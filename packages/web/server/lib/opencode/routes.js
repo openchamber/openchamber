@@ -1,3 +1,5 @@
+import { createProjectIdFromPath } from '../projects/project-id.js';
+
 export const registerOpenCodeRoutes = (app, dependencies) => {
   const {
     crypto,
@@ -177,7 +179,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
         : [
             ...existingProjects,
             {
-              id: crypto.randomUUID(),
+              id: createProjectIdFromPath(resolvedPath),
               path: resolvedPath,
               addedAt: Date.now(),
               lastOpenedAt: Date.now(),

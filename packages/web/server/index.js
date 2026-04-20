@@ -1,5 +1,6 @@
 import 'reflect-metadata';
 import express from 'express';
+import compression from 'compression';
 import path from 'path';
 import { spawn, spawnSync } from 'child_process';
 import fs from 'fs';
@@ -30,6 +31,10 @@ import { prepareNotificationLastMessage } from './lib/notifications/index.js';
 import { registerTtsRoutes } from './lib/tts/routes.js';
 import { detectSayTtsCapability } from './lib/tts/capability-runtime.js';
 import { createTerminalRuntime } from './lib/terminal/runtime.js';
+import {
+  createGlobalUiEventBroadcaster,
+  createMessageStreamWsRuntime,
+} from './lib/event-stream/index.js';
 import { createFsSearchRuntime as createFsSearchRuntimeFactory } from './lib/fs/search.js';
 import { createOpenCodeLifecycleRuntime } from './lib/opencode/lifecycle.js';
 import { createOpenCodeEnvRuntime } from './lib/opencode/env-runtime.js';
@@ -56,6 +61,7 @@ import { createOpenCodeResolutionRuntime } from './lib/opencode/opencode-resolut
 import { createBootstrapRuntime } from './lib/opencode/bootstrap-runtime.js';
 import { createSessionRuntime } from './lib/opencode/session-runtime.js';
 import { createOpenCodeWatcherRuntime } from './lib/opencode/watcher.js';
+import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { createServerStartupRuntime } from './lib/opencode/server-startup-runtime.js';
 import { createTunnelWiringRuntime } from './lib/opencode/tunnel-wiring-runtime.js';
 import { createStartupPipelineRuntime } from './lib/opencode/startup-pipeline-runtime.js';
@@ -66,6 +72,7 @@ import { createNotificationTriggerRuntime } from './lib/notifications/runtime.js
 import { createPushRuntime } from './lib/notifications/push-runtime.js';
 import { createNotificationTemplateRuntime } from './lib/notifications/template-runtime.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
+import { createProjectConfigRuntime } from './lib/projects/project-config.js';
 import webPush from 'web-push';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -74,6 +81,8 @@ const __dirname = path.dirname(__filename);
 const DEFAULT_PORT = 3000;
 const DESKTOP_NOTIFY_PREFIX = '[OpenChamberDesktopNotify] ';
 const uiNotificationClients = new Set();
+const uiNotificationWsClients = new Set();
+const uiOpenChamberEventClients = new Set();
 const HEALTH_CHECK_INTERVAL = 15000;
 const SHUTDOWN_TIMEOUT = 10000;
 const MODELS_DEV_API_URL = 'https://models.dev/api.json';
@@ -87,6 +96,53 @@ const TUNNEL_BOOTSTRAP_TTL_MAX_MS = 24 * 60 * 60 * 1000;
 const TUNNEL_SESSION_TTL_DEFAULT_MS = 8 * 60 * 60 * 1000;
 const TUNNEL_SESSION_TTL_MIN_MS = 5 * 60 * 1000;
 const TUNNEL_SESSION_TTL_MAX_MS = 30 * 24 * 60 * 60 * 1000;
+
+function headerIncludesEventStream(value) {
+  if (typeof value === 'string') {
+    return value.toLowerCase().includes('text/event-stream');
+  }
+
+  if (Array.isArray(value)) {
+    return value.some((entry) => typeof entry === 'string' && entry.toLowerCase().includes('text/event-stream'));
+  }
+
+  return false;
+}
+
+/**
+ * SSE endpoint paths that must never be compressed by the compression middleware.
+ *
+ * The compression middleware filter runs before route handlers, so
+ * `res.getHeader('Content-Type')` is still undefined at that point.
+ * This means the Accept-header check alone is not sufficient for
+ * non-standard clients (e.g. curl, fetch) that omit Accept.
+ * Path-based exclusion acts as a deterministic fallback.
+ */
+const SSE_PATH_PREFIXES = [
+  '/api/event',
+  '/api/global/event',
+  '/api/notifications/stream',
+  '/api/openchamber/events',
+];
+
+function shouldSkipCompression(req, res) {
+  if (headerIncludesEventStream(req.headers.accept)) {
+    return true;
+  }
+
+  const pathname = req.path || req.url || '';
+  if (pathname.startsWith('/api/terminal/') && pathname.endsWith('/stream')) {
+    return true;
+  }
+  for (const prefix of SSE_PATH_PREFIXES) {
+    if (pathname === prefix) {
+      return true;
+    }
+  }
+
+  return headerIncludesEventStream(res.getHeader('Content-Type'));
+}
+
 const OPENCHAMBER_VERSION = (() => {
   try {
     const packagePath = path.resolve(__dirname, '..', 'package.json');
@@ -146,6 +202,7 @@ const sanitizeProjects = (...args) => settingsNormalizationRuntime.sanitizeProje
 
 const OPENCHAMBER_USER_CONFIG_ROOT = path.join(os.homedir(), '.config', 'openchamber');
 const OPENCHAMBER_USER_THEMES_DIR = path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'themes');
+const OPENCHAMBER_PROJECTS_CONFIG_DIR = path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'projects');
 
 const MAX_THEME_JSON_BYTES = 512 * 1024;
 
@@ -302,15 +359,28 @@ const notificationEmitterRuntime = createNotificationEmitterRuntime({
   getDesktopNotifyEnabled: () => ENV_DESKTOP_NOTIFY,
   desktopNotifyPrefix: DESKTOP_NOTIFY_PREFIX,
   getUiNotificationClients: () => uiNotificationClients,
+  getBroadcastGlobalUiEvent: () => broadcastGlobalUiEvent,
 });
 
 const writeSseEvent = (...args) => notificationEmitterRuntime.writeSseEvent(...args);
 const emitDesktopNotification = (...args) => notificationEmitterRuntime.emitDesktopNotification(...args);
+const broadcastGlobalUiEvent = createGlobalUiEventBroadcaster({
+  sseClients: uiNotificationClients,
+  wsClients: uiNotificationWsClients,
+  writeSseEvent,
+});
 const broadcastUiNotification = (...args) => notificationEmitterRuntime.broadcastUiNotification(...args);
 
 const sessionRuntime = createSessionRuntime({
   writeSseEvent,
   getNotificationClients: () => uiNotificationClients,
+  broadcastEvent: broadcastGlobalUiEvent,
+});
+
+const projectConfigRuntime = createProjectConfigRuntime({
+  fsPromises,
+  path,
+  projectsDirPath: OPENCHAMBER_PROJECTS_CONFIG_DIR,
 });
 
 // HMR-persistent state via globalThis
@@ -349,6 +419,7 @@ const tunnelAuthController = createTunnelAuth();
 let runtimeManagedRemoteTunnelToken = '';
 let runtimeManagedRemoteTunnelHostname = '';
 let terminalRuntime = null;
+let messageStreamRuntime = null;
 const userProvidedOpenCodePassword = hmrStateRuntime.getUserProvidedOpenCodePassword(hmrState);
 const initialOpenCodeAuthState = hmrStateRuntime.resolveOpenCodeAuthFromState({
   hmrState,
@@ -587,6 +658,50 @@ const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   },
 });
 
+const processForwardedEventPayload = (payload, emitSyntheticEvent) => {
+  if (!payload || typeof payload !== 'object' || typeof emitSyntheticEvent !== 'function') {
+    return;
+  }
+
+  maybeCacheSessionInfoFromEvent(payload);
+
+  if (payload.type !== 'session.status') {
+    return;
+  }
+
+  const properties = payload.properties && typeof payload.properties === 'object' ? payload.properties : {};
+  const info = properties.info && typeof properties.info === 'object' ? properties.info : {};
+  const sessionId = typeof properties.sessionID === 'string' ? properties.sessionID.trim() : '';
+  const status = typeof info.type === 'string' ? info.type.trim() : '';
+
+  if (!sessionId || !status) {
+    return;
+  }
+
+  emitSyntheticEvent({
+    type: 'openchamber:session-status',
+    properties: {
+      sessionId,
+      status,
+      timestamp: Date.now(),
+      metadata: {
+        attempt: typeof info.attempt === 'number' ? info.attempt : undefined,
+        message: typeof info.message === 'string' ? info.message : undefined,
+        next: typeof info.next === 'number' ? info.next : undefined,
+      },
+      needsAttention: false,
+    },
+  });
+
+  emitSyntheticEvent({
+    type: 'openchamber:session-activity',
+    properties: {
+      sessionId,
+      phase: status === 'busy' || status === 'retry' ? 'busy' : 'idle',
+    },
+  });
+};
+
 
 const serverUtilsRuntime = createServerUtilsRuntime({
   fs,
@@ -694,6 +809,7 @@ const tunnelWiringRuntime = createTunnelWiringRuntime({
 });
 const startupPipelineRuntime = createStartupPipelineRuntime({
   createTerminalRuntime,
+  createMessageStreamWsRuntime,
   createServerStartupRuntime,
 });
 
@@ -754,6 +870,37 @@ const waitForOpenCodeReady = (...args) => openCodeLifecycleRuntime.waitForOpenCo
 const waitForAgentPresence = (...args) => openCodeLifecycleRuntime.waitForAgentPresence(...args);
 const refreshOpenCodeAfterConfigChange = (...args) => openCodeLifecycleRuntime.refreshOpenCodeAfterConfigChange(...args);
 const startHealthMonitoring = () => openCodeLifecycleRuntime.startHealthMonitoring(HEALTH_CHECK_INTERVAL);
+const triggerHealthCheck = () => openCodeLifecycleRuntime.triggerHealthCheck();
+const scheduledTasksRuntime = createScheduledTasksRuntime({
+  projectConfigRuntime,
+  listProjects: async () => {
+    const settings = await readSettingsFromDiskMigrated();
+    return sanitizeProjects(settings?.projects || []);
+  },
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  waitForOpenCodeReady,
+  emitTaskRunEvent: (event) => {
+    for (const client of uiOpenChamberEventClients) {
+      try {
+        writeSseEvent(client, {
+          type: 'openchamber:scheduled-task-ran',
+          properties: {
+            projectId: event.projectID,
+            taskId: event.taskID,
+            ranAt: event.ranAt,
+            status: event.status,
+            ...(event.sessionID ? { sessionId: event.sessionID } : {}),
+          },
+        });
+      } catch {
+        uiOpenChamberEventClients.delete(client);
+      }
+    }
+  },
+  logger: console,
+});
+
 const ensureGlobalWatcherStarted = async () => {
   if (globalWatcherStartPromise) {
     return globalWatcherStartPromise;
@@ -802,6 +949,10 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   setTerminalRuntime: (value) => {
     terminalRuntime = value;
   },
+  getMessageStreamRuntime: () => messageStreamRuntime,
+  setMessageStreamRuntime: (value) => {
+    messageStreamRuntime = value;
+  },
   shouldSkipOpenCodeStop: () => ENV_SKIP_OPENCODE_START || isExternalOpenCode,
   getOpenCodePort: () => openCodePort,
   getOpenCodeProcess: () => openCodeProcess,
@@ -820,6 +971,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
     activeTunnelController = value;
   },
   tunnelAuthController,
+  scheduledTasksRuntime,
 });
 
 const gracefulShutdown = (...args) => gracefulShutdownRuntime.gracefulShutdown(...args);
@@ -856,6 +1008,9 @@ async function main(options = {}) {
   if (typeof options.exitOnShutdown === 'boolean') {
     exitOnShutdown = options.exitOnShutdown;
   }
+  if (typeof options.onDesktopNotification === 'function') {
+    notificationEmitterRuntime.setOnDesktopNotification(options.onDesktopNotification);
+  }
 
   console.log(`Starting OpenChamber on port ${port === 0 ? 'auto' : port}`);
 
@@ -867,6 +1022,13 @@ async function main(options = {}) {
   const app = express();
   const serverStartedAt = new Date().toISOString();
   app.set('trust proxy', true);
+  app.use(compression({
+    filter: (req, res) => {
+      if (shouldSkipCompression(req, res)) return false;
+      return compression.filter(req, res);
+    },
+    threshold: 1024,
+  }));
   expressApp = app;
   server = http.createServer(app);
 
@@ -969,6 +1131,10 @@ async function main(options = {}) {
     getOpenCodeAuthHeaders,
     getOpenCodePort: () => openCodePort,
     buildAugmentedPath,
+    projectConfigRuntime,
+    scheduledTasksRuntime,
+    getOpenChamberEventClients: () => uiOpenChamberEventClients,
+    writeSseEvent,
   });
 
   const startupPipelineResult = await startupPipelineRuntime.run({
@@ -983,12 +1149,17 @@ async function main(options = {}) {
     isExecutable,
     isRequestOriginAllowed,
     rejectWebSocketUpgrade,
+    buildOpenCodeUrl,
+    getOpenCodeAuthHeaders,
+    processForwardedEventPayload,
+    messageStreamWsClients: uiNotificationWsClients,
     terminalHeartbeatIntervalMs: TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS,
     terminalRebindWindowMs: TERMINAL_INPUT_WS_REBIND_WINDOW_MS,
     terminalMaxRebindsPerWindow: TERMINAL_INPUT_WS_MAX_REBINDS_PER_WINDOW,
     setupProxy,
     scheduleOpenCodeApiDetection,
     bootstrapOpenCodeAtStartup,
+    triggerHealthCheck,
     staticRoutesRuntime,
     process,
     crypto,
@@ -1013,6 +1184,13 @@ async function main(options = {}) {
     attachSignals,
   });
   terminalRuntime = startupPipelineResult.terminalRuntime;
+  messageStreamRuntime = startupPipelineResult.messageStreamRuntime;
+
+  try {
+    await scheduledTasksRuntime.start();
+  } catch (error) {
+    console.warn('[ScheduledTasks] Failed to start runtime:', error?.message || error);
+  }
 
   return {
     expressApp: app,

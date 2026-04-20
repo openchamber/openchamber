@@ -29,6 +29,7 @@ interface OpenChamberDefaults {
     autoCreateWorktree?: boolean;
     gitmojiEnabled?: boolean;
     zenModel?: string;
+    messageStreamTransport?: 'auto' | 'ws' | 'sse';
 }
 
 const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
@@ -45,6 +46,10 @@ const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
                     const defaultAgent = typeof data?.defaultAgent === 'string' ? data.defaultAgent.trim() : '';
                     const gitmojiEnabled = typeof data?.gitmojiEnabled === 'boolean' ? data.gitmojiEnabled : undefined;
                     const zenModel = typeof data?.zenModel === 'string' ? data.zenModel.trim() : '';
+                    const messageStreamTransport =
+                        data?.messageStreamTransport === 'ws' || data?.messageStreamTransport === 'sse' || data?.messageStreamTransport === 'auto'
+                            ? data.messageStreamTransport
+                            : undefined;
 
                     return {
                         defaultModel: defaultModel.length > 0 ? defaultModel : undefined,
@@ -53,6 +58,7 @@ const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
                         autoCreateWorktree: typeof data?.autoCreateWorktree === 'boolean' ? data.autoCreateWorktree : undefined,
                         gitmojiEnabled,
                         zenModel: zenModel.length > 0 ? zenModel : undefined,
+                        messageStreamTransport,
                     };
                 }
             } catch {
@@ -74,6 +80,10 @@ const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
         const defaultAgent = typeof data?.defaultAgent === 'string' ? data.defaultAgent.trim() : '';
         const gitmojiEnabled = typeof data?.gitmojiEnabled === 'boolean' ? data.gitmojiEnabled : undefined;
         const zenModel = typeof data?.zenModel === 'string' ? data.zenModel.trim() : '';
+        const messageStreamTransport =
+            data?.messageStreamTransport === 'ws' || data?.messageStreamTransport === 'sse' || data?.messageStreamTransport === 'auto'
+                ? data.messageStreamTransport
+                : undefined;
 
         return {
             defaultModel: defaultModel.length > 0 ? defaultModel : undefined,
@@ -82,6 +92,7 @@ const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
             autoCreateWorktree: typeof data?.autoCreateWorktree === 'boolean' ? data.autoCreateWorktree : undefined,
             gitmojiEnabled,
             zenModel: zenModel.length > 0 ? zenModel : undefined,
+            messageStreamTransport,
         };
     } catch {
         return {};
@@ -466,6 +477,7 @@ interface ConfigStore {
     settingsAutoCreateWorktree: boolean;
     settingsGitmojiEnabled: boolean;
     settingsZenModel: string | undefined;
+    settingsMessageStreamTransport: 'auto' | 'ws' | 'sse';
     // Voice provider preference ('browser', 'openai', 'openai-compatible', or 'say' for macOS)
     voiceProvider: 'browser' | 'openai' | 'openai-compatible' | 'say';
     setVoiceProvider: (provider: 'browser' | 'openai' | 'openai-compatible' | 'say') => void;
@@ -534,6 +546,7 @@ interface ConfigStore {
     setSettingsAutoCreateWorktree: (enabled: boolean) => void;
     setSettingsGitmojiEnabled: (enabled: boolean) => void;
     setSettingsZenModel: (model: string | undefined) => void;
+    setSettingsMessageStreamTransport: (transport: 'auto' | 'ws' | 'sse') => void;
     getResolvedGitGenerationModel: () => { providerId: string; modelId: string } | null;
     saveAgentModelSelection: (agentName: string, providerId: string, modelId: string) => void;
     getAgentModelSelection: (agentName: string) => { providerId: string; modelId: string } | null;
@@ -583,6 +596,7 @@ export const useConfigStore = create<ConfigStore>()(
                 settingsAutoCreateWorktree: false,
                 settingsGitmojiEnabled: false,
                 settingsZenModel: undefined,
+                settingsMessageStreamTransport: 'auto',
                 // Voice provider preference - load from localStorage or default to 'browser'
                 voiceProvider: (() => {
                     if (typeof window !== 'undefined') {
@@ -1256,6 +1270,7 @@ export const useConfigStore = create<ConfigStore>()(
                                     settingsAutoCreateWorktree: openChamberDefaults.autoCreateWorktree ?? false,
                                     settingsGitmojiEnabled: openChamberDefaults.gitmojiEnabled ?? false,
                                     settingsZenModel: resolvedZenModel,
+                                    settingsMessageStreamTransport: openChamberDefaults.messageStreamTransport ?? state.settingsMessageStreamTransport ?? 'auto',
                                     directoryScoped: {
                                         ...state.directoryScoped,
                                         [directoryKey]: nextSnapshot,
@@ -1687,6 +1702,10 @@ export const useConfigStore = create<ConfigStore>()(
                     set({ settingsZenModel: model });
                 },
 
+                setSettingsMessageStreamTransport: (transport: 'auto' | 'ws' | 'sse') => {
+                    set({ settingsMessageStreamTransport: transport });
+                },
+
                 getResolvedGitGenerationModel: () => {
                     const state = get();
                     return resolveGitGenerationModelSelection({
@@ -1983,6 +2002,7 @@ export const useConfigStore = create<ConfigStore>()(
                     settingsAutoCreateWorktree: state.settingsAutoCreateWorktree,
                     settingsGitmojiEnabled: state.settingsGitmojiEnabled,
                     settingsZenModel: state.settingsZenModel,
+                    settingsMessageStreamTransport: state.settingsMessageStreamTransport,
                     speechRate: state.speechRate,
                     speechPitch: state.speechPitch,
                     speechVolume: state.speechVolume,

@@ -714,6 +714,25 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     }
   };
 
+  /**
+   * Perform an immediate (one-shot) health check and restart OpenCode if it's
+   * not healthy.  Callers on the SSE / WS proxy path use this to trigger
+   * recovery without waiting for the next periodic interval (up to 15 s).
+   */
+  const triggerHealthCheck = async () => {
+    if (!state.openCodeProcess || state.isShuttingDown || state.isRestartingOpenCode) return;
+
+    try {
+      const healthy = await isOpenCodeProcessHealthy();
+      if (!healthy) {
+        console.log('[lifecycle] immediate health check: OpenCode not healthy, restarting...');
+        await restartOpenCode();
+      }
+    } catch (error) {
+      console.error(`[lifecycle] immediate health check error: ${error.message}`);
+    }
+  };
+
   const startHealthMonitoring = (healthCheckIntervalMs) => {
     if (state.healthCheckInterval) {
       clearInterval(state.healthCheckInterval);
@@ -743,6 +762,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     refreshOpenCodeAfterConfigChange,
     bootstrapOpenCodeAtStartup,
     startHealthMonitoring,
+    triggerHealthCheck,
     waitForPortRelease,
   };
 };

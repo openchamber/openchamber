@@ -14,10 +14,10 @@ use std::{
     path::{Path, PathBuf},
 };
 use std::{
-    net::TcpListener,
+    net::{TcpListener, UdpSocket},
     process::Command,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU32, AtomicU64, Ordering},
         Mutex,
     },
     time::Duration,
@@ -115,6 +115,8 @@ const MENU_ITEM_SETTINGS_ID: &str = "menu_settings";
 #[cfg(target_os = "macos")]
 const MENU_ITEM_COMMAND_PALETTE_ID: &str = "menu_command_palette";
 #[cfg(target_os = "macos")]
+const MENU_ITEM_QUICK_OPEN_ID: &str = "menu_quick_open";
+#[cfg(target_os = "macos")]
 const MENU_ITEM_NEW_SESSION_ID: &str = "menu_new_session";
 #[cfg(target_os = "macos")]
 const MENU_ITEM_WORKTREE_CREATOR_ID: &str = "menu_worktree_creator";
@@ -152,6 +154,8 @@ const MENU_ITEM_REQUEST_FEATURE_ID: &str = "menu_request_feature";
 const MENU_ITEM_JOIN_DISCORD_ID: &str = "menu_join_discord";
 #[cfg(target_os = "macos")]
 const MENU_ITEM_CLEAR_CACHE_ID: &str = "menu_clear_cache";
+#[cfg(target_os = "macos")]
+const MENU_ITEM_QUIT_ID: &str = "menu_quit";
 
 #[cfg(target_os = "macos")]
 const GITHUB_BUG_REPORT_URL: &str =
@@ -161,6 +165,198 @@ const GITHUB_FEATURE_REQUEST_URL: &str =
     "https://github.com/btriapitsyn/openchamber/issues/new?template=feature_request.yml";
 #[cfg(target_os = "macos")]
 const DISCORD_INVITE_URL: &str = "https://discord.gg/ZYRSdnwwKA";
+
+static QUIT_CONFIRMED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static QUIT_CONFIRMATION_PENDING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+static QUIT_RISK_HAS_ENABLED_SCHEDULED_TASKS: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+static QUIT_RISK_HAS_RUNNING_SCHEDULED_TASKS: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+static QUIT_RISK_ENABLED_SCHEDULED_TASKS_COUNT: AtomicU32 = AtomicU32::new(0);
+static QUIT_RISK_RUNNING_SCHEDULED_TASKS_COUNT: AtomicU32 = AtomicU32::new(0);
+static QUIT_RISK_HAS_ACTIVE_TUNNEL: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+static QUIT_RISK_POLLER_STARTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(target_os = "macos")]
+const QUIT_RISK_POLL_INTERVAL: Duration = Duration::from_secs(5);
+
+#[cfg(target_os = "macos")]
+fn should_require_quit_confirmation() -> bool {
+    use std::sync::atomic::Ordering;
+
+    QUIT_RISK_HAS_ACTIVE_TUNNEL.load(Ordering::Relaxed)
+        || QUIT_RISK_HAS_RUNNING_SCHEDULED_TASKS.load(Ordering::Relaxed)
+        || QUIT_RISK_HAS_ENABLED_SCHEDULED_TASKS.load(Ordering::Relaxed)
+}
+
+#[cfg(target_os = "macos")]
+fn quit_confirmation_message() -> String {
+    use std::sync::atomic::Ordering;
+
+    let has_active_tunnel = QUIT_RISK_HAS_ACTIVE_TUNNEL.load(Ordering::Relaxed);
+    let running_tasks_count = QUIT_RISK_RUNNING_SCHEDULED_TASKS_COUNT.load(Ordering::Relaxed);
+    let enabled_tasks_count = QUIT_RISK_ENABLED_SCHEDULED_TASKS_COUNT.load(Ordering::Relaxed);
+
+    let mut reasons: Vec<String> = Vec::new();
+    if has_active_tunnel {
+        reasons.push("an active tunnel".to_string());
+    }
+    if running_tasks_count > 0 {
+        reasons.push(format!(
+            "{} running scheduled task{}",
+            running_tasks_count,
+            if running_tasks_count == 1 { "" } else { "s" }
+        ));
+    }
+    if enabled_tasks_count > 0 {
+        reasons.push(format!(
+            "{} enabled scheduled task{}",
+            enabled_tasks_count,
+            if enabled_tasks_count == 1 { "" } else { "s" }
+        ));
+    }
+
+    if reasons.is_empty() {
+        "Background processes (sidecar, SSH sessions) will be stopped.".to_string()
+    } else {
+        format!(
+            "OpenChamber detected {}. Quitting now will stop sidecar/background processes and may interrupt pending work.",
+            reasons.join(", ")
+        )
+    }
+}
+
+#[cfg(target_os = "macos")]
+const NS_TERMINATE_CANCEL: isize = 0;
+#[cfg(target_os = "macos")]
+const NS_TERMINATE_NOW: isize = 1;
+
+#[cfg(target_os = "macos")]
+unsafe extern "C-unwind" fn application_should_terminate_with_confirmation(
+    _: &objc2::runtime::AnyObject,
+    _: objc2::runtime::Sel,
+    _: *mut std::ffi::c_void,
+) -> isize {
+    use std::sync::atomic::Ordering;
+
+    if QUIT_CONFIRMED.load(Ordering::SeqCst) {
+        return NS_TERMINATE_NOW;
+    }
+
+    if !should_require_quit_confirmation() {
+        QUIT_CONFIRMED.store(true, Ordering::SeqCst);
+        return NS_TERMINATE_NOW;
+    }
+
+    if QUIT_CONFIRMATION_PENDING.swap(true, Ordering::SeqCst) {
+        return NS_TERMINATE_CANCEL;
+    }
+
+    let message = quit_confirmation_message();
+    let confirmed = matches!(
+        rfd::MessageDialog::new()
+            .set_title("Quit OpenChamber?")
+            .set_description(&message)
+            .set_level(rfd::MessageLevel::Warning)
+            .set_buttons(rfd::MessageButtons::OkCancel)
+            .show(),
+        rfd::MessageDialogResult::Ok | rfd::MessageDialogResult::Yes
+    );
+
+    QUIT_CONFIRMATION_PENDING.store(false, Ordering::SeqCst);
+
+    if confirmed {
+        QUIT_CONFIRMED.store(true, Ordering::SeqCst);
+        NS_TERMINATE_NOW
+    } else {
+        NS_TERMINATE_CANCEL
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn install_macos_quit_confirmation_hook() {
+    use objc2::ffi;
+    use objc2::runtime::{AnyClass, AnyObject, Imp, Sel};
+    use std::ffi::CStr;
+
+    unsafe {
+        let Some(delegate_class) = AnyClass::get(CStr::from_bytes_with_nul_unchecked(
+            b"TaoAppDelegateParent\0",
+        )) else {
+            log::warn!("[desktop] TaoAppDelegateParent class not found; dock Quit confirmation hook skipped");
+            return;
+        };
+
+        let selector = Sel::register(c"applicationShouldTerminate:");
+        if !ffi::class_getInstanceMethod(delegate_class, selector).is_null() {
+            return;
+        }
+
+        let imp: Imp = std::mem::transmute(
+            application_should_terminate_with_confirmation
+                as unsafe extern "C-unwind" fn(&AnyObject, Sel, *mut std::ffi::c_void) -> isize,
+        );
+
+        let added = ffi::class_addMethod(
+            delegate_class as *const _ as *mut _,
+            selector,
+            imp,
+            b"q@:@\0".as_ptr().cast(),
+        );
+
+        if !added.as_bool() {
+            log::warn!("[desktop] failed to install applicationShouldTerminate hook");
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn install_macos_quit_confirmation_hook() {}
+
+#[cfg(target_os = "macos")]
+fn request_quit_with_confirmation(app: &tauri::AppHandle) {
+    use std::sync::atomic::Ordering;
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+
+    if !should_require_quit_confirmation() {
+        QUIT_CONFIRMED.store(true, Ordering::SeqCst);
+        app.exit(0);
+        return;
+    }
+
+    if QUIT_CONFIRMATION_PENDING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+
+    // When app has only hidden windows (common after closing last window),
+    // ensure at least one window is visible so native dialog reliably appears.
+    let windows = app.webview_windows();
+    let has_visible = windows.values().any(|w| w.is_visible().unwrap_or(false));
+    if !has_visible {
+        if let Some(hidden) = windows.values().find(|w| !w.is_visible().unwrap_or(true)) {
+            let _ = hidden.show();
+            let _ = hidden.set_focus();
+        }
+    }
+
+    let message = quit_confirmation_message();
+    let handle = app.clone();
+    app.dialog()
+        .message(message)
+        .title("Quit OpenChamber?")
+        .buttons(MessageDialogButtons::OkCancel)
+        .kind(tauri_plugin_dialog::MessageDialogKind::Warning)
+        .show(move |confirmed| {
+            QUIT_CONFIRMATION_PENDING.store(false, Ordering::SeqCst);
+            if confirmed {
+                QUIT_CONFIRMED.store(true, Ordering::SeqCst);
+                handle.exit(0);
+            }
+        });
+}
 
 #[cfg(target_os = "macos")]
 fn build_macos_menu<R: tauri::Runtime>(
@@ -199,6 +395,14 @@ fn build_macos_menu<R: tauri::Runtime>(
         "Command Palette",
         true,
         Some("Cmd+K"),
+    )?;
+
+    let quick_open = MenuItem::with_id(
+        app,
+        MENU_ITEM_QUICK_OPEN_ID,
+        "Quick Open…",
+        true,
+        Some("Cmd+P"),
     )?;
 
     let new_window = MenuItem::with_id(
@@ -388,13 +592,20 @@ fn build_macos_menu<R: tauri::Runtime>(
                     &PredefinedMenuItem::separator(app)?,
                     &settings,
                     &command_palette,
+                    &quick_open,
                     &PredefinedMenuItem::separator(app)?,
                     &PredefinedMenuItem::services(app, None)?,
                     &PredefinedMenuItem::separator(app)?,
                     &PredefinedMenuItem::hide(app, None)?,
                     &PredefinedMenuItem::hide_others(app, None)?,
                     &PredefinedMenuItem::separator(app)?,
-                    &PredefinedMenuItem::quit(app, None)?,
+                    &MenuItem::with_id(
+                        app,
+                        MENU_ITEM_QUIT_ID,
+                        format!("Quit {}", pkg_info.name),
+                        true,
+                        Some("Cmd+Q"),
+                    )?,
                 ],
             )?,
             &Submenu::with_items(
@@ -1419,13 +1630,14 @@ fn settings_file_path() -> PathBuf {
         .join("settings.json")
 }
 
+fn read_desktop_settings_json() -> Option<serde_json::Value> {
+    fs::read_to_string(settings_file_path())
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+}
+
 fn read_desktop_local_port_from_disk() -> Option<u16> {
-    let path = settings_file_path();
-    let raw = fs::read_to_string(path).ok();
-    let parsed = raw
-        .as_deref()
-        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
-    parsed
+    read_desktop_settings_json()
         .as_ref()
         .and_then(|v| v.get("desktopLocalPort"))
         .and_then(|v| v.as_u64())
@@ -1913,6 +2125,93 @@ async fn wait_for_local_opencode_ready_with(
     last_probe
 }
 
+#[cfg(target_os = "macos")]
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ScheduledTasksQuitRiskResponse {
+    has_enabled_scheduled_tasks: bool,
+    has_running_scheduled_tasks: bool,
+    #[serde(default)]
+    enabled_scheduled_tasks_count: u32,
+    #[serde(default)]
+    running_scheduled_tasks_count: u32,
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TunnelStatusResponse {
+    active: bool,
+}
+
+#[cfg(target_os = "macos")]
+async fn refresh_quit_risk_flags(local_base_url: &str) {
+    use std::sync::atomic::Ordering;
+
+    let trimmed = local_base_url.trim_end_matches('/');
+    if trimmed.is_empty() {
+        return;
+    }
+
+    let client = match reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(2))
+        .build()
+    {
+        Ok(client) => client,
+        Err(_) => return,
+    };
+
+    let scheduled_url = format!("{trimmed}/api/openchamber/scheduled-tasks/status");
+    let tunnel_url = format!("{trimmed}/api/openchamber/tunnel/status");
+
+    let scheduled_future = client.get(scheduled_url).send();
+    let tunnel_future = client.get(tunnel_url).send();
+    let (scheduled_result, tunnel_result) = tokio::join!(scheduled_future, tunnel_future);
+
+    if let Ok(response) = scheduled_result {
+        if response.status().is_success() {
+            if let Ok(payload) = response.json::<ScheduledTasksQuitRiskResponse>().await {
+                let enabled_count = payload.enabled_scheduled_tasks_count;
+                let running_count = payload.running_scheduled_tasks_count;
+                QUIT_RISK_ENABLED_SCHEDULED_TASKS_COUNT.store(enabled_count, Ordering::Relaxed);
+                QUIT_RISK_RUNNING_SCHEDULED_TASKS_COUNT.store(running_count, Ordering::Relaxed);
+                QUIT_RISK_HAS_ENABLED_SCHEDULED_TASKS
+                    .store(payload.has_enabled_scheduled_tasks || enabled_count > 0, Ordering::Relaxed);
+                QUIT_RISK_HAS_RUNNING_SCHEDULED_TASKS
+                    .store(payload.has_running_scheduled_tasks || running_count > 0, Ordering::Relaxed);
+            }
+        }
+    }
+
+    if let Ok(response) = tunnel_result {
+        if response.status().is_success() {
+            if let Ok(payload) = response.json::<TunnelStatusResponse>().await {
+                QUIT_RISK_HAS_ACTIVE_TUNNEL.store(payload.active, Ordering::Relaxed);
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn start_quit_risk_poller(local_base_url: String) {
+    use std::sync::atomic::Ordering;
+
+    if QUIT_RISK_POLLER_STARTED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+
+    tauri::async_runtime::spawn(async move {
+        loop {
+            refresh_quit_risk_flags(&local_base_url).await;
+            tokio::time::sleep(QUIT_RISK_POLL_INTERVAL).await;
+        }
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+fn start_quit_risk_poller(_local_base_url: String) {}
+
 /// Uses the same probe_with_retry policy as startup/new-window (soft + hard)
 /// so that first-launch/recovery remote connect accepts slow-but-valid hosts.
 #[tauri::command]
@@ -2250,27 +2549,10 @@ async fn spawn_local_server(app: &tauri::AppHandle) -> Result<String> {
         }
     });
 
+    let desktop_settings = read_desktop_settings_json();
+
     let opencode_binary_from_settings: Option<String> = (|| {
-        let data_dir = env::var("OPENCHAMBER_DATA_DIR")
-            .ok()
-            .and_then(|v| {
-                let t = v.trim().to_string();
-                if t.is_empty() {
-                    None
-                } else {
-                    Some(PathBuf::from(t))
-                }
-            })
-            .or_else(|| {
-                resolved_home_dir_path
-                    .as_ref()
-                    .map(|home| home.join(".config").join("openchamber"))
-            });
-        let data_dir = data_dir?;
-        let settings_path = data_dir.join("settings.json");
-        let raw = fs::read_to_string(&settings_path).ok()?;
-        let json = serde_json::from_str::<serde_json::Value>(&raw).ok()?;
-        let value = json.get("opencodeBinary")?.as_str()?.trim();
+        let value = desktop_settings.as_ref()?.get("opencodeBinary")?.as_str()?.trim();
         if value.is_empty() {
             return None;
         }
@@ -2293,6 +2575,13 @@ async fn spawn_local_server(app: &tauri::AppHandle) -> Result<String> {
 
         Some(candidate)
     })();
+
+    let sidecar_bind_host = desktop_settings
+        .as_ref()
+        .and_then(|value| value.get("desktopLanAccessEnabled"))
+        .and_then(|value| value.as_bool())
+        .map(|enabled| if enabled { "0.0.0.0" } else { "127.0.0.1" })
+        .unwrap_or("127.0.0.1");
 
     let mut push_unique = |value: String| {
         let trimmed = value.trim();
@@ -2370,7 +2659,7 @@ async fn spawn_local_server(app: &tauri::AppHandle) -> Result<String> {
             .sidecar(SIDECAR_NAME)
             .map_err(|err| anyhow!("Failed to resolve sidecar '{SIDECAR_NAME}': {err}"))?
             .args(["--port", &port.to_string()])
-            .env("OPENCHAMBER_HOST", "127.0.0.1")
+            .env("OPENCHAMBER_HOST", sidecar_bind_host)
             .env("OPENCHAMBER_DIST_DIR", dist_dir.clone())
             .env("OPENCHAMBER_RUNTIME", "desktop")
             .env("OPENCHAMBER_DESKTOP_NOTIFY", "true")
@@ -2774,6 +3063,45 @@ fn desktop_read_file(path: String) -> Result<FileContent, String> {
     })
 }
 
+#[tauri::command]
+async fn desktop_save_markdown_file(
+    app: tauri::AppHandle,
+    default_file_name: String,
+    content: String,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let trimmed_file_name = default_file_name.trim();
+    if trimmed_file_name.is_empty() {
+        return Err("Default file name is required".to_string());
+    }
+
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .add_filter("Markdown", &["md"])
+        .set_file_name(trimmed_file_name)
+        .save_file(move |file_path| {
+            let _ = tx.send(file_path);
+        });
+
+    let Some(file_path) = rx
+        .await
+        .map_err(|_| "Save dialog was closed unexpectedly".to_string())?
+    else {
+        return Ok(None);
+    };
+
+    let path = file_path
+        .into_path()
+        .map_err(|_| "Selected export path is not a local filesystem path".to_string())?;
+
+    std::fs::write(&path, content)
+        .map_err(|error| format!("Failed to save exported session: {error}"))?;
+
+    Ok(Some(path.to_string_lossy().to_string()))
+}
+
 #[derive(Serialize)]
 struct FileContent {
     mime: String,
@@ -2869,9 +3197,7 @@ fn parse_theme_override(theme_mode: Option<&str>, theme_variant: Option<&str>) -
 }
 
 fn read_desktop_theme_override() -> Option<tauri::Theme> {
-    let settings = fs::read_to_string(settings_file_path())
-        .ok()
-        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok());
+    let settings = read_desktop_settings_json();
 
     let use_system_theme = settings
         .as_ref()
@@ -2893,6 +3219,22 @@ fn read_desktop_theme_override() -> Option<tauri::Theme> {
         .and_then(|value| value.as_str());
 
     parse_theme_override(theme_mode, theme_variant)
+}
+
+fn detect_desktop_lan_ipv4() -> Option<String> {
+    let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("8.8.8.8:80").ok()?;
+    let address = socket.local_addr().ok()?;
+    let ip = address.ip();
+
+    if ip.is_loopback() {
+        return None;
+    }
+
+    match ip {
+        std::net::IpAddr::V4(ipv4) => Some(ipv4.to_string()),
+        std::net::IpAddr::V6(_) => None,
+    }
 }
 
 /// Apply platform-specific window builder configuration.
@@ -2929,6 +3271,11 @@ fn desktop_set_window_theme(
         .map_err(|error| format!("failed to set window theme: {error}"))?;
 
     Ok(())
+}
+
+#[tauri::command]
+fn desktop_get_lan_address() -> Option<String> {
+    detect_desktop_lan_ipv4()
 }
 
 fn is_window_state_visible(app: &tauri::AppHandle, state: &DesktopWindowState) -> bool {
@@ -3538,6 +3885,10 @@ fn main() {
                     dispatch_menu_action(app, "command-palette");
                     return;
                 }
+                if id == MENU_ITEM_QUICK_OPEN_ID {
+                    dispatch_menu_action(app, "quick-open");
+                    return;
+                }
 
                 if id == MENU_ITEM_NEW_SESSION_ID {
                     dispatch_menu_action(app, "new-session");
@@ -3611,6 +3962,10 @@ fn main() {
                     });
                     return;
                 }
+                if id == MENU_ITEM_QUIT_ID {
+                    request_quit_with_confirmation(app);
+                    return;
+                }
             }
         })
         .on_window_event(|window, event| {
@@ -3624,12 +3979,10 @@ fn main() {
             }
 
             if let tauri::WindowEvent::Destroyed = event {
-                // Clean up focus tracking for the destroyed window.
                 if let Some(state) = app.try_state::<WindowFocusState>() {
                     state.remove_window(&label);
                 }
 
-                // Remove stale per-window init script.
                 if let Some(state) = app.try_state::<DesktopUiInjectionState>() {
                     state
                         .scripts
@@ -3637,24 +3990,25 @@ fn main() {
                         .expect("desktop ui injection mutex")
                         .remove(&label);
                 }
-
-                // If this was the last window, kill the sidecar and exit.
-                let remaining = app.webview_windows().len();
-                if remaining == 0 {
-                    if let Some(state) = app.try_state::<DesktopSshManagerState>() {
-                        state.shutdown_all(&app);
-                    }
-                    kill_sidecar(app.clone());
-                    app.exit(0);
-                }
             }
 
             if matches!(event, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_)) {
                 schedule_window_state_persist(window.clone(), false);
             }
 
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 schedule_window_state_persist(window.clone(), true);
+
+                let remaining_visible = app
+                    .webview_windows()
+                    .values()
+                    .filter(|w| w.is_visible().unwrap_or(false))
+                    .count();
+
+                if remaining_visible <= 1 {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -3670,10 +4024,12 @@ fn main() {
             desktop_filter_installed_apps,
             desktop_get_installed_apps,
             desktop_fetch_app_icons,
+            desktop_save_markdown_file,
             desktop_hosts_get,
             desktop_hosts_set,
             desktop_host_probe,
             desktop_set_window_theme,
+            desktop_get_lan_address,
             remote_ssh::desktop_ssh_instances_get,
             remote_ssh::desktop_ssh_instances_set,
             remote_ssh::desktop_ssh_import_hosts,
@@ -3754,6 +4110,7 @@ fn main() {
                 if let Some(state) = handle.try_state::<SidecarState>() {
                     *state.url.lock().expect("sidecar url mutex") = Some(local_url.clone());
                 }
+                start_quit_risk_poller(local_url.clone());
 
                 let local_origin = url::Url::parse(&local_ui_url)
                     .ok()
@@ -3855,10 +4212,18 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("failed to build Tauri application");
 
+    install_macos_quit_confirmation_hook();
+
     app.run(|app_handle, event| {
         match event {
-            tauri::RunEvent::ExitRequested { .. } => {
-                // Best-effort cleanup; never block shutdown.
+            tauri::RunEvent::ExitRequested { api, .. } => {
+                use std::sync::atomic::Ordering;
+                if !QUIT_CONFIRMED.load(Ordering::SeqCst) {
+                    api.prevent_exit();
+                    #[cfg(target_os = "macos")]
+                    request_quit_with_confirmation(app_handle);
+                    return;
+                }
                 if let Some(state) = app_handle.try_state::<DesktopSshManagerState>() {
                     state.shutdown_all(app_handle);
                 }
@@ -3875,9 +4240,18 @@ fn main() {
                 has_visible_windows,
                 ..
             } => {
-                // macOS: clicking dock icon when no windows are open opens a new one.
                 if !has_visible_windows {
-                    open_new_window(app_handle);
+                    let windows = app_handle.webview_windows();
+                    let hidden = windows
+                        .values()
+                        .find(|w| !w.is_visible().unwrap_or(true));
+                    if let Some(w) = hidden {
+                        let _ = w.show();
+                        let _ = w.set_focus();
+                    } else {
+                        drop(windows);
+                        open_new_window(app_handle);
+                    }
                 }
             }
             _ => {}

@@ -16,6 +16,17 @@ export const isMacOS = (): boolean => {
   return /Macintosh|Mac OS X/.test(navigator.userAgent || '');
 };
 
+export const isWindows = (): boolean => {
+  if (typeof navigator === 'undefined') return false;
+  return /Windows/.test(navigator.userAgent || '');
+};
+
+export const getRevealLabel = (): string => {
+  if (isMacOS()) return 'Reveal in Finder';
+  if (isWindows()) return 'Open in File Explorer';
+  return 'Open in File Manager';
+};
+
 /**
  * Checks if the platform-appropriate modifier key is pressed.
  * On macOS desktop app: Cmd (metaKey), on other platforms or web: Ctrl (ctrlKey).

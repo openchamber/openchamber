@@ -123,3 +123,79 @@ jobs:
           name: dmg-${{ inputs.macos_version }}-arm64
           path: artifacts/*.dmg
           retention-days: 7
+
+  build-macos-dmg-arm64-electron:
+    name: Build Electron DMG (arm64, ${{ inputs.macos_version }})
+    runs-on: ${{ inputs.macos_version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install Apple Certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/electron-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          echo "$APPLE_CERTIFICATE" | base64 --decode > $RUNNER_TEMP/certificate.p12
+          security import $RUNNER_TEMP/certificate.p12 \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+      - name: Build Electron app (arm64)
+        working-directory: packages/electron
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ELECTRON_BUILDER_ARCH: arm64
+        run: |
+          bun run build:web-assets
+          bun run bundle:main
+          bun run rebuild:native
+          ./node_modules/.bin/electron-builder --mac --arm64 --publish=never
+
+      - name: Prepare DMG artifact
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          DMG_PATH="packages/electron/dist/*.dmg"
+          if ls $DMG_PATH 1> /dev/null 2>&1; then
+            DMG_FILE=$(ls $DMG_PATH | head -n 1)
+            DMG_NAME="OpenChamber_Electron_${{ inputs.macos_version }}_arm64.dmg"
+            cp "$DMG_FILE" "artifacts/$DMG_NAME"
+          else
+            echo "Error: DMG file not found at $DMG_PATH"
+            exit 1
+          fi
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dmg-electron-${{ inputs.macos_version }}-arm64
+          path: artifacts/*.dmg
+          retention-days: 7

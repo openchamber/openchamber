@@ -13,18 +13,20 @@ import { cn } from '@/lib/utils';
 import { isEmptyTextPart, extractTextContent } from './partUtils';
 import { FadeInOnReveal } from './FadeInOnReveal';
 import { Button } from '@/components/ui/button';
+import { SaveProjectPlanDialog } from '@/components/session/SaveProjectPlanDialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { RiCheckLine, RiFileCopyLine, RiChatNewLine, RiArrowGoBackLine, RiGitBranchLine, RiHourglassLine, RiTimeLine, RiVolumeUpLine, RiStopLine, RiImageDownloadLine, RiLoader4Line, RiErrorWarningLine } from '@remixicon/react';
+import { RiCheckLine, RiFileCopyLine, RiChatNewLine, RiArrowGoBackLine, RiGitBranchLine, RiHourglassLine, RiTimeLine, RiVolumeUpLine, RiStopLine, RiImageDownloadLine, RiLoader4Line, RiErrorWarningLine, RiBookletLine } from '@remixicon/react';
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import type { ContentChangeReason } from '@/hooks/useChatScrollManager';
 
 import { SimpleMarkdownRenderer } from '../MarkdownRenderer';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUIStore } from '@/stores/useUIStore';
-import { flattenAssistantTextParts } from '@/lib/messages/messageText';
+import { flattenAssistantTextParts, suggestPlanTitleFromText } from '@/lib/messages/messageText';
 import { MULTIRUN_EXECUTION_FORK_PROMPT_META_TEXT } from '@/lib/messages/executionMeta';
 import { useMessageTTS } from '@/hooks/useMessageTTS';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 import { TextSelectionMenu } from './TextSelectionMenu';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -35,6 +37,10 @@ import { ToolRevealOnMount } from './parts/ToolRevealOnMount';
 import { StaticToolRow } from './parts/ProgressiveGroup';
 import { isExpandableTool, isStandaloneTool } from './parts/toolRenderUtils';
 import TurnActivity from '../components/TurnActivity';
+import { createProjectPlanFile } from '@/lib/openchamberConfig';
+import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useSessions } from '@/sync/sync-context';
 
 type SubtaskPartLike = Part & {
     type: 'subtask';
@@ -74,6 +80,7 @@ const normalizeSubtaskModel = (model: SubtaskPartLike['model']): string | null =
     if (!providerID || !modelID) return null;
     return `${providerID}/${modelID}`;
 };
+
 
 const UserSubtaskPart: React.FC<{ part: SubtaskPartLike }> = ({ part }) => {
     const [expanded, setExpanded] = React.useState(false);
@@ -426,9 +433,9 @@ const UserMessageBody: React.FC<{
                 )}
             >
                 {onRevert && (
-                    <Tooltip delayDuration={1000}>
-                        <TooltipTrigger asChild>
-                            <Button
+                <Tooltip delayDuration={1000}>
+                    <TooltipTrigger asChild>
+                        <Button
                                 type="button"
                                 variant="ghost"
                                 size="icon"
@@ -697,9 +704,17 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
     const assistantTextParts = React.useMemo(() => {
         return visibleParts.filter((part) => part.type === 'text');
     }, [visibleParts]);
+    const assistantPlanText = React.useMemo(() => flattenAssistantTextParts(assistantTextParts), [assistantTextParts]);
+    const suggestedPlanTitle = React.useMemo(() => suggestPlanTitleFromText(assistantPlanText), [assistantPlanText]);
 
     const createSessionFromAssistantMessage = useSessionUIStore((state) => state.createSessionFromAssistantMessage);
+    const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
     const openMultiRunLauncherWithPrompt = useUIStore((state) => state.openMultiRunLauncherWithPrompt);
+    const projects = useProjectsStore((state) => state.projects);
+    const effectiveDirectory = useEffectiveDirectory();
+    const sessions = useSessions();
+    const [isPlanDialogOpen, setIsPlanDialogOpen] = React.useState(false);
+    const [isSavingPlan, setIsSavingPlan] = React.useState(false);
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
     const isSortedRenderMode = chatRenderMode === 'sorted';
     const collapsedPreviewCount = 7;
@@ -718,6 +733,21 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
         const providerLabel = voiceProvider === 'browser' ? 'Browser' : voiceProvider === 'openai' ? 'OpenAI' : voiceProvider === 'openai-compatible' ? 'Custom' : 'Say';
         return `Read aloud (${providerLabel} voice)`;
     }, [isTTSPlaying, voiceProvider]);
+
+    const currentSession = React.useMemo(() => {
+        if (!currentSessionId) {
+            return null;
+        }
+        return sessions.find((session) => session.id === currentSessionId) ?? null;
+    }, [currentSessionId, sessions]);
+
+    const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
+    const currentProjectRef = React.useMemo(() => {
+        const directory = effectiveDirectory
+            ?? (typeof currentSession?.directory === 'string' ? currentSession.directory : '');
+        const resolved = resolveProjectForSessionDirectory(projects, availableWorktreesByProject, directory);
+        return resolved ? { id: resolved.id, path: resolved.path } : null;
+    }, [availableWorktreesByProject, currentSession?.directory, effectiveDirectory, projects]);
 
 
     const hasTools = toolParts.length > 0;
@@ -903,7 +933,6 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
             event.stopPropagation();
             event.preventDefault();
 
-            const assistantPlanText = flattenAssistantTextParts(assistantTextParts);
             if (!assistantPlanText.trim()) {
                 return;
             }
@@ -911,7 +940,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
             const prefilledPrompt = `${MULTIRUN_EXECUTION_FORK_PROMPT_META_TEXT}\n\n${assistantPlanText}`;
             openMultiRunLauncherWithPrompt(prefilledPrompt);
         },
-        [assistantTextParts, openMultiRunLauncherWithPrompt]
+        [assistantPlanText, openMultiRunLauncherWithPrompt]
     );
 
     const handleTTSClick = React.useCallback(
@@ -924,12 +953,55 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                 return;
             }
             
-            const messageText = flattenAssistantTextParts(assistantTextParts);
-            if (messageText.trim()) {
-                void playTTS(messageText);
+            if (assistantPlanText.trim()) {
+                void playTTS(assistantPlanText);
             }
         },
-        [assistantTextParts, isTTSPlaying, playTTS, stopTTS]
+        [assistantPlanText, isTTSPlaying, playTTS, stopTTS]
+    );
+
+    const handleSaveAsPlanClick = React.useCallback(
+        (event: React.MouseEvent<HTMLButtonElement>) => {
+            event.stopPropagation();
+            event.preventDefault();
+            if (!assistantPlanText.trim()) {
+                return;
+            }
+            setIsPlanDialogOpen(true);
+        },
+        [assistantPlanText]
+    );
+
+    const handleConfirmSaveAsPlan = React.useCallback(
+        async (title: string) => {
+            if (!assistantPlanText.trim()) {
+                return;
+            }
+            if (!currentProjectRef) {
+                toast.error('No project found for this session');
+                return;
+            }
+
+            setIsSavingPlan(true);
+            try {
+                const created = await createProjectPlanFile(currentProjectRef, {
+                    title,
+                    body: assistantPlanText,
+                });
+                if (!created) {
+                    toast.error('Failed to save plan');
+                    return;
+                }
+                window.dispatchEvent(new CustomEvent('openchamber:project-plan-saved', {
+                    detail: { projectId: currentProjectRef.id },
+                }));
+                setIsPlanDialogOpen(false);
+                toast.success('Plan saved');
+            } finally {
+                setIsSavingPlan(false);
+            }
+        },
+        [assistantPlanText, currentProjectRef]
     );
 
     const [isSharing, setIsSharing] = React.useState(false);
@@ -1106,6 +1178,8 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
         && hasAnchoredActivitySegments
         && Boolean(toggleActivityGroup);
 
+    const shouldDeferSortedInlineText = isSortedRenderMode && !hasStopFinish;
+
 
     const renderedParts = React.useMemo(() => {
         const rendered: React.ReactNode[] = [];
@@ -1152,7 +1226,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
 
             if (part.type === 'text') {
                 const activity = activityByPart.get(part);
-                if (isSortedRenderMode && !hasStopFinish) {
+                if (shouldDeferSortedInlineText) {
                     i += 1;
                     continue;
                 }
@@ -1177,10 +1251,6 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
 
             if (part.type === 'reasoning') {
                 const activity = activityByPart.get(part);
-                if (isSortedRenderMode && !hasStopFinish) {
-                    i += 1;
-                    continue;
-                }
                 if (activity?.kind === 'reasoning') {
                     i += 1;
                     continue;
@@ -1293,7 +1363,6 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
         chatRenderMode,
         collapsedPreviewCount,
         expandedTools,
-        hasStopFinish,
         isMobile,
         isActivityOwnerMessage,
         isSortedRenderMode,
@@ -1306,6 +1375,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
         shouldShowTool,
         streamPhase,
         showReasoningTraces,
+        shouldDeferSortedInlineText,
         syntaxTheme,
         toggleActivityGroup,
         turnGroupingContext,
@@ -1398,12 +1468,33 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                                 <RiImageDownloadLine className="h-4 w-4" />
                             )}
                         </Button>
-                    </TooltipTrigger>
-                    <TooltipContent sideOffset={6}>{isSharing ? 'Saving image...' : 'Save as image'}</TooltipContent>
-                </Tooltip>
-               <Tooltip delayDuration={1000}>
-                   <TooltipTrigger asChild>
-                       <Button
+                     </TooltipTrigger>
+                     <TooltipContent sideOffset={6}>{isSharing ? 'Saving image...' : 'Save as image'}</TooltipContent>
+                 </Tooltip>
+                {!isVSCodeRuntime() ? (
+                    <Tooltip delayDuration={1000}>
+                        <TooltipTrigger asChild>
+                            <Button
+                                type="button"
+                                size="icon"
+                                variant="ghost"
+                                disabled={!hasCopyableText || !currentProjectRef}
+                                className={cn(
+                                    'h-8 w-8 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50',
+                                    (!hasCopyableText || !currentProjectRef) && 'opacity-50'
+                                )}
+                                onPointerDown={(event) => event.stopPropagation()}
+                                onClick={handleSaveAsPlanClick}
+                            >
+                                <RiBookletLine className="h-4 w-4" />
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent sideOffset={6}>Save as plan</TooltipContent>
+                    </Tooltip>
+                ) : null}
+                <Tooltip delayDuration={1000}>
+                    <TooltipTrigger asChild>
+                        <Button
                            type="button"
                            size="icon"
                            variant="ghost"
@@ -1474,7 +1565,15 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
              onTouchStart={isTouchContext && canCopyMessage && hasCopyableText ? revealCopyHint : undefined}
          >
              <TextSelectionMenu containerRef={messageContentRef} />
-             <div>
+             <SaveProjectPlanDialog
+                 open={isPlanDialogOpen}
+                 onOpenChange={setIsPlanDialogOpen}
+                 initialTitle={suggestedPlanTitle}
+                 sourceText={assistantPlanText}
+                 saving={isSavingPlan}
+                 onSave={handleConfirmSaveAsPlan}
+             />
+              <div>
                  <div
                      className="message-content-text leading-relaxed overflow-hidden text-foreground/90 [&_p:last-child]:mb-0 [&_ul:last-child]:mb-0 [&_ol:last-child]:mb-0"
                  >

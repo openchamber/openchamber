@@ -18,6 +18,7 @@
     {
       "label": "Help",
       "items": [
+        { "label": "Reverse Proxy", "link": "/reverse-proxy/" },
         { "label": "Troubleshooting", "link": "/troubleshooting/" }
       ]
     }

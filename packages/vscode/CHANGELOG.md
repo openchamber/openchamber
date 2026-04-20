@@ -1,3 +1,11 @@
+## [1.9.6] - 2026-04-17
+
+- Reliability: improved startup shell detection to avoid false OpenCode discovery on POSIX login shells, reducing stuck startup edge cases in new workspaces (thanks to @geekifan).
+- Reliability/Streaming: moved to a WebSocket-first message stream with SSE fallback and added safer compression handling, improving stability on slower or proxied connections (thanks to @geekifan, @jwcrystal).
+- Sessions/Worktrees: enforced worktree isolation for session and Git flows, reducing cross-project context bleed when switching chats or branches (thanks to @jwcrystal).
+- Chat/Export: added export session as Markdown and improved empty-state/export behavior, making conversation handoff and notes easier (thanks to @coldbrow).
+- Chat/Markdown: added LaTeX rendering support for clearer math and technical notation in rendered messages (thanks to @ricautomation).
+
 ## [1.9.5] - 2026-04-14
 
 - Chat/Tool Output: added an interactive tree viewer for structured outputs and fixed JSON quote rendering, making large payloads easier to inspect accurately (thanks to @yaozhenghangma).

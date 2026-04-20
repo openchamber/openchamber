@@ -822,15 +822,15 @@ const getProjectStoragePath = (projectID) => {
 
 const syncSandboxesToOpenCodeDb = (projectID, sandboxes) => {
   try {
-    const { Database } = require('bun:sqlite');
+    const Database = require('better-sqlite3');
     const dbPath = path.join(getOpenCodeDataPath(), 'opencode.db');
     if (!fs.existsSync(dbPath)) return;
     const db = new Database(dbPath);
     try {
-      const row = db.query('SELECT sandboxes FROM project WHERE id = ?').get(projectID);
+      const row = db.prepare('SELECT sandboxes FROM project WHERE id = ?').get(projectID);
       if (!row) return;
       const json = JSON.stringify(sandboxes);
-      db.query('UPDATE project SET sandboxes = ?, time_updated = ? WHERE id = ?').run(json, Date.now(), projectID);
+      db.prepare('UPDATE project SET sandboxes = ?, time_updated = ? WHERE id = ?').run(json, Date.now(), projectID);
     } finally {
       db.close();
     }
@@ -2699,6 +2699,141 @@ export async function isLinkedWorktree(directory) {
     console.error('Failed to determine worktree type:', error);
     return false;
   }
+}
+
+export async function validateWorktreeDirectory(directory, worktreeRoot) {
+  const directoryPath = normalizeDirectoryPath(directory);
+  const rootPath = normalizeDirectoryPath(worktreeRoot);
+
+  if (!directoryPath || !rootPath) {
+    return {
+      valid: false,
+      insideWorktreeRoot: false,
+      resolvedWorktreeRoot: null,
+      resolvedCwd: null,
+    };
+  }
+
+  const isRepo = await isGitRepository(directoryPath);
+  if (!isRepo) {
+    return {
+      valid: false,
+      insideWorktreeRoot: false,
+      resolvedWorktreeRoot: null,
+      resolvedCwd: null,
+    };
+  }
+
+  const resolvedCwd = await canonicalPath(directoryPath);
+  const resolvedRoot = await canonicalPath(rootPath);
+
+  const inside = resolvedCwd.startsWith(resolvedRoot + path.sep) || resolvedCwd === resolvedRoot;
+
+  return {
+    valid: true,
+    insideWorktreeRoot: inside,
+    resolvedWorktreeRoot: resolvedRoot,
+    resolvedCwd,
+  };
+}
+
+export async function canonicalizeWorktreeState(directory) {
+  const directoryPath = normalizeDirectoryPath(directory);
+
+  if (!directoryPath) {
+    return {
+      worktreeRoot: null,
+      cwd: null,
+      branch: null,
+      headState: 'detached',
+      worktreeStatus: 'not-a-repo',
+      legacy: false,
+      degraded: false,
+      attentionReason: null,
+    };
+  }
+
+  const isRepo = await isGitRepository(directoryPath);
+  if (!isRepo) {
+    return {
+      worktreeRoot: null,
+      cwd: null,
+      branch: null,
+      headState: 'detached',
+      worktreeStatus: 'not-a-repo',
+      legacy: false,
+      degraded: false,
+      attentionReason: null,
+    };
+  }
+
+  const cwd = await canonicalPath(directoryPath);
+  const git = await createGit(directoryPath);
+
+  let worktreeRoot = null;
+  let worktreeStatus = 'ready';
+  let headState = /** @type {'branch' | 'detached' | 'unborn'} */ ('branch');
+  let branch = null;
+  let attentionReason = /** @type {'merge' | 'rebase' | 'cherry-pick' | 'revert' | 'bisect' | null} */ (null);
+
+  try {
+    const context = await resolveWorktreeProjectContext(directoryPath);
+    worktreeRoot = await canonicalPath(context.worktreeRoot);
+  } catch {
+    worktreeStatus = 'invalid';
+  }
+
+  try {
+    const symbolicRef = await git.raw(['symbolic-ref', '-q', 'HEAD']).catch(() => '');
+    if (symbolicRef.trim()) {
+      headState = 'branch';
+      branch = cleanBranchName(symbolicRef.trim());
+    } else {
+      const revParse = await git.raw(['rev-parse', 'HEAD']).catch(() => '');
+      if (!revParse.trim()) {
+        headState = 'unborn';
+        branch = null;
+      } else {
+        headState = 'detached';
+        branch = revParse.trim().slice(0, 7);
+      }
+    }
+  } catch {
+    headState = 'unborn';
+    branch = null;
+  }
+
+  // Detect attention reasons from getStatus side-effects
+  try {
+    const status = await git.status(['-uall']);
+    if (status.current && (await git.raw(['rev-parse', '--verify', 'MERGE_HEAD']).then(() => true).catch(() => false))) {
+      attentionReason = 'merge';
+    } else {
+      const rebaseMerge = await fsp.stat(path.join(directoryPath, '.git', 'rebase-merge')).then(() => true).catch(() => false);
+      const rebaseApply = await fsp.stat(path.join(directoryPath, '.git', 'rebase-apply')).then(() => true).catch(() => false);
+      if (rebaseMerge || rebaseApply) {
+        attentionReason = 'rebase';
+      } else if (status.conflicted && status.conflicted.length > 0) {
+        const cherryPickHead = await fsp.stat(path.join(directoryPath, '.git', 'CHERRY_PICK_HEAD')).then(() => true).catch(() => false);
+        const revertHead = await fsp.stat(path.join(directoryPath, '.git', 'REVERT_HEAD')).then(() => true).catch(() => false);
+        if (cherryPickHead) attentionReason = 'cherry-pick';
+        else if (revertHead) attentionReason = 'revert';
+      }
+    }
+  } catch {
+    // Status check failed — ignore
+  }
+
+  return {
+    worktreeRoot,
+    cwd,
+    branch,
+    headState,
+    worktreeStatus,
+    legacy: false,
+    degraded: false,
+    attentionReason,
+  };
 }
 
 export async function getCommitFiles(directory, commitHash) {

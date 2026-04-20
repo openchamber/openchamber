@@ -446,6 +446,51 @@ export async function handleFsBridgeMessage(
       return { id, type, success: true, data: { saved: true, path: saveUri.fsPath || saveUri.toString() } };
     }
 
+    case 'api:files/save-markdown': {
+      const rawFileName = (payload as { fileName?: unknown })?.fileName;
+      const rawContent = (payload as { content?: unknown })?.content;
+      const content = typeof rawContent === 'string' ? rawContent : '';
+      if (!content) {
+        return { id, type, success: false, error: 'Invalid markdown payload' };
+      }
+
+      const defaultFileName = typeof rawFileName === 'string' && rawFileName.trim().length > 0
+        ? rawFileName.trim()
+        : `session-${Date.now()}.md`;
+
+      const saveUri = await vscode.window.showSaveDialog({
+        saveLabel: 'Export session',
+        defaultUri: vscode.workspace.workspaceFolders?.[0]
+          ? vscode.Uri.joinPath(vscode.workspace.workspaceFolders[0].uri, defaultFileName)
+          : undefined,
+        filters: { Markdown: ['md'] },
+      });
+
+      if (!saveUri) {
+        return { id, type, success: true, data: { saved: false, canceled: true } };
+      }
+
+      await vscode.workspace.fs.writeFile(saveUri, Buffer.from(content, 'utf8'));
+
+      return { id, type, success: true, data: { saved: true, path: saveUri.fsPath || saveUri.toString() } };
+    }
+
+    case 'api:fs:reveal': {
+      const targetPath = (payload as { path?: unknown })?.path;
+      const value = typeof targetPath === 'string' ? targetPath.trim() : '';
+      if (!value) {
+        return { id, type, success: false, error: 'Path is required' };
+      }
+
+      try {
+        const uri = value.includes('://') ? vscode.Uri.parse(value) : vscode.Uri.file(value);
+        await vscode.commands.executeCommand('revealFileInOS', uri);
+        return { id, type, success: true, data: { success: true } };
+      } catch {
+        return { id, type, success: false, error: 'Failed to reveal path' };
+      }
+    }
+
     default:
       return null;
   }

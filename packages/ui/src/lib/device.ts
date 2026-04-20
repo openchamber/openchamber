@@ -1,5 +1,5 @@
 import React from 'react';
-import { isTauriShell } from '@/lib/desktop';
+import { isDesktopShell } from '@/lib/desktop';
 
 export type DeviceType = 'desktop' | 'mobile' | 'tablet';
 
@@ -82,7 +82,7 @@ export function getDeviceInfo(): DeviceInfo {
   const noHover = hoverQuery?.matches ?? false;
   const maxTouchPoints = typeof navigator !== 'undefined' ? navigator.maxTouchPoints ?? 0 : 0;
 
-  const isTauriShellRuntime = isTauriShell();
+  const isDesktopShellRuntime = isDesktopShell();
 
   const hasTouchInput = prefersCoarsePointer || noHover || maxTouchPoints > 0;
 
@@ -94,7 +94,7 @@ export function getDeviceInfo(): DeviceInfo {
   let isDesktop = !hasTouchInput || width > BREAKPOINTS.lg;
   let deviceType: DeviceType = 'desktop';
 
-  if (isTauriShellRuntime) {
+  if (isDesktopShellRuntime) {
     isMobile = false;
     isTablet = false;
     isDesktop = true;
@@ -108,7 +108,7 @@ export function getDeviceInfo(): DeviceInfo {
     deviceType = 'desktop';
   }
 
-  setRootDeviceAttributes(isTauriShellRuntime, deviceType, hasTouchInput);
+  setRootDeviceAttributes(isDesktopShellRuntime, deviceType, hasTouchInput);
 
   let breakpoint: keyof typeof BREAKPOINTS = 'xs';
   for (const [key, value] of Object.entries(BREAKPOINTS)) {
@@ -131,7 +131,7 @@ export function getDeviceInfo(): DeviceInfo {
 export function isMobileDeviceViaCSS(): boolean {
   if (typeof window === 'undefined') return false;
 
-  if (typeof window !== 'undefined' && isTauriShell()) {
+  if (typeof window !== 'undefined' && isDesktopShell()) {
     return false;
   }
 
@@ -213,7 +213,7 @@ export function useDeviceInfo(): DeviceInfo {
 
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
-    const isTauriShellRuntime = isTauriShell();
+    const isDesktopShellRuntime = isDesktopShell();
     const supportsMatchMedia = typeof window.matchMedia === 'function';
     const pointerQuery = supportsMatchMedia ? window.matchMedia('(pointer: coarse)') : null;
     const hoverQuery = supportsMatchMedia ? window.matchMedia('(hover: none)') : null;
@@ -221,7 +221,7 @@ export function useDeviceInfo(): DeviceInfo {
     const noHover = hoverQuery?.matches ?? false;
     const maxTouchPoints = typeof navigator !== 'undefined' ? navigator.maxTouchPoints ?? 0 : 0;
     const hasTouchInput = prefersCoarsePointer || noHover || maxTouchPoints > 0;
-    setRootDeviceAttributes(isTauriShellRuntime, deviceInfo.deviceType, hasTouchInput);
+    setRootDeviceAttributes(isDesktopShellRuntime, deviceInfo.deviceType, hasTouchInput);
   }, [deviceInfo.deviceType, deviceInfo.hasTouchInput]);
 
   return deviceInfo;

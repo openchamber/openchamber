@@ -211,4 +211,15 @@ export const createWebFilesAPI = (): FilesAPI => ({
     const result = await response.json().catch(() => ({}));
     return { success: Boolean((result as { success?: boolean }).success) };
   },
+
+  async downloadFile(path: string): Promise<void> {
+    const target = normalizePath(path);
+    const url = `/api/fs/raw?path=${encodeURIComponent(target)}&download=true`;
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = target.split('/').pop() || 'file';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  },
 });

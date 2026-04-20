@@ -16,6 +16,79 @@ import { stripSessionDiffSnapshots } from "./sanitize"
 import { syncDebug } from "./debug"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
+const DELTA_OVERLAP_FIELDS = ["text", "output"] as const
+const FINAL_TOOL_STATUSES = new Set(["completed", "error", "aborted", "failed", "timeout", "cancelled"])
+
+type DedupeMetadata = {
+  __dedupeNextDeltaFields?: string[]
+}
+
+function appendNonOverlappingDelta(existingValue: string | undefined, delta: string) {
+  if (!existingValue || delta.length === 0) return (existingValue ?? "") + delta
+  if (existingValue.endsWith(delta)) return existingValue
+
+  const maxOverlap = Math.min(existingValue.length, delta.length)
+  for (let overlap = maxOverlap; overlap > 0; overlap--) {
+    if (existingValue.endsWith(delta.slice(0, overlap))) {
+      return existingValue + delta.slice(overlap)
+    }
+  }
+
+  return existingValue + delta
+}
+
+function getUpdatedDeltaFields(previous: Part, next: Part) {
+  const dedupeFields: string[] = []
+  for (const field of DELTA_OVERLAP_FIELDS) {
+    const previousValue = (previous as Record<string, unknown>)[field]
+    const nextValue = (next as Record<string, unknown>)[field]
+    if (typeof previousValue !== "string" || typeof nextValue !== "string") continue
+    if (previousValue.length === 0 || nextValue.length === 0) continue
+    if (nextValue === previousValue || nextValue.startsWith(previousValue) || previousValue.startsWith(nextValue)) {
+      dedupeFields.push(field)
+    }
+  }
+  return dedupeFields
+}
+
+function getPartEndTime(part: Part): number | undefined {
+  const stateEnd = (part as { state?: { time?: { end?: unknown } } }).state?.time?.end
+  if (typeof stateEnd === "number") {
+    return stateEnd
+  }
+
+  const timeEnd = (part as { time?: { end?: unknown } }).time?.end
+  return typeof timeEnd === "number" ? timeEnd : undefined
+}
+
+function getToolStatus(part: Part): string | undefined {
+  if (part.type !== "tool") {
+    return undefined
+  }
+
+  const status = (part as { state?: { status?: unknown } }).state?.status
+  return typeof status === "string" ? status : undefined
+}
+
+function shouldPreserveExistingPart(previous: Part, next: Part): boolean {
+  if (previous.type !== "tool" || next.type !== "tool") {
+    return false
+  }
+
+  const previousStatus = getToolStatus(previous)
+  const nextStatus = getToolStatus(next)
+  if (previousStatus && FINAL_TOOL_STATUSES.has(previousStatus) && (!nextStatus || !FINAL_TOOL_STATUSES.has(nextStatus))) {
+    return true
+  }
+
+  const previousEnd = getPartEndTime(previous)
+  const nextEnd = getPartEndTime(next)
+  if (typeof previousEnd === "number" && typeof nextEnd !== "number") {
+    return true
+  }
+
+  return false
+}
 
 // ---------------------------------------------------------------------------
 // Global events
@@ -205,7 +278,14 @@ export function applyDirectoryEvent(
       const next = [...parts]
       const result = Binary.search(next, part.id, (p) => p.id)
       if (result.found) {
-        next[result.index] = part
+        const previous = next[result.index]
+        if (shouldPreserveExistingPart(previous, part)) {
+          return false
+        }
+        const dedupeFields = getUpdatedDeltaFields(previous, part)
+        next[result.index] = dedupeFields.length > 0
+          ? { ...part, __dedupeNextDeltaFields: dedupeFields } as unknown as Part
+          : part
       } else {
         // Replace optimistic part (no sessionID) with server part of same type.
         // Gate: only scan if the first part lacks sessionID (optimistic parts are
@@ -262,9 +342,15 @@ export function applyDirectoryEvent(
       }
       const existing = parts[result.index] as Record<string, unknown>
       const existingValue = existing[props.field] as string | undefined
+      const dedupeFields = (existing as DedupeMetadata).__dedupeNextDeltaFields ?? []
+      const shouldDedupe = dedupeFields.includes(props.field)
       // Create new Part object + new array so React detects the change
       const next = [...parts]
-      next[result.index] = { ...existing, [props.field]: (existingValue ?? "") + props.delta } as Part
+      next[result.index] = {
+        ...existing,
+        [props.field]: shouldDedupe ? appendNonOverlappingDelta(existingValue, props.delta) : (existingValue ?? "") + props.delta,
+        __dedupeNextDeltaFields: dedupeFields.filter((field) => field !== props.field),
+      } as unknown as Part
       draft.part[props.messageID] = next
       return true
     }

@@ -113,9 +113,14 @@ export const createVSCodeFilesAPI = (): FilesAPI => ({
     };
   },
 
+  async revealPath(path: string): Promise<{ success: boolean }> {
+    const target = normalizePath(path);
+    const data = await sendBridgeMessage<{ success?: boolean }>('api:fs:reveal', { path: target });
+    return { success: Boolean(data?.success) };
+  },
+
   async execCommands(commands: string[], cwd: string): Promise<{ success: boolean; results: CommandExecResult[] }> {
     const targetCwd = normalizePath(cwd);
-    // Use extended timeout for command execution (5 minutes)
     const data = await sendBridgeMessageWithOptions<{ success: boolean; results?: CommandExecResult[] }>('api:fs:exec', {
       commands,
       cwd: targetCwd,
@@ -125,5 +130,16 @@ export const createVSCodeFilesAPI = (): FilesAPI => ({
       success: Boolean(data?.success),
       results: Array.isArray(data?.results) ? data.results : [],
     };
+  },
+
+  async downloadFile(path: string): Promise<void> {
+    const target = normalizePath(path);
+    const url = `/api/fs/raw?path=${encodeURIComponent(target)}&download=true`;
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = target.split('/').pop() || 'file';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   },
 });

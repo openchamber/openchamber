@@ -14,6 +14,7 @@ import {
   RiBrainAi3Line,
   RiCloseCircleLine,
   RiCommandLine,
+  RiFileLine,
   RiGitBranchLine,
   RiLayoutLeftLine,
   RiLayoutRightLine,
@@ -65,6 +66,12 @@ export const HelpDialog: React.FC = () => {
           id: 'open_command_palette',
           description: "Open Command Palette",
           icon: RiCommandLine,
+          keys: '',
+        },
+        {
+          id: 'open_quick_open',
+          description: 'Quick open file',
+          icon: RiFileLine,
           keys: '',
         },
         {

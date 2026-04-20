@@ -846,10 +846,10 @@ export const MainLayout: React.FC = () => {
                                         )}
                                         style={{
                                             left: `${visibleSidebarWidth}px`,
-                                            width: 'var(--radius-md)',
-                                            height: 'var(--radius-md)',
-                                            WebkitMaskImage: 'radial-gradient(circle at 100% 100%, transparent calc(var(--radius-md) - 1px), black var(--radius-md))',
-                                            maskImage: 'radial-gradient(circle at 100% 100%, transparent calc(var(--radius-md) - 1px), black var(--radius-md))',
+                                            width: '10px',
+                                            height: '10px',
+                                            WebkitMaskImage: 'radial-gradient(circle at 100% 100%, transparent calc(10px - 1px), black 10px)',
+                                            maskImage: 'radial-gradient(circle at 100% 100%, transparent calc(10px - 1px), black 10px)',
                                         }}
                                     />
                                     <div
@@ -860,10 +860,10 @@ export const MainLayout: React.FC = () => {
                                         )}
                                         style={{
                                             left: `${visibleSidebarWidth}px`,
-                                            width: 'var(--radius-md)',
-                                            height: 'var(--radius-md)',
-                                            WebkitMaskImage: 'radial-gradient(circle at 100% 0%, transparent calc(var(--radius-md) - 1px), black var(--radius-md))',
-                                            maskImage: 'radial-gradient(circle at 100% 0%, transparent calc(var(--radius-md) - 1px), black var(--radius-md))',
+                                            width: '10px',
+                                            height: '10px',
+                                            WebkitMaskImage: 'radial-gradient(circle at 100% 0%, transparent calc(10px - 1px), black 10px)',
+                                            maskImage: 'radial-gradient(circle at 100% 0%, transparent calc(10px - 1px), black 10px)',
                                         }}
                                     />
                                 </>
@@ -878,10 +878,10 @@ export const MainLayout: React.FC = () => {
                                         )}
                                         style={{
                                             right: `${visibleRightSidebarWidth}px`,
-                                            width: 'var(--radius-md)',
-                                            height: 'var(--radius-md)',
-                                            WebkitMaskImage: 'radial-gradient(circle at 0 100%, transparent calc(var(--radius-md) - 1px), black var(--radius-md))',
-                                            maskImage: 'radial-gradient(circle at 0 100%, transparent calc(var(--radius-md) - 1px), black var(--radius-md))',
+                                            width: '10px',
+                                            height: '10px',
+                                            WebkitMaskImage: 'radial-gradient(circle at 0 100%, transparent calc(10px - 1px), black 10px)',
+                                            maskImage: 'radial-gradient(circle at 0 100%, transparent calc(10px - 1px), black 10px)',
                                         }}
                                     />
                                     <div
@@ -892,10 +892,10 @@ export const MainLayout: React.FC = () => {
                                         )}
                                         style={{
                                             right: `${visibleRightSidebarWidth}px`,
-                                            width: 'var(--radius-md)',
-                                            height: 'var(--radius-md)',
-                                            WebkitMaskImage: 'radial-gradient(circle at 0 0, transparent calc(var(--radius-md) - 1px), black var(--radius-md))',
-                                            maskImage: 'radial-gradient(circle at 0 0, transparent calc(var(--radius-md) - 1px), black var(--radius-md))',
+                                            width: '10px',
+                                            height: '10px',
+                                            WebkitMaskImage: 'radial-gradient(circle at 0 0, transparent calc(10px - 1px), black 10px)',
+                                            maskImage: 'radial-gradient(circle at 0 0, transparent calc(10px - 1px), black 10px)',
                                         }}
                                     />
                                 </>
@@ -910,8 +910,8 @@ export const MainLayout: React.FC = () => {
                             <div className={cn(
                                 'relative flex flex-1 min-w-0 flex-col overflow-hidden',
                                 'bg-sidebar',
-                                isSidebarOpen && 'border-l border-border/50 rounded-tl-md rounded-bl-md',
-                                isRightSidebarOpen && 'border-r border-border/50 rounded-tr-md rounded-br-md'
+                                isSidebarOpen && 'border-l border-border/50 rounded-tl-[10px] rounded-bl-[10px]',
+                                isRightSidebarOpen && 'border-r border-border/50 rounded-tr-[10px] rounded-br-[10px]'
                             )}>
                                 <Header desktopRightSidebarActionsHost={desktopRightSidebarActionsHost} />
                                 <div className={cn(

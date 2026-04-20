@@ -168,6 +168,7 @@ export const projectTurnRecords = (
             turnId: turn.turnId,
             assistantMessages: turn.assistantMessages,
             summarySourceMessageId: turn.summary.sourceMessageId,
+            summarySourcePartId: turn.summary.sourcePartId,
             showTextJustificationActivity: effectiveOptions.showTextJustificationActivity,
         });
         turn.activityParts = activity.activityParts;

@@ -2,7 +2,7 @@
   "name": "openchamber",
   "displayName": "OpenChamber",
   "description": "AI coding assistant powered by OpenCode",
-  "version": "1.9.5",
+  "version": "1.9.6",
   "publisher": "fedaykindev",
   "private": true,
   "repository": {
@@ -243,7 +243,7 @@
   },
   "dependencies": {
     "@openchamber/ui": "workspace:*",
-    "@opencode-ai/sdk": "^1.4.3",
+    "@opencode-ai/sdk": "^1.4.19",
     "adm-zip": "^0.5.16",
     "jsonc-parser": "^3.3.1",
     "react": "^19.1.1",

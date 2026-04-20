@@ -8,6 +8,7 @@ import { flushSync } from 'react-dom';
 import type { Theme, ThemeMode } from '@/types/theme';
 import type { DesktopSettings } from '@/lib/desktop';
 import { isDesktopLocalOriginActive, isTauriShell, isVSCodeRuntime } from '@/lib/desktop';
+import { setDesktopWindowTheme } from '@/lib/desktopNative';
 import { CSSVariableGenerator } from '@/lib/theme/cssGenerator';
 import { updateDesktopSettings } from '@/lib/persistence';
 import {
@@ -579,26 +580,9 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       return;
     }
 
-    let cancelled = false;
-
     void (async () => {
-      try {
-        const { invoke } = await import('@tauri-apps/api/core');
-        if (cancelled) {
-          return;
-        }
-        await invoke('desktop_set_window_theme', {
-          themeMode: preferences.themeMode,
-          themeVariant: currentTheme.metadata.variant,
-        });
-      } catch {
-        // noop
-      }
+      await setDesktopWindowTheme(preferences.themeMode, currentTheme.metadata.variant);
     })();
-
-    return () => {
-      cancelled = true;
-    };
   }, [currentTheme.metadata.variant, isDesktopShell, preferences.themeMode]);
 
   useEffect(() => {

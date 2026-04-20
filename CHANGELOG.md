@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 
+## [1.9.6] - 2026-04-17
+
+- Reliability/Streaming: switched live message events to a WebSocket-first transport with SSE fallback, added response compression, and hardened proxy/compression handling so long runs stay smoother on slower or proxied networks (thanks to @geekifan, @jwcrystal).
+- Sessions/Scheduled Tasks: added scheduled task creation and management with locale-aware scheduling, so recurring prompts run at the right local time without manual re-entry.
+- Sessions/Worktrees: enforced session worktree isolation and tightened session-switch safety, reducing cross-worktree mix-ups when resuming chats or running Git actions (thanks to @jwcrystal).
+- Files: added a full Go to Line workflow (toolbar + shortcut + dialog) and a new Copy Relative Path action, making in-editor navigation and path sharing much faster (thanks to @coldbrow).
+- Files: file trees now auto-refresh when files change outside the app, so new, renamed, or updated files appear without manual reloads (thanks to @jwcrystal).
+- Chat/Export: added export session as Markdown and improved empty-state/export behavior, making conversation handoff and documentation cleaner (thanks to @coldbrow).
+- Chat/Requests: restored blocking request visibility in sub-sessions, scoped auto-approve to the active session tree, and reduced noisy auto-approved notifications during multi-session work.
+- Desktop: added quick open and a LAN access toggle, plus safer quit behavior around scheduled tasks for smoother local-network and day-to-day desktop workflows (thanks to @An-jinu).
+- Chat/Markdown: added LaTeX rendering support for clearer math and technical notation in messages (thanks to @ricautomation).
+- Settings/Skills: skills are now sorted within groups so larger skill lists are easier to scan (thanks to @roctom).
+
+
 ## [1.9.5] - 2026-04-14
 
 - Security/Auth: added passkey sign-in for protected instances and new 1-week/30-day session expiration options, so teams can enforce stronger access controls with flexible login persistence (thanks to @daveotero, @pm0u).

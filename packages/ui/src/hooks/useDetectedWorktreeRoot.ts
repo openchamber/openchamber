@@ -90,6 +90,7 @@ export function useDetectedWorktreeMetadata(
 
       const branch = currentBranch || '';
       const name = worktreePath.split('/').filter(Boolean).pop() || worktreePath;
+      const headState = !branch ? 'unborn' : 'branch';
 
       setDetected({
         source: 'sdk',
@@ -98,6 +99,11 @@ export function useDetectedWorktreeMetadata(
         branch,
         label: branch || name,
         name,
+        // Phase 1 canonical fields — this hook is fallback-only
+        worktreeRoot: worktreePath,
+        worktreeStatus: 'ready',
+        headState,
+        worktreeSource: 'existing',
       });
     })();
 

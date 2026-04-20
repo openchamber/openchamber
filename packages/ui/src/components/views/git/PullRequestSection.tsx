@@ -6,8 +6,6 @@ import {
   RiAiGenerate2,
   RiArrowDownSLine,
   RiArrowRightSLine,
-  RiCheckboxBlankLine,
-  RiCheckboxLine,
   RiCloseLine,
   RiEditLine,
   RiErrorWarningLine,
@@ -20,6 +18,7 @@ import {
   RiLoader4Line,
 } from '@remixicon/react';
 import { toast } from '@/components/ui';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -1698,7 +1697,7 @@ export const PullRequestSection: React.FC<{
                   <Textarea
                     value={body}
                     onChange={(e) => setBody(e.target.value)}
-                    className="min-h-[110px] bg-background/80"
+                    className="min-h-[110px]"
                     placeholder="What changed and why"
                     autoCorrect={hasTouchInput ? "on" : "off"}
                     autoCapitalize={hasTouchInput ? "sentences" : "off"}
@@ -1719,22 +1718,12 @@ export const PullRequestSection: React.FC<{
                     }
                   }}
                 >
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setDraft((v) => !v);
-                    }}
-                    aria-label="Toggle draft PR"
-                    className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                  >
-                    {draft ? (
-                      <RiCheckboxLine className="size-4 text-primary" />
-                    ) : (
-                      <RiCheckboxBlankLine className="size-4" />
-                    )}
-                  </button>
+                  <Checkbox
+                    size="sm"
+                    checked={draft}
+                    onChange={(next) => setDraft(next)}
+                    ariaLabel="Toggle draft PR"
+                  />
                   <span className="typography-ui-label text-foreground select-none">Draft</span>
                 </div>
 

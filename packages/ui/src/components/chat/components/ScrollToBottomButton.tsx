@@ -21,7 +21,7 @@ const ScrollToBottomButton: React.FC<ScrollToBottomButtonProps> = ({ visible, on
                 variant="outline"
                 size="sm"
                 onClick={onClick}
-                className="rounded-full h-8 w-8 p-0 shadow-none bg-background/95 hover:bg-interactive-hover"
+                className="size-8 rounded-full [corner-shape:round] p-0 shadow-none bg-background/95 hover:bg-interactive-hover"
                 aria-label="Scroll to bottom"
             >
                 <RiArrowDownLine className="h-4 w-4" />

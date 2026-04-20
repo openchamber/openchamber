@@ -2,6 +2,18 @@ import type { Session, Message, Part } from "@opencode-ai/sdk/v2";
 import type { PermissionRequest, PermissionResponse } from "@/types/permission";
 import type { QuestionRequest } from "@/types/question";
 
+export type SessionWorktreeAttachment = {
+  worktreeRoot: string | null;
+  cwd: string | null;
+  branch: string | null;
+  headState: 'branch' | 'detached' | 'unborn';
+  worktreeStatus: 'ready' | 'missing' | 'invalid' | 'not-a-repo';
+  worktreeSource: 'existing' | 'created-for-session' | null;
+  legacy: boolean;
+  degraded: boolean;
+  attentionReason?: 'merge' | 'rebase' | 'cherry-pick' | 'revert' | 'bisect' | null;
+};
+
 export interface AttachedFile {
     id: string;
     file: File;

@@ -11,6 +11,48 @@ import { useFileSystemAccess } from '@/hooks/useFileSystemAccess';
 import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
 import { showOpenCodeStatus } from '@/lib/openCodeStatus';
 
+const getActiveElementSelectedText = (): string => {
+  if (typeof document === 'undefined') {
+    return '';
+  }
+
+  const activeElement = document.activeElement;
+  if (activeElement instanceof HTMLTextAreaElement) {
+    return activeElement.value.slice(activeElement.selectionStart ?? 0, activeElement.selectionEnd ?? 0);
+  }
+
+  if (activeElement instanceof HTMLInputElement) {
+    const type = activeElement.type?.toLowerCase() ?? 'text';
+    if (['text', 'search', 'url', 'tel', 'password'].includes(type)) {
+      return activeElement.value.slice(activeElement.selectionStart ?? 0, activeElement.selectionEnd ?? 0);
+    }
+  }
+
+  if (activeElement instanceof HTMLElement && activeElement.isContentEditable) {
+    return activeElement.ownerDocument.defaultView?.getSelection?.()?.toString() ?? '';
+  }
+
+  return '';
+};
+
+const copyCurrentSelectionFallback = async (): Promise<boolean> => {
+  const selectionText = getActiveElementSelectedText() || window.getSelection()?.toString() || '';
+  if (!selectionText.trim()) {
+    return false;
+  }
+
+  try {
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(selectionText);
+      return true;
+    }
+  } catch {
+    // Fall through to execCommand fallback when Clipboard API is unavailable.
+  }
+
+  return document.execCommand('copy');
+};
+
 const MENU_ACTION_EVENT = 'openchamber:menu-action';
 const CHECK_FOR_UPDATES_EVENT = 'openchamber:check-for-updates';
 
@@ -29,6 +71,7 @@ type MenuAction =
   | 'about'
   | 'settings'
   | 'command-palette'
+  | 'quick-open'
   | 'new-session'
   | 'new-worktree-session'
   | 'change-workspace'
@@ -50,6 +93,7 @@ export const useMenuActions = (
 ) => {
   const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
   const toggleCommandPalette = useUIStore((s) => s.toggleCommandPalette);
+  const setQuickOpenOpen = useUIStore((s) => s.setQuickOpenOpen);
   const toggleHelpDialog = useUIStore((s) => s.toggleHelpDialog);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
   const setSessionSwitcherOpen = useUIStore((s) => s.setSessionSwitcherOpen);
@@ -139,6 +183,10 @@ export const useMenuActions = (
           toggleCommandPalette();
           break;
 
+        case 'quick-open':
+          setQuickOpenOpen(true);
+          break;
+
         case 'new-session':
           setActiveMainTab('chat');
           setSessionSwitcherOpen(false);
@@ -183,7 +231,7 @@ export const useMenuActions = (
           const copyEvent = new Event('openchamber:copy', { cancelable: true });
           const wasHandled = !window.dispatchEvent(copyEvent);
           if (!wasHandled) {
-            document.execCommand('copy');
+            void copyCurrentSelectionFallback();
           }
           break;
         }
@@ -227,6 +275,7 @@ export const useMenuActions = (
       setAboutDialogOpen,
       setActiveMainTab,
       setSessionSwitcherOpen,
+      setQuickOpenOpen,
       setSettingsDialogOpen,
       setThemeMode,
       toggleCommandPalette,

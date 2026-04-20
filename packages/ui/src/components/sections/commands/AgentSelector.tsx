@@ -1,11 +1,13 @@
 import React from 'react';
+import type { Agent } from '@opencode-ai/sdk/v2';
 import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { useAgentsStore } from '@/stores/useAgentsStore';
+import { useAgentsStore, filterVisibleAgents } from '@/stores/useAgentsStore';
+import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDeviceInfo } from '@/lib/device';
 import { RiArrowDownSLine, RiRobot2Line } from '@remixicon/react';
@@ -16,15 +18,27 @@ interface AgentSelectorProps {
     agentName: string;
     onChange: (agentName: string) => void;
     className?: string;
+    filter?: (agent: Agent) => boolean;
 }
 
 export const AgentSelector: React.FC<AgentSelectorProps> = ({
     agentName,
     onChange,
-    className
+    className,
+    filter,
 }) => {
-    const { loadAgents, getVisibleAgents } = useAgentsStore();
-    const agents = getVisibleAgents();
+    const configAgents = useConfigStore((state) => state.agents);
+    const agentsStoreAgents = useAgentsStore((state) => state.agents);
+    const loadAgentsStore = useAgentsStore((state) => state.loadAgents);
+    const loadConfigAgents = useConfigStore((state) => state.loadAgents);
+    const rawAgents = React.useMemo(() => {
+        if (Array.isArray(configAgents) && configAgents.length > 0) return configAgents;
+        return Array.isArray(agentsStoreAgents) ? agentsStoreAgents : [];
+    }, [configAgents, agentsStoreAgents]);
+    const agents = React.useMemo(() => {
+        const visible = filterVisibleAgents(rawAgents);
+        return filter ? visible.filter(filter) : visible;
+    }, [rawAgents, filter]);
     const isMobile = useUIStore(state => state.isMobile);
     const { isMobile: deviceIsMobile } = useDeviceInfo();
     const isActuallyMobile = isMobile || deviceIsMobile;
@@ -32,8 +46,10 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
     const [isMobilePanelOpen, setIsMobilePanelOpen] = React.useState(false);
 
     React.useEffect(() => {
-        loadAgents();
-    }, [loadAgents]);
+        if (rawAgents.length > 0) return;
+        void loadConfigAgents();
+        void loadAgentsStore();
+    }, [rawAgents.length, loadConfigAgents, loadAgentsStore]);
 
     const closeMobilePanel = () => setIsMobilePanelOpen(false);
 

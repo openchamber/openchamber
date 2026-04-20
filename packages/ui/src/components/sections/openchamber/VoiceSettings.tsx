@@ -457,55 +457,39 @@ export const VoiceSettings: React.FC = () => {
                                     </div>
                                     <div className="flex flex-wrap items-center gap-1">
                                         <Button
-                                            variant="outline"
+                                            variant="chip"
                                             size="xs"
+                                            aria-pressed={voiceProvider === 'browser'}
                                             onClick={() => setVoiceProvider('browser')}
-                                            className={cn(
-                                                '!font-normal',
-                                                voiceProvider === 'browser'
-                                                    ? 'border-[var(--primary-base)] text-[var(--primary-base)] bg-[var(--primary-base)]/10 hover:text-[var(--primary-base)]'
-                                                    : 'text-foreground'
-                                            )}
+                                            className="!font-normal"
                                         >
                                             Browser
                                         </Button>
                                         <Button
-                                            variant="outline"
+                                            variant="chip"
                                             size="xs"
+                                            aria-pressed={voiceProvider === 'openai'}
                                             onClick={() => setVoiceProvider('openai')}
-                                            className={cn(
-                                                '!font-normal',
-                                                voiceProvider === 'openai'
-                                                    ? 'border-[var(--primary-base)] text-[var(--primary-base)] bg-[var(--primary-base)]/10 hover:text-[var(--primary-base)]'
-                                                    : 'text-foreground'
-                                            )}
+                                            className="!font-normal"
                                         >
                                             OpenAI
                                         </Button>
                                         <Button
-                                            variant="outline"
+                                            variant="chip"
                                             size="xs"
+                                            aria-pressed={voiceProvider === 'openai-compatible'}
                                             onClick={() => setVoiceProvider('openai-compatible')}
-                                            className={cn(
-                                                '!font-normal',
-                                                voiceProvider === 'openai-compatible'
-                                                    ? 'border-[var(--primary-base)] text-[var(--primary-base)] bg-[var(--primary-base)]/10 hover:text-[var(--primary-base)]'
-                                                    : 'text-foreground'
-                                            )}
+                                            className="!font-normal"
                                         >
                                             Custom
                                         </Button>
                                         {isSayAvailable && (
                                             <Button
-                                                variant="outline"
+                                                variant="chip"
                                                 size="xs"
+                                                aria-pressed={voiceProvider === 'say'}
                                                 onClick={() => setVoiceProvider('say')}
-                                                className={cn(
-                                                    '!font-normal',
-                                                    voiceProvider === 'say'
-                                                        ? 'border-[var(--primary-base)] text-[var(--primary-base)] bg-[var(--primary-base)]/10 hover:text-[var(--primary-base)]'
-                                                        : 'text-foreground'
-                                                )}
+                                                className="!font-normal"
                                             >
                                                 <RiAppleLine className="w-3.5 h-3.5 mr-0.5" />
                                                 Say
@@ -756,28 +740,20 @@ export const VoiceSettings: React.FC = () => {
                                 </div>
                                 <div className="flex flex-wrap items-center gap-1">
                                     <Button
-                                        variant="outline"
+                                        variant="chip"
                                         size="xs"
+                                        aria-pressed={sttProvider === 'browser'}
                                         onClick={() => setSttProvider('browser')}
-                                        className={cn(
-                                            '!font-normal',
-                                            sttProvider === 'browser'
-                                                ? 'border-[var(--primary-base)] text-[var(--primary-base)] bg-[var(--primary-base)]/10 hover:text-[var(--primary-base)]'
-                                                : 'text-foreground'
-                                        )}
+                                        className="!font-normal"
                                     >
                                         Browser
                                     </Button>
                                     <Button
-                                        variant="outline"
+                                        variant="chip"
                                         size="xs"
+                                        aria-pressed={sttProvider === 'server'}
                                         onClick={() => setSttProvider('server')}
-                                        className={cn(
-                                            '!font-normal',
-                                            sttProvider === 'server'
-                                                ? 'border-[var(--primary-base)] text-[var(--primary-base)] bg-[var(--primary-base)]/10 hover:text-[var(--primary-base)]'
-                                                : 'text-foreground'
-                                        )}
+                                        className="!font-normal"
                                     >
                                         Server
                                     </Button>

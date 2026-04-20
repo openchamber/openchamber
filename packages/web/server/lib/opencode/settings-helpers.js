@@ -85,6 +85,9 @@ export const createSettingsHelpers = (dependencies) => {
       const normalized = normalizeDirectoryPath(candidate.opencodeBinary).trim();
       result.opencodeBinary = normalized;
     }
+    if (typeof candidate.desktopLanAccessEnabled === 'boolean') {
+      result.desktopLanAccessEnabled = candidate.desktopLanAccessEnabled;
+    }
     if (Array.isArray(candidate.projects)) {
       const projects = sanitizeProjects(candidate.projects);
       if (projects) {
@@ -307,10 +310,28 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.showExpandedEditTools === 'boolean') {
       result.showExpandedEditTools = candidate.showExpandedEditTools;
     }
+    if (typeof candidate.timeFormatPreference === 'string') {
+      const mode = candidate.timeFormatPreference.trim();
+      if (mode === 'auto' || mode === '12h' || mode === '24h') {
+        result.timeFormatPreference = mode;
+      }
+    }
+    if (typeof candidate.weekStartPreference === 'string') {
+      const mode = candidate.weekStartPreference.trim();
+      if (mode === 'auto' || mode === 'sunday' || mode === 'monday') {
+        result.weekStartPreference = mode;
+      }
+    }
     if (typeof candidate.chatRenderMode === 'string') {
       const mode = candidate.chatRenderMode.trim();
       if (mode === 'sorted' || mode === 'live') {
         result.chatRenderMode = mode;
+      }
+    }
+    if (typeof candidate.messageStreamTransport === 'string') {
+      const mode = candidate.messageStreamTransport.trim();
+      if (mode === 'auto' || mode === 'ws' || mode === 'sse') {
+        result.messageStreamTransport = mode;
       }
     }
     if (typeof candidate.activityRenderMode === 'string') {

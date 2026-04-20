@@ -549,6 +549,10 @@ export function DesktopHostSwitcherDialog({
     setEditUrl('');
   }, []);
 
+  const stopDropdownTypeahead = React.useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
+    event.stopPropagation();
+  }, []);
+
   const commitEdit = React.useCallback(async () => {
     if (!editingId) return;
     if (editingId === LOCAL_HOST_ID) {
@@ -972,12 +976,14 @@ export function DesktopHostSwitcherDialog({
               <Input
                 value={editLabel}
                 onChange={(e) => setEditLabel(e.target.value)}
+                onKeyDown={stopDropdownTypeahead}
                 placeholder="Label"
                 disabled={isSaving}
               />
               <Input
                 value={editUrl}
                 onChange={(e) => setEditUrl(e.target.value)}
+                onKeyDown={stopDropdownTypeahead}
                 placeholder="https://host:port"
                 disabled={isSaving}
               />
@@ -1033,12 +1039,14 @@ export function DesktopHostSwitcherDialog({
               <Input
                 value={newLabel}
                 onChange={(e) => setNewLabel(e.target.value)}
+                onKeyDown={stopDropdownTypeahead}
                 placeholder="Label (optional)"
                 disabled={!tauriAvailable || isSaving}
               />
               <Input
                 value={newUrl}
                 onChange={(e) => setNewUrl(e.target.value)}
+                onKeyDown={stopDropdownTypeahead}
                 placeholder="https://host:port"
                 disabled={!tauriAvailable || isSaving}
               />

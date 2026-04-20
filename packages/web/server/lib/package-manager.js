@@ -327,6 +327,22 @@ function packageManagerOwnsCurrentInstall(pm) {
 }
 
 export function detectPackageManagerDetails() {
+  // In desktop (Electron) runtime, package-manager detection is worthless —
+  // the app ships as a .app bundle, not installed via npm/pnpm/yarn/bun, and
+  // updates are handled by electron-updater. The detection path does up to a
+  // dozen spawnSync(pm, ['bin', '-g']) calls with 10s timeouts each; under
+  // the in-process server every one blocks the Electron main event loop and
+  // manifests as a multi-second UI freeze. Short-circuit here.
+  if (process.env.OPENCHAMBER_RUNTIME === 'desktop') {
+    return {
+      packageManager: 'electron',
+      reason: 'desktop-runtime',
+      packagePath: null,
+      packageManagerCommand: null,
+      globalNodeModulesRoot: null,
+    };
+  }
+
   if (cachedDetectedPm) {
       return {
         packageManager: cachedDetectedPm,
