@@ -5,16 +5,6 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
-type AndroidNotificationBridge = {
-  getServerUrl?: () => string;
-  openAppSettings?: () => void;
-};
-
-declare global {
-  interface Window {
-    AndroidNotificationBridge?: AndroidNotificationBridge;
-  }
-}
 
 export const AppSettings: React.FC = () => {
   const isAndroidTwa = useIsAndroidTwa();
