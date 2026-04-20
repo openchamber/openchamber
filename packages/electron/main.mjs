@@ -1045,6 +1045,10 @@ const createBrowserWindow = ({ label, restoreGeometry, url }) => {
       backgroundThrottling: true,
       contextIsolation: true,
       nodeIntegration: false,
+      // sandbox must stay off: the preload uses contextBridge + ipcRenderer
+      // from Electron's Node layer. contextIsolation + nodeIntegration:false
+      // keep the renderer world walled off from Node. Do NOT flip to true —
+      // the preload would fail to load and __TAURI__ would go undefined.
       sandbox: false,
     },
   };
@@ -1526,7 +1530,30 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     }
 
     case 'desktop_read_file': {
-      const filePath = typeof args.path === 'string' ? args.path : '';
+      const rawPath = typeof args.path === 'string' ? args.path : '';
+      if (!rawPath) throw new Error('Path is required');
+      // Defense in depth behind the IPC origin gate: even our own UI (or a
+      // prompt-injected agent) can't read credential stores. Resolve the
+      // path, require it under $HOME or tmpdir, and refuse known secret dirs
+      // / dotfiles commonly holding keys.
+      const filePath = path.resolve(rawPath);
+      const home = os.homedir() || '';
+      const tmp = os.tmpdir() || '';
+      const underHome = home && (filePath === home || filePath.startsWith(home + path.sep));
+      const underTmp = tmp && (filePath === tmp || filePath.startsWith(tmp + path.sep));
+      if (!underHome && !underTmp) {
+        throw new Error('File is outside the allowed workspace');
+      }
+      const DENIED_SEGMENTS = ['.ssh', '.aws', '.gnupg', '.gpg', '.config/gh', '.config/openchamber/credentials'];
+      const relFromHome = underHome ? filePath.slice(home.length + 1) : '';
+      const relNormalized = relFromHome.split(path.sep).join('/');
+      if (DENIED_SEGMENTS.some((segment) => relNormalized === segment || relNormalized.startsWith(`${segment}/`))) {
+        throw new Error('Access to this path is not allowed');
+      }
+      const basename = path.basename(filePath).toLowerCase();
+      if (basename === '.env' || basename.startsWith('.env.') || basename.endsWith('.pem') || basename.endsWith('.key')) {
+        throw new Error('Access to this path is not allowed');
+      }
       const stats = await fsp.stat(filePath);
       if (stats.size > 50 * 1024 * 1024) {
         throw new Error('File is too large. Maximum size is 50MB.');
@@ -1708,11 +1735,14 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     }
 
     case 'desktop_set_vibrancy': {
-      const enabled = false;
+      // Vibrancy (macOS blur) is not supported in the Electron shell — the
+      // Tauri build used NSVisualEffectView via Tauri plugin, Electron has
+      // no equivalent for our titleBarStyle:'hidden' setup. Persist the
+      // disabled state so settings UI reflects it; args.enabled is ignored.
       const root = readSettingsRoot();
       root.desktopVibrancy = false;
       await writeSettingsRoot(root);
-      return { enabled, requiresRestart: true };
+      return { enabled: false, requiresRestart: false };
     }
 
     case 'desktop_check_for_updates': {
@@ -1952,12 +1982,49 @@ contextMenu({
   showCopyLink: true,
 });
 
+// All desktop_* IPC and dialog:open run with full Electron main privileges
+// (fs access, shell.openPath, spawn, app.relaunch, …). The preload shim is
+// injected into every webContents in the window, including remote hosts the
+// user switches to via DesktopHostSwitcher. Without this gate, a malicious
+// remote page could read arbitrary local files, open arbitrary apps, etc.
+// Allow only same-origin senders: Electron's renderer loaded from the
+// in-process loopback server or dev vite, matching state.localOrigin.
+const isLocalSender = (webContents) => {
+  try {
+    const raw = typeof webContents?.getURL === 'function' ? webContents.getURL() : '';
+    if (!raw) return false;
+    if (raw.startsWith('file://') || raw === 'about:blank') return true;
+    const url = new URL(raw);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+    const hostname = url.hostname;
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') return true;
+    if (state.localOrigin) {
+      try {
+        const allowed = new URL(state.localOrigin);
+        if (allowed.origin === url.origin) return true;
+      } catch {
+      }
+    }
+    return false;
+  } catch {
+    return false;
+  }
+};
+
 ipcMain.handle('openchamber:invoke', async (event, command, args) => {
+  if (!isLocalSender(event.sender)) {
+    log.warn(`[ipc] rejected ${command} from non-local origin: ${event.sender?.getURL?.() || '(unknown)'}`);
+    throw new Error('IPC not available for this origin');
+  }
   const browserWindow = BrowserWindow.fromWebContents(event.sender);
   return handleInvoke(browserWindow, command, args);
 });
 
 ipcMain.handle('openchamber:dialog:open', async (event, options) => {
+  if (!isLocalSender(event.sender)) {
+    log.warn(`[ipc] rejected dialog:open from non-local origin: ${event.sender?.getURL?.() || '(unknown)'}`);
+    throw new Error('IPC not available for this origin');
+  }
   const browserWindow = BrowserWindow.fromWebContents(event.sender);
   const result = await dialog.showOpenDialog(browserWindow || undefined, {
     title: typeof options?.title === 'string' ? options.title : undefined,

@@ -1,4 +1,4 @@
-import { isTauriShell } from '@/lib/desktop';
+import { isDesktopShell } from '@/lib/desktop';
 
 type InvokeArgs = Record<string, unknown>;
 
@@ -28,7 +28,7 @@ export const invokeDesktopCommand = async <TValue = unknown>(
 };
 
 export const startDesktopWindowDrag = async (): Promise<void> => {
-  if (!isTauriShell()) {
+  if (!isDesktopShell()) {
     return;
   }
 
@@ -46,7 +46,7 @@ export const startDesktopWindowDrag = async (): Promise<void> => {
 };
 
 export const isDesktopWindowFullscreen = async (): Promise<boolean> => {
-  if (!isTauriShell()) {
+  if (!isDesktopShell()) {
     return false;
   }
 
@@ -72,7 +72,7 @@ export const onDesktopWindowResized = (handler: () => void): (() => void) => {
 };
 
 export const setDesktopWindowTitle = async (title: string): Promise<void> => {
-  if (!isTauriShell()) {
+  if (!isDesktopShell()) {
     return;
   }
 
@@ -93,7 +93,7 @@ export const setDesktopWindowTheme = async (
   themeMode?: string,
   themeVariant?: string,
 ): Promise<void> => {
-  if (!isTauriShell()) {
+  if (!isDesktopShell()) {
     return;
   }
 
@@ -111,7 +111,7 @@ export const setDesktopWindowTheme = async (
 };
 
 export const getDesktopAppVersion = async (): Promise<string | null> => {
-  if (!isTauriShell()) {
+  if (!isDesktopShell()) {
     return null;
   }
 
@@ -142,10 +142,12 @@ export const readDesktopFileAsDataUrl = async (path: string): Promise<string> =>
 export const listenDesktopNativeDragDrop = async (
   handler: (event: unknown) => void,
 ): Promise<(() => void) | null> => {
-  if (!isTauriShell() || typeof window === 'undefined') {
+  if (!isDesktopShell() || typeof window === 'undefined') {
     return null;
   }
 
+  // Electron uses the renderer's native DOM drag/drop events instead of a
+  // separate webview drag listener.
   if (isElectronDesktop()) {
     return null;
   }
