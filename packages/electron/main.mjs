@@ -1985,10 +1985,15 @@ contextMenu({
 // All desktop_* IPC and dialog:open run with full Electron main privileges
 // (fs access, shell.openPath, spawn, app.relaunch, …). The preload shim is
 // injected into every webContents in the window, including remote hosts the
-// user switches to via DesktopHostSwitcher. Without this gate, a malicious
+// user switches to via DesktopHostSwitcher. Without a gate, a malicious
 // remote page could read arbitrary local files, open arbitrary apps, etc.
-// Allow only same-origin senders: Electron's renderer loaded from the
-// in-process loopback server or dev vite, matching state.localOrigin.
+//
+// Strategy: commands fall into two buckets by capability, not by origin.
+// Window/host-switcher operations (probe a URL, open a new window, set
+// title, read the hosts list) are safe for any renderer. Filesystem,
+// shell.openPath, installed-app scans, app relaunch, and file dialogs
+// are gated to local senders — even the user's own remote UI shouldn't
+// need them, and a compromised remote can't use them either.
 const isLocalSender = (webContents) => {
   try {
     const raw = typeof webContents?.getURL === 'function' ? webContents.getURL() : '';
@@ -2011,8 +2016,21 @@ const isLocalSender = (webContents) => {
   }
 };
 
+const COMMANDS_SAFE_FOR_REMOTE = new Set([
+  'desktop_hosts_get',
+  'desktop_host_probe',
+  'desktop_new_window',
+  'desktop_new_window_at_url',
+  'desktop_set_window_title',
+  'desktop_set_window_theme',
+  'desktop_is_window_fullscreen',
+  'desktop_start_window_drag',
+  'desktop_get_app_version',
+  'desktop_get_lan_address',
+]);
+
 ipcMain.handle('openchamber:invoke', async (event, command, args) => {
-  if (!isLocalSender(event.sender)) {
+  if (!isLocalSender(event.sender) && !COMMANDS_SAFE_FOR_REMOTE.has(command)) {
     log.warn(`[ipc] rejected ${command} from non-local origin: ${event.sender?.getURL?.() || '(unknown)'}`);
     throw new Error('IPC not available for this origin');
   }
@@ -2021,6 +2039,7 @@ ipcMain.handle('openchamber:invoke', async (event, command, args) => {
 });
 
 ipcMain.handle('openchamber:dialog:open', async (event, options) => {
+  // Native file dialogs expose absolute local paths; never grant to remote.
   if (!isLocalSender(event.sender)) {
     log.warn(`[ipc] rejected dialog:open from non-local origin: ${event.sender?.getURL?.() || '(unknown)'}`);
     throw new Error('IPC not available for this origin');

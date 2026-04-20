@@ -16,12 +16,18 @@ const homeDirectory = readArgValue('--openchamber-home');
 const macosMajorRaw = readArgValue('--openchamber-macos-major');
 const macosMajor = Number.parseInt(macosMajorRaw, 10);
 
-// Preload is re-executed on every in-window navigation (we run with
-// sandbox:false, per-document). Only expose desktop-shell APIs when the
-// current document is our local UI — on remote hosts the renderer must
-// look like a plain web page so isDesktopShell() returns false and the
-// UI doesn't try to invoke desktop_* IPC (which the main-process origin
-// gate would reject anyway, but that surfaces as a user-visible error).
+// Preload re-executes on every cross-origin navigation (we run with
+// sandbox:false, per-document). Two separate concerns to balance:
+//  - __OPENCHAMBER_ELECTRON__ is a shell-identity flag (no capability).
+//    Remote UIs still need it so isDesktopShell() returns true and the
+//    window renders with desktop affordances (DesktopHostSwitcher,
+//    title bar offsets, etc.). Expose unconditionally.
+//  - __TAURI__ is the IPC channel to the main process. Remote pages must
+//    not get it — otherwise any page loaded via DesktopHostSwitcher could
+//    read local files, open apps, relaunch, etc. Expose only on local
+//    pages (loopback / state.localOrigin / file:// for dev).
+// Everything driven by localOrigin (home dir, macOS hints) also stays
+// local-only since it leaks info about the Electron host machine.
 const currentOrigin = (() => {
   try {
     return typeof location !== 'undefined' ? location.origin : '';
@@ -34,17 +40,31 @@ const isLocalPage = currentOrigin === 'null'
   || isLoopbackOrigin
   || (localOrigin && currentOrigin === localOrigin);
 
-if (isLocalPage && localOrigin) {
+// Remote pages need __OPENCHAMBER_LOCAL_ORIGIN__ so the HostSwitcher knows
+// the URL of the Local entry (isDesktopLocalOriginActive() falls back to
+// window.location.origin otherwise — wrong on remote). Low risk: the value
+// is just "http://127.0.0.1:<port>" which is not exploitable without the
+// IPC channel, and CORS on the local server prevents remote-origin fetches.
+if (localOrigin) {
   contextBridge.exposeInMainWorld('__OPENCHAMBER_LOCAL_ORIGIN__', localOrigin);
 }
 
+// Home directory leaks the OS username — keep local-only. Remote pages
+// operate on the REMOTE server's filesystem, local home is irrelevant
+// (and would be misleading if consumed as a workspace hint).
 if (isLocalPage && homeDirectory) {
   contextBridge.exposeInMainWorld('__OPENCHAMBER_HOME__', homeDirectory);
 }
 
-if (isLocalPage && Number.isFinite(macosMajor) && macosMajor > 0) {
+// macOS major version drives window chrome offsets (traffic lights) — UI
+// presentation only, safe to expose.
+if (Number.isFinite(macosMajor) && macosMajor > 0) {
   contextBridge.exposeInMainWorld('__OPENCHAMBER_MACOS_MAJOR__', macosMajor);
 }
+
+contextBridge.exposeInMainWorld('__OPENCHAMBER_ELECTRON__', {
+  runtime: 'electron',
+});
 
 // Note: bootOutcome must stay writable from the main world's initScript so
 // re-navigations (host switch via deep link) can refresh it. contextBridge-
@@ -90,35 +110,34 @@ const dispatchNativeEvent = (event, detail) => {
   }
 };
 
-if (isLocalPage) {
-  ipcRenderer.on('openchamber:emit', (_evt, payload) => {
-    if (!payload || typeof payload !== 'object') {
-      return;
-    }
+// Main-process events are read-only notifications (update progress,
+// window focus, etc.) — safe to deliver to any page rendered in this
+// webContents. The events themselves don't grant capability.
+ipcRenderer.on('openchamber:emit', (_evt, payload) => {
+  if (!payload || typeof payload !== 'object') {
+    return;
+  }
 
-    const event = typeof payload.event === 'string' ? payload.event : '';
-    if (!event) {
-      return;
-    }
+  const event = typeof payload.event === 'string' ? payload.event : '';
+  if (!event) {
+    return;
+  }
 
-    dispatchNativeEvent(event, payload.detail);
-  });
-}
+  dispatchNativeEvent(event, payload.detail);
+});
 
-if (isLocalPage) {
-  contextBridge.exposeInMainWorld('__TAURI__', {
-    core: {
-      invoke: (cmd, args) => ipcRenderer.invoke('openchamber:invoke', cmd, args || {}),
-    },
-    dialog: {
-      open: (options) => ipcRenderer.invoke('openchamber:dialog:open', options || {}),
-    },
-    event: {
-      listen: async (event, handler) => addListener(event, handler),
-    },
-  });
-
-  contextBridge.exposeInMainWorld('__OPENCHAMBER_ELECTRON__', {
-    runtime: 'electron',
-  });
-}
+// __TAURI__ is exposed on all pages; the main-process gate in
+// ipcMain.handle('openchamber:invoke') decides per-command what is safe
+// for non-local callers (window/host-switcher ops yes, file/shell ops
+// no). See COMMANDS_SAFE_FOR_REMOTE in main.mjs.
+contextBridge.exposeInMainWorld('__TAURI__', {
+  core: {
+    invoke: (cmd, args) => ipcRenderer.invoke('openchamber:invoke', cmd, args || {}),
+  },
+  dialog: {
+    open: (options) => ipcRenderer.invoke('openchamber:dialog:open', options || {}),
+  },
+  event: {
+    listen: async (event, handler) => addListener(event, handler),
+  },
+});
