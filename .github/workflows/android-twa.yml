@@ -88,7 +88,6 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Generate signing key
-      if: ${{ github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feat/android-apk' }}
         run: |
           if [ ! -f packages/android-twa/android.keystore ]; then
             keytool -genkeypair -alias openchamber \
@@ -110,27 +109,13 @@ jobs:
           echo "twa.defaultUrl=$TWA_DEFAULT_URL" >> "$PROP_FILE"
 
       - name: Build APK
-      if: ${{ github.event.inputs.build_type == 'apk' || github.event.inputs.build_type == 'both' || github.event.inputs.build_type == '' }}
         run: bun run android:build
 
-      - name: Build AAB
-      if: ${{ github.event.inputs.build_type == 'aab' || github.event.inputs.build_type == 'both' }}
-        run: bun run android:build:aab
-
       - name: Upload APK
-      if: ${{ hashFiles('packages/android-twa/configurable-wrapper/app/build/outputs/apk/release/app-release.apk') != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: android-apk
           path: packages/android-twa/configurable-wrapper/app/build/outputs/apk/release/app-release.apk
-          retention-days: 30
-
-      - name: Upload AAB
-      if: ${{ hashFiles('packages/android-twa/configurable-wrapper/app/build/outputs/bundle/release/app-release.aab') != '' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-aab
-          path: packages/android-twa/configurable-wrapper/app/build/outputs/bundle/release/app-release.aab
           retention-days: 30
 
 # Optional: Release job that uploads to Play Store
