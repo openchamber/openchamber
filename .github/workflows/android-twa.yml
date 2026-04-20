@@ -3,17 +3,17 @@ name: Android TWA Build
 on:
   push:
     branches:
-        - main
-        - feat/android-apk
+      - main
+      - feat/android-apk
     paths:
       - 'packages/android-twa/**'
       - '.github/workflows/android-twa.yml'
   pull_request:
     branches:
-    - main
+      - main
     paths:
-    - 'packages/android-twa/**'
-    - '.github/workflows/android-twa.yml'
+      - 'packages/android-twa/**'
+      - '.github/workflows/android-twa.yml'
   workflow_dispatch:
     inputs:
       build_type:
@@ -52,6 +52,11 @@ jobs:
     needs: lint-and-test
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feat/android-apk'
+    env:
+      KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD || 'openchamber123' }}
+      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || 'openchamber123' }}
+      TWA_HOST_NAME: ${{ secrets.TWA_HOST || 'opencode.ai' }}
+      TWA_DEFAULT_URL: ${{ secrets.TWA_DEFAULT_URL || 'https://opencode.ai' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -82,18 +87,6 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Validate configuration
-        if: github.event_name == 'workflow_dispatch' || github.repository == 'openchamber/openchamber'
-        run: |
-        if [ -z "${{ secrets.KEYSTORE_PASSWORD || 'openchamber123' }}" ]; then
-          echo "::error::KEYSTORE_PASSWORD secret not configured"
-          exit 1
-        fi
-        if [ -z "${{ secrets.KEY_PASSWORD || 'openchamber123' }}" ]; then
-          echo "::error::KEY_PASSWORD secret not configured"
-          exit 1
-        fi
-
       - name: Generate signing key
         if: github.event_name == 'workflow_dispatch' || github.repository == 'openchamber/openchamber'
         run: |
@@ -102,20 +95,19 @@ jobs:
               -keyalg RSA -keysize 2048 \
               -validity 10000 \
               -keystore packages/android-twa/android.keystore \
-          -storepass "${{ secrets.KEYSTORE_PASSWORD || 'openchamber123' }}" \
+              -storepass "$KEYSTORE_PASSWORD" \
               -dname "CN=OpenChamber, OU=Mobile, O=OpenChamber, L=Remote, ST=Remote, C=US"
           fi
 
       - name: Create local.properties
         run: |
-          cat > packages/android-twa/configurable-wrapper/local.properties << EOF
-          keystore.path=../../android.keystore
-          keystore.alias=openchamber
-        keystore.password=${{ secrets.KEYSTORE_PASSWORD || 'openchamber123' }}
-        keystore.keyPassword=${{ secrets.KEY_PASSWORD || 'openchamber123' }}
-          twa.hostName=${{ secrets.TWA_HOST || 'opencode.ai' }}
-          twa.defaultUrl=${{ secrets.TWA_DEFAULT_URL || 'https://opencode.ai' }}
-          EOF
+          PROP_FILE=packages/android-twa/configurable-wrapper/local.properties
+          echo "keystore.path=../../android.keystore" > "$PROP_FILE"
+          echo "keystore.alias=openchamber" >> "$PROP_FILE"
+          echo "keystore.password=$KEYSTORE_PASSWORD" >> "$PROP_FILE"
+          echo "keystore.keyPassword=$KEY_PASSWORD" >> "$PROP_FILE"
+          echo "twa.hostName=$TWA_HOST_NAME" >> "$PROP_FILE"
+          echo "twa.defaultUrl=$TWA_DEFAULT_URL" >> "$PROP_FILE"
 
       - name: Build APK
         if: github.event.inputs.build_type == 'apk' || github.event.inputs.build_type == 'both' || github.event.inputs.build_type == ''
