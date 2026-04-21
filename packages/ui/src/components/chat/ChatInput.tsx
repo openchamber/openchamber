@@ -1038,6 +1038,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 activeMentions.add(mention);
             }
         }
+        confirmedMentionsRef.current = activeMentions;
         saveConfirmedMentions(sessionId, activeMentions);
         lastPersistedDraftRef.current.set(key, draft);
     }, []);
