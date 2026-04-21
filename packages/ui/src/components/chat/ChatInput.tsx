@@ -38,6 +38,7 @@ import { ModelControls } from './ModelControls';
 import { UnifiedControlsDrawer } from './UnifiedControlsDrawer';
 import { parseAgentMentions } from '@/lib/messages/agentMentions';
 import { StatusRow } from './StatusRow';
+import { PendingChangesBar } from './PendingChangesBar';
 import { MobileAgentButton } from './MobileAgentButton';
 import { MobileModelButton } from './MobileModelButton';
 import { MobileSessionStatusBar } from './MobileSessionStatusBar';
@@ -3283,6 +3284,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     showAbortStatus={showAbortStatus}
                     showAssistantStatus={false}
                     showTodos
+                    leftAccessory={newSessionDraftOpen ? null : <PendingChangesBar />}
                 />
                 {showDraftTargetSelectors && selectedDraftProject ? (
                     <div className="mb-1.5 flex min-w-0 items-center gap-1.5 px-0.5">

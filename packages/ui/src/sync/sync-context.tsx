@@ -27,6 +27,7 @@ import { syncDebug } from "./debug"
 import { opencodeClient } from "@/lib/opencode/client"
 import { usePermissionStore } from "@/stores/permissionStore"
 import { useConfigStore } from "@/stores/useConfigStore"
+import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { toast } from "@/components/ui"
 import { appendNotification } from "./notification-store"
 import type { State } from "./types"
@@ -1159,7 +1160,11 @@ function handleEvent(
       break
   }
 
-  if (applyDirectoryEvent(draft, payload)) {
+  if (applyDirectoryEvent(draft, payload, {
+    onSetSessionTodo: (sessionID, todos) => {
+      useTodosPersistStore.getState().setSessionTodos(sessionID, todos)
+    },
+  })) {
     store.setState(draft)
     const sessionID = getSessionIdFromPayload(payload) ?? undefined
     const messageID = getMessageIdFromPayload(payload) ?? undefined

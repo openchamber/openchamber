@@ -1,5 +1,5 @@
 import React from 'react';
-import { RiFileEditLine, RiArrowDownSLine, RiArrowRightSLine, RiCloseLine } from '@remixicon/react';
+import { RiFileEditLine, RiArrowDownSLine, RiArrowUpSLine } from '@remixicon/react';
 import type { ToolPart } from '@opencode-ai/sdk/v2';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionMessageRecords } from '@/sync/sync-context';
@@ -7,7 +7,6 @@ import { useStreamingStore, selectIsStreaming } from '@/sync/streaming';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useGitStore, useIsGitRepo } from '@/stores/useGitStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 // ---- Types ----
 
@@ -180,19 +179,6 @@ const toRelativePath = (absolutePath: string, baseDirectory: string): string => 
     return absPath;
 };
 
-/** Compute a simple signature hash for dismiss tracking */
-const computeSignature = (files: ChangedFileEntry[]): string => {
-    return files
-        .slice()
-        .sort((a, b) => a.path.localeCompare(b.path))
-        .map((f) => {
-            const adds = isGitFile(f) ? f.insertions : (f.additions ?? 0);
-            const dels = isGitFile(f) ? f.deletions : (f.deletions ?? 0);
-            return `${f.path}:${adds}:${dels}`;
-        })
-        .join('|');
-};
-
 /** Extract changed files from GitStatus */
 const extractGitChangedFiles = (
     files: Array<{ path: string; index: string; working_dir: string }>,
@@ -227,16 +213,12 @@ export const PendingChangesBar: React.FC = React.memo(() => {
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
     const sessionMessageRecords = useSessionMessageRecords(currentSessionId ?? '');
     const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
-    const runtime = React.useContext(RuntimeAPIContext);
     const isGitRepo = useIsGitRepo(currentDirectory);
     const gitStatus = useGitStore((s) =>
         currentDirectory ? s.directories.get(currentDirectory)?.status ?? null : null,
     );
     const isStreaming = useStreamingStore(selectIsStreaming(currentSessionId ?? ''));
-    const dismissedSignature = useSessionUIStore((s) => {
-        const sid = s.currentSessionId;
-        return sid ? s.pendingChangesBarDismissed.get(sid) ?? null : null;
-    });
+    const popoverRef = React.useRef<HTMLDivElement>(null);
 
     // ---- Mode selection ----
     const mode: 'git' | 'non-git' = isGitRepo === true ? 'git' : 'non-git';
@@ -268,12 +250,6 @@ export const PendingChangesBar: React.FC = React.memo(() => {
     // ---- Merged view ----
     const changedFiles: ChangedFileEntry[] = mode === 'git' ? gitChangedFiles : nonGitChangedFiles;
 
-    // ---- Signature for dismiss tracking ----
-    const currentSignature = React.useMemo(
-        () => computeSignature(changedFiles),
-        [changedFiles],
-    );
-
     // ---- Aggregate stats ----
     const { totalAdded, totalRemoved } = React.useMemo(() => {
         let added = 0;
@@ -290,44 +266,46 @@ export const PendingChangesBar: React.FC = React.memo(() => {
         return { totalAdded: added, totalRemoved: removed };
     }, [changedFiles]);
 
+    React.useEffect(() => {
+        if (!isExpanded) return;
+
+        const handleClickOutside = (event: MouseEvent) => {
+            if (popoverRef.current && !popoverRef.current.contains(event.target as Node)) {
+                setIsExpanded(false);
+            }
+        };
+
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [isExpanded]);
+
     // Don't render while git status is still loading
     if (isGitRepo === null) return null;
 
-    // ---- Dismiss logic ----
-    const isDismissed = dismissedSignature !== null && dismissedSignature === currentSignature;
-
     // ---- Visibility ----
-    if (changedFiles.length === 0 || isDismissed) return null;
+    if (changedFiles.length === 0) return null;
 
     // ---- Handlers ----
     const handleOpenFile = (file: ChangedFileEntry) => {
-        const absolutePath = file.path.startsWith('/')
-            ? file.path
-            : (currentDirectory.endsWith('/') ? currentDirectory : currentDirectory + '/') + file.path;
+        if (!currentDirectory) return;
 
-        const editor = runtime?.editor;
-        if (editor && !isGitFile(file) && file.patch) {
-            void editor.openDiff('', absolutePath, undefined, { patch: file.patch });
-        } else if (editor) {
-            void editor.openFile(absolutePath);
-        } else {
-            useUIStore.getState().openContextDiff(currentDirectory, absolutePath);
-        }
-    };
+        const targetPath = isGitFile(file)
+            ? file.relativePath
+            : toRelativePath(file.path, currentDirectory);
 
-    const handleDismiss = (e: React.MouseEvent) => {
-        e.stopPropagation();
-        const sid = useSessionUIStore.getState().currentSessionId;
-        if (sid) {
-            useSessionUIStore.getState().dismissPendingChangesBar(sid, currentSignature);
+        const store = useUIStore.getState();
+        if (!store.isMobile) {
+            store.openContextDiff(currentDirectory, targetPath);
+            return;
         }
+        store.navigateToDiff(targetPath);
+        store.setRightSidebarOpen(false);
     };
 
     // ---- Label ----
     const fileCount = changedFiles.length;
-    const label = mode === 'git'
-        ? `${fileCount} file${fileCount !== 1 ? 's' : ''} changed in workspace`
-        : `${fileCount} file${fileCount !== 1 ? 's' : ''} changed in the last reply`;
+    const labelHead = `${fileCount} file${fileCount !== 1 ? 's' : ''}`;
+    const labelTail = mode === 'git' ? 'changed in workspace' : 'changed in the last reply';
 
     // ---- Display helpers ----
     const getDisplayPath = (file: ChangedFileEntry): { fileName: string; dirPart: string } => {
@@ -346,104 +324,84 @@ export const PendingChangesBar: React.FC = React.memo(() => {
 
     // ---- Render ----
     return (
-        <div
-            className="border-b chat-column"
-            style={{ borderColor: 'var(--tools-border)', backgroundColor: 'var(--tools-background)' }}
-        >
+        <div className="relative flex min-w-0 items-center" ref={popoverRef}>
+            <button
+                type="button"
+                onClick={() => setIsExpanded((prev) => !prev)}
+                className="flex min-w-0 max-w-full items-center gap-1 text-left text-muted-foreground"
+            >
+                <RiFileEditLine className="h-3.5 w-3.5 flex-shrink-0 text-[var(--status-warning)]" />
+                <span className="min-w-0 typography-ui-label text-foreground flex-shrink-0">{labelHead}</span>
+                <span className="status-row__changed-label min-w-0 typography-ui-label text-foreground truncate">{labelTail}</span>
+                <span className="text-[0.75rem] tabular-nums inline-flex items-baseline gap-1 flex-shrink-0">
+                    {totalAdded > 0 ? <span style={{ color: 'var(--status-success)' }}>+{totalAdded}</span> : null}
+                    {totalRemoved > 0 ? <span style={{ color: 'var(--status-error)' }}>-{totalRemoved}</span> : null}
+                </span>
+                {isExpanded ? (
+                    <RiArrowUpSLine className="h-3.5 w-3.5 flex-shrink-0" />
+                ) : (
+                    <RiArrowDownSLine className="h-3.5 w-3.5 flex-shrink-0" />
+                )}
+            </button>
+
             {isExpanded ? (
-                <div className="py-2 px-1">
-                    <div className="flex items-center gap-2 w-full">
-                        <button
-                            type="button"
-                            className="flex items-center gap-2 typography-meta font-medium flex-1 text-left hover:opacity-80 transition-opacity min-w-0"
-                            style={{ color: 'var(--tools-title)' }}
-                            onClick={() => setIsExpanded(false)}
-                        >
-                            <RiArrowDownSLine className="h-3.5 w-3.5 flex-shrink-0" style={{ color: 'var(--tools-icon)' }} />
-                            <RiFileEditLine className="h-3.5 w-3.5 flex-shrink-0" style={{ color: 'var(--tools-icon)' }} />
-                            <span className="truncate">{label}</span>
-                        </button>
-                        <span className="ml-auto tabular-nums inline-flex items-center gap-0.5 flex-shrink-0">
-                            {totalAdded > 0 && <span style={{ color: 'var(--status-success)' }}>+{totalAdded}</span>}
-                            {totalRemoved > 0 && <span style={{ color: 'var(--status-error)' }}>-{totalRemoved}</span>}
-                        </span>
-                        <button
-                            type="button"
-                            className="flex-shrink-0 p-0.5 rounded hover:bg-muted/30 transition-colors"
-                            onClick={handleDismiss}
-                            title="Dismiss"
-                        >
-                            <RiCloseLine className="h-3.5 w-3.5" style={{ color: 'var(--tools-description)' }} />
-                        </button>
+                <div
+                    style={{
+                        maxWidth: 'calc(100cqw - 4ch)',
+                        backgroundColor: 'var(--surface-elevated)',
+                        color: 'var(--surface-elevated-foreground)',
+                    }}
+                    className="absolute left-0 bottom-full mb-1 z-50 w-max min-w-[280px] max-w-full rounded-xl p-1 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.8),inset_0_0_0_1px_rgba(0,0,0,0.04),0_0_0_1px_rgba(0,0,0,0.10),0_1px_2px_-0.5px_rgba(0,0,0,0.08),0_4px_8px_-2px_rgba(0,0,0,0.08),0_12px_20px_-4px_rgba(0,0,0,0.08)] dark:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.12),inset_0_0_0_1px_rgba(255,255,255,0.08),0_0_0_1px_rgba(0,0,0,0.36),0_1px_1px_-0.5px_rgba(0,0,0,0.22),0_3px_3px_-1.5px_rgba(0,0,0,0.20),0_6px_6px_-3px_rgba(0,0,0,0.16)] animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-2 duration-150"
+                >
+                    <div className="flex items-center gap-1.5 px-2 py-1 typography-ui-label font-medium text-muted-foreground">
+                        <span>Changed files</span>
+                        <span className="typography-meta tabular-nums">{fileCount}</span>
                     </div>
-                    <div className="flex flex-col gap-1 mt-2">
-                        {changedFiles.map((file) => {
+
+                    <div className="max-h-[260px] overflow-y-auto">
+                        {changedFiles.map((file, index) => {
                             const { fileName, dirPart } = getDisplayPath(file);
                             const stats = getFileStats(file);
 
                             return (
                                 <button
-                                    key={file.path}
+                                    key={`${file.path}:${index}`}
                                     type="button"
-                                    className="flex items-center gap-1.5 typography-micro px-1.5 py-0.5 rounded hover:bg-muted/30 transition-colors text-left w-full"
-                                    style={{ color: 'var(--tools-description)' }}
-                                    title={`Open ${file.path}`}
+                                    className="relative flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1 typography-ui-label outline-hidden select-none text-left hover:bg-interactive-hover"
+                                    title={`Open diff for ${file.path}`}
                                     onClick={() => handleOpenFile(file)}
                                 >
-                                    <FileTypeIcon filePath={file.path} className="h-3 w-3 flex-shrink-0" />
-                                    <span className="truncate flex-1" dir="rtl" style={{ textAlign: 'left' }}>
+                                    <FileTypeIcon filePath={file.path} className="h-3.5 w-3.5 flex-shrink-0" />
+                                    <span className="min-w-0 flex-1 flex items-baseline overflow-hidden" title={file.path}>
                                         {dirPart ? (
                                             <>
-                                                <span style={{ color: 'var(--tools-description)', opacity: 0.7 }}>{dirPart}/</span>
-                                                <span style={{ color: 'var(--tools-title)' }}>{fileName}</span>
+                                                <span
+                                                    className="min-w-0 truncate text-muted-foreground"
+                                                    style={{ direction: 'rtl', textAlign: 'left' }}
+                                                >
+                                                    {dirPart}
+                                                </span>
+                                                <span className="flex-shrink-0">
+                                                    <span className="text-muted-foreground">/</span>
+                                                    <span className="text-foreground">{fileName}</span>
+                                                </span>
                                             </>
                                         ) : (
-                                            <span style={{ color: 'var(--tools-title)' }}>{fileName}</span>
+                                            <span className="truncate text-foreground">{fileName}</span>
                                         )}
                                     </span>
-                                    {(stats.additions > 0 || stats.deletions > 0) && (
-                                        <span className="flex-shrink-0 inline-flex items-center gap-px tabular-nums">
-                                            {stats.additions > 0 && (
-                                                <span style={{ color: 'var(--status-success)', fontSize: '0.7rem' }}>+{stats.additions}</span>
-                                            )}
-                                            {stats.deletions > 0 && (
-                                                <span style={{ color: 'var(--status-error)', fontSize: '0.7rem' }}>-{stats.deletions}</span>
-                                            )}
+                                    {(stats.additions > 0 || stats.deletions > 0) ? (
+                                        <span className="flex-shrink-0 inline-flex items-baseline gap-1 text-[0.75rem] tabular-nums">
+                                            {stats.additions > 0 ? <span style={{ color: 'var(--status-success)' }}>+{stats.additions}</span> : null}
+                                            {stats.deletions > 0 ? <span style={{ color: 'var(--status-error)' }}>-{stats.deletions}</span> : null}
                                         </span>
-                                    )}
+                                    ) : null}
                                 </button>
                             );
                         })}
                     </div>
                 </div>
-            ) : (
-                <div className="py-1.5 flex items-center gap-2 px-1">
-                    <button
-                        type="button"
-                        className="flex items-center gap-2 typography-meta font-medium hover:opacity-80 transition-opacity flex-shrink-0"
-                        style={{ color: 'var(--tools-title)' }}
-                        onClick={() => setIsExpanded(true)}
-                    >
-                        <RiArrowRightSLine className="h-3.5 w-3.5" style={{ color: 'var(--tools-icon)' }} />
-                        <RiFileEditLine className="h-3.5 w-3.5" style={{ color: 'var(--tools-icon)' }} />
-                    </button>
-                    <span className="typography-meta font-medium flex-shrink-0 truncate" style={{ color: 'var(--tools-title)' }}>
-                        {label}
-                    </span>
-                    <span className="tabular-nums flex-shrink-0 inline-flex items-center gap-0.5">
-                        {totalAdded > 0 && <span style={{ color: 'var(--status-success)' }}>+{totalAdded}</span>}
-                        {totalRemoved > 0 && <span style={{ color: 'var(--status-error)' }}>-{totalRemoved}</span>}
-                    </span>
-                    <button
-                        type="button"
-                        className="ml-auto flex-shrink-0 p-0.5 rounded hover:bg-muted/30 transition-colors"
-                        onClick={handleDismiss}
-                        title="Dismiss"
-                    >
-                        <RiCloseLine className="h-3.5 w-3.5" style={{ color: 'var(--tools-description)' }} />
-                    </button>
-                </div>
-            )}
+            ) : null}
         </div>
     );
 });
