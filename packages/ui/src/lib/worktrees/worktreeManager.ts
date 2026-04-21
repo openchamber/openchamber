@@ -246,7 +246,6 @@ export async function listProjectWorktrees(project: ProjectRef): Promise<Worktre
           projectDirectory: metadataProjectDirectory,
           branch: branch,
           label: branch || name || deriveSdkWorktreeNameFromDirectory(worktreePath),
-          // Phase 1 canonical fields
           worktreeRoot: canonical.worktreeRoot,
           worktreeStatus: canonical.worktreeStatus,
           headState: canonical.headState,
@@ -307,7 +306,6 @@ export async function createWorktree(project: ProjectRef, args: CreateWorktreeAr
     projectDirectory: metadataProjectDirectory,
     branch: returnedBranch,
     label: returnedBranch || returnedName,
-    // Phase 1 canonical fields
     worktreeRoot: normalizePath(returnedPath),
     worktreeStatus: 'ready',
     headState: returnedBranch ? 'branch' : 'unborn',
@@ -315,6 +313,8 @@ export async function createWorktree(project: ProjectRef, args: CreateWorktreeAr
   };
 
   markWorktreeBootstrapPending(metadata.path);
+
+  _worktreeListCache.delete(projectDirectory);
 
   return metadata;
 }
@@ -344,6 +344,8 @@ export async function removeProjectWorktree(project: ProjectRef, worktree: Workt
   }
 
   clearWorktreeBootstrapState(worktree.path);
+
+  _worktreeListCache.delete(project.path);
 
   const branchName = (worktree.branch || '').replace(/^refs\/heads\//, '').trim();
   if (deleteRemote && branchName) {
