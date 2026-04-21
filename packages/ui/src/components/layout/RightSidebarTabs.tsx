@@ -1,5 +1,5 @@
 import React from 'react';
-import { RiBookletLine, RiFolder3Line, RiGitBranchLine } from '@remixicon/react';
+import { RiBookletLine, RiFolder3Line, RiGitBranchLine, RiGlobalLine } from '@remixicon/react';
 
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { ProjectNotesTodoPanel } from '@/components/session/ProjectNotesTodoPanel';
@@ -11,9 +11,10 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { formatDirectoryName } from '@/lib/utils';
+import { SidebarBrowserPanel } from './SidebarBrowserPanel';
 import { SidebarFilesTree } from './SidebarFilesTree';
 
-type RightTab = 'git' | 'files' | 'context';
+type RightTab = 'git' | 'files' | 'context' | 'browser';
 
 /**
  * Keeps git status fresh while the right sidebar is open.
@@ -113,6 +114,11 @@ export const RightSidebarTabs: React.FC = () => {
       label: 'Context',
       icon: <RiBookletLine className="h-3.5 w-3.5" />,
     },
+    {
+      id: 'browser',
+      label: 'Browser',
+      icon: <RiGlobalLine className="h-3.5 w-3.5" />,
+    },
   ], []);
 
   return (
@@ -132,6 +138,7 @@ export const RightSidebarTabs: React.FC = () => {
         {rightSidebarTab === 'git' && <GitView />}
         {rightSidebarTab === 'files' && <SidebarFilesTree />}
         {rightSidebarTab === 'context' && <ContextSidebarPanel />}
+        {rightSidebarTab === 'browser' && <SidebarBrowserPanel />}
       </div>
     </div>
   );

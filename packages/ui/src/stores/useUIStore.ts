@@ -6,7 +6,7 @@ import { SEMANTIC_TYPOGRAPHY, getTypographyVariable, type SemanticTypographyKey 
 import type { ShortcutCombo } from '@/lib/shortcuts';
 
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files';
-export type RightSidebarTab = 'git' | 'files' | 'context';
+export type RightSidebarTab = 'git' | 'files' | 'context' | 'browser';
 export type ContextPanelMode = 'diff' | 'file' | 'context' | 'plan' | 'chat';
 export type MermaidRenderingMode = 'svg' | 'ascii';
 export type UserMessageRenderingMode = 'markdown' | 'plain';
@@ -469,6 +469,7 @@ interface UIStore {
   rightSidebarWidth: number;
   hasManuallyResizedRightSidebar: boolean;
   rightSidebarTab: RightSidebarTab;
+  rightSidebarBrowserUrl: string;
   contextPanelByDirectory: Record<string, ContextPanelDirectoryState>;
   isBottomTerminalOpen: boolean;
   isBottomTerminalExpanded: boolean;
@@ -579,6 +580,7 @@ interface UIStore {
   setRightSidebarOpen: (open: boolean) => void;
   setRightSidebarWidth: (width: number) => void;
   setRightSidebarTab: (tab: RightSidebarTab) => void;
+  setRightSidebarBrowserUrl: (url: string) => void;
   openContextPanelTab: (directory: string, tab: ContextPanelTabDescriptor) => void;
   openContextDiff: (directory: string, filePath: string) => void;
   openContextFile: (directory: string, filePath: string) => void;
@@ -711,6 +713,7 @@ export const useUIStore = create<UIStore>()(
         rightSidebarWidth: RIGHT_SIDEBAR_MIN_WIDTH,
         hasManuallyResizedRightSidebar: false,
         rightSidebarTab: 'git',
+        rightSidebarBrowserUrl: '',
         contextPanelByDirectory: {},
         isBottomTerminalOpen: false,
         isBottomTerminalExpanded: false,
@@ -898,6 +901,10 @@ export const useUIStore = create<UIStore>()(
 
         setRightSidebarTab: (tab) => {
           set({ rightSidebarTab: tab });
+        },
+
+        setRightSidebarBrowserUrl: (url) => {
+          set({ rightSidebarBrowserUrl: url.trim() });
         },
 
         openContextPanelTab: (directory, tab) => {
@@ -1830,7 +1837,7 @@ export const useUIStore = create<UIStore>()(
 
           if (
             typeof state.rightSidebarTab !== 'string'
-            || (state.rightSidebarTab !== 'git' && state.rightSidebarTab !== 'files' && state.rightSidebarTab !== 'context')
+            || (state.rightSidebarTab !== 'git' && state.rightSidebarTab !== 'files' && state.rightSidebarTab !== 'context' && state.rightSidebarTab !== 'browser')
           ) {
             state.rightSidebarTab = 'git';
           }
