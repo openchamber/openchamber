@@ -24,9 +24,10 @@ function isTransientError(error: unknown): boolean {
   if (!error) return false
   const message = String(error instanceof Error ? error.message : error).toLowerCase()
   if (TRANSIENT_MESSAGES.some((m) => message.includes(m))) return true
-  // SDK errors from HTTP 502/503 responses (VS Code bridge returns these before OpenCode is ready)
+  // Any HTTP 5xx is considered transient — server-side issues during warmup
+  // (OpenCode reading sessions from disk, bridge not ready, etc.) are retryable.
   const status = (error as { status?: number })?.status
-  if (status === 502 || status === 503) return true
+  if (typeof status === "number" && status >= 500 && status < 600) return true
   return false
 }
 

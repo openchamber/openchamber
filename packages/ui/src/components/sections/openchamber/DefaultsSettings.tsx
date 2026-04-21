@@ -145,6 +145,13 @@ export const DefaultsSettings: React.FC = () => {
 
   const DEFAULT_VARIANT_VALUE = '__default__';
 
+  const formatVariantLabel = React.useCallback((variant: string) => {
+    if (variant === DEFAULT_VARIANT_VALUE) {
+      return 'Default';
+    }
+    return variant.charAt(0).toUpperCase() + variant.slice(1);
+  }, []);
+
   const handleVariantChange = React.useCallback(
     async (variant: string) => {
       const newValue = variant === DEFAULT_VARIANT_VALUE ? undefined : variant || undefined;
@@ -251,13 +258,15 @@ export const DefaultsSettings: React.FC = () => {
           <div className="flex items-center gap-2 sm:w-fit">
             <Select value={defaultVariant ?? DEFAULT_VARIANT_VALUE} onValueChange={handleVariantChange} disabled={!supportsVariants}>
               <SelectTrigger className="w-fit min-w-[120px]">
-                <SelectValue placeholder="Thinking" />
+                <SelectValue placeholder="Thinking">
+                  {formatVariantLabel(defaultVariant ?? DEFAULT_VARIANT_VALUE)}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={DEFAULT_VARIANT_VALUE}>Default</SelectItem>
                 {availableVariants.map((variant) => (
                   <SelectItem key={variant} value={variant}>
-                    {variant}
+                    {formatVariantLabel(variant)}
                   </SelectItem>
                 ))}
               </SelectContent>

@@ -12,6 +12,7 @@ import { toast } from '@/components/ui';
 import { RiAddLine, RiCloseLine, RiCalendarLine, RiArrowLeftSLine, RiArrowRightSLine, RiArrowDownSLine } from '@remixicon/react';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { AgentSelector } from '@/components/sections/commands/AgentSelector';
+import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
 import { CommandAutocomplete, type CommandAutocompleteHandle } from '@/components/chat/CommandAutocomplete';
 import { FileMentionAutocomplete, type FileMentionHandle } from '@/components/chat/FileMentionAutocomplete';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -1308,6 +1309,7 @@ export function ScheduledTaskEditorDialog(props: {
             <FieldLabel>Agent</FieldLabel>
             <AgentSelector
               agentName={draft.execution.agent}
+              filter={(agent) => isPrimaryMode(agent.mode)}
               onChange={(agent) => setDraft((prev) => ({
                 ...prev,
                 execution: {

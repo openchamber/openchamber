@@ -155,7 +155,7 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
               <Switch
                 checked={isConnected}
                 disabled={isBusy}
-                className="data-[state=checked]:bg-status-info"
+                className="data-[checked]:bg-status-info"
                 onCheckedChange={async (checked) => {
                   setBusyName(serverName);
                   try {
@@ -296,7 +296,7 @@ export const McpDropdown: React.FC<McpDropdownProps> = ({ headerIconButtonClass 
             <Switch
               checked={isConnected}
               disabled={isBusy}
-              className="data-[state=checked]:bg-status-info"
+              className="data-[checked]:bg-status-info"
               onCheckedChange={async (checked) => {
                 setBusyName(serverName);
                 try {

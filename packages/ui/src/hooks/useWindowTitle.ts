@@ -2,6 +2,7 @@ import React from 'react';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { isDesktopShell, isTauriShell } from '@/lib/desktop';
 import { desktopHostsGet, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
+import { setDesktopWindowTitle } from '@/lib/desktopNative';
 
 const APP_TITLE = 'OpenChamber';
 
@@ -105,31 +106,19 @@ export const useWindowTitle = () => {
       return;
     }
 
-    let cancelled = false;
-
     const applyTitle = async () => {
       try {
-        const { getCurrentWindow } = await import('@tauri-apps/api/window');
-        if (cancelled) {
-          return;
-        }
-
         const isMac = typeof navigator !== 'undefined' && /Macintosh|Mac OS X/.test(navigator.userAgent || '');
         if (isMac) {
           return;
         }
 
-        const currentWindow = getCurrentWindow();
-        await currentWindow.setTitle(title);
+        await setDesktopWindowTitle(title);
       } catch {
         return;
       }
     };
 
     void applyTitle();
-
-    return () => {
-      cancelled = true;
-    };
   }, [title]);
 };

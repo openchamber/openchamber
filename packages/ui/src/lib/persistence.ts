@@ -1,4 +1,5 @@
 import type { DesktopSettings } from '@/lib/desktop';
+import { createProjectIdFromPath } from '@/lib/projectId';
 import { useUIStore } from '@/stores/useUIStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { setDirectoryShowHidden } from '@/lib/directoryShowHidden';
@@ -149,12 +150,14 @@ const sanitizeProjects = (value: unknown): DesktopSettings['projects'] | undefin
     if (!entry || typeof entry !== 'object') continue;
     const candidate = entry as Record<string, unknown>;
 
-    const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
     const rawPath = typeof candidate.path === 'string' ? candidate.path.trim() : '';
-    if (!id || !rawPath) continue;
+    if (!rawPath) continue;
 
     const normalizedPath = rawPath === '/' ? rawPath : rawPath.replace(/\\/g, '/').replace(/\/+$/, '');
     if (!normalizedPath) continue;
+
+    const id = createProjectIdFromPath(normalizedPath);
+    if (!id) continue;
 
     if (seenIds.has(id) || seenPaths.has(normalizedPath)) continue;
     seenIds.add(id);

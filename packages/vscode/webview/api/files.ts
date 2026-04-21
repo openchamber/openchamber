@@ -71,13 +71,14 @@ export const createVSCodeFilesAPI = (): FilesAPI => ({
     };
   },
 
-  async statFile(path: string): Promise<{ path: string; isFile: boolean; size: number }> {
+  async statFile(path: string): Promise<{ path: string; isFile: boolean; size: number; mtimeMs?: number }> {
     const target = normalizePath(path);
-    const data = await sendBridgeMessage<{ path?: string; isFile?: boolean; size?: number }>('api:fs:stat', { path: target });
+    const data = await sendBridgeMessage<{ path?: string; isFile?: boolean; size?: number; mtimeMs?: number }>('api:fs:stat', { path: target });
     return {
       path: typeof data?.path === 'string' ? normalizePath(data.path) : target,
       isFile: Boolean(data?.isFile),
       size: typeof data?.size === 'number' ? data.size : 0,
+      mtimeMs: typeof data?.mtimeMs === 'number' ? data.mtimeMs : undefined,
     };
   },
 

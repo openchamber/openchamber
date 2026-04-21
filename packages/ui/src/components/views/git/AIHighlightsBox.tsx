@@ -5,22 +5,19 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 
 interface AIHighlightsBoxProps {
   highlights: string[];
-  onInsert: () => void;
-  onClear: () => void;
+  onInsert: (highlights: string[]) => void;
 }
 
 export const AIHighlightsBox: React.FC<AIHighlightsBoxProps> = ({
   highlights,
   onInsert,
-  onClear,
 }) => {
   if (highlights.length === 0) {
     return null;
   }
 
   const handleInsert = () => {
-    onInsert();
-    onClear();
+    onInsert(highlights);
   };
 
   return (

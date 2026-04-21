@@ -85,6 +85,18 @@ const normalizePath = (value: string): string => {
   return normalized;
 };
 
+const getRelativePath = (root: string, path: string): string => {
+  const normalizedPath = normalizePath(path);
+  const normalizedRoot = normalizePath(root).replace(/\/+$/, '');
+  if (normalizedPath === normalizedRoot) {
+    return '.';
+  }
+  if (!normalizedRoot || !normalizedPath.startsWith(`${normalizedRoot}/`)) {
+    return normalizedPath;
+  }
+  return normalizedPath.slice(normalizedRoot.length + 1);
+};
+
 const isAbsolutePath = (value: string): boolean => {
   return value.startsWith('/') || value.startsWith('//') || /^[A-Za-z]:\//.test(value);
 };
@@ -122,6 +134,7 @@ const FileStatusDot: React.FC<{ status: FileStatus }> = ({ status }) => {
 
 interface FileRowProps {
   node: FileNode;
+  root: string;
   isExpanded: boolean;
   isActive: boolean;
   status?: FileStatus | null;
@@ -144,6 +157,7 @@ interface FileRowProps {
 
 const FileRow: React.FC<FileRowProps> = ({
   node,
+  root,
   isExpanded,
   isActive,
   status,
@@ -179,6 +193,13 @@ const FileRow: React.FC<FileRowProps> = ({
     setContextMenuPath(node.path);
   }, [node.path, setContextMenuPath]);
 
+  const handleDragStart = React.useCallback((e: React.DragEvent) => {
+    const path = getRelativePath(root, node.path);
+    if (!path || path === '.') return;
+    e.dataTransfer.setData('application/x-openchamber-file-path', path);
+    e.dataTransfer.effectAllowed = 'copy';
+  }, [node.path, root]);
+
   return (
     <div
       className="group relative flex items-center"
@@ -188,9 +209,12 @@ const FileRow: React.FC<FileRowProps> = ({
         type="button"
         onClick={handleInteraction}
         onContextMenu={handleContextMenu}
+        draggable
+        onDragStart={handleDragStart}
         className={cn(
           'flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-foreground transition-colors pr-8 select-none',
-          isActive ? 'bg-interactive-selection/70' : 'hover:bg-interactive-hover/40'
+          isActive ? 'bg-interactive-selection/70' : 'hover:bg-interactive-hover/40',
+          'cursor-grab active:cursor-grabbing'
         )}
       >
         {isDir ? (
@@ -755,6 +779,7 @@ export const SidebarFilesTree: React.FC = () => {
           )}
           <FileRow
             node={node}
+            root={root}
             isExpanded={isExpanded}
             isActive={isActive}
             status={!isDir ? getFileStatus(node.path) : undefined}
@@ -848,8 +873,15 @@ export const SidebarFilesTree: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => handleOpenFile(node)}
+                    draggable
+                    onDragStart={(e) => {
+                      const path = node.relativePath || getRelativePath(root ?? '', node.path);
+                      if (!path || path === '.') return;
+                      e.dataTransfer.setData('application/x-openchamber-file-path', path);
+                      e.dataTransfer.effectAllowed = 'copy';
+                    }}
                     className={cn(
-                      'flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-foreground transition-colors',
+                      'flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-foreground transition-colors cursor-grab active:cursor-grabbing',
                       isActive ? 'bg-interactive-selection/70' : 'hover:bg-interactive-hover/40'
                     )}
                     title={node.path}

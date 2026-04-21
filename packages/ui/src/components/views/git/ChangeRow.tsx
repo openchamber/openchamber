@@ -1,11 +1,10 @@
 import React, { useCallback, useMemo } from 'react';
 import {
-  RiCheckboxLine,
-  RiCheckboxBlankLine,
   RiArrowGoBackLine,
   RiLoader4Line,
 } from '@remixicon/react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Checkbox } from '@/components/ui/checkbox';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import type { GitStatus } from '@/lib/api/types';
 
@@ -82,15 +81,6 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
     [onToggle, onViewDiff]
   );
 
-  const handleToggleClick = useCallback(
-    (event: React.MouseEvent) => {
-      event.preventDefault();
-      event.stopPropagation();
-      onToggle();
-    },
-    [onToggle]
-  );
-
   const handleRevertClick = useCallback(
     (event: React.MouseEvent) => {
       event.preventDefault();
@@ -109,19 +99,14 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
       onKeyDown={handleKeyDown}
       style={indentPx > 0 ? { paddingLeft: `${indentPx}px` } : undefined}
     >
-        <button
-          type="button"
-          onClick={handleToggleClick}
-          aria-pressed={checked}
-          aria-label={`Select ${file.path}`}
-          className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-        >
-          {checked ? (
-            <RiCheckboxLine className="size-4 text-primary" />
-          ) : (
-            <RiCheckboxBlankLine className="size-4" />
-          )}
-        </button>
+        <div onClick={(e) => { e.stopPropagation(); }}>
+          <Checkbox
+            size="sm"
+            checked={checked}
+            onChange={() => onToggle()}
+            ariaLabel={`Select ${file.path}`}
+          />
+        </div>
         <span
           className="typography-micro font-semibold w-4 text-center uppercase"
           style={{ color: descriptor.color }}

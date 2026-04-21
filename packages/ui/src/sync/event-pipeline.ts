@@ -19,7 +19,7 @@ export type QueuedEvent = {
 
 export type FlushHandler = (events: QueuedEvent[]) => void
 
-const FLUSH_FRAME_MS = 16
+const FLUSH_FRAME_MS = 33
 const STREAM_YIELD_MS = 8
 const RECONNECT_DELAY_MS = 250
 const HEARTBEAT_TIMEOUT_MS = 15_000
@@ -146,7 +146,6 @@ type DirectoryQueue = {
 export function createEventPipeline(input: EventPipelineInput) {
   const { sdk, onEvent, onReconnect, onDisconnect, routeDirectory, transport = "auto" } = input
   const abort = new AbortController()
-  let hasConnected = false
   let disconnected = false
   let lastEventId: string | undefined
   let wsFallbackUntil = 0
@@ -246,11 +245,12 @@ export function createEventPipeline(input: EventPipelineInput) {
 
   const markConnected = () => {
     disconnected = false
-    if (hasConnected) {
-      onReconnect?.()
-      return
-    }
-    hasConnected = true
+    // Fire onReconnect on every successful connect — including the very
+    // first one. Consumer state (isConnected) starts at false and needs
+    // to be flipped positively; without this the send button throws
+    // "Connection lost" until something else (HTTP health check) happens
+    // to race a setState({isConnected: true}) through.
+    onReconnect?.()
   }
 
   const enqueueEvent = (directory: string, payload: Event) => {

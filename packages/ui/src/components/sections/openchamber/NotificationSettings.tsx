@@ -8,7 +8,6 @@ import { updateDesktopSettings } from '@/lib/persistence';
 import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from '@/components/ui';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
-import { GridLoader } from '@/components/ui/grid-loader';
 import { Input } from '@/components/ui/input';
 import { NumberInput } from '@/components/ui/number-input';
 import { Button } from '@/components/ui/button';
@@ -908,7 +907,7 @@ export const NotificationSettings: React.FC = () => {
                 </div>
                 {pushBusy && (
                   <div className="pt-0.5 text-muted-foreground">
-                    <GridLoader size="sm" />
+                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-current animate-busy-pulse" aria-label="Loading" />
                   </div>
                 )}
               </div>

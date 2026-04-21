@@ -32,6 +32,14 @@ export const MagicPromptsSidebar: React.FC<MagicPromptsSidebarProps> = ({ onItem
           { id: 'github.pr.comment.single', title: 'Single PR Comment Review' },
         ],
       },
+      {
+        group: 'Planning',
+        items: [
+          { id: 'plan.todo', title: 'Todo Planning' },
+          { id: 'plan.improve', title: 'Improve Plan' },
+          { id: 'plan.implement', title: 'Implement Plan' },
+        ],
+      },
     ] as const;
   }, []);
 

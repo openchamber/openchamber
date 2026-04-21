@@ -274,17 +274,17 @@ export function GitHubPrPickerDialog({
         <button
           type="button"
           onClick={() => setIncludeDiff((prev) => !prev)}
-          className="h-9 shrink-0 flex items-center gap-1 text-left"
+          className="h-9 shrink-0 flex items-center gap-2 text-left"
           aria-pressed={includeDiff}
           aria-label="Include PR diff in attached context"
         >
-          <Checkbox
-            checked={includeDiff}
-            onChange={(checked) => setIncludeDiff(checked)}
-            ariaLabel="Include PR diff in attached context"
-            className="size-6"
-            iconClassName="size-5"
-          />
+          <span onClick={(e) => e.stopPropagation()}>
+            <Checkbox
+              checked={includeDiff}
+              onChange={(checked) => setIncludeDiff(checked)}
+              ariaLabel="Include PR diff in attached context"
+            />
+          </span>
           <span className="typography-small text-muted-foreground whitespace-nowrap">Include PR diff</span>
         </button>
       </div>

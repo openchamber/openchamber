@@ -822,15 +822,15 @@ const getProjectStoragePath = (projectID) => {
 
 const syncSandboxesToOpenCodeDb = (projectID, sandboxes) => {
   try {
-    const { Database } = require('bun:sqlite');
+    const Database = require('better-sqlite3');
     const dbPath = path.join(getOpenCodeDataPath(), 'opencode.db');
     if (!fs.existsSync(dbPath)) return;
     const db = new Database(dbPath);
     try {
-      const row = db.query('SELECT sandboxes FROM project WHERE id = ?').get(projectID);
+      const row = db.prepare('SELECT sandboxes FROM project WHERE id = ?').get(projectID);
       if (!row) return;
       const json = JSON.stringify(sandboxes);
-      db.query('UPDATE project SET sandboxes = ?, time_updated = ? WHERE id = ?').run(json, Date.now(), projectID);
+      db.prepare('UPDATE project SET sandboxes = ?, time_updated = ? WHERE id = ?').run(json, Date.now(), projectID);
     } finally {
       db.close();
     }

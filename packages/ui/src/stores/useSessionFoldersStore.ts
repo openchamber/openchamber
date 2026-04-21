@@ -29,7 +29,9 @@ interface SessionFoldersActions {
   renameFolder: (scopeKey: string, folderId: string, name: string) => void;
   deleteFolder: (scopeKey: string, folderId: string) => void;
   addSessionToFolder: (scopeKey: string, folderId: string, sessionId: string) => void;
+  addSessionsToFolder: (scopeKey: string, folderId: string, sessionIds: string[]) => void;
   removeSessionFromFolder: (scopeKey: string, sessionId: string) => void;
+  removeSessionsFromFolders: (scopeKey: string, sessionIds: string[]) => void;
   toggleFolderCollapse: (folderId: string) => void;
   cleanupSessions: (scopeKey: string, existingSessionIds: Set<string>) => void;
   getSessionFolderId: (scopeKey: string, sessionId: string) => string | null;
@@ -372,6 +374,64 @@ export const useSessionFoldersStore = create<SessionFoldersStore>()(
           return folder;
         });
 
+        const nextMap: SessionFoldersMap = { ...current, [scopeKey]: nextFolders };
+        const nextCollapsed = syncCollapsedAfterFolderCleanup(scopeFolders, nextFolders, get().collapsedFolderIds);
+
+        set(nextCollapsed
+          ? { foldersMap: nextMap, collapsedFolderIds: nextCollapsed }
+          : { foldersMap: nextMap });
+        persistState(nextMap, nextCollapsed ?? get().collapsedFolderIds);
+      },
+
+      addSessionsToFolder: (scopeKey: string, folderId: string, sessionIds: string[]): void => {
+        if (!scopeKey || !folderId || sessionIds.length === 0) return;
+        const current = get().foldersMap;
+        const scopeFolders = current[scopeKey];
+        if (!scopeFolders) return;
+
+        const idSet = new Set(sessionIds.filter((id) => typeof id === 'string' && id.length > 0));
+        if (idSet.size === 0) return;
+
+        const nextFolders = scopeFolders.map((folder) => {
+          const withoutSessions = folder.sessionIds.filter((id) => !idSet.has(id));
+          if (folder.id === folderId) {
+            return { ...folder, sessionIds: [...withoutSessions, ...idSet] };
+          }
+          if (withoutSessions.length !== folder.sessionIds.length) {
+            return { ...folder, sessionIds: withoutSessions };
+          }
+          return folder;
+        });
+
+        const nextMap: SessionFoldersMap = { ...current, [scopeKey]: nextFolders };
+        const nextCollapsed = syncCollapsedAfterFolderCleanup(scopeFolders, nextFolders, get().collapsedFolderIds);
+
+        set(nextCollapsed
+          ? { foldersMap: nextMap, collapsedFolderIds: nextCollapsed }
+          : { foldersMap: nextMap });
+        persistState(nextMap, nextCollapsed ?? get().collapsedFolderIds);
+      },
+
+      removeSessionsFromFolders: (scopeKey: string, sessionIds: string[]): void => {
+        if (!scopeKey || sessionIds.length === 0) return;
+        const current = get().foldersMap;
+        const scopeFolders = current[scopeKey];
+        if (!scopeFolders) return;
+
+        const idSet = new Set(sessionIds.filter((id) => typeof id === 'string' && id.length > 0));
+        if (idSet.size === 0) return;
+
+        let changed = false;
+        const nextFolders = scopeFolders.map((folder) => {
+          const filtered = folder.sessionIds.filter((id) => !idSet.has(id));
+          if (filtered.length !== folder.sessionIds.length) {
+            changed = true;
+            return { ...folder, sessionIds: filtered };
+          }
+          return folder;
+        });
+
+        if (!changed) return;
         const nextMap: SessionFoldersMap = { ...current, [scopeKey]: nextFolders };
         const nextCollapsed = syncCollapsedAfterFolderCleanup(scopeFolders, nextFolders, get().collapsedFolderIds);
 

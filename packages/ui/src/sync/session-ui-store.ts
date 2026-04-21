@@ -28,6 +28,7 @@ import { flattenAssistantTextParts } from "@/lib/messages/messageText"
 import { EXECUTION_FORK_META_TEXT } from "@/lib/messages/executionMeta"
 import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap"
 import { waitForPendingDraftWorktreeRequest } from "@/lib/worktrees/pendingDraftWorktree"
+import { resolveProjectForSessionDirectory } from "@/lib/projectResolution"
 import {
   getSyncSessions,
   getAllSyncSessions,
@@ -291,62 +292,7 @@ const persistDraftTarget = (target: PersistedDraftTarget): void => {
   } catch { /* ignored */ }
 }
 
-const resolveProjectForDirectory = (
-  projects: import("@/lib/api/types").ProjectEntry[],
-  directory: string | null,
-): import("@/lib/api/types").ProjectEntry | null => {
-  const nd = normalizePath(directory)
-  if (!nd) return null
-  let best: import("@/lib/api/types").ProjectEntry | null = null
-  for (const p of projects) {
-    const pp = normalizePath(p.path)
-    if (!pp) continue
-    if (nd !== pp && !nd.startsWith(`${pp}/`)) continue
-    if (!best || pp.length > (normalizePath(best.path)?.length ?? 0)) best = p
-  }
-  return best
-}
-
-const resolveProjectFromWorktreeDirectory = (
-  projects: import("@/lib/api/types").ProjectEntry[],
-  availableWorktreesByProject: Map<string, WorktreeMetadata[]>,
-  directory: string | null,
-): import("@/lib/api/types").ProjectEntry | null => {
-  const nd = normalizePath(directory)
-  if (!nd) return null
-  let matchedWorktree: WorktreeMetadata | null = null
-  let matchedProjectPath: string | null = null
-  let bestLen = -1
-  for (const [projectPath, worktrees] of availableWorktreesByProject.entries()) {
-    for (const wt of worktrees) {
-      const wp = normalizePath(wt.path)
-      if (!wp) continue
-      if (nd !== wp && !nd.startsWith(`${wp}/`)) continue
-      if (wp.length > bestLen) {
-        bestLen = wp.length
-        matchedWorktree = wt
-        matchedProjectPath = normalizePath(projectPath)
-      }
-    }
-  }
-  if (!matchedWorktree) return null
-  const candidates = [normalizePath(matchedWorktree.projectDirectory), matchedProjectPath].filter((v): v is string => Boolean(v))
-  for (const c of candidates) {
-    const exact = projects.find((p) => normalizePath(p.path) === c) ?? null
-    if (exact) return exact
-    const nested = resolveProjectForDirectory(projects, c)
-    if (nested) return nested
-  }
-  return null
-}
-
-const resolveDraftProjectForDirectory = (
-  projects: import("@/lib/api/types").ProjectEntry[],
-  availableWorktreesByProject: Map<string, WorktreeMetadata[]>,
-  directory: string | null,
-): import("@/lib/api/types").ProjectEntry | null =>
-  resolveProjectFromWorktreeDirectory(projects, availableWorktreesByProject, directory) ??
-  resolveProjectForDirectory(projects, directory)
+const resolveDraftProjectForDirectory = resolveProjectForSessionDirectory
 
 const getAttachmentForSession = (sessionId: string | null | undefined): SessionWorktreeAttachment | undefined => {
   if (!sessionId) return undefined

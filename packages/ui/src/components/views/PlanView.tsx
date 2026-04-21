@@ -5,6 +5,13 @@ import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { buildCodeMirrorCommentWidgets, normalizeLineRange, useInlineCommentController } from '@/components/comments';
 
 import { getLanguageFromExtension } from '@/lib/toolHelpers';
@@ -13,14 +20,37 @@ import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { generateSyntaxTheme } from '@/lib/theme/syntaxThemeGenerator';
 import { createFlexokiCodeMirrorTheme } from '@/lib/codemirror/flexokiTheme';
 import { languageByExtension } from '@/lib/codemirror/languageByExtension';
-import { RiCheckLine, RiClipboardLine, RiFileCopy2Line } from '@remixicon/react';
+import { RiCheckLine, RiClipboardLine, RiCodeAiLine, RiLoopRightAiLine } from '@remixicon/react';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessions } from '@/sync/sync-context';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useSelectionStore } from '@/sync/selection-store';
+import { useConfigStore } from '@/stores/useConfigStore';
+import { useUIStore } from '@/stores/useUIStore';
+import { useGitStore } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { EditorView } from '@codemirror/view';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { generateBranchName } from '@/lib/git/branchNameGenerator';
+import { parseProjectPlanMarkdown } from '@/lib/openchamberConfig';
+import { createWorktreeSessionForNewBranch } from '@/lib/worktreeSessionCreator';
+import { TodoSendDialog, type TodoSendExecution } from '@/components/session/TodoSendDialog';
+import { renderMagicPrompt } from '@/lib/magicPrompts';
+
+type PlanViewProps = {
+  targetPath?: string | null;
+};
+
+type PlanSendAction = 'improve' | 'implement';
+type PlanSendTarget = 'session' | 'worktree';
+
+type PendingPlanSend = {
+  action: PlanSendAction;
+  target: PlanSendTarget;
+};
 
 const normalize = (value: string): string => {
   if (!value) return '';
@@ -75,16 +105,57 @@ const toDisplayPath = (resolvedPath: string, options: { currentDirectory: string
   return normalized;
 };
 
+const resolveProjectRefForDirectory = (
+  directory: string,
+  projects: Array<{ id: string; path: string }>,
+  activeProjectId: string | null,
+): { id: string; path: string } | null => {
+  const normalized = normalize(directory.trim());
+  if (!normalized) {
+    return null;
+  }
+
+  const activeProject = activeProjectId
+    ? projects.find((project) => project.id === activeProjectId) ?? null
+    : null;
+
+  if (activeProject?.path) {
+    const activePath = normalize(activeProject.path);
+    if (normalized === activePath || normalized.startsWith(`${activePath}/`)) {
+      return { id: activeProject.id, path: activeProject.path };
+    }
+  }
+
+  const match = projects
+    .filter((project) => {
+      const projectPath = normalize(project.path);
+      return normalized === projectPath || normalized.startsWith(`${projectPath}/`);
+    })
+    .sort((left, right) => normalize(right.path).length - normalize(left.path).length)[0];
+
+  return match ? { id: match.id, path: match.path } : null;
+};
+
 type SelectedLineRange = {
   start: number;
   end: number;
 };
 
-export const PlanView: React.FC = () => {
+export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const createSession = useSessionUIStore((state) => state.createSession);
+  const initializeNewOpenChamberSession = useSessionUIStore((state) => state.initializeNewOpenChamberSession);
+  const sendMessage = useSessionUIStore((state) => state.sendMessage);
+  const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
   const sessions = useSessions();
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
   const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
+  const projects = useProjectsStore((state) => state.projects);
+  const activeProjectId = useProjectsStore((state) => state.activeProjectId);
+  const gitDirectories = useGitStore((state) => state.directories);
+  const effectiveDirectory = useEffectiveDirectory() ?? '';
+  const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
+  const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
   const runtimeApis = useRuntimeAPIs();
   const { isMobile } = useDeviceInfo();
   const { currentTheme } = useThemeSystem();
@@ -99,6 +170,20 @@ export const PlanView: React.FC = () => {
     const raw = typeof session?.directory === 'string' ? session.directory : '';
     return normalize(raw || '');
   }, [session?.directory]);
+  const projectDirectory = React.useMemo(
+    () => normalize(effectiveDirectory || sessionDirectory),
+    [effectiveDirectory, sessionDirectory],
+  );
+  const currentProjectRef = React.useMemo(
+    () => resolveProjectRefForDirectory(projectDirectory, projects, activeProjectId),
+    [activeProjectId, projectDirectory, projects],
+  );
+  const canCreateWorktree = React.useMemo(
+    () => (currentProjectRef ? gitDirectories.get(currentProjectRef.path)?.isGitRepo === true : false),
+    [currentProjectRef, gitDirectories],
+  );
+  const [pendingPlanSend, setPendingPlanSend] = React.useState<PendingPlanSend | null>(null);
+  const [isPlanSendSubmitting, setIsPlanSendSubmitting] = React.useState(false);
 
   const [resolvedPath, setResolvedPath] = React.useState<string | null>(null);
   const displayPath = React.useMemo(() => {
@@ -108,14 +193,20 @@ export const PlanView: React.FC = () => {
     return toDisplayPath(resolvedPath, { currentDirectory: sessionDirectory, homeDirectory });
   }, [resolvedPath, sessionDirectory, homeDirectory]);
   const [content, setContent] = React.useState<string>('');
+  const [saveError, setSaveError] = React.useState<string | null>(null);
   const planFileLabel = React.useMemo(() => {
     return displayPath ? displayPath.split('/').pop() || 'plan' : 'plan';
   }, [displayPath]);
+  const parsedTitle = React.useMemo(() => {
+    if (!content.trim()) {
+      return 'Plan';
+    }
+    return parseProjectPlanMarkdown(content).title || 'Plan';
+  }, [content]);
+  const sendPromptTitle = React.useMemo(() => parsedTitle.trim() || 'Plan', [parsedTitle]);
   const [loading, setLoading] = React.useState(false);
-  const [copiedPath, setCopiedPath] = React.useState(false);
   const [copiedContent, setCopiedContent] = React.useState(false);
   const [mdViewMode, setMdViewMode] = React.useState<'preview' | 'edit'>('edit');
-  const copiedTimeoutRef = React.useRef<number | null>(null);
   const copiedContentTimeoutRef = React.useRef<number | null>(null);
 
   const [lineSelection, setLineSelection] = React.useState<SelectedLineRange | null>(null);
@@ -256,8 +347,8 @@ export const PlanView: React.FC = () => {
   }, [currentTheme, resolvedPath]);
 
   React.useEffect(() => {
-    // Early exit if plan mode is disabled - don't load anything
-    if (!planModeEnabled) {
+    // Saved project plans opened via context panel should work even when session plan mode is off.
+    if (!planModeEnabled && !targetPath) {
       setResolvedPath(null);
       setContent('');
       setLoading(false);
@@ -282,6 +373,24 @@ export const PlanView: React.FC = () => {
     const run = async () => {
       setResolvedPath(null);
       setContent('');
+      setSaveError(null);
+
+      if (targetPath) {
+        setLoading(true);
+        try {
+          const text = await readText(targetPath);
+          if (cancelled) return;
+          setResolvedPath(targetPath);
+          setContent(text);
+        } catch {
+          if (cancelled) return;
+          setResolvedPath(null);
+          setContent('');
+        } finally {
+          if (!cancelled) setLoading(false);
+        }
+        return;
+      }
 
       if (!session?.slug || !session?.time?.created || !sessionDirectory) {
         setResolvedPath(null);
@@ -338,18 +447,140 @@ export const PlanView: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [planModeEnabled, sessionDirectory, session?.slug, session?.time?.created, homeDirectory, runtimeApis.files]);
+  }, [homeDirectory, planModeEnabled, runtimeApis.files, sessionDirectory, session?.slug, session?.time?.created, targetPath]);
+
+  React.useEffect(() => {
+    if (!resolvedPath) {
+      setSaveError(null);
+      return;
+    }
+
+    const controller = window.setTimeout(async () => {
+      setSaveError(null);
+      try {
+        if (runtimeApis.files?.writeFile) {
+          const result = await runtimeApis.files.writeFile(resolvedPath, content);
+          if (!result?.success) {
+            throw new Error('Write failed');
+          }
+        } else {
+          const response = await fetch('/api/fs/write', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: resolvedPath, content }),
+          });
+          if (!response.ok) {
+            throw new Error(`Failed to write plan file (${response.status})`);
+          }
+        }
+      } catch (error) {
+        setSaveError(error instanceof Error ? error.message : 'Failed to save');
+      }
+    }, 350);
+
+    return () => {
+      window.clearTimeout(controller);
+    };
+  }, [content, resolvedPath, runtimeApis.files]);
 
   React.useEffect(() => {
     return () => {
-      if (copiedTimeoutRef.current !== null) {
-        window.clearTimeout(copiedTimeoutRef.current);
-      }
       if (copiedContentTimeoutRef.current !== null) {
         window.clearTimeout(copiedContentTimeoutRef.current);
       }
     };
   }, []);
+
+  const routeToChat = React.useCallback(() => {
+    setActiveMainTab('chat');
+    setSessionSwitcherOpen(false);
+  }, [setActiveMainTab, setSessionSwitcherOpen]);
+
+  const handleConfirmPlanSend = React.useCallback(
+    async (execution: TodoSendExecution) => {
+      if (!currentProjectRef || !pendingPlanSend) {
+        return;
+      }
+
+      const visiblePrompt = await renderMagicPrompt(
+        pendingPlanSend.action === 'improve' ? 'plan.improve.visible' : 'plan.implement.visible',
+        {
+          plan_title: sendPromptTitle,
+        },
+      );
+      const instructionsText = await renderMagicPrompt(
+        pendingPlanSend.action === 'improve' ? 'plan.improve.instructions' : 'plan.implement.instructions',
+        {
+          plan_title: sendPromptTitle,
+          plan_path: resolvedPath ?? '',
+        },
+      );
+      const syntheticParts = [{ synthetic: true as const, text: instructionsText }];
+      setIsPlanSendSubmitting(true);
+
+      try {
+        routeToChat();
+
+        let sessionId: string | null = null;
+        let directoryHint: string | null = currentProjectRef.path;
+
+        if (pendingPlanSend.target === 'worktree') {
+          if (!canCreateWorktree) {
+            return;
+          }
+          const created = await createWorktreeSessionForNewBranch(currentProjectRef.path, generateBranchName());
+          if (!created?.id) {
+            return;
+          }
+          sessionId = created.id;
+          directoryHint = null;
+        } else {
+          const sessionResult = await createSession(undefined, currentProjectRef.path, null);
+          if (!sessionResult?.id) {
+            return;
+          }
+          sessionId = sessionResult.id;
+          directoryHint = sessionResult.directory ?? currentProjectRef.path;
+          initializeNewOpenChamberSession(sessionResult.id, useConfigStore.getState().agents ?? []);
+        }
+
+        if (!sessionId) {
+          return;
+        }
+
+        const selectionState = useSelectionStore.getState();
+        selectionState.saveSessionModelSelection(sessionId, execution.providerID, execution.modelID);
+        if (execution.agent.trim()) {
+          selectionState.saveSessionAgentSelection(sessionId, execution.agent);
+          selectionState.saveAgentModelForSession(sessionId, execution.agent, execution.providerID, execution.modelID);
+          selectionState.saveAgentModelVariantForSession(
+            sessionId,
+            execution.agent,
+            execution.providerID,
+            execution.modelID,
+            execution.variant || undefined,
+          );
+        }
+
+        setCurrentSession(sessionId, directoryHint);
+        await sendMessage(
+          visiblePrompt,
+          execution.providerID,
+          execution.modelID,
+          execution.agent.trim() || undefined,
+          undefined,
+          undefined,
+          syntheticParts,
+          execution.variant || undefined,
+        );
+
+        setPendingPlanSend(null);
+      } finally {
+        setIsPlanSendSubmitting(false);
+      }
+    },
+    [canCreateWorktree, createSession, currentProjectRef, initializeNewOpenChamberSession, pendingPlanSend, resolvedPath, routeToChat, sendMessage, sendPromptTitle, setCurrentSession]
+  );
 
   const blockWidgets = React.useMemo(() => {
     return buildCodeMirrorCommentWidgets({
@@ -375,15 +606,73 @@ export const PlanView: React.FC = () => {
     <div className="relative flex h-full min-h-0 min-w-0 w-full flex-col overflow-hidden bg-background">
       <div className="flex min-w-0 items-center gap-2 border-b border-border/40 px-3 py-1.5 flex-shrink-0">
         <div className="min-w-0 flex-1">
-          <div className="typography-ui-label font-medium truncate">Plan</div>
-          {resolvedPath ? (
-            <div className="typography-meta text-muted-foreground truncate" title={displayPath ?? resolvedPath}>
-              {displayPath ?? resolvedPath}
+          <div className="typography-ui-label font-medium truncate">{parsedTitle}</div>
+          {saveError ? (
+            <div className="typography-micro text-[color:var(--status-error)] truncate" title={saveError}>
+              Save failed
             </div>
           ) : null}
         </div>
         {resolvedPath ? (
           <div className="flex items-center gap-1">
+            <DropdownMenu>
+              <Tooltip delayDuration={500}>
+                <TooltipTrigger asChild>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-5 w-5 p-0"
+                      aria-label="Improve plan"
+                      disabled={!content.trim()}
+                    >
+                      <RiLoopRightAiLine className="size-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                </TooltipTrigger>
+                <TooltipContent sideOffset={8}>Improve</TooltipContent>
+              </Tooltip>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => setPendingPlanSend({ action: 'improve', target: 'session' })}>
+                  Send to new session
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setPendingPlanSend({ action: 'improve', target: 'worktree' })}
+                  disabled={!canCreateWorktree}
+                >
+                  Send to new worktree session
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <DropdownMenu>
+              <Tooltip delayDuration={500}>
+                <TooltipTrigger asChild>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-5 w-5 p-0"
+                      aria-label="Implement plan"
+                      disabled={!content.trim()}
+                    >
+                      <RiCodeAiLine className="size-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                </TooltipTrigger>
+                <TooltipContent sideOffset={8}>Implement</TooltipContent>
+              </Tooltip>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => setPendingPlanSend({ action: 'implement', target: 'session' })}>
+                  Send to new session
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setPendingPlanSend({ action: 'implement', target: 'worktree' })}
+                  disabled={!canCreateWorktree}
+                >
+                  Send to new worktree session
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <PreviewToggleButton
               currentMode={mdViewMode}
               onToggle={() => saveMdViewMode(mdViewMode === 'preview' ? 'edit' : 'preview')}
@@ -415,36 +704,22 @@ export const PlanView: React.FC = () => {
                 <RiClipboardLine className="h-4 w-4" />
               )}
             </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={async () => {
-                const result = await copyTextToClipboard(displayPath ?? resolvedPath);
-                if (result.ok) {
-                  setCopiedPath(true);
-                  if (copiedTimeoutRef.current !== null) {
-                    window.clearTimeout(copiedTimeoutRef.current);
-                  }
-                  copiedTimeoutRef.current = window.setTimeout(() => {
-                    setCopiedPath(false);
-                  }, 1200);
-                } else {
-                  // ignored
-                }
-              }}
-              className="h-5 w-5 p-0"
-              title={`Copy plan path (${displayPath ?? resolvedPath})`}
-              aria-label={`Copy plan path (${displayPath ?? resolvedPath})`}
-            >
-              {copiedPath ? (
-                <RiCheckLine className="h-4 w-4 text-[color:var(--status-success)]" />
-              ) : (
-                <RiFileCopy2Line className="h-4 w-4" />
-              )}
-            </Button>
           </div>
         ) : null}
       </div>
+
+      <TodoSendDialog
+        open={pendingPlanSend !== null}
+        onOpenChange={(open) => {
+          if (!open && !isPlanSendSubmitting) {
+            setPendingPlanSend(null);
+          }
+        }}
+        target={pendingPlanSend?.target ?? 'session'}
+        projectDirectory={currentProjectRef?.path ?? null}
+        submitting={isPlanSendSubmitting}
+        onConfirm={handleConfirmPlanSend}
+      />
 
       <div className="flex-1 min-h-0 min-w-0 relative">
         <ScrollableOverlay outerClassName="h-full min-w-0" className="h-full min-w-0">
@@ -452,7 +727,7 @@ export const PlanView: React.FC = () => {
             <div className="p-3 typography-ui text-muted-foreground">Loading…</div>
           ) : (
             <div className="relative h-full">
-              <div className="h-full oc-plan-editor">
+              <div className="h-full">
                 {mdViewMode === 'preview' ? (
                   <div className="h-full overflow-auto p-3">
                     <ErrorBoundary
@@ -472,10 +747,8 @@ export const PlanView: React.FC = () => {
                   <div className="relative h-full" ref={editorWrapperRef}>
                     <CodeMirrorEditor
                       value={content}
-                      onChange={() => {
-                        // read-only
-                      }}
-                      readOnly={true}
+                      onChange={setContent}
+                      readOnly={false}
                       className="h-full"
                       extensions={editorExtensions}
                       onViewReady={(view) => { editorViewRef.current = view; }}

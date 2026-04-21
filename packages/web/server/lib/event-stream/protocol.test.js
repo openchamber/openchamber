@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it } from 'vitest';
 
 import {
   MESSAGE_STREAM_DIRECTORY_WS_PATH,

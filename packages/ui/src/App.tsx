@@ -35,6 +35,7 @@ import { OnboardingScreen } from '@/components/onboarding/OnboardingScreen';
 import type { RecoveryVariant } from '@/components/onboarding/DesktopConnectionRecovery';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { SyncProvider, useSessions } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
@@ -451,6 +452,40 @@ function App({ apis }: AppProps) {
       window.removeEventListener('storage', handleStorage);
     };
   }, [embeddedSessionChat]);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ sessionId?: string }>).detail;
+      const sessionId = typeof detail?.sessionId === 'string' ? detail.sessionId.trim() : '';
+      if (!sessionId) return;
+      void useSessionUIStore.getState().setCurrentSession(sessionId);
+    };
+
+    window.addEventListener('openchamber:open-session', handler as EventListener);
+    return () => window.removeEventListener('openchamber:open-session', handler as EventListener);
+  }, []);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ projectPath?: string }>).detail;
+      const projectPath = typeof detail?.projectPath === 'string' ? detail.projectPath.trim() : '';
+      if (!projectPath) return;
+      const projectsStore = useProjectsStore.getState();
+      const existing = projectsStore.projects.find((project) => project.path === projectPath);
+      if (existing) {
+        projectsStore.setActiveProject(existing.id);
+      } else {
+        projectsStore.addProject(projectPath);
+      }
+    };
+
+    window.addEventListener('openchamber:open-project', handler as EventListener);
+    return () => window.removeEventListener('openchamber:open-project', handler as EventListener);
+  }, []);
 
   React.useEffect(() => {
     if (typeof window === 'undefined') return;

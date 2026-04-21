@@ -21,10 +21,11 @@ import { BranchSelector, useBranchOptions } from './BranchSelector';
 import { AgentSelector } from './AgentSelector';
 import { CommandAutocomplete, type CommandAutocompleteHandle } from '@/components/chat/CommandAutocomplete';
 import { FileMentionAutocomplete, type FileMentionHandle } from '@/components/chat/FileMentionAutocomplete';
-import { isDesktopShell, startDesktopWindowDrag } from '@/lib/desktop';
+import { isDesktopShell } from '@/lib/desktop';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { PROJECT_ICON_MAP, PROJECT_COLOR_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
 import type { ProjectEntry } from '@/lib/api/types';
+import { startDesktopWindowDrag } from '@/lib/desktopNative';
 
 /** Max file size in bytes (10MB) */
 const MAX_FILE_SIZE = 10 * 1024 * 1024;

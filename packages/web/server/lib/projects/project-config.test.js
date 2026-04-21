@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it } from 'vitest';
 import os from 'os';
 import path from 'path';
-import { mkdtemp, rm } from 'fs/promises';
+import { mkdtemp, rm, readFile, writeFile } from 'fs/promises';
 import { createProjectConfigRuntime } from './project-config.js';
 
 const createRuntime = async () => {
@@ -68,6 +68,47 @@ describe('project-config runtime', () => {
           modelID: 'gpt-4.1',
         },
       })).rejects.toThrow('schedule.cron is invalid');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('preserves unknown project config keys when writing scheduled tasks', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      const projectID = 'path_preserve';
+      const filePath = path.join(runtime.resolveProjectConfigPath(projectID));
+      await writeFile(
+        filePath,
+        JSON.stringify({
+          projectNotes: 'hello notes',
+          projectTodos: [{ id: 't1', text: 'buy milk', completed: false, createdAt: 1 }],
+          projectActions: [{ id: 'a1', name: 'Run', command: 'bun run dev' }],
+          projectActionsPrimaryId: 'a1',
+          'setup-worktree': ['bun install'],
+          projectPlanFiles: [{ id: 'p1', path: '/tmp/plans/p1.md', createdAt: 2 }],
+          projectPath: '/tmp/demo',
+        }, null, 2),
+        'utf8',
+      );
+
+      await runtime.upsertScheduledTask(projectID, {
+        name: 'nightly',
+        enabled: true,
+        schedule: { kind: 'daily', time: '09:00', timezone: 'UTC' },
+        execution: { prompt: 'run', providerID: 'openai', modelID: 'gpt-4.1' },
+      });
+
+      const raw = JSON.parse(await readFile(filePath, 'utf8'));
+      expect(raw.projectNotes).toBe('hello notes');
+      expect(raw.projectTodos).toEqual([{ id: 't1', text: 'buy milk', completed: false, createdAt: 1 }]);
+      expect(raw.projectActions).toHaveLength(1);
+      expect(raw.projectActionsPrimaryId).toBe('a1');
+      expect(raw['setup-worktree']).toEqual(['bun install']);
+      expect(raw.projectPlanFiles).toEqual([{ id: 'p1', path: '/tmp/plans/p1.md', createdAt: 2 }]);
+      expect(raw.projectPath).toBe('/tmp/demo');
+      expect(raw.scheduledTasks).toHaveLength(1);
+      expect(raw.version).toBe(1);
     } finally {
       await cleanup();
     }

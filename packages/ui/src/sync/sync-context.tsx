@@ -1255,13 +1255,34 @@ export function SyncProvider(props: {
                 limit: 50,
               })
               // SDK returns { error } instead of { data } on non-ok responses (503).
-              // Throw so retry() retries and allSettled marks it as rejected.
-              if ((result as { error?: unknown }).error) {
-                throw new Error("session.list failed: " + String((result as { error?: unknown }).error))
+              // Preserve HTTP status so retry()'s transient detection works.
+              const rawError = (result as { error?: unknown }).error
+              if (rawError) {
+                const response = (result as { response?: { status?: number } }).response
+                const status = response?.status
+                const message = typeof rawError === "object" && rawError !== null && "message" in rawError
+                  ? String((rawError as { message?: unknown }).message)
+                  : String(rawError)
+                const wrapped = new Error(`session.list failed${status ? ` (${status})` : ""}: ${message}`)
+                if (status !== undefined) {
+                  ;(wrapped as Error & { status?: number }).status = status
+                }
+                throw wrapped
               }
               const sessions = (result.data ?? [])
                 .filter((s) => !!s?.id)
                 .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+              // Race guard: if the list came back empty but event pipeline
+              // already populated the store, don't clobber. OpenCode can
+              // answer HTTP with empty sessions while WS delivers session
+              // events for the same data (disk warmup race on app launch).
+              const currentSessions = store.getState().session
+              if (sessions.length === 0 && currentSessions.length > 0) {
+                console.warn(
+                  `[bootstrap] session.list returned empty for ${dir}; preserving ${currentSessions.length} existing sessions`,
+                )
+                return
+              }
               store.setState({ session: sessions, sessionTotal: sessions.length, limit: Math.max(sessions.length, 50) })
               ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
             }),
@@ -1271,9 +1292,12 @@ export function SyncProvider(props: {
           // wasn't ready yet (bridge returned 503). Retry a few times.
           const state = store.getState()
           if (state.session.length === 0 && attempt < 5) {
+            console.warn(`[bootstrap] sessions empty for ${directory} after attempt ${attempt + 1}; retrying in 2s`)
             await new Promise((r) => setTimeout(r, 2000))
             store.setState({ status: "loading" as const })
             await runBootstrap(attempt + 1)
+          } else if (state.session.length === 0) {
+            console.warn(`[bootstrap] sessions empty for ${directory} after ${attempt + 1} attempts; giving up`)
           }
         }
 

@@ -1,14 +1,14 @@
 # TTS Module Documentation
 
 ## Purpose
-This module provides server-side Text-to-Speech services using OpenAI's TTS API, along with text summarization and sanitization utilities for preparing content for speech synthesis.
+This module provides server-side Text-to-Speech services using OpenAI's TTS API. Shared text summarization now lives in `packages/web/server/lib/text/` and is consumed here in `tts` mode.
 
 ## Entrypoints and structure
 - `packages/web/server/lib/tts/index.js`: Public entrypoint imported by `packages/web/server/index.js`.
 - `packages/web/server/lib/tts/routes.js`: Express route registration for `/api/voice/*`, `/api/tts/*`, and `/api/stt/*` endpoints.
 - `packages/web/server/lib/tts/capability-runtime.js`: runtime helper for probing local macOS `say` TTS voice capability.
 - `packages/web/server/lib/tts/service.js`: TTS service implementation with OpenAI integration.
-- `packages/web/server/lib/tts/summarization.js`: Text summarization and sanitization utilities using opencode.ai zen API.
+- `packages/web/server/lib/text/summarization.js`: Shared text summarization and sanitization utilities using opencode.ai zen API.
 - `packages/web/server/lib/tts/stt.js`: STT proxy for OpenAI-compatible transcription endpoints.
 - `packages/web/server/lib/tts/base-url.js`: shared base URL validation and normalization for custom OpenAI-compatible endpoints.
 
@@ -19,9 +19,10 @@ This module provides server-side Text-to-Speech services using OpenAI's TTS API,
 - `TTSService`: TTS service class for OpenAI audio generation.
 - `TTS_VOICES`: Array of supported OpenAI voice identifiers.
 
-### Summarization (from summarization.js)
-- `summarizeText({ text, threshold, maxLength, zenModel })`: Summarizes text for TTS output using opencode.ai zen API.
+### Shared text summarization (re-exported from ../text/summarization.js)
+- `summarizeText({ text, threshold, maxLength, zenModel, mode })`: Shared text summarizer. TTS uses `mode: 'tts'`.
 - `sanitizeForTTS(text)`: Sanitizes text by removing markdown, URLs, file paths, and other non-speakable content.
+- `sanitizeForNote(text)`: Re-exported for note-mode callers that still import through the TTS surface.
 
 ### Capability runtime (capability-runtime.js)
 - `detectSayTtsCapability(processLike)`: probes local `say -v "?"` support and returns `{ available, voices, reason }`.
@@ -35,7 +36,7 @@ This module provides server-side Text-to-Speech services using OpenAI's TTS API,
 - `SUMMARIZE_TIMEOUT_MS`: 30000 (30 seconds timeout for zen API requests).
 
 ### Default values
-- `summarizeText` defaults: `threshold` = 200, `maxLength` = 500, `zenModel` = 'gpt-5-nano'.
+- `summarizeText` defaults: `threshold` = 200, `maxLength` = 500, `zenModel` = 'gpt-5-nano', `mode` = 'tts'.
 - `generateSpeechStream` defaults: `voice` = 'coral', `model` = 'gpt-4o-mini-tts', `speed` = 1.0.
 - `generateSpeechBuffer` defaults: `voice` = 'coral', `model` = 'gpt-4o-mini-tts', `speed` = 1.0.
 
@@ -66,6 +67,8 @@ Returns object with:
 - `originalLength`: Optional number for original text length.
 - `summaryLength`: Optional number for summarized text length.
 
+The route-level text summarize API is now `/api/text/summarize`.
+
 ### `sanitizeForTTS`
 Returns sanitized string with markdown, URLs, file paths, and special characters removed.
 
@@ -90,6 +93,8 @@ The TTS module is used by `packages/web/server/index.js` for:
 - Summarizing long messages before TTS synthesis.
 - Sanitizing text to remove non-speakable content.
 
+The summarization logic itself is shared with notifications and notes, but this module uses it only in `tts` mode.
+
 The server-side TTS approach bypasses mobile Safari's audio context restrictions by generating audio on the server and streaming to clients.
 
 ## Notes for contributors
@@ -108,7 +113,7 @@ The server-side TTS approach bypasses mobile Safari's audio context restrictions
 
 ### Error handling
 - `generateSpeechStream` and `generateSpeechBuffer` throw descriptive errors for missing API keys or empty text.
-- `summarizeText` catches zen API errors and falls back to original text with `summarized: false`.
+- `summarizeText` catches zen API errors and returns mode-specific fallback text with `summarized: false`.
 - All errors are logged to console with `[TTSService]` or `[Summarize]` prefix.
 
 ### API key management

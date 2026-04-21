@@ -520,14 +520,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         {THEME_MODE_OPTIONS.map((option) => (
                                             <Button
                                                 key={option.value}
-                                                variant="outline"
+                                                variant="chip"
                                                 size="xs"
-                                                className={cn(
-                                                    '!font-normal',
-                                                    themeMode === option.value
-                                                        ? 'border-[var(--primary-base)] text-[var(--primary-base)] bg-[var(--primary-base)]/10 hover:text-[var(--primary-base)]'
-                                                        : 'text-foreground'
-                                                )}
+                                                aria-pressed={themeMode === option.value}
+                                                className="!font-normal"
                                                 onClick={() => setThemeMode(option.value)}
                                             >
                                                 {option.label}
@@ -542,7 +538,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     <span className="typography-ui-label text-foreground shrink-0">Light Theme</span>
                                     <Select value={selectedLightTheme?.metadata.id ?? ''} onValueChange={setLightThemePreference}>
                                         <SelectTrigger aria-label="Select light theme" className="w-fit">
-                                            <SelectValue placeholder="Select theme" />
+                                            <SelectValue placeholder="Select theme">
+                                                {selectedLightTheme
+                                                    ? formatThemeLabel(selectedLightTheme.metadata.name, 'light')
+                                                    : undefined}
+                                            </SelectValue>
                                         </SelectTrigger>
                                         <SelectContent>
                                             {lightThemes.map((theme) => (
@@ -557,7 +557,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     <span className="typography-ui-label text-foreground shrink-0">Dark Theme</span>
                                     <Select value={selectedDarkTheme?.metadata.id ?? ''} onValueChange={setDarkThemePreference}>
                                         <SelectTrigger aria-label="Select dark theme" className="w-fit">
-                                            <SelectValue placeholder="Select theme" />
+                                            <SelectValue placeholder="Select theme">
+                                                {selectedDarkTheme
+                                                    ? formatThemeLabel(selectedDarkTheme.metadata.name, 'dark')
+                                                    : undefined}
+                                            </SelectValue>
                                         </SelectTrigger>
                                         <SelectContent>
                                             {darkThemes.map((theme) => (
@@ -969,14 +973,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                     {MESSAGE_STREAM_TRANSPORT_OPTIONS.map((option) => (
                                                         <Button
                                                             key={option.id}
-                                                            variant="outline"
+                                                            variant="chip"
                                                             size="xs"
-                                                            className={cn(
-                                                                '!font-normal',
-                                                                messageStreamTransport === option.id
-                                                                    ? 'border-[var(--primary-base)] text-[var(--primary-base)] bg-[var(--primary-base)]/10 hover:text-[var(--primary-base)]'
-                                                                    : 'text-foreground'
-                                                            )}
+                                                            aria-pressed={messageStreamTransport === option.id}
+                                                            className="!font-normal"
                                                             onClick={() => handleMessageStreamTransportChange(option.id)}
                                                         >
                                                             {option.label}

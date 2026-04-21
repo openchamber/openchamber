@@ -360,41 +360,41 @@ export const createProjectConfigRuntime = (deps) => {
     return path.join(projectsDirPath, `${safeProjectID}.json`);
   };
 
-  const readProjectConfigFromDisk = async (projectID) => {
+  const readRawProjectConfigFromDisk = async (projectID) => {
     const filePath = resolveProjectConfigPath(projectID);
-
     try {
       const raw = await fsPromises.readFile(filePath, 'utf8');
       const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== 'object') {
-        return createEmptyProjectConfig();
-      }
-      const tasksRaw = Array.isArray(parsed.scheduledTasks) ? parsed.scheduledTasks : [];
-      const now = Date.now();
-      const scheduledTasks = [];
-      for (const task of tasksRaw) {
-        try {
-          const normalized = normalizeTaskForStorage(task, {
-            now,
-            createId: taskIDFactory,
-            existingTask: null,
-            allowCreate: true,
-          });
-          scheduledTasks.push(normalized);
-        } catch {
-        }
-      }
-
-      return {
-        version: PROJECT_CONFIG_VERSION,
-        scheduledTasks,
-      };
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
     } catch (error) {
       if (error && typeof error === 'object' && error.code === 'ENOENT') {
-        return createEmptyProjectConfig();
+        return {};
       }
       throw error;
     }
+  };
+
+  const readProjectConfigFromDisk = async (projectID) => {
+    const parsed = await readRawProjectConfigFromDisk(projectID);
+    const tasksRaw = Array.isArray(parsed.scheduledTasks) ? parsed.scheduledTasks : [];
+    const now = Date.now();
+    const scheduledTasks = [];
+    for (const task of tasksRaw) {
+      try {
+        const normalized = normalizeTaskForStorage(task, {
+          now,
+          createId: taskIDFactory,
+          existingTask: null,
+          allowCreate: true,
+        });
+        scheduledTasks.push(normalized);
+      } catch {
+      }
+    }
+    return {
+      version: PROJECT_CONFIG_VERSION,
+      scheduledTasks,
+    };
   };
 
   const writeProjectConfigToDisk = async (projectID, config) => {
@@ -402,8 +402,15 @@ export const createProjectConfigRuntime = (deps) => {
     const parentDirectory = path.dirname(filePath);
     const temporaryPath = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
+    const existing = await readRawProjectConfigFromDisk(projectID);
+    const merged = {
+      ...existing,
+      version: PROJECT_CONFIG_VERSION,
+      scheduledTasks: Array.isArray(config?.scheduledTasks) ? config.scheduledTasks : [],
+    };
+
     await fsPromises.mkdir(parentDirectory, { recursive: true });
-    await fsPromises.writeFile(temporaryPath, JSON.stringify(config, null, 2), 'utf8');
+    await fsPromises.writeFile(temporaryPath, JSON.stringify(merged, null, 2), 'utf8');
     await fsPromises.rename(temporaryPath, filePath);
   };
 

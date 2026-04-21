@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it } from 'vitest';
 import { computeNextRunAt, formatScheduledSessionTitle, parseScheduledCommandPrompt } from './runtime.js';
 
 describe('scheduled-tasks runtime helpers', () => {

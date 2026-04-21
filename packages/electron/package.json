@@ -1,0 +1,89 @@
+{
+  "name": "@openchamber/electron",
+  "version": "1.9.6",
+  "private": true,
+  "description": "Electron desktop runtime for OpenChamber",
+  "author": "OpenChamber",
+  "type": "module",
+  "main": "./dist-bundle/main.mjs",
+  "dependencies": {
+    "@openchamber/web": "workspace:*",
+    "electron-context-menu": "^4.1.2",
+    "electron-log": "^5.4.3",
+    "electron-updater": "^6.8.3"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^3.7.0",
+    "electron": "^41.2.1",
+    "electron-builder": "^26.0.0"
+  },
+  "desktopPrerequisites": [
+    "Electron runtime dependencies installed via bun install",
+    "Bun available for sidecar compilation",
+    "macOS build tools installed for notarized packaging"
+  ],
+  "scripts": {
+    "dev": "node ./scripts/electron-dev.mjs",
+    "build:web-assets": "node ./scripts/build-web-assets.mjs",
+    "build": "bun -e \"process.exit(0)\"",
+    "bundle:main": "bun ./scripts/bundle-main.mjs",
+    "rebuild:native": "node ./scripts/rebuild-native.mjs",
+    "package": "bun run build:web-assets && bun run bundle:main && bun run rebuild:native && electron-builder",
+    "finalize:latest-yml": "node ./scripts/finalize-latest-yml.mjs",
+    "type-check": "node --check ./main.mjs && node --check ./preload.mjs",
+    "lint": "node -e \"process.exit(0)\""
+  },
+  "build": {
+    "appId": "dev.openchamber.desktop",
+    "productName": "OpenChamber",
+    "files": [
+      "dist-bundle/main.mjs",
+      "preload.mjs"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/web-dist",
+        "to": "web-dist"
+      }
+    ],
+    "directories": {
+      "buildResources": "resources/icons",
+      "output": "dist"
+    },
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
+    "npmRebuild": false,
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "resources/icons/icon.icns",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "resources/entitlements.mac.plist",
+      "entitlementsInherit": "resources/entitlements.mac.plist",
+      "notarize": true,
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "dmg": {
+      "sign": true,
+      "title": "${productName} ${version}",
+      "backgroundColor": "#FFFCF0",
+      "iconSize": 100,
+      "iconTextSize": 13,
+      "window": {
+        "width": 540,
+        "height": 340
+      },
+      "contents": [
+        { "x": 180, "y": 140, "type": "file" },
+        { "x": 360, "y": 140, "type": "link", "path": "/Applications" }
+      ]
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "btriapitsyn",
+      "repo": "openchamber"
+    }
+  }
+}

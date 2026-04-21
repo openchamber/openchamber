@@ -1562,9 +1562,9 @@ export const GitView: React.FC = () => {
     [currentDirectory, git, isRevertingAll, refreshStatusAndBranches]
   );
 
-  const handleInsertHighlights = React.useCallback(() => {
-    if (generatedHighlights.length === 0) return;
-    const normalizedHighlights = generatedHighlights
+  const handleInsertHighlights = React.useCallback((sourceHighlights: string[]) => {
+    if (sourceHighlights.length === 0) return;
+    const normalizedHighlights = sourceHighlights
       .map((text) => text.trim())
       .filter(Boolean);
     if (normalizedHighlights.length === 0) {
@@ -1576,7 +1576,8 @@ export const GitView: React.FC = () => {
       const separator = base.length > 0 ? '\n\n' : '';
       return `${base}${separator}${normalizedHighlights.join('\n')}`.trim();
     });
-  }, [generatedHighlights, clearGeneratedHighlights]);
+    clearGeneratedHighlights();
+  }, [clearGeneratedHighlights]);
 
   const handleSelectGitmoji = React.useCallback((emoji: string, code: string) => {
     const token = code || emoji;
@@ -2097,7 +2098,6 @@ export const GitView: React.FC = () => {
                         onCommitMessageChange={setCommitMessage}
                         generatedHighlights={generatedHighlights}
                         onInsertHighlights={handleInsertHighlights}
-                        onClearHighlights={clearGeneratedHighlights}
                         onGenerateMessage={handleGenerateCommitMessage}
                         isGeneratingMessage={isGeneratingMessage}
                         onCommit={() => handleCommit({ pushAfter: false })}

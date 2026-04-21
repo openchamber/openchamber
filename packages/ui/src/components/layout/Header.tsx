@@ -27,7 +27,6 @@ import { useAllLiveSessions, useSession, useSessionMessagesResolved } from '@/sy
 import { getAllSyncSessions } from '@/sync/sync-refs';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
-import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useGitBranchLabel } from '@/stores/useGitStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
@@ -1105,14 +1104,6 @@ export const Header: React.FC<HeaderProps> = ({
   }, [currentSessionDiffStats]);
   const hasNonZeroSessionChanges = currentSessionChanges.additions > 0 || currentSessionChanges.deletions > 0;
 
-  const selectedFilePath = useFilesViewTabsStore((state) => {
-    const directory = normalize(openDirectory || '');
-    if (!directory) {
-      return null;
-    }
-    return state.byRoot[directory]?.selectedPath ?? null;
-  });
-
   const actionDirectory = React.useMemo(() => {
     return normalize(openDirectory || activeProject?.path || '');
   }, [activeProject?.path, openDirectory]);
@@ -1643,7 +1634,7 @@ export const Header: React.FC<HeaderProps> = ({
           </TooltipContent>
         </Tooltip>
       )}
-      <OpenInAppButton directory={openDirectory} activeFilePath={selectedFilePath} className="mr-1" />
+      <OpenInAppButton directory={actionDirectory} className="mr-1" />
       <DesktopServicesMenu
         isDesktopApp={isDesktopApp}
         currentInstanceLabel={currentInstanceLabel}

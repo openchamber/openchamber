@@ -1008,6 +1008,9 @@ async function main(options = {}) {
   if (typeof options.exitOnShutdown === 'boolean') {
     exitOnShutdown = options.exitOnShutdown;
   }
+  if (typeof options.onDesktopNotification === 'function') {
+    notificationEmitterRuntime.setOnDesktopNotification(options.onDesktopNotification);
+  }
 
   console.log(`Starting OpenChamber on port ${port === 0 ? 'auto' : port}`);
 

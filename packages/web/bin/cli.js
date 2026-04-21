@@ -1752,6 +1752,7 @@ function writeInstanceOptions(instanceFilePath, options, onNotice) {
   try {
     const toStore = {
       port: options.port,
+      host: typeof options.host === 'string' && options.host.length > 0 ? options.host : undefined,
       launchMode: options.launchMode === 'foreground' ? 'foreground' : 'daemon',
       uiPassword: typeof options.uiPassword === 'string' ? options.uiPassword : undefined,
       hasUiPassword: typeof options.uiPassword === 'string',
@@ -2931,6 +2932,7 @@ const commands = {
       writePidFile(fgPidFilePath, process.pid, emitNotice);
       writeInstanceOptions(fgInstanceFilePath, {
         port: resolvedPort,
+        host: effectiveHost,
         launchMode: 'foreground',
         uiPassword: effectiveUiPassword,
       }, emitNotice);
@@ -3058,6 +3060,7 @@ const commands = {
     writePidFile(pidFilePath, child.pid, emitNotice);
     writeInstanceOptions(instanceFilePath, {
       port: resolvedPort,
+      host: effectiveHost,
       launchMode: 'daemon',
       uiPassword: effectiveUiPassword,
     }, emitNotice);
@@ -3356,6 +3359,7 @@ const commands = {
 
         const restartedPort = await this.serve({
           port: restartPort,
+          host: storedOptions.host,
           explicitPort: true,
           uiPassword: options.explicitUiPassword ? options.uiPassword : storedOptions.uiPassword,
           suppressStartupSummary: true,
@@ -4791,6 +4795,7 @@ const commands = {
         const storedOptions = readInstanceOptions(instance.instanceFilePath) || { port: instance.port };
         await this.serve({
           port: storedOptions.port || instance.port,
+          host: storedOptions.host,
           explicitPort: true,
           uiPassword: storedOptions.uiPassword,
           suppressStartupSummary: true,
