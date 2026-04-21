@@ -295,19 +295,46 @@ const sshManager = new ElectronSshManager({
 const readJsonFile = (filePath) => {
   try {
     return JSON.parse(fs.readFileSync(filePath, 'utf8'));
-  } catch {
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return {};
+    // Parse errors can happen if a concurrent writer just truncated the file
+    // and hasn't finished writing yet. Log loudly so we notice, then return
+    // {} as before. Writes are atomic (tmp + rename) so this race is rare.
+    log.warn?.('[electron] failed to read JSON file', filePath, error);
     return {};
   }
 };
 
 const writeJsonFile = async (filePath, data) => {
   await fsp.mkdir(path.dirname(filePath), { recursive: true });
-  await fsp.writeFile(filePath, JSON.stringify(data, null, 2));
+  // Atomic: write to a temp file then rename. Readers never see a partial
+  // JSON file that could parse-error and get coerced to {}.
+  const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  await fsp.writeFile(tmp, JSON.stringify(data, null, 2));
+  await fsp.rename(tmp, filePath);
 };
 
 const readSettingsRoot = () => {
   const root = readJsonFile(settingsFilePath());
   return root && typeof root === 'object' && !Array.isArray(root) ? root : {};
+};
+
+// Serializes read-modify-write of the settings file within this process.
+// Multiple call sites (spawnLocalServer, writeDesktopHostsConfig, theme
+// preference saves, ssh manager imports, etc.) would otherwise have their
+// RMW pairs interleave across awaits, letting one writer's stale copy
+// overwrite another writer's just-persisted changes.
+let settingsMutationChain = Promise.resolve();
+const mutateSettingsRoot = (mutator) => {
+  const next = settingsMutationChain.then(async () => {
+    const current = readSettingsRoot();
+    const result = await mutator(current);
+    const nextRoot = result ?? current;
+    await writeJsonFile(settingsFilePath(), nextRoot);
+  });
+  // Keep the chain alive even if one mutator throws.
+  settingsMutationChain = next.catch(() => {});
+  return next;
 };
 
 const writeSettingsRoot = async (root) => writeJsonFile(settingsFilePath(), root);
@@ -350,28 +377,28 @@ const readDesktopHostsConfig = () => {
 };
 
 const writeDesktopHostsConfig = async (config) => {
-  const root = readSettingsRoot();
-  root.desktopHosts = Array.isArray(config?.hosts)
-    ? config.hosts
-        .map((entry) => {
-          const id = typeof entry?.id === 'string' ? entry.id.trim() : '';
-          const url = sanitizeHostUrlForStorage(entry?.url);
-          if (!id || id === LOCAL_HOST_ID || !url) return null;
-          return {
-            id,
-            label: typeof entry?.label === 'string' && entry.label.trim() ? entry.label.trim() : url,
-            url,
-          };
-        })
-        .filter(Boolean)
-    : [];
-  root.desktopDefaultHostId = typeof config?.defaultHostId === 'string' && config.defaultHostId.trim()
-    ? config.defaultHostId.trim()
-    : null;
-  if (typeof config?.initialHostChoiceCompleted === 'boolean') {
-    root.desktopInitialHostChoiceCompleted = config.initialHostChoiceCompleted;
-  }
-  await writeSettingsRoot(root);
+  await mutateSettingsRoot((root) => {
+    root.desktopHosts = Array.isArray(config?.hosts)
+      ? config.hosts
+          .map((entry) => {
+            const id = typeof entry?.id === 'string' ? entry.id.trim() : '';
+            const url = sanitizeHostUrlForStorage(entry?.url);
+            if (!id || id === LOCAL_HOST_ID || !url) return null;
+            return {
+              id,
+              label: typeof entry?.label === 'string' && entry.label.trim() ? entry.label.trim() : url,
+              url,
+            };
+          })
+          .filter(Boolean)
+      : [];
+    root.desktopDefaultHostId = typeof config?.defaultHostId === 'string' && config.defaultHostId.trim()
+      ? config.defaultHostId.trim()
+      : null;
+    if (typeof config?.initialHostChoiceCompleted === 'boolean') {
+      root.desktopInitialHostChoiceCompleted = config.initialHostChoiceCompleted;
+    }
+  });
 };
 
 const readWindowState = () => {
@@ -384,16 +411,16 @@ const writeWindowState = async (browserWindow) => {
   if (!state.mainWindow || browserWindow.id !== state.mainWindow.id) return;
 
   const bounds = browserWindow.getBounds();
-  const root = readSettingsRoot();
-  root.desktopWindowState = {
-    x: bounds.x,
-    y: bounds.y,
-    width: Math.max(bounds.width, MIN_WINDOW_WIDTH),
-    height: Math.max(bounds.height, MIN_WINDOW_HEIGHT),
-    maximized: browserWindow.isMaximized(),
-    fullscreen: browserWindow.isFullScreen(),
-  };
-  await writeSettingsRoot(root);
+  await mutateSettingsRoot((root) => {
+    root.desktopWindowState = {
+      x: bounds.x,
+      y: bounds.y,
+      width: Math.max(bounds.width, MIN_WINDOW_WIDTH),
+      height: Math.max(bounds.height, MIN_WINDOW_HEIGHT),
+      maximized: browserWindow.isMaximized(),
+      fullscreen: browserWindow.isFullScreen(),
+    };
+  });
 };
 
 const debounceWindowStatePersist = (browserWindow, immediate = false) => {
@@ -554,11 +581,22 @@ const focusForegroundWindow = () => {
   const target = state.mainWindow && !state.mainWindow.isDestroyed()
     ? state.mainWindow
     : windows.find((window) => window.isVisible()) || windows[0];
-  if (target.isMinimized()) target.restore();
-  if (!target.isVisible()) target.show();
-  target.focus();
+  // macOS: bring the app to foreground FIRST. When the window is minimized
+  // to the Dock or hidden via Cmd+H, the app is in the background, and
+  // subsequent window.show/restore/focus calls won't pull it forward
+  // unless app.focus runs first.
   if (process.platform === 'darwin') app.focus({ steal: true });
+  if (target.isMinimized()) target.restore();
+  target.show();
+  target.focus();
+  if (typeof target.moveTop === 'function') target.moveTop();
 };
+
+// Keep references to live notifications so they aren't garbage-collected
+// before the OS fires click/close. On macOS, losing the JS reference causes
+// click events to silently stop firing after ~1 min.
+// See https://blog.bloomca.me/2025/02/22/electron-mac-notifications
+const activeNotifications = new Set();
 
 const maybeShowNativeNotification = (rawInput) => {
   const payload = normalizeNotificationInput(rawInput);
@@ -587,12 +625,18 @@ const maybeShowNativeNotification = (rawInput) => {
     ...(process.platform === 'darwin' ? { sound: 'Glass' } : {}),
   });
 
+  activeNotifications.add(notification);
+  const release = () => { activeNotifications.delete(notification); };
+
   notification.on('click', () => {
     focusForegroundWindow();
     if (sessionId) {
       emitToAllWindows('openchamber:open-session', { sessionId });
     }
+    release();
   });
+  notification.on('close', release);
+  notification.on('failed', release);
 
   notification.show();
 };
@@ -735,9 +779,9 @@ const spawnLocalServer = async () => {
   state.serverHandle = handle;
   state.sidecarUrl = url;
 
-  const root = readSettingsRoot();
-  root.desktopLocalPort = port;
-  await writeSettingsRoot(root);
+  await mutateSettingsRoot((root) => {
+    root.desktopLocalPort = port;
+  });
 
   return url;
 };
@@ -1445,10 +1489,11 @@ const readDesktopSshInstances = () => {
 };
 
 const writeDesktopSshInstances = async (config) => {
-  const root = readSettingsRoot();
-  root.desktopSshInstances = Array.isArray(config?.instances) ? config.instances : [];
-  await writeSettingsRoot(root);
-  return { instances: root.desktopSshInstances };
+  const nextInstances = Array.isArray(config?.instances) ? config.instances : [];
+  await mutateSettingsRoot((root) => {
+    root.desktopSshInstances = nextInstances;
+  });
+  return { instances: nextInstances };
 };
 
 const updateHostUrlForSshInstance = async (id, label, localUrl) => {
@@ -1783,9 +1828,9 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       // Tauri build used NSVisualEffectView via Tauri plugin, Electron has
       // no equivalent for our titleBarStyle:'hidden' setup. Persist the
       // disabled state so settings UI reflects it; args.enabled is ignored.
-      const root = readSettingsRoot();
-      root.desktopVibrancy = false;
-      await writeSettingsRoot(root);
+      await mutateSettingsRoot((root) => {
+        root.desktopVibrancy = false;
+      });
       return { enabled: false, requiresRestart: false };
     }
 
@@ -2151,9 +2196,8 @@ app.on('activate', async () => {
   if (windows.length > 0) {
     const visibleWindow = windows.find((window) => window.isVisible());
     const targetWindow = visibleWindow || state.mainWindow || windows[0];
-    if (!targetWindow.isVisible()) {
-      targetWindow.show();
-    }
+    if (targetWindow.isMinimized()) targetWindow.restore();
+    targetWindow.show();
     targetWindow.focus();
     return;
   }

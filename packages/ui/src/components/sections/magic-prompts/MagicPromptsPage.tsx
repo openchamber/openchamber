@@ -1,7 +1,6 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { GridLoader } from '@/components/ui/grid-loader';
 import { toast } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { RiInformationLine } from '@remixicon/react';
@@ -236,7 +235,7 @@ export const MagicPromptsPage: React.FC = () => {
   if (loading) {
     return (
       <div className="py-6 px-6 flex items-center gap-2 text-muted-foreground">
-        <GridLoader size="sm" />
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-current animate-busy-pulse" aria-label="Loading" />
         <span className="typography-ui">Loading Magic Prompts...</span>
       </div>
     );

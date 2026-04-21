@@ -48,11 +48,15 @@ import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { SortableDragHandleProps } from './sidebar/sortableItems';
 import {
+  BulkSessionDeleteConfirmDialog,
   FolderDeleteConfirmDialog,
   SessionDeleteConfirmDialog,
+  type BulkDeleteSessionsConfirmState,
   type DeleteFolderConfirmState,
   type DeleteSessionConfirmState,
 } from './sidebar/ConfirmDialogs';
+import { BulkActionBar } from './sidebar/BulkActionBar';
+import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 import { type SessionGroup, type SessionNode } from './sidebar/types';
 import {
   type ActiveNowEntry,
@@ -145,6 +149,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const [renameFolderDraft, setRenameFolderDraft] = React.useState('');
   const [deleteSessionConfirm, setDeleteSessionConfirm] = React.useState<DeleteSessionConfirmState>(null);
   const [deleteFolderConfirm, setDeleteFolderConfirm] = React.useState<DeleteFolderConfirmState>(null);
+  const [bulkDeleteConfirm, setBulkDeleteConfirm] = React.useState<BulkDeleteSessionsConfirmState>(null);
   const [pinnedSessionIds, setPinnedSessionIds] = React.useState<Set<string>>(() => {
     try {
       const raw = getSafeStorage().getItem(SESSION_PINNED_STORAGE_KEY);
@@ -251,7 +256,9 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const renameFolder = useSessionFoldersStore((state) => state.renameFolder);
   const deleteFolder = useSessionFoldersStore((state) => state.deleteFolder);
   const addSessionToFolder = useSessionFoldersStore((state) => state.addSessionToFolder);
+  const addSessionsToFolder = useSessionFoldersStore((state) => state.addSessionsToFolder);
   const removeSessionFromFolder = useSessionFoldersStore((state) => state.removeSessionFromFolder);
+  const removeSessionsFromFolders = useSessionFoldersStore((state) => state.removeSessionsFromFolders);
   const toggleFolderCollapse = useSessionFoldersStore((state) => state.toggleFolderCollapse);
   const cleanupSessions = useSessionFoldersStore((state) => state.cleanupSessions);
   const getSessionFolderId = useSessionFoldersStore((state) => state.getSessionFolderId);
@@ -389,7 +396,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     }
     return /Macintosh|Mac OS X/.test(navigator.userAgent || '');
   }, []);
-  const showDesktopSidebarChrome = !mobileVariant && !isVSCode;
+  const isWebRuntime = !mobileVariant && !isVSCode && !isDesktopShellRuntime;
+  const showDesktopSidebarChrome = !mobileVariant && !isVSCode && !isWebRuntime;
   const desktopSidebarTopPaddingClass = isDesktopShellRuntime && isMacPlatform && !isDesktopWindowFullscreen ? 'pl-[5.5rem]' : 'pl-3';
   const desktopSidebarToggleButtonClass = 'app-region-no-drag inline-flex h-8 w-8 items-center justify-center rounded-md typography-ui-label font-medium text-foreground transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50';
 
@@ -1380,6 +1388,154 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     />
   ) : null;
   const isInlineEditing = Boolean(renamingFolderId || editingId || editingProjectDialogId);
+
+  const selectionModeEnabled = useSessionMultiSelectStore((state) => state.enabled);
+  const selectedIds = useSessionMultiSelectStore((state) => state.selectedIds);
+  const selectionScopeKey = useSessionMultiSelectStore((state) => state.scopeKey);
+  const multiSelectStoreApi = useSessionMultiSelectStore;
+
+  const handleToggleSelectionMode = React.useCallback(() => {
+    useSessionMultiSelectStore.getState().toggleMode();
+  }, []);
+  const handleExitSelectionMode = React.useCallback(() => {
+    useSessionMultiSelectStore.getState().disable();
+  }, []);
+
+  const bulkScopeIsArchived = React.useMemo(() => {
+    if (selectedIds.size === 0) return false;
+    if (typeof document === 'undefined') return false;
+    let sawActive = false;
+    let sawArchived = false;
+    for (const id of selectedIds) {
+      const rows = document.querySelectorAll<HTMLElement>(`[data-session-row="${CSS.escape(id)}"]`);
+      for (const row of rows) {
+        if (row.getAttribute('data-session-archived') === '1') sawArchived = true;
+        else sawActive = true;
+      }
+    }
+    return sawArchived && !sawActive;
+  }, [selectedIds]);
+
+  const derivedSelectionScope = React.useMemo(() => {
+    if (selectionScopeKey) return selectionScopeKey;
+    if (selectedIds.size === 0) return null;
+    if (typeof document === 'undefined') return null;
+    for (const id of selectedIds) {
+      const row = document.querySelector<HTMLElement>(`[data-session-row="${CSS.escape(id)}"]`);
+      const scope = row?.getAttribute('data-session-scope');
+      if (scope && scope.length > 0) return scope;
+    }
+    return null;
+  }, [selectedIds, selectionScopeKey]);
+
+  const bulkScopeFolders = React.useMemo(() => {
+    if (!derivedSelectionScope) return [];
+    return foldersMap[derivedSelectionScope] ?? [];
+  }, [foldersMap, derivedSelectionScope]);
+
+  const bulkCanRemoveFromFolder = React.useMemo(() => {
+    if (!derivedSelectionScope || selectedIds.size === 0) return false;
+    const scopeFolders = foldersMap[derivedSelectionScope] ?? [];
+    for (const folder of scopeFolders) {
+      for (const id of folder.sessionIds) {
+        if (selectedIds.has(id)) return true;
+      }
+    }
+    return false;
+  }, [foldersMap, derivedSelectionScope, selectedIds]);
+
+  const handleBulkMoveToFolder = React.useCallback((folderId: string) => {
+    if (!derivedSelectionScope || selectedIds.size === 0) return;
+    addSessionsToFolder(derivedSelectionScope, folderId, Array.from(selectedIds));
+  }, [addSessionsToFolder, selectedIds, derivedSelectionScope]);
+
+  const handleBulkCreateFolderAndMove = React.useCallback(() => {
+    if (!derivedSelectionScope || selectedIds.size === 0) return;
+    const newFolder = createFolderAndStartRename(derivedSelectionScope);
+    if (!newFolder) return;
+    addSessionsToFolder(derivedSelectionScope, newFolder.id, Array.from(selectedIds));
+  }, [addSessionsToFolder, createFolderAndStartRename, selectedIds, derivedSelectionScope]);
+
+  const handleBulkRemoveFromFolder = React.useCallback(() => {
+    if (!derivedSelectionScope || selectedIds.size === 0) return;
+    removeSessionsFromFolders(derivedSelectionScope, Array.from(selectedIds));
+  }, [removeSessionsFromFolders, selectedIds, derivedSelectionScope]);
+
+  const executeBulkDelete = React.useCallback(async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    if (bulkScopeIsArchived) {
+      const { deletedIds, failedIds } = await deleteSessions(ids);
+      if (deletedIds.length > 0) toast.success(`Deleted ${deletedIds.length} session${deletedIds.length === 1 ? '' : 's'}`);
+      if (failedIds.length > 0) toast.error(`Failed to delete ${failedIds.length} session${failedIds.length === 1 ? '' : 's'}`);
+    } else {
+      const { archivedIds, failedIds } = await archiveSessions(ids);
+      if (archivedIds.length > 0) toast.success(`Archived ${archivedIds.length} session${archivedIds.length === 1 ? '' : 's'}`);
+      if (failedIds.length > 0) toast.error(`Failed to archive ${failedIds.length} session${failedIds.length === 1 ? '' : 's'}`);
+    }
+    useSessionMultiSelectStore.getState().clear();
+  }, [archiveSessions, bulkScopeIsArchived, deleteSessions, selectedIds]);
+
+  const handleBulkDelete = React.useCallback(() => {
+    const count = selectedIds.size;
+    if (count === 0) return;
+    if (!showDeletionDialog) {
+      void executeBulkDelete();
+      return;
+    }
+    setBulkDeleteConfirm({ sessionCount: count, archivedBucket: bulkScopeIsArchived });
+  }, [bulkScopeIsArchived, executeBulkDelete, selectedIds, showDeletionDialog]);
+
+  const confirmBulkDelete = React.useCallback(async () => {
+    setBulkDeleteConfirm(null);
+    await executeBulkDelete();
+  }, [executeBulkDelete]);
+
+  React.useEffect(() => {
+    if (!selectionModeEnabled) return;
+    const isMac = typeof navigator !== 'undefined' && /Macintosh|Mac OS X/.test(navigator.userAgent || '');
+    const listener = (event: KeyboardEvent) => {
+      if (isInlineEditing) return;
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return;
+      }
+      const modifier = isMac ? event.metaKey : event.ctrlKey;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        useSessionMultiSelectStore.getState().disable();
+        return;
+      }
+      if (modifier && event.key === 'Backspace') {
+        event.preventDefault();
+        handleBulkDelete();
+        return;
+      }
+      if (modifier && (event.key === 'a' || event.key === 'A')) {
+        const rows = typeof document !== 'undefined'
+          ? Array.from(document.querySelectorAll<HTMLElement>('[data-session-row]'))
+          : [];
+        if (rows.length === 0) return;
+        event.preventDefault();
+        const currentScope = multiSelectStoreApi.getState().scopeKey;
+        const targetScope = currentScope
+          ?? rows[0]?.getAttribute('data-session-scope')
+          ?? null;
+        const scopeFilter = (el: HTMLElement): boolean => {
+          if (!targetScope) return true;
+          return el.getAttribute('data-session-scope') === targetScope;
+        };
+        const ids = rows
+          .filter(scopeFilter)
+          .map((el) => el.getAttribute('data-session-row'))
+          .filter((id): id is string => typeof id === 'string' && id.length > 0);
+        if (ids.length === 0) return;
+        multiSelectStoreApi.getState().replaceAll(ids, targetScope || null);
+      }
+    };
+    window.addEventListener('keydown', listener);
+    return () => window.removeEventListener('keydown', listener);
+  }, [handleBulkDelete, isInlineEditing, multiSelectStoreApi, selectionModeEnabled]);
   const handleSidebarNewSession = React.useCallback(() => {
     setActiveMainTab('chat');
     if (mobileVariant) {
@@ -1449,6 +1605,10 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         collapseAllProjects={collapseAllProjects}
         expandAllProjects={expandAllProjects}
         openScheduledTasksDialog={() => setScheduledTasksDialogOpen(true)}
+        selectionModeEnabled={selectionModeEnabled}
+        onToggleSelectionMode={handleToggleSelectionMode}
+        showSidebarToggle={isWebRuntime}
+        onToggleSidebar={toggleSidebar}
       />
 
       <SidebarProjectsList
@@ -1484,6 +1644,21 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         setOpenSidebarMenuKey={setOpenSidebarMenuKey}
         isInlineEditing={isInlineEditing}
       />
+
+      {selectionModeEnabled && selectedIds.size > 0 ? (
+        <BulkActionBar
+          selectedCount={selectedIds.size}
+          scopeKey={derivedSelectionScope}
+          scopeFolders={bulkScopeFolders}
+          archivedBucket={bulkScopeIsArchived}
+          onMoveToFolder={handleBulkMoveToFolder}
+          onCreateFolderAndMove={handleBulkCreateFolderAndMove}
+          onRemoveFromFolder={handleBulkRemoveFromFolder}
+          canRemoveFromFolder={bulkCanRemoveFromFolder}
+          onDelete={handleBulkDelete}
+          onDone={handleExitSelectionMode}
+        />
+      ) : null}
 
       <SidebarFooter
         onOpenSettings={handleOpenSettings}
@@ -1555,6 +1730,14 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         value={deleteFolderConfirm}
         setValue={setDeleteFolderConfirm}
         onConfirm={confirmDeleteFolder}
+      />
+
+      <BulkSessionDeleteConfirmDialog
+        value={bulkDeleteConfirm}
+        setValue={setBulkDeleteConfirm}
+        showDeletionDialog={showDeletionDialog}
+        setShowDeletionDialog={setShowDeletionDialog}
+        onConfirm={confirmBulkDelete}
       />
     </div>
   );

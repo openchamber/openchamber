@@ -62,15 +62,14 @@ export const Radio = React.memo<RadioProps>(function Radio({
         className,
       )}
     >
-      {checked ? (
-        <span
-          aria-hidden
-          className={cn(
-            'block h-[5px] w-[5px] rounded-full bg-white',
-            iconClassName,
-          )}
-        />
-      ) : null}
+      <span
+        aria-hidden
+        className={cn(
+          'block h-[5px] w-[5px] rounded-full bg-white',
+          !checked && 'opacity-0',
+          iconClassName,
+        )}
+      />
     </button>
   );
 });

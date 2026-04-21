@@ -18,6 +18,7 @@ type TodoItem = Todo & { id?: string };
 type TodoStatus = string;
 type TodoPriority = string;
 import { useUIStore } from "@/stores/useUIStore";
+import { useTodosPersistStore } from "@/stores/useTodosPersistStore";
 import { WorkingPlaceholder } from "./message/parts/WorkingPlaceholder";
 import { isVSCodeRuntime } from "@/lib/desktop";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -134,6 +135,7 @@ interface StatusRowProps {
   showAssistantStatus?: boolean;
   showTodos?: boolean;
   agentName?: string;
+  leftAccessory?: React.ReactNode;
 }
 
 export const StatusRow: React.FC<StatusRowProps> = ({
@@ -150,14 +152,23 @@ export const StatusRow: React.FC<StatusRowProps> = ({
   showAssistantStatus = true,
   showTodos = true,
   agentName,
+  leftAccessory,
 }) => {
   const [isExpanded, setIsExpanded] = React.useState(false);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const todosRecord = useDirectorySync((state) => state.todo);
-  const todos: TodoItem[] = React.useMemo(
-    () => (currentSessionId ? todosRecord[currentSessionId] ?? EMPTY_TODOS : EMPTY_TODOS),
-    [todosRecord, currentSessionId],
+  const persistedSessionTodos = useTodosPersistStore(
+    React.useCallback(
+      (state) => (currentSessionId ? state.sessions[currentSessionId]?.todos : undefined),
+      [currentSessionId],
+    ),
   );
+  const todos: TodoItem[] = React.useMemo(() => {
+    if (!currentSessionId) return EMPTY_TODOS;
+    const live = todosRecord[currentSessionId];
+    if (live && live.length > 0) return live;
+    return persistedSessionTodos ?? EMPTY_TODOS;
+  }, [todosRecord, persistedSessionTodos, currentSessionId]);
   const isMobile = useUIStore((state) => state.isMobile);
   const isCompact = isMobile || isVSCodeRuntime();
 
@@ -189,17 +200,17 @@ export const StatusRow: React.FC<StatusRowProps> = ({
     return { active, left };
   }, [visibleTodos]);
 
-  const hasActiveTodos = visibleTodos.some((t) => t.status === "in_progress" || t.status === "pending");
-  const hasTodoContent = showTodos && hasActiveTodos;
+  const hasTodoContent = showTodos && visibleTodos.length > 0;
   const hasAssistantContent = showAssistantStatus && (
     isWorking ||
     Boolean(wasAborted) ||
     Boolean(showAbortStatus)
   );
+  const hasLeftAccessory = Boolean(leftAccessory);
   // Original logic from ChatInput
   const shouldRenderPlaceholder = !showAbortStatus && (wasAborted || !abortActive);
 
-  const hasContent = hasAssistantContent || hasTodoContent;
+  const hasContent = hasAssistantContent || hasTodoContent || hasLeftAccessory;
 
   // Close popover when clicking outside
   const popoverRef = React.useRef<HTMLDivElement>(null);
@@ -239,7 +250,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
     >
       {/* Desktop: show task text; Mobile/VSCode: just "Tasks" */}
       {!isCompact && activeTodo ? (
-        <span className="typography-ui-label text-foreground truncate max-w-[200px]">
+        <span className="status-row__active-todo typography-ui-label text-foreground truncate max-w-[200px]">
           {activeTodo.content}
         </span>
       ) : (
@@ -262,10 +273,10 @@ export const StatusRow: React.FC<StatusRowProps> = ({
   }
 
   return (
-    <div className="chat-column mb-1" style={{ containerType: "inline-size" }}>
-      <div className="flex items-center justify-between py-0.5 gap-2 h-[1.2rem]">
-        {/* Left: Abort status or Working placeholder */}
-        <div className="flex-1 flex items-center overflow-hidden min-w-0">
+    <div className={cn("mb-1", !hasLeftAccessory && "chat-column")} style={{ containerType: "inline-size", containerName: "status-row" }}>
+      <div className={cn("flex items-center justify-between py-0.5 gap-2 h-[1.2rem]", hasLeftAccessory && "px-0.5")}>
+        {/* Left: Abort status or Working placeholder or leftAccessory */}
+        <div className={cn("flex-1 flex items-center min-w-0", hasLeftAccessory ? "pl-1.5" : "overflow-hidden")}>
           {showAssistantStatus && showAbortStatus ? (
             <div className="flex h-full items-center text-[var(--status-error)] pl-0.5">
               <span className="flex items-center gap-1.5 typography-ui-label">
@@ -283,36 +294,43 @@ export const StatusRow: React.FC<StatusRowProps> = ({
               retryInfo={retryInfo}
               agentName={agentName}
             />
+          ) : leftAccessory ? (
+            leftAccessory
           ) : null}
         </div>
 
         {/* Right: Abort (mobile only) + Todo */}
-        <div className="relative -mr-3 flex items-center gap-2 flex-shrink-0" ref={popoverRef}>
+        <div className={cn("relative flex items-center gap-2 flex-shrink-0", hasLeftAccessory ? "pr-1.5" : "-mr-3")} ref={popoverRef}>
           {abortButton}
           {todoTrigger}
 
           {/* Popover dropdown */}
-          {isExpanded && hasActiveTodos && (
+          {isExpanded && hasTodoContent && (
             <div
-              style={{ maxWidth: "calc(100cqw - 4ch)" }}
+              style={{
+                maxWidth: "min(28rem, calc(100cqw - 4ch))",
+                backgroundColor: "var(--surface-elevated)",
+                color: "var(--surface-elevated-foreground)",
+              }}
               className={cn(
                 "absolute right-0 bottom-full mb-1 z-50",
-                "w-max min-w-[200px]",
-                "rounded-xl border border-border bg-background shadow-none",
+                "w-max min-w-[200px] rounded-xl p-1",
+                "shadow-[inset_0_1px_0_0_rgba(255,255,255,0.8),inset_0_0_0_1px_rgba(0,0,0,0.04),0_0_0_1px_rgba(0,0,0,0.10),0_1px_2px_-0.5px_rgba(0,0,0,0.08),0_4px_8px_-2px_rgba(0,0,0,0.08),0_12px_20px_-4px_rgba(0,0,0,0.08)]",
+                "dark:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.12),inset_0_0_0_1px_rgba(255,255,255,0.08),0_0_0_1px_rgba(0,0,0,0.36),0_1px_1px_-0.5px_rgba(0,0,0,0.22),0_3px_3px_-1.5px_rgba(0,0,0,0.20),0_6px_6px_-3px_rgba(0,0,0,0.16)]",
                 "animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-2",
                 "duration-150"
               )}
             >
               {/* Header */}
-              <div className="flex items-center justify-between px-3 py-2 border-b border-border">
-                <span className="typography-ui-label text-muted-foreground">Tasks</span>
-                <span className="typography-meta text-muted-foreground">
+              <div className="flex items-center gap-1.5 px-2 py-1 typography-ui-label font-medium text-muted-foreground">
+                <span>Tasks</span>
+                <span className="typography-meta tabular-nums">
                   {progress.completed}/{progress.total}
                 </span>
               </div>
 
               {/* Todo list */}
-              <div className="px-3 py-2 max-h-[200px] overflow-y-auto divide-y divide-border">
+              <div className="px-1 max-h-[200px] overflow-y-auto">
                 {visibleTodos.map((todo, index) => (
                   <TodoItemRow key={todo.id ?? `todo-${index}`} todo={todo} />
                 ))}

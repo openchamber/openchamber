@@ -308,101 +308,6 @@ textarea[data-chat-input="true"]:focus-visible {
   }
 }
 
-[data-component="oc-text-shimmer"] {
-  --oc-text-shimmer-step: 45ms;
-  --oc-text-shimmer-duration: 1200ms;
-  --oc-text-shimmer-angle: 90deg;
-  --oc-text-shimmer-spread: 5.2ch;
-  --oc-text-shimmer-size: 360%;
-  --oc-text-shimmer-base-color: color-mix(in srgb, var(--surface-muted-foreground) 75%, transparent);
-  --oc-text-shimmer-peak-color: var(--surface-foreground);
-  --oc-text-shimmer-sweep: linear-gradient(
-    var(--oc-text-shimmer-angle),
-    transparent calc(50% - var(--oc-text-shimmer-spread)),
-    var(--oc-text-shimmer-peak-color) 50%,
-    transparent calc(50% + var(--oc-text-shimmer-spread))
-  );
-  --oc-text-shimmer-base: linear-gradient(var(--oc-text-shimmer-base-color), var(--oc-text-shimmer-base-color));
-
-}
-
-[data-component="oc-text-shimmer"] [data-slot="text-shimmer-char"] {
-  display: inline-grid;
-  white-space: inherit;
-  font: inherit;
-  letter-spacing: inherit;
-  line-height: inherit;
-}
-
-[data-component="oc-text-shimmer"] [data-slot="text-shimmer-char-base"],
-[data-component="oc-text-shimmer"] [data-slot="text-shimmer-char-shimmer"] {
-  grid-area: 1 / 1;
-  white-space: inherit;
-  font: inherit;
-  letter-spacing: inherit;
-  line-height: inherit;
-}
-
-[data-component="oc-text-shimmer"] [data-slot="text-shimmer-char-base"] {
-  color: inherit;
-  opacity: 0;
-}
-
-[data-component="oc-text-shimmer"] [data-slot="text-shimmer-char-shimmer"] {
-  color: var(--surface-muted-foreground);
-  opacity: 1;
-}
-
-[data-component="oc-text-shimmer"] [data-slot="text-shimmer-char-shimmer"][data-run="true"] {
-  animation-name: oc-text-shimmer-sweep;
-  animation-duration: var(--oc-text-shimmer-duration);
-  animation-iteration-count: infinite;
-  animation-timing-function: linear;
-  animation-fill-mode: both;
-  animation-delay: calc(var(--oc-text-shimmer-step) * -1);
-  will-change: background-position;
-}
-
-@keyframes oc-text-shimmer-sweep {
-  0% {
-    background-position:
-      100% 0,
-      0 0;
-  }
-
-  100% {
-    background-position:
-      0% 0,
-      0 0;
-  }
-}
-
-@supports ((-webkit-background-clip: text) or (background-clip: text)) {
-  [data-component="oc-text-shimmer"] [data-slot="text-shimmer-char-shimmer"] {
-    color: transparent;
-    -webkit-text-fill-color: transparent;
-    background-image: var(--oc-text-shimmer-sweep), var(--oc-text-shimmer-base);
-    background-size:
-      var(--oc-text-shimmer-size) 100%,
-      100% 100%;
-    background-position:
-      100% 0,
-      0 0;
-    background-repeat: no-repeat;
-    -webkit-background-clip: text;
-    background-clip: text;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  [data-component="oc-text-shimmer"] [data-slot="text-shimmer-char-shimmer"] {
-    animation: none !important;
-    color: inherit;
-    -webkit-text-fill-color: currentColor;
-    background-image: none;
-  }
-}
-
 @keyframes gradient-shimmer {
   0% {
     stop-color: currentColor;
@@ -511,12 +416,6 @@ svg.animate-spin {
   100% {
     transform: translateZ(0) rotate(360deg);
   }
-}
-
-/* Starfield twinkle — dots fade through varying brightness like stars */
-@keyframes star-twinkle {
-  0%, 100% { opacity: 0.15; }
-  50% { opacity: 0.7; }
 }
 
 @keyframes pulse-opacity {
@@ -860,6 +759,19 @@ html:not(.dark) .chat-scroll {
 /* Git right-sidebar header/actions collapse to icon-only when narrow. */
 @container git-header (max-width: 26rem) {
   .git-header-label {
+    display: none;
+  }
+}
+
+/* Status row: collapse optional text when narrow to keep both sides in one line. */
+@container status-row (max-width: 30rem) {
+  .status-row__active-todo {
+    display: none;
+  }
+}
+
+@container status-row (max-width: 24rem) {
+  .status-row__changed-label {
     display: none;
   }
 }
@@ -1415,7 +1327,7 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   font-family: "JetBrainsMono Nerd Font", "FiraCode Nerd Font", "Fira Code", "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
-@keyframes grid-pulse {
+@keyframes oc-busy-pulse {
   0%, 100% {
     opacity: 0.2;
   }
@@ -1424,21 +1336,8 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   }
 }
 
-.animate-grid-pulse {
-  animation: grid-pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes attention-diamond-pulse {
-  0%, 100% {
-    opacity: 0.52;
-  }
-  50% {
-    opacity: 0.92;
-  }
-}
-
-.animate-attention-diamond-pulse {
-  animation: attention-diamond-pulse 2.3s ease-in-out infinite;
+.animate-busy-pulse {
+  animation: oc-busy-pulse 1.2s ease-in-out infinite;
 }
 
 @keyframes navrail-dot-wave {
@@ -1525,8 +1424,7 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
     animation: none;
   }
 
-  .animate-grid-pulse,
-  .animate-attention-diamond-pulse {
+  .animate-busy-pulse {
     animation: none;
   }
 

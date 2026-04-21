@@ -72,7 +72,12 @@ const readJsonRoot = (settingsFilePath) => {
 
 const writeJsonRoot = async (settingsFilePath, root) => {
   await fsp.mkdir(path.dirname(settingsFilePath), { recursive: true });
-  await fsp.writeFile(settingsFilePath, JSON.stringify(root, null, 2));
+  // Atomic write: concurrent readers (main.mjs, web server) would otherwise
+  // see partial JSON and readJsonRoot()'s catch would silently coerce to {},
+  // causing the next read-modify-write to wipe the entire settings file.
+  const tmp = `${settingsFilePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  await fsp.writeFile(tmp, JSON.stringify(root, null, 2));
+  await fsp.rename(tmp, settingsFilePath);
 };
 
 const defaultTrue = () => true;

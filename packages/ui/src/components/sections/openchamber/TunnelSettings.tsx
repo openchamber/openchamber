@@ -20,7 +20,6 @@ import {
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { GridLoader } from '@/components/ui/grid-loader';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -1058,7 +1057,7 @@ export const TunnelSettings: React.FC = () => {
   if (state === 'checking') {
     return (
       <div className="flex items-center justify-center py-12">
-        <GridLoader size="sm" />
+        <span className="h-1.5 w-1.5 rounded-full bg-current animate-busy-pulse" aria-label="Loading" />
       </div>
     );
   }

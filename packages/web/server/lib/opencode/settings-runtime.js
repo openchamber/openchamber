@@ -440,7 +440,13 @@ export const createSettingsRuntime = (deps) => {
   const writeSettingsToDisk = async (settings) => {
     try {
       await fsPromises.mkdir(path.dirname(SETTINGS_FILE_PATH), { recursive: true });
-      await fsPromises.writeFile(SETTINGS_FILE_PATH, JSON.stringify(settings, null, 2), 'utf8');
+      // Atomic write: Electron main and ssh-manager read this file via plain
+      // readFile + JSON.parse and silently coerce parse errors to {}. A
+      // partial read during a non-atomic writeFile would make their next
+      // read-modify-write wipe the settings file.
+      const tmp = `${SETTINGS_FILE_PATH}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      await fsPromises.writeFile(tmp, JSON.stringify(settings, null, 2), 'utf8');
+      await fsPromises.rename(tmp, SETTINGS_FILE_PATH);
     } catch (error) {
       console.warn('Failed to write settings file:', error);
       throw error;

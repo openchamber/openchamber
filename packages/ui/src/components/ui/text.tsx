@@ -17,24 +17,6 @@ const variants = [
     ),
   },
   {
-    variant: "shine",
-    component: ({ children, className, ...props }) => (
-      <span
-        {...props}
-        data-component="oc-text-shimmer"
-        data-active="true"
-        className={className}
-      >
-        <span data-slot="text-shimmer-char">
-          <span data-slot="text-shimmer-char-base">{children}</span>
-          <span data-slot="text-shimmer-char-shimmer" data-run="true" aria-hidden="true">
-            {children}
-          </span>
-        </span>
-      </span>
-    ),
-  },
-  {
     variant: "generate-effect",
     component: ({ children, className, ...props }) => {
       if (children === null || typeof children === "undefined") return null;
@@ -210,12 +192,10 @@ export type TextProps = {
 } & React.ComponentProps<"span"> &
   Partial<MotionProps>;
 
-export function Text({ variant = "shine", className, ...props }: TextProps) {
-  const FALLBACK_INDEX = 1;
-
+export function Text({ variant = "static", className, ...props }: TextProps) {
   const variantComponent = variants.find((v) => v.variant === variant)?.component;
 
-  const Component = variantComponent || variants[FALLBACK_INDEX].component;
+  const Component = variantComponent || variants[0].component;
 
   return <Component {...props} className={className} />;
 }

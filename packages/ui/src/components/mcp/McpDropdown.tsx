@@ -17,6 +17,7 @@ import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { cn } from '@/lib/utils';
 import { useDeviceInfo } from '@/lib/device';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
 import { computeMcpHealth, useMcpStore } from '@/stores/useMcpStore';
 import { McpIcon } from '@/components/icons/McpIcon';
 
@@ -66,6 +67,8 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
   const refresh = useMcpStore((state) => state.refresh);
   const connect = useMcpStore((state) => state.connect);
   const disconnect = useMcpStore((state) => state.disconnect);
+  const mcpServers = useMcpConfigStore((state) => state.mcpServers);
+  const loadMcpConfigs = useMcpConfigStore((state) => state.loadMcpConfigs);
   const [isSpinning, setIsSpinning] = React.useState(false);
   const [busyName, setBusyName] = React.useState<string | null>(null);
 
@@ -74,13 +77,26 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
   }, [refresh, directory]);
 
   React.useEffect(() => {
+    void loadMcpConfigs({ force: true });
+  }, [loadMcpConfigs]);
+
+  React.useEffect(() => {
     if (!active) return;
-    void refresh({ directory, silent: true });
-  }, [active, refresh, directory]);
+    void Promise.all([
+      refresh({ directory, silent: true }),
+      loadMcpConfigs({ force: true }),
+    ]);
+  }, [active, refresh, directory, loadMcpConfigs]);
 
   const sortedNames = React.useMemo(() => {
-    return Object.keys(status).sort((a, b) => a.localeCompare(b));
-  }, [status]);
+    const names = new Set<string>(Object.keys(status));
+    for (const server of mcpServers) {
+      if (server?.name) {
+        names.add(server.name);
+      }
+    }
+    return Array.from(names).sort((a, b) => a.localeCompare(b));
+  }, [mcpServers, status]);
 
   const handleRefresh = React.useCallback((e?: React.MouseEvent) => {
     e?.preventDefault();
@@ -195,6 +211,8 @@ export const McpDropdown: React.FC<McpDropdownProps> = ({ headerIconButtonClass 
   const refresh = useMcpStore((state) => state.refresh);
   const connect = useMcpStore((state) => state.connect);
   const disconnect = useMcpStore((state) => state.disconnect);
+  const mcpServers = useMcpConfigStore((state) => state.mcpServers);
+  const loadMcpConfigs = useMcpConfigStore((state) => state.loadMcpConfigs);
 
   const handleDropdownOpenChange = React.useCallback((isOpen: boolean) => {
     if (!isOpen) {
@@ -219,19 +237,29 @@ export const McpDropdown: React.FC<McpDropdownProps> = ({ headerIconButtonClass 
   // Fetch on mount and when directory changes
   React.useEffect(() => {
     void refresh({ directory, silent: true });
-  }, [refresh, directory]);
+    void loadMcpConfigs({ force: true });
+  }, [refresh, directory, loadMcpConfigs]);
 
   // Refresh when dropdown opens
   React.useEffect(() => {
     if (!open) return;
-    void refresh({ directory, silent: true });
-  }, [open, refresh, directory]);
+    void Promise.all([
+      refresh({ directory, silent: true }),
+      loadMcpConfigs({ force: true }),
+    ]);
+  }, [open, refresh, directory, loadMcpConfigs]);
 
   const health = React.useMemo(() => computeMcpHealth(status), [status]);
 
   const sortedNames = React.useMemo(() => {
-    return Object.keys(status).sort((a, b) => a.localeCompare(b));
-  }, [status]);
+    const names = new Set<string>(Object.keys(status));
+    for (const server of mcpServers) {
+      if (server?.name) {
+        names.add(server.name);
+      }
+    }
+    return Array.from(names).sort((a, b) => a.localeCompare(b));
+  }, [mcpServers, status]);
 
   const handleRefresh = React.useCallback((e?: React.MouseEvent) => {
     e?.preventDefault();

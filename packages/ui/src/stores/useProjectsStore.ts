@@ -655,6 +655,25 @@ export const useProjectsStore = create<ProjectsStore>()(
         : null;
 
       const current = get();
+
+      // Race guard: settings load can return empty projects during app
+      // rebuild/reinstall or an incomplete settings read. Don't clobber
+      // a populated cache with empty — the sidebar would go blank and
+      // localStorage would be overwritten, losing the list entirely.
+      if (incomingProjects.length === 0 && current.projects.length > 0) {
+        if (incomingActive !== current.activeProjectId) {
+          // Active project may still be valid within the cached list.
+          const activeExists = incomingActive
+            ? current.projects.some((project) => project.id === incomingActive)
+            : true;
+          if (activeExists) {
+            set({ activeProjectId: incomingActive });
+            cacheProjects(current.projects, incomingActive);
+          }
+        }
+        return;
+      }
+
       const projectsChanged = JSON.stringify(current.projects) !== JSON.stringify(incomingProjects);
       const activeChanged = current.activeProjectId !== incomingActive;
 

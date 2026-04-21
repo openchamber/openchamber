@@ -1,7 +1,5 @@
 import React from 'react';
-import { Text } from '@/components/ui/text';
-// import { SessionActiveSpinner } from './SessionActiveSpinner';
-import { GenericStatusSpinner } from './GenericStatusSpinner';
+import { BusyDots } from './BusyDots';
 
 interface WorkingPlaceholderProps {
   isWorking: boolean;
@@ -190,20 +188,18 @@ export function WorkingPlaceholder({
     const countdownLabel = retryCountdown !== null && retryCountdown > 0
       ? ` in ${formatRetryCountdown(retryCountdown)}`
       : '';
-    const retryText = `Retrying${countdownLabel}${attemptLabel}...`;
+    const retryText = `Retrying${countdownLabel}${attemptLabel}`;
 
     return (
       <div
         className="flex h-full items-center text-muted-foreground pl-0.5"
         role="status"
         aria-live="polite"
-        aria-label={retryText}
+        aria-label={`${retryText}...`}
       >
-        <span className="flex items-center gap-1">
-          <GenericStatusSpinner className="size-[15px] shrink-0" />
-          <Text variant="shine" className="typography-ui-header">
-            {retryText}
-          </Text>
+        <span className="typography-ui-header">
+          {retryText}
+          <BusyDots />
         </span>
       </div>
     );
@@ -214,7 +210,6 @@ export function WorkingPlaceholder({
   }
 
   const label = displayedText.charAt(0).toUpperCase() + displayedText.slice(1);
-  const displayText = `${label}...`;
 
   return (
     <div
@@ -226,11 +221,9 @@ export function WorkingPlaceholder({
       aria-label={label}
       data-waiting={displayedPermission ? 'true' : undefined}
     >
-      <span className="flex items-center gap-1">
-        <GenericStatusSpinner className="size-[15px] shrink-0" />
-        <Text variant="shine" className="typography-ui-header">
-          {displayText}
-        </Text>
+      <span className="typography-ui-header">
+        {label}
+        <BusyDots />
       </span>
     </div>
   );

@@ -11,6 +11,13 @@ import { opencodeClient } from '@/lib/opencode/client';
 
 export type McpScope = 'user' | 'project';
 
+type McpMutationResult = {
+  ok: boolean;
+  reloadFailed?: boolean;
+  message?: string;
+  warning?: string;
+};
+
 const getConfigDirectory = (): string | null => {
   try {
     const projectsStore = useProjectsStore.getState();
@@ -38,10 +45,20 @@ export interface McpLocalConfig {
   enabled: boolean;
 }
 
+export interface McpOAuthConfig {
+  clientId?: string;
+  clientSecret?: string;
+  scope?: string;
+  redirectUri?: string;
+}
+
 export interface McpRemoteConfig {
   type: 'remote';
   url: string;
   environment?: Record<string, string>;
+  headers?: Record<string, string>;
+  oauth?: McpOAuthConfig | false;
+  timeout?: number;
   enabled: boolean;
 }
 
@@ -55,6 +72,13 @@ export interface McpDraft {
   command: string[];
   url: string;
   environment: Array<{ key: string; value: string }>;
+  headers: Array<{ key: string; value: string }>;
+  oauthEnabled: boolean;
+  oauthClientId: string;
+  oauthClientSecret: string;
+  oauthScope: string;
+  oauthRedirectUri: string;
+  timeout: string;
   enabled: boolean;
 }
 
@@ -69,6 +93,12 @@ export const envArrayToRecord = (arr: Array<{ key: string; value: string }>): Re
   const filtered = arr.filter((e) => e.key.trim());
   if (filtered.length === 0) return undefined;
   return Object.fromEntries(filtered.map((e) => [e.key.trim(), e.value]));
+};
+
+const trimOptionalString = (value: string | undefined): string | undefined => {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
 };
 
 const CLIENT_RELOAD_DELAY_MS = 800;
@@ -91,12 +121,16 @@ interface McpConfigStore {
 
   setSelectedMcp: (name: string | null) => void;
   setMcpDraft: (draft: McpDraft | null) => void;
-  loadMcpConfigs: () => Promise<boolean>;
-  createMcp: (config: McpDraft) => Promise<boolean>;
-  updateMcp: (name: string, config: Partial<McpDraft>) => Promise<boolean>;
-  deleteMcp: (name: string) => Promise<boolean>;
+  loadMcpConfigs: (options?: { force?: boolean }) => Promise<boolean>;
+  createMcp: (config: McpDraft) => Promise<McpMutationResult>;
+  updateMcp: (name: string, config: Partial<McpDraft>) => Promise<McpMutationResult>;
+  deleteMcp: (name: string) => Promise<McpMutationResult>;
   getMcpByName: (name: string) => McpServerWithScope | undefined;
 }
+
+const invalidateMcpCache = (directory: string | null) => {
+  mcpLastLoadedAt.delete(getMcpCacheKey(directory));
+};
 
 export const useMcpConfigStore = create<McpConfigStore>()(
   devtools(
@@ -111,19 +145,19 @@ export const useMcpConfigStore = create<McpConfigStore>()(
 
         setMcpDraft: (draft) => set({ mcpDraft: draft }),
 
-        loadMcpConfigs: async () => {
+        loadMcpConfigs: async (options) => {
           const configDirectory = getConfigDirectory();
           const cacheKey = getMcpCacheKey(configDirectory);
           const now = Date.now();
           const loadedAt = mcpLastLoadedAt.get(cacheKey) ?? 0;
           const hasCachedConfigs = get().mcpServers.length > 0;
 
-          if (hasCachedConfigs && now - loadedAt < MCP_LOAD_CACHE_TTL_MS) {
+          if (!options?.force && hasCachedConfigs && now - loadedAt < MCP_LOAD_CACHE_TTL_MS) {
             return true;
           }
 
           const inFlight = mcpLoadInFlight.get(cacheKey);
-          if (inFlight) {
+          if (!options?.force && inFlight) {
             return inFlight;
           }
 
@@ -177,6 +211,8 @@ export const useMcpConfigStore = create<McpConfigStore>()(
               throw new Error(payload?.error || 'Failed to create MCP server');
             }
 
+            invalidateMcpCache(configDirectory);
+
             if (payload?.requiresReload) {
               requiresReload = true;
               await refreshAfterOpenCodeRestart({
@@ -184,14 +220,25 @@ export const useMcpConfigStore = create<McpConfigStore>()(
                 delayMs: payload.reloadDelayMs ?? CLIENT_RELOAD_DELAY_MS,
                 scopes: ['all'],
               });
-              return true;
+              await get().loadMcpConfigs({ force: true });
+              return {
+                ok: true,
+                reloadFailed: payload?.reloadFailed === true,
+                message: payload?.message,
+                warning: payload?.warning,
+              };
             }
 
-            await get().loadMcpConfigs();
-            return true;
+            await get().loadMcpConfigs({ force: true });
+            return {
+              ok: true,
+              reloadFailed: payload?.reloadFailed === true,
+              message: payload?.message,
+              warning: payload?.warning,
+            };
           } catch (error) {
             console.error('[McpConfigStore] Failed to create MCP:', error);
-            return false;
+            return { ok: false };
           } finally {
             if (!requiresReload) finishConfigUpdate();
           }
@@ -218,6 +265,8 @@ export const useMcpConfigStore = create<McpConfigStore>()(
               throw new Error(payload?.error || 'Failed to update MCP server');
             }
 
+            invalidateMcpCache(configDirectory);
+
             if (payload?.requiresReload) {
               requiresReload = true;
               await refreshAfterOpenCodeRestart({
@@ -225,11 +274,22 @@ export const useMcpConfigStore = create<McpConfigStore>()(
                 delayMs: payload.reloadDelayMs ?? CLIENT_RELOAD_DELAY_MS,
                 scopes: ['all'],
               });
-              return true;
+              await get().loadMcpConfigs({ force: true });
+              return {
+                ok: true,
+                reloadFailed: payload?.reloadFailed === true,
+                message: payload?.message,
+                warning: payload?.warning,
+              };
             }
 
-            await get().loadMcpConfigs();
-            return true;
+            await get().loadMcpConfigs({ force: true });
+            return {
+              ok: true,
+              reloadFailed: payload?.reloadFailed === true,
+              message: payload?.message,
+              warning: payload?.warning,
+            };
           } catch (error) {
             console.error('[McpConfigStore] Failed to update MCP:', error);
             throw error;
@@ -254,6 +314,8 @@ export const useMcpConfigStore = create<McpConfigStore>()(
               throw new Error(payload?.error || 'Failed to delete MCP server');
             }
 
+            invalidateMcpCache(configDirectory);
+
             if (payload?.requiresReload) {
               requiresReload = true;
               await refreshAfterOpenCodeRestart({
@@ -261,17 +323,21 @@ export const useMcpConfigStore = create<McpConfigStore>()(
                 delayMs: payload.reloadDelayMs ?? CLIENT_RELOAD_DELAY_MS,
                 scopes: ['all'],
               });
-              return true;
             }
 
             if (get().selectedMcpName === name) {
               set({ selectedMcpName: null });
             }
-            await get().loadMcpConfigs();
-            return true;
+            await get().loadMcpConfigs({ force: true });
+            return {
+              ok: true,
+              reloadFailed: payload?.reloadFailed === true,
+              message: payload?.message,
+              warning: payload?.warning,
+            };
           } catch (error) {
             console.error('[McpConfigStore] Failed to delete MCP:', error);
-            return false;
+            return { ok: false };
           } finally {
             if (!requiresReload) finishConfigUpdate();
           }
@@ -310,6 +376,46 @@ function buildMcpBody(config: Partial<McpDraft>): Record<string, unknown> {
 
   if (config.environment !== undefined) {
     body.environment = envArrayToRecord(config.environment) ?? {};
+  }
+
+  if (config.headers !== undefined) {
+    body.headers = envArrayToRecord(config.headers) ?? {};
+  }
+
+  if (
+    config.oauthEnabled !== undefined ||
+    config.oauthClientId !== undefined ||
+    config.oauthClientSecret !== undefined ||
+    config.oauthScope !== undefined ||
+    config.oauthRedirectUri !== undefined
+  ) {
+    if (config.oauthEnabled === false) {
+      body.oauth = false;
+    } else {
+      const oauth = {
+        clientId: trimOptionalString(config.oauthClientId),
+        clientSecret: trimOptionalString(config.oauthClientSecret),
+        scope: trimOptionalString(config.oauthScope),
+        redirectUri: trimOptionalString(config.oauthRedirectUri),
+      };
+
+      if (oauth.clientId || oauth.clientSecret || oauth.scope || oauth.redirectUri) {
+        body.oauth = oauth;
+      } else if (config.oauthEnabled) {
+        body.oauth = {};
+      } else {
+        body.oauth = false;
+      }
+    }
+  }
+
+  if (config.timeout !== undefined) {
+    const timeout = Number(config.timeout);
+    if (Number.isFinite(timeout) && timeout > 0) {
+      body.timeout = timeout;
+    } else {
+      body.timeout = null;
+    }
   }
 
   if (config.enabled !== undefined) {

@@ -9,15 +9,18 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   RiCheckLine,
+  RiCheckboxMultipleLine,
   RiChatNewLine,
   RiEqualizer2Line,
   RiFolderAddLine,
+  RiLayoutLeftLine,
   RiSearchLine,
   RiCloseLine,
   RiContractUpDownLine,
   RiExpandUpDownLine,
   RiCalendarScheduleLine,
 } from '@remixicon/react';
+import { cn } from '@/lib/utils';
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 
@@ -40,6 +43,10 @@ type Props = {
   collapseAllProjects: () => void;
   expandAllProjects: () => void;
   openScheduledTasksDialog: () => void;
+  selectionModeEnabled: boolean;
+  onToggleSelectionMode: () => void;
+  showSidebarToggle?: boolean;
+  onToggleSidebar?: () => void;
 };
 
 export function SidebarHeader(props: Props): React.ReactNode {
@@ -62,6 +69,10 @@ export function SidebarHeader(props: Props): React.ReactNode {
     collapseAllProjects,
     expandAllProjects,
     openScheduledTasksDialog,
+    selectionModeEnabled,
+    onToggleSelectionMode,
+    showSidebarToggle = false,
+    onToggleSidebar,
   } = props;
 
   const displayMode = useSessionDisplayStore((state) => state.displayMode);
@@ -72,11 +83,36 @@ export function SidebarHeader(props: Props): React.ReactNode {
   }
 
   return (
-    <div className="select-none flex-shrink-0 px-2.5 py-1">
+    <div
+      className={cn(
+        'select-none flex-shrink-0',
+        showSidebarToggle ? 'pl-3 pr-3' : 'px-2.5 py-1',
+      )}
+    >
       {reserveHeaderActionsSpace ? (
-        <div className="flex h-auto min-h-8 flex-col gap-1">
+        <div
+          className={cn(
+            'flex h-auto flex-col gap-1',
+            showSidebarToggle ? 'min-h-[var(--oc-header-height,56px)] justify-center' : 'min-h-8',
+          )}
+        >
           <div className="flex h-8 items-center justify-between gap-2">
             <div className="flex items-center gap-1.5">
+              {showSidebarToggle && onToggleSidebar ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={onToggleSidebar}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-md typography-ui-label font-medium text-foreground transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50"
+                      aria-label="Close sessions"
+                    >
+                      <RiLayoutLeftLine className="h-[18px] w-[18px]" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" sideOffset={4}><p>Close sessions</p></TooltipContent>
+                </Tooltip>
+              ) : null}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
@@ -148,6 +184,23 @@ export function SidebarHeader(props: Props): React.ReactNode {
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" sideOffset={4}><p>Search sessions</p></TooltipContent>
+              </Tooltip>
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={onToggleSelectionMode}
+                    className={cn(headerActionButtonClass, selectionModeEnabled && 'bg-interactive-hover text-primary')}
+                    aria-label={selectionModeEnabled ? 'Exit selection' : 'Select sessions'}
+                    aria-pressed={selectionModeEnabled}
+                  >
+                    <RiCheckboxMultipleLine className={headerActionIconClass} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" sideOffset={4}>
+                  <p>{selectionModeEnabled ? 'Exit selection' : 'Select sessions'}</p>
+                </TooltipContent>
               </Tooltip>
 
               <DropdownMenu>
