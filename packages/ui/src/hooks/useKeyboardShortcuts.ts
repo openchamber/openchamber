@@ -183,7 +183,8 @@ export const useKeyboardShortcuts = () => {
         }
 
         const tabs = ['git', 'files', 'context'] as const;
-        const currentIndex = tabs.indexOf(rightSidebarTab);
+        const currentTab = rightSidebarTab === 'browser' ? 'context' : rightSidebarTab;
+        const currentIndex = tabs.indexOf(currentTab);
         const nextTab = tabs[(currentIndex + 1) % tabs.length];
 
         e.preventDefault();
