@@ -192,7 +192,7 @@ Each commit must leave type-check/lint/build green on its own.
   new sessions are created with a seed message. If there's no programmatic
   seeder, BLOCK.
 
-**Status:** planned.
+**Status:** shipped (commits: f35440a3, 50b84a88, 5251dfd7, 0848e04a).
 
 ---
 
