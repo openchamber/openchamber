@@ -669,7 +669,7 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public void openAppSettings() {
-            runOnUiThread(this::openSettings);
+            runOnUiThread(MainActivity.this::openSettings);
         }
     }
 
