@@ -378,29 +378,25 @@ UI rendering of the crown.
 
 ---
 
-### 3.8 Shared context pool
+### 3.8 Git-Native Shared Context Pool
 
-**Problem.** Team skills, prompts, notes, todos, secrets — a single place
-for shared context.
+**Problem.** Team skills, prompts, notes, and playbooks — a single place
+for shared context that needs version control.
 
-**UX.** *Workspace → Context* tab. Four subsections: Skills, Prompts, Notes,
-Todos. Secrets are a fifth, Maintainer-only.
+**Architecture Note:** Just like Mode 2, this data is NOT stored in SQLite. It lives in the `.openchamber/` directory of the repository.
 
-**Endpoints.** Extend Mode 2's skills catalog; add three new entity types
-(prompts, notes, todos) under a shared `teams/context/*` route prefix.
+**UX.** *Workspace → Context* tab. Subsections: Skills, Prompts, Notes (ADRs, Playbooks). Secrets are a separate, Maintainer-only section that lives locally on the host.
 
-**Files.** `packages/web/server/lib/local-team/context/`, one file per
-entity. UI feature under `packages/ui/src/features/team-context/`.
+**Endpoints.** Extend the skills-catalog module to discover prompts and notes from the `.openchamber/` directory.
+
+**Files.** `packages/web/server/lib/skills-catalog/git-provider.js` (reused from Mode 2).
 
 **Commit plan.**
-1. `feat(teams/mode3/context): add prompts + notes + todos tables + routes`
-2. `feat(teams/mode3/context): add context UI tab with four subsections`
-3. `feat(teams/mode3/context): add Maintainer-gated secrets (encrypted)`
+1. `feat(teams/mode3/context): reuse git-provider for prompts and notes`
+2. `feat(teams/mode3/context): add context UI tab with subsections`
+3. `feat(teams/mode3/context): add Maintainer-gated secrets (encrypted in SQLite)`
 
 **Open questions.**
-- Notes CRDT? Default: yes, Y.Text per note (so two people can edit the
-  same note live). Todos and prompts: last-write-wins with optimistic
-  concurrency.
 - Secrets shared with peers: store encrypted with a workspace symmetric
   key derived from the host's master key. Only Maintainers see them
   decrypted client-side.

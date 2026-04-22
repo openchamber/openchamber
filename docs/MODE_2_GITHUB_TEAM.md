@@ -12,6 +12,28 @@ Read first: [`IMPLEMENTATION_GUIDE.md`](IMPLEMENTATION_GUIDE.md),
 
 ---
 
+## The 3-Tier Hybrid Architecture
+
+To provide a fast, secure, and real-time team experience without locking
+user IP into a proprietary cloud database, Mode 2 (and Mode 3) relies on a
+strict 3-tier architecture. 
+
+**Rule: Never store data in the wrong tier.**
+
+1. **GitHub API (Live Read / Cache-less)**
+   - **What:** PRs, issues, CI statuses, reviewer states.
+   - **Why:** GitHub is the source of truth. Caching this elsewhere creates stale data and synchronization bugs. We read this live using the GitHub GraphQL API and REST API.
+   
+2. **Git Layer (`.openchamber/` in the repository)**
+   - **What:** Team Skills, Team Prompts, Architecture Decision Records (ADRs), Playbooks, Project-level notes.
+   - **Why:** Low-frequency, high-value context that requires team consensus, version control, and code review (via PRs). It naturally travels with the code.
+
+3. **SQLite (Host Machine / Central Node)**
+   - **What:** Presence (who is looking at what), Activity Feed (instant notifications), Session Handoff metadata (who sent what to whom), and Live Session CRDTs (in Mode 3).
+   - **Why:** High-frequency, ephemeral, or coordination data that would overwhelm GitHub API rate limits or bloat the Git history. Stored locally on the team's host machine to ensure IP never leaves the internal network.
+
+---
+
 ## Non-goals
 
 - Replacing GitHub's permission model. We mirror it; we don't outrank it.
@@ -35,7 +57,7 @@ Read first: [`IMPLEMENTATION_GUIDE.md`](IMPLEMENTATION_GUIDE.md),
 | Webhook endpoint path | `POST /webhooks/github` at the existing Express app. |
 | Tunnel | reuse existing `tunnels` module (`packages/web/server/lib/tunnels/`) for exposing the webhook receiver. |
 | Event bus | reuse existing `event-stream` module. New channel: `teams.activity`. |
-| Optimistic PR-board updates | allowed for local actions only (assign, snooze). GitHub-side changes wait for webhook confirmation. |
+| Team Skills location | `.openchamber/skills/` directory inside the connected repository. |
 | Secrets | `~/.config/openchamber/teams/secrets.enc`, xsalsa20-poly1305 using a machine key derived from OS keychain. |
 
 ---
@@ -47,8 +69,6 @@ Read first: [`IMPLEMENTATION_GUIDE.md`](IMPLEMENTATION_GUIDE.md),
 - PR status, issues, pulls endpoints.
 - Event stream for SSE fan-out.
 - UI feature folder convention, shared PR store.
-- Skills catalog module (`packages/web/server/lib/skills-catalog/`) for the
-  personal scope; we add team + repo scopes on top.
 
 ---
 
@@ -82,7 +102,7 @@ CREATE TABLE workspace_members (
 CREATE TABLE activity_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   workspace_id TEXT NOT NULL,
-  kind TEXT NOT NULL,                   -- 'pr.opened', 'review.requested', etc.
+  kind TEXT NOT NULL,                   -- 'pr.opened', 'review.requested', 'handoff.sent'
   actor_login TEXT,
   repo_full_name TEXT,
   payload_json TEXT NOT NULL,
@@ -92,18 +112,7 @@ CREATE TABLE activity_events (
 CREATE INDEX idx_activity_workspace_time
   ON activity_events(workspace_id, happened_at DESC);
 
--- Per-member assignments for the PR board (not GitHub's own assignees).
-CREATE TABLE assignments (
-  workspace_id TEXT NOT NULL,
-  repo_full_name TEXT NOT NULL,
-  pr_number INTEGER NOT NULL,
-  assignee_login TEXT NOT NULL,
-  kind TEXT NOT NULL CHECK(kind IN ('author','reviewer','watcher')),
-  assigned_at INTEGER NOT NULL,
-  PRIMARY KEY (workspace_id, repo_full_name, pr_number, assignee_login, kind)
-);
-
--- Session handoff records.
+-- Session handoff notifications (metadata only, PR context comes from GitHub live).
 CREATE TABLE handoffs (
   id TEXT PRIMARY KEY,                  -- uuid
   workspace_id TEXT NOT NULL,
@@ -111,15 +120,13 @@ CREATE TABLE handoffs (
   to_login TEXT NOT NULL,
   session_id TEXT NOT NULL,
   snapshot_json TEXT NOT NULL,          -- summary, open files, plan, risks
+  target_repo TEXT NOT NULL,
+  target_pr_number INTEGER,
   status TEXT NOT NULL CHECK(status IN
     ('sent','accepted','declined','expired')),
   created_at INTEGER NOT NULL,
   responded_at INTEGER
 );
-
--- Team skills live in the existing skills-catalog module, with a new
--- scope column ('personal' | 'team:<workspace_id>' | 'repo:<full_name>').
--- If upstream's schema doesn't support a scope column, add a migration.
 ```
 
 ---
@@ -248,32 +255,26 @@ within 1s. Heavy work deferred to an in-process queue.
 **Problem.** GitHub's PR list is linear. Teams operate in columns: draft →
 needs review → changes requested → approved → merged.
 
+**Architecture Note:** To avoid stale data, the PR Board data is *not* stored in SQLite. It is fetched live from GitHub via GraphQL API, with aggressive client-side caching (SWR).
+
 **UX.** Full-page view. Columns match the statuses above. Cards aggregate
-data we already fetch. Filters: my reviews, my PRs, all, by repo, by label,
-by milestone. "Blocking me" vs "I'm blocking" toggle.
+data fetched live. Filters: my reviews, my PRs, all, by repo, by label.
 
 **Endpoints.**
-- `GET /api/teams/:workspace/board` — query params for filter. Returns PRs
-  grouped by column, with per-card aggregates (CI dot, reviewer avatars,
-  time since last activity).
+- `GET /api/teams/:workspace/board` — Uses GitHub GraphQL to fetch open PRs across workspace repos in a single request.
 - Card-click actions reuse Mode 1's PR cockpit endpoints.
 
 **Files.**
-- `packages/web/server/lib/teams/board.js` — aggregation across repos.
-- `packages/ui/src/features/team-board/` — kanban.
-- `packages/ui/src/stores/team/board.ts` — narrow store.
+- `packages/web/server/lib/teams/board.js` — GraphQL query builder and aggregator.
+- `packages/ui/src/features/team-board/` — kanban UI.
 
 **Commit plan.**
-1. `feat(teams/mode2/board): add board aggregation endpoint`
-2. `feat(teams/mode2/board): add kanban UI shell`
+1. `feat(teams/mode2/board): add GraphQL board aggregation endpoint`
+2. `feat(teams/mode2/board): add kanban UI shell and SWR cache`
 3. `feat(teams/mode2/board): add card + quick actions`
-4. `feat(teams/mode2/board): add filters + saved views`
 
 **Open questions.**
 - Stale-card threshold — default: 48h of no activity.
-- Card action set — default: `Start session`, `Request review`, `Assign`,
-  `Snooze`. Anything destructive (close, delete branch) goes through the
-  existing PR cockpit.
 
 ---
 
@@ -287,24 +288,12 @@ panel shows: CODEOWNERS match + top 3 recent editors + lowest-load
 teammate. One-click "Request these".
 
 **Endpoints.**
-- `GET /api/teams/:workspace/reviewers/suggest` — params: repo, branch.
-- `GET /api/teams/:workspace/review-load` — per-member load dashboard.
-
-**Files.**
-- `packages/web/server/lib/teams/codeowners.js` — parser.
-- `packages/web/server/lib/teams/reviewer-suggest.js` — ranker.
-- `packages/ui/src/features/reviewer-suggest/`.
+- `GET /api/teams/:workspace/reviewers/suggest` — params: repo, branch. Calculates live from Git history.
 
 **Commit plan.**
 1. `feat(teams/mode2/reviewer): add CODEOWNERS parser with tests`
 2. `feat(teams/mode2/reviewer): add suggestion ranker + endpoint`
 3. `feat(teams/mode2/reviewer): add suggestion panel in PR cockpit`
-4. `feat(teams/mode2/reviewer): add review-load dashboard`
-
-**Open questions.**
-- "Auto-assign on PR open" toggle — default: off; visible toggle in workspace
-  settings.
-- Load calculation — default: weighted open-review count * (review age / 24h).
 
 ---
 
@@ -313,197 +302,69 @@ teammate. One-click "Request these".
 **Problem.** Half-done work lives in one person's head. Status updates don't
 transfer context.
 
+**Architecture Note:** The "Who and What" (snapshot metadata) is stored in SQLite for instant delivery and notifications. The "Where" (PR Context) remains in GitHub.
+
 **UX.** In any session → *Hand off to …* → picker. Recipient gets a
-notification with the handoff package. Accept → their app opens the session
-(same worktree on their machine is optional; if absent, they clone from the
-host and continue from the snapshot).
+notification with the handoff package via SSE. Accept → their app opens the session.
 
 **Endpoints.**
-- `POST /api/teams/:workspace/handoffs` — create handoff.
-- `GET  /api/teams/:workspace/handoffs/inbox` — my pending handoffs.
+- `POST /api/teams/:workspace/handoffs` — create handoff in SQLite.
+- `GET  /api/teams/:workspace/handoffs/inbox` — my pending handoffs from SQLite.
 - `POST /api/teams/:workspace/handoffs/:id/accept`
-- `POST /api/teams/:workspace/handoffs/:id/decline`
-
-**Handoff snapshot contains:**
-
-```json
-{
-  "summary": "AI-generated short narrative",
-  "plan": "copy of current plan-mode contents",
-  "openFiles": ["path", ...],
-  "cursors": { "path": { "line": 12, "col": 3 } },
-  "risks": ["bullet 1", "bullet 2"],
-  "lastMessages": [ { "role": "...", "content": "..." }, ... ],
-  "suggestedNextPrompt": "AI-generated",
-  "branch": "feat/xyz",
-  "worktreeHint": "/Users/alice/code/proj-xyz/.worktrees/feat-xyz"
-}
-```
-
-**Files.**
-- `packages/web/server/lib/teams/handoff/snapshot.js` — serializer.
-- `packages/web/server/lib/teams/handoff/routes.js`.
-- `packages/ui/src/features/handoff/` — send + inbox.
 
 **Commit plan.**
-1. `feat(teams/mode2/handoff): add snapshot serializer (no AI yet) + tests`
+1. `feat(teams/mode2/handoff): add snapshot serializer + db tables`
 2. `feat(teams/mode2/handoff): add routes for create/accept/decline`
 3. `feat(teams/mode2/handoff): add send dialog and inbox UI`
-4. `feat(teams/mode2/handoff): enrich snapshot with AI summary + next prompt`
-
-**Open questions.**
-- "Async handoff scheduled for tomorrow morning" — default: yes, include a
-  `not_before` timestamp; recipient only sees it after.
-- Auto-generated summary quality — default: use the session's active model.
-  If unavailable, skip the AI step and let the user write a summary manually.
-- Worktree re-creation on recipient side — default: do not auto-create; show
-  the hint and let the recipient open it.
-
-**Stuck checks.**
-- Confirm session state is queryable from the server-side (messages,
-  plan-mode contents, open files). If session data lives only in the UI,
-  BLOCK and surface.
+4. `feat(teams/mode2/handoff): enrich snapshot with AI summary`
 
 ---
 
-### 2.6 Shared Team Skills
+### 2.6 Git-Native Shared Team Skills
 
 **Problem.** Skills today are personal. Teams want shared conventions (commit
-style, review checklists, incident playbooks).
+style, review checklists, incident playbooks), and they want them version controlled.
 
-**UX.** Skills management UI gains a *Scope* field: Personal, Team, Repo.
-Team and Repo scopes are visible to all workspace members; protected skills
-(Maintainer+) get a lock icon.
+**Architecture Note:** Do NOT store Team Skills in SQLite. They live in `.openchamber/skills/` within the repository itself.
 
-**Endpoints.** Extend the existing skills-catalog module with a `scope`
-column and query filters. No new endpoints needed if the existing routes
-accept a scope filter.
-
-**Files.**
-- Extend `packages/web/server/lib/skills-catalog/`.
-- `packages/ui/src/components/sections/skills/` — add scope picker.
-
-**Commit plan.**
-1. `feat(teams/mode2/skills): add scope column migration + model update`
-2. `feat(teams/mode2/skills): add scope filter + write permissions`
-3. `feat(teams/mode2/skills): UI scope picker + visibility lock icons`
-
-**Open questions.**
-- Where are skills physically stored? Default: existing disk location;
-  scope is metadata-only. If upstream later adds a git-backed skills repo,
-  we adopt that then.
-- Conflict resolution when two maintainers edit the same skill. Default:
-  last-write-wins with a visible warning; no merge UI in Mode 2.
-
----
-
-### 2.7 Multi-Agent Runs for Teams
-
-**Problem.** The upstream multi-agent feature runs in isolation; teams want
-to collectively decide which variant wins.
-
-**UX.** After a multi-agent run, a *team vote* banner appears in the
-session. Any workspace member can vote; the winner is the one the human
-reviewer accepts.
+**UX.** Skills management UI reads from the local `.openchamber/skills/` directory of the active project. To edit a team skill, the user edits the markdown file and commits it via the standard Git workflow.
 
 **Endpoints.**
-- `POST /api/teams/:workspace/agent-runs/:runId/vote` — up/down from a member.
-- `GET  /api/teams/:workspace/agent-runs/:runId` — aggregated votes.
+- Extend `packages/web/server/lib/skills-catalog/` to discover skills from the `.openchamber/` directory of the active project workspace.
 
 **Files.**
-- `packages/web/server/lib/teams/agent-runs.js`.
-- `packages/ui/src/features/multi-agent-vote/`.
+- `packages/web/server/lib/skills-catalog/git-provider.js` — scans project dir.
 
 **Commit plan.**
-1. `feat(teams/mode2/agent-votes): add vote table + routes`
-2. `feat(teams/mode2/agent-votes): add vote banner + avatar strip`
-
-**Open questions.**
-- Do votes bind the outcome? Default: no. The PR author decides; votes are
-  advisory.
+1. `feat(teams/mode2/skills): add git-provider to skills-catalog`
+2. `feat(teams/mode2/skills): UI badge to distinguish repo-scoped skills`
 
 ---
 
-### 2.8 Repo Activity Feed
+### 2.7 Repo Activity Feed
 
 **Problem.** GitHub event streams are firehose. Teams want a signal-only
 feed per repo.
 
-**UX.** Per-repo tab in the workspace: chronological events. Filters by
-type. Outbound webhook (optional) to Slack, Discord.
+**Architecture Note:** Driven entirely off the `activity_events` table in SQLite, populated by the Webhook Receiver.
 
-**Endpoints.** Driven off `activity_events`; no new endpoint beyond
-`GET /api/teams/:workspace/activity?repo=&since=`.
-
-**Files.**
-- `packages/ui/src/features/activity-feed/`.
-- Optional outbound: `packages/web/server/lib/teams/relay/` (only if a user
-  configures a Slack/Discord webhook).
+**UX.** Per-repo tab in the workspace: chronological events.
 
 **Commit plan.**
 1. `feat(teams/mode2/activity): add activity feed endpoint + UI`
 2. `feat(teams/mode2/activity): add filters and per-type icons`
-3. `feat(teams/mode2/activity): add optional outbound relay to Slack/Discord`
-
-**Open questions.**
-- What counts as "noise" vs "signal"? Default: omit label edits, milestone
-  touches, stale-close/reopen unless the user flips "show everything".
 
 ---
 
-### 2.9 Milestone / Projects Sync
+## Shipping order
 
-**Problem.** Teams plan in GitHub Projects (v2). We don't need to mirror
-the whole thing, just surface "active work" relevant to the logged-in user.
-
-**UX.** In the top of the PR board, an optional strip shows projects items
-tagged "In progress" or "Blocked" that belong to the current user's
-milestone.
-
-**Endpoints.** `GET /api/teams/:workspace/projects/active` — queries
-GitHub Projects v2 GraphQL.
-
-**Files.** `packages/web/server/lib/teams/projects.js` + UI strip.
-
-**Commit plan.**
-1. `feat(teams/mode2/projects): add projects v2 query module`
-2. `feat(teams/mode2/projects): add active-items strip on the board`
-
-**Open questions.**
-- Does the minimum viable App have `read:project` scope? Confirm before
-  shipping; if not, document it as a setup step.
-
----
-
-### 2.10 Shipping order
-
-1. 2.1 Workspaces.
-2. 2.2 Webhooks (unlocks 2.3, 2.8).
-3. 2.3 PR Board.
-4. 2.5 Handoff (highest team-level value; ship before broader UX polish).
-5. 2.4 Reviewer routing.
-6. 2.6 Shared skills.
-7. 2.8 Activity feed.
-8. 2.7 Multi-agent votes.
-9. 2.9 Projects strip (optional / nice-to-have).
+1. 2.1 Workspaces & SQLite Setup.
+2. 2.6 Git-Native Shared Team Skills (High value, easy win).
+3. 2.2 Webhooks (unlocks Activity Feed and live Board refreshes).
+4. 2.3 PR Board (GraphQL).
+5. 2.5 Handoff (highest team-level value).
+6. 2.8 Activity feed.
+7. 2.4 Reviewer routing.
 
 Anything not shipped after 6 weeks of real-team use is either cut or moved
 to a separate track. Do not extend Mode 2 indefinitely.
-
----
-
-## Cross-runtime notes
-
-- **Electron** inherits everything.
-- **VS Code webview** gets: handoff inbox (so people receive handoffs in
-  their editor), PR cockpit panels (already shared from Mode 1). The
-  full PR Board is too large for a VS Code side panel; keep it web/electron.
-
-## Security notes
-
-- Webhook HMAC verification is non-negotiable. Drop requests without it.
-- Secrets never leave the host machine. Peers in Mode 3 receive encrypted
-  blobs they can't decrypt unless explicitly shared.
-- Rate limits: cross-repo aggregations must paginate and back off on 429.
-- Audit log is `activity_events`. Do not delete rows; add a tombstone if
-  needed.
