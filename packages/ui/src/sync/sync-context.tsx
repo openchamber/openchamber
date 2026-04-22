@@ -1116,7 +1116,30 @@ function handleEvent(
     }
   }
 
-  // Read live state, create targeted draft cloning ONLY fields the event
+  // Sync-layer parent resync: when a child session goes idle, schedule
+  // a targeted parts repair for the parent session. This ensures the
+  // parent's task tool part reflects the child's completion even when
+  // no ToolPart component is mounted.
+  if (payload.type === "session.idle" && sessionID) {
+    const sessionState = store.getState()
+    const idleSession = sessionState.session.find((s) => s.id === sessionID)
+    const parentID = idleSession
+      ? (idleSession as Session & { parentID?: string | null }).parentID
+      : null
+    if (parentID && resolvedDirectory && resolvedDirectory !== "global") {
+      void Promise.resolve().then(async () => {
+        const dirStore = childStores.getChild(resolvedDirectory)
+        if (!dirStore) return
+        try {
+          await repairSessionParts(resolvedDirectory, parentID, dirStore)
+        } catch {
+          // Transient failure — next event or reconnect will catch up
+        }
+      })
+    }
+  }
+
+  // Read live state, create targeted draft cloning ONLY fields that event
   // type will mutate. This preserves reference identity for untouched slices
   // so Zustand selectors skip re-renders for unrelated subscribers.
   const current = store.getState()
