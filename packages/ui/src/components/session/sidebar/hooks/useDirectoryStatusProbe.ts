@@ -44,18 +44,29 @@ async function probeDirectory(directory: string): Promise<DirectoryStatusValue> 
   try {
     await opencodeClient.listLocalDirectory(directory);
     return 'exists';
-  } catch {
+  } catch (error) {
     const looksLikeSdkWorktree =
       directory.includes('/opencode/worktree/') ||
       directory.includes('/.opencode/data/worktree/') ||
       directory.includes('/.local/share/opencode/worktree/');
 
-    if (looksLikeSdkWorktree) {
-      const ok = await opencodeClient.probeDirectory(directory).catch(() => false);
-      if (ok) return 'exists';
+    const reachable = await opencodeClient.probeDirectory(directory).catch(() => false);
+    if (reachable) {
+      return 'exists';
     }
 
-    return 'missing';
+    const message = error instanceof Error ? error.message.toLowerCase() : '';
+    const definitelyMissing =
+      message.includes('enoent') ||
+      message.includes('not found') ||
+      message.includes('does not exist') ||
+      message.includes('no such file');
+
+    if (definitelyMissing || looksLikeSdkWorktree) {
+      return 'missing';
+    }
+
+    return 'unknown';
   }
 }
 
@@ -75,13 +86,17 @@ export const useDirectoryStatusProbe = ({
 
   React.useEffect(() => {
     const directories = new Set<string>();
+    const normalizedProjectRoots = new Set<string>();
     sortedSessions.forEach((session) => {
       const dir = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
       if (dir) directories.add(dir);
     });
     projects.forEach((project) => {
       const normalized = normalizePath(project.path);
-      if (normalized) directories.add(normalized);
+      if (normalized) {
+        directories.add(normalized);
+        normalizedProjectRoots.add(normalized);
+      }
     });
 
     const now = Date.now();
@@ -90,12 +105,25 @@ export const useDirectoryStatusProbe = ({
     const preseeded = new Map<string, DirectoryStatusValue>();
 
     for (const directory of directories) {
+      const isProjectRoot = normalizedProjectRoots.has(directory);
       const known = directoryStatusRef.current.get(directory);
-      if (known && known !== 'unknown') continue;
+      if (known === 'exists') continue;
+
+      const cachedAt = missingCache[directory];
+      if (known === 'missing') {
+        if (isProjectRoot) {
+          toProbe.push(directory);
+          continue;
+        }
+        if (cachedAt && now - cachedAt < MISSING_REPROBE_MS) {
+          continue;
+        }
+        toProbe.push(directory);
+        continue;
+      }
 
       // Use cached "missing" status if fresh enough — skip the HTTP probe
-      const cachedAt = missingCache[directory];
-      if (cachedAt && now - cachedAt < MISSING_REPROBE_MS) {
+      if (!isProjectRoot && cachedAt && now - cachedAt < MISSING_REPROBE_MS) {
         preseeded.set(directory, 'missing');
         continue;
       }

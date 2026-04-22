@@ -13,6 +13,7 @@ export {
 export {
   summarizeText,
   sanitizeForTTS,
-} from './summarization.js';
+  sanitizeForNote,
+} from '../text/summarization.js';
 
 export { transcribeAudio } from './stt.js';

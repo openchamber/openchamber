@@ -14,6 +14,35 @@ import type {
   GitWorktreeValidationResult,
 } from '@/lib/api/types';
 
+type WorktreeListEntry = {
+  path?: string;
+  branch?: string;
+  head?: string;
+  name?: string;
+};
+
+const deriveHeadStateFromWorktreeEntry = (entry: WorktreeListEntry): 'branch' | 'detached' | 'unborn' => {
+  const branch = (entry.branch || '').trim();
+  const head = (entry.head || '').trim();
+  if (!branch) {
+    if (!head) return 'unborn';
+    return 'detached';
+  }
+  return 'branch';
+};
+
+const deriveCanonicalWorktreeFields = (
+  entry: WorktreeListEntry,
+  worktreePath: string,
+): Pick<WorktreeMetadata, 'worktreeRoot' | 'worktreeStatus' | 'headState' | 'worktreeSource'> => {
+  return {
+    worktreeRoot: worktreePath,
+    worktreeStatus: 'ready',
+    headState: deriveHeadStateFromWorktreeEntry(entry),
+    worktreeSource: 'existing',
+  };
+};
+
 export type ProjectRef = { id: string; path: string };
 
 const normalizePath = (value: string): string => {
@@ -206,13 +235,21 @@ export async function listProjectWorktrees(project: ProjectRef): Promise<Worktre
         const worktreePath = normalizePath(entry.path);
         const branch = (entry.branch || '').replace(/^refs\/heads\//, '').trim();
         const name = (entry.name || '').trim();
+
+        // Derive canonical worktree metadata from worktree list entry
+        const canonical = deriveCanonicalWorktreeFields(entry, worktreePath);
+
         return {
           source: 'sdk' as const,
           name: name || deriveSdkWorktreeNameFromDirectory(worktreePath),
           path: worktreePath,
           projectDirectory: metadataProjectDirectory,
-          branch,
+          branch: branch,
           label: branch || name || deriveSdkWorktreeNameFromDirectory(worktreePath),
+          worktreeRoot: canonical.worktreeRoot,
+          worktreeStatus: canonical.worktreeStatus,
+          headState: canonical.headState,
+          worktreeSource: canonical.worktreeSource,
         };
       })
       .filter((entry) => normalizePath(entry.path) !== normalizedProjectDirectory);
@@ -269,9 +306,15 @@ export async function createWorktree(project: ProjectRef, args: CreateWorktreeAr
     projectDirectory: metadataProjectDirectory,
     branch: returnedBranch,
     label: returnedBranch || returnedName,
+    worktreeRoot: normalizePath(returnedPath),
+    worktreeStatus: 'ready',
+    headState: returnedBranch ? 'branch' : 'unborn',
+    worktreeSource: 'created-for-session',
   };
 
   markWorktreeBootstrapPending(metadata.path);
+
+  _worktreeListCache.delete(projectDirectory);
 
   return metadata;
 }
@@ -301,6 +344,8 @@ export async function removeProjectWorktree(project: ProjectRef, worktree: Workt
   }
 
   clearWorktreeBootstrapState(worktree.path);
+
+  _worktreeListCache.delete(normalizePath(project.path));
 
   const branchName = (worktree.branch || '').replace(/^refs\/heads\//, '').trim();
   if (deleteRemote && branchName) {

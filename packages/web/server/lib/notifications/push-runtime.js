@@ -1,5 +1,15 @@
 const PUSH_SUBSCRIPTIONS_VERSION = 1;
 
+const isLoopbackHttpOrigin = (value) => {
+  if (typeof value !== 'string') {
+    return false;
+  }
+
+  return value.startsWith('http://localhost')
+    || value.startsWith('http://127.0.0.1')
+    || value.startsWith('http://[::1]');
+};
+
 export const createPushRuntime = (deps) => {
   const {
     fsPromises,
@@ -241,7 +251,7 @@ export const createPushRuntime = (deps) => {
     const originEnv = process.env.OPENCHAMBER_PUBLIC_ORIGIN;
     if (typeof originEnv === 'string' && originEnv.trim().length > 0) {
       const trimmed = originEnv.trim();
-      if (trimmed.startsWith('http://localhost')) {
+      if (isLoopbackHttpOrigin(trimmed)) {
         return 'mailto:openchamber@localhost';
       }
       return trimmed;
@@ -252,7 +262,7 @@ export const createPushRuntime = (deps) => {
       const stored = settings?.publicOrigin;
       if (typeof stored === 'string' && stored.trim().length > 0) {
         const trimmed = stored.trim();
-        if (trimmed.startsWith('http://localhost')) {
+        if (isLoopbackHttpOrigin(trimmed)) {
           return 'mailto:openchamber@localhost';
         }
         return trimmed;

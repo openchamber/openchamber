@@ -7,7 +7,7 @@ import { parse as parseJsonc } from 'jsonc-parser';
 const OPENCODE_CONFIG_DIR = path.join(os.homedir(), '.config', 'opencode');
 const AGENT_DIR = path.join(OPENCODE_CONFIG_DIR, 'agents');
 const COMMAND_DIR = path.join(OPENCODE_CONFIG_DIR, 'commands');
-const CONFIG_FILE = path.join(OPENCODE_CONFIG_DIR, 'opencode.json');
+const CONFIG_FILE = path.join(OPENCODE_CONFIG_DIR, 'config.json');
 const CUSTOM_CONFIG_FILE = process.env.OPENCODE_CONFIG
   ? path.resolve(process.env.OPENCODE_CONFIG)
   : null;
@@ -321,10 +321,24 @@ const getProjectConfigPath = (workingDirectory?: string): string | null => {
 };
 
 const getConfigPaths = (workingDirectory?: string) => ({
-  userPath: CONFIG_FILE,
+  userPaths: [
+    path.join(OPENCODE_CONFIG_DIR, 'config.json'),
+    path.join(OPENCODE_CONFIG_DIR, 'opencode.json'),
+    path.join(OPENCODE_CONFIG_DIR, 'opencode.jsonc'),
+  ],
   projectPath: getProjectConfigPath(workingDirectory),
   customPath: CUSTOM_CONFIG_FILE
 });
+
+const getPrimaryUserConfigPath = (userPaths: string[]): string => {
+  for (const userPath of userPaths) {
+    if (fs.existsSync(userPath)) {
+      return userPath;
+    }
+  }
+
+  return CONFIG_FILE;
+};
 
 const readConfigFile = (filePath?: string | null): Record<string, unknown> => {
   if (!filePath || !fs.existsSync(filePath)) return {};
@@ -355,7 +369,8 @@ const mergeConfigs = (base: Record<string, unknown>, override: Record<string, un
 };
 
 const readConfigLayers = (workingDirectory?: string) => {
-  const { userPath, projectPath, customPath } = getConfigPaths(workingDirectory);
+  const { userPaths, projectPath, customPath } = getConfigPaths(workingDirectory);
+  const userPath = getPrimaryUserConfigPath(userPaths);
   const userConfig = readConfigFile(userPath);
   const projectConfig = readConfigFile(projectPath);
   const customConfig = readConfigFile(customPath);

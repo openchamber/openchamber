@@ -278,7 +278,7 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
       </div>
 
       {/* Branch Selection */}
-      <div className="space-y-3">
+      <div className="flex flex-col gap-3">
         <p className="typography-meta text-muted-foreground">
           {operation === 'merge' ? `Branch to merge into ${targetBranchLabel}` : 'Branch to rebase onto'}
         </p>
@@ -293,7 +293,8 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="start"
-            className="w-[--radix-dropdown-menu-trigger-width] p-0 max-h-(--radix-dropdown-menu-content-available-height) flex flex-col overflow-hidden"
+            sideOffset={6}
+            className="w-[var(--anchor-width)] p-0 max-h-[min(var(--available-height),24rem)] flex flex-col overflow-hidden"
           >
             <Command className="h-full min-h-0">
               <CommandInput

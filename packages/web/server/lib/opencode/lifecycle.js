@@ -125,6 +125,15 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
     if (process.platform === 'win32') {
       try {
+        child.kill();
+      } catch {
+      }
+
+      if (await waitForChildProcessClose(child, 800)) {
+        return;
+      }
+
+      try {
         spawnSync('taskkill', ['/pid', String(pid), '/t'], {
           stdio: 'ignore',
           timeout: 3000,
@@ -310,12 +319,17 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     }
 
     try {
-      const response = await fetch(buildOpenCodeUrl('/session', ''), {
+      const response = await fetch(buildOpenCodeUrl('/global/health', ''), {
         method: 'GET',
-        headers: getOpenCodeAuthHeaders(),
-        signal: AbortSignal.timeout(2000),
+        headers: {
+          Accept: 'application/json',
+          ...getOpenCodeAuthHeaders(),
+        },
+        signal: AbortSignal.timeout(5000),
       });
-      return response.ok;
+      if (!response.ok) return false;
+      const body = await response.json().catch(() => null);
+      return body?.healthy === true;
     } catch {
       return false;
     }
@@ -705,6 +719,25 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     }
   };
 
+  /**
+   * Perform an immediate (one-shot) health check and restart OpenCode if it's
+   * not healthy.  Callers on the SSE / WS proxy path use this to trigger
+   * recovery without waiting for the next periodic interval (up to 15 s).
+   */
+  const triggerHealthCheck = async () => {
+    if (!state.openCodeProcess || state.isShuttingDown || state.isRestartingOpenCode) return;
+
+    try {
+      const healthy = await isOpenCodeProcessHealthy();
+      if (!healthy) {
+        console.log('[lifecycle] immediate health check: OpenCode not healthy, restarting...');
+        await restartOpenCode();
+      }
+    } catch (error) {
+      console.error(`[lifecycle] immediate health check error: ${error.message}`);
+    }
+  };
+
   const startHealthMonitoring = (healthCheckIntervalMs) => {
     if (state.healthCheckInterval) {
       clearInterval(state.healthCheckInterval);
@@ -734,6 +767,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     refreshOpenCodeAfterConfigChange,
     bootstrapOpenCodeAtStartup,
     startHealthMonitoring,
+    triggerHealthCheck,
     waitForPortRelease,
   };
 };

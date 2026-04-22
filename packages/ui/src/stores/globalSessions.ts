@@ -69,6 +69,7 @@ export async function listGlobalSessionPages(
     },
 ): Promise<GlobalSessionRecord[]> {
     const all: GlobalSessionRecord[] = [];
+    const seenIds = new Set<string>();
     let cursor: number | undefined;
 
     while (true) {
@@ -76,23 +77,41 @@ export async function listGlobalSessionPages(
             () => apiClient.experimental.session.list({
                 archived: options.archived,
                 limit: options.pageSize,
-                ...(cursor ? { cursor } : {}),
+                ...(cursor !== undefined ? { cursor } : {}),
             }),
             { attempts: 3, delay: 500, retryIf: () => true },
         );
 
         const payload = Array.isArray(response.data) ? (response.data as GlobalSessionRecord[]) : [];
-        if (payload.length === 0) {
-            break;
+        if (payload.length === 0) break;
+
+        let appended = 0;
+        for (const session of payload) {
+            if (!session?.id || seenIds.has(session.id)) continue;
+            seenIds.add(session.id);
+            all.push(session);
+            appended += 1;
+        }
+        if (appended > 0) {
+            options.onPage?.(payload);
         }
 
-        all.push(...payload);
-        options.onPage?.(payload);
+        // Stop on partial page — nothing more to fetch.
+        if (payload.length < options.pageSize) break;
 
-        const nextCursor = toNumber(readResponseHeader(response, "x-next-cursor"));
-        if (!nextCursor) {
-            break;
-        }
+        // Prefer server header; fall back to last session's `time.updated`
+        // (cursor semantics on server = "updated strictly before this timestamp").
+        const headerCursor = toNumber(readResponseHeader(response, "x-next-cursor"));
+        const lastUpdated = payload[payload.length - 1]?.time?.updated;
+        const nextCursor = headerCursor
+            ?? (typeof lastUpdated === "number" && Number.isFinite(lastUpdated) ? lastUpdated : undefined);
+
+        if (nextCursor === undefined) break;
+        // Loop guard: cursor must move backwards in time.
+        if (cursor !== undefined && nextCursor >= cursor) break;
+        // Every id in this page already seen — stop to avoid spinning.
+        if (appended === 0) break;
+
         cursor = nextCursor;
     }
 

@@ -17,10 +17,18 @@ export type DesktopHost = {
 export type DesktopHostsConfig = {
   hosts: DesktopHost[];
   defaultHostId: string | null;
+  initialHostChoiceCompleted: boolean;
+};
+
+/** Backward-compatible input type — callers may omit `initialHostChoiceCompleted`. */
+export type DesktopHostsConfigInput = {
+  hosts: DesktopHost[];
+  defaultHostId: string | null;
+  initialHostChoiceCompleted?: boolean;
 };
 
 export type HostProbeResult = {
-  status: 'ok' | 'auth' | 'unreachable';
+  status: 'ok' | 'auth' | 'wrong-service' | 'unreachable';
   latencyMs: number;
 };
 
@@ -48,6 +56,12 @@ export const redactSensitiveUrl = (raw: string): string => {
 
   try {
     const url = new URL(normalized);
+    // Redact embedded credentials (userinfo) to prevent leaking user:pass
+    if (url.username || url.password) {
+      url.username = '';
+      url.password = '';
+    }
+
     const keys = Array.from(new Set(Array.from(url.searchParams.keys())));
     for (const key of keys) {
       if (SENSITIVE_QUERY_KEY.test(key)) {
@@ -121,12 +135,12 @@ const getInvoke = (): TauriInvoke | null => {
 export const desktopHostsGet = async (): Promise<DesktopHostsConfig> => {
   const invoke = getInvoke();
   if (!invoke) {
-    return { hosts: [], defaultHostId: 'local' };
+    return { hosts: [], defaultHostId: 'local', initialHostChoiceCompleted: false };
   }
 
   const raw = await invoke('desktop_hosts_get');
   if (!isRecord(raw)) {
-    return { hosts: [], defaultHostId: null };
+    return { hosts: [], defaultHostId: null, initialHostChoiceCompleted: false };
   }
 
   const hostsRaw = raw.hosts;
@@ -139,16 +153,20 @@ export const desktopHostsGet = async (): Promise<DesktopHostsConfig> => {
     readString(raw, 'default_host_id') ||
     readString(raw, 'defaultHostID');
 
-  return { hosts, defaultHostId };
+  const initialHostChoiceCompleted =
+    raw.initialHostChoiceCompleted === true || raw.initial_host_choice_completed === true;
+
+  return { hosts, defaultHostId, initialHostChoiceCompleted };
 };
 
-export const desktopHostsSet = async (config: DesktopHostsConfig): Promise<void> => {
+export const desktopHostsSet = async (config: DesktopHostsConfigInput): Promise<void> => {
   const invoke = getInvoke();
   if (!invoke) return;
   await invoke('desktop_hosts_set', {
-    config: {
+    input: {
       hosts: config.hosts,
       defaultHostId: config.defaultHostId,
+      initialHostChoiceCompleted: config.initialHostChoiceCompleted,
     },
   });
 };
@@ -166,7 +184,7 @@ export const desktopHostProbe = async (url: string): Promise<HostProbeResult> =>
 
   const rawStatus = raw.status;
   const status: HostProbeResult['status'] =
-    rawStatus === 'ok' || rawStatus === 'auth' || rawStatus === 'unreachable'
+    rawStatus === 'ok' || rawStatus === 'auth' || rawStatus === 'wrong-service' || rawStatus === 'unreachable'
       ? rawStatus
       : 'unreachable';
 

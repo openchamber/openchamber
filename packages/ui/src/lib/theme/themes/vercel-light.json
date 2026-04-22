@@ -411,14 +411,6 @@
       "mono": "\"IBM Plex Mono\", monospace",
       "heading": "\"IBM Plex Mono\", monospace"
     },
-    "radius": {
-      "none": "0",
-      "sm": "0.325rem",
-      "md": "0.75rem",
-      "lg": "1.125rem",
-      "xl": "1.5rem",
-      "full": "9999px"
-    },
     "spacing": {
       "xs": "0.25rem",
       "sm": "0.5rem",

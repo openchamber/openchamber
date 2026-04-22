@@ -4,6 +4,44 @@ import type { GlobalState, State } from "./types"
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 
+/**
+ * SDK returns `{ data, error, response }` without throwing on non-2xx.
+ * The silent `x.data!` / `x.data ?? []` pattern lets HTTP 5xx warmup
+ * errors become empty state. Wrap into a real Error so retry() fires.
+ */
+function unwrap<T>(
+  result: { data?: T; error?: unknown; response?: { status?: number } },
+  name: string,
+): T {
+  if (result.error) {
+    const rawError = result.error
+    const status = result.response?.status
+    const message = typeof rawError === "object" && rawError !== null && "message" in rawError
+      ? String((rawError as { message?: unknown }).message)
+      : String(rawError)
+    const err = new Error(`${name} failed${status ? ` (${status})` : ""}: ${message}`)
+    if (status !== undefined) {
+      ;(err as Error & { status?: number }).status = status
+    }
+    throw err
+  }
+  if (result.data === undefined) {
+    // No error + no data: ambiguous, treat as transient so retry fires.
+    const err = new Error(`${name} returned no data`)
+    ;(err as Error & { status?: number }).status = 503
+    throw err
+  }
+  return result.data
+}
+
+const requestSignature = (items: Array<{ id: string }> | undefined): string => {
+  if (!items || items.length === 0) return ""
+  return items
+    .map((item) => item.id)
+    .sort(cmp)
+    .join("|")
+}
+
 function groupBySession<T extends { id: string; sessionID: string }>(input: T[]) {
   return input.reduce<Record<string, T[]>>((acc, item) => {
     if (!item?.id || !item.sessionID) return acc
@@ -29,18 +67,19 @@ export async function bootstrapGlobal(
   set: (patch: Partial<GlobalState>) => void,
 ) {
   const results = await Promise.allSettled([
-    retry(() => sdk.path.get().then((x) => set({ path: x.data! }))),
-    retry(() => sdk.global.config.get().then((x) => set({ config: x.data! }))),
+    retry(() => sdk.path.get().then((x) => set({ path: unwrap(x, "path.get") }))),
+    retry(() => sdk.global.config.get().then((x) => set({ config: unwrap(x, "global.config.get") }))),
     retry(() =>
       sdk.project.list().then((x) => {
-        const projects = (x.data ?? [])
+        const data = unwrap(x, "project.list")
+        const projects = data
           .filter((p): p is Project => !!p?.id)
           .filter((p) => !!p.worktree && !p.worktree.includes("opencode-test"))
           .sort((a, b) => cmp(a.id, b.id))
         set({ projects })
       }),
     ),
-    retry(() => sdk.provider.list().then((x) => set({ providers: x.data! }))),
+    retry(() => sdk.provider.list().then((x) => set({ providers: unwrap(x, "provider.list") }))),
   ])
 
   const errors = results
@@ -107,66 +146,95 @@ export async function bootstrapDirectory(input: {
   const results = await Promise.allSettled([
     seededProject
       ? Promise.resolve()
-      : retry(() => sdk.project.current().then((x) => set({ project: x.data!.id }))),
-    retry(() => sdk.provider.list().then((x) => set({ provider: x.data! }))),
-    retry(() => sdk.app.agents().then((x) => set({ agent: x.data ?? [] }))),
-    retry(() => sdk.config.get().then((x) => set({ config: x.data! }))),
+      : retry(() => sdk.project.current().then((x) => set({ project: unwrap(x, "project.current").id }))),
+    retry(() => sdk.provider.list().then((x) => set({ provider: unwrap(x, "provider.list") }))),
+    retry(() => sdk.app.agents().then((x) => set({ agent: unwrap(x, "app.agents") }))),
+    retry(() => sdk.config.get().then((x) => set({ config: unwrap(x, "config.get") }))),
     retry(() =>
       sdk.path.get().then((x) => {
-        set({ path: x.data! })
-        const next = projectID(x.data?.directory ?? directory, g.projects)
+        const data = unwrap(x, "path.get")
+        set({ path: data })
+        const next = projectID(data?.directory ?? directory, g.projects)
         if (next) set({ project: next })
       }),
     ),
-    retry(() => sdk.command.list().then((x) => set({ command: x.data ?? [] }))),
-    retry(() => sdk.session.status().then((x) => set({ session_status: x.data! }))),
+    retry(() => sdk.command.list().then((x) => set({ command: unwrap(x, "command.list") }))),
+    retry(() => sdk.session.status().then((x) => set({ session_status: unwrap(x, "session.status") }))),
     input.loadSessions(directory),
-    retry(() => sdk.mcp.status().then((x) => set({ mcp: x.data! }))),
-    retry(() => sdk.lsp.status().then((x) => set({ lsp: x.data! }))),
+    retry(() => sdk.mcp.status().then((x) => set({ mcp: unwrap(x, "mcp.status") }))),
+    retry(() => sdk.lsp.status().then((x) => set({ lsp: unwrap(x, "lsp.status") }))),
     retry(() =>
       sdk.vcs.get().then((x) => {
         const current = getState()
+        // vcs is optional — fall back to current if server omits it.
+        if (x.error) {
+          throw new Error(`vcs.get failed: ${String(x.error)}`)
+        }
         set({ vcs: x.data ?? current.vcs })
       }),
     ),
-    retry(() =>
-      sdk.permission.list().then((x) => {
-        const grouped = groupBySession(
-          (x.data ?? []).filter((perm): perm is PermissionRequest => !!perm?.id && !!perm.sessionID),
-        )
-        const permission: Record<string, PermissionRequest[]> = {}
-        // Clear sessions no longer having permissions
-        const current = getState()
-        for (const sessionID of Object.keys(current.permission ?? {})) {
-          if (!grouped[sessionID]) permission[sessionID] = []
+    retry(async () => {
+      const before = getState()
+      const beforeSignatures = new Map(
+        Object.entries(before.question ?? {}).map(([sessionID, questions]) => [sessionID, requestSignature(questions)]),
+      )
+      const x = await sdk.question.list(directory ? { directory } : undefined)
+        if (x.error) {
+          const status = (x as { response?: { status?: number } }).response?.status
+          const err = new Error(`question.list failed${status ? ` (${status})` : ""}: ${String(x.error)}`)
+          if (status !== undefined) (err as Error & { status?: number }).status = status
+          throw err
         }
-        // Set grouped permissions sorted by id
-        for (const [sessionID, perms] of Object.entries(grouped)) {
-          permission[sessionID] = perms
-            .filter((p) => !!p?.id)
-            .sort((a, b) => cmp(a.id, b.id))
-        }
-        set({ permission })
-      }),
-    ),
-    retry(() =>
-      sdk.question.list().then((x) => {
         const grouped = groupBySession(
           (x.data ?? []).filter((q): q is QuestionRequest => !!q?.id && !!q.sessionID),
         )
-        const question: Record<string, QuestionRequest[]> = {}
         const current = getState()
-        for (const sessionID of Object.keys(current.question ?? {})) {
-          if (!grouped[sessionID]) question[sessionID] = []
-        }
+        const merged = { ...current.question }
         for (const [sessionID, questions] of Object.entries(grouped)) {
-          question[sessionID] = questions
+          merged[sessionID] = questions
             .filter((q) => !!q?.id)
             .sort((a, b) => cmp(a.id, b.id))
         }
-        set({ question })
-      }),
-    ),
+        for (const sessionID of beforeSignatures.keys()) {
+          if (grouped[sessionID]) continue
+          const beforeSignature = beforeSignatures.get(sessionID) ?? ""
+          const currentSignature = requestSignature(current.question[sessionID])
+          if (currentSignature !== beforeSignature) continue
+          delete merged[sessionID]
+        }
+        set({ question: merged })
+    }),
+    retry(async () => {
+      const before = getState()
+      const beforeSignatures = new Map(
+        Object.entries(before.permission ?? {}).map(([sessionID, permissions]) => [sessionID, requestSignature(permissions)]),
+      )
+      const x = await sdk.permission.list(directory ? { directory } : undefined)
+        if (x.error) {
+          const status = (x as { response?: { status?: number } }).response?.status
+          const err = new Error(`permission.list failed${status ? ` (${status})` : ""}: ${String(x.error)}`)
+          if (status !== undefined) (err as Error & { status?: number }).status = status
+          throw err
+        }
+        const grouped = groupBySession(
+          (x.data ?? []).filter((perm): perm is PermissionRequest => !!perm?.id && !!perm?.sessionID),
+        )
+        const current = getState()
+        const merged = { ...current.permission }
+        for (const [sessionID, perms] of Object.entries(grouped)) {
+          merged[sessionID] = perms
+            .filter((p) => !!p?.id)
+            .sort((a, b) => cmp(a.id, b.id))
+        }
+        for (const sessionID of beforeSignatures.keys()) {
+          if (grouped[sessionID]) continue
+          const beforeSignature = beforeSignatures.get(sessionID) ?? ""
+          const currentSignature = requestSignature(current.permission[sessionID])
+          if (currentSignature !== beforeSignature) continue
+          delete merged[sessionID]
+        }
+        set({ permission: merged })
+    }),
   ])
 
   const errors = results

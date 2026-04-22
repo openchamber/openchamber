@@ -21,12 +21,12 @@ export const isAutoAcceptingLevel = (level: PermissionLevel): boolean => {
     return level === 'auto-accept' || level === 'full-access';
 };
 
-const DIRECTORY_WILDCARD = "*";
+const DIRECTORY_WILDCARD = '*';
 
 const encodeBase64 = (value: string): string => {
     try {
         const bytes = new TextEncoder().encode(value);
-        let binary = "";
+        let binary = '';
         for (const byte of bytes) {
             binary += String.fromCharCode(byte);
         }
@@ -37,39 +37,45 @@ const encodeBase64 = (value: string): string => {
 };
 
 export const normalizeDirectory = (value: string | null | undefined): string | null => {
-    if (typeof value !== "string") {
+    if (typeof value !== 'string') {
         return null;
     }
     const trimmed = value.trim();
     if (!trimmed) {
         return null;
     }
-    const normalized = trimmed.replace(/\\/g, "/");
-    if (normalized === "/") {
-        return "/";
+    const normalized = trimmed.replace(/\\/g, '/');
+    if (normalized === '/') {
+        return '/';
     }
-    return normalized.length > 1 ? normalized.replace(/\/+$/g, "") : normalized;
+    return normalized.length > 1 ? normalized.replace(/\/+$/g, '') : normalized;
 };
 
 export const directoryAcceptKey = (directory: string): string => `${encodeBase64(directory)}/${DIRECTORY_WILDCARD}`;
 
 export const sessionAcceptKey = (sessionID: string, directory: string): string => `${encodeBase64(directory)}/${sessionID}`;
 
-const resolveLineage = (sessionID: string, sessions: Session[]): string[] => {
-    const map = new Map<string, Session>();
-    for (const session of sessions) {
-        map.set(session.id, session);
-    }
+const buildSessionMap = (sessions: Session[]): Map<string, Session> => {
+  const map = new Map<string, Session>();
+  for (const session of sessions) {
+    map.set(session.id, session);
+  }
+  return map;
+};
 
-    const result: string[] = [];
-    const seen = new Set<string>();
-    let current: string | undefined = sessionID;
-    while (current && !seen.has(current)) {
-        seen.add(current);
-        result.push(current);
-        current = map.get(current)?.parentID;
-    }
-    return result;
+const resolveLineage = (sessionID: string, sessions: Session[]): string[] => {
+  const map = buildSessionMap(sessions);
+  const result: string[] = [];
+  const seen = new Set<string>();
+  let current: string | undefined = sessionID;
+
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    result.push(current);
+    current = map.get(current)?.parentID;
+  }
+
+  return result;
 };
 
 /**
@@ -104,10 +110,10 @@ export const getPermissionLevel = (input: {
 };
 
 export const autoRespondsPermission = (input: {
-    autoAccept: PermissionAutoAcceptMap;
-    sessions: Session[];
-    sessionID: string;
-    directory: string;
+  autoAccept: PermissionAutoAcceptMap;
+  sessions: Session[];
+  sessionID: string;
+  directory: string;
 }): boolean => {
     return isAutoAcceptingLevel(getPermissionLevel(input));
 };

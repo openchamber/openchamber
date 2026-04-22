@@ -74,6 +74,10 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
   const [isCreating, setIsCreating] = React.useState(false);
   const createInputRef = React.useRef<HTMLInputElement>(null);
 
+  const stopDropdownTypeahead = React.useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
+    event.stopPropagation();
+  }, []);
+
   const hasMultipleRemotes = remotes.length > 1;
 
   const sanitizedNewBranch = React.useMemo(
@@ -250,7 +254,9 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
                     placeholder="New branch name"
                     value={newBranchName}
                     onChange={(e) => setNewBranchName(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
                     onKeyDown={(e) => {
+                      stopDropdownTypeahead(e);
                       if (e.key === 'Enter') {
                         e.preventDefault();
                         handleCreate();

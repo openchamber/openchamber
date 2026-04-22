@@ -13,6 +13,7 @@ import {
   RiMore2Fill,
   RiRefreshLine,
   RiSearchLine,
+  RiDownloadLine,
 } from '@remixicon/react';
 
 import { toast } from '@/components/ui';
@@ -44,7 +45,7 @@ import { useGitStatus } from '@/stores/useGitStore';
 import { useDirectoryShowHidden } from '@/lib/directoryShowHidden';
 import { useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { copyTextToClipboard } from '@/lib/clipboard';
-import { cn } from '@/lib/utils';
+import { cn, getRevealLabel } from '@/lib/utils';
 import { opencodeClient } from '@/lib/opencode/client';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { getContextFileOpenFailureMessage, validateContextFileOpen } from '@/lib/contextFileOpenGuard';
@@ -84,6 +85,18 @@ const normalizePath = (value: string): string => {
   return normalized;
 };
 
+const getRelativePath = (root: string, path: string): string => {
+  const normalizedPath = normalizePath(path);
+  const normalizedRoot = normalizePath(root).replace(/\/+$/, '');
+  if (normalizedPath === normalizedRoot) {
+    return '.';
+  }
+  if (!normalizedRoot || !normalizedPath.startsWith(`${normalizedRoot}/`)) {
+    return normalizedPath;
+  }
+  return normalizedPath.slice(normalizedRoot.length + 1);
+};
+
 const isAbsolutePath = (value: string): boolean => {
   return value.startsWith('/') || value.startsWith('//') || /^[A-Za-z]:\//.test(value);
 };
@@ -121,6 +134,7 @@ const FileStatusDot: React.FC<{ status: FileStatus }> = ({ status }) => {
 
 interface FileRowProps {
   node: FileNode;
+  root: string;
   isExpanded: boolean;
   isActive: boolean;
   status?: FileStatus | null;
@@ -132,6 +146,7 @@ interface FileRowProps {
     canDelete: boolean;
     canReveal: boolean;
   };
+  downloadFile?: (path: string) => Promise<void>;
   contextMenuPath: string | null;
   setContextMenuPath: (path: string | null) => void;
   onSelect: (node: FileNode) => void;
@@ -142,11 +157,13 @@ interface FileRowProps {
 
 const FileRow: React.FC<FileRowProps> = ({
   node,
+  root,
   isExpanded,
   isActive,
   status,
   badge,
   permissions,
+  downloadFile,
   contextMenuPath,
   setContextMenuPath,
   onSelect,
@@ -176,6 +193,13 @@ const FileRow: React.FC<FileRowProps> = ({
     setContextMenuPath(node.path);
   }, [node.path, setContextMenuPath]);
 
+  const handleDragStart = React.useCallback((e: React.DragEvent) => {
+    const path = getRelativePath(root, node.path);
+    if (!path || path === '.') return;
+    e.dataTransfer.setData('application/x-openchamber-file-path', path);
+    e.dataTransfer.effectAllowed = 'copy';
+  }, [node.path, root]);
+
   return (
     <div
       className="group relative flex items-center"
@@ -185,9 +209,12 @@ const FileRow: React.FC<FileRowProps> = ({
         type="button"
         onClick={handleInteraction}
         onContextMenu={handleContextMenu}
+        draggable
+        onDragStart={handleDragStart}
         className={cn(
           'flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-foreground transition-colors pr-8 select-none',
-          isActive ? 'bg-interactive-selection/70' : 'hover:bg-interactive-hover/40'
+          isActive ? 'bg-interactive-selection/70' : 'hover:bg-interactive-hover/40',
+          'cursor-grab active:cursor-grabbing'
         )}
       >
         {isDir ? (
@@ -244,9 +271,17 @@ const FileRow: React.FC<FileRowProps> = ({
               }}>
                 <RiFileCopyLine className="mr-2 h-4 w-4" /> Copy Path
               </DropdownMenuItem>
+              {!isDir && downloadFile && (
+                <DropdownMenuItem onClick={(e) => {
+                  e.stopPropagation();
+                  void downloadFile(node.path);
+                }}>
+                  <RiDownloadLine className="mr-2 h-4 w-4" /> Save
+                </DropdownMenuItem>
+              )}
               {canReveal && (
                 <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onRevealPath(node.path); }}>
-                  <RiFolderReceivedLine className="mr-2 h-4 w-4" /> Reveal in Finder
+                  <RiFolderReceivedLine className="mr-2 h-4 w-4" /> {getRevealLabel()}
                 </DropdownMenuItem>
               )}
               {isDir && (canCreateFile || canCreateFolder) && (
@@ -744,11 +779,13 @@ export const SidebarFilesTree: React.FC = () => {
           )}
           <FileRow
             node={node}
+            root={root}
             isExpanded={isExpanded}
             isActive={isActive}
             status={!isDir ? getFileStatus(node.path) : undefined}
             badge={isDir ? getFolderBadge(node.path) : undefined}
             permissions={{ canRename, canCreateFile, canCreateFolder, canDelete, canReveal }}
+            downloadFile={files.downloadFile}
             contextMenuPath={contextMenuPath}
             setContextMenuPath={setContextMenuPath}
             onSelect={handleOpenFile}
@@ -836,8 +873,15 @@ export const SidebarFilesTree: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => handleOpenFile(node)}
+                    draggable
+                    onDragStart={(e) => {
+                      const path = node.relativePath || getRelativePath(root ?? '', node.path);
+                      if (!path || path === '.') return;
+                      e.dataTransfer.setData('application/x-openchamber-file-path', path);
+                      e.dataTransfer.effectAllowed = 'copy';
+                    }}
                     className={cn(
-                      'flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-foreground transition-colors',
+                      'flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-foreground transition-colors cursor-grab active:cursor-grabbing',
                       isActive ? 'bg-interactive-selection/70' : 'hover:bg-interactive-hover/40'
                     )}
                     title={node.path}

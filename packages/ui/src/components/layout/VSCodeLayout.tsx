@@ -675,7 +675,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
               Last updated {formatTime(quotaLastUpdated)}
             </div>
             {!hasRateLimits && (
-              <DropdownMenuItem className="cursor-default" onSelect={(event) => event.preventDefault()}>
+              <DropdownMenuItem className="cursor-default" closeOnClick={false}>
                 <span className="typography-ui-label text-muted-foreground">No rate limits available.</span>
               </DropdownMenuItem>
             )}
@@ -689,7 +689,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
                   <DropdownMenuItem
                     key={`${group.providerId}-empty`}
                     className="cursor-default"
-                    onSelect={(event) => event.preventDefault()}
+                    closeOnClick={false}
                   >
                     <span className="typography-ui-label text-muted-foreground">
                       {group.error ?? 'No rate limits reported.'}
@@ -710,7 +710,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
                     <DropdownMenuItem
                       key={`${group.providerId}-${label}`}
                       className="cursor-default items-start"
-                      onSelect={(event) => event.preventDefault()}
+                      closeOnClick={false}
                     >
                       <span className="flex min-w-0 flex-1 flex-col gap-2">
                               <span className="flex min-w-0 items-center justify-between gap-3">

@@ -494,8 +494,170 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  build-desktop-electron-macos:
+    needs: create-release
+    runs-on: macos-26
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            arch: arm64
+            platform: darwin-aarch64
+          - target: x86_64-apple-darwin
+            arch: x64
+            platform: darwin-x86_64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install Apple Certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/electron-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          echo "$APPLE_CERTIFICATE" | base64 --decode > $RUNNER_TEMP/certificate.p12
+          security import $RUNNER_TEMP/certificate.p12 \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+      - name: Build Electron app
+        working-directory: packages/electron
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # rebuild-native.mjs reads this to target the right arch when
+          # cross-building (runner is arm64; x64 matrix needs the hint).
+          ELECTRON_BUILDER_ARCH: ${{ matrix.arch }}
+        run: |
+          bun run build:web-assets
+          bun run bundle:main
+          # npmRebuild=false in package.json, so electron-builder won't
+          # recompile native deps on its own — we must rebuild against the
+          # target Electron ABI before packaging, otherwise better-sqlite3/
+          # node-pty/bun-pty crash on require inside the packaged app.
+          bun run rebuild:native
+          ./node_modules/.bin/electron-builder --mac --${{ matrix.arch }} --publish=never
+
+      - name: Verify signature + entitlements + notarization
+        run: |
+          set -euo pipefail
+
+          APP_DIR="packages/electron/dist/mac"
+          [ -d "packages/electron/dist/mac-arm64" ] && APP_DIR="packages/electron/dist/mac-arm64"
+
+          APP_PATH=$(find "$APP_DIR" -maxdepth 2 -name "*.app" -print -quit)
+          if [ -z "$APP_PATH" ]; then
+            echo "Error: .app not found under packages/electron/dist/mac*"
+            ls -la packages/electron/dist/
+            exit 1
+          fi
+
+          echo "Verifying $APP_PATH"
+          codesign -vv --deep --strict "$APP_PATH"
+
+          # Require hardened runtime
+          CS_INFO=$(codesign -dv --verbose=4 "$APP_PATH" 2>&1)
+          echo "$CS_INFO"
+          if ! echo "$CS_INFO" | grep -q "flags=.*runtime"; then
+            echo "Error: hardened runtime flag missing"
+            exit 1
+          fi
+
+          # Require notary ticket stapled
+          xcrun stapler validate "$APP_PATH"
+
+          ENTITLEMENTS=$(codesign -d --entitlements :- "$APP_PATH" 2>&1 || true)
+          if echo "$ENTITLEMENTS" | grep -q "com.apple.security.app-sandbox"; then
+            echo "Error: app sandbox entitlement is present"
+            exit 1
+          fi
+          for key in \
+            com.apple.security.cs.allow-jit \
+            com.apple.security.cs.allow-unsigned-executable-memory \
+            com.apple.security.cs.disable-library-validation
+          do
+            if ! echo "$ENTITLEMENTS" | grep -q "<key>$key</key>"; then
+              echo "Error: required entitlement missing: $key"
+              exit 1
+            fi
+          done
+
+      - name: Upload DMG / ZIP / blockmaps to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.create-release.outputs.version }}
+          files: |
+            packages/electron/dist/*.dmg
+            packages/electron/dist/*.zip
+            packages/electron/dist/*.blockmap
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload per-arch latest-mac.yml for merge
+        uses: actions/upload-artifact@v4
+        with:
+          name: latest-yml-${{ matrix.target }}
+          path: packages/electron/dist/latest-mac.yml
+          retention-days: 1
+
+  combine-electron-manifests:
+    needs: [create-release, build-desktop-electron-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Download per-arch latest-mac.yml
+        uses: actions/download-artifact@v4
+        with:
+          pattern: latest-yml-*-apple-darwin
+          path: artifacts
+
+      - name: Finalize combined latest-mac.yml
+        env:
+          LATEST_YML_DIR: ${{ github.workspace }}/artifacts
+          GH_REPO: ${{ github.repository }}
+          OPENCHAMBER_VERSION: ${{ needs.create-release.outputs.version }}
+        run: node packages/electron/scripts/finalize-latest-yml.mjs
+
+      - name: Upload combined latest-mac.yml to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.create-release.outputs.version }}
+          files: ${{ runner.temp }}/latest-mac.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   finalize-release:
-    needs: [create-release, build-desktop-macos, publish-npm, combine-manifests]
+    needs: [create-release, build-desktop-macos, build-desktop-electron-macos, publish-npm, combine-manifests, combine-electron-manifests]
     runs-on: ubuntu-latest
     env:
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}

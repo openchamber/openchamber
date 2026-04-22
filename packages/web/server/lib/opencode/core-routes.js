@@ -18,7 +18,7 @@ export const registerServerStatusRoutes = (app, dependencies) => {
 
   app.post('/api/system/shutdown', (_req, res) => {
     res.json({ ok: true });
-    gracefulShutdown({ exitProcess: false }).catch((error) => {
+    gracefulShutdown({ exitProcess: true }).catch((error) => {
       console.error('Shutdown request failed:', error?.message || error);
     });
   });
@@ -262,6 +262,7 @@ export const registerCommonRequestMiddleware = (app, dependencies) => {
       req.path.startsWith('/api/opencode') ||
       req.path.startsWith('/api/openchamber') ||
       req.path.startsWith('/api/push') ||
+      req.path.startsWith('/api/text') ||
       req.path.startsWith('/api/voice') ||
       req.path.startsWith('/api/tts') ||
       req.path.startsWith('/api/openchamber/tunnel')

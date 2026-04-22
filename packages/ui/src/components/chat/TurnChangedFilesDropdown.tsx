@@ -1,0 +1,120 @@
+import React from 'react';
+import { RiFileEditLine, RiArrowDownSLine, RiArrowUpSLine } from '@remixicon/react';
+import type { ToolPart } from '@opencode-ai/sdk/v2';
+import { Popover } from '@base-ui/react/popover';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useIsGitRepo } from '@/stores/useGitStore';
+import { useUIStore } from '@/stores/useUIStore';
+import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
+import {
+    type ChangedFile,
+    type ChangedFileEntry,
+    FILE_EDIT_TOOLS,
+    extractChangedFiles,
+    isGitFile,
+    toRelativePath,
+} from './changedFiles';
+import { ChangedFilesList } from './ChangedFilesList';
+import { changedFilesPopoverClassName, changedFilesPopoverStyle } from './changedFilesPopover';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import type { TurnActivityRecord } from './lib/turns/types';
+
+interface TurnChangedFilesDropdownProps {
+    activityParts: TurnActivityRecord[] | undefined;
+}
+
+export const TurnChangedFilesDropdown: React.FC<TurnChangedFilesDropdownProps> = React.memo(({ activityParts }) => {
+    const [isExpanded, setIsExpanded] = React.useState(false);
+    const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
+    const runtime = React.useContext(RuntimeAPIContext);
+    const isGitRepo = useIsGitRepo(currentDirectory);
+
+    const changedFiles = React.useMemo<ChangedFile[]>(() => {
+        // Skip work entirely in git repos — the global PendingChangesBar handles those.
+        if (isGitRepo !== false) return [];
+        if (!activityParts || activityParts.length === 0) return [];
+        const toolParts: ToolPart[] = [];
+        for (const activity of activityParts) {
+            const part = activity.part;
+            if (part.type !== 'tool') continue;
+            if (!FILE_EDIT_TOOLS.has(part.tool)) continue;
+            toolParts.push(part);
+        }
+        if (toolParts.length === 0) return [];
+        return extractChangedFiles(toolParts);
+    }, [activityParts, isGitRepo]);
+
+    if (changedFiles.length === 0) return null;
+
+    const handleOpenFile = (file: ChangedFileEntry) => {
+        if (!currentDirectory) return;
+        if (isGitFile(file)) return;
+
+        const absolutePath = file.path.startsWith('/')
+            ? file.path
+            : (currentDirectory.endsWith('/') ? currentDirectory : currentDirectory + '/') + file.path;
+
+        const editor = runtime?.editor;
+        if (editor) {
+            void editor.openFile(absolutePath);
+            setIsExpanded(false);
+            return;
+        }
+
+        const store = useUIStore.getState();
+        if (!store.isMobile) {
+            store.openContextFile(currentDirectory, absolutePath);
+            setIsExpanded(false);
+            return;
+        }
+        store.navigateToDiff(toRelativePath(file.path, currentDirectory));
+        store.setRightSidebarOpen(false);
+        setIsExpanded(false);
+    };
+
+    const fileCount = changedFiles.length;
+    const label = `${fileCount} file${fileCount !== 1 ? 's' : ''}`;
+
+    return (
+        <Popover.Root open={isExpanded} onOpenChange={setIsExpanded}>
+            <Tooltip delayDuration={300}>
+                <TooltipTrigger asChild>
+                    <Popover.Trigger
+                        render={
+                            <button
+                                type="button"
+                                className="flex items-center gap-1 text-sm text-muted-foreground/60 hover:text-muted-foreground tabular-nums"
+                                aria-label={`${label} changed in this turn`}
+                            >
+                                <RiFileEditLine className="h-3.5 w-3.5" />
+                                <span className="message-footer__label">{label}</span>
+                                {isExpanded ? (
+                                    <RiArrowUpSLine className="h-3.5 w-3.5" />
+                                ) : (
+                                    <RiArrowDownSLine className="h-3.5 w-3.5" />
+                                )}
+                            </button>
+                        }
+                    />
+                </TooltipTrigger>
+                <TooltipContent>{label} changed in this turn</TooltipContent>
+            </Tooltip>
+            <Popover.Portal>
+                <Popover.Positioner side="top" align="start" sideOffset={4} collisionPadding={8}>
+                    <Popover.Popup
+                        style={changedFilesPopoverStyle}
+                        className={changedFilesPopoverClassName}
+                    >
+                        <ChangedFilesList
+                            files={changedFiles}
+                            currentDirectory={currentDirectory}
+                            onOpenFile={handleOpenFile}
+                        />
+                    </Popover.Popup>
+                </Popover.Positioner>
+            </Popover.Portal>
+        </Popover.Root>
+    );
+});
+
+TurnChangedFilesDropdown.displayName = 'TurnChangedFilesDropdown';

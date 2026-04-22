@@ -27,6 +27,7 @@
       const defaultAppName = 'OpenChamber - AI Coding Assistant';
       const defaultShortName = 'OpenChamber';
       const pwaNameStorageKey = 'openchamber.pwaName';
+      const pwaOrientationStorageKey = 'openchamber.pwaOrientation';
       const pwaRecentSessionsStorageKey = 'openchamber.pwaRecentSessions';
 
       const normalizePwaName = (value, fallback) => {
@@ -45,6 +46,13 @@
           return '';
         }
         return value.length > maxLength ? value.slice(0, maxLength) : value;
+      };
+
+      const normalizePwaOrientation = (value, fallback = 'system') => {
+        if (value === 'portrait' || value === 'landscape' || value === 'system') {
+          return value;
+        }
+        return fallback;
       };
 
       const getStoredInstallName = () => {
@@ -68,6 +76,25 @@
           return defaultAppName;
         }
         return normalizedName || defaultAppName;
+      };
+
+      const getStoredOrientation = () => {
+        try {
+          const storedOrientation = localStorage.getItem(pwaOrientationStorageKey);
+          return normalizePwaOrientation(storedOrientation, 'system');
+        } catch {
+          return 'system';
+        }
+      };
+
+      const setStoredOrientation = (value) => {
+        const normalizedOrientation = normalizePwaOrientation(value, 'system');
+        try {
+          localStorage.setItem(pwaOrientationStorageKey, normalizedOrientation);
+        } catch {
+          return 'system';
+        }
+        return normalizedOrientation;
       };
 
       const getQueryInstallNameOverride = () => {
@@ -158,8 +185,13 @@
         return shortcuts;
       };
 
-      const buildManifest = (appName, recentSessions) => {
+      const buildManifest = (appName, recentSessions, orientationPreference) => {
         const shortName = appName === defaultAppName ? defaultShortName : truncate(appName, 30);
+        const manifestOrientation = orientationPreference === 'portrait'
+          ? 'portrait-primary'
+          : orientationPreference === 'landscape'
+            ? 'landscape-primary'
+            : null;
         return {
           name: appName,
           short_name: shortName,
@@ -168,7 +200,7 @@
           start_url: `${baseUrl}/`,
           scope: `${baseUrl}/`,
           display: 'standalone',
-          orientation: 'portrait-primary',
+          ...(manifestOrientation ? { orientation: manifestOrientation } : {}),
           background_color: '#151313',
           theme_color: '#edb449',
           icons: [
@@ -187,10 +219,13 @@
         };
       };
 
-      const buildManifestEndpointUrl = (installNameOverride = null) => {
+      const buildManifestEndpointUrl = (installNameOverride = null, orientationOverride = null) => {
         const params = new URLSearchParams();
         if (typeof installNameOverride === 'string') {
           params.set('appName', installNameOverride);
+        }
+        if (typeof orientationOverride === 'string') {
+          params.set('orientation', normalizePwaOrientation(orientationOverride, 'system'));
         }
         const search = params.toString();
         return `${baseUrl}/manifest.webmanifest${search ? `?${search}` : ''}`;
@@ -257,11 +292,14 @@
         }
       };
 
-      const updateManifest = async (installNameOverride = null) => {
+      const updateManifest = async (installNameOverride = null, orientationOverride = null) => {
         const resolvedFallbackName = typeof installNameOverride === 'string' ? installNameOverride : getStoredInstallName();
+        const resolvedOrientation = typeof orientationOverride === 'string'
+          ? normalizePwaOrientation(orientationOverride, 'system')
+          : getStoredOrientation();
         const recentSessions = parseRecentSessionShortcuts();
-        const manifest = buildManifest(resolvedFallbackName, recentSessions);
-        const manifestUrl = buildManifestEndpointUrl(installNameOverride);
+        const manifest = buildManifest(resolvedFallbackName, recentSessions, resolvedOrientation);
+        const manifestUrl = buildManifestEndpointUrl(installNameOverride, resolvedOrientation);
         const requestVersion = ++manifestRequestVersion;
 
         const useEndpoint = await canUseManifestEndpoint(manifestUrl, requestVersion);
@@ -289,6 +327,11 @@
         const resolvedName = setStoredInstallName(value);
         void updateManifest(resolvedName);
         return resolvedName;
+      };
+      window.__OPENCHAMBER_SET_PWA_ORIENTATION__ = (value) => {
+        const resolvedOrientation = setStoredOrientation(value);
+        void updateManifest(null, resolvedOrientation);
+        return resolvedOrientation;
       };
       window.__OPENCHAMBER_UPDATE_PWA_MANIFEST__ = () => {
         refreshManifestFromStorage();
@@ -501,9 +544,14 @@
     </div>
 
     <script>
-      // Fallback: hide loading screen after 10 seconds if React fails to load
+      // Fallback: hide loading screen after 10 seconds if React fails to load.
+      // Desktop shells manage their own splash via the injected boot outcome;
+      // do not force-remove for desktop windows.
       setTimeout(function() {
-        const loading = document.getElementById('initial-loading');
+        if (typeof window.__OPENCHAMBER_LOCAL_ORIGIN__ === 'string' && window.__OPENCHAMBER_LOCAL_ORIGIN__.length > 0) {
+          return;
+        }
+        var loading = document.getElementById('initial-loading');
         if (loading) {
           console.warn('Loading screen timeout - forcing hide after 10s');
           loading.classList.add('fade-out');

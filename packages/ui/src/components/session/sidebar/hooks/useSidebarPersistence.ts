@@ -19,6 +19,7 @@ type Keys = {
 
 type Args = {
   isVSCode: boolean;
+  hasLoadedGlobalSessions: boolean;
   safeStorage: SafeStorageLike;
   keys: Keys;
   sessions: Session[];
@@ -34,6 +35,7 @@ type Args = {
 export const useSidebarPersistence = (args: Args) => {
   const {
     isVSCode,
+    hasLoadedGlobalSessions,
     safeStorage,
     keys,
     sessions,
@@ -114,6 +116,10 @@ export const useSidebarPersistence = (args: Args) => {
   }, [keys.projectCollapse, keys.sessionExpanded, safeStorage, setCollapsedProjects, setExpandedParents]);
 
   React.useEffect(() => {
+    if (!hasLoadedGlobalSessions) {
+      return;
+    }
+
     const existingSessionIds = new Set(sessions.map((session) => session.id));
     setPinnedSessionIds((prev) => {
       let changed = false;
@@ -127,7 +133,7 @@ export const useSidebarPersistence = (args: Args) => {
       });
       return changed ? next : prev;
     });
-  }, [sessions, setPinnedSessionIds]);
+  }, [hasLoadedGlobalSessions, sessions, setPinnedSessionIds]);
 
   React.useEffect(() => {
     try {

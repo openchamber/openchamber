@@ -6,12 +6,15 @@
  * current selection, draft state, viewport anchors, model/agent preferences,
  * voice state, abort prompts, attached files, worktree metadata.
  *
+ * Session↔worktree attachments are the authoritative exception: they live in
+ * session-worktree-store (shared sync), and session-ui-store routes through it.
+ *
  * SDK-calling actions that need domain data read it from sync-refs.
  */
 
 import { create } from "zustand"
 import type { Session, Part, Message, TextPart } from "@opencode-ai/sdk/v2/client"
-import type { AttachedFile, SessionContextUsage } from "@/stores/types/sessionTypes"
+import type { AttachedFile, SessionContextUsage, SessionWorktreeAttachment } from "@/stores/types/sessionTypes"
 import type { WorktreeMetadata } from "@/types/worktree"
 import { opencodeClient } from "@/lib/opencode/client"
 import { useConfigStore } from "@/stores/useConfigStore"
@@ -25,7 +28,7 @@ import { flattenAssistantTextParts } from "@/lib/messages/messageText"
 import { EXECUTION_FORK_META_TEXT } from "@/lib/messages/executionMeta"
 import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap"
 import { waitForPendingDraftWorktreeRequest } from "@/lib/worktrees/pendingDraftWorktree"
-import type { ProjectEntry } from "@/lib/api/types"
+import { resolveProjectForSessionDirectory } from "@/lib/projectResolution"
 import {
   getSyncSessions,
   getAllSyncSessions,
@@ -49,6 +52,8 @@ import { useSelectionStore } from "./selection-store"
 import { useViewportStore } from "./viewport-store"
 import { usePermissionStore } from "@/stores/permissionStore"
 import { useBackendsStore } from "@/stores/useBackendsStore"
+import { useSessionWorktreeStore } from "./session-worktree-store"
+import { getAttachedSessionDirectory } from "./session-worktree-contract"
 
 export type { AttachedFile }
 
@@ -208,6 +213,10 @@ export type SessionUIState = {
   markSessionPlanAvailable: (sessionId: string) => void
   isSessionPlanAvailable: (sessionId: string) => boolean
 
+  // Non-Git mode: dismissed signature hash per session, hides bar until new turn arrives
+  pendingChangesBarDismissed: Map<string, string>
+  dismissPendingChangesBar: (sessionId: string, signature: string | null) => void
+
   // Actions — UI state management
   setCurrentSession: (id: string | null, directoryHint?: string | null) => void
   openNewSessionDraft: (options?: Partial<NewSessionDraftState>) => void
@@ -313,65 +322,20 @@ const persistDraftTarget = (target: PersistedDraftTarget): void => {
   } catch { /* ignored */ }
 }
 
-const resolveProjectForDirectory = (projects: ProjectEntry[], directory: string | null): ProjectEntry | null => {
-  const nd = normalizePath(directory)
-  if (!nd) return null
-  let best: ProjectEntry | null = null
-  for (const p of projects) {
-    const pp = normalizePath(p.path)
-    if (!pp) continue
-    if (nd !== pp && !nd.startsWith(`${pp}/`)) continue
-    if (!best || pp.length > (normalizePath(best.path)?.length ?? 0)) best = p
-  }
-  return best
-}
+const resolveDraftProjectForDirectory = resolveProjectForSessionDirectory
 
-const resolveProjectFromWorktreeDirectory = (
-  projects: ProjectEntry[],
-  availableWorktreesByProject: Map<string, WorktreeMetadata[]>,
-  directory: string | null,
-): ProjectEntry | null => {
-  const nd = normalizePath(directory)
-  if (!nd) return null
-  let matchedWorktree: WorktreeMetadata | null = null
-  let matchedProjectPath: string | null = null
-  let bestLen = -1
-  for (const [projectPath, worktrees] of availableWorktreesByProject.entries()) {
-    for (const wt of worktrees) {
-      const wp = normalizePath(wt.path)
-      if (!wp) continue
-      if (nd !== wp && !nd.startsWith(`${wp}/`)) continue
-      if (wp.length > bestLen) {
-        bestLen = wp.length
-        matchedWorktree = wt
-        matchedProjectPath = normalizePath(projectPath)
-      }
-    }
-  }
-  if (!matchedWorktree) return null
-  const candidates = [normalizePath(matchedWorktree.projectDirectory), matchedProjectPath].filter((v): v is string => Boolean(v))
-  for (const c of candidates) {
-    const exact = projects.find((p) => normalizePath(p.path) === c) ?? null
-    if (exact) return exact
-    const nested = resolveProjectForDirectory(projects, c)
-    if (nested) return nested
-  }
-  return null
+const getAttachmentForSession = (sessionId: string | null | undefined): SessionWorktreeAttachment | undefined => {
+  if (!sessionId) return undefined
+  return useSessionWorktreeStore.getState().getAttachment(sessionId)
 }
-
-const resolveDraftProjectForDirectory = (
-  projects: ProjectEntry[],
-  availableWorktreesByProject: Map<string, WorktreeMetadata[]>,
-  directory: string | null,
-): ProjectEntry | null =>
-  resolveProjectFromWorktreeDirectory(projects, availableWorktreesByProject, directory) ??
-  resolveProjectForDirectory(projects, directory)
 
 const resolveSessionDirectory = (
   sessionId: string | null | undefined,
   getWtMeta: (id: string) => WorktreeMetadata | undefined,
 ): string | null => {
   if (!sessionId) return null
+  const attachmentDirectory = getAttachedSessionDirectory(getAttachmentForSession(sessionId))
+  if (attachmentDirectory) return attachmentDirectory
   const metaPath = getWtMeta(sessionId)?.path
   if (typeof metaPath === "string" && metaPath.trim().length > 0) return normalizePath(metaPath)
   const sessions = getAllSyncSessions()
@@ -410,6 +374,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   isLoading: false,
   lastLoadedDirectory: null,
   sessionPlanAvailable: new Map(),
+  pendingChangesBarDismissed: new Map(),
 
   // ---------------------------------------------------------------------------
   // setCurrentSession
@@ -653,13 +618,30 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     // Stub — was a no-op in old store
   },
 
-  setWorktreeMetadata: (sessionId, metadata) =>
+  setWorktreeMetadata: (sessionId, metadata) => {
+    // Write to authoritative session-worktree-store
+    if (metadata) {
+      useSessionWorktreeStore.getState().setAttachment(sessionId, {
+        worktreeRoot: metadata.worktreeRoot ?? metadata.path ?? null,
+        cwd: metadata.path ?? null,
+        branch: metadata.branch ?? null,
+        headState: metadata.headState ?? (metadata.branch ? 'branch' : 'detached'),
+        worktreeStatus: metadata.worktreeStatus ?? 'ready',
+        worktreeSource: metadata.worktreeSource ?? null,
+        legacy: false,
+        degraded: false,
+      })
+    } else {
+      useSessionWorktreeStore.getState().clearAttachment(sessionId)
+    }
+    // Also keep local map for backward compatibility
     set((s) => {
       const map = new Map(s.worktreeMetadata)
       if (metadata) map.set(sessionId, metadata)
       else map.delete(sessionId)
       return { worktreeMetadata: map }
-    }),
+    })
+  },
 
   overrideNewSessionDraftTarget: (options) => {
     let nextDirectory: string | null = null
@@ -702,6 +684,16 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
   getWorktreeMetadata: (sessionId) => get().worktreeMetadata.get(sessionId),
 
+  dismissPendingChangesBar: (sessionId, signature) => {
+    const map = new Map(get().pendingChangesBarDismissed);
+    if (signature === null) {
+      map.delete(sessionId);
+    } else {
+      map.set(sessionId, signature);
+    }
+    set({ pendingChangesBarDismissed: map });
+  },
+
   // ---------------------------------------------------------------------------
   // sendMessage — calls SDK, reads domain data from sync
   // ---------------------------------------------------------------------------
@@ -716,6 +708,14 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     variant?: string,
     inputMode?: "normal" | "shell",
   ) => {
+    // Clear non-Git changed-files bar on new user message for current session
+    const sid = get().currentSessionId;
+    if (sid) {
+      const map = new Map(get().pendingChangesBarDismissed);
+      map.delete(sid);
+      set({ pendingChangesBarDismissed: map });
+    }
+
     const draft = get().newSessionDraft
     const trimmedAgent = typeof agent === "string" && agent.trim().length > 0 ? agent.trim() : undefined
 
@@ -1130,6 +1130,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   },
 
   getDirectoryForSession: (sessionId) => {
+    const attachmentDirectory = getAttachedSessionDirectory(getAttachmentForSession(sessionId))
+    if (attachmentDirectory) return attachmentDirectory
     const sessions = getAllSyncSessions()
     const session = sessions.find((s) => s.id === sessionId)
     if (!session) return null

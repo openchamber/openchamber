@@ -57,6 +57,7 @@ export const useScrollEngine = ({
     const followRafRef = React.useRef<number | null>(null);
     const followActiveRef = React.useRef(false);
     const followPersistRef = React.useRef(false);
+    const followObserversRef = React.useRef<{ resize: ResizeObserver; mutation: MutationObserver } | null>(null);
 
     const cancelSpring = React.useCallback(() => {
         if (scrollAnimRef.current) {
@@ -65,7 +66,16 @@ export const useScrollEngine = ({
         }
     }, []);
 
+    const teardownFollowObservers = React.useCallback(() => {
+        const observers = followObserversRef.current;
+        if (!observers) return;
+        observers.resize.disconnect();
+        observers.mutation.disconnect();
+        followObserversRef.current = null;
+    }, []);
+
     const cancelFollow = React.useCallback(() => {
+        teardownFollowObservers();
         if (followRafRef.current !== null && typeof window !== 'undefined') {
             window.cancelAnimationFrame(followRafRef.current);
             followRafRef.current = null;
@@ -73,46 +83,49 @@ export const useScrollEngine = ({
         followActiveRef.current = false;
         followPersistRef.current = false;
         setIsFollowingBottom(false);
-    }, []);
+    }, [teardownFollowObservers]);
 
     const cancelAll = React.useCallback(() => {
         cancelSpring();
         cancelFollow();
     }, [cancelSpring, cancelFollow]);
 
-    // Continuous lerp loop that chases scrollHeight - clientHeight.
-    const startFollowLoop = React.useCallback((persist = false) => {
-        followPersistRef.current = persist || followPersistRef.current;
-        if (followActiveRef.current) return; // already running
+    // One burst of the lerp loop — runs until scrollTop catches up to bottom, then stops.
+    // Re-invoked by observers when persist mode content grows.
+    const runFollowBurst = React.useCallback(() => {
+        if (followActiveRef.current) return;
+        const container = containerRef.current;
+        if (!container) return;
         followActiveRef.current = true;
-        setIsFollowingBottom(true);
+        if (!followPersistRef.current) {
+            setIsFollowingBottom(true);
+        }
         let stableFrames = 0;
 
         const tick = () => {
-            const container = containerRef.current;
-            if (!container || !followActiveRef.current) {
+            const c = containerRef.current;
+            if (!c || !followActiveRef.current) {
                 followActiveRef.current = false;
                 followRafRef.current = null;
-                setIsFollowingBottom(false);
+                if (!followPersistRef.current) {
+                    setIsFollowingBottom(false);
+                }
                 return;
             }
 
-            const target = container.scrollHeight - container.clientHeight;
-            const current = container.scrollTop;
+            const target = c.scrollHeight - c.clientHeight;
+            const current = c.scrollTop;
             const delta = target - current;
 
             if (Math.abs(delta) <= SNAP_EPSILON) {
-                container.scrollTop = target;
-                if (followPersistRef.current) {
-                    stableFrames = 0;
-                    followRafRef.current = window.requestAnimationFrame(tick);
-                    return;
-                }
+                c.scrollTop = target;
                 stableFrames += 1;
                 if (stableFrames >= FOLLOW_STABLE_FRAME_LIMIT) {
                     followActiveRef.current = false;
                     followRafRef.current = null;
-                    setIsFollowingBottom(false);
+                    if (!followPersistRef.current) {
+                        setIsFollowingBottom(false);
+                    }
                     return;
                 }
                 followRafRef.current = window.requestAnimationFrame(tick);
@@ -120,12 +133,48 @@ export const useScrollEngine = ({
             }
 
             stableFrames = 0;
-            container.scrollTop = current + delta * LERP_FACTOR;
+            c.scrollTop = current + delta * LERP_FACTOR;
             followRafRef.current = window.requestAnimationFrame(tick);
         };
 
         followRafRef.current = window.requestAnimationFrame(tick);
     }, [containerRef]);
+
+    // Observer-driven persist mode — RAF bursts only fire when content actually changes.
+    // No idle CPU cost while waiting for the next token.
+    const setupFollowObservers = React.useCallback(() => {
+        const container = containerRef.current;
+        if (!container || followObserversRef.current) return;
+
+        const onChange = () => {
+            if (!followPersistRef.current) return;
+            runFollowBurst();
+        };
+
+        const resize = new ResizeObserver(onChange);
+        const inner = container.firstElementChild;
+        if (inner instanceof Element) {
+            resize.observe(inner);
+        }
+        resize.observe(container);
+
+        const mutation = new MutationObserver(onChange);
+        mutation.observe(container, { childList: true, subtree: true });
+
+        followObserversRef.current = { resize, mutation };
+    }, [containerRef, runFollowBurst]);
+
+    const startFollowLoop = React.useCallback((persist = false) => {
+        const wasPersist = followPersistRef.current;
+        followPersistRef.current = persist || wasPersist;
+        if (followPersistRef.current) {
+            if (!wasPersist) {
+                setIsFollowingBottom(true);
+            }
+            setupFollowObservers();
+        }
+        runFollowBurst();
+    }, [runFollowBurst, setupFollowObservers]);
 
     const scrollToPosition = React.useCallback(
         (position: number, options?: ScrollOptions) => {

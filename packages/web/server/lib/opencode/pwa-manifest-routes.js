@@ -1,4 +1,13 @@
 const DEFAULT_PWA_APP_NAME = 'OpenChamber - AI Coding Assistant';
+const mapPwaOrientationToManifest = (value) => {
+  if (value === 'portrait') {
+    return 'portrait-primary';
+  }
+  if (value === 'landscape') {
+    return 'landscape-primary';
+  }
+  return undefined;
+};
 
 export const registerPwaManifestRoute = (app, dependencies) => {
   const {
@@ -8,6 +17,7 @@ export const registerPwaManifestRoute = (app, dependencies) => {
     getOpenCodeAuthHeaders,
     readSettingsFromDiskMigrated,
     normalizePwaAppName,
+    normalizePwaOrientation,
   } = dependencies;
 
   const recentPwaSessionsCache = new Map();
@@ -180,18 +190,26 @@ export const registerPwaManifestRoute = (app, dependencies) => {
     }
 
     const queryOverrideName = normalizePwaAppName(queryValueRaw, '');
+    const hasOrientationOverride = typeof req.query?.orientation === 'string';
+    const queryOverrideOrientation = normalizePwaOrientation(req.query?.orientation, 'system');
 
     let storedName = '';
+    let storedOrientation = 'system';
     try {
       const settings = await readSettingsFromDiskMigrated();
       storedName = normalizePwaAppName(settings?.pwaAppName, '');
+      storedOrientation = normalizePwaOrientation(settings?.pwaOrientation, 'system');
     } catch {
       storedName = '';
+      storedOrientation = 'system';
     }
 
     const appName = hasQueryOverride
       ? (queryOverrideName || DEFAULT_PWA_APP_NAME)
       : (storedName || DEFAULT_PWA_APP_NAME);
+    const manifestOrientation = mapPwaOrientationToManifest(
+      hasOrientationOverride ? queryOverrideOrientation : storedOrientation
+    );
 
     const shortName = appName.length > 30 ? appName.slice(0, 30) : appName;
     const recentSessionShortcuts = await getRecentPwaSessionShortcuts(req);
@@ -206,7 +224,7 @@ export const registerPwaManifestRoute = (app, dependencies) => {
       display: 'standalone',
       background_color: '#151313',
       theme_color: '#edb449',
-      orientation: 'any',
+      ...(manifestOrientation ? { orientation: manifestOrientation } : {}),
       icons: [
         { src: '/pwa-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
         { src: '/pwa-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },

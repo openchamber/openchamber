@@ -1,5 +1,6 @@
 import express from 'express';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
+import { summarizeText, sanitizeForTTS, sanitizeForNote } from '../text/summarization.js';
 
 export function registerTtsRoutes(app, { resolveZenModel, sayTTSCapability }) {
   let ttsModulePromise = null;
@@ -76,9 +77,8 @@ export function registerTtsRoutes(app, { resolveZenModel, sayTTSCapability }) {
       // Optionally summarize long text before speaking using zen API
       if (summarize && textToSpeak.length > threshold) {
         try {
-          const { summarizeText } = await getTtsModule();
           const speakZenModel = await resolveZenModel(typeof req.body?.zenModel === 'string' ? req.body.zenModel : undefined);
-          const result = await summarizeText({ text: textToSpeak, threshold, maxLength, zenModel: speakZenModel });
+          const result = await summarizeText({ text: textToSpeak, threshold, maxLength, zenModel: speakZenModel, mode: 'tts' });
           
           if (result.summarized && result.summary) {
             textToSpeak = result.summary;
@@ -115,23 +115,29 @@ export function registerTtsRoutes(app, { resolveZenModel, sayTTSCapability }) {
       }
   });
 
-  app.post('/api/tts/summarize', async (req, res) => {
+  app.post('/api/text/summarize', async (req, res) => {
     try {
-      const { summarizeText } = await getTtsModule();
-      const { text, threshold = 200, maxLength = 500 } = req.body || {};
+      const { text, threshold = 200, maxLength = 500, mode } = req.body || {};
 
       if (!text || typeof text !== 'string' || !text.trim()) {
         return res.status(400).json({ error: 'Text is required' });
       }
 
       const sumZenModel = await resolveZenModel(typeof req.body?.zenModel === 'string' ? req.body.zenModel : undefined);
-      const result = await summarizeText({ text, threshold, maxLength, zenModel: sumZenModel });
+      const result = await summarizeText({
+        text,
+        threshold,
+        maxLength,
+        zenModel: sumZenModel,
+        mode: typeof mode === 'string' ? mode : 'tts',
+      });
 
       return res.json(result);
     } catch (error) {
       console.error('[Summarize] Error:', error);
-      const { sanitizeForTTS } = await getTtsModule();
-      const sanitized = sanitizeForTTS(req.body?.text || '');
+      const sanitized = typeof req.body?.mode === 'string' && req.body.mode === 'note'
+        ? sanitizeForNote(req.body?.text || '')
+        : sanitizeForTTS(req.body?.text || '');
       return res.json({ summary: sanitized, summarized: false, reason: error.message });
     }
   });

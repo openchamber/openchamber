@@ -62,6 +62,21 @@ export const createProjectDirectoryRuntime = (dependencies) => {
       ? getReadSettingsFromDiskMigrated()
       : readSettingsFromDiskMigrated;
     const settings = await readSettings();
+
+    // `lastDirectory` reflects the directory the UI is currently browsing —
+    // useDirectoryStore.setDirectory() persists it on every navigation.
+    // Prefer it over activeProjectId, because the user may have navigated
+    // away from the project that was last "clicked" in the sidebar (e.g. via
+    // `go to parent`, directory picker, or a deep link), leaving
+    // activeProjectId stale. Fetches scoped to the stale project would 400
+    // with "Path is outside of active workspace".
+    if (typeof settings.lastDirectory === 'string' && settings.lastDirectory.trim()) {
+      const validated = await validateDirectoryPath(settings.lastDirectory);
+      if (validated.ok) {
+        return { directory: validated.directory, error: null };
+      }
+    }
+
     const projects = sanitizeProjects(settings.projects) || [];
     if (projects.length === 0) {
       return { directory: null, error: 'Directory parameter or active project is required' };

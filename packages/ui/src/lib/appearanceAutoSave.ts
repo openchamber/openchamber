@@ -31,6 +31,7 @@ type AppearanceSlice = {
   inputBarOffset: number;
   diffLayoutPreference: 'dynamic' | 'inline' | 'side-by-side';
   diffViewMode: 'single' | 'stacked';
+  gitChangesViewMode: 'flat' | 'tree';
 };
 
 let initialized = false;
@@ -66,6 +67,7 @@ export const startAppearanceAutoSave = (): void => {
     inputBarOffset: useUIStore.getState().inputBarOffset,
     diffLayoutPreference: useUIStore.getState().diffLayoutPreference,
     diffViewMode: useUIStore.getState().diffViewMode,
+    gitChangesViewMode: useUIStore.getState().gitChangesViewMode,
   };
 
   let pending: Partial<DesktopSettings> | null = null;
@@ -113,6 +115,7 @@ export const startAppearanceAutoSave = (): void => {
       inputBarOffset: state.inputBarOffset,
       diffLayoutPreference: state.diffLayoutPreference,
       diffViewMode: state.diffViewMode,
+      gitChangesViewMode: state.gitChangesViewMode,
     };
 
     const diff: Partial<DesktopSettings> = {};
@@ -186,6 +189,9 @@ export const startAppearanceAutoSave = (): void => {
     if (current.diffViewMode !== previous.diffViewMode) {
       diff.diffViewMode = current.diffViewMode;
     }
+    if (current.gitChangesViewMode !== previous.gitChangesViewMode) {
+      diff.gitChangesViewMode = current.gitChangesViewMode;
+    }
 
     previous = current;
 
@@ -193,4 +199,5 @@ export const startAppearanceAutoSave = (): void => {
       schedule(diff);
     }
   });
+
 };

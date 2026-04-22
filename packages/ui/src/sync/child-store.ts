@@ -39,11 +39,18 @@ export class ChildStoreManager {
   private readonly lifecycle = new Map<string, DirState>()
   private readonly pins = new Map<string, number>()
   private readonly disposers = new Map<string, () => void>()
+  private readonly registrySubscribers = new Set<() => void>()
 
   private onBootstrap?: (directory: string) => void
   private onDispose?: (directory: string) => void
   private isBooting?: (directory: string) => boolean
   private isLoadingSessions?: (directory: string) => boolean
+
+  private notifyRegistrySubscribers() {
+    for (const subscriber of this.registrySubscribers) {
+      subscriber()
+    }
+  }
 
   configure(callbacks: {
     onBootstrap?: (directory: string) => void
@@ -91,6 +98,7 @@ export class ChildStoreManager {
     if (!store) {
       store = createDirectoryStore(directory)
       this.children.set(directory, store)
+      this.notifyRegistrySubscribers()
     }
 
     this.mark(directory)
@@ -122,6 +130,7 @@ export class ChildStoreManager {
 
     this.lifecycle.delete(directory)
     this.children.delete(directory)
+    this.notifyRegistrySubscribers()
     const dispose = this.disposers.get(directory)
     if (dispose) {
       dispose()
@@ -165,8 +174,53 @@ export class ChildStoreManager {
     for (const directory of [...this.children.keys()]) {
       this.children.delete(directory)
     }
+    this.notifyRegistrySubscribers()
     this.lifecycle.clear()
     this.pins.clear()
     this.disposers.clear()
+  }
+
+  subscribeRegistry(listener: () => void): () => void {
+    this.registrySubscribers.add(listener)
+    return () => {
+      this.registrySubscribers.delete(listener)
+    }
+  }
+
+  subscribeAll(listener: () => void): () => void {
+    const storeUnsubscribers = new Map<string, () => void>()
+
+    const syncStoreSubscriptions = () => {
+      const activeDirectories = new Set(this.children.keys())
+
+      for (const [directory, unsubscribe] of storeUnsubscribers.entries()) {
+        if (activeDirectories.has(directory)) {
+          continue
+        }
+        unsubscribe()
+        storeUnsubscribers.delete(directory)
+      }
+
+      for (const [directory, store] of this.children.entries()) {
+        if (storeUnsubscribers.has(directory)) {
+          continue
+        }
+        storeUnsubscribers.set(directory, store.subscribe(listener))
+      }
+    }
+
+    syncStoreSubscriptions()
+    const unsubscribeRegistry = this.subscribeRegistry(() => {
+      syncStoreSubscriptions()
+      listener()
+    })
+
+    return () => {
+      unsubscribeRegistry()
+      for (const unsubscribe of storeUnsubscribers.values()) {
+        unsubscribe()
+      }
+      storeUnsubscribers.clear()
+    }
   }
 }

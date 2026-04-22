@@ -640,7 +640,7 @@ export const ProjectActionsButton = ({
         <button
           type="button"
           className={cn(
-            'app-region-no-drag inline-flex h-9 w-9 items-center justify-center rounded-md p-2',
+            'app-region-no-drag inline-flex h-9 w-9 items-center justify-center rounded-[10px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] p-2',
             'typography-ui-label font-medium text-muted-foreground hover:bg-interactive-hover hover:text-foreground transition-colors',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
             className
@@ -657,9 +657,10 @@ export const ProjectActionsButton = ({
       <button
         type="button"
         className={cn(
-          'app-region-no-drag inline-flex h-7 shrink-0 items-center gap-2 self-center rounded-md border border-[var(--interactive-border)]',
+          'app-region-no-drag inline-flex h-7 shrink-0 items-center gap-2 self-center rounded-[9px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px]',
           'bg-[var(--surface-elevated)] px-3 typography-ui-label font-medium text-foreground hover:bg-interactive-hover transition-colors',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+          'border border-border/60',
           className
         )}
         onClick={openProjectActionsSettings}
@@ -690,7 +691,7 @@ export const ProjectActionsButton = ({
             type="button"
             disabled={isLoading || isStoppingSelected}
             className={cn(
-              'app-region-no-drag inline-flex h-9 w-9 items-center justify-center rounded-md p-2',
+              'app-region-no-drag inline-flex h-9 w-9 items-center justify-center rounded-[10px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] p-2',
               'typography-ui-label font-medium text-muted-foreground hover:bg-interactive-hover hover:text-foreground transition-colors',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
               'disabled:cursor-not-allowed',
@@ -745,8 +746,9 @@ export const ProjectActionsButton = ({
   return (
     <div
       className={cn(
-        'app-region-no-drag inline-flex shrink-0 items-center self-center rounded-md border border-[var(--interactive-border)]',
-        'bg-[var(--surface-elevated)] shadow-none overflow-hidden',
+        'app-region-no-drag inline-flex shrink-0 items-center self-center rounded-[9px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px]',
+        'bg-[var(--surface-elevated)] overflow-hidden',
+        'border border-border/60',
         compact ? 'h-9' : 'h-7',
         className
       )}

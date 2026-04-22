@@ -23,6 +23,7 @@ import { isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
 import { useDeviceInfo } from '@/lib/device';
 import { usePwaDetection } from '@/hooks/usePwaDetection';
 import { updateDesktopSettings } from '@/lib/persistence';
+import { useConfigStore } from '@/stores/useConfigStore';
 import {
     setDirectoryShowHidden,
     useDirectoryShowHidden,
@@ -94,10 +95,32 @@ const MERMAID_RENDERING_OPTIONS: Option<'svg' | 'ascii'>[] = [
 ];
 
 const DEFAULT_PWA_INSTALL_NAME = 'OpenChamber - AI Coding Assistant';
+const PWA_ORIENTATION_OPTIONS: Option<'system' | 'portrait' | 'landscape'>[] = [
+    {
+        id: 'system',
+        label: 'Follow system',
+        description: 'Respect the device rotation setting.',
+    },
+    {
+        id: 'portrait',
+        label: 'Portrait lock',
+        description: 'Install the app locked to portrait.',
+    },
+    {
+        id: 'landscape',
+        label: 'Landscape lock',
+        description: 'Install the app locked to landscape.',
+    },
+];
 
 type PwaInstallNameWindow = Window & {
     __OPENCHAMBER_SET_PWA_INSTALL_NAME__?: (value: string) => string;
+    __OPENCHAMBER_SET_PWA_ORIENTATION__?: (value: 'system' | 'portrait' | 'landscape') => 'system' | 'portrait' | 'landscape';
     __OPENCHAMBER_UPDATE_PWA_MANIFEST__?: () => void;
+};
+
+const normalizePwaOrientation = (value: unknown): 'system' | 'portrait' | 'landscape' => {
+    return value === 'portrait' || value === 'landscape' ? value : 'system';
 };
 
 const USER_MESSAGE_RENDERING_OPTIONS: Option<'markdown' | 'plain'>[] = [
@@ -126,6 +149,24 @@ const CHAT_RENDER_MODE_OPTIONS: Option<'sorted' | 'live'>[] = [
     },
 ];
 
+const MESSAGE_STREAM_TRANSPORT_OPTIONS: Option<'auto' | 'ws' | 'sse'>[] = [
+    {
+        id: 'auto',
+        label: 'Auto',
+        description: 'Prefer WebSocket and fall back to SSE if needed.',
+    },
+    {
+        id: 'ws',
+        label: 'WebSocket',
+        description: 'Use WebSocket for message streaming.',
+    },
+    {
+        id: 'sse',
+        label: 'SSE',
+        description: 'Use Server-Sent Events for message streaming.',
+    },
+];
+
 const ACTIVITY_RENDER_MODE_OPTIONS: Option<'collapsed' | 'summary'>[] = [
     {
         id: 'collapsed',
@@ -139,11 +180,45 @@ const ACTIVITY_RENDER_MODE_OPTIONS: Option<'collapsed' | 'summary'>[] = [
     },
 ];
 
+const TIME_FORMAT_OPTIONS: Option<'auto' | '12h' | '24h'>[] = [
+    {
+        id: 'auto',
+        label: 'Auto',
+        description: 'Use system locale preference.',
+    },
+    {
+        id: '24h',
+        label: '24-hour',
+        description: 'Show time as 14:15.',
+    },
+    {
+        id: '12h',
+        label: '12-hour',
+        description: 'Show time as 02:15 PM.',
+    },
+];
+
+const WEEK_START_OPTIONS: Option<'auto' | 'monday' | 'sunday'>[] = [
+    {
+        id: 'auto',
+        label: 'Auto',
+        description: 'Use locale week start.',
+    },
+    {
+        id: 'monday',
+        label: 'Monday',
+    },
+    {
+        id: 'sunday',
+        label: 'Sunday',
+    },
+];
+
 const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' => {
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-export type VisibleSetting = 'theme' | 'pwaInstallName' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'activityRenderMode' | 'stickyUserHeader' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'showToolFileIcons' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage';
+export type VisibleSetting = 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'stickyUserHeader' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'showToolFileIcons' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage';
 
 interface OpenChamberVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
@@ -193,8 +268,14 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setShowExpandedBashTools = useUIStore(state => state.setShowExpandedBashTools);
     const showExpandedEditTools = useUIStore(state => state.showExpandedEditTools);
     const setShowExpandedEditTools = useUIStore(state => state.setShowExpandedEditTools);
+    const timeFormatPreference = useUIStore(state => state.timeFormatPreference);
+    const setTimeFormatPreference = useUIStore(state => state.setTimeFormatPreference);
+    const weekStartPreference = useUIStore(state => state.weekStartPreference);
+    const setWeekStartPreference = useUIStore(state => state.setWeekStartPreference);
     const showMobileSessionStatusBar = useUIStore(state => state.showMobileSessionStatusBar);
     const setShowMobileSessionStatusBar = useUIStore(state => state.setShowMobileSessionStatusBar);
+    const messageStreamTransport = useConfigStore((state) => state.settingsMessageStreamTransport);
+    const setMessageStreamTransport = useConfigStore((state) => state.setSettingsMessageStreamTransport);
     const isSettingsDialogOpen = useUIStore(state => state.isSettingsDialogOpen);
     const {
         themeMode,
@@ -285,6 +366,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         void updateDesktopSettings({ chatRenderMode: mode });
     }, [setChatRenderMode]);
 
+    const handleMessageStreamTransportChange = React.useCallback((mode: 'auto' | 'ws' | 'sse') => {
+        setMessageStreamTransport(mode);
+        void updateDesktopSettings({ messageStreamTransport: mode });
+    }, [setMessageStreamTransport]);
+
     const handleActivityRenderModeChange = React.useCallback((mode: 'collapsed' | 'summary') => {
         setActivityRenderMode(mode);
         void updateDesktopSettings({ activityRenderMode: mode });
@@ -309,6 +395,16 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         setShowExpandedEditTools(enabled);
         void updateDesktopSettings({ showExpandedEditTools: enabled });
     }, [setShowExpandedEditTools]);
+
+    const handleTimeFormatPreferenceChange = React.useCallback((value: 'auto' | '12h' | '24h') => {
+        setTimeFormatPreference(value);
+        void updateDesktopSettings({ timeFormatPreference: value });
+    }, [setTimeFormatPreference]);
+
+    const handleWeekStartPreferenceChange = React.useCallback((value: 'auto' | 'monday' | 'sunday') => {
+        setWeekStartPreference(value);
+        void updateDesktopSettings({ weekStartPreference: value });
+    }, [setWeekStartPreference]);
 
     const lightThemes = React.useMemo(
         () => availableThemes
@@ -345,12 +441,13 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     };
 
     const isVSCode = isVSCodeRuntime();
-    const hasAppearanceSettings = (shouldShow('theme') || shouldShow('pwaInstallName')) && !isVSCode;
+    const hasAppearanceSettings = (shouldShow('theme') || shouldShow('pwaInstallName') || shouldShow('pwaOrientation') || shouldShow('timeFormat') || shouldShow('weekStart')) && !isVSCode;
     const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('spacing') || shouldShow('inputBarOffset');
     const hasNavigationSettings = shouldShow('terminalQuickKeys') && !isMobile;
     const hasBehaviorSettings = shouldShow('mermaidRendering')
         || shouldShow('userMessageRendering')
         || shouldShow('chatRenderMode')
+        || shouldShow('messageTransport')
         || (shouldShow('activityRenderMode') && chatRenderMode === 'sorted')
         || shouldShow('stickyUserHeader')
         || shouldShow('diffLayout')
@@ -364,7 +461,9 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || (!isMobile && shouldShow('inputSpellcheck'));
 
     const showPwaInstallNameSetting = shouldShow('pwaInstallName') && isWebRuntime() && browserTab && !isDesktopShell() && !isVSCode;
+    const showPwaOrientationSetting = shouldShow('pwaOrientation') && isWebRuntime() && !isDesktopShell() && !isVSCode;
     const [pwaInstallName, setPwaInstallName] = React.useState('');
+    const [pwaOrientation, setPwaOrientation] = React.useState<'system' | 'portrait' | 'landscape'>('system');
 
     const applyPwaInstallName = React.useCallback(async (value: string) => {
         if (typeof window === 'undefined') {
@@ -387,8 +486,28 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         win.__OPENCHAMBER_UPDATE_PWA_MANIFEST__?.();
     }, []);
 
+    const applyPwaOrientation = React.useCallback(async (value: 'system' | 'portrait' | 'landscape') => {
+        if (typeof window === 'undefined') {
+            return;
+        }
+
+        const win = window as PwaInstallNameWindow;
+        const normalized = normalizePwaOrientation(value);
+
+        await updateDesktopSettings({ pwaOrientation: normalized });
+
+        if (typeof win.__OPENCHAMBER_SET_PWA_ORIENTATION__ === 'function') {
+            const resolved = win.__OPENCHAMBER_SET_PWA_ORIENTATION__(normalized);
+            setPwaOrientation(resolved);
+            return;
+        }
+
+        setPwaOrientation(normalized);
+        win.__OPENCHAMBER_UPDATE_PWA_MANIFEST__?.();
+    }, []);
+
     React.useEffect(() => {
-        if (typeof window === 'undefined' || !showPwaInstallNameSetting) {
+        if (typeof window === 'undefined' || (!showPwaInstallNameSetting && !showPwaOrientationSetting)) {
             return;
         }
 
@@ -412,13 +531,24 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                 const settings = await response.json().catch(() => ({}));
                 const raw = typeof settings?.pwaAppName === 'string' ? settings.pwaAppName : '';
                 const normalized = raw.trim().replace(/\s+/g, ' ').slice(0, 64);
+                const orientation = normalizePwaOrientation(settings?.pwaOrientation);
 
                 if (!cancelled) {
-                    setPwaInstallName(normalized || DEFAULT_PWA_INSTALL_NAME);
+                    if (showPwaInstallNameSetting) {
+                        setPwaInstallName(normalized || DEFAULT_PWA_INSTALL_NAME);
+                    }
+                    if (showPwaOrientationSetting) {
+                        setPwaOrientation(orientation);
+                    }
                 }
             } catch {
                 if (!cancelled) {
-                    setPwaInstallName(DEFAULT_PWA_INSTALL_NAME);
+                    if (showPwaInstallNameSetting) {
+                        setPwaInstallName(DEFAULT_PWA_INSTALL_NAME);
+                    }
+                    if (showPwaOrientationSetting) {
+                        setPwaOrientation('system');
+                    }
                 }
             }
         };
@@ -428,7 +558,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         return () => {
             cancelled = true;
         };
-    }, [showPwaInstallNameSetting]);
+    }, [showPwaInstallNameSetting, showPwaOrientationSetting]);
 
     return (
         <div className="space-y-8">
@@ -445,14 +575,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         {THEME_MODE_OPTIONS.map((option) => (
                                             <Button
                                                 key={option.value}
-                                                variant="outline"
+                                                variant="chip"
                                                 size="xs"
-                                                className={cn(
-                                                    '!font-normal',
-                                                    themeMode === option.value
-                                                        ? 'border-[var(--primary-base)] text-[var(--primary-base)] bg-[var(--primary-base)]/10 hover:text-[var(--primary-base)]'
-                                                        : 'text-foreground'
-                                                )}
+                                                aria-pressed={themeMode === option.value}
+                                                className="!font-normal"
                                                 onClick={() => setThemeMode(option.value)}
                                             >
                                                 {option.label}
@@ -467,7 +593,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     <span className="typography-ui-label text-foreground shrink-0">Light Theme</span>
                                     <Select value={selectedLightTheme?.metadata.id ?? ''} onValueChange={setLightThemePreference}>
                                         <SelectTrigger aria-label="Select light theme" className="w-fit">
-                                            <SelectValue placeholder="Select theme" />
+                                            <SelectValue placeholder="Select theme">
+                                                {selectedLightTheme
+                                                    ? formatThemeLabel(selectedLightTheme.metadata.name, 'light')
+                                                    : undefined}
+                                            </SelectValue>
                                         </SelectTrigger>
                                         <SelectContent>
                                             {lightThemes.map((theme) => (
@@ -482,7 +612,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     <span className="typography-ui-label text-foreground shrink-0">Dark Theme</span>
                                     <Select value={selectedDarkTheme?.metadata.id ?? ''} onValueChange={setDarkThemePreference}>
                                         <SelectTrigger aria-label="Select dark theme" className="w-fit">
-                                            <SelectValue placeholder="Select theme" />
+                                            <SelectValue placeholder="Select theme">
+                                                {selectedDarkTheme
+                                                    ? formatThemeLabel(selectedDarkTheme.metadata.name, 'dark')
+                                                    : undefined}
+                                            </SelectValue>
                                         </SelectTrigger>
                                         <SelectContent>
                                             {darkThemes.map((theme) => (
@@ -494,6 +628,43 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     </Select>
                                 </div>
                             </div>
+
+                            {(shouldShow('timeFormat') || shouldShow('weekStart')) && (
+                                <div className="mt-1 grid grid-cols-1 gap-2 py-1.5 md:grid-cols-[14rem_auto] md:gap-x-8 md:gap-y-2">
+                                    {shouldShow('timeFormat') && (
+                                        <div className="flex min-w-0 items-center gap-2">
+                                            <span className="typography-ui-label text-foreground shrink-0">Time Format</span>
+                                            <Select value={timeFormatPreference} onValueChange={(value: 'auto' | '12h' | '24h') => handleTimeFormatPreferenceChange(value)}>
+                                                <SelectTrigger aria-label="Select time format" className="w-fit">
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {TIME_FORMAT_OPTIONS.map((option) => (
+                                                        <SelectItem key={option.id} value={option.id}>{option.label}</SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                    )}
+
+                                    {shouldShow('weekStart') && (
+                                        <div className="flex min-w-0 items-center gap-2">
+                                            <span className="typography-ui-label text-foreground shrink-0">Week Starts On</span>
+                                            <Select value={weekStartPreference} onValueChange={(value: 'auto' | 'monday' | 'sunday') => handleWeekStartPreferenceChange(value)}>
+                                                <SelectTrigger aria-label="Select week start" className="w-fit">
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {WEEK_START_OPTIONS.map((option) => (
+                                                        <SelectItem key={option.id} value={option.id}>{option.label}</SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
                             <div className="flex items-center gap-2 py-1.5">
                                 <button
                                     type="button"
@@ -566,6 +737,50 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             }}
                                             className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
                                             aria-label="Reset install app name"
+                                            title="Reset"
+                                        >
+                                            <RiRestartLine className="h-3.5 w-3.5" />
+                                        </Button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {showPwaOrientationSetting && (
+                                <div className="py-1.5 space-y-1.5">
+                                    <div className="flex min-w-0 flex-col">
+                                        <span className="typography-ui-label text-foreground">Install Orientation</span>
+                                        <span className="typography-meta text-muted-foreground">Used by the installed web app. Reinstall the PWA after changing this.</span>
+                                    </div>
+                                    <div className="flex w-full max-w-[18rem] items-center gap-2">
+                                        <Select
+                                            value={pwaOrientation}
+                                            onValueChange={(value) => {
+                                                const orientation = normalizePwaOrientation(value);
+                                                setPwaOrientation(orientation);
+                                                void applyPwaOrientation(orientation);
+                                            }}
+                                        >
+                                            <SelectTrigger aria-label="PWA install orientation" className="w-full">
+                                                <SelectValue placeholder="Select orientation" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {PWA_ORIENTATION_OPTIONS.map((option) => (
+                                                    <SelectItem key={option.id} value={option.id}>
+                                                        {option.label}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                        <Button size="sm"
+                                            type="button"
+                                            variant="ghost"
+                                            onClick={() => {
+                                                setPwaOrientation('system');
+                                                void applyPwaOrientation('system');
+                                            }}
+                                            disabled={pwaOrientation === 'system'}
+                                            className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
+                                            aria-label="Reset install orientation"
                                             title="Reset"
                                         >
                                             <RiRestartLine className="h-3.5 w-3.5" />
@@ -763,7 +978,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
 
 
-                            {(shouldShow('userMessageRendering') || shouldShow('mermaidRendering') || shouldShow('chatRenderMode') || (shouldShow('activityRenderMode') && chatRenderMode === 'sorted') || (shouldShow('diffLayout') && !isVSCode)) && (
+                            {(shouldShow('userMessageRendering') || shouldShow('mermaidRendering') || shouldShow('chatRenderMode') || shouldShow('messageTransport') || (shouldShow('activityRenderMode') && chatRenderMode === 'sorted') || (shouldShow('diffLayout') && !isVSCode)) && (
                                 <div className="grid grid-cols-1 gap-y-2 md:grid-cols-[minmax(0,16rem)_minmax(0,16rem)] md:justify-start md:gap-x-2">
                                     {shouldShow('chatRenderMode') && (
                                         <section className="p-2 md:col-span-2">
@@ -845,6 +1060,31 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                         </button>
                                                     );
                                                 })}
+                                            </div>
+                                        </section>
+                                    )}
+
+                                    {shouldShow('messageTransport') && (
+                                        <section className="p-2 md:col-span-2">
+                                            <h4 className="typography-ui-header font-medium text-foreground">Message Stream Transport</h4>
+                                            <div className="mt-1 flex max-w-[24rem] flex-col gap-2">
+                                                <div className="flex flex-wrap items-center gap-1">
+                                                    {MESSAGE_STREAM_TRANSPORT_OPTIONS.map((option) => (
+                                                        <Button
+                                                            key={option.id}
+                                                            variant="chip"
+                                                            size="xs"
+                                                            aria-pressed={messageStreamTransport === option.id}
+                                                            className="!font-normal"
+                                                            onClick={() => handleMessageStreamTransportChange(option.id)}
+                                                        >
+                                                            {option.label}
+                                                        </Button>
+                                                    ))}
+                                                </div>
+                                                <span className="typography-meta text-muted-foreground">
+                                                    {MESSAGE_STREAM_TRANSPORT_OPTIONS.find((option) => option.id === messageStreamTransport)?.description}
+                                                </span>
                                             </div>
                                         </section>
                                     )}

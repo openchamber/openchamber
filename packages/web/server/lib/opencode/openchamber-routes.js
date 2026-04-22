@@ -134,6 +134,17 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
       ];
       let restartCmdPrimary = restartParts.join(' ');
       let restartCmdFallback = `openchamber serve --port ${storedOptions.port}`;
+      if (storedOptions.host) {
+        if (isWindows) {
+          const escapedHost = storedOptions.host.replace(/"/g, '""');
+          restartCmdPrimary += ` --host "${escapedHost}"`;
+          restartCmdFallback += ` --host "${escapedHost}"`;
+        } else {
+          const escapedHost = storedOptions.host.replace(/'/g, "'\\''");
+          restartCmdPrimary += ` --host '${escapedHost}'`;
+          restartCmdFallback += ` --host '${escapedHost}'`;
+        }
+      }
       if (storedOptions.uiPassword) {
         if (isWindows) {
           const escapedPw = storedOptions.uiPassword.replace(/"/g, '""');

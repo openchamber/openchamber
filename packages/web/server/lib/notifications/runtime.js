@@ -365,10 +365,17 @@ export const createNotificationTriggerRuntime = (deps) => {
     }
 
     if (payload.type === 'permission.replied' && sessionId) {
-      const requestId = payload.properties?.requestID;
+      const requestId = payload.properties?.requestID ?? payload.properties?.requestId ?? payload.properties?.id;
       const requestKey = typeof requestId === 'string' ? `${sessionId}:${requestId}` : null;
       const pendingNotification = pushPermissionDebounceTimers.get(sessionId);
-      if (requestKey && pendingNotification?.requestKey === requestKey) {
+      if (!pendingNotification) {
+        return;
+      }
+
+      // Some runtimes may omit requestID on permission.replied.
+      // When request ID is missing, clear session debounce to avoid
+      // showing stale permission notifications for auto-approved prompts.
+      if (!requestKey || !pendingNotification.requestKey || pendingNotification.requestKey === requestKey) {
         clearTimeout(pendingNotification.timer);
         pushPermissionDebounceTimers.delete(sessionId);
       }
@@ -376,7 +383,7 @@ export const createNotificationTriggerRuntime = (deps) => {
     }
 
     if (payload.type === 'permission.asked' && sessionId) {
-      const requestId = payload.properties?.id;
+      const requestId = payload.properties?.id ?? payload.properties?.requestID ?? payload.properties?.requestId;
       const permission = payload.properties?.permission;
       const requestKey = typeof requestId === 'string' ? `${sessionId}:${requestId}` : null;
       if (requestKey && notifiedPermissionRequests.has(requestKey)) {

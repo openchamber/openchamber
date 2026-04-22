@@ -202,7 +202,7 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
                   <RiArrowDownSLine className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-[var(--radix-dropdown-menu-trigger-width)]">
+              <DropdownMenuContent align="start" className="w-[var(--anchor-width)]">
                 {group.sessions.map((session) => (
                   <DropdownMenuItem
                     key={session.id}
@@ -249,19 +249,15 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-[220px]">
                 <DropdownMenuItem
-                  onSelect={(e) => {
-                    e.preventDefault();
-                    handleRemoveSelectedWorktree();
-                  }}
+                  onSelect={handleRemoveSelectedWorktree}
+                  closeOnClick={false}
                   variant="destructive"
                 >
                   Remove this worktree
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  onSelect={(e) => {
-                    e.preventDefault();
-                    handleKeepOnlySelectedWorktree();
-                  }}
+                  onSelect={handleKeepOnlySelectedWorktree}
+                  closeOnClick={false}
                 >
                   Leave this one, remove others
                 </DropdownMenuItem>

@@ -132,16 +132,17 @@ export const BottomTerminalDock: React.FC<BottomTerminalDockProps> = ({ isOpen, 
     <section
       ref={dockRef}
       className={cn(
-        'relative flex overflow-hidden border-t border-border bg-sidebar',
+        'flex overflow-hidden border-t border-border bg-sidebar',
+        isFullscreen ? 'absolute inset-0 z-40' : 'relative',
         isResizing ? 'transition-none' : 'transition-[height] duration-300 ease-in-out',
         !isOpen && 'border-t-0'
       )}
-      style={{
+      style={isFullscreen ? undefined : {
         height: `${appliedHeight}px`,
         minHeight: `${appliedHeight}px`,
         maxHeight: `${appliedHeight}px`,
       }}
-      aria-hidden={!isOpen || appliedHeight === 0}
+      aria-hidden={!isOpen || (!isFullscreen && appliedHeight === 0)}
     >
       {isOpen && !isFullscreen && (
         <div

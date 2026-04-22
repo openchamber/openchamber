@@ -374,7 +374,7 @@ export const IntegrateCommitsSection: React.FC<{
               </DropdownMenuTrigger>
               <DropdownMenuContent
                 align="end"
-                className="w-72 p-0 max-h-(--radix-dropdown-menu-content-available-height) flex flex-col overflow-hidden"
+                className="w-72 p-0 max-h-[var(--available-height)] flex flex-col overflow-hidden"
               >
                 <Command className="h-full min-h-0">
                   <CommandInput ref={searchInputRef} placeholder="Search branches..." />

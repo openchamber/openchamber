@@ -16,14 +16,18 @@ import {
 
 function Command({
   className,
+  style,
   ...props
 }: React.ComponentProps<typeof CommandPrimitive>) {
   return (
     <CommandPrimitive
       data-slot="command"
+      // Let the parent (DropdownMenuContent, DialogContent, etc.) paint the
+      // background and provide elevation. Overriding bg here would cover the
+      // parent's inset shadows (our inner light ring) and flatten the edge.
       style={{
-        backgroundColor: 'var(--surface-elevated)',
         color: 'var(--surface-elevated-foreground)',
+        ...style,
       }}
       className={cn(
         "flex h-full w-full flex-col overflow-hidden rounded-xl",
@@ -41,11 +45,12 @@ function CommandDialog({
   className,
   showCloseButton = true,
   ...props
-}: React.ComponentProps<typeof Dialog> & {
+}: Omit<React.ComponentProps<typeof Dialog>, "children"> & {
   title?: string
   description?: string
   className?: string
   showCloseButton?: boolean
+  children?: React.ReactNode
 }) {
   return (
     <Dialog {...props}>

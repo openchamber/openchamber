@@ -1,3 +1,31 @@
+## [1.9.7] - 2026-04-22
+
+- Sessions/UI: added bulk selection in the sessions sidebar and fixed pinned sessions so they stay pinned after reloads (thanks to @yart).
+- Chat/Files: you can now drag files and folders from the file tree into chat, with improved `@folder` autocomplete when building prompt context (thanks to @youfch).
+- Files: open editors now refresh file content after external changes, reducing stale-file surprises while coding (thanks to @jwcrystal).
+- Settings/MCP: improved MCP auth flow with remote config support and clearer diagnostics for faster setup and troubleshooting (thanks to @daveotero).
+- Chat/Questions: single-choice questions now use radio selection, making guided responses clearer and faster.
+- Reliability: config resolution now matches OpenCode behavior more closely, reducing extension/runtime mismatches during startup and settings reads (thanks to @cyan).
+- Reliability/Streaming: strengthened bootstrap and connection recovery paths, improving first-load consistency and reducing stuck/empty session states during reconnects.
+
+## [1.9.6] - 2026-04-17
+
+- Reliability: improved startup shell detection to avoid false OpenCode discovery on POSIX login shells, reducing stuck startup edge cases in new workspaces (thanks to @geekifan).
+- Reliability/Streaming: moved to a WebSocket-first message stream with SSE fallback and added safer compression handling, improving stability on slower or proxied connections (thanks to @geekifan, @jwcrystal).
+- Sessions/Worktrees: enforced worktree isolation for session and Git flows, reducing cross-project context bleed when switching chats or branches (thanks to @jwcrystal).
+- Chat/Export: added export session as Markdown and improved empty-state/export behavior, making conversation handoff and notes easier (thanks to @coldbrow).
+- Chat/Markdown: added LaTeX rendering support for clearer math and technical notation in rendered messages (thanks to @ricautomation).
+
+## [1.9.5] - 2026-04-14
+
+- Chat/Tool Output: added an interactive tree viewer for structured outputs and fixed JSON quote rendering, making large payloads easier to inspect accurately (thanks to @yaozhenghangma).
+- Chat/Reliability: fixed question-tool content disappearing after refresh, so follow-up answers remain visible after panel reloads (thanks to @jwcrystal).
+- Sync/Performance: optimized multi-session streaming with per-directory queues, event coalescing, and parts-gap recovery for steadier live updates in busy workspaces (thanks to @jwcrystal).
+- Task/Reliability: hardened subagent session resolution and polling lifecycle handling to reduce silent task failures (thanks to @jwcrystal).
+- Sessions/UI: kept active sessions visible in Recent, auto-expanded parent groups for subagent sessions, and hid empty archived/folder sections for cleaner navigation (thanks to @jwcrystal).
+- Models: restored model-variant compatibility with newer OpenCode runtimes so variant selection behaves more reliably (thanks to @Chi-square-test).
+- Usage: added Zhipu AI Coding Plan tracking for broader quota visibility in the extension (thanks to @cainiao1992).
+
 ## [1.9.4] - 2026-04-07
 
 - Reliability/Streaming: added loading timeouts, automatic SSE reconnect, and message retry behavior so temporary connection stalls recover more reliably (thanks to @jwcrystal).

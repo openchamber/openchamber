@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it } from 'vitest';
 
 import {
   TERMINAL_OUTPUT_REPLAY_MAX_BYTES,

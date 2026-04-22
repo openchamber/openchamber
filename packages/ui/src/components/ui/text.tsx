@@ -1,7 +1,5 @@
 import * as React from "react";
 import { motion, type MotionProps } from "motion/react";
-import * as Slot from "@radix-ui/react-slot";
-
 import { cn } from "@/lib/utils";
 
 type Variant = {
@@ -15,24 +13,6 @@ const variants = [
     component: ({ children, className, ...props }) => (
       <span {...props} className={className}>
         {children}
-      </span>
-    ),
-  },
-  {
-    variant: "shine",
-    component: ({ children, className, ...props }) => (
-      <span
-        {...props}
-        data-component="oc-text-shimmer"
-        data-active="true"
-        className={className}
-      >
-        <span data-slot="text-shimmer-char">
-          <span data-slot="text-shimmer-char-base">{children}</span>
-          <span data-slot="text-shimmer-char-shimmer" data-run="true" aria-hidden="true">
-            {children}
-          </span>
-        </span>
       </span>
     ),
   },
@@ -212,16 +192,10 @@ export type TextProps = {
 } & React.ComponentProps<"span"> &
   Partial<MotionProps>;
 
-export function Text({ variant = "shine", className, ...props }: TextProps) {
-  const FALLBACK_INDEX = 1;
-
+export function Text({ variant = "static", className, ...props }: TextProps) {
   const variantComponent = variants.find((v) => v.variant === variant)?.component;
 
-  const Component = variantComponent || variants[FALLBACK_INDEX].component;
+  const Component = variantComponent || variants[0].component;
 
-  return (
-    <Slot.Root>
-      <Component {...props} className={className} />
-    </Slot.Root>
-  );
+  return <Component {...props} className={className} />;
 }

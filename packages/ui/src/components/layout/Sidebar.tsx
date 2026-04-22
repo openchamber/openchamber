@@ -3,8 +3,8 @@ import { cn } from '@/lib/utils';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { useUIStore } from '@/stores/useUIStore';
 
-export const SIDEBAR_CONTENT_WIDTH = 250;
-const SIDEBAR_MIN_WIDTH = 250;
+export const SIDEBAR_CONTENT_WIDTH = 280;
+const SIDEBAR_MIN_WIDTH = 280;
 const SIDEBAR_MAX_WIDTH = 500;
 
 interface SidebarProps {

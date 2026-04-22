@@ -4,6 +4,43 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.9.7] - 2026-04-22
+
+- Desktop: added an Electron desktop runtime in parallel with the current Tauri app, with Electron planned to become the default path in an upcoming release.
+- Plans/Notes/Todos: added editable project plans from assistant messages, external plan upload, configurable planning magic prompts, and quicker note/todo handoff into new sessions or worktrees.
+- Chat/Files: you can now drag files and folders from the file tree into chat, with improved `@folder` autocomplete for faster context building (thanks to @youfch).
+- Sessions/UI: added bulk session selection in the sidebar and fixed pinned sessions so they persist reliably after reloads (thanks to @yart).
+- Files/Git: added a file-change summary bar and auto-refresh for open files changed outside the app, improving review flow and keeping editors in sync (thanks to @jwcrystal).
+- Git/Worktrees: improved branch/worktree reliability by allowing checkout with uncommitted changes, tightening worktree cache invalidation, and reducing incorrect remote prefetches (thanks to @jwcrystal, @jasonalsing).
+- Settings/MCP: improved MCP auth flow with better remote-config support and clearer diagnostics, and aligned config resolution with OpenCode behavior for more predictable setup (thanks to @daveotero, @cyan).
+- Reliability/Chat: hardened bootstrap and stream-connection recovery, preserved session/connect state more reliably, and reduced streaming UI churn for smoother long runs.
+- Web/PWA: added install orientation controls and fixed loopback-origin handling for web push notifications in local setups (thanks to @vhqtvn, @yart).
+
+## [1.9.6] - 2026-04-17
+
+- Reliability/Streaming: switched live message events to a WebSocket-first transport with SSE fallback, added response compression, and hardened proxy/compression handling so long runs stay smoother on slower or proxied networks (thanks to @geekifan, @jwcrystal).
+- Sessions/Scheduled Tasks: added scheduled task creation and management with locale-aware scheduling, so recurring prompts run at the right local time without manual re-entry.
+- Sessions/Worktrees: enforced session worktree isolation and tightened session-switch safety, reducing cross-worktree mix-ups when resuming chats or running Git actions (thanks to @jwcrystal).
+- Files: added a full Go to Line workflow (toolbar + shortcut + dialog) and a new Copy Relative Path action, making in-editor navigation and path sharing much faster (thanks to @coldbrow).
+- Files: file trees now auto-refresh when files change outside the app, so new, renamed, or updated files appear without manual reloads (thanks to @jwcrystal).
+- Chat/Export: added export session as Markdown and improved empty-state/export behavior, making conversation handoff and documentation cleaner (thanks to @coldbrow).
+- Chat/Requests: restored blocking request visibility in sub-sessions, scoped auto-approve to the active session tree, and reduced noisy auto-approved notifications during multi-session work.
+- Desktop: added quick open and a LAN access toggle, plus safer quit behavior around scheduled tasks for smoother local-network and day-to-day desktop workflows (thanks to @An-jinu).
+- Chat/Markdown: added LaTeX rendering support for clearer math and technical notation in messages (thanks to @ricautomation).
+- Settings/Skills: skills are now sorted within groups so larger skill lists are easier to scan (thanks to @roctom).
+
+## [1.9.5] - 2026-04-14
+
+- Security/Auth: added passkey sign-in for protected instances and new 1-week/30-day session expiration options, so teams can enforce stronger access controls with flexible login persistence (thanks to @daveotero, @pm0u).
+- Voice: added OpenAI-compatible custom server support for both text-to-speech and speech-to-text, including configurable TTS model/pitch/volume and stricter custom URL validation for safer setup (thanks to @ablepharus).
+- Chat/Tool Output: added an interactive tree viewer for structured outputs and fixed JSON quote rendering, making large payloads easier to inspect and copy accurately (thanks to @yaozhenghangma).
+- Chat/Reliability: fixed question-tool content disappearing after refresh and hardened subagent/session recovery paths, reducing silent failures and stuck task states (thanks to @jwcrystal).
+- Sync/Performance: optimized multi-session streaming with per-directory queues, event coalescing, and parts-gap recovery to keep live updates smoother under heavy activity (thanks to @jwcrystal).
+- Sessions/UI: kept active sessions visible in Recent, auto-expanded parent groups when opening subagent sessions, and hid empty archived/folder sections for cleaner navigation (thanks to @jwcrystal).
+- Git/UI: restored Git changes panel visibility and sidebar sync, so change review stays available and consistent while switching contexts (thanks to @jwcrystal).
+- Desktop/Startup: delivered a more guided first-launch and smart recovery flow, plus startup and remote-window interaction fixes to reduce early-session friction (thanks to @jwcrystal).
+- Usage: added Zhipu AI Coding Plan tracking and restored model-variant compatibility with older OpenCode runtimes for more reliable quota reporting and model selection (thanks to @cainiao1992, @Chi-square-test).
+
 ## [1.9.4] - 2026-04-07
 
 - Settings/Magic Prompts: added a dedicated Magic Prompts page with editable templates for commit/PR generation, PR and issue reviews, failed-check/comment analysis, and merge/cherry-pick conflict resolution.
@@ -43,7 +80,6 @@ All notable changes to this project will be documented in this file.
 - CLI/Server: added `--foreground` for process-manager deployments, made managed server hostname configurable, and added an explicit `--host` option with safer localhost defaults (thanks to @colinmollenhour, @rapidrabbit76, @yulia-ivashko).
 - Docker/Deployments: improved container defaults for broader compatibility, including UID 1000 user behavior, non-fatal SSH key generation, and better localhost detection in container networking (thanks to @yulia-ivashko).
 - Web/PWA: fixed manifest behavior behind Cloudflare Access so install flows work more reliably in protected environments (thanks to @arthurfiorette).
-
 
 ## [1.9.1] - 2026-03-20
 

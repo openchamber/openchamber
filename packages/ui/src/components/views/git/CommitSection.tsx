@@ -18,8 +18,7 @@ interface CommitSectionProps {
   commitMessage: string;
   onCommitMessageChange: (value: string) => void;
   generatedHighlights: string[];
-  onInsertHighlights: () => void;
-  onClearHighlights: () => void;
+  onInsertHighlights: (highlights: string[]) => void;
   onGenerateMessage: () => void;
   isGeneratingMessage: boolean;
   onCommit: () => void;
@@ -36,7 +35,6 @@ export const CommitSection: React.FC<CommitSectionProps> = ({
   onCommitMessageChange,
   generatedHighlights,
   onInsertHighlights,
-  onClearHighlights,
   onGenerateMessage,
   isGeneratingMessage,
   onCommit,
@@ -70,7 +68,6 @@ export const CommitSection: React.FC<CommitSectionProps> = ({
         <AIHighlightsBox
           highlights={generatedHighlights}
           onInsert={onInsertHighlights}
-          onClear={onClearHighlights}
         />
 
         <CommitInput

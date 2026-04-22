@@ -1,0 +1,13 @@
+# Dependencies
+node_modules/
+
+# Electron build output
+dist/
+dist-bundle/
+
+# Generated packaging resources
+resources/web-dist/
+resources/sidecar/
+
+# OS-specific
+.DS_Store

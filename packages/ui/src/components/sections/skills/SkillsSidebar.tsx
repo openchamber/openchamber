@@ -350,7 +350,11 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
     }
     const sortedGroups = Object.keys(groups)
       .sort((a, b) => a.localeCompare(b))
-      .map((name) => ({ name, skills: groups[name] }));
+      .map((name) => ({
+        name,
+        skills: [...groups[name]].sort((a, b) => a.name.localeCompare(b.name)),
+      }));
+    ungrouped.sort((a, b) => a.name.localeCompare(b.name));
     return { sortedGroups, ungrouped };
   }
 

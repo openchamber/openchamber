@@ -136,15 +136,14 @@ export function InlineCommentInput({
         )}
         
         <Textarea
+          simple
           ref={textareaRef}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Add a comment... (Cmd+Enter to save)"
-          className="min-h-[80px] text-sm resize-y"
-          style={{
-            backgroundColor: currentTheme?.colors?.surface?.subtle,
-          }}
+          outerClassName="rounded-[var(--radius-xl)] bg-[var(--surface-subtle)] ring-1 ring-inset ring-border/60 focus-within:ring-2 focus-within:ring-[var(--interactive-focus-ring)]"
+          className="min-h-[80px] px-3 py-2.5 text-sm resize-y"
         />
         
         <div className="flex items-center justify-end gap-2 mt-3">

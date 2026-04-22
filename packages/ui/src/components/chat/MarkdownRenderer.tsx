@@ -3,6 +3,8 @@ import { renderMermaidASCII, renderMermaidSVG } from 'beautiful-mermaid';
 import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
 import { marked, type Tokens } from 'marked';
 import remend from 'remend';
 import { FadeInOnReveal } from './message/FadeInOnReveal';
@@ -482,6 +484,7 @@ type MermaidControlOptions = {
 };
 
 const extractMermaidBlocks = (markdown: string): string[] => {
+  if (!markdown.includes('mermaid')) return [];
   const blocks: string[] = [];
   const regex = /(?:^|\r?\n)(`{3,}|~{3,})mermaid[^\n\r]*\r?\n([\s\S]*?)\r?\n\1(?=\r?\n|$)/gi;
   let match: RegExpExecArray | null = regex.exec(markdown);
@@ -648,12 +651,74 @@ const getCodeLanguage = (className: string | undefined): string => {
   return match?.[1]?.toLowerCase() ?? 'text';
 };
 
+const decodeHtmlEntities = (value: string): string => {
+  let decoded = value;
+  for (let i = 0; i < 3; i += 1) {
+    const next = decoded
+      .replace(/&quot;/g, '"')
+      .replace(/&#34;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&#39;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&');
+    if (next === decoded) {
+      return decoded;
+    }
+    decoded = next;
+  }
+  return decoded;
+};
+
+const normalizeCodeBlockText = (code: string, language: string): string => {
+  if (!['json', 'jsonc', 'json5'].includes(language)) {
+    return code;
+  }
+  if (!/&(quot|#34|amp;quot|lt|gt|amp|apos|#39);/.test(code)) {
+    return code;
+  }
+  return decodeHtmlEntities(code);
+};
+
+const CODE_HIGHLIGHT_SETTLE_MS = 300;
+const CODE_SHARED_STYLE: React.CSSProperties = {
+  margin: 0,
+  background: 'transparent',
+  padding: 0,
+  fontSize: 'var(--text-code)',
+  lineHeight: 'var(--markdown-code-block-line-height)',
+};
+
 const MarkdownCodeBlock: React.FC<{
   code: string;
   language: string;
   syntaxTheme: { [key: string]: React.CSSProperties };
 }> = ({ code, language, syntaxTheme }) => {
   const [copied, setCopied] = React.useState(false);
+  const [highlight, setHighlight] = React.useState(true);
+  const prevCodeRef = React.useRef<string>(code);
+  const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Defer Prism highlighting while code is actively streaming.
+  // Initial mount renders highlighted immediately (plays nice with finalized blocks).
+  React.useEffect(() => {
+    if (prevCodeRef.current === code) return;
+    prevCodeRef.current = code;
+
+    if (timerRef.current) clearTimeout(timerRef.current);
+    setHighlight(false);
+    timerRef.current = setTimeout(() => {
+      setHighlight(true);
+      timerRef.current = null;
+    }, CODE_HIGHLIGHT_SETTLE_MS);
+
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, [code]);
 
   const handleCopy = React.useCallback(async () => {
     const result = await copyTextToClipboard(code);
@@ -678,15 +743,21 @@ const MarkdownCodeBlock: React.FC<{
         </div>
       </div>
       <div className="px-3 py-2.5">
-        <SyntaxHighlighter
-          language={language}
-          style={syntaxTheme}
-          customStyle={{ margin: 0, background: 'transparent', padding: 0, fontSize: 'var(--text-code)', lineHeight: 'var(--markdown-code-block-line-height)' }}
-          codeTagProps={{ style: { fontSize: 'var(--text-code)', lineHeight: 'var(--markdown-code-block-line-height)' } }}
-          PreTag="pre"
-        >
-          {code}
-        </SyntaxHighlighter>
+        {highlight ? (
+          <SyntaxHighlighter
+            language={language}
+            style={syntaxTheme}
+            customStyle={CODE_SHARED_STYLE}
+            codeTagProps={{ style: CODE_SHARED_STYLE }}
+            PreTag="pre"
+          >
+            {code}
+          </SyntaxHighlighter>
+        ) : (
+          <pre style={CODE_SHARED_STYLE}>
+            <code style={CODE_SHARED_STYLE}>{code}</code>
+          </pre>
+        )}
       </div>
     </div>
   );
@@ -751,8 +822,8 @@ const buildMarkdownComponents = ({
   pre({ children, ...props }) {
     const child = React.Children.only(children) as React.ReactElement<{ className?: string; children?: React.ReactNode }>;
     const className = child.props.className;
-    const code = extractCodeText(child.props.children).replace(/\n$/, '');
     const language = getCodeLanguage(className);
+    const code = normalizeCodeBlockText(extractCodeText(child.props.children).replace(/\n$/, ''), language);
     if (language === 'mermaid') {
       return <MermaidBlock source={code} mode={useUIStore.getState().mermaidRenderingMode} />;
     }
@@ -788,7 +859,7 @@ const MarkdownBlockView: React.FC<{
   components: Components;
 }> = React.memo(({ block, components }) => {
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+    <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[[rehypeKatex, { throwOnError: false, errorColor: 'var(--destructive)' }]]} components={components}>
       {block.src}
     </ReactMarkdown>
   );
@@ -1225,7 +1296,6 @@ const useFileReferenceInteractions = ({
     observer.observe(container, {
       childList: true,
       subtree: true,
-      characterData: true,
     });
 
     container.addEventListener('click', handleClick);

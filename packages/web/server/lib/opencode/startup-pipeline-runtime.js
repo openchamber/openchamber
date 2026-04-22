@@ -1,6 +1,7 @@
 export const createStartupPipelineRuntime = (dependencies) => {
   const {
     createTerminalRuntime,
+    createMessageStreamWsRuntime,
     createServerStartupRuntime,
   } = dependencies;
 
@@ -17,6 +18,11 @@ export const createStartupPipelineRuntime = (dependencies) => {
       isExecutable,
       isRequestOriginAllowed,
       rejectWebSocketUpgrade,
+      buildOpenCodeUrl,
+      getOpenCodeAuthHeaders,
+      processForwardedEventPayload,
+      messageStreamWsClients,
+      triggerHealthCheck,
       terminalHeartbeatIntervalMs,
       terminalRebindWindowMs,
       terminalMaxRebindsPerWindow,
@@ -69,6 +75,18 @@ export const createStartupPipelineRuntime = (dependencies) => {
       || !!process.env.OPENCODE_HOST
       || !!process.env.OPENCODE_BINARY
       || !!process.env.OPENCODE_PORT;
+
+    const messageStreamRuntime = createMessageStreamWsRuntime({
+      server,
+      uiAuthController,
+      isRequestOriginAllowed,
+      rejectWebSocketUpgrade,
+      buildOpenCodeUrl,
+      getOpenCodeAuthHeaders,
+      processForwardedEventPayload,
+      wsClients: messageStreamWsClients,
+      triggerHealthCheck,
+    });
 
     // Always register proxy routes (they handle session merging for all backends),
     // but only bootstrap the OpenCode server process when needed.
@@ -133,6 +151,7 @@ export const createStartupPipelineRuntime = (dependencies) => {
 
     return {
       terminalRuntime,
+      messageStreamRuntime,
     };
   };
 

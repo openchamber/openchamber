@@ -8,7 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { RiAddLine, RiDeleteBinLine, RiMore2Line, RiPlugLine } from '@remixicon/react';
+import { RiAddLine, RiDeleteBinLine, RiMore2Line, RiPlugLine, RiRefreshLine, RiServerLine, RiGlobalLine } from '@remixicon/react';
 import { useMcpConfigStore, type McpDraft, type McpServerConfig } from '@/stores/useMcpConfigStore';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -93,6 +93,8 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
 
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const mcpStatus = useMcpStore((state) => state.getStatusForDirectory(currentDirectory ?? null));
+  const refreshStatus = useMcpStore((state) => state.refresh);
+  const getErrorForDirectory = useMcpStore((state) => state.getErrorForDirectory);
 
   const isCodexBackend = selectedBackendId === 'codex';
 
@@ -127,6 +129,7 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
   const [deleteTarget, setDeleteTarget] = React.useState<McpServerConfig | null>(null);
   const [isDeleting, setIsDeleting] = React.useState(false);
   const [openMenuMcp, setOpenMenuMcp] = React.useState<string | null>(null);
+  const [isRefreshingStatus, setIsRefreshingStatus] = React.useState(false);
 
   const projectServers = React.useMemo(
     () => mcpServers.filter((server) => server.scope === 'project'),
@@ -140,6 +143,25 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
   React.useEffect(() => {
     void loadMcpConfigs();
   }, [loadMcpConfigs]);
+
+  const handleRefresh = React.useCallback(() => {
+    if (isRefreshingStatus) return;
+
+    setIsRefreshingStatus(true);
+    const minSpinPromise = new Promise((resolve) => setTimeout(resolve, 500));
+
+    Promise.all([
+      refreshStatus({ directory: currentDirectory, silent: true }),
+      minSpinPromise,
+    ]).then(() => {
+      const error = getErrorForDirectory(currentDirectory);
+      if (error) {
+        toast.error(error);
+      }
+    }).finally(() => {
+      setIsRefreshingStatus(false);
+    });
+  }, [currentDirectory, getErrorForDirectory, isRefreshingStatus, refreshStatus]);
 
   const handleCreateNew = () => {
     if (isCodexBackend) {
@@ -161,6 +183,13 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
       command: [],
       url: '',
       environment: [],
+      headers: [],
+      oauthEnabled: true,
+      oauthClientId: '',
+      oauthClientSecret: '',
+      oauthScope: '',
+      oauthRedirectUri: '',
+      timeout: '',
       enabled: true,
     };
     setMcpDraft(draft);
@@ -199,9 +228,15 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
   const handleDelete = async () => {
     if (!deleteTarget) return;
     setIsDeleting(true);
-    const success = await deleteMcp(deleteTarget.name);
-    if (success) {
-      toast.success(`MCP server "${deleteTarget.name}" deleted`);
+    const result = await deleteMcp(deleteTarget.name);
+    if (result.ok) {
+      if (result.reloadFailed) {
+        toast.warning(result.message || `MCP server "${deleteTarget.name}" deleted, but OpenCode reload failed`, {
+          description: result.warning || 'Refresh the MCP list if the UI looks stale.',
+        });
+      } else {
+        toast.success(result.message || `MCP server "${deleteTarget.name}" deleted`);
+      }
     } else {
       toast.error('Failed to delete MCP server');
     }
@@ -212,7 +247,19 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
   return (
     <div className={cn('flex h-full flex-col', bgClass)}>
       <div className="border-b px-3 pt-4 pb-3">
-        <h2 className="text-base font-semibold text-foreground mb-3">MCP Servers</h2>
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h2 className="text-base font-semibold text-foreground">MCP Servers</h2>
+          <button
+            type="button"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            disabled={isRefreshingStatus}
+            onClick={handleRefresh}
+            aria-label="Refresh MCP status"
+            title="Refresh MCP status"
+          >
+            <RiRefreshLine className={cn('h-4 w-4', isRefreshingStatus && 'animate-spin')} />
+          </button>
+        </div>
         <BackendSwitcher
           capability="config"
           selectedBackendId={selectedBackendId}
@@ -333,8 +380,12 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
                         <div className="flex items-center gap-2">
                           <StatusDot tone={tone} enabled={server.enabled} />
                           <span className="typography-ui-label font-normal truncate text-foreground">{server.name}</span>
-                          <span className="typography-micro text-muted-foreground bg-muted px-1 rounded flex-shrink-0 leading-none pb-px border border-border/50">
-                            {server.type}
+                          <span title={server.type === 'local' ? 'Local server' : 'Remote server'}>
+                            {server.type === 'local' ? (
+                              <RiServerLine className="h-3 w-3 text-muted-foreground/60 flex-shrink-0" />
+                            ) : (
+                              <RiGlobalLine className="h-3 w-3 text-muted-foreground/60 flex-shrink-0" />
+                            )}
                           </span>
                         </div>
                         <div className="typography-micro text-muted-foreground/60 truncate leading-tight pl-4">
@@ -403,8 +454,12 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
                         <div className="flex items-center gap-2">
                           <StatusDot tone={tone} enabled={server.enabled} />
                           <span className="typography-ui-label font-normal truncate text-foreground">{server.name}</span>
-                          <span className="typography-micro text-muted-foreground bg-muted px-1 rounded flex-shrink-0 leading-none pb-px border border-border/50">
-                            {server.type}
+                          <span title={server.type === 'local' ? 'Local server' : 'Remote server'}>
+                            {server.type === 'local' ? (
+                              <RiServerLine className="h-3 w-3 text-muted-foreground/60 flex-shrink-0" />
+                            ) : (
+                              <RiGlobalLine className="h-3 w-3 text-muted-foreground/60 flex-shrink-0" />
+                            )}
                           </span>
                         </div>
                         <div className="typography-micro text-muted-foreground/60 truncate leading-tight pl-4">

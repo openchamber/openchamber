@@ -78,7 +78,7 @@
   }
 
   /* Improve touch targets for mobile */
-  :root.mobile-pointer:not(.desktop-runtime) button,
+  :root.mobile-pointer:not(.desktop-runtime) button:not([role="radio"]):not([role="checkbox"]):not([role="switch"]),
   :root.mobile-pointer:not(.desktop-runtime) .btn,
   :root.mobile-pointer:not(.desktop-runtime) [role="button"] {
     min-height: 36px;

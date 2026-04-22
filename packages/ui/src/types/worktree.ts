@@ -33,6 +33,20 @@ export interface WorktreeMetadata {
     behind?: number;
     upstream?: string | null;
   };
+
+  // --- Phase 1: canonical worktree attachment fields ---
+
+  /** Canonical root path for the worktree (same as path for secondary worktrees). */
+  worktreeRoot?: string;
+
+  /** Operational status of this worktree. */
+  worktreeStatus?: 'ready' | 'missing' | 'invalid' | 'not-a-repo';
+
+  /** Git HEAD state classification. */
+  headState?: 'branch' | 'detached' | 'unborn';
+
+  /** How this worktree was attached to a session. */
+  worktreeSource?: 'existing' | 'created-for-session';
 }
 
 export type WorktreeMap = Map<string, WorktreeMetadata>;

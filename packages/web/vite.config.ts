@@ -117,7 +117,7 @@ export default defineConfig({
 
           if (packageName === '@opencode-ai/sdk') return 'vendor-opencode-sdk';
           if (packageName.includes('remark') || packageName.includes('rehype') || packageName === 'react-markdown') return 'vendor-markdown';
-          if (packageName.startsWith('@radix-ui')) return 'vendor-radix';
+          if (packageName === '@base-ui/react' || packageName.startsWith('@base-ui')) return 'vendor-base-ui';
           if (packageName.includes('react-syntax-highlighter') || packageName.includes('highlight.js')) return 'vendor-syntax';
 
           const sanitized = packageName.replace(/^@/, '').replace(/\//g, '-');

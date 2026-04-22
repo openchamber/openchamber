@@ -294,7 +294,7 @@ if (workspaceFolder) {
 
 const normalizeUrl = (input: string | URL) => {
   try {
-    return typeof input === 'string' ? new URL(input, window.location.origin) : new URL(input.toString());
+    return typeof input === 'string' ? new URL(input, window.location.href) : new URL(input.toString(), window.location.href);
   } catch {
     return null;
   }
@@ -523,7 +523,7 @@ const handleLocalApiRequest = async (url: URL, init?: RequestInit) => {
     });
   }
 
-  if ((pathname === '/api/tts/speak' || pathname === '/api/tts/say/speak' || pathname === '/api/tts/summarize') && method === 'POST') {
+  if ((pathname === '/api/tts/speak' || pathname === '/api/tts/say/speak' || pathname === '/api/text/summarize') && method === 'POST') {
     return new Response(JSON.stringify({ error: 'TTS endpoints are not available in VS Code runtime' }), {
       status: 501,
       headers: { 'Content-Type': 'application/json' },
@@ -586,6 +586,18 @@ const handleLocalApiRequest = async (url: URL, init?: RequestInit) => {
       ? (body as { dataUrl: string }).dataUrl
       : undefined;
     const data = await sendBridgeMessage('api:files/save-image', { fileName, dataUrl });
+    return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  if (pathname.startsWith('/api/vscode/save-markdown') && method === 'POST') {
+    const body = init?.body ? JSON.parse(init.body as string) : {};
+    const fileName = typeof (body as { fileName?: unknown }).fileName === 'string'
+      ? (body as { fileName: string }).fileName
+      : undefined;
+    const content = typeof (body as { content?: unknown }).content === 'string'
+      ? (body as { content: string }).content
+      : undefined;
+    const data = await sendBridgeMessage('api:files/save-markdown', { fileName, content });
     return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
 

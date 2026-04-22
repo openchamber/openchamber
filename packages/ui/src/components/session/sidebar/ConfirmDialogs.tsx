@@ -65,6 +65,66 @@ export function SessionDeleteConfirmDialog(props: {
   );
 }
 
+export type BulkDeleteSessionsConfirmState = {
+  sessionCount: number;
+  archivedBucket: boolean;
+} | null;
+
+export function BulkSessionDeleteConfirmDialog(props: {
+  value: BulkDeleteSessionsConfirmState;
+  setValue: (next: BulkDeleteSessionsConfirmState) => void;
+  showDeletionDialog: boolean;
+  setShowDeletionDialog: (next: boolean) => void;
+  onConfirm: () => Promise<void> | void;
+}): React.ReactNode {
+  const { value, setValue, showDeletionDialog, setShowDeletionDialog, onConfirm } = props;
+  const archived = value?.archivedBucket === true;
+  const n = value?.sessionCount ?? 0;
+  const plural = n === 1 ? '' : 's';
+  const title = archived ? 'Delete sessions?' : 'Archive sessions?';
+  const description = archived
+    ? `${n} session${plural} will be permanently deleted.`
+    : `${n} session${plural} will be archived.`;
+
+  return (
+    <Dialog open={Boolean(value)} onOpenChange={(open) => { if (!open) setValue(null); }}>
+      <DialogContent showCloseButton={false} className="max-w-sm gap-5">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+        <DialogFooter className="w-full sm:items-center sm:justify-between">
+          <button
+            type="button"
+            onClick={() => setShowDeletionDialog(!showDeletionDialog)}
+            className="inline-flex items-center gap-1.5 typography-ui-label text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
+            aria-pressed={!showDeletionDialog}
+          >
+            {!showDeletionDialog ? <RiCheckboxLine className="h-4 w-4 text-primary" /> : <RiCheckboxBlankLine className="h-4 w-4" />}
+            Never ask
+          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setValue(null)}
+              className="inline-flex h-8 items-center justify-center rounded-md border border-border px-3 typography-ui-label text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => void onConfirm()}
+              className="inline-flex h-8 items-center justify-center rounded-md bg-destructive px-3 typography-ui-label text-destructive-foreground hover:bg-destructive/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/50"
+            >
+              {archived ? 'Delete' : 'Archive'}
+            </button>
+          </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export type DeleteFolderConfirmState = {
   scopeKey: string;
   folderId: string;

@@ -97,6 +97,7 @@ const makeId = (): string => {
 const statusDotClass = (status: HostProbeResult['status'] | null): string => {
   if (status === 'ok') return 'bg-status-success';
   if (status === 'auth') return 'bg-status-warning';
+  if (status === 'wrong-service') return 'bg-status-error';
   if (status === 'unreachable') return 'bg-status-error';
   return 'bg-muted-foreground/40';
 };
@@ -104,6 +105,7 @@ const statusDotClass = (status: HostProbeResult['status'] | null): string => {
 const statusLabel = (status: HostProbeResult['status'] | null): string => {
   if (status === 'ok') return 'Connected';
   if (status === 'auth') return 'Auth required';
+  if (status === 'wrong-service') return 'Wrong service';
   if (status === 'unreachable') return 'Unreachable';
   return 'Unknown';
 };
@@ -111,6 +113,7 @@ const statusLabel = (status: HostProbeResult['status'] | null): string => {
 const statusIcon = (status: HostProbeResult['status'] | null) => {
   if (status === 'ok') return <RiCheckLine className="h-4 w-4" />;
   if (status === 'auth') return <RiShieldKeyholeLine className="h-4 w-4" />;
+  if (status === 'wrong-service') return <RiCloudOffLine className="h-4 w-4" />;
   if (status === 'unreachable') return <RiCloudOffLine className="h-4 w-4" />;
   return <RiEarthLine className="h-4 w-4" />;
 };
@@ -516,7 +519,7 @@ export function DesktopHostSwitcherDialog({
         [host.id]: { status: probe.status, latencyMs: probe.latencyMs },
       }));
 
-      if (probe.status === 'unreachable') {
+      if (probe.status === 'unreachable' || probe.status === 'wrong-service') {
         toast.error(`Instance "${redactSensitiveUrl(host.label)}" is unreachable`);
         setSwitchingHostId(null);
         return;
@@ -544,6 +547,10 @@ export function DesktopHostSwitcherDialog({
     setEditingId(null);
     setEditLabel('');
     setEditUrl('');
+  }, []);
+
+  const stopDropdownTypeahead = React.useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
+    event.stopPropagation();
   }, []);
 
   const commitEdit = React.useCallback(async () => {
@@ -909,7 +916,7 @@ export function DesktopHostSwitcherDialog({
                             )}
                             onClick={() => void setDefault(host.id)}
                             aria-label={isDefault ? 'Default instance' : 'Set as default'}
-                            disabled={isSaving}
+                            disabled={isSaving || (!isDefault && (statusKind === 'unreachable' || statusKind === 'wrong-service'))}
                           >
                             {isDefault ? <RiStarFill className="h-4 w-4" /> : <RiStarLine className="h-4 w-4" />}
                           </button>
@@ -925,7 +932,7 @@ export function DesktopHostSwitcherDialog({
                             type="button"
                               className={cn(
                                 'h-8 w-8 rounded-md inline-flex items-center justify-center hover:bg-interactive-hover transition-colors',
-                                statusKind === 'unreachable'
+                                statusKind === 'unreachable' || statusKind === 'wrong-service'
                                   ? 'text-muted-foreground/30 cursor-not-allowed'
                                   : 'text-muted-foreground/60 hover:text-foreground',
                               )}
@@ -933,14 +940,14 @@ export function DesktopHostSwitcherDialog({
                               e.stopPropagation();
                               openInNewWindow(host);
                             }}
-                            disabled={statusKind === 'unreachable'}
+                            disabled={statusKind === 'unreachable' || statusKind === 'wrong-service'}
                             aria-label="Open in new window"
                           >
                             <RiWindowLine className="h-4 w-4" />
                           </button>
                         </TooltipTrigger>
                         <TooltipContent sideOffset={6}>
-                          {statusKind === 'unreachable' ? 'Instance unreachable' : 'Open in new window'}
+                          {(statusKind === 'unreachable' || statusKind === 'wrong-service') ? 'Instance unreachable' : 'Open in new window'}
                         </TooltipContent>
                       </Tooltip>
                     </div>
@@ -969,12 +976,14 @@ export function DesktopHostSwitcherDialog({
               <Input
                 value={editLabel}
                 onChange={(e) => setEditLabel(e.target.value)}
+                onKeyDown={stopDropdownTypeahead}
                 placeholder="Label"
                 disabled={isSaving}
               />
               <Input
                 value={editUrl}
                 onChange={(e) => setEditUrl(e.target.value)}
+                onKeyDown={stopDropdownTypeahead}
                 placeholder="https://host:port"
                 disabled={isSaving}
               />
@@ -1030,12 +1039,14 @@ export function DesktopHostSwitcherDialog({
               <Input
                 value={newLabel}
                 onChange={(e) => setNewLabel(e.target.value)}
+                onKeyDown={stopDropdownTypeahead}
                 placeholder="Label (optional)"
                 disabled={!tauriAvailable || isSaving}
               />
               <Input
                 value={newUrl}
                 onChange={(e) => setNewUrl(e.target.value)}
+                onKeyDown={stopDropdownTypeahead}
                 placeholder="https://host:port"
                 disabled={!tauriAvailable || isSaving}
               />

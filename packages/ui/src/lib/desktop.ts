@@ -50,6 +50,7 @@ export type DesktopSettings = {
   homeDirectory?: string;
   // Optional absolute path to `opencode` binary.
   opencodeBinary?: string;
+  desktopLanAccessEnabled?: boolean;
   projects?: ProjectEntry[];
   activeProjectId?: string;
   approvedDirectories?: string[];
@@ -119,11 +120,15 @@ export type DesktopSettings = {
   gitProviderId?: string;
   gitModelId?: string;
   pwaAppName?: string;
+  pwaOrientation?: 'system' | 'portrait' | 'landscape';
   inputSpellcheckEnabled?: boolean;
   showToolFileIcons?: boolean;
   showExpandedBashTools?: boolean;
   showExpandedEditTools?: boolean;
+  timeFormatPreference?: 'auto' | '12h' | '24h';
+  weekStartPreference?: 'auto' | 'sunday' | 'monday';
   chatRenderMode?: 'sorted' | 'live';
+  messageStreamTransport?: 'auto' | 'ws' | 'sse';
   activityRenderMode?: 'collapsed' | 'summary';
   mermaidRenderingMode?: 'svg' | 'ascii';
   userMessageRenderingMode?: 'markdown' | 'plain';
@@ -138,6 +143,7 @@ export type DesktopSettings = {
   recentModels?: Array<{ providerID: string; modelID: string }>;
   diffLayoutPreference?: 'dynamic' | 'inline' | 'side-by-side';
   diffViewMode?: 'single' | 'stacked';
+  gitChangesViewMode?: 'flat' | 'tree';
   directoryShowHidden?: boolean;
   filesViewShowGitignored?: boolean;
 
@@ -165,11 +171,22 @@ type TauriGlobal = {
   };
 };
 
+type ElectronRuntimeGlobal = {
+  runtime?: string;
+};
+
+const getElectronRuntime = (): ElectronRuntimeGlobal | null => {
+  if (typeof window === 'undefined') return null;
+  return (window as unknown as { __OPENCHAMBER_ELECTRON__?: ElectronRuntimeGlobal }).__OPENCHAMBER_ELECTRON__ ?? null;
+};
+
 export const isTauriShell = (): boolean => {
   if (typeof window === 'undefined') return false;
   const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
   return typeof tauri?.core?.invoke === 'function';
 };
+
+export const isElectronShell = (): boolean => getElectronRuntime()?.runtime === 'electron';
 
 const normalizeOrigin = (raw: string): string | null => {
   const trimmed = raw.trim();
@@ -208,6 +225,8 @@ const isLoopbackHost = (host: string): boolean => {
 
 export const isDesktopLocalOriginActive = (): boolean => {
   if (typeof window === 'undefined') return false;
+  if (!isDesktopShell()) return false;
+
   const local = typeof window.__OPENCHAMBER_LOCAL_ORIGIN__ === 'string' ? window.__OPENCHAMBER_LOCAL_ORIGIN__ : '';
   const localUrl = parseUrl(local);
   const currentUrl = parseUrl(window.location.origin);
@@ -230,17 +249,31 @@ export const isDesktopLocalOriginActive = (): boolean => {
 
   const localOrigin = normalizeOrigin(local);
   const currentOrigin = normalizeOrigin(window.location.origin) || window.location.origin;
-  return Boolean(localOrigin && currentOrigin && localOrigin === currentOrigin);
-};
-
-// Desktop shell detection that doesn't require Tauri IPC availability.
-// (Remote pages can temporarily lose window.__TAURI__ if URL doesn't match remote allowlist.)
-export const isDesktopShell = (): boolean => {
-  if (typeof window === 'undefined') return false;
-  if (typeof window.__OPENCHAMBER_LOCAL_ORIGIN__ === 'string' && window.__OPENCHAMBER_LOCAL_ORIGIN__.length > 0) {
+  if (localOrigin && currentOrigin && localOrigin === currentOrigin) {
     return true;
   }
-  return isTauriShell();
+
+  return Boolean(currentUrl && isLoopbackHost(currentUrl.hostname));
+};
+
+export const isDesktopShell = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  return isTauriShell() || isElectronShell();
+};
+
+export const startDesktopWindowDrag = async (): Promise<boolean> => {
+  if (!isDesktopShell() || !isTauriShell()) {
+    return false;
+  }
+
+  try {
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
+    const appWindow = getCurrentWindow();
+    await appWindow.startDragging();
+    return true;
+  } catch {
+    return false;
+  }
 };
 
 export const isVSCodeRuntime = (): boolean => {
@@ -443,13 +476,36 @@ export const restartToApplyUpdate = async (): Promise<boolean> => {
     return false;
   }
 
+  return restartDesktopApp();
+};
+
+export const restartDesktopApp = async (): Promise<boolean> => {
+  if (!isTauriShell()) {
+    return false;
+  }
+
   try {
     const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
     await tauri?.core?.invoke?.('desktop_restart');
     return true;
   } catch (error) {
-    console.warn('Failed to restart for update (tauri)', error);
+    console.warn('Failed to restart desktop app (tauri)', error);
     return false;
+  }
+};
+
+export const getDesktopLanAddress = async (): Promise<string | null> => {
+  if (!isTauriShell() || !isDesktopLocalOriginActive()) {
+    return null;
+  }
+
+  try {
+    const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
+    const result = await tauri?.core?.invoke?.('desktop_get_lan_address');
+    return typeof result === 'string' && result.trim().length > 0 ? result.trim() : null;
+  } catch (error) {
+    console.warn('Failed to get desktop LAN address (tauri)', error);
+    return null;
   }
 };
 
@@ -476,11 +532,57 @@ export const openDesktopPath = async (path: string, app?: string | null): Promis
   }
 };
 
+export const revealDesktopPath = async (path: string): Promise<boolean> => {
+  if (!isTauriShell() || !isDesktopLocalOriginActive()) {
+    return false;
+  }
+
+  const trimmed = path?.trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  try {
+    const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
+    await tauri?.core?.invoke?.('desktop_reveal_path', {
+      path: trimmed,
+    });
+    return true;
+  } catch {
+    return openDesktopPath(trimmed);
+  }
+};
+
+export const saveDesktopMarkdownFile = async (
+  defaultFileName: string,
+  content: string,
+): Promise<string | null> => {
+  if (!isTauriShell() || !isDesktopLocalOriginActive()) {
+    return null;
+  }
+
+  const trimmedFileName = defaultFileName?.trim();
+  if (!trimmedFileName) {
+    return null;
+  }
+
+  try {
+    const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
+    const result = await tauri?.core?.invoke?.('desktop_save_markdown_file', {
+      defaultFileName: trimmedFileName,
+      content,
+    });
+    return typeof result === 'string' && result.trim().length > 0 ? result : null;
+  } catch (error) {
+    console.warn('Failed to save markdown file (tauri)', error);
+    return null;
+  }
+};
+
 export const openDesktopProjectInApp = async (
   projectPath: string,
   appId: string,
   appName: string,
-  filePath?: string | null,
 ): Promise<boolean> => {
   if (!isTauriShell() || !isDesktopLocalOriginActive()) {
     return false;
@@ -489,7 +591,6 @@ export const openDesktopProjectInApp = async (
   const trimmedProjectPath = projectPath?.trim();
   const trimmedAppId = appId?.trim();
   const trimmedAppName = appName?.trim();
-  const trimmedFilePath = typeof filePath === 'string' ? filePath.trim() : '';
 
   if (!trimmedProjectPath || !trimmedAppId || !trimmedAppName) {
     return false;
@@ -501,11 +602,41 @@ export const openDesktopProjectInApp = async (
       projectPath: trimmedProjectPath,
       appId: trimmedAppId,
       appName: trimmedAppName,
-      filePath: trimmedFilePath.length > 0 ? trimmedFilePath : undefined,
     });
     return true;
   } catch (error) {
-    console.warn('Failed to open project in app (tauri)', error);
+    console.warn('Failed to open project in app', error);
+    return false;
+  }
+};
+
+export const openDesktopFileInApp = async (
+  filePath: string,
+  appId: string,
+  appName: string,
+): Promise<boolean> => {
+  if (!isTauriShell() || !isDesktopLocalOriginActive()) {
+    return false;
+  }
+
+  const trimmedFilePath = filePath?.trim();
+  const trimmedAppId = appId?.trim();
+  const trimmedAppName = appName?.trim();
+
+  if (!trimmedFilePath || !trimmedAppId || !trimmedAppName) {
+    return false;
+  }
+
+  try {
+    const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
+    await tauri?.core?.invoke?.('desktop_open_file_in_app', {
+      filePath: trimmedFilePath,
+      appId: trimmedAppId,
+      appName: trimmedAppName,
+    });
+    return true;
+  } catch (error) {
+    console.warn('Failed to open file in app', error);
     return false;
   }
 };

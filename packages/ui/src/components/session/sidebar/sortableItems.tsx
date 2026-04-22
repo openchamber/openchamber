@@ -118,6 +118,14 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
     event.stopPropagation();
   }, []);
 
+  const handleMenuTriggerPointerDown = React.useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+  }, []);
+
+  const handleMenuTriggerMouseDown = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+  }, []);
+
   const handleToggleMouseDown = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
     if (event.button === 2 || (event.button === 0 && event.ctrlKey)) {
       suppressNextToggleRef.current = true;
@@ -250,6 +258,8 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                               : 'opacity-0 pointer-events-none group-hover/project:opacity-100 group-hover/project:pointer-events-auto group-focus-within/project:opacity-100 group-focus-within/project:pointer-events-auto',
                         )}
                         aria-label="Project menu"
+                        onPointerDown={handleMenuTriggerPointerDown}
+                        onMouseDown={handleMenuTriggerMouseDown}
                         onClick={handleMenuTriggerClick}
                       >
                         <RiMore2Line className="h-3.5 w-3.5" />

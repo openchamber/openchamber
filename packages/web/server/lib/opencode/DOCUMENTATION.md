@@ -80,7 +80,7 @@ This module provides OpenCode server integration utilities for the web server ru
 - Keeps route behavior independent from composition root; `index.js` now supplies dependencies only.
 
 ## Public exports (session-runtime.js)
-- `createSessionRuntime({ writeSseEvent, getNotificationClients })`: creates runtime-owned state machine and APIs for session status.
+- `createSessionRuntime({ writeSseEvent, getNotificationClients, broadcastEvent? })`: creates runtime-owned state machine and APIs for session status.
 - Returned API:
   - `processOpenCodeSsePayload(payload)`
   - `getSessionActivitySnapshot()`

@@ -9,32 +9,27 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   RiCheckLine,
+  RiCheckboxMultipleLine,
   RiChatNewLine,
   RiEqualizer2Line,
   RiFolderAddLine,
+  RiLayoutLeftLine,
   RiSearchLine,
   RiCloseLine,
   RiContractUpDownLine,
   RiExpandUpDownLine,
-  RiStickyNoteLine,
+  RiCalendarScheduleLine,
 } from '@remixicon/react';
+import { cn } from '@/lib/utils';
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
-import type { ProjectRef } from '@/lib/openchamberConfig';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
-import { ProjectNotesTodoPanel } from '../ProjectNotesTodoPanel';
 
 type Props = {
   hideDirectoryControls: boolean;
   handleOpenDirectoryDialog: () => void;
   handleNewSession: () => void;
-  useMobileNotesPanel: boolean;
-  projectNotesPanelOpen: boolean;
-  setProjectNotesPanelOpen: (open: boolean) => void;
-  activeProjectRefForHeader: ProjectRef | null;
-  activeProjectLabelForHeader: string | null;
   canOpenMultiRun: boolean;
   openMultiRunLauncher: () => void;
-  stableActiveProjectIsRepo: boolean;
   headerActionIconClass: string;
   reserveHeaderActionsSpace: boolean;
   headerActionButtonClass: string;
@@ -47,6 +42,11 @@ type Props = {
   searchMatchCount: number;
   collapseAllProjects: () => void;
   expandAllProjects: () => void;
+  openScheduledTasksDialog: () => void;
+  selectionModeEnabled: boolean;
+  onToggleSelectionMode: () => void;
+  showSidebarToggle?: boolean;
+  onToggleSidebar?: () => void;
 };
 
 export function SidebarHeader(props: Props): React.ReactNode {
@@ -54,14 +54,8 @@ export function SidebarHeader(props: Props): React.ReactNode {
     hideDirectoryControls,
     handleOpenDirectoryDialog,
     handleNewSession,
-    useMobileNotesPanel,
-    projectNotesPanelOpen,
-    setProjectNotesPanelOpen,
-    activeProjectRefForHeader,
-    activeProjectLabelForHeader,
     canOpenMultiRun,
     openMultiRunLauncher,
-    stableActiveProjectIsRepo,
     headerActionIconClass,
     reserveHeaderActionsSpace,
     headerActionButtonClass,
@@ -74,6 +68,11 @@ export function SidebarHeader(props: Props): React.ReactNode {
     searchMatchCount,
     collapseAllProjects,
     expandAllProjects,
+    openScheduledTasksDialog,
+    selectionModeEnabled,
+    onToggleSelectionMode,
+    showSidebarToggle = false,
+    onToggleSidebar,
   } = props;
 
   const displayMode = useSessionDisplayStore((state) => state.displayMode);
@@ -84,11 +83,36 @@ export function SidebarHeader(props: Props): React.ReactNode {
   }
 
   return (
-    <div className="select-none flex-shrink-0 px-2.5 py-1">
+    <div
+      className={cn(
+        'select-none flex-shrink-0',
+        showSidebarToggle ? 'pl-3 pr-3' : 'px-2.5 py-1',
+      )}
+    >
       {reserveHeaderActionsSpace ? (
-        <div className="flex h-auto min-h-8 flex-col gap-1">
+        <div
+          className={cn(
+            'flex h-auto flex-col gap-1',
+            showSidebarToggle ? 'min-h-[var(--oc-header-height,56px)] justify-center' : 'min-h-8',
+          )}
+        >
           <div className="flex h-8 items-center justify-between gap-2">
             <div className="flex items-center gap-1.5">
+              {showSidebarToggle && onToggleSidebar ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={onToggleSidebar}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-md typography-ui-label font-medium text-foreground transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50"
+                      aria-label="Close sessions"
+                    >
+                      <RiLayoutLeftLine className="h-[18px] w-[18px]" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" sideOffset={4}><p>Close sessions</p></TooltipContent>
+                </Tooltip>
+              ) : null}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
@@ -115,9 +139,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
                 </TooltipTrigger>
                 <TooltipContent side="bottom" sideOffset={4}><p>New session</p></TooltipContent>
               </Tooltip>
-            </div>
 
-            <div className="flex items-center gap-1.5">
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
@@ -132,49 +154,22 @@ export function SidebarHeader(props: Props): React.ReactNode {
                 </TooltipTrigger>
                 <TooltipContent side="bottom" sideOffset={4}><p>New multi-run</p></TooltipContent>
               </Tooltip>
+            </div>
 
-              {useMobileNotesPanel ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      onClick={() => setProjectNotesPanelOpen(true)}
-                      className={headerActionButtonClass}
-                      aria-label="Project notes"
-                      disabled={!activeProjectRefForHeader}
-                    >
-                      <RiStickyNoteLine className={headerActionIconClass} />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" sideOffset={4}><p>Project notes</p></TooltipContent>
-                </Tooltip>
-              ) : (
-                <DropdownMenu open={projectNotesPanelOpen} onOpenChange={setProjectNotesPanelOpen} modal={false}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <DropdownMenuTrigger asChild>
-                        <button
-                          type="button"
-                          className={headerActionButtonClass}
-                          aria-label="Project notes"
-                          disabled={!activeProjectRefForHeader}
-                        >
-                          <RiStickyNoteLine className={headerActionIconClass} />
-                        </button>
-                      </DropdownMenuTrigger>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" sideOffset={4}><p>Project notes</p></TooltipContent>
-                  </Tooltip>
-                  <DropdownMenuContent align="start" className="w-[420px] max-w-[min(92vw,420px)] p-0">
-                    <ProjectNotesTodoPanel
-                      projectRef={activeProjectRefForHeader}
-                      projectLabel={activeProjectLabelForHeader}
-                      canCreateWorktree={stableActiveProjectIsRepo}
-                      onActionComplete={() => setProjectNotesPanelOpen(false)}
-                    />
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
+            <div className="flex items-center gap-1.5">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={openScheduledTasksDialog}
+                    className={headerActionButtonClass}
+                    aria-label="Scheduled tasks"
+                  >
+                    <RiCalendarScheduleLine className={headerActionIconClass} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" sideOffset={4}><p>Scheduled tasks</p></TooltipContent>
+              </Tooltip>
 
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -189,6 +184,23 @@ export function SidebarHeader(props: Props): React.ReactNode {
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" sideOffset={4}><p>Search sessions</p></TooltipContent>
+              </Tooltip>
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={onToggleSelectionMode}
+                    className={cn(headerActionButtonClass, selectionModeEnabled && 'bg-interactive-hover text-primary')}
+                    aria-label={selectionModeEnabled ? 'Exit selection' : 'Select sessions'}
+                    aria-pressed={selectionModeEnabled}
+                  >
+                    <RiCheckboxMultipleLine className={headerActionIconClass} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" sideOffset={4}>
+                  <p>{selectionModeEnabled ? 'Exit selection' : 'Select sessions'}</p>
+                </TooltipContent>
               </Tooltip>
 
               <DropdownMenu>
