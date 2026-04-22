@@ -354,7 +354,7 @@ wire-up. The server-side primitive is already there.
 - Outdated comments (`diffHunk` no longer matches HEAD). Default: include the
   original hunk as context and mark it `[outdated]` in the seed.
 
-**Status:** planned, after 1.3 is enough to host the entry point.
+**Status:** shipped (commit: d408ca9b).
 
 ---
 
