@@ -258,7 +258,7 @@ Snooze is local-only (GitHub has no snooze API). Stored in
 - Confirm `activity.listNotificationsForAuthenticatedUser` is callable with
   the default token scopes.
 
-**Status:** planned, after 1.2 ships.
+**Status:** shipped (commits: d9033bbb, ddcc0f4b, 2132f75c).
 
 ---
 
