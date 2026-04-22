@@ -1152,6 +1152,8 @@ export function registerGitHubRoutes(app) {
         path: comment.path,
         line: typeof comment.line === 'number' ? comment.line : null,
         position: typeof comment.position === 'number' ? comment.position : null,
+        diffHunk: comment.diff_hunk || '',
+        inReplyToId: typeof comment.in_reply_to_id === 'number' ? comment.in_reply_to_id : undefined,
         author: comment.user ? { login: comment.user.login, id: comment.user.id, avatarUrl: comment.user.avatar_url } : null,
       }));
 

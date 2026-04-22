@@ -56,6 +56,7 @@ import { useSelectionStore } from '@/sync/selection-store';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { getGitHubPrStatusKey, useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
+import { useReviewCommentSession } from '@/features/review-comment-session/useReviewCommentSession';
 import { ChecksPanel } from './pr/ChecksPanel';
 import { ReviewersPanel } from './pr/ReviewersPanel';
 import { ConversationPanel } from './pr/ConversationPanel';
@@ -432,6 +433,9 @@ export const PullRequestSection: React.FC<{
   // Cockpit data states
   const [cockpitData, setCockpitData] = React.useState<GitHubPullRequestContextResult | null>(null);
   const [protectionData, setProtectionData] = React.useState<GitHubBranchProtection | null>(null);
+
+  const { startSession: startReviewSession, loading: isStartingReviewSession } = useReviewCommentSession();
+  const [startingSessionId, setStartingSessionId] = React.useState<number | null>(null);
 
   const attemptedBodyHydrationRef = React.useRef<Set<string>>(new Set());
   const lastSyncedPrNumberRef = React.useRef<number | null>(null);
@@ -1698,6 +1702,20 @@ export const PullRequestSection: React.FC<{
                       <ConversationPanel
                         issueComments={cockpitData?.issueComments}
                         reviewComments={cockpitData?.reviewComments}
+                        onStartReviewSession={async (comment, allComments) => {
+                          try {
+                            setStartingSessionId(comment.id);
+                            setActiveMainTab('chat');
+                            await startReviewSession(pr, comment, allComments);
+                          } catch (error) {
+                            const message = error instanceof Error ? error.message : String(error);
+                            toast.error('Failed to start review session', { description: message });
+                          } finally {
+                            setStartingSessionId(null);
+                          }
+                        }}
+                        isStartingSession={isStartingReviewSession}
+                        startingSessionId={startingSessionId}
                       />
                     </div>
                   ) : null}

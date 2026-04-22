@@ -791,6 +791,8 @@ export type GitHubPullRequestReviewComment = {
   path?: string;
   line?: number | null;
   position?: number | null;
+  diffHunk?: string;
+  inReplyToId?: number;
   createdAt?: string;
   updatedAt?: string;
 };
