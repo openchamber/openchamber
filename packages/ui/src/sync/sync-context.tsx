@@ -1365,6 +1365,12 @@ export function SyncProvider(props: {
       onDisconnect: (reason) => {
         useConfigStore.setState({ isConnected: false, lastDisconnectReason: reason })
       },
+      onTransportSwitch: () => {
+        // Transport switched (e.g. WS timeout → SSE fallback) without
+        // actual disconnection. No events lost — just update connection
+        // state without triggering a full directory resync.
+        useConfigStore.setState({ isConnected: true })
+      },
     })
     return cleanup
   }, [props.sdk, childStores, routingIndex, messageStreamTransport])

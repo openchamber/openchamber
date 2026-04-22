@@ -35,6 +35,8 @@ export type EventPipelineInput = {
   onReconnect?: () => void
   /** Called when the stream disconnects (heartbeat timeout, network error, or transport failure). */
   onDisconnect?: (reason: string) => void
+  /** Called when transport switches (e.g. WS timeout → SSE fallback) without actual disconnection. */
+  onTransportSwitch?: () => void
   transport?: "auto" | "ws" | "sse"
 }
 
@@ -144,7 +146,7 @@ type DirectoryQueue = {
 }
 
 export function createEventPipeline(input: EventPipelineInput) {
-  const { sdk, onEvent, onReconnect, onDisconnect, routeDirectory, transport = "auto" } = input
+  const { sdk, onEvent, onReconnect, onDisconnect, onTransportSwitch, routeDirectory, transport = "auto" } = input
   const abort = new AbortController()
   let disconnected = false
   let lastEventId: string | undefined
@@ -514,6 +516,12 @@ export function createEventPipeline(input: EventPipelineInput) {
         const code = typeof error === "object" && error !== null ? (error as { code?: unknown }).code : undefined
         if (currentTransport === "ws" && code === "WS_FALLBACK") {
           retryDelayMs = 0
+          // Transport switch (WS → SSE fallback), not a real disconnection.
+          // No events were lost — the next attempt will use SSE and carry
+          // lastEventId for gapless replay. Notify consumer so it can set
+          // isConnected, but do NOT treat this as a disconnection requiring
+          // a full directory resync.
+          onTransportSwitch?.()
         } else if (!isAbortError(error)) {
           if (!streamErrorLogged) {
             streamErrorLogged = true
