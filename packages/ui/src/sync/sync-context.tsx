@@ -291,6 +291,21 @@ function getReconnectCandidateSessionIds(state: State) {
     }
   }
 
+  // Ensure parent sessions of any child sessions are also resynced.
+  // A child may have completed during the disconnect gap without the
+  // store knowing (SSE events lost). The parent's task tool part needs
+  // to reflect the child's final state.
+  const parentIds = new Set<string>()
+  for (const session of state.session) {
+    const parentId = (session as Session & { parentID?: string | null }).parentID
+    if (parentId) {
+      parentIds.add(parentId)
+    }
+  }
+  for (const pid of parentIds) {
+    ids.add(pid)
+  }
+
   return Array.from(ids)
 }
 
@@ -755,13 +770,10 @@ async function resyncDirectoryAfterReconnect(
         sessionChanged = true
       }
 
+      // Merge parts: overwrite only messages present in the fetch snapshot.
+      // Do NOT delete parts for messages that may have been added by SSE
+      // events arriving between the fetch and the setState — those are more recent.
       const nextPartState = { ...state.part }
-      const previousMessages = state.message[sessionId] ?? []
-      for (const message of previousMessages) {
-        if (!nextMessageIds.has(message.id)) {
-          delete nextPartState[message.id]
-        }
-      }
       for (const record of records) {
         const messageId = record?.info?.id
         if (!messageId) continue
