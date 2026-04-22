@@ -928,6 +928,78 @@ export function registerGitHubRoutes(app) {
     }
   });
 
+  app.post('/api/github/issues/start-work', async (req, res) => {
+    try {
+      const directory = typeof req.body?.directory === 'string' ? req.body.directory.trim() : '';
+      const issueNumber = typeof req.body?.issueNumber === 'number' ? req.body.issueNumber : null;
+      if (!directory || !issueNumber) {
+        return res.status(400).json({ ok: false, error: { code: 'bad_input', message: 'directory and issueNumber are required' } });
+      }
+
+      const { getOctokitOrNull, resolveGitHubRepoFromDirectory } = await getGitHubLibraries();
+      const octokit = getOctokitOrNull();
+      if (!octokit) {
+        return res.status(401).json({ ok: false, error: { code: 'not_authenticated', message: 'GitHub not authenticated' } });
+      }
+
+      let owner = typeof req.body?.owner === 'string' ? req.body.owner.trim() : '';
+      let repo = typeof req.body?.repo === 'string' ? req.body.repo.trim() : '';
+      if (!owner || !repo) {
+        const resolved = await resolveGitHubRepoFromDirectory(directory);
+        if (!resolved?.repo) {
+          return res.status(400).json({ ok: false, error: { code: 'not_found', message: 'Could not resolve GitHub repo from directory' } });
+        }
+        owner = resolved.repo.owner;
+        repo = resolved.repo.repo;
+      }
+
+      const issueResp = await octokit.rest.issues.get({ owner, repo, issue_number: issueNumber });
+      const issue = issueResp.data;
+
+      const { buildBranchName } = await import('./branch-naming.js');
+      const labels = (issue.labels || []).map((l) => (typeof l === 'string' ? l : l.name || '')).filter(Boolean);
+      const branchName = buildBranchName({ number: issueNumber, title: issue.title || '', labels });
+
+      const { buildIssueBrief, renderBrief } = await import('./issue-brief.js');
+      const brief = buildIssueBrief({
+        number: issueNumber,
+        title: issue.title || '',
+        body: issue.body || '',
+        labels,
+        repoFullName: `${owner}/${repo}`,
+      });
+      const briefText = renderBrief(brief);
+
+      const sessionSeed = `Plan how to resolve issue #${issueNumber}. Use the brief above as ground truth. Don't write code yet.\n\n${briefText}`;
+
+      const baseBranch = typeof req.body?.baseBranch === 'string' ? req.body.baseBranch.trim() : 'HEAD';
+
+      const { createWorktree } = await import('../git/service.js');
+      const worktreeResult = await createWorktree(directory, {
+        mode: 'new',
+        branchName,
+        worktreeName: branchName,
+        startRef: baseBranch,
+      });
+
+      return res.json({
+        ok: true,
+        data: {
+          branch: worktreeResult.branch,
+          worktreePath: worktreeResult.path,
+          brief: briefText,
+          sessionSeed,
+        },
+      });
+    } catch (error) {
+      if (error.message?.includes('Branch already exists')) {
+        return res.status(409).json({ ok: false, error: { code: 'conflict', message: error.message } });
+      }
+      console.error('Failed to start work from issue:', error);
+      return res.status(500).json({ ok: false, error: { code: 'internal', message: error.message || 'Failed to start work from issue' } });
+    }
+  });
+
   // ================= GitHub Pull Request Context APIs =================
 
   app.get('/api/github/pulls/list', async (req, res) => {
