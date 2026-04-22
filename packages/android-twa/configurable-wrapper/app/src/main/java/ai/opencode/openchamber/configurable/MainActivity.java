@@ -259,9 +259,13 @@ public class MainActivity extends AppCompatActivity {
                                 return false;
                             }
                         }
-                        Intent intent = new Intent(Intent.ACTION_VIEW, request.getUrl());
-                        startActivity(intent);
-                        return true;
+      Intent intent = new Intent(Intent.ACTION_VIEW, request.getUrl());
+      try {
+        startActivity(intent);
+      } catch (android.content.ActivityNotFoundException e) {
+        Log.w(TAG, "No handler for URL: " + request.getUrl());
+      }
+      return true;
                     }
 
                     @Override
@@ -394,7 +398,7 @@ public class MainActivity extends AppCompatActivity {
     private void showErrorPage(String url, String type) {
         String title = getString(R.string.error_page_title);
         String message =
-                type.equals("network")
+                "network".equals(type)
                         ? getString(R.string.network_unavailable)
                         : getString(R.string.error_page_message);
         String retryLabel = getString(R.string.retry_button);
@@ -665,7 +669,7 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public void openAppSettings() {
-            runOnUiThread(() -> openSettings());
+            runOnUiThread(this::openSettings);
         }
     }
 
