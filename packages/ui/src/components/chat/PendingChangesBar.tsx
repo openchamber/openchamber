@@ -306,10 +306,20 @@ export const PendingChangesBar: React.FC = React.memo(() => {
             void editor.openDiff('', absolutePath, undefined, { patch: file.patch });
         } else if (editor) {
             void editor.openFile(absolutePath);
-        } else {
+        } else if (isGitFile(file)) {
+            // Git files: open context diff panel (requires git repo)
             const store = useUIStore.getState();
             if (!store.isMobile) {
                 store.openContextDiff(currentDirectory, relativePath);
+                return;
+            }
+            store.navigateToDiff(relativePath);
+            store.setRightSidebarOpen(false);
+        } else {
+            // Non-git files: open file content view (DiffView requires git)
+            const store = useUIStore.getState();
+            if (!store.isMobile) {
+                store.openContextFile(currentDirectory, relativePath);
                 return;
             }
             store.navigateToDiff(relativePath);
