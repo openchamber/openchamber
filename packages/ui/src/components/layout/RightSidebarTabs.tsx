@@ -1,9 +1,10 @@
 import React from 'react';
-import { RiBookletLine, RiFolder3Line, RiGitBranchLine } from '@remixicon/react';
+import { RiBookletLine, RiFolder3Line, RiGitBranchLine, RiInboxArchiveLine } from '@remixicon/react';
 
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { ProjectNotesTodoPanel } from '@/components/session/ProjectNotesTodoPanel';
 import { GitView } from '@/components/views';
+import { InboxView } from '@/features/github-inbox';
 import { useGitStore } from '@/stores/useGitStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -104,6 +105,11 @@ export const RightSidebarTabs: React.FC = () => {
       icon: <RiGitBranchLine className="h-3.5 w-3.5" />,
     },
     {
+      id: 'inbox',
+      label: 'Inbox',
+      icon: <RiInboxArchiveLine className="h-3.5 w-3.5" />,
+    },
+    {
       id: 'files',
       label: 'Files',
       icon: <RiFolder3Line className="h-3.5 w-3.5" />,
@@ -130,6 +136,7 @@ export const RightSidebarTabs: React.FC = () => {
 
       <div className="min-h-0 flex-1 overflow-hidden">
         {rightSidebarTab === 'git' && <GitView />}
+        {rightSidebarTab === 'inbox' && <InboxView />}
         {rightSidebarTab === 'files' && <SidebarFilesTree />}
         {rightSidebarTab === 'context' && <ContextSidebarPanel />}
       </div>

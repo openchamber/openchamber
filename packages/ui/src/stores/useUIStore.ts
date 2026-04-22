@@ -6,7 +6,7 @@ import { SEMANTIC_TYPOGRAPHY, getTypographyVariable, type SemanticTypographyKey 
 import type { ShortcutCombo } from '@/lib/shortcuts';
 
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files';
-export type RightSidebarTab = 'git' | 'files' | 'context';
+export type RightSidebarTab = 'git' | 'files' | 'context' | 'inbox';
 export type ContextPanelMode = 'diff' | 'file' | 'context' | 'plan' | 'chat';
 export type MermaidRenderingMode = 'svg' | 'ascii';
 export type UserMessageRenderingMode = 'markdown' | 'plain';
