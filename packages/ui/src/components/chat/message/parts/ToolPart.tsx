@@ -1928,7 +1928,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
     const taskSessionId = explicitTaskSessionId ?? fallbackTaskSessionId;
 
     const childSessionMessages = useSessionMessageRecords(taskSessionId ?? '', currentDirectory);
-    useEnsureSessionMessages(taskSessionId ?? '', currentDirectory)
+    useEnsureSessionMessages(taskSessionId ?? '', currentDirectory);
 
     const metadataTaskSummaryEntries = React.useMemo<TaskToolSummaryEntry[]>(() => {
         if (!isTaskTool) {
