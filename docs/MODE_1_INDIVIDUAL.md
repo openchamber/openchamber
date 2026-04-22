@@ -315,7 +315,7 @@ its own loading + error states.
 - Confirm the shared PR store in `packages/ui/src/stores/**` can add
   cockpit-local fields without causing cascading re-renders in the sidebar.
 
-**Status:** planned, concurrent with 1.4.
+**Status:** shipped (commits: 5c57ce87, afb4321a).
 
 ---
 
