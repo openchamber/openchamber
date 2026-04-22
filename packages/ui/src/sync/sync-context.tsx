@@ -750,7 +750,6 @@ async function resyncDirectoryAfterReconnect(
       .filter((record) => !!record?.info?.id)
       .map((record) => stripMessageDiffSnapshots(record.info))
       .sort((a, b) => cmp(a.id, b.id))
-    const nextMessageIds = new Set(nextMessages.map((message) => message.id))
 
     store.setState((state: DirectoryStore) => {
       const sessions = [...state.session]
@@ -1120,22 +1119,25 @@ function handleEvent(
   // a targeted parts repair for the parent session. This ensures the
   // parent's task tool part reflects the child's completion even when
   // no ToolPart component is mounted.
-  if (payload.type === "session.idle" && sessionID) {
-    const sessionState = store.getState()
-    const idleSession = sessionState.session.find((s) => s.id === sessionID)
-    const parentID = idleSession
-      ? (idleSession as Session & { parentID?: string | null }).parentID
-      : null
-    if (parentID && resolvedDirectory && resolvedDirectory !== "global") {
-      void Promise.resolve().then(async () => {
-        const dirStore = childStores.getChild(resolvedDirectory)
-        if (!dirStore) return
-        try {
-          await repairSessionParts(resolvedDirectory, parentID, dirStore)
-        } catch {
-          // Transient failure — next event or reconnect will catch up
-        }
-      })
+  if (payload.type === "session.idle") {
+    const idleSessionId = getSessionIdFromPayload(payload)
+    if (idleSessionId && resolvedDirectory && resolvedDirectory !== "global") {
+      const sessionState = store.getState()
+      const idleSession = sessionState.session.find((s) => s.id === idleSessionId)
+      const parentID = idleSession
+        ? (idleSession as Session & { parentID?: string | null }).parentID
+        : null
+      if (parentID) {
+        void Promise.resolve().then(async () => {
+          const dirStore = childStores.getChild(resolvedDirectory)
+          if (!dirStore) return
+          try {
+            await repairSessionParts(resolvedDirectory, parentID, dirStore)
+          } catch {
+            // Transient failure — next event or reconnect will catch up
+          }
+        })
+      }
     }
   }
 
@@ -1918,9 +1920,9 @@ export function useEnsureSessionMessages(sessionID: string, directory?: string) 
 
     void (async () => {
       try {
-        const scopedClient = opencodeClient.getScopedSdkClient(dir)
+        const scopedClient = opencodeClient.getScopedSdkClient(dir ?? "")
         const response = await scopedClient.session.messages({
-          sessionID,
+          sessionID: sessionID,
           limit: RECONNECT_MESSAGE_LIMIT,
         })
         const records = (response.data ?? []).filter(
