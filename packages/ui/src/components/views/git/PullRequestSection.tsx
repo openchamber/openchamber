@@ -56,12 +56,17 @@ import { useSelectionStore } from '@/sync/selection-store';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { getGitHubPrStatusKey, useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
+import { ChecksPanel } from './pr/ChecksPanel';
+import { ReviewersPanel } from './pr/ReviewersPanel';
+import { ConversationPanel } from './pr/ConversationPanel';
+import { ProtectionBanner } from './pr/ProtectionBanner';
 import type {
   GitHubPullRequest,
   GitHubCheckRun,
   GitHubPullRequestContextResult,
   GitHubPullRequestStatus,
   GitRemote,
+  GitHubBranchProtection,
 } from '@/lib/api/types';
 
 type MergeMethod = 'merge' | 'squash' | 'rebase';
@@ -424,6 +429,10 @@ export const PullRequestSection: React.FC<{
   const [commentsDetails, setCommentsDetails] = React.useState<GitHubPullRequestContextResult | null>(null);
   const [isLoadingCommentsDetails, setIsLoadingCommentsDetails] = React.useState(false);
 
+  // Cockpit data states
+  const [cockpitData, setCockpitData] = React.useState<GitHubPullRequestContextResult | null>(null);
+  const [protectionData, setProtectionData] = React.useState<GitHubBranchProtection | null>(null);
+
   const attemptedBodyHydrationRef = React.useRef<Set<string>>(new Set());
   const lastSyncedPrNumberRef = React.useRef<number | null>(null);
   const didUserOverrideRemoteRef = React.useRef(false);
@@ -489,6 +498,42 @@ export const PullRequestSection: React.FC<{
       cancelled = true;
     };
   }, [directory, github, pr, prStatusKey, updatePrStatus]);
+
+  // Fetch cockpit data (reviews, comments, check details, protection) when PR is visible
+  React.useEffect(() => {
+    if (!github?.prContext || !pr || !directory) {
+      setCockpitData(null);
+      setProtectionData(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    void github.prContext(directory, pr.number, { includeDiff: false, includeCheckDetails: true })
+      .then((ctx) => {
+        if (cancelled) return;
+        setCockpitData(ctx);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setCockpitData(null);
+      });
+
+    if (github?.prProtection && pr.base) {
+      void github.prProtection(directory, pr.base)
+        .then((result) => {
+          if (cancelled) return;
+          if (result.ok && result.data) {
+            setProtectionData(result.data.protection);
+          }
+        })
+        .catch(() => {});
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [directory, github, pr]);
 
   React.useEffect(() => {
     if (!pr) {
@@ -1635,8 +1680,27 @@ export const PullRequestSection: React.FC<{
                           </Tooltip>
                         </>
                       ) : null}
-                    </div>
+                     </div>
                   </div>
+
+                  {/* PR Cockpit Panels */}
+                  {pr.state === 'open' ? (
+                    <div className="flex flex-col gap-3 mt-2 border-t border-[hsl(var(--border))] pt-3">
+                      <ProtectionBanner protection={protectionData} prMergeable={pr.mergeable} />
+                      <ChecksPanel
+                        checkRuns={cockpitData?.checkRuns}
+                        onFixWithAI={checks?.failure ? sendFailedChecksToChat : undefined}
+                      />
+                      <ReviewersPanel
+                        reviews={cockpitData?.reviews}
+                        requestedReviewers={cockpitData?.requestedReviewers}
+                      />
+                      <ConversationPanel
+                        issueComments={cockpitData?.issueComments}
+                        reviewComments={cockpitData?.reviewComments}
+                      />
+                    </div>
+                  ) : null}
                 </div>
               </div>
             ) : (
