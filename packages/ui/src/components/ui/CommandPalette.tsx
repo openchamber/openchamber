@@ -33,6 +33,8 @@ import {
   RiTerminalBoxLine,
 } from '@remixicon/react';
 import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
+import { useStartWork } from '@/features/issue-work/useStartWork';
+import { toast } from '@/components/ui';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
 import { SETTINGS_PAGE_METADATA, SETTINGS_GROUP_LABELS, type SettingsRuntimeContext } from '@/lib/settings/metadata';
@@ -65,6 +67,7 @@ export const CommandPalette: React.FC = () => {
   const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
   const { themeMode, setThemeMode } = useThemeSystem();
   const { isMobile } = useDeviceInfo();
+  const { startWork } = useStartWork();
 
   const close = React.useCallback(() => setCommandPaletteOpen(false), [setCommandPaletteOpen]);
 
@@ -168,6 +171,19 @@ export const CommandPalette: React.FC = () => {
             <RiGitBranchLine className="mr-2 h-4 w-4" />
             <span>New Worktree Draft</span>
             <CommandShortcut>{shortcut('new_chat_worktree')}</CommandShortcut>
+          </CommandItem>
+          <CommandItem onSelect={run(async () => {
+            const input = window.prompt('Enter GitHub issue number:');
+            if (!input) return;
+            const issueNumber = Number(input);
+            if (!Number.isFinite(issueNumber) || issueNumber <= 0) {
+              toast.error('Invalid issue number');
+              return;
+            }
+            await startWork(issueNumber);
+          })}>
+            <RiGitBranchLine className="mr-2 h-4 w-4" />
+            <span>Work on GitHub Issue</span>
           </CommandItem>
           <CommandItem onSelect={handleOpenSessionList}>
             <RiLayoutLeftLine className="mr-2 h-4 w-4" />
