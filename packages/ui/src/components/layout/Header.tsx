@@ -42,6 +42,7 @@ import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { formatPercent, formatWindowLabel, QUOTA_PROVIDERS, calculatePace, calculateExpectedUsagePercent } from '@/lib/quota';
 import { UsageProgressBar } from '@/components/sections/usage/UsageProgressBar';
 import { PaceIndicator } from '@/components/sections/usage/PaceIndicator';
+import { WorkspaceSwitcher } from '@/features/team-workspace';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { eventMatchesShortcut, formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import {
@@ -1681,6 +1682,7 @@ export const Header: React.FC<HeaderProps> = ({
         isSwitchingGitHubAccount={isSwitchingGitHubAccount}
         handleGitHubAccountSwitch={handleGitHubAccountSwitch}
       />
+      {!isMobile && <WorkspaceSwitcher />}
     </>
   );
 
