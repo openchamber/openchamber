@@ -89,11 +89,18 @@ export const ScrollShadow = React.forwardRef<HTMLElement, ScrollShadowProps>(
         return;
       }
 
-      const hasBefore = orientation === "vertical" ? el.scrollTop > offset : el.scrollLeft > offset;
+      // Subpixel tolerance: on hi-DPI (Retina) and with fractional scrollTop,
+      // scrollTop+clientHeight can fall ~0.5px short of scrollHeight at the very end,
+      // which would otherwise keep the bottom fade visible after fully scrolling.
+      const SUBPIXEL_TOLERANCE = 1;
+      const hasBefore =
+        orientation === "vertical"
+          ? el.scrollTop > offset + SUBPIXEL_TOLERANCE
+          : el.scrollLeft > offset + SUBPIXEL_TOLERANCE;
       let hasAfter =
         orientation === "vertical"
-          ? el.scrollTop + el.clientHeight + offset < el.scrollHeight
-          : el.scrollLeft + el.clientWidth + offset < el.scrollWidth;
+          ? el.scrollHeight - (el.scrollTop + el.clientHeight) > offset + SUBPIXEL_TOLERANCE
+          : el.scrollWidth - (el.scrollLeft + el.clientWidth) > offset + SUBPIXEL_TOLERANCE;
 
       const effectiveHasBefore = hideTopShadow && orientation === "vertical" ? false : hasBefore;
 

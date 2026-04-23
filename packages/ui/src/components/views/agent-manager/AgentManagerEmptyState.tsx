@@ -20,7 +20,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { ModelMultiSelect, generateInstanceId, type ModelSelectionWithId } from '@/components/multirun/ModelMultiSelect';
 import { BranchSelector, useBranchOptions } from '@/components/multirun/BranchSelector';
 import { AgentSelector } from '@/components/multirun/AgentSelector';
-import { CommandAutocomplete, type CommandAutocompleteHandle } from '@/components/chat/CommandAutocomplete';
+import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo } from '@/components/chat/CommandAutocomplete';
 import { FileMentionAutocomplete, type FileMentionHandle } from '@/components/chat/FileMentionAutocomplete';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { getWorktreeSetupCommands } from '@/lib/openchamberConfig';
@@ -294,7 +294,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
     });
   }, [prompt, updateAutocompleteState]);
 
-  const handleAutocompleteCommandSelect = React.useCallback((command: { name: string }) => {
+  const handleAutocompleteCommandSelect = React.useCallback((command: CommandInfo) => {
     const nextPrompt = `/${command.name} `;
     setPrompt(nextPrompt);
     setShowCommandAutocomplete(false);

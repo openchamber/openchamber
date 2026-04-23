@@ -200,7 +200,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
     return { active, left };
   }, [visibleTodos]);
 
-  const hasTodoContent = showTodos && visibleTodos.length > 0;
+  const hasTodoContent = showTodos && statusSummary.left > 0;
   const hasAssistantContent = showAssistantStatus && (
     isWorking ||
     Boolean(wasAborted) ||

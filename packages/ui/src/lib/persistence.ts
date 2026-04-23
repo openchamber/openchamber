@@ -32,7 +32,15 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
   }
   if (settings.homeDirectory) {
     localStorage.setItem('homeDirectory', settings.homeDirectory);
-    window.__OPENCHAMBER_HOME__ = settings.homeDirectory;
+    // Electron's preload exposes __OPENCHAMBER_HOME__ as a read-only
+    // contextBridge property; assignment throws TypeError there. In VSCode
+    // webview and plain web runtime the property is writable. Swallow the
+    // error in Electron — preload already seeded the value correctly.
+    try {
+      window.__OPENCHAMBER_HOME__ = settings.homeDirectory;
+    } catch {
+      /* read-only contextBridge property — leave preload-seeded value */
+    }
   }
   if (Array.isArray(settings.projects) && settings.projects.length > 0) {
     localStorage.setItem('projects', JSON.stringify(settings.projects));
@@ -969,20 +977,47 @@ export const syncDesktopSettings = async (): Promise<void> => {
 
   const persistApi = getPersistApi();
 
-  const applySettings = (settings: DesktopSettings) => {
-    persistToLocalStorage(settings);
-    const apply = () => applyDesktopUiPreferences(settings);
+  // Wait for Zustand persist hydration before applying server settings.
+  // Otherwise `set()`-calls race with hydration: we set X, then hydration
+  // reads localStorage and overwrites back to the persisted value.
+  const waitForHydration = (): Promise<void> => {
+    if (!persistApi?.hasHydrated || persistApi.hasHydrated()) {
+      return Promise.resolve();
+    }
+    if (!persistApi.onFinishHydration) {
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
+      const unsubscribe = persistApi.onFinishHydration!(() => {
+        unsubscribe?.();
+        finish();
+      });
+      // Guard: hydration may have flipped to true between the hasHydrated
+      // check and the onFinishHydration subscription — resolve immediately.
+      if (persistApi.hasHydrated?.()) finish();
+    });
+  };
 
-    if (persistApi?.hasHydrated?.()) {
-      apply();
-    } else {
-      apply();
-      if (persistApi?.onFinishHydration) {
-        const unsubscribe = persistApi.onFinishHydration(() => {
-          unsubscribe?.();
-          apply();
-        });
-      }
+  // Each step is wrapped in try/catch so a failure in one side-effect (e.g.
+  // a TypeError from writing to a contextBridge-protected global) doesn't
+  // prevent server settings from reaching the Zustand store.
+  const applySettings = async (settings: DesktopSettings) => {
+    try {
+      persistToLocalStorage(settings);
+    } catch (error) {
+      console.warn('persistToLocalStorage failed:', error);
+    }
+    await waitForHydration();
+    try {
+      applyDesktopUiPreferences(settings);
+    } catch (error) {
+      console.warn('applyDesktopUiPreferences failed:', error);
     }
 
     if (typeof window !== 'undefined') {
@@ -993,7 +1028,7 @@ export const syncDesktopSettings = async (): Promise<void> => {
   try {
     const webSettings = await fetchWebSettings();
     if (webSettings) {
-      applySettings(webSettings);
+      await applySettings(webSettings);
     }
   } catch (error) {
     console.warn('Failed to synchronise settings:', error);

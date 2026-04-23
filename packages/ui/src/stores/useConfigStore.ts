@@ -468,6 +468,8 @@ interface ConfigStore {
     agentModelSelections: { [agentName: string]: { providerId: string; modelId: string } };
     defaultProviders: { [key: string]: string };
     isConnected: boolean;
+    hasEverConnected: boolean;
+    connectionPhase: "connecting" | "connected" | "reconnecting";
     lastDisconnectReason: string | null;
     isInitialized: boolean;
     modelsMetadata: Map<string, ModelMetadata>;
@@ -589,6 +591,8 @@ export const useConfigStore = create<ConfigStore>()(
                 agentModelSelections: {},
                 defaultProviders: {},
                 isConnected: false,
+                hasEverConnected: false,
+                connectionPhase: "connecting",
                 lastDisconnectReason: null,
                 isInitialized: false,
                 modelsMetadata: new Map<string, ModelMetadata>(),
@@ -1890,7 +1894,14 @@ export const useConfigStore = create<ConfigStore>()(
                     while (attempt < maxAttempts) {
                         try {
                             const isHealthy = await opencodeClient.checkHealth();
-                            set({ isConnected: isHealthy });
+                            const hasEverConnected = get().hasEverConnected;
+                            set(isHealthy
+                                ? { isConnected: true, hasEverConnected: true, connectionPhase: "connected" }
+                                : {
+                                    isConnected: false,
+                                    connectionPhase: hasEverConnected ? "reconnecting" : "connecting",
+                                    lastDisconnectReason: 'health_check_unhealthy',
+                                });
                             return isHealthy;
                         } catch (error) {
                             lastError = error;
@@ -1903,7 +1914,11 @@ export const useConfigStore = create<ConfigStore>()(
                     if (lastError) {
                         console.warn("[ConfigStore] Failed to reach OpenCode after retrying:", lastError);
                     }
-                    set({ isConnected: false });
+                    set({
+                        isConnected: false,
+                        connectionPhase: get().hasEverConnected ? "reconnecting" : "connecting",
+                        lastDisconnectReason: 'health_check_failed',
+                    });
                     return false;
                 },
 
@@ -1917,7 +1932,11 @@ export const useConfigStore = create<ConfigStore>()(
 
                         if (!isConnected) {
                             if (debug) console.log("Server not connected");
-                            set({ isConnected: false });
+                            // checkConnection already set lastDisconnectReason; do not overwrite.
+                            set({
+                                isConnected: false,
+                                connectionPhase: get().hasEverConnected ? "reconnecting" : "connecting",
+                            });
                             return;
                         }
 
@@ -1930,11 +1949,16 @@ export const useConfigStore = create<ConfigStore>()(
                         if (debug) console.log("Loading agents...");
                         await get().loadAgents();
 
-                        set({ isInitialized: true, isConnected: true });
+                        set({ isInitialized: true, isConnected: true, hasEverConnected: true, connectionPhase: "connected" });
                         if (debug) console.log("App initialized successfully");
                     } catch (error) {
                         console.error("Failed to initialize app:", error);
-                        set({ isInitialized: false, isConnected: false });
+                        set({
+                            isInitialized: false,
+                            isConnected: false,
+                            connectionPhase: get().hasEverConnected ? "reconnecting" : "connecting",
+                            lastDisconnectReason: 'init_error',
+                        });
                     }
                 },
 

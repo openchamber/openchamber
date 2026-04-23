@@ -55,9 +55,28 @@ function dir() {
 }
 
 function connectionLostError(): Error {
-  const reason = useConfigStore.getState().lastDisconnectReason
-  const suffix = reason ? ` (${reason})` : " (never connected)"
+  const { hasEverConnected, lastDisconnectReason } = useConfigStore.getState()
+  const suffix = lastDisconnectReason
+    ? ` (${lastDisconnectReason})`
+    : hasEverConnected
+      ? ""
+      : " (never connected)"
   return new Error(`Connection lost${suffix}. Please wait for reconnection.`)
+}
+
+// Wait briefly for the pipeline to re-establish connection before failing a
+// send. Transient reconnects (heartbeat race, WS→SSE fallback, brief network
+// blip) otherwise surface as a hard "Connection lost" toast even though the
+// pipeline recovers within a second. Poll isConnected at 100ms intervals.
+const CONNECTION_GRACE_MS = 2000
+export async function waitForConnectionOrThrow(): Promise<void> {
+  if (useConfigStore.getState().isConnected) return
+  const deadline = Date.now() + CONNECTION_GRACE_MS
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    if (useConfigStore.getState().isConnected) return
+  }
+  throw connectionLostError()
 }
 
 function getSessionDirectory(sessionId: string): string | undefined {
@@ -332,9 +351,7 @@ export async function optimisticSend(input: {
     throw new Error("Optimistic refs not set — is useSync() mounted?")
   }
 
-  if (!useConfigStore.getState().isConnected) {
-    throw connectionLostError()
-  }
+  await waitForConnectionOrThrow()
 
   const store = dirStore()
   const messageID = ascendingId("msg")
@@ -419,9 +436,7 @@ export async function respondToPermission(
   requestId: string,
   response: "once" | "always" | "reject",
 ): Promise<void> {
-  if (!useConfigStore.getState().isConnected) {
-    throw connectionLostError()
-  }
+  await waitForConnectionOrThrow()
   const result = await getRequestReplyClient("permission", sessionId, requestId).permission.reply({
     requestID: requestId,
     reply: response,
@@ -435,9 +450,7 @@ export async function dismissPermission(
   sessionId: string,
   requestId: string,
 ): Promise<void> {
-  if (!useConfigStore.getState().isConnected) {
-    throw connectionLostError()
-  }
+  await waitForConnectionOrThrow()
   const result = await getRequestReplyClient("permission", sessionId, requestId).permission.reply({
     requestID: requestId,
     reply: "reject",
@@ -456,9 +469,7 @@ export async function respondToQuestion(
   requestId: string,
   answers: string[] | string[][],
 ): Promise<void> {
-  if (!useConfigStore.getState().isConnected) {
-    throw connectionLostError()
-  }
+  await waitForConnectionOrThrow()
   const result = await getRequestReplyClient("question", sessionId, requestId).question.reply({
     requestID: requestId,
     answers: answers as Array<Array<string>>,
@@ -472,9 +483,7 @@ export async function rejectQuestion(
   sessionId: string,
   requestId: string,
 ): Promise<void> {
-  if (!useConfigStore.getState().isConnected) {
-    throw connectionLostError()
-  }
+  await waitForConnectionOrThrow()
   const result = await getRequestReplyClient("question", sessionId, requestId).question.reject({
     requestID: requestId,
   })

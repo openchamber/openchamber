@@ -291,6 +291,21 @@ function getReconnectCandidateSessionIds(state: State) {
     }
   }
 
+  // Ensure parent sessions of any child sessions are also resynced.
+  // A child may have completed during the disconnect gap without the
+  // store knowing (SSE events lost). The parent's task tool part needs
+  // to reflect the child's final state.
+  const parentIds = new Set<string>()
+  for (const session of state.session) {
+    const parentId = (session as Session & { parentID?: string | null }).parentID
+    if (parentId) {
+      parentIds.add(parentId)
+    }
+  }
+  for (const pid of parentIds) {
+    ids.add(pid)
+  }
+
   return Array.from(ids)
 }
 
@@ -735,7 +750,6 @@ async function resyncDirectoryAfterReconnect(
       .filter((record) => !!record?.info?.id)
       .map((record) => stripMessageDiffSnapshots(record.info))
       .sort((a, b) => cmp(a.id, b.id))
-    const nextMessageIds = new Set(nextMessages.map((message) => message.id))
 
     store.setState((state: DirectoryStore) => {
       const sessions = [...state.session]
@@ -755,13 +769,10 @@ async function resyncDirectoryAfterReconnect(
         sessionChanged = true
       }
 
+      // Merge parts: overwrite only messages present in the fetch snapshot.
+      // Do NOT delete parts for messages that may have been added by SSE
+      // events arriving between the fetch and the setState — those are more recent.
       const nextPartState = { ...state.part }
-      const previousMessages = state.message[sessionId] ?? []
-      for (const message of previousMessages) {
-        if (!nextMessageIds.has(message.id)) {
-          delete nextPartState[message.id]
-        }
-      }
       for (const record of records) {
         const messageId = record?.info?.id
         if (!messageId) continue
@@ -1104,7 +1115,25 @@ function handleEvent(
     }
   }
 
-  // Read live state, create targeted draft cloning ONLY fields the event
+  // Sync-layer parent resync: when a child session goes idle, schedule
+  // a targeted parts repair for the parent session. This ensures the
+  // parent's task tool part reflects the child's completion even when
+  // no ToolPart component is mounted.
+  if (payload.type === "session.idle") {
+    const idleSessionId = getSessionIdFromPayload(payload)
+    if (idleSessionId && resolvedDirectory && resolvedDirectory !== "global") {
+      const sessionState = store.getState()
+      const idleSession = sessionState.session.find((s) => s.id === idleSessionId)
+      const parentID = idleSession
+        ? (idleSession as Session & { parentID?: string | null }).parentID
+        : null
+      if (parentID) {
+        enqueuePartsRepair(resolvedDirectory, parentID, childStores)
+      }
+    }
+  }
+
+  // Read live state, create targeted draft cloning ONLY fields that event
   // type will mutate. This preserves reference identity for untouched slices
   // so Zustand selectors skip re-renders for unrelated subscribers.
   const current = store.getState()
@@ -1347,7 +1376,11 @@ export function SyncProvider(props: {
         handleEvent(directory, payload, childStores, routingIndex)
       },
       onReconnect: () => {
-        useConfigStore.setState({ isConnected: true, lastDisconnectReason: null })
+        useConfigStore.setState({
+          isConnected: true,
+          hasEverConnected: true,
+          connectionPhase: "connected",
+        })
         for (const [dir, store] of childStores.children) {
           if (reconnectResyncing.has(dir)) continue
           if (getReconnectCandidateSessionIds(store.getState()).length === 0) continue
@@ -1363,7 +1396,22 @@ export function SyncProvider(props: {
         }
       },
       onDisconnect: (reason) => {
-        useConfigStore.setState({ isConnected: false, lastDisconnectReason: reason })
+        const { hasEverConnected } = useConfigStore.getState()
+        useConfigStore.setState({
+          isConnected: false,
+          connectionPhase: hasEverConnected ? "reconnecting" : "connecting",
+          lastDisconnectReason: reason,
+        })
+      },
+      onTransportSwitch: () => {
+        // Transport switched (e.g. WS timeout → SSE fallback) without
+        // actual disconnection. No events lost — just update connection
+        // state without triggering a full directory resync.
+        useConfigStore.setState({
+          isConnected: true,
+          hasEverConnected: true,
+          connectionPhase: "connected",
+        })
       },
     })
     return cleanup
@@ -1846,6 +1894,79 @@ export function useSessionMessageRecords(
   }, [options?.suspendPartUpdates, sessionID, store])
 
   return React.useSyncExternalStore(store.subscribe, getSnapshot, getSnapshot)
+}
+
+/**
+ * Ensures a session's messages are loaded into the sync store.
+ * If the session exists in state.session but messages haven't been fetched
+ * (state.message[sessionID] is absent), triggers a background API fetch.
+ *
+ * This covers the case where a user navigates to an old parent session
+ * whose child session messages were never loaded — bootstrap only loads
+ * session metadata, not messages.
+ */
+
+// Module-level in-flight tracking for useEnsureSessionMessages.
+// Prevents redundant parallel fetches when multiple component instances
+// (e.g. multiple ToolParts) request the same session's messages.
+const _ensureMessagesLoading = new Set<string>()
+
+export function useEnsureSessionMessages(sessionID: string, directory?: string) {
+  const store = useDirectoryStore(directory)
+
+  React.useEffect(() => {
+    if (!sessionID) return
+
+    const state = store.getState()
+    // Already loaded — nothing to do
+    if (Object.prototype.hasOwnProperty.call(state.message, sessionID)) return
+    // Session doesn't exist — nothing to load
+    if (!state.session.some((s) => s.id === sessionID)) return
+
+    const dir = directory ?? opencodeClient.getDirectory()
+    const loadingKey = `${dir ?? ""}:${sessionID}`
+    // Already loading this session for this directory
+    if (_ensureMessagesLoading.has(loadingKey)) return
+
+    _ensureMessagesLoading.add(loadingKey)
+
+    void (async () => {
+      try {
+        const scopedClient = opencodeClient.getScopedSdkClient(dir ?? "")
+        const response = await scopedClient.session.messages({
+          sessionID: sessionID,
+          limit: RECONNECT_MESSAGE_LIMIT,
+        })
+        const records = (response.data ?? []).filter(
+          (record: { info?: { id?: string } }) => !!record?.info?.id,
+        )
+        if (records.length === 0) return
+
+        const nextMessages = records
+          .map((record: { info: Message }) => stripMessageDiffSnapshots(record.info))
+          .filter((m: Message | null): m is Message => m !== null)
+          .sort((a: Message, b: Message) => cmp(a.id, b.id))
+
+        const nextPartState: Record<string, Part[]> = {}
+        for (const record of records) {
+          const messageId = record?.info?.id
+          if (!messageId) continue
+          nextPartState[messageId] = (record.parts ?? [])
+            .filter((part: Part) => !!part?.id && !RECONNECT_SKIP_PARTS.has(part.type))
+            .sort((a: Part, b: Part) => cmp(a.id, b.id))
+        }
+
+        store.setState((state: DirectoryStore) => ({
+          message: { ...state.message, [sessionID]: nextMessages },
+          part: { ...state.part, ...nextPartState },
+        }))
+      } catch {
+        // Transient failure — next navigation or reconnect will retry
+      } finally {
+        _ensureMessagesLoading.delete(loadingKey)
+      }
+    })()
+  }, [sessionID, store, directory])
 }
 
 /**

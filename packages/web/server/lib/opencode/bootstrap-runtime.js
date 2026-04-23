@@ -47,6 +47,7 @@ export const createBootstrapRuntime = (dependencies) => {
       modelsMetadataCacheTtl,
       fetchFreeZenModels,
       getCachedZenModels,
+      setAutoAcceptSession,
     } = options;
 
     registerServerStatusRoutes(app, {
@@ -100,6 +101,7 @@ export const createBootstrapRuntime = (dependencies) => {
       markSessionUnviewed: sessionRuntime.markSessionUnviewed,
       markUserMessageSent: sessionRuntime.markUserMessageSent,
       setPushInitialized,
+      setAutoAcceptSession,
     });
 
     registerOpenChamberRoutes(app, {

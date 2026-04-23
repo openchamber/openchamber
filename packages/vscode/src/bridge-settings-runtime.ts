@@ -165,11 +165,18 @@ const writeSharedSettingsToDisk = async (changes: Record<string, unknown>): Prom
     await fs.promises.mkdir(path.dirname(OPENCHAMBER_SHARED_SETTINGS_PATH), { recursive: true });
     const current = readSharedSettingsFromDisk();
     const next: Record<string, unknown> = { ...current, ...changes };
-    await fs.promises.writeFile(OPENCHAMBER_SHARED_SETTINGS_PATH, JSON.stringify(next, null, 2), 'utf8');
+    // Atomic write: tmp file + rename. Readers never see a partial/truncated
+    // JSON that would fail to parse and silently get coerced to {}.
+    const tmp = `${OPENCHAMBER_SHARED_SETTINGS_PATH}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    await fs.promises.writeFile(tmp, JSON.stringify(next, null, 2), 'utf8');
+    await fs.promises.rename(tmp, OPENCHAMBER_SHARED_SETTINGS_PATH);
   } catch {
     // ignore
   }
 };
+
+// Fields derived from runtime context — never persisted, always recomputed.
+const DERIVED_FIELDS = new Set(['themeVariant', 'lastDirectory']);
 
 const sanitizeMagicPromptOverrides = (input: unknown): Record<string, string> => {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
@@ -207,12 +214,50 @@ const writeMagicPromptFile = async (state: { version: number; overrides: Record<
   await fs.promises.writeFile(OPENCHAMBER_MAGIC_PROMPTS_PATH, JSON.stringify(state, null, 2), 'utf8');
 };
 
+const stripDerived = (source: Record<string, unknown>): Record<string, unknown> => {
+  const next: Record<string, unknown> = { ...source };
+  for (const key of DERIVED_FIELDS) {
+    delete next[key];
+  }
+  return next;
+};
+
+let eagerMigrationAttempted = false;
+
+// Read the merged persisted settings: shared file is canonical (synced with
+// Desktop and Web clients), globalState is kept as a migration fallback for
+// users upgrading from the pre-shared-sync era. Disk wins on conflicts.
+//
+// On first read per process, if globalState has keys that are missing on
+// disk, copy them to disk so other clients see them immediately — without
+// waiting for the user to save again.
+const readPersistedSettings = (ctx?: BridgeContext): Record<string, unknown> => {
+  const fromGlobalState = stripDerived(
+    ctx?.context?.globalState.get<Record<string, unknown>>(SETTINGS_KEY) || {},
+  );
+  const fromDisk = stripDerived(readSharedSettingsFromDisk());
+
+  if (!eagerMigrationAttempted) {
+    eagerMigrationAttempted = true;
+    const missingFromDisk: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(fromGlobalState)) {
+      if (!(key in fromDisk)) {
+        missingFromDisk[key] = value;
+      }
+    }
+    if (Object.keys(missingFromDisk).length > 0) {
+      // Fire-and-forget; readers already have an in-memory merged view.
+      void writeSharedSettingsToDisk(missingFromDisk);
+    }
+  }
+
+  return { ...fromGlobalState, ...fromDisk };
+};
+
 export const readSettings = (ctx?: BridgeContext): Record<string, unknown> => {
-  const stored = ctx?.context?.globalState.get<Record<string, unknown>>(SETTINGS_KEY) || {};
-  const restStored = { ...stored };
-  delete (restStored as Record<string, unknown>).lastDirectory;
-  const shared = readSharedSettingsFromDisk();
-  const sharedOpencodeBinary = typeof shared.opencodeBinary === 'string' ? shared.opencodeBinary.trim() : '';
+  const persisted = readPersistedSettings(ctx);
+  const persistedOpencodeBinary =
+    typeof persisted.opencodeBinary === 'string' ? String(persisted.opencodeBinary).trim() : '';
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
   const themeVariant =
     vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Light ||
@@ -221,20 +266,16 @@ export const readSettings = (ctx?: BridgeContext): Record<string, unknown> => {
       : 'dark';
 
   return {
+    ...persisted,
     themeVariant,
     lastDirectory: workspaceFolder,
-    ...restStored,
-    opencodeBinary:
-      typeof restStored.opencodeBinary === 'string'
-        ? String(restStored.opencodeBinary).trim()
-        : (sharedOpencodeBinary || undefined),
+    opencodeBinary: persistedOpencodeBinary || undefined,
   };
 };
 
 export const persistSettings = async (changes: Record<string, unknown>, ctx?: BridgeContext): Promise<Record<string, unknown>> => {
   const current = readSettings(ctx);
-  const restChanges = { ...(changes || {}) };
-  delete restChanges.lastDirectory;
+  const restChanges = stripDerived({ ...(changes || {}) });
 
   const keysToClear = new Set<string>();
 
@@ -256,19 +297,33 @@ export const persistSettings = async (changes: Record<string, unknown>, ctx?: Br
     delete restChanges.usageRefreshIntervalMs;
   }
 
-  const merged = { ...current, ...restChanges, lastDirectory: current.lastDirectory } as Record<string, unknown>;
+  if (typeof restChanges.opencodeBinary === 'string') {
+    restChanges.opencodeBinary = restChanges.opencodeBinary.trim();
+  }
+
+  // Persistable state = current persisted (no derived fields) + sanitized changes.
+  const persistedCurrent = readPersistedSettings(ctx);
+  const persistable: Record<string, unknown> = { ...persistedCurrent, ...restChanges };
   for (const key of keysToClear) {
-    delete merged[key];
-  }
-  await ctx?.context?.globalState.update(SETTINGS_KEY, merged);
-
-  if (keysToClear.has('opencodeBinary')) {
-    await writeSharedSettingsToDisk({ opencodeBinary: '' });
-  } else if (typeof restChanges.opencodeBinary === 'string') {
-    await writeSharedSettingsToDisk({ opencodeBinary: restChanges.opencodeBinary.trim() });
+    delete persistable[key];
   }
 
-  return merged;
+  // Write to the shared file (canonical, cross-client). Also mirror into
+  // globalState so older builds can still read recent values if a user
+  // downgrades the extension.
+  await writeSharedSettingsToDisk(persistable);
+  await ctx?.context?.globalState.update(SETTINGS_KEY, persistable);
+
+  // Return the same shape as readSettings (with derived fields re-applied).
+  return {
+    ...persistable,
+    themeVariant: current.themeVariant,
+    lastDirectory: current.lastDirectory,
+    opencodeBinary:
+      typeof persistable.opencodeBinary === 'string' && persistable.opencodeBinary.length > 0
+        ? persistable.opencodeBinary
+        : undefined,
+  };
 };
 
 export const readMagicPromptOverrides = (): { version: number; overrides: Record<string, string> } => {

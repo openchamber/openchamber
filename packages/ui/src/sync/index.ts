@@ -70,6 +70,7 @@ export {
   useSyncDirectory,
   useChildStoreManager,
   useSessionMessageRecords,
+  useEnsureSessionMessages,
   useSessionTextMessages,
   useUserMessageHistory,
   buildSessionMessageRecordsSnapshot,

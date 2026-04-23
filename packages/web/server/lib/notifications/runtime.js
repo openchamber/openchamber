@@ -27,6 +27,21 @@ export const createNotificationTriggerRuntime = (deps) => {
   const sessionParentIdCache = new Map();
   const SESSION_PARENT_CACHE_TTL_MS = 60 * 1000;
 
+  // Sessions where the client has enabled Permission Auto-Accept. Mirrored
+  // from the client-side permissionStore via POST /api/notifications/auto-accept
+  // so the server can suppress permission notifications BEFORE dispatch (the
+  // 500ms debounce race otherwise leaks notifications for auto-accepted
+  // permissions when the replied round-trip is slower than the debounce).
+  const autoAcceptingSessions = new Set();
+  const setAutoAcceptSession = (sessionId, enabled) => {
+    if (typeof sessionId !== 'string' || sessionId.length === 0) return;
+    if (enabled) {
+      autoAcceptingSessions.add(sessionId);
+    } else {
+      autoAcceptingSessions.delete(sessionId);
+    }
+  };
+
   const buildSessionDeepLinkUrl = (sessionId) => {
     if (!sessionId || typeof sessionId !== 'string') {
       return '/';
@@ -78,6 +93,22 @@ export const createNotificationTriggerRuntime = (deps) => {
     } catch {
       return undefined;
     }
+  };
+
+  // Mirrors client-side autoRespondsPermission: a session auto-accepts if it
+  // OR any ancestor is flagged. Walks the parent chain via fetchSessionParentId.
+  const isSessionAutoAccepting = async (sessionId) => {
+    if (!sessionId || autoAcceptingSessions.size === 0) return false;
+    let current = sessionId;
+    const seen = new Set();
+    while (current && !seen.has(current)) {
+      if (autoAcceptingSessions.has(current)) return true;
+      seen.add(current);
+      const parent = await fetchSessionParentId(current);
+      if (!parent) return false;
+      current = parent;
+    }
+    return false;
   };
 
   const extractSessionIdFromPayload = (payload) => {
@@ -390,6 +421,14 @@ export const createNotificationTriggerRuntime = (deps) => {
         return;
       }
 
+      // Client may be in Permission Auto-Accept for this session (or any
+      // ancestor). Skip the whole notification path — the client responds
+      // directly and the user has opted out of approval prompts.
+      if (await isSessionAutoAccepting(sessionId)) {
+        if (requestKey) notifiedPermissionRequests.add(requestKey);
+        return;
+      }
+
       const existingTimer = pushPermissionDebounceTimers.get(sessionId);
       if (existingTimer) {
         clearTimeout(existingTimer.timer);
@@ -473,5 +512,6 @@ export const createNotificationTriggerRuntime = (deps) => {
 
   return {
     maybeSendPushForTrigger,
+    setAutoAcceptSession,
   };
 };

@@ -1,8 +1,6 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { getSafeStorage } from './utils/safeStorage';
-import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
-import { useDirectoryStore } from './useDirectoryStore';
 import { isVSCodeRuntime } from '@/lib/desktop';
 
 // --- Types ---
@@ -43,7 +41,7 @@ type SessionFoldersStore = SessionFoldersState & SessionFoldersActions;
 
 const FOLDERS_STORAGE_KEY = 'oc.sessions.folders';
 const COLLAPSED_STORAGE_KEY = 'oc.sessions.folderCollapse';
-const SESSIONS_DIRECTORIES_PATH_SUFFIX = '.config/openchamber/sessions-directories.json';
+const SESSION_FOLDERS_API_PATH = '/api/session-folders';
 const DISK_WRITE_DEBOUNCE_MS = 250;
 const ARCHIVED_SCOPE_PREFIX = '__archived__:';
 
@@ -68,27 +66,6 @@ const isVSCodeWebview = (): boolean => {
   return (window as { __VSCODE_CONFIG__?: unknown }).__VSCODE_CONFIG__ !== undefined;
 };
 
-const getSessionsDirectoriesPath = (): string | null => {
-  const directoryState = useDirectoryStore.getState();
-  const homeDirectory = typeof directoryState.homeDirectory === 'string' && directoryState.homeDirectory.length > 0
-    ? directoryState.homeDirectory
-    : (safeStorage.getItem('homeDirectory') || '');
-
-  if (!homeDirectory) {
-    return null;
-  }
-
-  return `${homeDirectory.replace(/\/$/, '')}/${SESSIONS_DIRECTORIES_PATH_SUFFIX}`;
-};
-
-const getParentDirectory = (path: string): string | null => {
-  const index = path.lastIndexOf('/');
-  if (index <= 0) {
-    return null;
-  }
-  return path.slice(0, index);
-};
-
 const schedulePersistToDisk = (foldersMap: SessionFoldersMap, collapsedFolderIds: Set<string>): void => {
   if (typeof window === 'undefined') {
     return;
@@ -107,31 +84,17 @@ const schedulePersistToDisk = (foldersMap: SessionFoldersMap, collapsedFolderIds
 
   diskWriteTimer = setTimeout(() => {
     diskWriteTimer = null;
-    void (async () => {
-      const runtimeFiles = getRegisteredRuntimeAPIs()?.files;
-      if (!runtimeFiles?.writeFile) {
-        return;
-      }
-
-      const path = getSessionsDirectoriesPath();
-      if (!path) {
-        return;
-      }
-
-      const parentDirectory = getParentDirectory(path);
-      if (parentDirectory) {
-        await runtimeFiles.createDirectory(parentDirectory).catch(() => undefined);
-      }
-
-      const payload = {
-        version: 1,
-        foldersMap: foldersSnapshot,
-        collapsedFolderIds: collapsedSnapshot,
-        updatedAt: Date.now(),
-      };
-
-      await runtimeFiles.writeFile(path, JSON.stringify(payload, null, 2)).catch(() => undefined);
-    })();
+    const payload = {
+      version: 1,
+      foldersMap: foldersSnapshot,
+      collapsedFolderIds: collapsedSnapshot,
+      updatedAt: Date.now(),
+    };
+    void fetch(SESSION_FOLDERS_API_PATH, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).catch(() => { /* best-effort */ });
   }, DISK_WRITE_DEBOUNCE_MS);
 };
 
@@ -536,35 +499,27 @@ const hydrateSessionFoldersFromDisk = async (): Promise<void> => {
     return;
   }
 
-  const runtimeFiles = getRegisteredRuntimeAPIs()?.files;
-  if (!runtimeFiles?.readFile) {
-    return;
-  }
-
-  const path = getSessionsDirectoriesPath();
-  if (!path) {
-    return;
-  }
-
   diskHydrationInFlight = true;
 
-  const result = await runtimeFiles.readFile(path).catch(() => null);
-  if (!result?.content) {
-    diskHydrationInFlight = false;
-    diskHydrated = true;
-    return;
-  }
-
   try {
-    const parsed = JSON.parse(result.content) as {
+    const response = await fetch(SESSION_FOLDERS_API_PATH).catch(() => null);
+    if (!response || !response.ok) {
+      return;
+    }
+
+    const parsed = await response.json().catch(() => null) as {
       foldersMap?: SessionFoldersMap;
       collapsedFolderIds?: string[];
-    };
+    } | null;
 
-    const diskFolders = parsed?.foldersMap && typeof parsed.foldersMap === 'object'
+    if (!parsed) {
+      return;
+    }
+
+    const diskFolders = parsed.foldersMap && typeof parsed.foldersMap === 'object'
       ? parsed.foldersMap
       : {};
-    const diskCollapsed = Array.isArray(parsed?.collapsedFolderIds)
+    const diskCollapsed = Array.isArray(parsed.collapsedFolderIds)
       ? new Set(parsed.collapsedFolderIds.filter((value): value is string => typeof value === 'string'))
       : new Set<string>();
 
@@ -593,21 +548,7 @@ const bootstrapSessionFoldersDiskHydration = (): void => {
     return;
   }
 
-  let attempts = 0;
-  const maxAttempts = 20;
-
-  const runAttempt = () => {
-    attempts += 1;
-    void hydrateSessionFoldersFromDisk();
-
-    if (diskHydrated || attempts >= maxAttempts) {
-      return;
-    }
-
-    setTimeout(runAttempt, 500);
-  };
-
-  runAttempt();
+  void hydrateSessionFoldersFromDisk();
 };
 
 bootstrapSessionFoldersDiskHydration();

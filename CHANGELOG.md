@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.9.8] - 2026-04-22
+
+- Sessions/Reliability: fixed parent-child session sync during reconnects and navigation, so status and progress stay aligned in complex session trees (thanks to @jwcrystal).
+- Settings/Sync: settings updates now sync more reliably across clients, and sidebar session pagination is steadier in larger workspaces.
+- Sessions/Folders: folder changes now persist through server-backed endpoints, improving consistency across environments and path setups.
+- Notifications: permission notifications are now suppressed when auto-accept is enabled, reducing noise during trusted runs.
+- Chat/Files: improved changed-files handling in chat and restored quick file-open flows from pending changes, so jump-to-edit stays fast (thanks to @jwcrystal).
+- UI: improved bottom scroll shadow behavior and hide the tasks row when there is no active work for a cleaner conversation view.
+- Reliability/Desktop: improved live event-stream recovery after transient stalls, wait briefly before failing chat actions during reconnects, and persist Electron server logs for easier disconnect debugging.
+- Desktop/macOS: System color mode now tracks OS theme changes, traffic-light controls stay visible after dock restore, and update restart/changelog handling is more reliable.
+- Chat/Commands: added `/summary` slash command for a non-destructive session summary - optional topic hint after the command focuses the output, and the prompt is customizable under Settings: Magic Prompts.
+
 ## [1.9.7] - 2026-04-22
 
 - Desktop: added an Electron desktop runtime in parallel with the current Tauri app, with Electron planned to become the default path in an upcoming release.

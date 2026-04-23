@@ -42,6 +42,14 @@ log.transports.file.maxSize = 5 * 1024 * 1024;
 log.transports.file.level = 'info';
 log.transports.console.level = isDev ? 'debug' : 'warn';
 
+// The in-process web server runs in this same Node process and uses plain
+// `console.log/warn/error`. Without piping console through electron-log,
+// that output never lands in ~/Library/Logs/OpenChamber/main.log and we
+// can't diagnose issues (e.g. OpenCode lifecycle, SSE disconnects) after
+// the fact. Route all console calls through electron-log so server-side
+// diagnostics are persisted.
+Object.assign(console, log.functions);
+
 const LOG_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 try {
   const logPath = log.transports.file.getFile().path;
@@ -118,6 +126,7 @@ const state = {
   quitRequested: false,
   quitConfirmed: false,
   quitConfirmationPending: false,
+  installingUpdate: false,
   quitRiskPollerStarted: false,
   pendingUpdate: null,
   unreachableHosts: new Set(),
@@ -159,10 +168,11 @@ const quitConfirmationMessage = () => {
   return `OpenChamber detected ${reasons.join(', ')}. Quitting now will stop sidecar/background processes and may interrupt pending work.`;
 };
 
-const performConfirmedQuit = () => {
-  if (state.quitConfirmed) return;
-  state.quitConfirmed = true;
+const prepareForQuit = ({ installingUpdate = false } = {}) => {
   state.quitRequested = true;
+  state.quitConfirmed = true;
+  state.installingUpdate = installingUpdate;
+  state.quitConfirmationPending = false;
 
   if (state.mainWindow && !state.mainWindow.isDestroyed()) {
     try {
@@ -171,11 +181,18 @@ const performConfirmedQuit = () => {
     }
   }
 
-  try {
-    killSidecar();
-  } catch {
+  if (!installingUpdate) {
+    try {
+      killSidecar();
+    } catch {
+    }
+    void sshManager.shutdownAll().catch(() => {});
   }
-  void sshManager.shutdownAll().catch(() => {});
+};
+
+const performConfirmedQuit = () => {
+  if (state.quitConfirmed) return;
+  prepareForQuit();
 
   // Safety net: force-exit if normal quit sequence stalls (e.g. background
   // handles in electron-updater / fetch refs) after a short grace period.
@@ -1053,9 +1070,14 @@ const nextWindowLabel = () => {
 
 const readThemeSource = () => {
   const settings = readSettingsRoot();
-  if (settings.useSystemTheme === true) return 'system';
-  if (settings.themeMode === 'light' || settings.themeVariant === 'light') return 'light';
-  if (settings.themeMode === 'dark' || settings.themeVariant === 'dark') return 'dark';
+  // themeMode is the user's intent; themeVariant is only the resolved
+  // concrete appearance at persist time. When mode === 'system', we must
+  // follow the OS even if variant was saved as a specific value.
+  if (settings.themeMode === 'system' || settings.useSystemTheme === true) return 'system';
+  if (settings.themeMode === 'light') return 'light';
+  if (settings.themeMode === 'dark') return 'dark';
+  if (settings.themeVariant === 'light') return 'light';
+  if (settings.themeVariant === 'dark') return 'dark';
   return 'system';
 };
 
@@ -1077,7 +1099,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url }) => {
     // Electron's hiddenInset adds its own extra inset, which leaves the controls
     // visibly lower than the app header. Use a plain hidden title bar instead.
     titleBarStyle: process.platform === 'darwin' ? 'hidden' : 'default',
-    trafficLightPosition: process.platform === 'darwin' ? { x: 16, y: 18 } : undefined,
+    trafficLightPosition: process.platform === 'darwin' ? { x: 16, y: 17 } : undefined,
     webPreferences: {
       additionalArguments: [
         `--openchamber-local-origin=${desktopLocalOrigin}`,
@@ -1114,6 +1136,30 @@ const createBrowserWindow = ({ label, restoreGeometry, url }) => {
   browserWindow.on('blur', () => {
     state.focusedWindowIds.delete(browserWindow.id);
   });
+
+  // Traffic lights disappear during dock-restore animation when using
+  // titleBarStyle:'hidden' + custom trafficLightPosition. macOS caches a
+  // snapshot of the window at miniaturize time and plays it during the
+  // genie-restore animation. We re-assert button position on 'minimize'
+  // (before the snapshot) and 'restore'/'show'/'focus' to cover other
+  // transient reset states AppKit puts the buttons in.
+  if (process.platform === 'darwin') {
+    const refreshTrafficLights = () => {
+      if (browserWindow.isDestroyed()) return;
+      try {
+        browserWindow.setWindowButtonVisibility(true);
+        browserWindow.setTrafficLightPosition({ x: 16, y: 17 });
+      } catch {}
+    };
+    browserWindow.on('minimize', refreshTrafficLights);
+    browserWindow.on('restore', () => {
+      refreshTrafficLights();
+      setTimeout(refreshTrafficLights, 250);
+    });
+    browserWindow.on('show', refreshTrafficLights);
+    browserWindow.on('focus', refreshTrafficLights);
+  }
+
   browserWindow.on('resize', () => {
     emitToWindow(browserWindow, 'openchamber:window-resized');
     debounceWindowStatePersist(browserWindow, false);
@@ -1143,7 +1189,9 @@ const createBrowserWindow = ({ label, restoreGeometry, url }) => {
       state.mainWindow = null;
     }
     if (BrowserWindow.getAllWindows().length === 0) {
-      killSidecar();
+      if (!state.installingUpdate) {
+        killSidecar();
+      }
       if (process.platform !== 'darwin') {
         app.quit();
       }
@@ -1828,9 +1876,24 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     case 'desktop_set_window_theme': {
       const mode = typeof args.themeMode === 'string' ? args.themeMode : '';
       const variant = typeof args.themeVariant === 'string' ? args.themeVariant : '';
-      nativeTheme.themeSource = mode === 'dark' || variant === 'dark'
-        ? 'dark'
-        : (mode === 'light' || variant === 'light' ? 'light' : 'system');
+      // Priority order: themeMode expresses the user's intent (including
+      // "follow OS"). Variant is just the resolved variant at send time;
+      // when mode === 'system' with variant === 'dark' (because OS is
+      // currently dark), we must still pin themeSource to 'system' so
+      // Chromium keeps reacting to OS theme changes.
+      if (mode === 'system') {
+        nativeTheme.themeSource = 'system';
+      } else if (mode === 'light') {
+        nativeTheme.themeSource = 'light';
+      } else if (mode === 'dark') {
+        nativeTheme.themeSource = 'dark';
+      } else if (variant === 'light') {
+        nativeTheme.themeSource = 'light';
+      } else if (variant === 'dark') {
+        nativeTheme.themeSource = 'dark';
+      } else {
+        nativeTheme.themeSource = 'system';
+      }
       return null;
     }
 
@@ -1895,8 +1958,26 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       if (!state.pendingUpdate.electronUpdate) {
         throw new Error('Electron updater metadata is not available for this build');
       }
-      await autoUpdater.downloadUpdate();
-      state.pendingUpdate.downloaded = true;
+      if (!state.pendingUpdate.downloaded) {
+        await new Promise((resolve, reject) => {
+          let settled = false;
+          const cleanup = () => {
+            autoUpdater.off('update-downloaded', onDownloaded);
+            autoUpdater.off('error', onError);
+          };
+          const finish = (callback, value) => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            callback(value);
+          };
+          const onDownloaded = () => finish(resolve, null);
+          const onError = (error) => finish(reject, error);
+          autoUpdater.on('update-downloaded', onDownloaded);
+          autoUpdater.on('error', onError);
+          Promise.resolve(autoUpdater.downloadUpdate()).catch((error) => finish(reject, error));
+        });
+      }
       emitToAllWindows('openchamber:update-progress', mapUpdaterProgressEvent({
         event: 'Finished',
         data: {},
@@ -1906,13 +1987,37 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     case 'desktop_restart': {
       const applyUpdate = Boolean(state.pendingUpdate?.downloaded && app.isPackaged);
       log.info(`[electron] desktop_restart applyUpdate=${applyUpdate} packaged=${app.isPackaged}`);
+      if (applyUpdate && process.platform === 'darwin' && typeof app.isInApplicationsFolder === 'function') {
+        try {
+          if (!app.isInApplicationsFolder()) {
+            throw new Error('Desktop update requires OpenChamber.app to be installed in /Applications');
+          }
+        } catch (error) {
+          log.warn('[electron] desktop_restart blocked', error);
+          throw error;
+        }
+      }
+      if (applyUpdate) {
+        // Match the working updater pattern closely: only bypass the macOS
+        // hide-on-close / quit-confirmation guards, leave the rest of the
+        // updater-driven quit/install sequence alone.
+        state.quitRequested = true;
+        state.installingUpdate = true;
+        state.quitConfirmationPending = false;
+        if (state.mainWindow && !state.mainWindow.isDestroyed()) {
+          try {
+            debounceWindowStatePersist(state.mainWindow, true);
+          } catch {
+          }
+        }
+      }
       // Defer so the IPC reply flushes before the app starts shutting down.
       // Without this, quitAndInstall() can race with the renderer's pending
       // invoke and the restart appears to do nothing from the UI side.
       setImmediate(() => {
         try {
           if (applyUpdate) {
-            autoUpdater.quitAndInstall(false, true);
+            autoUpdater.quitAndInstall();
           } else {
             app.relaunch();
             app.exit(0);
@@ -2185,15 +2290,17 @@ app.on('window-all-closed', () => {
     return;
   }
 
-  killSidecar();
-  void sshManager.shutdownAll();
+  if (!state.installingUpdate) {
+    killSidecar();
+    void sshManager.shutdownAll();
+  }
   if (process.platform !== 'darwin') {
     app.quit();
   }
 });
 
 app.on('before-quit', (event) => {
-  if (state.quitConfirmed || process.platform !== 'darwin') {
+  if (state.quitConfirmed || state.installingUpdate || process.platform !== 'darwin') {
     state.quitRequested = true;
     return;
   }

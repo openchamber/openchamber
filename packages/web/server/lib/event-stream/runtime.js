@@ -10,6 +10,9 @@ import {
   sendMessageStreamWsFrame,
 } from './protocol.js';
 
+const MESSAGE_STREAM_UPSTREAM_STALL_TIMEOUT_MS = 20_000;
+const MESSAGE_STREAM_UPSTREAM_RECONNECT_DELAY_MS = 250;
+
 function shouldTriggerUpstreamHealthCheck(upstream) {
   if (!upstream) {
     return true;
@@ -67,6 +70,9 @@ export function createMessageStreamWsRuntime({
   processForwardedEventPayload,
   wsClients,
   triggerHealthCheck,
+  heartbeatIntervalMs = MESSAGE_STREAM_WS_HEARTBEAT_INTERVAL_MS,
+  upstreamStallTimeoutMs = MESSAGE_STREAM_UPSTREAM_STALL_TIMEOUT_MS,
+  upstreamReconnectDelayMs = MESSAGE_STREAM_UPSTREAM_RECONNECT_DELAY_MS,
   fetchImpl = fetch,
 }) {
   const wsServer = new WebSocketServer({
@@ -82,12 +88,21 @@ export function createMessageStreamWsRuntime({
     const requestedDirectory = requestUrl.searchParams.get('directory')?.trim() || '';
 
     const controller = new AbortController();
+    let currentUpstreamAbortController = null;
+    let upstreamConnected = false;
+    let streamReady = false;
+    let lastEventId = requestedLastEventId;
     const cleanup = () => {
       if (!controller.signal.aborted) {
         controller.abort();
       }
+      if (currentUpstreamAbortController && !currentUpstreamAbortController.signal.aborted) {
+        currentUpstreamAbortController.abort();
+      }
       wsClients.delete(socket);
     };
+
+    const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
     const pingInterval = setInterval(() => {
       if (socket.readyState !== 1) {
@@ -98,15 +113,20 @@ export function createMessageStreamWsRuntime({
         socket.ping();
       } catch {
       }
-    }, MESSAGE_STREAM_WS_HEARTBEAT_INTERVAL_MS);
+    }, heartbeatIntervalMs);
 
     const heartbeatInterval = setInterval(() => {
+      if (!upstreamConnected) {
+        return;
+      }
+
       sendMessageStreamWsEvent(socket, { type: 'openchamber:heartbeat', timestamp: Date.now() }, { directory: 'global' });
-    }, MESSAGE_STREAM_WS_HEARTBEAT_INTERVAL_MS);
+    }, heartbeatIntervalMs);
 
     socket.on('close', () => {
       clearInterval(pingInterval);
       clearInterval(heartbeatInterval);
+      upstreamConnected = false;
       cleanup();
     });
 
@@ -115,73 +135,6 @@ export function createMessageStreamWsRuntime({
     });
 
     const run = async () => {
-      let targetUrl;
-      try {
-        targetUrl = new URL(buildOpenCodeUrl(isGlobalStream ? '/global/event' : '/event', ''));
-      } catch {
-        sendMessageStreamWsFrame(socket, { type: 'error', message: 'OpenCode service unavailable' });
-        socket.close(1011, 'OpenCode service unavailable');
-        return;
-      }
-
-      if (!isGlobalStream && requestedDirectory) {
-        targetUrl.searchParams.set('directory', requestedDirectory);
-      }
-
-      const headers = {
-        Accept: 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        Connection: 'keep-alive',
-        ...getOpenCodeAuthHeaders(),
-      };
-
-      if (requestedLastEventId) {
-        headers['Last-Event-ID'] = requestedLastEventId;
-      }
-
-      let upstream;
-      try {
-        upstream = await fetchImpl(targetUrl.toString(), {
-          headers,
-          signal: controller.signal,
-        });
-      } catch {
-        if (!controller.signal.aborted) {
-          sendMessageStreamWsFrame(socket, { type: 'error', message: 'Failed to connect to OpenCode event stream' });
-          socket.close(1011, 'Failed to connect to OpenCode event stream');
-          // Trigger immediate health check so the server detects and
-          // restarts a dead OpenCode process without waiting for the next
-          // periodic interval (up to 15 s).
-          triggerHealthCheck?.();
-        }
-        return;
-      }
-
-      if (!upstream.ok || !upstream.body) {
-        sendMessageStreamWsFrame(socket, {
-          type: 'error',
-          message: `OpenCode event stream unavailable (${upstream.status})`,
-        });
-        socket.close(1011, 'OpenCode event stream unavailable');
-        if (shouldTriggerUpstreamHealthCheck(upstream)) {
-          triggerHealthCheck?.();
-        }
-        return;
-      }
-
-      sendMessageStreamWsFrame(socket, {
-        type: 'ready',
-        scope: isGlobalStream ? 'global' : 'directory',
-      });
-
-      if (isGlobalStream) {
-        wsClients.add(socket);
-      }
-
-      const decoder = new TextDecoder();
-      const reader = upstream.body.getReader();
-      let buffer = '';
-
       const forwardBlock = (block) => {
         if (!block) {
           return;
@@ -197,6 +150,10 @@ export function createMessageStreamWsRuntime({
           ? (typeof envelope?.directory === 'string' && envelope.directory.length > 0 ? envelope.directory : 'global')
           : (requestedDirectory || envelope?.directory || 'global');
 
+        if (typeof envelope?.eventId === 'string' && envelope.eventId.length > 0) {
+          lastEventId = envelope.eventId;
+        }
+
         sendMessageStreamWsEvent(socket, payload, {
           directory,
           eventId: typeof envelope?.eventId === 'string' && envelope.eventId.length > 0 ? envelope.eventId : undefined,
@@ -208,25 +165,148 @@ export function createMessageStreamWsRuntime({
       };
 
       try {
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) {
-            break;
+        while (!controller.signal.aborted) {
+          let targetUrl;
+          try {
+            targetUrl = new URL(buildOpenCodeUrl(isGlobalStream ? '/global/event' : '/event', ''));
+          } catch {
+            sendMessageStreamWsFrame(socket, { type: 'error', message: 'OpenCode service unavailable' });
+            socket.close(1011, 'OpenCode service unavailable');
+            return;
           }
 
-          buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
-
-          let separatorIndex = buffer.indexOf('\n\n');
-          while (separatorIndex !== -1) {
-            const block = buffer.slice(0, separatorIndex);
-            buffer = buffer.slice(separatorIndex + 2);
-            forwardBlock(block);
-            separatorIndex = buffer.indexOf('\n\n');
+          if (!isGlobalStream && requestedDirectory) {
+            targetUrl.searchParams.set('directory', requestedDirectory);
           }
-        }
 
-        if (buffer.trim().length > 0) {
-          forwardBlock(buffer.trim());
+          const headers = {
+            Accept: 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            Connection: 'keep-alive',
+            ...getOpenCodeAuthHeaders(),
+          };
+          if (lastEventId) {
+            headers['Last-Event-ID'] = lastEventId;
+          }
+
+          const upstreamController = new AbortController();
+          currentUpstreamAbortController = upstreamController;
+          const abortUpstream = () => upstreamController.abort();
+          controller.signal.addEventListener('abort', abortUpstream, { once: true });
+
+          let upstream;
+          try {
+            upstream = await fetchImpl(targetUrl.toString(), {
+              headers,
+              signal: upstreamController.signal,
+            });
+          } catch {
+            controller.signal.removeEventListener('abort', abortUpstream);
+            currentUpstreamAbortController = null;
+            upstreamConnected = false;
+            if (controller.signal.aborted) {
+              return;
+            }
+            if (!streamReady) {
+              sendMessageStreamWsFrame(socket, { type: 'error', message: 'Failed to connect to OpenCode event stream' });
+              socket.close(1011, 'Failed to connect to OpenCode event stream');
+              triggerHealthCheck?.();
+              return;
+            }
+            await wait(upstreamReconnectDelayMs);
+            continue;
+          }
+
+          if (!upstream.ok || !upstream.body) {
+            controller.signal.removeEventListener('abort', abortUpstream);
+            currentUpstreamAbortController = null;
+            upstreamConnected = false;
+            if (!streamReady) {
+              sendMessageStreamWsFrame(socket, {
+                type: 'error',
+                message: `OpenCode event stream unavailable (${upstream.status})`,
+              });
+              socket.close(1011, 'OpenCode event stream unavailable');
+              if (shouldTriggerUpstreamHealthCheck(upstream)) {
+                triggerHealthCheck?.();
+              }
+              return;
+            }
+            await wait(upstreamReconnectDelayMs);
+            continue;
+          }
+
+          if (!streamReady) {
+            sendMessageStreamWsFrame(socket, {
+              type: 'ready',
+              scope: isGlobalStream ? 'global' : 'directory',
+            });
+            streamReady = true;
+
+            if (isGlobalStream) {
+              wsClients.add(socket);
+            }
+          }
+
+          upstreamConnected = true;
+          const decoder = new TextDecoder();
+          const reader = upstream.body.getReader();
+          let buffer = '';
+          let upstreamAbortReason = null;
+          let stallTimer = null;
+          const resetStallTimer = () => {
+            if (stallTimer) {
+              clearTimeout(stallTimer);
+            }
+            stallTimer = setTimeout(() => {
+              upstreamAbortReason = 'upstream_stalled';
+              upstreamConnected = false;
+              upstreamController.abort();
+            }, upstreamStallTimeoutMs);
+          };
+
+          resetStallTimer();
+
+          try {
+            while (true) {
+              const { value, done } = await reader.read();
+              if (done) {
+                break;
+              }
+
+              resetStallTimer();
+              buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
+
+              let separatorIndex = buffer.indexOf('\n\n');
+              while (separatorIndex !== -1) {
+                const block = buffer.slice(0, separatorIndex);
+                buffer = buffer.slice(separatorIndex + 2);
+                forwardBlock(block);
+                separatorIndex = buffer.indexOf('\n\n');
+              }
+            }
+
+            if (buffer.trim().length > 0) {
+              forwardBlock(buffer.trim());
+            }
+          } catch (error) {
+            if (!controller.signal.aborted && upstreamAbortReason !== 'upstream_stalled') {
+              console.warn('Message stream WS proxy error:', error);
+            }
+          } finally {
+            if (stallTimer) {
+              clearTimeout(stallTimer);
+            }
+            upstreamConnected = false;
+            currentUpstreamAbortController = null;
+            controller.signal.removeEventListener('abort', abortUpstream);
+          }
+
+          if (controller.signal.aborted) {
+            return;
+          }
+
+          await wait(upstreamReconnectDelayMs);
         }
       } catch (error) {
         if (!controller.signal.aborted) {

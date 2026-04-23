@@ -169,6 +169,15 @@ export const usePermissionStore = create<PermissionStore>()(
                         return { autoAccept };
                     });
 
+                    // Mirror state to the server so it can suppress permission
+                    // notifications at the source (otherwise the 500ms debounce
+                    // races with the client's auto-response and can leak).
+                    void fetch('/api/notifications/auto-accept', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ sessionId, enabled }),
+                    }).catch(() => { /* best-effort */ });
+
                     if (!enabled) {
                         return;
                     }
@@ -259,6 +268,21 @@ export const usePermissionStore = create<PermissionStore>()(
                         ...merged,
                         autoAccept: nextAutoAccept,
                     };
+                },
+                onRehydrateStorage: () => (state) => {
+                    if (!state) return;
+                    // Re-broadcast auto-accept state to the server after
+                    // rehydration so server-side notification suppression
+                    // survives page reloads / server restarts.
+                    for (const [sid, enabled] of Object.entries(state.autoAccept || {})) {
+                        if (enabled === true) {
+                            void fetch('/api/notifications/auto-accept', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ sessionId: sid, enabled: true }),
+                            }).catch(() => { /* best-effort */ });
+                        }
+                    }
                 },
             }
         ),

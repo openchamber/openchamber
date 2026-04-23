@@ -1,6 +1,6 @@
 {
   "name": "openchamber-teams-monorepo",
-  "version": "1.9.7",
+  "version": "1.9.8",
   "description": "OpenChamber Teams — fork of OpenChamber adding GitHub workflows for individuals and teams on top of the web, ui, and desktop runtimes",
   "private": true,
   "type": "module",

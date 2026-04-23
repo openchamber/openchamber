@@ -99,7 +99,7 @@ export default defineConfig({
   build: {
     outDir: path.resolve(__dirname, 'dist'),
     emptyOutDir: true,
-    chunkSizeWarningLimit: 1200,
+    chunkSizeWarningLimit: 500,
     rollupOptions: {
       external: ['node:child_process', 'node:fs', 'node:path', 'node:url'],
       output: {

@@ -1,3 +1,11 @@
+## [1.9.8] - 2026-04-22
+
+- Sessions/Reliability: fixed parent-child session sync during reconnects and navigation, so status and progress stay aligned in nested session trees (thanks to @jwcrystal).
+- Settings/Sync: settings changes now sync more reliably with other clients, and sidebar session pagination is steadier in larger workspaces.
+- Sessions/Folders: folder updates now persist through server-backed APIs, improving consistency across different machine path setups.
+- UI: refined chat chrome with a cleaner bottom scroll fade and hidden idle tasks row.
+- Chat/Commands: added `/summary` slash command for a non-destructive session summary - optional topic hint after the command focuses the output, and the prompt is customizable under Settings: Magic Prompts.
+
 ## [1.9.7] - 2026-04-22
 
 - Sessions/UI: added bulk selection in the sessions sidebar and fixed pinned sessions so they stay pinned after reloads (thanks to @yart).

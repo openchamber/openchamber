@@ -12,7 +12,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useDirectorySync, useSessionMessageRecords } from '@/sync/sync-context';
+import { useDirectorySync, useSessionMessageRecords, useEnsureSessionMessages } from '@/sync/sync-context';
 import { getSyncChildStores } from '@/sync/sync-refs';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionActivity } from '@/hooks/useSessionActivity';
@@ -1928,6 +1928,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
     const taskSessionId = explicitTaskSessionId ?? fallbackTaskSessionId;
 
     const childSessionMessages = useSessionMessageRecords(taskSessionId ?? '', currentDirectory);
+    useEnsureSessionMessages(taskSessionId ?? '', currentDirectory);
 
     const metadataTaskSummaryEntries = React.useMemo<TaskToolSummaryEntry[]>(() => {
         if (!isTaskTool) {
