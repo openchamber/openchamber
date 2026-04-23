@@ -18,6 +18,7 @@ import { useRouter } from '@/hooks/useRouter';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { usePwaManifestSync } from '@/hooks/usePwaManifestSync';
 import { usePwaInstallPrompt } from '@/hooks/usePwaInstallPrompt';
+import { useWindowControlsOverlayLayout } from '@/hooks/useWindowControlsOverlayLayout';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { hasModifier } from '@/lib/utils';
@@ -163,6 +164,7 @@ function SyncAppEffects({ embeddedBackgroundWorkEnabled }: {
   embeddedBackgroundWorkEnabled: boolean;
 }) {
   usePwaManifestSync();
+  useWindowControlsOverlayLayout();
   useSessionAutoCleanup(embeddedBackgroundWorkEnabled);
   useQueuedMessageAutoSend(embeddedBackgroundWorkEnabled);
   useKeyboardShortcuts();

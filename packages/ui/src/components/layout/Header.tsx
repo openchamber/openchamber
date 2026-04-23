@@ -1356,6 +1356,19 @@ export const Header: React.FC<HeaderProps> = ({
     return '';
   }, [isDesktopApp, isMacPlatform, macosMajorVersion]);
 
+  const webWindowControlsOverlayStyle = React.useMemo<React.CSSProperties | undefined>(() => {
+    if (isDesktopApp || isVSCode) {
+      return undefined;
+    }
+
+    return {
+      paddingLeft: 'calc(0.75rem + var(--oc-wco-left-inset, 0px))',
+      paddingRight: 'calc(0.75rem + var(--oc-wco-right-inset, 0px))',
+      minHeight: 'max(3rem, var(--oc-wco-titlebar-height, 0px))',
+      height: 'max(3rem, var(--oc-wco-titlebar-height, 0px))',
+    };
+  }, [isDesktopApp, isVSCode]);
+
   const updateHeaderHeight = React.useCallback(() => {
     if (typeof document === 'undefined') {
       return;
@@ -1694,6 +1707,7 @@ export const Header: React.FC<HeaderProps> = ({
         desktopPaddingClass,
         macosHeaderSizeClass
       )}
+      style={webWindowControlsOverlayStyle}
       role="tablist"
       aria-label="Main navigation"
     >

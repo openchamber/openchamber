@@ -200,6 +200,7 @@
           start_url: `${baseUrl}/`,
           scope: `${baseUrl}/`,
           display: 'standalone',
+          display_override: ['window-controls-overlay'],
           ...(manifestOrientation ? { orientation: manifestOrientation } : {}),
           background_color: '#151313',
           theme_color: '#edb449',
