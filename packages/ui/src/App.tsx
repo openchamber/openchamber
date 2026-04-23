@@ -649,13 +649,15 @@ function App({ apis }: AppProps) {
       return (
         <ErrorBoundary>
           <div className="h-full text-foreground bg-transparent">
-            <OnboardingScreen
-              mode="first-launch"
-              onCliAvailable={handleDesktopBootDismiss}
-              onChooseRemote={() => {
-                // Switch to remote tab - handled internally by OnboardingScreen
-              }}
-            />
+            <React.Suspense fallback={<div className="h-full" />}>
+              <OnboardingScreen
+                mode="first-launch"
+                onCliAvailable={handleDesktopBootDismiss}
+                onChooseRemote={() => {
+                  // Switch to remote tab - handled internally by OnboardingScreen
+                }}
+              />
+            </React.Suspense>
           </div>
         </ErrorBoundary>
       );
@@ -668,13 +670,15 @@ function App({ apis }: AppProps) {
     return (
       <ErrorBoundary>
         <div className="h-full text-foreground bg-transparent">
-          <OnboardingScreen
-            mode="recovery"
-            recoveryVariant={recoveryVariant}
-            recoveryHostUrl={hostUrl}
-            recoveryHostLabel={undefined}
-            onCliAvailable={handleDesktopBootDismiss}
-          />
+          <React.Suspense fallback={<div className="h-full" />}>
+            <OnboardingScreen
+              mode="recovery"
+              recoveryVariant={recoveryVariant}
+              recoveryHostUrl={hostUrl}
+              recoveryHostLabel={undefined}
+              onCliAvailable={handleDesktopBootDismiss}
+            />
+          </React.Suspense>
         </div>
       </ErrorBoundary>
     );

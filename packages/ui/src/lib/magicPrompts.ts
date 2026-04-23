@@ -24,7 +24,9 @@ export type MagicPromptId =
   | 'plan.implement.visible'
   | 'plan.implement.instructions'
   | 'session.summary.visible'
-  | 'session.summary.instructions';
+  | 'session.summary.instructions'
+  | 'session.review.visible'
+  | 'session.review.instructions';
 
 export interface MagicPromptDefinition {
   id: MagicPromptId;
@@ -505,6 +507,56 @@ Formatting:
 - Keep length proportional to session length; do not pad
 
 Respond in the same language the user used most in the conversation.`,
+  },
+  {
+    id: 'session.review.visible',
+    title: 'Workspace Review Visible Prompt',
+    group: 'Session',
+    description: 'Visible user message sent by the /review command.',
+    template: 'Review the changes made in this workspace.',
+  },
+  {
+    id: 'session.review.instructions',
+    title: 'Workspace Review Instructions',
+    group: 'Session',
+    description: 'Hidden instructions attached to the /review command. Reviews current workspace changes for high-signal issues only.',
+    template: `
+Report only real, high-signal issues introduced by these changes.
+
+The diff is the source of truth. Use the local repo only as ancillary context when you need to validate a specific claim or check an applicable rule.
+
+Focus on:
+- runtime bugs
+- incorrect logic
+- broken assumptions in the changed code
+- clear regressions introduced by the changes
+- missing implementations across affected modules or targets when the diff clearly introduced the gap
+- clear CLAUDE.md or AGENTS.md violations that apply to the changed files
+
+Do not report:
+- pre-existing issues unrelated to the diff
+- pedantic nitpicks a senior engineer would not flag
+- issues a linter would catch
+- subjective style preferences not explicitly required by CLAUDE.md or AGENTS.md
+- speculative concerns or anything you cannot verify with high confidence
+- missing tests or coverage gaps unless an applicable CLAUDE.md or AGENTS.md explicitly requires them for the changed area
+- rules mentioned in CLAUDE.md or AGENTS.md but explicitly silenced in the code
+
+Validation pass:
+- Before reporting an issue, re-check it against the diff plus only the local context you actually needed to read.
+- For CLAUDE.md or AGENTS.md violations, verify the rule applies to the affected file path and cite the exact rule.
+- If you are not certain an issue is real, omit it.
+
+Output:
+- If no high-signal issues are found, respond with exactly: No high-signal issues found.
+- Otherwise, return a concise numbered list.
+- For each issue include:
+  - short title
+  - why it is a real problem
+  - affected file path
+  - category: bug or rule violation
+
+Keep the review concise and practical.`,
   },
 ] as const;
 

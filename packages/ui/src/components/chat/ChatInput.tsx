@@ -65,11 +65,13 @@ import { useChatSearchDirectory } from '@/hooks/useChatSearchDirectory';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
-import { useGitBranches, useGitStore } from '@/stores/useGitStore';
+import { useGitBranches, useGitStore, useIsGitRepo } from '@/stores/useGitStore';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { createWorktreeDraft } from '@/lib/worktreeSessionCreator';
 import { buildSessionTargetOptions } from '@/sync/session-worktree-contract';
 import { usePermissionStore } from '@/stores/permissionStore';
+import { extractGitChangedFiles } from './changedFiles';
 
 const MAX_VISIBLE_TEXTAREA_LINES = 8;
 const EMPTY_QUEUE: QueuedMessage[] = [];
@@ -750,6 +752,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         Promise.resolve((useSessionUIStore.getState().sendMessage as (...a: unknown[]) => unknown)(...args)),
     ).current;
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
+    const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
     const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
     const newSessionDraftOpen = Boolean(newSessionDraft?.open);
     const setNewSessionDraftTarget = useSessionUIStore((s) => s.setNewSessionDraftTarget);
@@ -792,6 +795,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const { git: runtimeGit } = useRuntimeAPIs();
     const { currentTheme } = useThemeSystem();
     const chatSearchDirectory = useChatSearchDirectory();
+    const isGitRepo = useIsGitRepo(currentDirectory);
+    const currentGitStatus = useGitStore((state) =>
+        currentDirectory ? state.directories.get(currentDirectory)?.status ?? null : null,
+    );
     const [showAbortStatus, setShowAbortStatus] = React.useState(false);
     const setSessionAutoAccept = usePermissionStore((state) => state.setSessionAutoAccept);
     const composerHighlightRef = React.useRef<HTMLDivElement | null>(null);
@@ -1560,6 +1567,28 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     scrollToBottom?.({ instant: true, force: true });
                 } catch (error) {
                     toast.error(error instanceof Error ? error.message : 'Failed to generate summary');
+                }
+                return;
+            }
+            else if (commandName === 'review' && currentSessionId) {
+                try {
+                    await sessionActions.waitForConnectionOrThrow();
+                    const visibleText = await renderMagicPrompt('session.review.visible');
+                    const instructionsText = await renderMagicPrompt('session.review.instructions');
+                    await sendMessage(
+                        visibleText,
+                        currentProviderId,
+                        currentModelId,
+                        currentAgentName,
+                        [],
+                        agentMentionName,
+                        [{ text: instructionsText, synthetic: true }],
+                        currentVariant,
+                        inputMode,
+                    );
+                    scrollToBottom?.({ instant: true, force: true });
+                } catch (error) {
+                    toast.error(error instanceof Error ? error.message : 'Failed to review changes');
                 }
                 return;
             }
@@ -3117,6 +3146,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         return draftBranchItems.find((item) => item.value === selectedValue)?.label ?? formatDirectoryName(selectedValue);
     }, [draftBranchItems, selectedDraftDirectory]);
 
+    const hasPendingChanges = React.useMemo(() => {
+        if (isGitRepo !== true || !currentGitStatus || currentGitStatus.isClean) {
+            return false;
+        }
+        return extractGitChangedFiles(currentGitStatus.files, currentGitStatus.diffStats, currentDirectory).length > 0;
+    }, [currentDirectory, currentGitStatus, isGitRepo]);
+
     const selectedDraftBranchIsKnown = React.useMemo(() => {
         if (!selectedDraftDirectory) {
             return true;
@@ -3426,7 +3462,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     showAbortStatus={showAbortStatus}
                     showAssistantStatus={false}
                     showTodos
-                    leftAccessory={newSessionDraftOpen ? null : <PendingChangesBar />}
+                    leftAccessory={newSessionDraftOpen || !hasPendingChanges ? null : <PendingChangesBar />}
                 />
                 {showDraftTargetSelectors && selectedDraftProject ? (
                     <div className="mb-1.5 flex min-w-0 items-center gap-1.5 px-0.5">

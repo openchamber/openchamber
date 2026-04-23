@@ -131,6 +131,14 @@ const PROMPT_PAGE_MAP: Record<string, PromptPageConfig> = {
       { id: 'session.summary.instructions', title: 'Instructions' },
     ],
   },
+  'session.review': {
+    title: 'Workspace Review',
+    description: 'Prompts used by the /review slash command: visible user message + hidden instructions. Reviews current workspace changes for high-signal issues only.',
+    blocks: [
+      { id: 'session.review.visible', title: 'Visible Prompt' },
+      { id: 'session.review.instructions', title: 'Instructions' },
+    ],
+  },
 };
 
 const hasOwn = (input: Record<string, string>, key: string) => Object.prototype.hasOwnProperty.call(input, key);

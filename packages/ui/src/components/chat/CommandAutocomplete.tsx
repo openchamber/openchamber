@@ -1,5 +1,5 @@
 import React from 'react';
-import { RiCommandLine, RiFileLine, RiFlashlightLine, RiRefreshLine, RiScissorsLine, RiTerminalBoxLine, RiArrowGoBackLine, RiArrowGoForwardLine } from '@remixicon/react';
+import { RiCommandLine, RiFileLine, RiFlashlightLine, RiRefreshLine, RiScissorsLine, RiTerminalBoxLine, RiArrowGoBackLine, RiArrowGoForwardLine, RiSearchEyeLine } from '@remixicon/react';
 import { cn, fuzzyMatch } from '@/lib/utils';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionMessages } from '@/sync/sync-context';
@@ -122,6 +122,10 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
             ? [{ id: 'openchamber:summary', name: 'summary', source: 'openchamber' as const, description: 'Non-destructive session summary. Optional topic hint after the command.', isOpenChamber: true }]
             : []
           ),
+          ...(hasSession
+            ? [{ id: 'openchamber:review', name: 'review', source: 'openchamber' as const, description: 'Review current workspace changes for high-signal issues only.', isOpenChamber: true }]
+            : []
+          ),
         ];
         const allCommands = [...builtInCommands, ...customCommands];
 
@@ -160,6 +164,10 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
           { id: 'openchamber:compact', name: 'compact', source: 'openchamber' as const, description: 'Compress session history using AI to reduce context size', isBuiltIn: true },
           ...(hasSession
             ? [{ id: 'openchamber:summary', name: 'summary', source: 'openchamber' as const, description: 'Non-destructive session summary. Optional topic hint after the command.', isOpenChamber: true }]
+            : []
+          ),
+          ...(hasSession
+            ? [{ id: 'openchamber:review', name: 'review', source: 'openchamber' as const, description: 'Review current workspace changes for high-signal issues only.', isOpenChamber: true }]
             : []
           ),
         ];
@@ -234,6 +242,8 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
         return <RiArrowGoForwardLine className="h-3.5 w-3.5 text-orange-500" />;
       case 'compact':
         return <RiScissorsLine className="h-3.5 w-3.5 text-purple-500" />;
+      case 'review':
+        return <RiSearchEyeLine className="h-3.5 w-3.5 text-blue-500" />;
       case 'test':
       case 'build':
       case 'run':
