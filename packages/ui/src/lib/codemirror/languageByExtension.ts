@@ -1,5 +1,8 @@
 import type { Extension } from '@codemirror/state';
 
+// Static imports for the most common languages only.
+// Less common languages are loaded dynamically via loadLanguageByExtension
+// to keep the initial bundle lean.
 import { javascript } from '@codemirror/lang-javascript';
 import { json } from '@codemirror/lang-json';
 import { css } from '@codemirror/lang-css';
@@ -7,33 +10,12 @@ import { html } from '@codemirror/lang-html';
 import { markdown } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
 import { python } from '@codemirror/lang-python';
-import { sql } from '@codemirror/lang-sql';
-import { xml } from '@codemirror/lang-xml';
-import { yaml as yamlLanguage } from '@codemirror/lang-yaml';
-import { rust } from '@codemirror/lang-rust';
-import { elixir } from 'codemirror-lang-elixir';
-import { cpp } from '@codemirror/lang-cpp';
-import { go } from '@codemirror/lang-go';
 
 import { Language, LanguageDescription, StreamLanguage, HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
 import { shell } from '@codemirror/legacy-modes/mode/shell';
-import { toml } from '@codemirror/legacy-modes/mode/toml';
-import { diff } from '@codemirror/legacy-modes/mode/diff';
-import { dockerFile } from '@codemirror/legacy-modes/mode/dockerfile';
-import { ruby } from '@codemirror/legacy-modes/mode/ruby';
-import { properties } from '@codemirror/legacy-modes/mode/properties';
-import { erlang } from '@codemirror/legacy-modes/mode/erlang';
 
 const shellLanguage = StreamLanguage.define(shell);
-const tomlLanguage = StreamLanguage.define(toml);
-const diffLanguage = StreamLanguage.define(diff);
-const dockerfileLanguage = StreamLanguage.define(dockerFile);
-const rubyLanguage = StreamLanguage.define(ruby);
-const propertiesLanguage = StreamLanguage.define(properties);
-const elixirSupport = elixir();
-const elixirLanguage = elixirSupport.language;
-const erlangLanguage = StreamLanguage.define(erlang);
 
 function codeBlockLanguageResolver(info: string): Language | LanguageDescription | null {
   const normalized = info.trim().toLowerCase();
@@ -46,11 +28,6 @@ function codeBlockLanguageResolver(info: string): Language | LanguageDescription
     case 'shellsession':
     case 'console':
       return shellLanguage;
-    case 'toml':
-      return tomlLanguage;
-    case 'diff':
-    case 'patch':
-      return diffLanguage;
     case 'json':
     case 'jsonc':
     case 'json5':
@@ -65,39 +42,13 @@ function codeBlockLanguageResolver(info: string): Language | LanguageDescription
       return javascript({ typescript: true }).language;
     case 'tsx':
       return javascript({ typescript: true, jsx: true }).language;
-    case 'yaml':
-    case 'yml':
-      return yamlLanguage().language;
     case 'html':
       return html().language;
     case 'css':
       return css().language;
-    case 'xml':
-    case 'svg':
-      return xml().language;
     case 'py':
     case 'python':
       return python().language;
-    case 'sql':
-      return sql().language;
-    case 'rs':
-    case 'rust':
-      return rust().language;
-    case 'c':
-    case 'cpp':
-    case 'h':
-    case 'hpp':
-      return cpp().language;
-    case 'go':
-      return go().language;
-    case 'ex':
-    case 'exs':
-    case 'elixir':
-      return elixirLanguage;
-    case 'erl':
-    case 'hrl':
-    case 'erlang':
-      return erlangLanguage;
     case 'heex':
     case 'eex':
     case 'leex':
@@ -135,8 +86,6 @@ export function languageByExtension(filePath: string): Extension | null {
 
   // Special filenames
   switch (filename) {
-    case 'dockerfile':
-      return dockerfileLanguage;
     case 'makefile':
     case 'gnumakefile':
       // No dedicated mode; shell is a decent fallback for Make-ish files.
@@ -147,7 +96,7 @@ export function languageByExtension(filePath: string): Extension | null {
   const ext = idx >= 0 ? normalized.slice(idx + 1) : '';
 
   switch (ext) {
-    // JavaScript/TypeScript
+    // JavaScript/TypeScript (most common — keep static)
     case 'ts':
     case 'tsx':
     case 'mts':
@@ -159,7 +108,7 @@ export function languageByExtension(filePath: string): Extension | null {
     case 'cjs':
       return javascript({ typescript: false, jsx: ext === 'jsx' });
 
-    // Web
+    // Web (keep static)
     case 'json':
     case 'jsonc':
     case 'json5':
@@ -187,20 +136,7 @@ export function languageByExtension(filePath: string): Extension | null {
         markdownHighlight(),
       ];
 
-    // Data/config
-    case 'yml':
-    case 'yaml':
-      return yamlLanguage();
-    case 'toml':
-      return tomlLanguage;
-    case 'ini':
-    case 'cfg':
-    case 'conf':
-    case 'config':
-    case 'properties':
-      return propertiesLanguage;
-
-    // Shell
+    // Shell (keep static)
     case 'sh':
     case 'bash':
     case 'zsh':
@@ -208,52 +144,14 @@ export function languageByExtension(filePath: string): Extension | null {
     case 'env':
       return shellLanguage;
 
-    // Languages we already ship
+    // Python (very common — keep static)
     case 'py':
     case 'pyw':
     case 'pyi':
       return python();
-    case 'sql':
-    case 'psql':
-    case 'plsql':
-      return sql();
-    case 'xml':
-    case 'xsl':
-    case 'xslt':
-    case 'xsd':
-    case 'dtd':
-    case 'plist':
-    case 'svg':
-      return xml();
-    case 'rs':
-      return rust();
-    case 'c':
-    case 'cpp':
-    case 'h':
-    case 'hpp':
-      return cpp();
-    case 'go':
-      return go();
 
-    // Legacy modes
-    case 'rb':
-    case 'erb':
-    case 'rake':
-    case 'gemspec':
-      return rubyLanguage;
-
-    case 'ex':
-    case 'exs':
-      return elixirSupport;
-    case 'erl':
-    case 'hrl':
-      return erlangLanguage;
-
-    case 'eex':
-    case 'leex':
-    case 'heex':
-      return html();
-
+    // Less common languages: return null so callers fall back to
+    // loadLanguageByExtension which dynamically imports from @codemirror/language-data.
     default:
       return null;
   }
