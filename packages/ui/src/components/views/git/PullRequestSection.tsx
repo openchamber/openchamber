@@ -1712,7 +1712,7 @@ export const PullRequestSection: React.FC<{
 
                   {/* PR Cockpit Panels */}
                   {pr.state === 'open' ? (
-                    <div className="flex flex-col gap-3 mt-2 border-t border-[hsl(var(--border))] pt-3">
+                    <div className="flex flex-col gap-3 mt-2 border-t border-border/40 pt-3">
                       <ProtectionBanner protection={protectionData} prMergeable={pr.mergeable} />
                       <ChecksPanel
                         checkRuns={cockpitData?.checkRuns}

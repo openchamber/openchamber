@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { GitHubInboxItem } from '@/lib/api/types';
-import { RiCheckLine, RiTimeLine, RiGitPullRequestLine, RiErrorWarningLine, RiGitMergeLine } from '@remixicon/react';
+import { RiCheckLine, RiTimeLine, RiGitPullRequestLine, RiErrorWarningLine, RiGitMergeLine, RiRefreshLine } from '@remixicon/react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -103,12 +103,24 @@ export const InboxView: React.FC = () => {
     return true;
   });
 
+  const filterLabels: Record<string, string> = {
+    all: 'All Notifications',
+    review_requested: 'Review Requested',
+    assigned: 'Assigned',
+    mentioned: 'Mentioned',
+    ci_failing: 'CI Failing',
+    stale: 'Stale PRs',
+    ready_to_merge: 'Ready to Merge',
+  };
+
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 items-center justify-between gap-1 border-b border-[hsl(var(--border))] px-3 py-2">
+      <div className="flex shrink-0 items-center justify-between gap-1 border-b border-border/40 px-3 py-2">
         <Select value={filter} onValueChange={setFilter}>
           <SelectTrigger className="h-7 w-[160px] bg-transparent border-0 px-1 hover:bg-[hsl(var(--accent))] typography-micro focus:ring-0">
-            <SelectValue placeholder="Filter..." />
+            <SelectValue placeholder="Filter...">
+              {(val: string | undefined) => (val ? filterLabels[val] : 'Filter...')}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Notifications</SelectItem>
@@ -129,7 +141,7 @@ export const InboxView: React.FC = () => {
               disabled={loading}
               className="h-7 w-7 p-0 text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"
             >
-              <RiTimeLine className={loading ? 'size-4 animate-spin' : 'size-4'} />
+              <RiRefreshLine className={loading ? 'size-4 animate-spin' : 'size-4'} />
             </Button>
           </TooltipTrigger>
           <TooltipContent><p>Refresh Inbox</p></TooltipContent>
