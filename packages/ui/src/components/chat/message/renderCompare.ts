@@ -80,6 +80,13 @@ export const areRenderRelevantPartsEqual = (left: Part[], right: Part[]): boolea
       if (leftTool !== rightTool) {
         return false;
       }
+      // Compare tool output so streaming updates (e.g., todo list progress)
+      // trigger re-renders when the output payload changes.
+      const leftOutput = (leftPart as { output?: unknown }).output;
+      const rightOutput = (rightPart as { output?: unknown }).output;
+      if (leftOutput !== rightOutput) {
+        return false;
+      }
       continue;
     }
 
