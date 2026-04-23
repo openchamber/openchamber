@@ -143,12 +143,15 @@ export async function bootstrapDirectory(input: {
   }
   if (loading) set({ status: "partial" })
 
-  const results = await Promise.allSettled([
+  // ---------------------------------------------------------------------------
+  // Phase 1: Critical path — block until these resolve so the UI can render.
+  // These are the minimum data needed to show a functional chat interface.
+  // ---------------------------------------------------------------------------
+  const phase1Results = await Promise.allSettled([
     seededProject
       ? Promise.resolve()
       : retry(() => sdk.project.current().then((x) => set({ project: unwrap(x, "project.current").id }))),
     retry(() => sdk.provider.list().then((x) => set({ provider: unwrap(x, "provider.list") }))),
-    retry(() => sdk.app.agents().then((x) => set({ agent: unwrap(x, "app.agents") }))),
     retry(() => sdk.config.get().then((x) => set({ config: unwrap(x, "config.get") }))),
     retry(() =>
       sdk.path.get().then((x) => {
@@ -158,15 +161,37 @@ export async function bootstrapDirectory(input: {
         if (next) set({ project: next })
       }),
     ),
-    retry(() => sdk.command.list().then((x) => set({ command: unwrap(x, "command.list") }))),
     retry(() => sdk.session.status().then((x) => set({ session_status: unwrap(x, "session.status") }))),
-    input.loadSessions(directory),
+  ])
+
+  const phase1Errors = phase1Results
+    .filter((r): r is PromiseRejectedResult => r.status === "rejected")
+    .map((r) => r.reason)
+
+  // path.get (index 3) and session.status (index 4) have no global-state
+  // fallback. If either fails, the UI cannot safely advance to "complete".
+  const criticalPhase1Failed = phase1Results[3].status === "rejected" || phase1Results[4].status === "rejected"
+
+  if (phase1Errors.length === phase1Results.length || criticalPhase1Failed) {
+    console.error(`[bootstrap] directory bootstrap failed for ${directory}`, phase1Errors[0])
+    return
+  }
+
+  // Mark ready after critical data arrives so the UI can paint.
+  if (loading) set({ status: "complete" })
+
+  // ---------------------------------------------------------------------------
+  // Phase 2: Deferrable — fetch after first paint without blocking.
+  // These enrich the UI but aren't required for basic functionality.
+  // ---------------------------------------------------------------------------
+  void Promise.allSettled([
+    retry(() => sdk.app.agents().then((x) => set({ agent: unwrap(x, "app.agents") }))),
+    retry(() => sdk.command.list().then((x) => set({ command: unwrap(x, "command.list") }))),
     retry(() => sdk.mcp.status().then((x) => set({ mcp: unwrap(x, "mcp.status") }))),
     retry(() => sdk.lsp.status().then((x) => set({ lsp: unwrap(x, "lsp.status") }))),
     retry(() =>
       sdk.vcs.get().then((x) => {
         const current = getState()
-        // vcs is optional — fall back to current if server omits it.
         if (x.error) {
           throw new Error(`vcs.get failed: ${String(x.error)}`)
         }
@@ -179,30 +204,30 @@ export async function bootstrapDirectory(input: {
         Object.entries(before.question ?? {}).map(([sessionID, questions]) => [sessionID, requestSignature(questions)]),
       )
       const x = await sdk.question.list(directory ? { directory } : undefined)
-        if (x.error) {
-          const status = (x as { response?: { status?: number } }).response?.status
-          const err = new Error(`question.list failed${status ? ` (${status})` : ""}: ${String(x.error)}`)
-          if (status !== undefined) (err as Error & { status?: number }).status = status
-          throw err
-        }
-        const grouped = groupBySession(
-          (x.data ?? []).filter((q): q is QuestionRequest => !!q?.id && !!q.sessionID),
-        )
-        const current = getState()
-        const merged = { ...current.question }
-        for (const [sessionID, questions] of Object.entries(grouped)) {
-          merged[sessionID] = questions
-            .filter((q) => !!q?.id)
-            .sort((a, b) => cmp(a.id, b.id))
-        }
-        for (const sessionID of beforeSignatures.keys()) {
-          if (grouped[sessionID]) continue
-          const beforeSignature = beforeSignatures.get(sessionID) ?? ""
-          const currentSignature = requestSignature(current.question[sessionID])
-          if (currentSignature !== beforeSignature) continue
-          delete merged[sessionID]
-        }
-        set({ question: merged })
+      if (x.error) {
+        const status = (x as { response?: { status?: number } }).response?.status
+        const err = new Error(`question.list failed${status ? ` (${status})` : ""}: ${String(x.error)}`)
+        if (status !== undefined) (err as Error & { status?: number }).status = status
+        throw err
+      }
+      const grouped = groupBySession(
+        (x.data ?? []).filter((q): q is QuestionRequest => !!q?.id && !!q.sessionID),
+      )
+      const current = getState()
+      const merged = { ...current.question }
+      for (const [sessionID, questions] of Object.entries(grouped)) {
+        merged[sessionID] = questions
+          .filter((q) => !!q?.id)
+          .sort((a, b) => cmp(a.id, b.id))
+      }
+      for (const sessionID of beforeSignatures.keys()) {
+        if (grouped[sessionID]) continue
+        const beforeSignature = beforeSignatures.get(sessionID) ?? ""
+        const currentSignature = requestSignature(current.question[sessionID])
+        if (currentSignature !== beforeSignature) continue
+        delete merged[sessionID]
+      }
+      set({ question: merged })
     }),
     retry(async () => {
       const before = getState()
@@ -210,40 +235,44 @@ export async function bootstrapDirectory(input: {
         Object.entries(before.permission ?? {}).map(([sessionID, permissions]) => [sessionID, requestSignature(permissions)]),
       )
       const x = await sdk.permission.list(directory ? { directory } : undefined)
-        if (x.error) {
-          const status = (x as { response?: { status?: number } }).response?.status
-          const err = new Error(`permission.list failed${status ? ` (${status})` : ""}: ${String(x.error)}`)
-          if (status !== undefined) (err as Error & { status?: number }).status = status
-          throw err
-        }
-        const grouped = groupBySession(
-          (x.data ?? []).filter((perm): perm is PermissionRequest => !!perm?.id && !!perm?.sessionID),
-        )
-        const current = getState()
-        const merged = { ...current.permission }
-        for (const [sessionID, perms] of Object.entries(grouped)) {
-          merged[sessionID] = perms
-            .filter((p) => !!p?.id)
-            .sort((a, b) => cmp(a.id, b.id))
-        }
-        for (const sessionID of beforeSignatures.keys()) {
-          if (grouped[sessionID]) continue
-          const beforeSignature = beforeSignatures.get(sessionID) ?? ""
-          const currentSignature = requestSignature(current.permission[sessionID])
-          if (currentSignature !== beforeSignature) continue
-          delete merged[sessionID]
-        }
-        set({ permission: merged })
+      if (x.error) {
+        const status = (x as { response?: { status?: number } }).response?.status
+        const err = new Error(`permission.list failed${status ? ` (${status})` : ""}: ${String(x.error)}`)
+        if (status !== undefined) (err as Error & { status?: number }).status = status
+        throw err
+      }
+      const grouped = groupBySession(
+        (x.data ?? []).filter((perm): perm is PermissionRequest => !!perm?.id && !!perm?.sessionID),
+      )
+      const current = getState()
+      const merged = { ...current.permission }
+      for (const [sessionID, perms] of Object.entries(grouped)) {
+        merged[sessionID] = perms
+          .filter((p) => !!p?.id)
+          .sort((a, b) => cmp(a.id, b.id))
+      }
+      for (const sessionID of beforeSignatures.keys()) {
+        if (grouped[sessionID]) continue
+        const beforeSignature = beforeSignatures.get(sessionID) ?? ""
+        const currentSignature = requestSignature(current.permission[sessionID])
+        if (currentSignature !== beforeSignature) continue
+        delete merged[sessionID]
+      }
+      set({ permission: merged })
     }),
-  ])
+  ]).then((results) => {
+    const errors = results
+      .filter((r): r is PromiseRejectedResult => r.status === "rejected")
+      .map((r) => r.reason)
+    if (errors.length) {
+      console.error(`[bootstrap] deferred phase failed for ${directory}`, errors[0])
+    }
+  })
 
-  const errors = results
-    .filter((r): r is PromiseRejectedResult => r.status === "rejected")
-    .map((r) => r.reason)
-  if (errors.length) {
-    console.error(`[bootstrap] directory bootstrap failed for ${directory}`, errors[0])
-    return
-  }
-
-  if (loading) set({ status: "complete" })
+  // ---------------------------------------------------------------------------
+  // Phase 3: Lazy — session list can be large; don't block on it.
+  // ---------------------------------------------------------------------------
+  void Promise.resolve(input.loadSessions(directory)).catch((err) => {
+    console.error(`[bootstrap] session load failed for ${directory}`, err)
+  })
 }

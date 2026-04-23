@@ -1,7 +1,9 @@
 import React from 'react';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { SessionSidebar } from '@/components/session/SessionSidebar';
-import { ChatView, SettingsView } from '@/components/views';
+import { ChatView } from '@/components/views';
+
+const SettingsView = React.lazy(() => import('@/components/views/SettingsView').then(m => ({ default: m.SettingsView })));
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useViewportStore } from '@/sync/viewport-store';
 import { useSessions, useDirectorySync } from '@/sync/sync-context';
@@ -388,10 +390,12 @@ export const VSCodeLayout: React.FC = () => {
         </div>
       ) : currentView === 'settings' ? (
         // Settings view
-        <SettingsView
-          onClose={() => setCurrentView(usesExpandedLayout ? 'chat' : 'sessions')}
-          forceMobile={usesMobileLayout}
-        />
+        <React.Suspense fallback={null}>
+          <SettingsView
+            onClose={() => setCurrentView(usesExpandedLayout ? 'chat' : 'sessions')}
+            forceMobile={usesMobileLayout}
+          />
+        </React.Suspense>
       ) : usesExpandedLayout ? (
         // Expanded layout: sessions sidebar + chat side by side
         <div className="flex h-full">

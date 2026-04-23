@@ -23,7 +23,17 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { cn } from '@/lib/utils';
 import { isDesktopShell } from '@/lib/desktop';
 
-import { ChatView, PlanView, GitView, DiffView, TerminalView, FilesView, SettingsView, SettingsWindow, MultiRunWindow } from '@/components/views';
+import { ChatView } from '@/components/views';
+
+// Heavy views loaded on-demand to reduce initial bundle parse time.
+const PlanView = React.lazy(() => import('@/components/views/PlanView').then(m => ({ default: m.PlanView })));
+const GitView = React.lazy(() => import('@/components/views/GitView').then(m => ({ default: m.GitView })));
+const DiffView = React.lazy(() => import('@/components/views/DiffView').then(m => ({ default: m.DiffView })));
+const TerminalView = React.lazy(() => import('@/components/views/TerminalView').then(m => ({ default: m.TerminalView })));
+const FilesView = React.lazy(() => import('@/components/views/FilesView').then(m => ({ default: m.FilesView })));
+const SettingsView = React.lazy(() => import('@/components/views/SettingsView').then(m => ({ default: m.SettingsView })));
+const SettingsWindow = React.lazy(() => import('@/components/views/SettingsWindow').then(m => ({ default: m.SettingsWindow })));
+const MultiRunWindow = React.lazy(() => import('@/components/views/MultiRunWindow').then(m => ({ default: m.MultiRunWindow })));
 
 // Mobile drawer width as screen percentage
 const MOBILE_DRAWER_WIDTH_PERCENT = 85;
@@ -596,15 +606,15 @@ export const MainLayout: React.FC = () => {
     const secondaryView = React.useMemo(() => {
         switch (activeMainTab) {
             case 'plan':
-                return <PlanView />;
+                return <React.Suspense fallback={null}><PlanView /></React.Suspense>;
             case 'git':
-                return <GitView />;
+                return <React.Suspense fallback={null}><GitView /></React.Suspense>;
             case 'diff':
-                return <DiffView />;
+                return <React.Suspense fallback={null}><DiffView /></React.Suspense>;
             case 'terminal':
-                return <TerminalView />;
+                return <React.Suspense fallback={null}><TerminalView /></React.Suspense>;
             case 'files':
-                return <FilesView />;
+                return <React.Suspense fallback={null}><FilesView /></React.Suspense>;
             default:
                 return null;
         }
@@ -783,7 +793,7 @@ export const MainLayout: React.FC = () => {
                     >
                         <div className="h-full overflow-hidden flex flex-col bg-background shadow-none drawer-safe-area">
                             <ErrorBoundary>
-                                <GitView />
+                                <React.Suspense fallback={null}><GitView /></React.Suspense>
                             </ErrorBoundary>
                         </div>
                     </motion.aside>
@@ -824,7 +834,11 @@ export const MainLayout: React.FC = () => {
                             className="absolute inset-0 z-10 bg-background"
                             style={{ paddingTop: 'var(--oc-safe-area-top, 0px)' }}
                         >
-                            <ErrorBoundary><SettingsView onClose={() => setSettingsDialogOpen(false)} /></ErrorBoundary>
+                            <ErrorBoundary>
+                                <React.Suspense fallback={null}>
+                                    <SettingsView onClose={() => setSettingsDialogOpen(false)} />
+                                </React.Suspense>
+                            </ErrorBoundary>
                         </div>
                     )}
                 </DrawerProvider>
@@ -934,7 +948,13 @@ export const MainLayout: React.FC = () => {
                                     </div>
                                 </div>
                                 <BottomTerminalDock isOpen={isBottomTerminalOpen} isMobile={isMobile}>
-                                    {isBottomTerminalOpen ? <ErrorBoundary><TerminalView /></ErrorBoundary> : null}
+                                    {isBottomTerminalOpen ? (
+                                        <ErrorBoundary>
+                                            <React.Suspense fallback={null}>
+                                                <TerminalView />
+                                            </React.Suspense>
+                                        </ErrorBoundary>
+                                    ) : null}
                                 </BottomTerminalDock>
                             </div>
                             <RightSidebar
@@ -949,15 +969,19 @@ export const MainLayout: React.FC = () => {
                     </div>
 
                     {/* Desktop settings: windowed dialog with blur */}
-                    <SettingsWindow
-                        open={isSettingsDialogOpen}
-                        onOpenChange={setSettingsDialogOpen}
-                    />
-                    <MultiRunWindow
-                        open={isMultiRunLauncherOpen}
-                        onOpenChange={setMultiRunLauncherOpen}
-                        initialPrompt={multiRunLauncherPrefillPrompt}
-                    />
+                    <React.Suspense fallback={null}>
+                        <SettingsWindow
+                            open={isSettingsDialogOpen}
+                            onOpenChange={setSettingsDialogOpen}
+                        />
+                    </React.Suspense>
+                    <React.Suspense fallback={null}>
+                        <MultiRunWindow
+                            open={isMultiRunLauncherOpen}
+                            onOpenChange={setMultiRunLauncherOpen}
+                            initialPrompt={multiRunLauncherPrefillPrompt}
+                        />
+                    </React.Suspense>
                 </>
             )}
 
