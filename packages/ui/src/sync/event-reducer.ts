@@ -282,10 +282,23 @@ export function applyDirectoryEvent(
         if (shouldPreserveExistingPart(previous, part)) {
           return false
         }
-        const dedupeFields = getUpdatedDeltaFields(previous, part)
+        // For tool parts, protect output from being overwritten by an
+        // empty/missing value. The server may send a status-only update
+        // (e.g. status → "completed") without the output field populated,
+        // which would erase previously-received content.
+        let mergedPart = part
+        if (part.type === "tool") {
+          const prevOutput = (previous as Record<string, unknown>).output
+          const nextOutput = (part as Record<string, unknown>).output
+          if (typeof prevOutput === "string" && prevOutput.length > 0
+            && (typeof nextOutput !== "string" || nextOutput.length === 0)) {
+            mergedPart = { ...part, output: prevOutput } as unknown as Part
+          }
+        }
+        const dedupeFields = getUpdatedDeltaFields(previous, mergedPart)
         next[result.index] = dedupeFields.length > 0
-          ? { ...part, __dedupeNextDeltaFields: dedupeFields } as unknown as Part
-          : part
+          ? { ...mergedPart, __dedupeNextDeltaFields: dedupeFields } as unknown as Part
+          : mergedPart
       } else {
         // Replace optimistic part (no sessionID) with server part of same type.
         // Gate: only scan if the first part lacks sessionID (optimistic parts are
