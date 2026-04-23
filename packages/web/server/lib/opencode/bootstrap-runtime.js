@@ -1,3 +1,5 @@
+import { registerGlobalAgentsRoutes } from '../global-agents-md.js';
+
 export const createBootstrapRuntime = (dependencies) => {
   const {
     createUiAuth,
@@ -75,6 +77,8 @@ export const createBootstrapRuntime = (dependencies) => {
       readSettingsFromDiskMigrated,
       normalizeTunnelSessionTtlMs,
     });
+
+    registerGlobalAgentsRoutes(app);
 
     registerTtsRoutes(app, { resolveZenModel, sayTTSCapability });
 
