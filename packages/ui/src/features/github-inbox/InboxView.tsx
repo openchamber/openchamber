@@ -4,6 +4,7 @@ import type { GitHubInboxItem } from '@/lib/api/types';
 import { RiCheckLine, RiTimeLine, RiGitPullRequestLine, RiErrorWarningLine, RiGitMergeLine } from '@remixicon/react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useStartWork } from '@/features/issue-work/useStartWork';
 import { useUIStore } from '@/stores/useUIStore';
 
@@ -14,7 +15,7 @@ export const InboxView: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<string>('all');
   const [snoozing, setSnoozing] = useState<Set<string>>(new Set());
-  const { startWork, loading: startingWork } = useStartWork();
+  const { startWork } = useStartWork();
   const setActiveMainTab = useUIStore((s) => s.setActiveMainTab);
 
   const fetchInbox = React.useCallback(async () => {
@@ -103,10 +104,10 @@ export const InboxView: React.FC = () => {
   });
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2 border-b border-[hsl(var(--border))] p-2">
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex shrink-0 items-center justify-between gap-1 border-b border-[hsl(var(--border))] px-3 py-2">
         <Select value={filter} onValueChange={setFilter}>
-          <SelectTrigger className="flex-1 h-7 typography-micro">
+          <SelectTrigger className="h-7 w-[160px] bg-transparent border-0 px-1 hover:bg-[hsl(var(--accent))] typography-micro focus:ring-0">
             <SelectValue placeholder="Filter..." />
           </SelectTrigger>
           <SelectContent>
@@ -119,75 +120,71 @@ export const InboxView: React.FC = () => {
             <SelectItem value="ready_to_merge">Ready to Merge</SelectItem>
           </SelectContent>
         </Select>
-        <Button variant="ghost" size="sm" onClick={fetchInbox} disabled={loading} className="h-7 px-2 typography-micro">
-          {loading ? '...' : 'Refresh'}
-        </Button>
+        <Tooltip delayDuration={300}>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={fetchInbox}
+              disabled={loading}
+              className="h-7 w-7 p-0 text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"
+            >
+              <RiTimeLine className={loading ? 'size-4 animate-spin' : 'size-4'} />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent><p>Refresh Inbox</p></TooltipContent>
+        </Tooltip>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-2">
-        {error && <div className="text-[hsl(var(--status-error))] typography-micro mb-2">{error}</div>}
+      <div className="flex-1 overflow-y-auto px-2.5 pb-2 pt-1">
+        {error && <div className="text-[hsl(var(--status-error))] typography-micro mb-2 px-1.5">{error}</div>}
         {filteredItems.length === 0 && !loading && (
-          <div className="text-center text-[hsl(var(--muted-foreground))] typography-micro mt-4">
+          <div className="text-left text-[hsl(var(--muted-foreground))] typography-micro mt-2 px-1.5">
             Inbox is empty.
           </div>
         )}
-        <div className="flex flex-col gap-2 p-1">
+        <div className="space-y-0.5">
           {filteredItems.map((item) => (
-            <div key={item.id} className="flex flex-col gap-2 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] p-2.5">
+            <div
+              key={item.id}
+              className="group relative flex flex-col gap-1 rounded-sm px-1.5 py-1.5 hover:bg-[hsl(var(--accent))] cursor-pointer transition-colors"
+              onClick={() => {
+                if (item.number) handleStartWork(item);
+              }}
+            >
               <div className="flex items-start gap-2">
-                {item.reason === 'stale' && <RiTimeLine className="size-4 shrink-0 text-[hsl(var(--status-warning))]" />}
-                {item.reason === 'ci_failing' && <RiErrorWarningLine className="size-4 shrink-0 text-[hsl(var(--status-error))]" />}
-                {item.reason === 'ready_to_merge' && <RiGitMergeLine className="size-4 shrink-0 text-[hsl(var(--status-success))]" />}
-                {['stale', 'ci_failing', 'ready_to_merge'].indexOf(item.reason) === -1 && <RiGitPullRequestLine className="size-4 shrink-0 text-[hsl(var(--muted-foreground))]" />}
+                <div className="mt-0.5">
+                  {item.reason === 'stale' && <RiTimeLine className="size-3.5 text-[hsl(var(--status-warning))]" />}
+                  {item.reason === 'ci_failing' && <RiErrorWarningLine className="size-3.5 text-[hsl(var(--status-error))]" />}
+                  {item.reason === 'ready_to_merge' && <RiGitMergeLine className="size-3.5 text-[hsl(var(--status-success))]" />}
+                  {['stale', 'ci_failing', 'ready_to_merge'].indexOf(item.reason) === -1 && <RiGitPullRequestLine className="size-3.5 text-[hsl(var(--muted-foreground))]" />}
+                </div>
                 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5">
-                    <span className="typography-micro font-medium text-[hsl(var(--foreground))] truncate">{item.repoFullName}</span>
-                    <span className="typography-micro text-[hsl(var(--muted-foreground))] opacity-80 whitespace-nowrap">
-                      {new Date(item.updatedAt).toLocaleDateString()}
-                    </span>
+                    <span className="typography-ui-label text-[hsl(var(--foreground))] truncate">{item.repoFullName}</span>
                   </div>
-                  <div className="typography-micro text-[hsl(var(--muted-foreground))] break-words line-clamp-2 mt-0.5">
+                  <div className="typography-micro text-[hsl(var(--muted-foreground))] break-words line-clamp-2 mt-0.5 group-hover:text-[hsl(var(--foreground))] transition-colors">
                     {item.title}
                   </div>
                 </div>
-              </div>
-              
-              <div className="flex items-center gap-1.5 mt-1">
-                {item.number && (
-                  <Button 
-                    variant="secondary" 
-                    size="sm" 
-                    className="h-6 typography-micro px-2"
-                    onClick={() => handleStartWork(item)}
-                    disabled={startingWork || snoozing.has(item.id)}
-                  >
-                    Start Work
-                  </Button>
-                )}
 
-                <div className="ml-auto flex items-center gap-1">
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    className="h-6 w-6 p-0 text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"
-                    onClick={() => handleMarkDone(item)}
-                    disabled={snoozing.has(item.id)}
-                    title="Mark Done"
-                  >
-                    <RiCheckLine className="size-3.5" />
-                  </Button>
-                  
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    className="h-6 w-6 p-0 text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"
-                    onClick={() => handleSnooze(item.id, 1)}
-                    disabled={snoozing.has(item.id)}
-                    title="Snooze 1d"
-                  >
-                    <RiTimeLine className="size-3.5" />
-                  </Button>
+                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+                  <Tooltip delayDuration={300}>
+                    <TooltipTrigger asChild>
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        className="h-6 w-6 p-0 text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"
+                        onClick={() => handleMarkDone(item)}
+                        disabled={snoozing.has(item.id)}
+                        aria-label="Mark Done"
+                      >
+                        <RiCheckLine className="size-3.5" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="left"><p>Mark Done</p></TooltipContent>
+                  </Tooltip>
                 </div>
               </div>
             </div>
