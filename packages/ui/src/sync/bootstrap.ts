@@ -260,8 +260,13 @@ export async function bootstrapDirectory(input: {
       }
       set({ permission: merged })
     }),
-  ]).catch((err) => {
-    console.error(`[bootstrap] deferred phase failed for ${directory}`, err)
+  ]).then((results) => {
+    const errors = results
+      .filter((r): r is PromiseRejectedResult => r.status === "rejected")
+      .map((r) => r.reason)
+    if (errors.length) {
+      console.error(`[bootstrap] deferred phase failed for ${directory}`, errors[0])
+    }
   })
 
   // ---------------------------------------------------------------------------
