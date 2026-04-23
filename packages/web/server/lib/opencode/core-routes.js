@@ -245,8 +245,19 @@ export const registerSettingsUtilityRoutes = (app, dependencies) => {
 export const registerCommonRequestMiddleware = (app, dependencies) => {
   const { express } = dependencies;
 
+  const jsonParser = express.json({
+    limit: '50mb',
+    verify: (req, res, buf) => {
+      if (req.path.startsWith('/webhooks/')) {
+        req.rawBody = buf.toString('utf8');
+      }
+    },
+  });
+
   app.use((req, res, next) => {
     if (
+      req.path.startsWith('/api/github') ||
+      req.path.startsWith('/api/teams') ||
       req.path.startsWith('/api/config/agents') ||
       req.path.startsWith('/api/config/commands') ||
       req.path.startsWith('/api/config/mcp') ||
@@ -265,11 +276,11 @@ export const registerCommonRequestMiddleware = (app, dependencies) => {
       req.path.startsWith('/api/tts') ||
       req.path.startsWith('/api/openchamber/tunnel')
     ) {
-      express.json({ limit: '50mb' })(req, res, next);
+      jsonParser(req, res, next);
     } else if (req.path.startsWith('/api')) {
       next();
     } else {
-      express.json({ limit: '50mb' })(req, res, next);
+      jsonParser(req, res, next);
     }
   });
 

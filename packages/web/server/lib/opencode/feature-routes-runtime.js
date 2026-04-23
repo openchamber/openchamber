@@ -2,6 +2,7 @@ import { registerFsRoutes } from '../fs/routes.js';
 import { registerQuotaRoutes } from '../quota/routes.js';
 import { registerGitHubRoutes } from '../github/routes.js';
 import { registerTeamsRoutes } from '../teams/routes.js';
+import { registerWebhookRoutes } from '../teams/webhooks/receiver.js';
 import { registerGitRoutes } from '../git/routes.js';
 import { registerMagicPromptRoutes } from '../magic-prompts/routes.js';
 import { registerConfigEntityRoutes } from './config-entity-routes.js';
@@ -212,6 +213,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     registerQuotaRoutes(app, { getQuotaProviders });
     registerGitHubRoutes(app);
     registerTeamsRoutes(app);
+    registerWebhookRoutes(app);
     registerGitRoutes(app);
     registerMagicPromptRoutes(app, {
       fsPromises,
