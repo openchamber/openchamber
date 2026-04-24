@@ -134,6 +134,7 @@ const requestSignature = (items: Array<{ id: string }> | undefined): string => {
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 
 const partRepairSignature = (part: Part): string => JSON.stringify(part)
+const syncSnapshotSignature = (value: unknown): string => JSON.stringify(value)
 
 function haveEquivalentPartSnapshots(left: Part[] | undefined, right: Part[]): boolean {
   if (!left) {
@@ -159,6 +160,36 @@ function haveEquivalentPartSnapshots(left: Part[] | undefined, right: Part[]): b
   }
 
   return true
+}
+
+function haveEquivalentMessageSnapshots(left: Message[] | undefined, right: Message[]): boolean {
+  if (!left) {
+    return right.length === 0
+  }
+
+  if (left.length !== right.length) {
+    return false
+  }
+
+  for (let index = 0; index < left.length; index += 1) {
+    const leftMessage = left[index]
+    const rightMessage = right[index]
+    if (!leftMessage || !rightMessage) {
+      return false
+    }
+    if (leftMessage.id !== rightMessage.id) {
+      return false
+    }
+    if (syncSnapshotSignature(leftMessage) !== syncSnapshotSignature(rightMessage)) {
+      return false
+    }
+  }
+
+  return true
+}
+
+function haveEquivalentSyncSnapshots(left: unknown, right: unknown): boolean {
+  return syncSnapshotSignature(left) === syncSnapshotSignature(right)
 }
 
 // ---------------------------------------------------------------------------
@@ -707,9 +738,23 @@ async function resyncDirectoryAfterReconnect(
   }
 
   if (Object.keys(relevantStatuses).length > 0) {
-    store.setState((state: DirectoryStore) => ({
-      session_status: { ...state.session_status, ...relevantStatuses },
-    }))
+    store.setState((state: DirectoryStore) => {
+      let changed = false
+      for (const [sessionId, nextStatus] of Object.entries(relevantStatuses)) {
+        if (!haveEquivalentSyncSnapshots(state.session_status?.[sessionId], nextStatus)) {
+          changed = true
+          break
+        }
+      }
+
+      if (!changed) {
+        return state
+      }
+
+      return {
+        session_status: { ...state.session_status, ...relevantStatuses },
+      }
+    })
   }
 
   const scopedClient = opencodeClient.getScopedSdkClient(directory)
@@ -729,17 +774,19 @@ async function resyncDirectoryAfterReconnect(
       .sort((a, b) => cmp(a.id, b.id))
 
     store.setState((state: DirectoryStore) => {
-      const sessions = [...state.session]
-      const sessionIndex = sessions.findIndex((item) => item.id === nextSession.id)
+      const sessionIndex = state.session.findIndex((item) => item.id === nextSession.id)
+      let sessions = state.session
       let sessionChanged = false
       let sessionTotal = state.sessionTotal
 
       if (sessionIndex >= 0) {
-        if (sessions[sessionIndex] !== nextSession) {
+        if (!haveEquivalentSyncSnapshots(sessions[sessionIndex], nextSession)) {
+          sessions = [...state.session]
           sessions[sessionIndex] = nextSession
           sessionChanged = true
         }
       } else {
+        sessions = [...state.session]
         sessions.push(nextSession)
         sessions.sort((a, b) => cmp(a.id, b.id))
         if (!nextSession.parentID) sessionTotal += 1
@@ -749,19 +796,32 @@ async function resyncDirectoryAfterReconnect(
       // Merge parts: overwrite only messages present in the fetch snapshot.
       // Do NOT delete parts for messages that may have been added by SSE
       // events arriving between the fetch and the setState — those are more recent.
-      const nextPartState = { ...state.part }
+      let nextPartState = state.part
+      let partsChanged = false
       for (const record of records) {
         const messageId = record?.info?.id
         if (!messageId) continue
-        nextPartState[messageId] = (record.parts ?? [])
+        const nextParts = (record.parts ?? [])
           .filter((part) => !!part?.id && !RECONNECT_SKIP_PARTS.has(part.type))
           .sort((a, b) => cmp(a.id, b.id))
+        if (!haveEquivalentPartSnapshots(state.part[messageId], nextParts)) {
+          if (!partsChanged) {
+            nextPartState = { ...state.part }
+            partsChanged = true
+          }
+          nextPartState[messageId] = nextParts
+        }
+      }
+
+      const messagesChanged = !haveEquivalentMessageSnapshots(state.message[sessionId], nextMessages)
+      if (!sessionChanged && !messagesChanged && !partsChanged) {
+        return state
       }
 
       return {
         ...(sessionChanged ? { session: sessions, sessionTotal } : {}),
-        message: { ...state.message, [sessionId]: nextMessages },
-        part: nextPartState,
+        ...(messagesChanged ? { message: { ...state.message, [sessionId]: nextMessages } } : {}),
+        ...(partsChanged ? { part: nextPartState } : {}),
       }
     })
 
