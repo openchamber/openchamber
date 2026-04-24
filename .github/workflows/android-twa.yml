@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - feat/android-apk
     paths:
       - 'packages/android-twa/**'
       - '.github/workflows/android-twa.yml'
@@ -51,7 +50,7 @@ jobs:
     name: Build Android TWA
     needs: lint-and-test
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feat/android-apk'
+    if: ${{ github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' }}
     env:
       KEYSTORE_PASSWORD: "${{ secrets.KEYSTORE_PASSWORD || 'ci-temp-' }}"
       KEY_PASSWORD: "${{ secrets.KEY_PASSWORD || 'ci-temp-' }}"

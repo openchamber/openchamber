@@ -33,9 +33,16 @@ function checkBridge(): boolean {
 export const useIsAndroidTwa = (): boolean => {
   const [isAndroidTwa, setIsAndroidTwa] = React.useState(() => {
     if (typeof window === 'undefined') return false;
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored === 'true') return true;
-    return checkBridge();
+    // Only trust localStorage if the bridge is actually present in this runtime.
+    // Chrome and TWA share localStorage for the same origin, so a stale 'true'
+    // from a prior TWA session would cause Android-specific UI to flash in Chrome.
+    if (checkBridge()) {
+      localStorage.setItem(STORAGE_KEY, 'true');
+      return true;
+    }
+    // Clear any stale flag from a prior TWA session.
+    localStorage.removeItem(STORAGE_KEY);
+    return false;
   });
 
   React.useEffect(() => {

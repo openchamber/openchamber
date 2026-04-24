@@ -42,11 +42,9 @@ import androidx.core.content.ContextCompat;
 import androidx.webkit.WebViewCompat;
 import androidx.webkit.WebViewFeature;
 
-import java.io.FileInputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Properties;
 import java.util.Set;
 
 public class MainActivity extends AppCompatActivity {
@@ -106,35 +104,19 @@ public class MainActivity extends AppCompatActivity {
         return prefs.getString(App.KEY_SERVER_URL, null);
     }
 
-    private String loadHostName() {
-        // Try to load from local.properties in the configurable-wrapper directory
-        try {
-            java.io.File propsFile =
-                    new java.io.File(getApplicationInfo().dataDir, "../local.properties");
-            if (propsFile.exists()) {
-                Properties props = new Properties();
-                try (FileInputStream fis = new FileInputStream(propsFile)) {
-                    props.load(fis);
-                    String hostName = props.getProperty("twa.hostName");
-                    if (hostName != null && !hostName.isEmpty()) {
-                        return hostName;
-                    }
-                }
-            }
-        } catch (Exception e) {
-            Log.w(TAG, "Could not load local.properties: " + e.getMessage());
-        }
-        // Fallback: parse host from saved URL
-        String savedUrl = getSavedUrl();
-        if (savedUrl != null && !savedUrl.isEmpty()) {
-            String host = Uri.parse(savedUrl).getHost();
-            if (host != null && !host.isEmpty()) {
-                return host;
-            }
-        }
-        // Ultimate fallback (should not happen in normal operation)
-        return "localhost";
+  private String loadHostName() {
+    // Derive host from the saved URL (the source of truth at runtime).
+    // local.properties is a build-time artifact; it is not present on device.
+    String savedUrl = getSavedUrl();
+    if (savedUrl != null && !savedUrl.isEmpty()) {
+      String host = Uri.parse(savedUrl).getHost();
+      if (host != null && !host.isEmpty()) {
+        return host;
+      }
     }
+    // Ultimate fallback (should not happen in normal operation)
+    return "localhost";
+  }
 
     private void launchTwa(String url) {
         Uri uri = Uri.parse(url);
@@ -268,19 +250,24 @@ public class MainActivity extends AppCompatActivity {
       return true;
                     }
 
-                    @Override
-                    public void onPageFinished(WebView view, String pageUrl) {
-                        super.onPageFinished(view, pageUrl);
-                        String savedUrl = getSavedUrl();
-                        if (savedUrl != null
-                                && pageUrl != null
-                                && Uri.parse(pageUrl).getHost() != null
-                                && Uri.parse(pageUrl)
-                                        .getHost()
-                                        .equals(Uri.parse(savedUrl).getHost())) {
-                            view.evaluateJavascript(getNotificationBridgeJs(), null);
-                        }
-                    }
+      @Override
+      public void onPageFinished(WebView view, String pageUrl) {
+        super.onPageFinished(view, pageUrl);
+        // Only inject via onPageFinished when DOCUMENT_START_SCRIPT is not available;
+        // otherwise the script was already injected at document start.
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+          return;
+        }
+        String savedUrl = getSavedUrl();
+        if (savedUrl != null
+            && pageUrl != null
+            && Uri.parse(pageUrl).getHost() != null
+            && Uri.parse(pageUrl)
+                .getHost()
+                .equals(Uri.parse(savedUrl).getHost())) {
+          view.evaluateJavascript(getNotificationBridgeJs(), null);
+        }
+      }
 
                     @Override
                     public void onReceivedError(
