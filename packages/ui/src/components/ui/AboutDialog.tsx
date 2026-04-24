@@ -109,7 +109,7 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xs p-6">
+      <DialogContent className="max-w-sm p-6 max-h-[85vh] overflow-y-auto">
         <div className="flex flex-col items-center text-center space-y-4">
           <OpenChamberLogo width={64} height={64} />
 

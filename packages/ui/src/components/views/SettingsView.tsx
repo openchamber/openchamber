@@ -56,6 +56,7 @@ import type { OpenChamberSection } from '@/components/sections/openchamber/types
 import { OpenChamberPage } from '@/components/sections/openchamber/OpenChamberPage';
 import { McpIcon } from '@/components/icons/McpIcon';
 import { useDeviceInfo } from '@/lib/device';
+import { useIsAndroidTwa } from '@/hooks/useIsAndroidTwa';
 import { isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
 import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
 import {
@@ -103,10 +104,10 @@ const pageOrder: SettingsPageSlug[] = [
   'tunnel',
 ];
 
-function buildRuntimeContext(isDesktop: boolean): SettingsRuntimeContext {
+function buildRuntimeContext(isDesktop: boolean, isAndroidTwa: boolean): SettingsRuntimeContext {
   const isVSCode = isVSCodeRuntime();
   const isWeb = !isDesktop && isWebRuntime();
-  return { isVSCode, isWeb, isDesktop };
+  return { isVSCode, isWeb, isDesktop, isAndroidTwa };
 }
 
 function isPageAvailable(page: SettingsPageMeta, ctx: SettingsRuntimeContext): boolean {
@@ -264,9 +265,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     return isDesktopShell();
   }, []);
 
-  // keep platform check available for future window chrome tweaks
+  const isAndroidTwa = useIsAndroidTwa();
 
-  const runtimeCtx = React.useMemo(() => buildRuntimeContext(isDesktopApp), [isDesktopApp]);
+  const runtimeCtx = React.useMemo(() => buildRuntimeContext(isDesktopApp, isAndroidTwa), [isDesktopApp, isAndroidTwa]);
 
   const visiblePages = React.useMemo(() => {
     return SETTINGS_PAGE_METADATA

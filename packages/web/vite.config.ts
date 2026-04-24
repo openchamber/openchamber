@@ -51,7 +51,8 @@ export default defineConfig({
         // iOS Safari/PWA is much more reliable with a classic (non-module) SW bundle.
         rollupFormat: 'iife',
         // We already keep a custom manifest in index.html
-        injectionPoint: undefined,
+        injectionPoint: 'self.__WB_MANIFEST',
+        maximumFileSizeToCacheInBytes: 20 * 1024 * 1024,
       },
       devOptions: {
         enabled: pwaDevEnabled,

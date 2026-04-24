@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">OpenChamber</string>
+    <string name="settings_title">Connect to Server</string>
+    <string name="settings_description">Enter your OpenChamber server URL to connect</string>
+    <string name="url_hint">https://your-server.com</string>
+    <string name="connect_button">Save &amp; Connect</string>
+    <string name="clear_button">Clear</string>
+    <string name="invalid_url">Please enter a valid URL starting with http:// or https://</string>
+    <string name="invalid_url_detail">URL must have a valid hostname</string>
+    <string name="https_required">HTTPS is required. HTTP is only supported for localhost connections.</string>
+    <string name="http_warning_title">Insecure connection</string>
+    <string name="http_warning_message">This URL uses HTTP, which sends data unencrypted. This is fine for trusted networks like Tailscale or LAN, but not recommended for public servers. Continue anyway?</string>
+    <string name="http_warning_accept">Continue with HTTP</string>
+ <string name="connection_error">Unable to connect to server</string>
+ <string name="network_unavailable">No internet connection</string>
+ <string name="error_page_title">Connection Failed</string>
+ <string name="error_page_message">Could not load the page. Check your internet connection and try again.</string>
+ <string name="retry_button">Retry</string>
+</resources>

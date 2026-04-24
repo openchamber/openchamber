@@ -1,0 +1,145 @@
+name: Android TWA Build
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'packages/android-twa/**'
+      - '.github/workflows/android-twa.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'packages/android-twa/**'
+      - '.github/workflows/android-twa.yml'
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build type (apk or aab)'
+        required: false
+        default: 'apk'
+        type: choice
+        options:
+          - apk
+          - aab
+          - both
+
+env:
+  BUN_VERSION: '1.3.5'
+
+jobs:
+  lint-and-test:
+    name: Lint & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run tests
+        run: bun test packages/android-twa
+
+  build:
+    name: Build Android TWA
+    needs: lint-and-test
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' }}
+    env:
+      KEYSTORE_PASSWORD: "${{ secrets.KEYSTORE_PASSWORD || 'ci-temp-' }}"
+      KEY_PASSWORD: "${{ secrets.KEY_PASSWORD || 'ci-temp-' }}"
+      TWA_HOST_NAME: "${{ secrets.TWA_HOST || 'openchamber.app' }}"
+      TWA_DEFAULT_URL: "${{ secrets.TWA_DEFAULT_URL || 'https://openchamber.app' }}"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Gradle cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('packages/android-twa/configurable-wrapper/**/*.gradle*', 'packages/android-twa/configurable-wrapper/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Generate signing key
+        run: |
+          if [ ! -f packages/android-twa/android.keystore ]; then
+            # Ensure password meets keytool's 6-char minimum
+            if [ ${#KEYSTORE_PASSWORD} -lt 6 ]; then
+              KEYSTORE_PASSWORD="ci-temp-$(openssl rand -hex 6)"
+              KEY_PASSWORD="$KEYSTORE_PASSWORD"
+              echo "KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+              echo "KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
+            fi
+            keytool -genkeypair -alias openchamber \
+              -keyalg RSA -keysize 2048 \
+              -validity 10000 \
+              -keystore packages/android-twa/android.keystore \
+              -storepass "$KEYSTORE_PASSWORD" \
+              -dname "CN=OpenChamber, OU=Mobile, O=OpenChamber, L=Remote, ST=Remote, C=US"
+          fi
+
+      - name: Create local.properties
+        run: |
+          PROP_FILE=packages/android-twa/configurable-wrapper/local.properties
+          echo "keystore.path=../android.keystore" > "$PROP_FILE"
+          echo "keystore.alias=openchamber" >> "$PROP_FILE"
+          echo "keystore.password=$KEYSTORE_PASSWORD" >> "$PROP_FILE"
+          echo "keystore.keyPassword=$KEY_PASSWORD" >> "$PROP_FILE"
+          echo "twa.hostName=$TWA_HOST_NAME" >> "$PROP_FILE"
+          echo "twa.defaultUrl=$TWA_DEFAULT_URL" >> "$PROP_FILE"
+
+      - name: Build APK
+        run: bun run android:build
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: packages/android-twa/configurable-wrapper/app/build/outputs/apk/release/app-release.apk
+          retention-days: 30
+
+# Optional: Release job that uploads to Play Store
+# Uncomment and configure with your Play Store credentials
+# release:
+#   name: Release to Play Store
+#   needs: build
+#   runs-on: ubuntu-latest
+#   if: github.event_name == 'workflow_dispatch' && github.event.inputs.build_type == 'aab'
+#   steps:
+#     - name: Download AAB
+#       uses: actions/download-artifact@v4
+#       with:
+#         name: android-aab
+#     - name: Upload to Play Store
+#       uses: r0adkll/upload-google-play@v1
+#       with:
+#         serviceAccountJsonPlainText: ${{ secrets.PLAY_STORE_SERVICE_ACCOUNT }}
+#         packageName: ai.opencode.openchamber.configurable
+#         releaseFiles: app-release.aab
+#         track: internal

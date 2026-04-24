@@ -7,4 +7,5 @@ export type OpenChamberSection =
   | 'github'
   | 'notifications'
   | 'voice'
+  | 'app'
   | 'tunnel';
