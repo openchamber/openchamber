@@ -10,6 +10,7 @@ import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { generateSyntaxTheme } from '@/lib/theme/syntaxThemeGenerator';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { DiffPreview, WritePreview } from './DiffPreview';
+import { useI18n } from '@/lib/i18n';
 
 interface PermissionCardProps {
   permission: PermissionRequest;
@@ -62,6 +63,7 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
   permission,
   onResponse
 }) => {
+  const { t } = useI18n();
   const [isResponding, setIsResponding] = React.useState(false);
   const [hasResponded, setHasResponded] = React.useState(false);
   const respondToPermission = sessionActions.respondToPermission;;
@@ -123,12 +125,12 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
           )}
           {workingDir && (
             <div className="typography-meta text-muted-foreground mb-2">
-              <span className="font-semibold">Working Directory:</span> <code className="px-1 py-0.5 bg-muted/30 rounded">{workingDir}</code>
+              <span className="font-semibold">{t('chat.permissionCard.workingDirectory')}</span> <code className="px-1 py-0.5 bg-muted/30 rounded">{workingDir}</code>
             </div>
           )}
           {timeout && (
             <div className="typography-meta text-muted-foreground mb-2">
-              <span className="font-semibold">Timeout:</span> {timeout}ms
+              <span className="font-semibold">{t('chat.permissionCard.timeout')}</span> {timeout}ms
             </div>
           )}
           {}
@@ -215,7 +217,7 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
         <>
           {url && (
             <div className="mb-2">
-              <div className="typography-meta text-muted-foreground mb-1">Request:</div>
+              <div className="typography-meta text-muted-foreground mb-1">{t('chat.permissionCard.request')}</div>
               <div className="flex items-center gap-2">
                 <span className="typography-meta font-semibold px-1.5 py-0.5 bg-primary/20 text-primary rounded">
                   {method}
@@ -228,7 +230,7 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
           )}
           {headers && Object.keys(headers).length > 0 && (
             <div className="mb-2">
-              <div className="typography-meta text-muted-foreground mb-1">Headers:</div>
+              <div className="typography-meta text-muted-foreground mb-1">{t('chat.permissionCard.headers')}</div>
               <ScrollableOverlay outerClassName="max-h-24" className="p-0">
                 <SyntaxHighlighter
                   language="json"
@@ -250,7 +252,7 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
           )}
           {body && (
             <div className="mb-2">
-              <div className="typography-meta text-muted-foreground mb-1">Body:</div>
+              <div className="typography-meta text-muted-foreground mb-1">{t('chat.permissionCard.body')}</div>
               <ScrollableOverlay outerClassName="max-h-32" className="p-0">
                 <SyntaxHighlighter
                   language={typeof body === 'object' ? 'json' : 'text'}
@@ -291,7 +293,7 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
         )}
         {genericContent && (
           <div className="mb-2">
-            <div className="typography-meta text-muted-foreground mb-1">Action:</div>
+            <div className="typography-meta text-muted-foreground mb-1">{t('chat.permissionCard.action')}</div>
             <ScrollableOverlay outerClassName="max-h-32" className="p-0">
               <pre className="typography-meta font-mono px-2 py-1 bg-muted/30 rounded whitespace-pre-wrap break-all">
                 {String(genericContent)}
@@ -302,7 +304,7 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
         {}
         {Object.keys(permission.metadata).length > 0 && !genericContent && !description && (
           <div>
-            <div className="typography-meta text-muted-foreground mb-1">Details:</div>
+            <div className="typography-meta text-muted-foreground mb-1">{t('chat.permissionCard.details')}</div>
             <ScrollableOverlay outerClassName="max-h-32" className="p-0">
               <pre className="typography-meta font-mono px-2 py-1 bg-muted/30 rounded whitespace-pre-wrap break-all">
                 {JSON.stringify(permission.metadata, null, 2)}
@@ -343,7 +345,7 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
           <div className="px-2 py-2">
             {permission.patterns.length > 0 && (
               <div className="mb-2">
-                <div className="typography-meta text-muted-foreground mb-1">Patterns:</div>
+                <div className="typography-meta text-muted-foreground mb-1">{t('chat.permissionCard.patterns')}</div>
                 <code className="typography-meta px-2 py-1 bg-muted/30 rounded block break-all">
                   {permission.patterns.join(", ")}
                 </code>

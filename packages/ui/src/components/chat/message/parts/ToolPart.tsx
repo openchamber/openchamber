@@ -41,6 +41,7 @@ import { getToolIcon } from './toolPresentation';
 import { useDurationTickerNow } from './useDurationTicker';
 import { resolveFallbackTaskSessionId } from './resolveFallbackTaskSessionId';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
+import { useI18n } from '@/lib/i18n';
 
 type ToolStateWithMetadata = ToolStateUnion & { metadata?: Record<string, unknown>; input?: Record<string, unknown>; output?: string; error?: string; time?: { start: number; end?: number } };
 
@@ -1060,6 +1061,7 @@ const TaskToolSummary: React.FC<{
     animateTailText?: boolean;
     isActive?: boolean;
 }> = ({ entries, isExpanded, isMobile, output, sessionId, onShowPopup, input, animateTailText = true, isActive = false }) => {
+    const { t } = useI18n();
     const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
     const showToolFileIcons = useUIStore((state) => state.showToolFileIcons);
     const displayEntries = entries;
@@ -1171,7 +1173,7 @@ const TaskToolSummary: React.FC<{
                     onClick={handleOpenSession}
                 >
                     <RiExternalLinkLine className="h-3.5 w-3.5 flex-shrink-0" />
-                    <span className="typography-meta text-primary font-medium">Open {agentType.charAt(0).toUpperCase() + agentType.slice(1)} subtask</span>
+                    <span className="typography-meta text-primary font-medium">{t('chat.toolPart.openSubtask', { type: agentType.charAt(0).toUpperCase() + agentType.slice(1) })}</span>
                 </button>
             )}
 
@@ -1192,7 +1194,7 @@ const TaskToolSummary: React.FC<{
                         ) : (
                             <RiArrowRightSLine className="h-3.5 w-3.5 flex-shrink-0" />
                         )}
-                        <span className="typography-meta text-foreground/80 font-medium">Output</span>
+                        <span className="typography-meta text-foreground/80 font-medium">{t('chat.toolPart.output')}</span>
                     </button>
                     {isOutputExpanded ? (
                         <ToolScrollableSection maxHeightClass="max-h-[50vh]">
@@ -1409,6 +1411,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     currentDirectory,
     onShowPopup,
 }) => {
+    const { t } = useI18n();
     const { pierreTheme, pierreThemeType } = usePierreThemeConfig();
     const [diffViewMode, setDiffViewMode] = React.useState<DiffViewMode>('unified');
     const stateWithData = state as ToolStateWithMetadata;
@@ -1497,7 +1500,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                     }}
                 >
                     <div className="typography-meta font-medium" style={{ color: 'var(--status-error)' }}>
-                        LSP errors
+                        {t('chat.toolPart.lspErrors')}
                     </div>
                     <div className="space-y-1">
                         <div className="flex items-center gap-1 min-w-0">
@@ -1519,7 +1522,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                         </div>
                         {diagnosticSection.remaining > 0 ? (
                             <div className="typography-micro text-muted-foreground">
-                                +{diagnosticSection.remaining} more errors
+                                {t('chat.toolPart.moreErrors', { count: diagnosticSection.remaining })}
                             </div>
                         ) : null}
                     </div>
@@ -1549,7 +1552,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
             if (state.status === 'error' && 'error' in state) {
                 return (
                     <div>
-                        <div className="typography-meta font-medium text-muted-foreground mb-1">Error:</div>
+                        <div className="typography-meta font-medium text-muted-foreground mb-1">{t('chat.toolPart.error')}</div>
                         <div className="typography-meta p-2 rounded-xl border" style={{
                             backgroundColor: 'var(--status-error-background)',
                             color: 'var(--status-error)',
@@ -1590,7 +1593,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                 );
             }
 
-            return <div className="typography-meta text-muted-foreground">Awaiting response...</div>;
+            return <div className="typography-meta text-muted-foreground">{t('chat.toolPart.awaitingResponse')}</div>;
         }
 
         if (part.tool === 'task' && hasStringOutput) {
@@ -1655,7 +1658,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         }
 
         return renderScrollableBlock(
-            <div className="typography-meta text-muted-foreground/70">No output produced</div>,
+            <div className="typography-meta text-muted-foreground/70">{t('chat.toolPart.noOutputProduced')}</div>,
             { maxHeightClass: 'max-h-60' }
         );
     };
@@ -1714,7 +1717,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
 
                     {state.status === 'error' && 'error' in state && (
                         <div>
-                            <div className="typography-meta font-medium text-muted-foreground/80 mb-1">Error:</div>
+                            <div className="typography-meta font-medium text-muted-foreground/80 mb-1">{t('chat.toolPart.error')}</div>
                             <div className="typography-meta p-2 rounded-xl border" style={{
                                 backgroundColor: 'var(--status-error-background)',
                                 color: 'var(--status-error)',

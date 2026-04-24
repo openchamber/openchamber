@@ -55,6 +55,7 @@ import { useDrawerSwipe } from '@/hooks/useDrawerSwipe';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useNotificationStore } from '@/sync/notification-store';
+import { useI18n } from '@/lib/i18n';
 
 interface MobileSessionStatusBarProps {
   onSessionSwitch?: (sessionId: string) => void;
@@ -745,6 +746,7 @@ function ProjectEditPanel({
   onDelete,
   homeDirectory,
 }: ProjectEditPanelProps) {
+  const { t } = useI18n();
   const [localProjects, setLocalProjects] = React.useState(projects);
 
   React.useEffect(() => {
@@ -797,10 +799,10 @@ function ProjectEditPanel({
     <MobileOverlayPanel
       open={isOpen}
       onClose={onClose}
-      title="Edit Projects"
+      title={t('chat.mobileStatus.editProjects.title')}
       footer={
         <p className="text-xs text-[var(--surface-mutedForeground)] text-center">
-          Drag items to reorder, or use arrows to move. Tap edit to change details.
+          {t('chat.mobileStatus.editProjects.footer')}
         </p>
       }
     >
@@ -832,7 +834,7 @@ function ProjectEditPanel({
 
         {localProjects.length === 0 && (
           <div className="text-center py-8 text-[var(--surface-mutedForeground)]">
-            No projects to edit
+            {t('chat.mobileStatus.editProjects.empty')}
           </div>
         )}
       </div>
@@ -958,6 +960,7 @@ function ProjectBar({
   onRemoveProject,
   homeDirectory
 }: ProjectBarProps) {
+  const { t } = useI18n();
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const [editPanelOpen, setEditPanelOpen] = React.useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
@@ -1012,12 +1015,12 @@ function ProjectBar({
   if (projects.length === 0) {
     return (
       <div className="flex items-center gap-2 px-2 py-1 border-b border-[var(--interactive-border)] bg-transparent">
-        <span className="text-[11px] text-[var(--surface-mutedForeground)]">No projects</span>
+        <span className="text-[11px] text-[var(--surface-mutedForeground)]">{t('chat.mobileStatus.projects.empty')}</span>
         <button
           type="button"
           onClick={onAddProject}
           className="flex items-center justify-center !py-1.5 px-2 rounded-md border border-[var(--primary-base)]/60 bg-[var(--primary-base)]/5 text-[var(--primary-base)]/80 hover:text-[var(--primary-base)] hover:bg-[var(--primary-base)]/10 !min-h-0"
-          aria-label="Add project"
+          aria-label={t('chat.mobileStatus.projects.addAria')}
         >
           <RiAddLine className="h-3 w-3" />
         </button>
@@ -1093,7 +1096,7 @@ function ProjectBar({
         type="button"
         onClick={onAddProject}
         className="flex items-center justify-center !py-1.5 px-2 rounded-md border border-[var(--primary-base)]/60 bg-[var(--primary-base)]/5 text-[var(--primary-base)]/80 hover:text-[var(--primary-base)] hover:bg-[var(--primary-base)]/10 shrink-0 !min-h-0"
-        aria-label="Add project"
+        aria-label={t('chat.mobileStatus.projects.addAria')}
       >
         <RiAddLine className="h-3.5 w-3.5" />
       </button>
@@ -1102,17 +1105,17 @@ function ProjectBar({
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Remove Project</DialogTitle>
+            <DialogTitle>{t('chat.mobileStatus.projects.removeTitle')}</DialogTitle>
             <DialogDescription>
-              Are you sure you want to remove <span className="font-medium text-foreground">{projectToDelete?.label || formatDirectoryName(projectToDelete?.path || '', homeDirectory)}</span>?
+              {t('chat.mobileStatus.projects.removeDescriptionPrefix')} <span className="font-medium text-foreground">{projectToDelete?.label || formatDirectoryName(projectToDelete?.path || '', homeDirectory)}</span>?
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="flex gap-2">
             <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
-              Cancel
+              {t('chat.mobileStatus.projects.cancel')}
             </Button>
             <Button variant="destructive" onClick={handleConfirmDelete}>
-              Remove
+              {t('chat.mobileStatus.projects.remove')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1176,6 +1179,7 @@ function CollapsedView({
   contextUsage: SessionContextUsage | null;
   childIndicators?: Array<{ session: Session; isRunning: boolean }>;
 }) {
+  const { t } = useI18n();
   const { handleTouchStart, handleTouchMove, handleTouchEnd } = useDrawerSwipe();
 
   return (
@@ -1219,7 +1223,7 @@ function CollapsedView({
           }}
           className="flex items-center gap-0.5 px-2 py-1 text-[12px] leading-tight !min-h-0 rounded border border-[var(--primary-base)]/60 bg-[var(--primary-base)]/5 text-[var(--primary-base)]/80 hover:text-[var(--primary-base)] hover:bg-[var(--primary-base)]/10 self-center"
         >
-          New
+          {t('chat.mobileStatus.new')}
         </button>
       </div>
     </div>
@@ -1283,6 +1287,7 @@ function ExpandedView({
   homeDirectory: string | null;
   childIndicators?: Array<{ session: Session; isRunning: boolean }>;
 }) {
+  const { t } = useI18n();
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [collapsedHeight, setCollapsedHeight] = React.useState<number | null>(null);
   const [hasMeasured, setHasMeasured] = React.useState(false);
@@ -1376,7 +1381,7 @@ function ExpandedView({
             }}
             className="flex items-center gap-0.5 px-2 py-1 text-[12px] leading-tight !min-h-0 rounded border border-[var(--primary-base)]/60 bg-[var(--primary-base)]/5 text-[var(--primary-base)]/80 hover:text-[var(--primary-base)] hover:bg-[var(--primary-base)]/10 self-start"
           >
-            New
+            {t('chat.mobileStatus.new')}
           </button>
         </div>
       </div>
@@ -1400,7 +1405,7 @@ function ExpandedView({
       >
         {displaySessions.length === 0 ? (
           <div className="flex items-center justify-center py-3 text-[11px] text-[var(--surface-mutedForeground)]">
-            <span>No sessions in this project</span>
+            <span>{t('chat.mobileStatus.noSessionsInProject')}</span>
           </div>
         ) : (
           displaySessions.map((session) => (
@@ -1424,6 +1429,7 @@ function ExpandedView({
 export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
   onSessionSwitch,
 }) => {
+  const { t } = useI18n();
   const { currentTheme } = useThemeSystem();
   const sessions = useSessions();
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
@@ -1457,7 +1463,7 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
   const currentSession = sessions.find((s) => s.id === currentSessionId);
   const currentSessionTitle = currentSession
     ? getSessionTitle(currentSession)
-    : '← Swipe here to open sidebars →';
+    : t('chat.mobileStatus.swipeHint');
 
   // Calculate current session's child indicators
   const currentSessionWithStatus = sortedSessions.find((s) => s.id === currentSessionId);
@@ -1522,19 +1528,19 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
         if (result.success && result.path) {
           const added = addProject(result.path, { id: result.projectId });
           if (!added) {
-            toast.error('Failed to add project', {
-              description: 'Please select a valid directory.',
+            toast.error(t('chat.mobileStatus.toast.addProjectFailed'), {
+              description: t('chat.mobileStatus.toast.selectValidDirectory'),
             });
           }
         } else if (result.error && result.error !== 'Directory selection cancelled') {
-          toast.error('Failed to select directory', {
+          toast.error(t('chat.mobileStatus.toast.selectDirectoryFailed'), {
             description: result.error,
           });
         }
       })
       .catch((error) => {
         console.error('Failed to select directory:', error);
-        toast.error('Failed to select directory');
+        toast.error(t('chat.mobileStatus.toast.selectDirectoryFailed'));
       });
   };
 

@@ -3,6 +3,7 @@ import { RiCloseLine, RiMessage2Line } from '@remixicon/react';
 import { useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
+import { useI18n } from '@/lib/i18n';
 
 interface QueuedMessageChipProps {
     message: QueuedMessage;
@@ -11,6 +12,7 @@ interface QueuedMessageChipProps {
 }
 
 const QueuedMessageChip = memo(({ message, sessionId, onEdit }: QueuedMessageChipProps) => {
+    const { t } = useI18n();
     const removeFromQueue = useMessageQueueStore((state) => state.removeFromQueue);
 
     // Get first line of message, truncated
@@ -38,11 +40,11 @@ const QueuedMessageChip = memo(({ message, sessionId, onEdit }: QueuedMessageChi
             <span className="text-muted-foreground flex-shrink-0">
                 Queued
                 {attachmentCount > 0 && (
-                    <span className="ml-1">+{attachmentCount} file{attachmentCount > 1 ? 's' : ''}</span>
+                    <span className="ml-1">{t('chat.queuedMessage.attachments', { count: attachmentCount })}</span>
                 )}
             </span>
             <span className="text-foreground truncate">
-                {firstLine || '(empty)'}
+                {firstLine || t('chat.queuedMessage.empty')}
             </span>
             <span
                 onClick={(e) => {
@@ -50,7 +52,7 @@ const QueuedMessageChip = memo(({ message, sessionId, onEdit }: QueuedMessageChi
                     removeFromQueue(sessionId, message.id);
                 }}
                 className="flex items-center justify-center h-6 w-6 flex-shrink-0 hover:bg-[var(--interactive-hover)] rounded-full transition-colors cursor-pointer"
-                aria-label="Remove from queue"
+                aria-label={t('chat.queuedMessage.removeAria')}
             >
                 <RiCloseLine className="h-4 w-4 text-muted-foreground" />
             </span>

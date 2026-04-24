@@ -13,6 +13,7 @@ import {
     getQuickEffortOptions,
     parseEffortVariant,
 } from './mobileControlsUtils';
+import { useI18n } from '@/lib/i18n';
 
 const COMPACT_NUMBER_FORMATTER = new Intl.NumberFormat('en-US', {
     notation: 'compact',
@@ -43,6 +44,7 @@ export const UnifiedControlsDrawer: React.FC<UnifiedControlsDrawerProps> = ({
     onOpenModel,
     onOpenEffort,
 }) => {
+    const { t } = useI18n();
     const providers = useConfigStore((state) => state.providers);
     const currentProviderId = useConfigStore((state) => state.currentProviderId);
     const currentModelId = useConfigStore((state) => state.currentModelId);
@@ -156,16 +158,16 @@ export const UnifiedControlsDrawer: React.FC<UnifiedControlsDrawerProps> = ({
     };
 
     return (
-        <MobileOverlayPanel open={open} onClose={onClose} title="Controls">
+        <MobileOverlayPanel open={open} onClose={onClose} title={t('chat.unifiedControls.title')}>
             <div className="flex flex-col gap-3">
                 <div className="flex flex-col gap-2">
                     <div className="typography-meta font-semibold uppercase tracking-wide text-muted-foreground">
-                        Model
+                        {t('chat.unifiedControls.model.title')}
                     </div>
                     <div className="rounded-xl border border-border/40 overflow-hidden">
                         {recentModels.length === 0 && !hasCurrentInRecents && (
                             <div className="px-3 py-2 typography-meta text-muted-foreground">
-                                No recent models
+                                {t('chat.unifiedControls.model.noRecent')}
                             </div>
                         )}
                         {recentModels.map(({ providerID, modelID, model }) => {
@@ -204,7 +206,7 @@ export const UnifiedControlsDrawer: React.FC<UnifiedControlsDrawerProps> = ({
                             type="button"
                             onClick={onOpenModel}
                             className="flex min-h-[44px] w-full items-center justify-center border-t border-border/30 px-3 py-2 typography-meta font-medium text-muted-foreground"
-                            aria-label="More models"
+                            aria-label={t('chat.unifiedControls.model.moreAria')}
                         >
                             ...
                         </button>
@@ -214,7 +216,7 @@ export const UnifiedControlsDrawer: React.FC<UnifiedControlsDrawerProps> = ({
                 {hasEffort && (
                     <div className="flex flex-col gap-2">
                         <div className="typography-meta font-semibold uppercase tracking-wide text-muted-foreground">
-                            Effort
+                            {t('chat.unifiedControls.effort.title')}
                         </div>
                         <div className="flex flex-wrap gap-2">
                             {quickEfforts.map((variant) => {
@@ -241,7 +243,7 @@ export const UnifiedControlsDrawer: React.FC<UnifiedControlsDrawerProps> = ({
                                     type="button"
                                     onClick={onOpenEffort}
                                     className="inline-flex items-center rounded-full border border-border/40 px-2.5 py-1 typography-meta font-medium text-muted-foreground hover:bg-interactive-hover/50"
-                                    aria-label="More effort options"
+                                    aria-label={t('chat.unifiedControls.effort.moreAria')}
                                 >
                                     ...
                                 </button>

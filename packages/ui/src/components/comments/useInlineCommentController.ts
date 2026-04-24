@@ -2,6 +2,7 @@ import React from 'react';
 import { toast } from '@/components/ui';
 import { useInlineCommentDraftStore, type InlineCommentDraft, type InlineCommentSource } from '@/stores/useInlineCommentDraftStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useI18n } from '@/lib/i18n';
 
 type LineRangeBase = {
   start: number;
@@ -46,6 +47,7 @@ export const normalizeLineRange = <TRange extends LineRangeBase>(range: TRange):
 export function useInlineCommentController<TRange extends LineRangeBase>(
   options: UseInlineCommentControllerOptions<TRange>
 ) {
+  const { t } = useI18n();
   const { source, fileLabel, language, getCodeForRange, toStoreRange, fromDraftRange } = options;
 
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
@@ -100,7 +102,7 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
     if (!targetRange || !trimmedText || !fileLabel) return;
 
     if (!sessionKey) {
-      toast.error('Select a session to save comment');
+      toast.error(t('inlineComment.toast.selectSessionToSave'));
       return;
     }
 
@@ -133,7 +135,7 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
     }
 
     reset();
-  }, [addDraft, editingDraftId, fileLabel, getCodeForRange, language, reset, selection, sessionKey, source, toStoreRange, updateDraft]);
+  }, [addDraft, editingDraftId, fileLabel, getCodeForRange, language, reset, selection, sessionKey, source, t, toStoreRange, updateDraft]);
 
   return {
     sessionKey,
