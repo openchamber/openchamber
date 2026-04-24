@@ -1,20 +1,30 @@
 /// <reference lib="webworker" />
 
 /**
- * Architectural decision: Workbox service worker for TWA (Android)
+ * Architectural decision: conditional Workbox routes for TWA (Android)
  *
- * This service worker uses Workbox caching strategies (precacheAndRoute, NetworkFirst,
- * CacheFirst, ExpirationPlugin) to provide offline support and performance optimization
- * for the Android TWA (Trusted Web Activity) build of OpenChamber.
+ * This service worker provides two sets of behaviour:
  *
- * TWA is an Android-only distribution — it runs inside Chrome Custom Tabs, not in iOS Safari.
- * The upstream codebase previously set `injectionPoint: undefined` and omitted workbox
- * dependencies to avoid iOS Safari service-worker stability issues. That concern does not
- * apply here: TWA targets Chrome on Android, where workbox is well-supported.
+ * 1. **Push notifications** — always active on every platform (install,
+ *    activate, push, notificationclick). These are harmless on browsers
+ *    that don't support push because the events simply never fire.
  *
- * When the app is NOT built for TWA (default web/PWA), VitePWA's `injectionPoint` is
- * `undefined` and `self.__WB_MANIFEST` resolves to an empty array, so this file degrades
- * gracefully — precacheAndRoute([]) is a no-op and the caching routes simply don't fire.
+ * 2. **Workbox caching routes** (precacheAndRoute, navigation NetworkFirst,
+ *    API NetworkFirst, static-asset CacheFirst) — registered ONLY after the
+ *    page signals TWA context via a `{ type: 'TWA_CONTEXT' }` postMessage.
+ *    This avoids regressions on iOS Safari where the upstream codebase
+ *    deliberately avoided runtime Workbox routing (3 s navigation timeout,
+ *    stale cached API responses, and SSE/WebSocket interference).
+ *
+ * The TWA detection flow:
+ *   a. The Android WebView injects `AndroidNotificationBridge` via
+ *      `addDocumentStartJavaScript` (or onPageStarted fallback).
+ *   b. The page's `useIsAndroidTwa` hook (or main.tsx) detects the bridge
+ *      and sends `navigator.serviceWorker.controller.postMessage({
+ *      type: 'TWA_CONTEXT' })`.
+ *   c. The service worker receives the message and registers the Workbox
+ *      routes. Until that message arrives, the service worker is a
+ *      pass-through — all requests go to the network unintercepted.
  */
 
 import { precacheAndRoute } from 'workbox-precaching';
@@ -27,70 +37,9 @@ declare const self: ServiceWorkerGlobalScope & {
   __WB_MANIFEST: Array<string | { url: string; revision?: string }>;
 };
 
-precacheAndRoute(self.__WB_MANIFEST);
-
-const OFFLINE_BODY = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>OpenChamber – Offline</title>
-<style>
-  body{font-family:system-ui,-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#100f0f;color:#fffcf0}
-  .card{text-align:center;max-width:360px;padding:2rem}
-  h1{font-size:1.5rem;margin:0 0 .5rem}
-  p{color:#9e9b93;margin:0 0 1.5rem;line-height:1.5}
-  button{background:#66800b;color:#fffcf0;border:none;border-radius:.5rem;padding:.6rem 1.4rem;font-size:1rem;cursor:pointer}
-  button:hover{background:#4d6008}
-</style>
-</head>
-<body><div class="card">
-<h1>You're offline</h1>
-<p>OpenChamber can't reach the server right now. Check your connection and try again.</p>
-<button onclick="location.reload()">Retry</button>
-</div></body>
-</html>`;
-
-const offlineFallbackResponse = () => new Response(OFFLINE_BODY, {
-  headers: { 'Content-Type': 'text/html; charset=utf-8' },
-});
-
-const navHandler = new NetworkFirst({
-  networkTimeoutSeconds: 3,
-  cacheName: 'nav-cache',
-  plugins: [
-    new ExpirationPlugin({ maxEntries: 50, maxAgeSeconds: 7 * 24 * 60 * 60 }),
-    {
-      handlerDidError: async () => offlineFallbackResponse(),
-    },
-  ],
-}) as unknown as RouteHandler;
-
-registerRoute(new NavigationRoute(navHandler));
-
-registerRoute(
-  ({ url }: { url: URL }) => url.pathname.startsWith('/api/'),
-  new NetworkFirst({
-    networkTimeoutSeconds: 30,
-    cacheName: 'api-cache',
-    plugins: [
-      new ExpirationPlugin({ maxEntries: 100, maxAgeSeconds: 5 * 60 }),
-    ],
-  }) as unknown as RouteHandler,
-);
-
-registerRoute(
-  ({ request }: { request: Request }) =>
-    request.destination === 'image' || request.destination === 'font',
-  new CacheFirst({
-    cacheName: 'static-assets',
-    plugins: [
-      new ExpirationPlugin({
-        maxEntries: 200,
-        maxAgeSeconds: 30 * 24 * 60 * 60,
-      }),
-    ],
-  }) as unknown as RouteHandler,
-);
+// ---------------------------------------------------------------------------
+// Push notification handlers — always active
+// ---------------------------------------------------------------------------
 
 type PushPayload = {
   title?: string;
@@ -154,4 +103,91 @@ self.addEventListener('notificationclick', (event) => {
   const url = data?.url ?? '/';
 
   event.waitUntil(self.clients.openWindow(url));
+});
+
+// ---------------------------------------------------------------------------
+// Workbox caching routes — registered only in TWA context
+// ---------------------------------------------------------------------------
+
+let twaRoutesRegistered = false;
+
+const OFFLINE_BODY = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OpenChamber – Offline</title>
+<style>
+ body{font-family:system-ui,-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#100f0f;color:#fffcf0}
+ .card{text-align:center;max-width:360px;padding:2rem}
+ h1{font-size:1.5rem;margin:0 0 .5rem}
+ p{color:#9e9b93;margin:0 0 1.5rem;line-height:1.5}
+ button{background:#66800b;color:#fffcf0;border:none;border-radius:.5rem;padding:.6rem 1.4rem;font-size:1rem;cursor:pointer}
+ button:hover{background:#4d6008}
+</style>
+</head>
+<body><div class="card">
+<h1>You're offline</h1>
+<p>OpenChamber can't reach the server right now. Check your connection and try again.</p>
+<button onclick="location.reload()">Retry</button>
+</div></body>
+</html>`;
+
+const offlineFallbackResponse = () => new Response(OFFLINE_BODY, {
+  headers: { 'Content-Type': 'text/html; charset=utf-8' },
+});
+
+function registerTwaRoutes() {
+  if (twaRoutesRegistered) return;
+  twaRoutesRegistered = true;
+
+  precacheAndRoute(self.__WB_MANIFEST);
+
+  const navHandler = new NetworkFirst({
+    networkTimeoutSeconds: 3,
+    cacheName: 'nav-cache',
+    plugins: [
+      new ExpirationPlugin({ maxEntries: 50, maxAgeSeconds: 7 * 24 * 60 * 60 }),
+      {
+        handlerDidError: async () => offlineFallbackResponse(),
+      },
+    ],
+  }) as unknown as RouteHandler;
+
+  registerRoute(new NavigationRoute(navHandler));
+
+  // API caching — exclude WebSocket event-stream paths to avoid
+  // interfering with the real-time SSE/WebSocket connections used by
+  // /api/global/event/ws and /api/event/ws.
+  registerRoute(
+    ({ url }: { url: URL }) =>
+      url.pathname.startsWith('/api/')
+      && !url.pathname.includes('/event/ws'),
+    new NetworkFirst({
+      networkTimeoutSeconds: 30,
+      cacheName: 'api-cache',
+      plugins: [
+        new ExpirationPlugin({ maxEntries: 100, maxAgeSeconds: 5 * 60 }),
+      ],
+    }) as unknown as RouteHandler,
+  );
+
+  registerRoute(
+    ({ request }: { request: Request }) =>
+      request.destination === 'image' || request.destination === 'font',
+    new CacheFirst({
+      cacheName: 'static-assets',
+      plugins: [
+        new ExpirationPlugin({
+          maxEntries: 200,
+          maxAgeSeconds: 30 * 24 * 60 * 60,
+        }),
+      ],
+    }) as unknown as RouteHandler,
+  );
+}
+
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'TWA_CONTEXT') {
+    registerTwaRoutes();
+  }
 });
