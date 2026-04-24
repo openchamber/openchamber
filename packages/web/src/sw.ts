@@ -115,7 +115,13 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('push', (event) => {
   event.waitUntil((async () => {
-    const payload = (event.data?.json() ?? null) as PushPayload | null;
+    let payload: PushPayload | null;
+    try {
+      payload = (event.data?.json() ?? null) as PushPayload | null;
+    } catch {
+      // Push payload was not valid JSON — ignore silently
+      return;
+    }
     if (!payload) {
       return;
     }

@@ -530,9 +530,15 @@ export const NotificationSettings: React.FC = () => {
       await apis.push.unsubscribe({ endpoint });
       setPushSubscribed(false);
       toast.success('Background notifications disabled');
-    } finally {
-      setPushBusy(false);
-    }
+  } catch (error) {
+    console.error('[Push] Disable failed:', error);
+    const formatted = formatUnknownError(error);
+    toast.error('Failed to disable background notifications', {
+      description: formatted.summary,
+    });
+  } finally {
+    setPushBusy(false);
+  }
   };
 
   return (
