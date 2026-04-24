@@ -2,6 +2,7 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 import type { PaceInfo } from '@/lib/quota';
 import { getPaceStatusColor, formatRemainingTime } from '@/lib/quota';
+import { useI18n } from '@/lib/i18n';
 
 interface PaceIndicatorProps {
   paceInfo: PaceInfo;
@@ -19,22 +20,23 @@ export const PaceIndicator: React.FC<PaceIndicatorProps> = ({
   className,
   compact = false,
 }) => {
+  const { t } = useI18n();
   const statusColor = getPaceStatusColor(paceInfo.status);
 
   const statusLabel = React.useMemo(() => {
-    switch (paceInfo.status) {
+      switch (paceInfo.status) {
       case 'on-track':
-        return 'On track';
+        return t('settings.usage.pace.status.onTrack');
       case 'slightly-fast':
-        return 'Slightly fast';
+        return t('settings.usage.pace.status.slightlyFast');
       case 'too-fast':
-        return 'Too fast';
+        return t('settings.usage.pace.status.tooFast');
       case 'exhausted':
-        return 'Used up';
-    }
-  }, [paceInfo.status]);
+        return t('settings.usage.pace.status.usedUp');
+      }
+  }, [paceInfo.status, t]);
 
-  const predictionTooltip = `Predicted usage at window end based on current pace: ${paceInfo.predictText}`;
+  const predictionTooltip = t('settings.usage.pace.predictionTooltip', { prediction: paceInfo.predictText });
 
   if (compact) {
     return (
@@ -50,9 +52,9 @@ export const PaceIndicator: React.FC<PaceIndicatorProps> = ({
           title={paceInfo.isExhausted ? undefined : predictionTooltip}
         >
           {paceInfo.isExhausted ? (
-            <>Wait {formatRemainingTime(paceInfo.remainingSeconds)}</>
+            <>{t('settings.usage.pace.wait', { duration: formatRemainingTime(paceInfo.remainingSeconds) })}</>
           ) : (
-            <>Pred: {paceInfo.predictText}</>
+            <>{t('settings.usage.pace.prediction', { prediction: paceInfo.predictText })}</>
           )}
         </span>
       </div>
@@ -64,7 +66,7 @@ export const PaceIndicator: React.FC<PaceIndicatorProps> = ({
       <div className="flex items-center gap-1.5">
         {!paceInfo.isExhausted && (
           <span className="typography-micro text-muted-foreground">
-            Pace: {paceInfo.paceRateText}
+            {t('settings.usage.pace.rate', { rate: paceInfo.paceRateText })}
           </span>
         )}
       </div>
@@ -76,12 +78,12 @@ export const PaceIndicator: React.FC<PaceIndicatorProps> = ({
           {paceInfo.isExhausted ? (
             <>
               <span className="font-medium">{statusLabel}</span>
-              <span className="text-muted-foreground"> · Wait </span>
+              <span className="text-muted-foreground">{t('settings.usage.pace.waitSeparator')}</span>
               <span className="font-medium">{formatRemainingTime(paceInfo.remainingSeconds)}</span>
             </>
           ) : (
             <span title={predictionTooltip}>
-              <span className="text-muted-foreground">Pred: </span>
+              <span className="text-muted-foreground">{t('settings.usage.pace.predictionLabel')}</span>
               <span className="font-medium">{paceInfo.predictText}</span>
             </span>
           )}

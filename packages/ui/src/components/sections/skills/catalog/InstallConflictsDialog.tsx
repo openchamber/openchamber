@@ -15,6 +15,7 @@ import {
   SelectItem,
   SelectTrigger,
 } from '@/components/ui/select';
+import { useI18n } from '@/lib/i18n';
 
 export type SkillConflict = {
   skillName: string;
@@ -37,6 +38,7 @@ export const InstallConflictsDialog: React.FC<InstallConflictsDialogProps> = ({
   conflicts,
   onConfirm,
 }) => {
+  const { t } = useI18n();
   const [decisions, setDecisions] = React.useState<Record<string, ConflictDecision>>({});
 
   React.useEffect(() => {
@@ -62,18 +64,18 @@ export const InstallConflictsDialog: React.FC<InstallConflictsDialogProps> = ({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Skills already exist</DialogTitle>
+          <DialogTitle>{t('settings.skills.catalog.conflicts.title')}</DialogTitle>
           <DialogDescription>
-            Some selected skills are already installed in this scope. Choose whether to skip or overwrite them.
+            {t('settings.skills.catalog.conflicts.description')}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-2">
-            <span className="typography-meta text-muted-foreground">{conflicts.length} conflict(s)</span>
+            <span className="typography-meta text-muted-foreground">{t('settings.skills.catalog.conflicts.count', { count: conflicts.length })}</span>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="xs" className="!font-normal" onClick={() => setAll('skip')}>Skip all</Button>
-              <Button variant="outline" size="xs" className="!font-normal" onClick={() => setAll('overwrite')}>Overwrite all</Button>
+              <Button variant="outline" size="xs" className="!font-normal" onClick={() => setAll('skip')}>{t('settings.skills.catalog.conflicts.actions.skipAll')}</Button>
+              <Button variant="outline" size="xs" className="!font-normal" onClick={() => setAll('overwrite')}>{t('settings.skills.catalog.conflicts.actions.overwriteAll')}</Button>
             </div>
           </div>
 
@@ -86,7 +88,14 @@ export const InstallConflictsDialog: React.FC<InstallConflictsDialogProps> = ({
                 <div className="min-w-0">
                   <div className="typography-ui-label truncate">{conflict.skillName}</div>
                   <div className="typography-micro text-muted-foreground">
-                    Installed in {conflict.scope} / {conflict.source || 'opencode'}
+                    {t('settings.skills.catalog.conflicts.installedIn', {
+                      scope: conflict.scope === 'project'
+                        ? t('settings.skills.catalog.conflicts.scope.project')
+                        : t('settings.skills.catalog.conflicts.scope.user'),
+                      source: conflict.source === 'agents'
+                        ? t('settings.skills.catalog.conflicts.source.agents')
+                        : t('settings.skills.catalog.conflicts.source.opencode'),
+                    })}
                   </div>
                 </div>
 
@@ -95,14 +104,18 @@ export const InstallConflictsDialog: React.FC<InstallConflictsDialogProps> = ({
                   onValueChange={(v) => setDecisions((prev) => ({ ...prev, [conflict.skillName]: v as ConflictDecision }))}
                 >
                   <SelectTrigger className="w-fit">
-                    <span className="capitalize">{decisions[conflict.skillName] || 'skip'}</span>
+                    <span className="capitalize">
+                      {(decisions[conflict.skillName] || 'skip') === 'overwrite'
+                        ? t('settings.skills.catalog.conflicts.decision.overwrite')
+                        : t('settings.skills.catalog.conflicts.decision.skip')}
+                    </span>
                   </SelectTrigger>
                   <SelectContent align="end">
                     <SelectItem value="skip" className="pr-2 [&>span:first-child]:hidden">
-                      Skip
+                      {t('settings.skills.catalog.conflicts.decision.skip')}
                     </SelectItem>
                     <SelectItem value="overwrite" className="pr-2 [&>span:first-child]:hidden">
-                      Overwrite
+                      {t('settings.skills.catalog.conflicts.decision.overwrite')}
                     </SelectItem>
                   </SelectContent>
                 </Select>
@@ -113,14 +126,14 @@ export const InstallConflictsDialog: React.FC<InstallConflictsDialogProps> = ({
 
         <DialogFooter>
           <Button size="sm" variant="ghost" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t('settings.common.actions.cancel')}
           </Button>
           <Button
             size="sm"
             onClick={() => onConfirm(decisions)}
             disabled={!canConfirm}
           >
-            Continue
+            {t('settings.skills.catalog.conflicts.actions.continue')}
           </Button>
         </DialogFooter>
       </DialogContent>

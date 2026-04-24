@@ -23,7 +23,6 @@ import {
 import { SkillsCatalogPage } from './catalog/SkillsCatalogPage';
 import {
   SKILL_LOCATION_OPTIONS,
-  locationLabel,
   locationPartsFrom,
   locationValueFrom,
   type SkillLocationValue,
@@ -93,6 +92,32 @@ const SkillsInstalledPage: React.FC = () => {
   const hasFileChanges = editingFilePath 
     ? newFileContent !== originalFileContent
     : newFileName.trim() !== '';
+
+  const locationLabelText = React.useCallback((value: SkillLocationValue) => {
+    switch (value) {
+      case 'project-opencode':
+        return t('settings.skills.location.option.projectOpencode.label');
+      case 'user-agents':
+        return t('settings.skills.location.option.userAgents.label');
+      case 'project-agents':
+        return t('settings.skills.location.option.projectAgents.label');
+      default:
+        return t('settings.skills.location.option.userOpencode.label');
+    }
+  }, [t]);
+
+  const locationDescriptionText = React.useCallback((value: SkillLocationValue) => {
+    switch (value) {
+      case 'project-opencode':
+        return t('settings.skills.location.option.projectOpencode.description');
+      case 'user-agents':
+        return t('settings.skills.location.option.userAgents.description');
+      case 'project-agents':
+        return t('settings.skills.location.option.projectAgents.description');
+      default:
+        return t('settings.skills.location.option.userOpencode.description');
+    }
+  }, [t]);
 
   React.useEffect(() => {
     const loadSkillDetails = async () => {
@@ -357,7 +382,11 @@ const SkillsInstalledPage: React.FC = () => {
               )}
             </h2>
             <p className="typography-meta text-muted-foreground truncate">
-              {selectedSkill ? t('settings.skills.page.subtitle.skillLocation', { location: locationLabel(selectedSkill.scope, selectedSkill.source) }) : t('settings.skills.page.subtitle.newSkill')}
+              {selectedSkill
+                ? t('settings.skills.page.subtitle.skillLocation', {
+                    location: locationLabelText(locationValueFrom(selectedSkill.scope, selectedSkill.source)),
+                  })
+                : t('settings.skills.page.subtitle.newSkill')}
             </p>
           </div>
         </div>
@@ -398,7 +427,7 @@ const SkillsInstalledPage: React.FC = () => {
                         <RiFolderLine className="h-3.5 w-3.5" />
                       )}
                       {draftSource === 'agents' ? <RiRobot2Line className="h-3.5 w-3.5" /> : null}
-                      <span>{locationLabel(draftScope, draftSource)}</span>
+                      <span>{locationLabelText(locationValueFrom(draftScope, draftSource))}</span>
                     </SelectTrigger>
                     <SelectContent align="start">
                       {SKILL_LOCATION_OPTIONS.map((option) => (
@@ -407,9 +436,9 @@ const SkillsInstalledPage: React.FC = () => {
                             <div className="flex items-center gap-2">
                               {option.scope === 'user' ? <RiUser3Line className="h-3.5 w-3.5" /> : <RiFolderLine className="h-3.5 w-3.5" />}
                               {option.source === 'agents' ? <RiRobot2Line className="h-3.5 w-3.5" /> : null}
-                              <span>{option.label}</span>
+                              <span>{locationLabelText(option.value)}</span>
                             </div>
-                            <span className="typography-micro text-muted-foreground ml-6">{option.description}</span>
+                            <span className="typography-micro text-muted-foreground ml-6">{locationDescriptionText(option.value)}</span>
                           </div>
                         </SelectItem>
                       ))}

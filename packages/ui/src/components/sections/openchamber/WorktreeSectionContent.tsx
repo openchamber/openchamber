@@ -14,12 +14,14 @@ import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
 import { sessionEvents } from '@/lib/sessionEvents';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { formatPathForDisplay, cn } from '@/lib/utils';
+import { useI18n } from '@/lib/i18n';
 
 export interface WorktreeSectionContentProps {
   projectRef?: { id: string; path: string } | null;
 }
 
 export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ projectRef: projectRefProp = null }) => {
+  const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
   const activeProject = useProjectsStore((state) => state.getActiveProject());
 
@@ -251,7 +253,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
   if (!projectPath) {
     return (
       <p className="typography-meta text-muted-foreground">
-        Select a project to manage worktrees.
+        {t('settings.openchamber.worktrees.state.selectProject')}
       </p>
     );
   }
@@ -259,7 +261,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
   if (isGitRepoLocal === false) {
     return (
       <p className="typography-meta text-muted-foreground">
-        Worktree settings are only available for Git repositories.
+        {t('settings.openchamber.worktrees.state.gitOnly')}
       </p>
     );
   }
@@ -270,21 +272,24 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
       <div className="space-y-2">
         <div className="mb-1 px-1">
           <div className="flex items-center gap-2">
-            <h3 className="typography-ui-header font-normal text-foreground">Setup commands</h3>
+            <h3 className="typography-ui-header font-normal text-foreground">{t('settings.openchamber.worktrees.setup.title')}</h3>
             <Tooltip delayDuration={1000}>
               <TooltipTrigger asChild>
                 <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
               </TooltipTrigger>
               <TooltipContent sideOffset={8} className="max-w-xs">
-                Run automatically inside the new worktree directory when a worktree is created.
-                Use <code className="font-mono text-xs bg-sidebar-accent/50 px-1 rounded">$ROOT_PROJECT_PATH</code> for the project root.
+                {t('settings.openchamber.worktrees.setup.tooltipPrefix')}
+                {' '}
+                <code className="font-mono text-xs bg-sidebar-accent/50 px-1 rounded">$ROOT_PROJECT_PATH</code>
+                {' '}
+                {t('settings.openchamber.worktrees.setup.tooltipSuffix')}
               </TooltipContent>
             </Tooltip>
           </div>
         </div>
 
         {isLoadingCommands ? (
-          <p className="typography-meta text-muted-foreground px-1">Loading...</p>
+          <p className="typography-meta text-muted-foreground px-1">{t('settings.openchamber.worktrees.setup.loading')}</p>
         ) : (
           <div className="space-y-2 px-1">
             {setupCommands.map((command, index) => (
@@ -293,7 +298,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
                   value={command}
                   onChange={(e) => handleSetupCommandChange(index, e.target.value)}
                   onBlur={handleCommandBlur}
-                  placeholder="e.g., bun install"
+                  placeholder={t('settings.openchamber.worktrees.setup.commandPlaceholder')}
                   className="h-7 w-[30rem] max-w-full font-mono text-xs"
                 />
                   <button
@@ -302,7 +307,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
                     handleRemoveCommand(index);
                     }}
                     className="flex-shrink-0 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                    aria-label="Remove command"
+                    aria-label={t('settings.openchamber.worktrees.setup.removeCommandAria')}
                   >
                   <RiCloseLine className="h-4 w-4" />
                 </button>
@@ -316,7 +321,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
               onClick={handleAddCommand}
             >
               <RiAddLine className="h-3.5 w-3.5" />
-              Add command
+              {t('settings.openchamber.worktrees.setup.addCommand')}
             </Button>
           </div>
         )}
@@ -326,23 +331,23 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
       <div className="space-y-2 border-t border-border/40 pt-4">
         <div className="mb-1 px-1">
           <div className="flex items-center gap-2">
-            <h3 className="typography-ui-header font-normal text-foreground">Existing worktrees</h3>
+            <h3 className="typography-ui-header font-normal text-foreground">{t('settings.openchamber.worktrees.list.title')}</h3>
             <Tooltip delayDuration={1000}>
               <TooltipTrigger asChild>
                 <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
               </TooltipTrigger>
               <TooltipContent sideOffset={8} className="max-w-xs">
-                Worktrees live outside the repo (OpenCode-managed). Deleting a worktree also removes linked sessions.
+                {t('settings.openchamber.worktrees.list.tooltip')}
               </TooltipContent>
             </Tooltip>
           </div>
         </div>
 
         {isLoadingWorktrees ? (
-          <p className="typography-meta text-muted-foreground px-1">Loading worktrees...</p>
+          <p className="typography-meta text-muted-foreground px-1">{t('settings.openchamber.worktrees.list.loading')}</p>
         ) : availableWorktrees.length === 0 ? (
           <p className="typography-meta text-muted-foreground/70 px-1">
-            No worktrees found for this project
+            {t('settings.openchamber.worktrees.list.empty')}
           </p>
         ) : (
           <div className="space-y-1 px-1 max-w-[32.5rem]">
@@ -354,7 +359,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 min-w-0">
                     <p className="typography-meta text-foreground truncate min-w-0">
-                      {worktree.label || worktree.branch || 'Detached HEAD'}
+                      {worktree.label || worktree.branch || t('settings.openchamber.worktrees.list.detachedHead')}
                     </p>
                     <span className="typography-micro text-muted-foreground/60 px-1.5 py-[1px] rounded bg-sidebar-accent/40 flex-shrink-0 self-center leading-none">
                       OpenCode
@@ -371,7 +376,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
                       "flex-shrink-0 flex h-7 w-7 items-center justify-center rounded text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-opacity focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
                       isMobile ? "opacity-100" : "opacity-0 group-hover:opacity-100"
                     )}
-                    aria-label={`Delete worktree ${worktree.branch || worktree.label}`}
+                    aria-label={t('settings.openchamber.worktrees.list.deleteWorktreeAria', { name: worktree.branch || worktree.label || worktree.path })}
                 >
                   <RiDeleteBinLine className="h-4 w-4" />
                 </button>

@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { RiFolderLine, RiRobot2Line, RiUser3Line } from '@remixicon/react';
+import { useI18n } from '@/lib/i18n';
 
 import type { SkillsCatalogItem } from '@/lib/api/types';
 import { useSkillsCatalogStore } from '@/stores/useSkillsCatalogStore';
@@ -25,7 +26,6 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { InstallConflictsDialog, type ConflictDecision, type SkillConflict } from './InstallConflictsDialog';
 import {
   SKILL_LOCATION_OPTIONS,
-  locationLabel,
   locationPartsFrom,
   locationValueFrom,
   type SkillLocationValue,
@@ -38,6 +38,7 @@ interface InstallSkillDialogProps {
 }
 
 export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, onOpenChange, item }) => {
+  const { t } = useI18n();
   const { installSkills, isInstalling } = useSkillsCatalogStore();
   const [scope, setScope] = React.useState<'user' | 'project'>('user');
   const [targetSource, setTargetSource] = React.useState<'opencode' | 'agents'>('opencode');
@@ -64,6 +65,32 @@ export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, on
     setConflicts([]);
     setBaseRequest(null);
   }, [open, activeProjectId]);
+
+  const locationLabelText = React.useCallback((value: SkillLocationValue) => {
+    switch (value) {
+      case 'project-opencode':
+        return t('settings.skills.location.option.projectOpencode.label');
+      case 'user-agents':
+        return t('settings.skills.location.option.userAgents.label');
+      case 'project-agents':
+        return t('settings.skills.location.option.projectAgents.label');
+      default:
+        return t('settings.skills.location.option.userOpencode.label');
+    }
+  }, [t]);
+
+  const locationDescriptionText = React.useCallback((value: SkillLocationValue) => {
+    switch (value) {
+      case 'project-opencode':
+        return t('settings.skills.location.option.projectOpencode.description');
+      case 'user-agents':
+        return t('settings.skills.location.option.userAgents.description');
+      case 'project-agents':
+        return t('settings.skills.location.option.projectAgents.description');
+      default:
+        return t('settings.skills.location.option.userOpencode.description');
+    }
+  }, [t]);
 
   const resolvedTargetProjectId = React.useMemo(() => {
     if (projects.length === 0) {
@@ -122,7 +149,7 @@ export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, on
     }, { directory: request.directoryOverride ?? null });
 
     if (result.ok) {
-      toast.success('Skill installed successfully');
+      toast.success(t('settings.skills.catalog.installSkill.toast.installed'));
       onOpenChange(false);
       return;
     }
@@ -142,11 +169,11 @@ export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, on
     }
 
     if (result.error?.kind === 'authRequired') {
-      toast.error(result.error.message || 'Authentication required');
+      toast.error(result.error.message || t('settings.skills.catalog.installSkill.toast.authRequired'));
       return;
     }
 
-    toast.error(result.error?.message || 'Failed to install skill');
+    toast.error(result.error?.message || t('settings.skills.catalog.installSkill.toast.installFailed'));
   };
 
   if (!item) {
@@ -158,15 +185,19 @@ export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, on
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Install skill</DialogTitle>
+            <DialogTitle>{t('settings.skills.catalog.installSkill.title')}</DialogTitle>
             <DialogDescription>
-              Install <span className="font-semibold text-foreground">{item.skillName}</span> into one of four target locations.
+              {t('settings.skills.catalog.installSkill.descriptionPrefix')}
+              {' '}
+              <span className="font-semibold text-foreground">{item.skillName}</span>
+              {' '}
+              {t('settings.skills.catalog.installSkill.descriptionSuffix')}
             </DialogDescription>
           </DialogHeader>
 
           <div className="mt-2 space-y-3">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="typography-ui-label text-foreground">Destination</span>
+              <span className="typography-ui-label text-foreground">{t('settings.skills.catalog.installSkill.field.destination')}</span>
               <Select
                 value={locationValueFrom(scope, targetSource)}
                 onValueChange={(v) => {
@@ -178,7 +209,7 @@ export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, on
                 <SelectTrigger className="w-fit gap-1.5">
                   {scope === 'user' ? <RiUser3Line className="h-3.5 w-3.5" /> : <RiFolderLine className="h-3.5 w-3.5" />}
                   {targetSource === 'agents' ? <RiRobot2Line className="h-3.5 w-3.5" /> : null}
-                  <span>{locationLabel(scope, targetSource)}</span>
+                  <span>{locationLabelText(locationValueFrom(scope, targetSource))}</span>
                 </SelectTrigger>
                 <SelectContent align="start">
                   {SKILL_LOCATION_OPTIONS.map((option) => (
@@ -187,9 +218,9 @@ export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, on
                         <div className="flex items-center gap-2">
                           {option.scope === 'user' ? <RiUser3Line className="h-3.5 w-3.5" /> : <RiFolderLine className="h-3.5 w-3.5" />}
                           {option.source === 'agents' ? <RiRobot2Line className="h-3.5 w-3.5" /> : null}
-                          <span>{option.label}</span>
+                          <span>{locationLabelText(option.value)}</span>
                         </div>
-                        <span className="typography-micro text-muted-foreground ml-5">{option.description}</span>
+                        <span className="typography-micro text-muted-foreground ml-5">{locationDescriptionText(option.value)}</span>
                       </div>
                     </SelectItem>
                   ))}
@@ -199,9 +230,9 @@ export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, on
 
             {scope === 'project' && (
               <div className="flex flex-wrap items-center gap-2">
-                <span className="typography-ui-label text-foreground">Project</span>
+                <span className="typography-ui-label text-foreground">{t('settings.skills.catalog.installSkill.field.project')}</span>
                 {projects.length === 0 ? (
-                  <span className="typography-meta text-muted-foreground">No projects available</span>
+                  <span className="typography-meta text-muted-foreground">{t('settings.skills.catalog.installSkill.field.noProjects')}</span>
                 ) : (
                   <Select
                     value={resolvedTargetProjectId ?? ''}
@@ -209,7 +240,7 @@ export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, on
                     disabled={projects.length === 1}
                   >
                     <SelectTrigger className="w-fit">
-                      <SelectValue placeholder="Choose project" />
+                      <SelectValue placeholder={t('settings.skills.catalog.installSkill.field.chooseProjectPlaceholder')} />
                     </SelectTrigger>
                     <SelectContent align="start">
                       {projects.map((p) => (
@@ -236,7 +267,7 @@ export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, on
               variant="ghost"
               onClick={() => onOpenChange(false)}
             >
-              Cancel
+              {t('settings.common.actions.cancel')}
             </Button>
             <Button
               size="sm"
@@ -252,7 +283,7 @@ export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, on
                 })
               }
             >
-              {isInstalling ? 'Installing...' : 'Install'}
+              {isInstalling ? t('settings.skills.catalog.installSkill.actions.installing') : t('settings.skills.catalog.installSkill.actions.install')}
             </Button>
           </DialogFooter>
         </DialogContent>
