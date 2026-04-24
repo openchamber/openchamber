@@ -104,20 +104,6 @@ public class MainActivity extends AppCompatActivity {
         return prefs.getString(App.KEY_SERVER_URL, null);
     }
 
-  private String loadHostName() {
-    // Derive host from the saved URL (the source of truth at runtime).
-    // local.properties is a build-time artifact; it is not present on device.
-    String savedUrl = getSavedUrl();
-    if (savedUrl != null && !savedUrl.isEmpty()) {
-      String host = Uri.parse(savedUrl).getHost();
-      if (host != null && !host.isEmpty()) {
-        return host;
-      }
-    }
-    // Ultimate fallback (should not happen in normal operation)
-    return "localhost";
-  }
-
     private void launchTwa(String url) {
         Uri uri = Uri.parse(url);
 
@@ -203,10 +189,12 @@ public class MainActivity extends AppCompatActivity {
         webView.addJavascriptInterface(new NotificationBridge(), NOTIFICATION_JS_OBJECT);
 
         if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
-            String hostName = loadHostName();
-            Set<String> allowedOrigins = Collections.singleton("https://" + hostName);
-            WebViewCompat.addDocumentStartJavaScript(
-                    webView, getNotificationBridgeJs(), allowedOrigins);
+    String savedUrl = getSavedUrl();
+    Uri savedUri = Uri.parse(savedUrl != null ? savedUrl : "");
+    String origin = savedUri.getScheme() + "://" + savedUri.getAuthority();
+    Set<String> allowedOrigins = Collections.singleton(origin);
+    WebViewCompat.addDocumentStartJavaScript(
+      webView, getNotificationBridgeJs(), allowedOrigins);
         }
 
         webView.setWebViewClient(
