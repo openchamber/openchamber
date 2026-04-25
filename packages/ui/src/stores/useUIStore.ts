@@ -482,6 +482,7 @@ interface UIStore {
   pendingFileNavigation: PendingFileNavigation | null;
   pendingFileFocusPath: string | null;
   isMobile: boolean;
+  isKeyboardOpen: boolean;
   isQuickOpenOpen: boolean;
   isCommandPaletteOpen: boolean;
   isHelpDialogOpen: boolean;
@@ -636,6 +637,7 @@ interface UIStore {
   setPadding: (size: number) => void;
   setCornerRadius: (radius: number) => void;
   setInputBarOffset: (offset: number) => void;
+  setKeyboardOpen: (open: boolean) => void;
   applyTypography: () => void;
   applyPadding: () => void;
   updateProportionalSidebarWidths: () => void;
@@ -722,6 +724,7 @@ export const useUIStore = create<UIStore>()(
         pendingFileNavigation: null,
         pendingFileFocusPath: null,
         isMobile: false,
+        isKeyboardOpen: false,
         isQuickOpenOpen: false,
         isCommandPaletteOpen: false,
         isHelpDialogOpen: false,
@@ -1465,6 +1468,10 @@ export const useUIStore = create<UIStore>()(
  
         setInputBarOffset: (offset) => {
           set({ inputBarOffset: offset });
+        },
+
+        setKeyboardOpen: (open) => {
+          set({ isKeyboardOpen: open });
         },
 
         toggleFavoriteModel: (providerID, modelID) => {

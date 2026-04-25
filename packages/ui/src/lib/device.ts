@@ -32,6 +32,7 @@ const setRootDeviceAttributes = (
   isTauriShellRuntime: boolean,
   deviceType: DeviceType,
   hasTouchInput: boolean,
+  isAndroid: boolean,
 ) => {
   if (typeof window === 'undefined') {
     return;
@@ -41,7 +42,7 @@ const setRootDeviceAttributes = (
   const isMobile = deviceType === 'mobile';
   const isTablet = deviceType === 'tablet';
 
-  root.classList.remove('device-mobile', 'device-tablet', 'device-desktop');
+  root.classList.remove('device-mobile', 'device-tablet', 'device-desktop', 'device-android');
   root.classList.add(
     deviceType === 'mobile'
       ? 'device-mobile'
@@ -60,6 +61,9 @@ const setRootDeviceAttributes = (
     root.classList.remove('mobile-pointer');
   } else {
     root.classList.remove('desktop-runtime');
+    if (isAndroid) {
+      root.classList.add('device-android');
+    }
     root.style.setProperty('--is-mobile', isMobile ? '1' : '0');
     root.style.setProperty('--device-type', deviceType);
     root.style.setProperty('--font-scale', isMobile ? '0.9' : isTablet ? '0.95' : '1');
@@ -81,6 +85,7 @@ export function getDeviceInfo(): DeviceInfo {
   const prefersCoarsePointer = pointerQuery?.matches ?? false;
   const noHover = hoverQuery?.matches ?? false;
   const maxTouchPoints = typeof navigator !== 'undefined' ? navigator.maxTouchPoints ?? 0 : 0;
+  const isAndroid = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent);
 
   const isDesktopShellRuntime = isDesktopShell();
 
@@ -108,7 +113,7 @@ export function getDeviceInfo(): DeviceInfo {
     deviceType = 'desktop';
   }
 
-  setRootDeviceAttributes(isDesktopShellRuntime, deviceType, hasTouchInput);
+  setRootDeviceAttributes(isDesktopShellRuntime, deviceType, hasTouchInput, !isDesktopShellRuntime && isAndroid);
 
   let breakpoint: keyof typeof BREAKPOINTS = 'xs';
   for (const [key, value] of Object.entries(BREAKPOINTS)) {
@@ -220,8 +225,14 @@ export function useDeviceInfo(): DeviceInfo {
     const prefersCoarsePointer = pointerQuery?.matches ?? false;
     const noHover = hoverQuery?.matches ?? false;
     const maxTouchPoints = typeof navigator !== 'undefined' ? navigator.maxTouchPoints ?? 0 : 0;
+    const isAndroid = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent);
     const hasTouchInput = prefersCoarsePointer || noHover || maxTouchPoints > 0;
-    setRootDeviceAttributes(isDesktopShellRuntime, deviceInfo.deviceType, hasTouchInput);
+    setRootDeviceAttributes(
+      isDesktopShellRuntime,
+      deviceInfo.deviceType,
+      hasTouchInput,
+      !isDesktopShellRuntime && isAndroid,
+    );
   }, [deviceInfo.deviceType, deviceInfo.hasTouchInput]);
 
   return deviceInfo;

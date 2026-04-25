@@ -158,11 +158,32 @@
   }
 
   /* Fix mobile viewport height */
-  :root.mobile-pointer:not(.desktop-runtime),
-  :root.mobile-pointer:not(.desktop-runtime) body {
+  :root.mobile-pointer:not(.desktop-runtime) {
     height: 100%;
     height: -webkit-fill-available;
     overflow: hidden;
+  }
+
+  :root.device-mobile:not(.desktop-runtime) body,
+  :root.device-mobile:not(.desktop-runtime) #root {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: var(--oc-visual-viewport-height, 100dvh);
+    width: 100%;
+    overflow: hidden;
+    overscroll-behavior-y: none;
+  }
+
+  :root.device-android:not(.desktop-runtime) body,
+  :root.device-android:not(.desktop-runtime) #root {
+    position: relative;
+    top: auto;
+    left: auto;
+    right: auto;
+    height: 100%;
+    min-height: 0;
   }
 
   /* Fix main layout container */
@@ -265,6 +286,21 @@
     :root.device-mobile:not(.desktop-runtime) .drawer-safe-area {
       padding-top: 0;
       padding-bottom: var(--oc-safe-area-bottom-visual);
+    }
+
+    :root.device-mobile:not(.desktop-runtime) .ios-keyboard-safe-area {
+      padding-bottom: calc(var(--oc-keyboard-home-indicator, 34px) + var(--oc-safe-area-bottom-visual, 0px)) !important;
+    }
+
+    :root.device-mobile:not(.desktop-runtime) body {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: var(--oc-visual-viewport-height, 100dvh);
+      width: 100%;
+      overflow: hidden;
+      overscroll-behavior-y: none;
     }
 
     /* Fix iOS viewport issues */

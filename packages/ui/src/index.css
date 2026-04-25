@@ -223,6 +223,10 @@ textarea[data-chat-input="true"]:focus-visible {
   -webkit-appearance: none;
 }
 
+[data-keyboard-avoid-active="true"] {
+  transform: translateY(calc(-1 * var(--oc-keyboard-avoid-offset, 0px)));
+}
+
 /* Scroll shadow (HeroUI) fallback styling to ensure visible gradients without the Tailwind plugin */
 [data-scroll-shadow="true"] {
   --scroll-shadow-size: var(--scroll-shadow-size, 48px);
