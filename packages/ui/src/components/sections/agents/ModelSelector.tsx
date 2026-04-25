@@ -2,6 +2,7 @@ import React from 'react';
 import {
     DropdownMenu,
     DropdownMenuContent,
+    DropdownMenuItem,
     DropdownMenuLabel,
     DropdownMenuSeparator,
     DropdownMenuTrigger,
@@ -71,7 +72,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     const [isDropdownOpen, setIsDropdownOpen] = React.useState(false);
     const [searchQuery, setSearchQuery] = React.useState('');
     const [selectedIndex, setSelectedIndex] = React.useState(0);
-    const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
+    const itemRefs = React.useRef<(HTMLElement | null)[]>([]);
 
     const allowedProviderSet = React.useMemo(() => {
         if (!Array.isArray(allowedProviderIds) || allowedProviderIds.length === 0) {
@@ -174,14 +175,14 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
         const showProviderLogo = keyPrefix === 'fav' || keyPrefix === 'recent';
 
         return (
-            <div
+            <DropdownMenuItem
                 key={`${keyPrefix}-${provID}-${modID}`}
                 ref={(el) => { itemRefs.current[flatIndex] = el; }}
                 className={cn(
-                    "typography-meta group flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer",
-                    isHighlighted ? "bg-interactive-selection" : "hover:bg-interactive-hover/50"
+                    "group flex items-center gap-2",
+                    isHighlighted && "bg-interactive-selection"
                 )}
-                onClick={() => handleProviderAndModelChange(provID, modID)}
+                onSelect={() => handleProviderAndModelChange(provID, modID)}
                 onMouseEnter={() => setSelectedIndex(flatIndex)}
             >
                 <div className="flex items-center gap-1.5 flex-1 min-w-0">
@@ -221,7 +222,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                         )}
                     </button>
                 </div>
-            </div>
+            </DropdownMenuItem>
         );
     };
 
@@ -609,19 +610,18 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                                     <ScrollableOverlay outerClassName="max-h-[min(400px,calc(100dvh-12rem))] flex-1">
                                         <div className="p-1">
                                             {/* Not selected option */}
-                                            <div
+                                            <DropdownMenuItem
                                                 className={cn(
-                                                    "typography-meta flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer",
-                                                    "hover:bg-interactive-hover/50"
+                                                    "flex items-center gap-2",
                                                 )}
-                                                onClick={() => handleProviderAndModelChange('', '')}
+                                                onSelect={() => handleProviderAndModelChange('', '')}
                                             >
                                                 <RiCloseLine className="h-3.5 w-3.5 text-muted-foreground" />
                                                 <span className="text-muted-foreground">{placeholder || 'Not selected'}</span>
                                                 {!providerId && !modelId && (
                                                     <RiCheckLine className="h-4 w-4 text-primary ml-auto" />
                                                 )}
-                                            </div>
+                                            </DropdownMenuItem>
 
                                             <DropdownMenuSeparator />
 
