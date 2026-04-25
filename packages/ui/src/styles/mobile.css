@@ -292,17 +292,6 @@
       padding-bottom: calc(var(--oc-keyboard-home-indicator, 34px) + var(--oc-safe-area-bottom-visual, 0px)) !important;
     }
 
-    :root.device-mobile:not(.desktop-runtime) body {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: var(--oc-visual-viewport-height, 100dvh);
-      width: 100%;
-      overflow: hidden;
-      overscroll-behavior-y: none;
-    }
-
     /* Fix iOS viewport issues */
     :root.device-mobile:not(.desktop-runtime) .flex.flex-col.h-screen {
       min-height: 100vh;

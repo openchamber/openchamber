@@ -365,6 +365,9 @@ export const MainLayout: React.FC = () => {
         let keyboardAvoidTarget: HTMLElement | null = null;
 
         const setKeyboardOpen = useUIStore.getState().setKeyboardOpen;
+        const userAgent = typeof navigator === 'undefined' ? '' : navigator.userAgent;
+        const isAndroid = /Android/i.test(userAgent);
+        const isIOS = /iPad|iPhone|iPod/.test(userAgent);
 
         const clearKeyboardAvoidTarget = () => {
             if (!keyboardAvoidTarget) {
@@ -429,7 +432,6 @@ export const MainLayout: React.FC = () => {
             const isTextTarget = isInput || Boolean(active?.isContentEditable);
 
             const layoutHeight = Math.round(root.clientHeight || window.innerHeight);
-            const isAndroid = /Android/i.test(navigator.userAgent);
             if (previousOrientation !== orientation) {
                 previousOrientation = orientation;
                 maxObservedLayoutHeight = layoutHeight;
@@ -457,6 +459,7 @@ export const MainLayout: React.FC = () => {
             } else if (stickyKeyboardInset === 0) {
                 if (effectiveMeasuredInset > 0 && isTextTarget) {
                     stickyKeyboardInset = effectiveMeasuredInset;
+                    setKeyboardOpen(true);
                 }
             } else {
                 const closingByHeight = !isTextTarget && height > previousHeight + 6;
@@ -478,7 +481,6 @@ export const MainLayout: React.FC = () => {
             root.style.setProperty('--oc-keyboard-inset', `${stickyKeyboardInset}px`);
             previousHeight = height;
 
-            const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
             const keyboardHomeIndicator = isIOS && stickyKeyboardInset > 0 ? 34 : 0;
             root.style.setProperty('--oc-keyboard-home-indicator', `${keyboardHomeIndicator}px`);
 
