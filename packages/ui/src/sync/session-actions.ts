@@ -12,6 +12,7 @@ import { opencodeClient } from "@/lib/opencode/client"
 import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { registerSessionDirectory } from "./sync-refs"
+import { isSyntheticPart } from "@/lib/messages/synthetic"
 
 // Reference set by SyncProvider — allows actions to access SDK and stores
 let _sdk: OpencodeClient | null = null
@@ -519,13 +520,14 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
     }
   }
 
-  // Extract message text for prompt restoration
+  // Extract message text for prompt restoration (only non-synthetic text parts —
+  // the server adds file content as synthetic text parts that should not be restored)
   const messages = state.message[sessionId] ?? []
   const targetMsg = messages.find((m) => m.id === messageId)
   let messageText = ""
   if (targetMsg && targetMsg.role === "user") {
     const parts = state.part[messageId] ?? []
-    const textParts = parts.filter((p) => p.type === "text")
+    const textParts = parts.filter((p) => p.type === "text" && !isSyntheticPart(p))
     messageText = textParts
       .map((p: Record<string, unknown>) => (p as { text?: string }).text || (p as { content?: string }).content || "")
       .join("\n")
@@ -640,10 +642,11 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
   const store = dirStore()
   const state = store.getState()
 
-  // Extract message text for input restoration
+  // Extract message text for input restoration (only non-synthetic text parts —
+  // the server adds file content as synthetic text parts that should not be restored)
   const parts = state.part[messageId] ?? []
   let messageText = ""
-  const textParts = parts.filter((p) => p.type === "text")
+  const textParts = parts.filter((p) => p.type === "text" && !isSyntheticPart(p))
   messageText = textParts
     .map((p: Part) => ((p as Record<string, unknown>).text as string) || ((p as Record<string, unknown>).content as string) || "")
     .join("\n")
