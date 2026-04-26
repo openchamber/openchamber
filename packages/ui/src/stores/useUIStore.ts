@@ -645,11 +645,18 @@ interface UIStore {
   applyPadding: () => void;
   updateProportionalSidebarWidths: () => void;
   toggleFavoriteModel: (providerID: string, modelID: string) => void;
+  reorderFavoriteModel: (
+    activeProviderID: string,
+    activeModelID: string,
+    overProviderID: string,
+    overModelID: string,
+  ) => void;
   toggleHiddenModel: (providerID: string, modelID: string) => void;
   isHiddenModel: (providerID: string, modelID: string) => boolean;
   hideAllModels: (providerID: string, modelIDs: string[]) => void;
   showAllModels: (providerID: string) => void;
   toggleModelProviderCollapsed: (providerID: string) => void;
+  setModelProvidersCollapsed: (providerIDs: string[], collapsed: boolean) => void;
   isFavoriteModel: (providerID: string, modelID: string) => boolean;
   addRecentModel: (providerID: string, modelID: string) => void;
   addRecentAgent: (agentName: string) => void;
@@ -1504,6 +1511,29 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
+        reorderFavoriteModel: (activeProviderID, activeModelID, overProviderID, overModelID) => {
+          set((state) => {
+            const oldIndex = state.favoriteModels.findIndex(
+              (fav) => fav.providerID === activeProviderID && fav.modelID === activeModelID
+            );
+            const newIndex = state.favoriteModels.findIndex(
+              (fav) => fav.providerID === overProviderID && fav.modelID === overModelID
+            );
+
+            if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) {
+              return state;
+            }
+
+            const nextFavorites = state.favoriteModels.slice();
+            const [moved] = nextFavorites.splice(oldIndex, 1);
+            if (!moved) {
+              return state;
+            }
+            nextFavorites.splice(newIndex, 0, moved);
+            return { favoriteModels: nextFavorites };
+          });
+        },
+
         toggleHiddenModel: (providerID, modelID) => {
           set((state) => {
             const exists = state.hiddenModels.some(
@@ -1563,6 +1593,30 @@ export const useUIStore = create<UIStore>()(
 
             return {
               collapsedModelProviders: [...state.collapsedModelProviders, normalizedProviderID],
+            };
+          });
+        },
+
+        setModelProvidersCollapsed: (providerIDs, collapsed) => {
+          const normalizedProviderIDs = Array.from(new Set(
+            providerIDs
+              .filter((providerID): providerID is string => typeof providerID === 'string')
+              .map((providerID) => providerID.trim())
+              .filter(Boolean)
+          ));
+
+          if (normalizedProviderIDs.length === 0) {
+            return;
+          }
+
+          set((state) => {
+            const scopedProviderIDs = new Set(normalizedProviderIDs);
+            const untouchedProviders = state.collapsedModelProviders.filter((providerID) => !scopedProviderIDs.has(providerID));
+
+            return {
+              collapsedModelProviders: collapsed
+                ? [...untouchedProviders, ...normalizedProviderIDs]
+                : untouchedProviders,
             };
           });
         },
