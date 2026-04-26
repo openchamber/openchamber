@@ -277,7 +277,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
 
   // Mobile: use flex layout where tree takes remaining space
   const mobileContent = (
-    <div className="flex flex-col gap-3 h-full">
+    <div className="flex h-full min-h-0 flex-col gap-3">
       <div className="flex-shrink-0">{pathInputSection}</div>
       <div className="flex-shrink-0 flex items-center justify-end">
         {showHiddenToggle}
@@ -332,8 +332,8 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
         open={open}
         onClose={() => onOpenChange(false)}
         title={t('directoryExplorerDialog.title')}
-        className="max-w-full"
-        contentMaxHeightClassName="max-h-[min(70vh,520px)] h-[min(70vh,520px)]"
+        className="h-[88dvh] max-h-[720px] max-w-full"
+        contentMaxHeightClassName="flex-1"
         footer={<div className="flex flex-row gap-2">{renderActionButtons()}</div>}
       >
         {mobileContent}
