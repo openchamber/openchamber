@@ -3,8 +3,10 @@ import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { getDesktopLanAddress, isDesktopLocalOriginActive, isDesktopShell, restartDesktopApp } from '@/lib/desktop';
+import { useI18n } from '@/lib/i18n';
 
 export const DesktopNetworkSettings: React.FC = () => {
+  const { t } = useI18n();
   const isLocalDesktop = isDesktopShell() && isDesktopLocalOriginActive();
   const [savedValue, setSavedValue] = React.useState(false);
   const [draftValue, setDraftValue] = React.useState(false);
@@ -27,7 +29,7 @@ export const DesktopNetworkSettings: React.FC = () => {
           headers: { Accept: 'application/json' },
         });
         if (!response.ok) {
-          throw new Error('Failed to load desktop settings');
+          throw new Error(t('settings.openchamber.desktopNetwork.error.loadFailed'));
         }
 
         const data = (await response.json().catch(() => null)) as null | { desktopLanAccessEnabled?: unknown };
@@ -41,7 +43,7 @@ export const DesktopNetworkSettings: React.FC = () => {
         setError(null);
       } catch (cause) {
         if (!cancelled) {
-          setError(cause instanceof Error ? cause.message : 'Failed to load desktop settings');
+          setError(cause instanceof Error ? cause.message : t('settings.openchamber.desktopNetwork.error.loadFailed'));
         }
       } finally {
         if (!cancelled) {
@@ -53,7 +55,7 @@ export const DesktopNetworkSettings: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [isLocalDesktop]);
+  }, [isLocalDesktop, t]);
 
   React.useEffect(() => {
     if (!isLocalDesktop || !draftValue) {
@@ -109,20 +111,20 @@ export const DesktopNetworkSettings: React.FC = () => {
       });
 
       if (!response.ok) {
-        throw new Error('Failed to save desktop settings');
+        throw new Error(t('settings.openchamber.desktopNetwork.error.saveFailed'));
       }
 
       setSavedValue(draftValue);
 
       const restarted = await restartDesktopApp();
       if (!restarted) {
-        throw new Error('Saved, but failed to restart app');
+        throw new Error(t('settings.openchamber.desktopNetwork.error.savedRestartFailed'));
       }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Failed to save desktop settings');
+      setError(cause instanceof Error ? cause.message : t('settings.openchamber.desktopNetwork.error.saveFailed'));
       setIsSaving(false);
     }
-  }, [draftValue, isDirty]);
+  }, [draftValue, isDirty, t]);
 
   if (!isLocalDesktop) {
     return null;
@@ -131,7 +133,7 @@ export const DesktopNetworkSettings: React.FC = () => {
   return (
     <div className="mb-8">
       <div className="mb-1 px-1">
-        <h3 className="typography-ui-header font-medium text-foreground">Desktop Network Access</h3>
+        <h3 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.desktopNetwork.title')}</h3>
       </div>
 
       <section className="space-y-2 px-2 pb-2 pt-0">
@@ -150,16 +152,16 @@ export const DesktopNetworkSettings: React.FC = () => {
           <Checkbox
             checked={draftValue}
             onChange={handleToggle}
-            ariaLabel="Allow LAN access to desktop sidecar"
+            ariaLabel={t('settings.openchamber.desktopNetwork.field.allowLanAccessAria')}
             disabled={isLoading || isSaving}
           />
           <div className="min-w-0 flex-1">
-            <div className="typography-ui-label text-foreground">Let other devices on your local network open this app</div>
+            <div className="typography-ui-label text-foreground">{t('settings.openchamber.desktopNetwork.field.allowLanAccess')}</div>
             <div className="typography-micro text-muted-foreground/70">
-              Restarts the app so phones, tablets, and other computers on your Wi-Fi can open it.
+              {t('settings.openchamber.desktopNetwork.field.allowLanAccessDescription')}
             </div>
             <div className="typography-micro text-[var(--status-warning)]/85">
-              Warning: while enabled, the app is reachable by anyone on the same local network.
+              {t('settings.openchamber.desktopNetwork.field.warning')}
             </div>
           </div>
         </div>
@@ -170,7 +172,9 @@ export const DesktopNetworkSettings: React.FC = () => {
 
         {lanUrl ? (
           <div className="px-2 typography-micro text-muted-foreground/80">
-            {isDirty && !savedValue ? 'After restart, open from another device: ' : 'Open from another device: '}
+            {isDirty && !savedValue
+              ? t('settings.openchamber.desktopNetwork.hint.openAfterRestart')
+              : t('settings.openchamber.desktopNetwork.hint.openNow')}
             <span className="font-mono text-foreground">{lanUrl}</span>
           </div>
         ) : null}
@@ -183,7 +187,7 @@ export const DesktopNetworkSettings: React.FC = () => {
             disabled={isLoading || isSaving || !isDirty}
             className="shrink-0 !font-normal"
           >
-            {isSaving ? 'Saving…' : 'Save + Restart'}
+            {isSaving ? t('settings.common.actions.saving') : t('settings.openchamber.desktopNetwork.actions.saveAndRestart')}
           </Button>
         </div>
       </section>

@@ -426,6 +426,14 @@ const ensureModelsMetadataFetch = (
 };
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const CONNECTION_PROBE_TIMEOUT_MS = 800;
+
+const probeOpenCodeHealth = async (timeoutMs = CONNECTION_PROBE_TIMEOUT_MS): Promise<boolean> => {
+    return Promise.race([
+        opencodeClient.checkHealth().catch(() => false),
+        sleep(Math.max(1, timeoutMs)).then(() => false),
+    ]);
+};
 
 const DIRECTORY_KEY_GLOBAL = "__global__";
 
@@ -560,6 +568,7 @@ interface ConfigStore {
     getResolvedGitGenerationModel: () => { providerId: string; modelId: string } | null;
     saveAgentModelSelection: (agentName: string, providerId: string, modelId: string) => void;
     getAgentModelSelection: (agentName: string) => { providerId: string; modelId: string } | null;
+    probeConnection: (options?: { timeoutMs?: number }) => Promise<boolean>;
     checkConnection: () => Promise<boolean>;
     initializeApp: () => Promise<void>;
     getCurrentProvider: () => ProviderWithModelList | undefined;
@@ -1897,6 +1906,26 @@ export const useConfigStore = create<ConfigStore>()(
                     if (typeof window !== 'undefined') {
                         localStorage.setItem('summarizeMaxLength', String(clamped));
                     }
+                },
+
+                probeConnection: async (options?: { timeoutMs?: number }) => {
+                    const isHealthy = await probeOpenCodeHealth(options?.timeoutMs);
+                    if (isHealthy) {
+                        set({ isConnected: true, hasEverConnected: true, connectionPhase: "connected" });
+                        return true;
+                    }
+
+                    const state = get();
+                    if (state.isConnected) {
+                        return true;
+                    }
+
+                    set({
+                        isConnected: false,
+                        connectionPhase: state.hasEverConnected ? "reconnecting" : "connecting",
+                        lastDisconnectReason: 'health_probe_unhealthy',
+                    });
+                    return false;
                 },
 
                 checkConnection: async () => {

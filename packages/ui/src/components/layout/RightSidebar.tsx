@@ -1,6 +1,7 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
+import { useI18n } from '@/lib/i18n';
 import { isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag } from '@/lib/desktop';
 
 export const RIGHT_SIDEBAR_CONTENT_WIDTH = 420;
@@ -15,6 +16,7 @@ interface RightSidebarProps {
 }
 
 export const RightSidebar: React.FC<RightSidebarProps> = ({ isOpen, children, className, onTopActionsHostChange }) => {
+  const { t } = useI18n();
   const rightSidebarWidth = useUIStore((state) => state.rightSidebarWidth);
   const setRightSidebarWidth = useUIStore((state) => state.setRightSidebarWidth);
   const isDesktopApp = React.useMemo(() => isDesktopShell(), []);
@@ -182,7 +184,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ isOpen, children, cl
           onPointerCancel={handlePointerEnd}
           role="separator"
           aria-orientation="vertical"
-          aria-label="Resize right panel"
+          aria-label={t('sidebar.resize.rightPanelAria')}
         />
       )}
       <div

@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils';
 import { PROJECT_ICONS, PROJECT_COLORS, PROJECT_COLOR_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
+import { useI18n } from '@/lib/i18n';
 
 interface ProjectEditDialogProps {
   open: boolean;
@@ -50,6 +51,7 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
   initialIconBackground = null,
   onSave,
 }) => {
+  const { t } = useI18n();
   const uploadProjectIcon = useProjectsStore((state) => state.uploadProjectIcon);
   const removeProjectIcon = useProjectsStore((state) => state.removeProjectIcon);
   const discoverProjectIcon = useProjectsStore((state) => state.discoverProjectIcon);
@@ -105,10 +107,10 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
       const uploadResult = await uploadProjectIcon(projectId, pendingUploadIconFile);
       setIsUploadingIcon(false);
       if (!uploadResult.ok) {
-        toast.error(uploadResult.error || 'Failed to upload project icon');
+        toast.error(uploadResult.error || t('projectEditDialog.toast.failedToUploadIcon'));
         return;
       }
-      toast.success('Project icon updated');
+      toast.success(t('projectEditDialog.toast.iconUpdated'));
       clearPendingUploadIcon();
       setPendingRemoveImageIcon(false);
     }
@@ -120,10 +122,10 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
       const result = await removeProjectIcon(projectId);
       setIsRemovingCustomIcon(false);
       if (!result.ok) {
-        toast.error(result.error || 'Failed to remove project icon');
+        toast.error(result.error || t('projectEditDialog.toast.failedToRemoveIcon'));
         return;
       }
-      toast.success('Project icon removed');
+      toast.success(t('projectEditDialog.toast.iconRemoved'));
       setPendingRemoveImageIcon(false);
       setIconBackground(null);
     }
@@ -213,37 +215,37 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
     void discoverProjectIcon(projectId)
       .then((result) => {
         if (!result.ok) {
-          toast.error(result.error || 'Failed to discover project icon');
+          toast.error(result.error || t('projectEditDialog.toast.failedToDiscoverIcon'));
           return;
         }
         if (result.skipped) {
-          toast.success('Custom icon already set for this project');
+          toast.success(t('projectEditDialog.toast.customIconAlreadySet'));
           return;
         }
-        toast.success('Project icon discovered');
+        toast.success(t('projectEditDialog.toast.iconDiscovered'));
       })
       .finally(() => {
         setIsDiscoveringIcon(false);
       });
-  }, [clearPendingUploadIcon, discoverProjectIcon, isDiscoveringIcon, projectId]);
+  }, [clearPendingUploadIcon, discoverProjectIcon, isDiscoveringIcon, projectId, t]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader className="min-w-0">
-          <DialogTitle>Edit project</DialogTitle>
+          <DialogTitle>{t('projectEditDialog.title')}</DialogTitle>
         </DialogHeader>
 
         <div className="min-w-0 space-y-5 py-1">
           {/* Name */}
           <div className="min-w-0 space-y-1.5">
             <label className="typography-ui-label font-medium text-foreground">
-              Name
+              {t('projectEditDialog.field.name')}
             </label>
             <Input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="Project name"
+              placeholder={t('projectEditDialog.field.namePlaceholder')}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   e.preventDefault();
@@ -260,7 +262,7 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
           {/* Color */}
           <div className="min-w-0 space-y-2">
             <label className="typography-ui-label font-medium text-foreground">
-              Color
+              {t('projectEditDialog.field.color')}
             </label>
             <div className="flex gap-2 flex-wrap">
               {/* No color option */}
@@ -273,7 +275,7 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
                     ? 'border-foreground scale-110'
                     : 'border-border hover:border-border/80'
                 )}
-                title="None"
+                title={t('projectEditDialog.option.none')}
               >
                 <span className="w-4 h-0.5 bg-muted-foreground/40 rotate-45 rounded-full" />
               </button>
@@ -298,7 +300,7 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
           {/* Icon */}
           <div className="min-w-0 space-y-2">
             <label className="typography-ui-label font-medium text-foreground">
-              Icon
+              {t('projectEditDialog.field.icon')}
             </label>
             <input
               ref={fileInputRef}
@@ -322,7 +324,7 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
                     ? 'border-foreground scale-110 bg-[var(--surface-elevated)]'
                     : 'border-border hover:border-border/80'
                 )}
-                title="None"
+                title={t('projectEditDialog.option.none')}
               >
                 <span className="w-4 h-0.5 bg-muted-foreground/40 rotate-45 rounded-full" />
               </button>
@@ -351,7 +353,7 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
             </div>
             {effectiveHasImageIcon && iconPreviewUrl && (
               <div className="flex items-center gap-2 pt-1">
-                <span className="typography-meta text-muted-foreground">Preview</span>
+                <span className="typography-meta text-muted-foreground">{t('projectEditDialog.field.preview')}</span>
                 <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border/60 bg-[var(--surface-elevated)] p-1">
                   <span
                     className="inline-flex h-4 w-4 items-center justify-center overflow-hidden rounded-[2px]"
@@ -372,21 +374,21 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
               {!hasCustomIcon && (
                 <>
                   <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()} disabled={isUploadingIcon}>
-                    {isUploadingIcon ? 'Uploading...' : 'Upload Icon'}
+                    {isUploadingIcon ? t('projectEditDialog.actions.uploading') : t('projectEditDialog.actions.uploadIcon')}
                   </Button>
                   <Button size="sm" variant="outline" onClick={() => void handleDiscoverIcon()} disabled={isDiscoveringIcon}>
-                    {isDiscoveringIcon ? 'Discovering...' : 'Discover Favicon'}
+                    {isDiscoveringIcon ? t('projectEditDialog.actions.discovering') : t('projectEditDialog.actions.discoverFavicon')}
                   </Button>
                 </>
               )}
               {hasRemovableImageIcon && (
                 <Button size="sm" variant="outline" onClick={() => void handleRemoveImageIcon()} disabled={isRemovingCustomIcon}>
-                  {isRemovingCustomIcon ? 'Removing...' : 'Remove Project Icon'}
+                  {isRemovingCustomIcon ? t('projectEditDialog.actions.removing') : t('projectEditDialog.actions.removeProjectIcon')}
                 </Button>
               )}
               {pendingRemoveImageIcon && (
                 <Button size="sm" variant="outline" onClick={() => setPendingRemoveImageIcon(false)} disabled={isRemovingCustomIcon}>
-                  Undo Remove
+                  {t('projectEditDialog.actions.undoRemove')}
                 </Button>
               )}
             </div>
@@ -395,7 +397,7 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
           {effectiveHasImageIcon && (
             <div className="min-w-0 space-y-2">
               <label className="typography-ui-label font-medium text-foreground">
-                Icon Background
+                {t('projectEditDialog.field.iconBackground')}
               </label>
               <div className="flex flex-wrap items-center gap-2">
                 <input
@@ -403,7 +405,7 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
                   value={iconBackground ?? '#000000'}
                   onChange={(event) => setIconBackground(event.target.value)}
                   className="h-8 w-10 cursor-pointer rounded border border-border bg-transparent p-1"
-                  aria-label="Project icon background color"
+                  aria-label={t('projectEditDialog.field.iconBackgroundAria')}
                 />
                 <Input
                   value={iconBackground ?? ''}
@@ -412,7 +414,7 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
                   className="h-8 w-[8.5rem]"
                 />
                 <Button size="sm" variant="outline" onClick={() => setIconBackground(null)}>
-                  Clear
+                  {t('projectEditDialog.actions.clear')}
                 </Button>
               </div>
             </div>
@@ -421,10 +423,10 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
 
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t('projectEditDialog.actions.cancel')}
           </Button>
           <Button onClick={handleSave} disabled={!name.trim() || isUploadingIcon || isRemovingCustomIcon}>
-            Save
+            {t('projectEditDialog.actions.save')}
           </Button>
         </DialogFooter>
       </DialogContent>

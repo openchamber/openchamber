@@ -4,6 +4,7 @@ import type { Part } from '@opencode-ai/sdk/v2';
 import type { AgentMentionInfo } from '../types';
 import { SimpleMarkdownRenderer } from '../../MarkdownRenderer';
 import { useUIStore } from '@/stores/useUIStore';
+import { RiArrowUpSLine } from '@remixicon/react';
 
 type PartWithText = Part & { text?: string; content?: string; value?: string };
 
@@ -33,14 +34,12 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
 };
 
 const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMention }) => {
-    const CLAMP_LINES = 2;
     const partWithText = part as PartWithText;
     const rawText = partWithText.text;
     const textContent = typeof rawText === 'string' ? rawText : partWithText.content || partWithText.value || '';
 
     const [isExpanded, setIsExpanded] = React.useState(false);
     const [isTruncated, setIsTruncated] = React.useState(false);
-    const [collapseZoneHeight, setCollapseZoneHeight] = React.useState<number>(0);
     const userMessageRenderingMode = useUIStore((state) => state.userMessageRenderingMode);
     const normalizedRenderingMode = normalizeUserMessageRenderingMode(userMessageRenderingMode);
     const textRef = React.useRef<HTMLDivElement>(null);
@@ -67,13 +66,6 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
             if (!isExpanded) {
                 setIsTruncated(el.scrollHeight > el.clientHeight);
             }
-
-            const styles = window.getComputedStyle(el);
-            const lineHeight = parseFloat(styles.lineHeight);
-            const fontSize = parseFloat(styles.fontSize);
-            const fallbackLineHeight = isFinite(fontSize) ? fontSize * 1.4 : 20;
-            const resolvedLineHeight = isFinite(lineHeight) ? lineHeight : fallbackLineHeight;
-            setCollapseZoneHeight(Math.max(1, Math.round(resolvedLineHeight * CLAMP_LINES)));
         };
 
         checkTruncation();
@@ -84,7 +76,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
         return () => resizeObserver.disconnect();
     }, [textContent, isExpanded]);
 
-    const handleClick = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    const handleClick = React.useCallback(() => {
         const element = textRef.current;
         if (!element) {
             return;
@@ -94,18 +86,15 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
             return;
         }
 
-        if (!isExpanded) {
-            if (isTruncated) {
-                setIsExpanded(true);
-            }
-            return;
+        if (!isExpanded && isTruncated) {
+            setIsExpanded(true);
         }
+    }, [hasActiveSelectionInElement, isExpanded, isTruncated]);
 
-        const clickY = event.clientY - element.getBoundingClientRect().top;
-        if (clickY <= collapseZoneHeight) {
-            setIsExpanded(false);
-        }
-    }, [collapseZoneHeight, hasActiveSelectionInElement, isExpanded, isTruncated]);
+    const handleCollapse = React.useCallback((event: React.MouseEvent) => {
+        event.stopPropagation();
+        setIsExpanded(false);
+    }, []);
 
     const processedMarkdownContent = React.useMemo(() => {
         let content = textContent;
@@ -153,9 +142,20 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
 
     return (
         <div className="relative" key={part.id || `${messageId}-user-text`}>
+            {isExpanded && (
+                <button
+                    type="button"
+                    onClick={handleCollapse}
+                    className="absolute top-0 right-0 flex items-center justify-center rounded-sm p-0.5 text-[var(--surface-mutedForeground)] hover:text-[var(--surface-foreground)] hover:bg-[var(--interactive-hover)] transition-colors"
+                    aria-label="Collapse"
+                >
+                    <RiArrowUpSLine className="h-3.5 w-3.5" />
+                </button>
+            )}
             <div
                 className={cn(
                     "break-words font-sans typography-markdown",
+                    isExpanded && "pb-3",
                     normalizedRenderingMode === 'plain' && 'whitespace-pre-wrap',
                     !isExpanded && "line-clamp-2",
                     isTruncated && !isExpanded && "cursor-pointer"

@@ -32,6 +32,7 @@ import {
 } from '@/components/ui/command';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { useI18n } from '@/lib/i18n';
 
 type OperationType = 'merge' | 'rebase';
 
@@ -66,6 +67,7 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
   onOperationComplete,
   mode = 'dialog',
 }) => {
+  const { t } = useI18n();
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [operation, setOperation] = React.useState<OperationType>('merge');
   const [selectedBranch, setSelectedBranch] = React.useState<string | null>(null);
@@ -75,7 +77,7 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
   const logContainerRef = React.useRef<HTMLDivElement>(null);
 
   const isDisabled = disabled || isOperating;
-  const targetBranchLabel = currentBranch || 'current branch';
+  const targetBranchLabel = currentBranch || t('gitView.branch.currentBranchFallback');
   
   // Check if operation completed (all logs are done or error)
   const operationCompleted = operationLogs.length > 0 && 
@@ -199,13 +201,13 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
         mode === 'dialog' ? (
           <DialogFooter>
             <Button variant="default" size="sm" onClick={handleClose}>
-              {hasError ? 'Close' : 'Done'}
+              {hasError ? t('gitView.common.close') : t('gitView.common.done')}
             </Button>
           </DialogFooter>
         ) : (
           <div className="flex justify-end">
             <Button variant="default" size="sm" onClick={handleClose}>
-              {hasError ? 'Close' : 'Done'}
+              {hasError ? t('gitView.common.close') : t('gitView.common.done')}
             </Button>
           </div>
         )
@@ -217,7 +219,7 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
     <div className="space-y-4">
       {/* Operation Selection */}
       <div className="space-y-3">
-        <p className="typography-meta text-muted-foreground">Operation</p>
+        <p className="typography-meta text-muted-foreground">{t('gitView.branch.operation')}</p>
         <div className="grid grid-cols-2 gap-3">
           <button
             type="button"
@@ -239,11 +241,11 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
                   operation === 'merge' ? 'text-foreground' : 'text-muted-foreground'
                 )}
               >
-                Merge
+                {t('gitView.operation.merge')}
               </span>
             </div>
             <p className="typography-micro text-muted-foreground">
-              Combines branches with a merge commit and preserves history.
+              {t('gitView.branch.mergeDescription')}
             </p>
           </button>
 
@@ -267,11 +269,11 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
                   operation === 'rebase' ? 'text-foreground' : 'text-muted-foreground'
                 )}
               >
-                Rebase
+                {t('gitView.operation.rebase')}
               </span>
             </div>
                     <p className="typography-micro text-muted-foreground">
-                      Moves your commits to be on top of another branch. Creates linear history.
+                      {t('gitView.branch.rebaseDescription')}
                     </p>
                   </button>
         </div>
@@ -280,13 +282,15 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
       {/* Branch Selection */}
       <div className="flex flex-col gap-3">
         <p className="typography-meta text-muted-foreground">
-          {operation === 'merge' ? `Branch to merge into ${targetBranchLabel}` : 'Branch to rebase onto'}
+          {operation === 'merge'
+            ? t('gitView.branch.branchToMergeInto', { branch: targetBranchLabel })
+            : t('gitView.branch.branchToRebaseOnto')}
         </p>
         <DropdownMenu open={branchDropdownOpen} onOpenChange={setBranchDropdownOpen} modal={false}>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" size="lg" className="w-full justify-between">
               <span className={cn('truncate', !selectedBranch && 'text-muted-foreground')}>
-                {selectedBranch || 'Select a branch...'}
+                {selectedBranch || t('gitView.branch.selectBranch')}
               </span>
               <RiArrowDownSLine className="size-4 opacity-60 shrink-0" />
             </Button>
@@ -299,15 +303,15 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
             <Command className="h-full min-h-0">
               <CommandInput
                 ref={searchInputRef}
-                placeholder="Search branches..."
+                placeholder={t('gitView.branch.searchPlaceholder')}
                 value={branchSearch}
                 onValueChange={setBranchSearch}
               />
               <CommandList className="h-full min-h-0" disableHorizontal>
-                <CommandEmpty>No branches found.</CommandEmpty>
+                <CommandEmpty>{t('gitView.branch.empty')}</CommandEmpty>
 
                 {filteredLocal.length > 0 && (
-                  <CommandGroup heading="Local branches">
+                  <CommandGroup heading={t('gitView.branch.localBranches')}>
                     {filteredLocal.map((branch) => (
                       <CommandItem key={`local-${branch}`} onSelect={() => handleSelectBranch(branch)}>
                         <span className="typography-ui-label text-foreground truncate">{branch}</span>
@@ -319,7 +323,7 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
                 {filteredLocal.length > 0 && filteredRemote.length > 0 ? <CommandSeparator /> : null}
 
                 {filteredRemote.length > 0 && (
-                  <CommandGroup heading="Remote branches">
+                  <CommandGroup heading={t('gitView.branch.remoteBranches')}>
                     {filteredRemote.map((branch) => (
                       <CommandItem key={`remote-${branch}`} onSelect={() => handleSelectBranch(branch)}>
                         <span className="typography-ui-label text-foreground truncate">{branch}</span>
@@ -339,13 +343,11 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
           <p className="typography-meta text-muted-foreground">
             {operation === 'merge' ? (
               <>
-                This will merge <span className="font-mono text-foreground">{selectedBranch}</span> into{' '}
-                <span className="font-mono text-foreground">{targetBranchLabel}</span>
+                {t('gitView.branch.summaryMergePrefix')} <span className="font-mono text-foreground">{selectedBranch}</span> {t('gitView.branch.summaryMergeInfix')} <span className="font-mono text-foreground">{targetBranchLabel}</span>
               </>
             ) : (
               <>
-                This will rebase <span className="font-mono text-foreground">{targetBranchLabel}</span> onto{' '}
-                <span className="font-mono text-foreground">{selectedBranch}</span>
+                {t('gitView.branch.summaryRebasePrefix')} <span className="font-mono text-foreground">{targetBranchLabel}</span> {t('gitView.branch.summaryRebaseInfix')} <span className="font-mono text-foreground">{selectedBranch}</span>
               </>
             )}
           </p>
@@ -355,7 +357,7 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
       {mode === 'dialog' ? (
         <DialogFooter className="gap-2 pt-1">
           <Button variant="ghost" size="sm" onClick={handleCancel}>
-            Cancel
+            {t('gitView.common.cancel')}
           </Button>
           <Button
             variant="default"
@@ -367,12 +369,12 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
             {operation === 'merge' ? (
               <>
                 <RiGitMergeLine className="size-4" />
-                Merge
+                {t('gitView.operation.merge')}
               </>
             ) : (
               <>
                 <RiGitBranchLine className="size-4" />
-                Rebase
+                {t('gitView.operation.rebase')}
               </>
             )}
           </Button>
@@ -380,11 +382,11 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
       ) : (
         <div className="flex items-center gap-2 pt-1">
           <Button variant="destructive" size="sm" onClick={handleCancel} disabled={isDisabled}>
-            Reset
+            {t('gitView.common.reset')}
           </Button>
           <div className="flex-1" />
           <Button variant="default" size="sm" onClick={handleConfirm} disabled={isDisabled || !selectedBranch}>
-            {operation === 'merge' ? 'Merge' : 'Rebase'}
+            {operation === 'merge' ? t('gitView.operation.merge') : t('gitView.operation.rebase')}
           </Button>
         </div>
       )}
@@ -398,9 +400,9 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
       <section className="border-0 bg-transparent rounded-none">
         <header className="border-b border-border/40 px-0 py-3">
           <div className="space-y-1">
-            <div className="typography-ui-header font-semibold text-foreground">Update branch</div>
+            <div className="typography-ui-header font-semibold text-foreground">{t('gitView.branch.updateTitle')}</div>
             <div className="typography-micro text-muted-foreground">
-              Bring changes from another branch into{' '}
+              {t('gitView.branch.updateDescriptionPrefix')}{' '}
               <span className="font-mono text-foreground">{targetBranchLabel}</span>.
             </div>
           </div>
@@ -426,11 +428,11 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
             ) : (
               <RiGitMergeLine className="size-4" />
             )}
-            <span>Merge/Rebase</span>
+            <span>{t('gitView.branch.mergeRebase')}</span>
           </Button>
         </TooltipTrigger>
         <TooltipContent sideOffset={8}>
-          Merge or rebase changes from another branch.
+          {t('gitView.branch.mergeRebaseTooltip')}
         </TooltipContent>
       </Tooltip>
 
@@ -443,17 +445,17 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
       }}>
           <DialogContent className="max-w-md">
             <DialogHeader>
-              <DialogTitle>Update Branch</DialogTitle>
+              <DialogTitle>{t('gitView.branch.updateTitle')}</DialogTitle>
               <DialogDescription>
               {isOperating ? (
                 operationCompleted ? (
-                  hasError ? 'Operation failed' : 'Operation completed'
+                  hasError ? t('gitView.branch.operationFailed') : t('gitView.branch.operationCompleted')
                 ) : (
-                  `${operation === 'merge' ? 'Merging' : 'Rebasing'} in progress...`
+                  operation === 'merge' ? t('gitView.branch.mergingInProgress') : t('gitView.branch.rebasingInProgress')
                 )
               ) : (
                 <>
-                  Choose how to bring changes from another branch into{' '}
+                  {t('gitView.branch.dialogDescriptionPrefix')}{' '}
                   <span className="font-mono text-foreground">{targetBranchLabel}</span>
                   .
                 </>

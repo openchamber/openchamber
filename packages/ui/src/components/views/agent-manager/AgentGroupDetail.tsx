@@ -31,6 +31,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { useI18n } from '@/lib/i18n';
 
 interface AgentGroupDetailProps {
   group: AgentGroup;
@@ -52,6 +53,7 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
   group,
   className,
 }) => {
+  const { t } = useI18n();
   const selectedSessionId = useAgentGroupsStore((s) => s.selectedSessionId);
   const selectSession = useAgentGroupsStore((s) => s.selectSession);
   const deleteGroupSessions = useAgentGroupsStore((s) => s.deleteGroupSessions);
@@ -92,17 +94,17 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
 
   const handleCopyWorktreePath = React.useCallback(() => {
     if (!selectedSession?.path) {
-      toast.error('No worktree path available');
+      toast.error(t('agentManager.detail.toast.noWorktreePath'));
       return;
     }
     void copyTextToClipboard(selectedSession.path).then((result) => {
       if (result.ok) {
-        toast.success('Worktree path copied');
+        toast.success(t('agentManager.detail.toast.worktreePathCopied'));
         return;
       }
-      toast.error('Failed to copy path');
+      toast.error(t('agentManager.detail.toast.failedToCopyPath'));
     });
-  }, [selectedSession?.path]);
+  }, [selectedSession?.path, t]);
 
   const handleRemoveSelectedWorktree = React.useCallback(() => {
     if (!selectedSession) return;
@@ -123,24 +125,28 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
       let sessionsToDelete: AgentGroupSession[];
 
       if (worktreeDialog.kind === 'remove') {
-        toast.info('Removing worktree...');
+        toast.info(t('agentManager.detail.toast.removingWorktree'));
         sessionsToDelete = group.sessions.filter((s) => normalize(s.path) === targetPath);
       } else {
-        toast.info('Removing other worktrees...');
+        toast.info(t('agentManager.detail.toast.removingOtherWorktrees'));
         sessionsToDelete = group.sessions.filter((s) => normalize(s.path) !== targetPath);
       }
 
       const { failedIds, failedWorktreePaths } = await deleteGroupSessions(sessionsToDelete, { removeWorktrees: true });
       if (failedIds.length > 0 || failedWorktreePaths.length > 0) {
-        toast.error('Failed to fully remove worktree');
+        toast.error(t('agentManager.detail.toast.failedToFullyRemoveWorktree'));
       } else {
-        toast.success(worktreeDialog.kind === 'remove' ? 'Worktree removed' : 'Removed other worktrees');
+        toast.success(
+          worktreeDialog.kind === 'remove'
+            ? t('agentManager.detail.toast.worktreeRemoved')
+            : t('agentManager.detail.toast.otherWorktreesRemoved')
+        );
       }
       setWorktreeDialog(null);
     } finally {
       setIsProcessing(false);
     }
-  }, [deleteGroupSessions, group.sessions, isProcessing, worktreeDialog]);
+  }, [deleteGroupSessions, group.sessions, isProcessing, t, worktreeDialog]);
 
   // Group-level status: show if any session is busy
   const allStatuses = useAllSessionStatuses();
@@ -160,11 +166,15 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
               {groupBusy && <RiLoader4Line className="h-4 w-4 animate-spin text-amber-500 flex-shrink-0" />}
             </div>
             <div className="flex items-center gap-2 mt-1 typography-meta text-muted-foreground">
-              <span>{group.sessionCount} model{group.sessionCount !== 1 ? 's' : ''}</span>
+              <span>
+                {group.sessionCount === 1
+                  ? t('agentManager.detail.header.modelCountSingle', { count: group.sessionCount })
+                  : t('agentManager.detail.header.modelCountPlural', { count: group.sessionCount })}
+              </span>
               <span>·</span>
               <span className="flex items-center gap-1">
                 <RiGitBranchLine className="h-3.5 w-3.5" />
-                {selectedSession?.worktreeMetadata?.label || selectedSession?.branch || 'No branch'}
+                {selectedSession?.worktreeMetadata?.label || selectedSession?.branch || t('agentManager.detail.header.noBranch')}
               </span>
             </div>
           </div>
@@ -243,7 +253,7 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="icon" className="flex-shrink-0" aria-label="Worktree actions">
+                <Button variant="outline" size="icon" className="flex-shrink-0" aria-label={t('agentManager.detail.actions.worktreeActionsAria')}>
                   <RiMore2Line className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
@@ -253,13 +263,13 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
                   closeOnClick={false}
                   variant="destructive"
                 >
-                  Remove this worktree
+                  {t('agentManager.detail.actions.removeThisWorktree')}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onSelect={handleKeepOnlySelectedWorktree}
                   closeOnClick={false}
                 >
-                  Leave this one, remove others
+                  {t('agentManager.detail.actions.keepThisRemoveOthers')}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                 onClick={(e) => {
@@ -269,7 +279,7 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
                 disabled={!selectedSession?.path}
               >
                 <RiFileCopyLine className="h-4 w-4 mr-px" />
-                Copy Worktree Path
+                {t('agentManager.detail.actions.copyWorktreePath')}
               </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -281,24 +291,33 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>
-              {worktreeDialog?.kind === 'remove' ? 'Remove worktree' : 'Remove other worktrees'}
+              {worktreeDialog?.kind === 'remove'
+                ? t('agentManager.detail.dialog.removeWorktreeTitle')
+                : t('agentManager.detail.dialog.removeOtherWorktreesTitle')}
             </DialogTitle>
             <DialogDescription>
               {worktreeDialog?.kind === 'remove'
-                ? <>Remove <span className="text-foreground font-medium">{worktreeDialog?.label}</span>? This deletes all sessions in that worktree and removes the worktree itself.</>
-                : <>Keep <span className="text-foreground font-medium">{worktreeDialog?.label}</span> and remove the other worktrees in <span className="text-foreground font-medium">{group.name}</span>.</>}
+                ? t('agentManager.detail.dialog.removeWorktreeDescription', { label: worktreeDialog?.label ?? '' })
+                : t('agentManager.detail.dialog.removeOtherWorktreesDescription', {
+                    label: worktreeDialog?.label ?? '',
+                    group: group.name,
+                  })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setWorktreeDialog(null)} disabled={isProcessing}>
-              Cancel
+              {t('agentManager.detail.dialog.cancel')}
             </Button>
             <Button
               variant={worktreeDialog?.kind === 'remove' ? 'destructive' : 'default'}
               onClick={() => void handleConfirmWorktreeAction()}
               disabled={isProcessing}
             >
-              {isProcessing ? 'Working…' : worktreeDialog?.kind === 'remove' ? 'Remove' : 'Remove others'}
+              {isProcessing
+                ? t('agentManager.detail.dialog.working')
+                : worktreeDialog?.kind === 'remove'
+                  ? t('agentManager.detail.dialog.remove')
+                  : t('agentManager.detail.dialog.removeOthers')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -328,10 +347,10 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
               <div className="flex-1 flex items-center justify-center">
                 <div className="text-center p-8">
                   <p className="typography-body text-muted-foreground mb-2">
-                    Loading session for <span className="font-medium text-foreground">{selectedSession.displayLabel}</span>
+                    {t('agentManager.detail.state.loadingSessionFor', { label: selectedSession.displayLabel })}
                   </p>
                   <p className="typography-micro text-muted-foreground/60">
-                    Session ID: {selectedSession.id}
+                    {t('agentManager.detail.state.sessionId', { id: selectedSession.id })}
                   </p>
                 </div>
               </div>
@@ -340,7 +359,7 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
         ) : (
           <div className="h-full flex items-center justify-center">
             <p className="typography-body text-muted-foreground">
-              No sessions in this group
+              {t('agentManager.detail.state.noSessionsInGroup')}
             </p>
           </div>
         )}

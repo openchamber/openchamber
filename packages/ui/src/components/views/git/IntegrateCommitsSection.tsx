@@ -32,6 +32,7 @@ import {
   type IntegratePlan,
 } from '@/lib/git/integrateWorktreeCommits';
 import type { WorktreeMetadata } from '@/types/worktree';
+import { useI18n } from '@/lib/i18n';
 
 type IntegrateUiState =
   | { kind: 'idle' }
@@ -57,6 +58,7 @@ export const IntegrateCommitsSection: React.FC<{
   refreshKey,
   onRefresh,
 }) => {
+  const { t } = useI18n();
   const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
   const setActiveMainTab = useUIStore((s) => s.setActiveMainTab);
   const [branchDropdownOpen, setBranchDropdownOpen] = React.useState(false);
@@ -240,7 +242,7 @@ export const IntegrateCommitsSection: React.FC<{
 
     // Use current session - set pending input text and synthetic parts
     if (!currentSessionId) {
-      toast.error('No active session', { description: 'Open a chat session first or start a new session.' });
+      toast.error(t('gitView.integrate.noActiveSession'), { description: t('gitView.integrate.noActiveSessionDescription') });
       return;
     }
 
@@ -250,20 +252,22 @@ export const IntegrateCommitsSection: React.FC<{
       { text: context.payloadText, synthetic: true },
     ]);
     setActiveMainTab('chat');
-  }, [currentSessionId, setActiveMainTab, buildConflictContext, openNewSessionDraft, setPendingInputText, setPendingSyntheticParts]);
+  }, [currentSessionId, setActiveMainTab, buildConflictContext, openNewSessionDraft, setPendingInputText, setPendingSyntheticParts, t]);
 
   const handleMove = React.useCallback(async () => {
     if (ui.kind !== 'ready') return;
     if (ui.plan.commits.length === 0) {
-      toast.message('No commits to move');
+      toast.message(t('gitView.integrate.noCommitsToMoveToast'));
       return;
     }
     setUi({ kind: 'running', plan: ui.plan });
     try {
       const result = await integrateWorktreeCommits(ui.plan);
       if (result.kind === 'success') {
-        toast.success('Commits moved', {
-          description: `${result.moved} commit${result.moved === 1 ? '' : 's'} into ${ui.plan.targetBranch}`,
+        toast.success(t('gitView.integrate.commitsMovedToast'), {
+          description: result.moved === 1
+            ? t('gitView.integrate.commitsMovedDescriptionSingle', { count: result.moved, branch: ui.plan.targetBranch })
+            : t('gitView.integrate.commitsMovedDescriptionPlural', { count: result.moved, branch: ui.plan.targetBranch }),
         });
         const next = await computeIntegratePlan(ui.plan);
         setUi({ kind: 'ready', plan: next });
@@ -271,7 +275,7 @@ export const IntegrateCommitsSection: React.FC<{
         return;
       }
       if (result.kind === 'conflict') {
-        toast.error('Cherry-pick conflict', { description: 'Resolve conflicts, then continue.' });
+        toast.error(t('gitView.integrate.cherryPickConflictToast'), { description: t('gitView.integrate.cherryPickConflictDescription') });
         setUi({ kind: 'conflict', state: result.state, details: result.details });
         if (conflictStorageKey && typeof window !== 'undefined') {
           window.localStorage.setItem(conflictStorageKey, JSON.stringify(result.state));
@@ -279,18 +283,18 @@ export const IntegrateCommitsSection: React.FC<{
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      toast.error('Failed to move commits', { description: message });
+      toast.error(t('gitView.integrate.failedToMoveToast'), { description: message });
       const next = await computeIntegratePlan({ repoRoot, sourceBranch, targetBranch }).catch(() => null);
       if (next) setUi({ kind: 'ready', plan: next });
       else setUi({ kind: 'idle' });
     }
-  }, [ui, onRefresh, repoRoot, sourceBranch, targetBranch, conflictStorageKey]);
+  }, [ui, onRefresh, repoRoot, sourceBranch, targetBranch, conflictStorageKey, t]);
 
   const handleAbort = React.useCallback(async () => {
     if (ui.kind !== 'conflict') return;
     try {
       await abortIntegrate(ui.state);
-      toast.message('Cherry-pick aborted');
+      toast.message(t('gitView.integrate.cherryPickAbortedToast'));
       if (conflictStorageKey && typeof window !== 'undefined') {
         window.localStorage.removeItem(conflictStorageKey);
       }
@@ -299,14 +303,14 @@ export const IntegrateCommitsSection: React.FC<{
       if (next) setUi({ kind: 'ready', plan: next });
       else setUi({ kind: 'idle' });
     }
-  }, [ui, repoRoot, sourceBranch, targetBranch, conflictStorageKey]);
+  }, [ui, repoRoot, sourceBranch, targetBranch, conflictStorageKey, t]);
 
   const handleContinue = React.useCallback(async () => {
     if (ui.kind !== 'conflict') return;
     try {
       const result = await continueIntegrate(ui.state);
       if (result.kind === 'success') {
-        toast.success('Cherry-pick finished');
+        toast.success(t('gitView.integrate.cherryPickFinishedToast'));
         const next = await computeIntegratePlan({ repoRoot, sourceBranch, targetBranch }).catch(() => null);
         if (next) setUi({ kind: 'ready', plan: next });
         else setUi({ kind: 'idle' });
@@ -324,9 +328,9 @@ export const IntegrateCommitsSection: React.FC<{
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      toast.error('Cherry-pick continue failed', { description: message });
+      toast.error(t('gitView.integrate.cherryPickContinueFailedToast'), { description: message });
     }
-  }, [ui, repoRoot, sourceBranch, targetBranch, onRefresh, conflictStorageKey]);
+  }, [ui, repoRoot, sourceBranch, targetBranch, onRefresh, conflictStorageKey, t]);
 
   if (!repoRoot || !sourceBranch) {
     return null;
@@ -341,9 +345,11 @@ export const IntegrateCommitsSection: React.FC<{
       <div className={headerClassName}>
         <div className="flex items-center gap-2 min-w-0">
           <RiSplitCellsHorizontal className="size-4 text-muted-foreground" />
-          <h3 className="typography-ui-header font-semibold text-foreground truncate">Re-integrate commits</h3>
+          <h3 className="typography-ui-header font-semibold text-foreground truncate">{t('gitView.integrate.title')}</h3>
           {ui.kind === 'ready' && ui.plan.commits.length > 0 ? (
-            <span className="typography-meta text-muted-foreground truncate">{ui.plan.commits.length} to move</span>
+            <span className="typography-meta text-muted-foreground truncate">
+              {t('gitView.integrate.toMoveCount', { count: ui.plan.commits.length })}
+            </span>
           ) : null}
         </div>
         <div className="flex items-center gap-2">
@@ -356,7 +362,7 @@ export const IntegrateCommitsSection: React.FC<{
       <div className={bodyClassName}>
         <div className="flex flex-wrap items-center gap-2">
           <div className="min-w-0">
-            <div className="typography-ui-label text-foreground">Move commits</div>
+            <div className="typography-ui-label text-foreground">{t('gitView.integrate.moveCommits')}</div>
               <div className="typography-micro text-muted-foreground truncate">
                 {sourceBranch} → {targetBranch}
               </div>
@@ -367,7 +373,7 @@ export const IntegrateCommitsSection: React.FC<{
             <DropdownMenu open={branchDropdownOpen} onOpenChange={setBranchDropdownOpen}>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="sm" className="gap-1.5">
-                  Target
+                  {t('gitView.integrate.target')}
                   <span className="max-w-[160px] truncate font-mono text-xs text-muted-foreground">{targetBranch}</span>
                   <RiArrowDownSLine className="size-4 opacity-60" />
                 </Button>
@@ -377,14 +383,14 @@ export const IntegrateCommitsSection: React.FC<{
                 className="w-72 p-0 max-h-[var(--available-height)] flex flex-col overflow-hidden"
               >
                 <Command className="h-full min-h-0">
-                  <CommandInput ref={searchInputRef} placeholder="Search branches..." />
+                  <CommandInput ref={searchInputRef} placeholder={t('gitView.branch.searchPlaceholder')} />
                   <CommandList
                     className="h-full min-h-0"
                     scrollbarClassName="overlay-scrollbar--flush overlay-scrollbar--dense overlay-scrollbar--zero"
                     disableHorizontal
                   >
-                    <CommandEmpty>No branches found.</CommandEmpty>
-                    <CommandGroup heading="Local branches">
+                    <CommandEmpty>{t('gitView.branch.empty')}</CommandEmpty>
+                    <CommandGroup heading={t('gitView.branch.localBranches')}>
                       {localBranches.map((branch) => (
                         <CommandItem
                           key={branch}
@@ -406,28 +412,28 @@ export const IntegrateCommitsSection: React.FC<{
 
             {ui.kind === 'ready' ? (
               <Button size="sm" onClick={() => void handleMove()} disabled={!isEligible || ui.plan.commits.length === 0}>
-                Move
+                {t('gitView.integrate.move')}
               </Button>
             ) : ui.kind === 'loading' ? (
               <Button size="sm" variant="outline" disabled>
-                Checking…
+                {t('gitView.integrate.checking')}
               </Button>
             ) : ui.kind === 'running' ? (
               <Button size="sm" variant="outline" disabled>
-                Moving…
+                {t('gitView.integrate.moving')}
               </Button>
             ) : null}
           </div>
 
           {ui.kind === 'ready' && ui.plan.commits.length === 0 && (
-            <div className="typography-meta text-muted-foreground">No commits to move.</div>
+            <div className="typography-meta text-muted-foreground">{t('gitView.integrate.noCommitsToMove')}</div>
           )}
 
           {ui.kind === 'ready' && ui.plan.commits.length > 0 && (
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <div className="typography-meta text-foreground">
-                  Commits to move
+                  {t('gitView.integrate.commitsToMove')}
                   <span className="text-muted-foreground"> ({ui.plan.commits.length})</span>
                 </div>
                 {commitSummaries.length > 0 && ui.plan.commits.length > 5 && (
@@ -436,7 +442,7 @@ export const IntegrateCommitsSection: React.FC<{
                     onClick={() => setShowAllCommits((v) => !v)}
                     className="typography-micro text-muted-foreground hover:text-foreground"
                   >
-                    {showAllCommits ? 'Show less' : 'Show all'}
+                    {showAllCommits ? t('gitView.integrate.showLess') : t('gitView.integrate.showAll')}
                   </button>
                 )}
               </div>
@@ -449,11 +455,11 @@ export const IntegrateCommitsSection: React.FC<{
                   </div>
                 ))}
                 {commitSummaries.length === 0 && (
-                  <div className="typography-meta text-muted-foreground">Preview unavailable.</div>
+                  <div className="typography-meta text-muted-foreground">{t('gitView.integrate.previewUnavailable')}</div>
                 )}
                 {ui.plan.commits.length > commitSummaries.length && (
                   <div className="typography-micro text-muted-foreground/70">
-                    Showing first {commitSummaries.length} commits.
+                    {t('gitView.integrate.showingFirstCommits', { count: commitSummaries.length })}
                   </div>
                 )}
               </div>
@@ -463,10 +469,10 @@ export const IntegrateCommitsSection: React.FC<{
           {ui.kind === 'conflict' && (
             <div className="rounded-md border border-border/60 bg-background/60 p-3 space-y-2">
               <div className="typography-meta text-foreground">
-                Conflicts in {ui.details.unmergedFiles.length} files
+                {t('gitView.integrate.conflictsInFiles', { count: ui.details.unmergedFiles.length })}
               </div>
               <div className="typography-micro text-muted-foreground/80">
-                Current commit: <span className="font-mono">{ui.state.currentCommit.slice(0, 7)}</span>
+                {t('gitView.integrate.currentCommit')}: <span className="font-mono">{ui.state.currentCommit.slice(0, 7)}</span>
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {ui.details.unmergedFiles.slice(0, 6).map((file) => (
@@ -475,12 +481,12 @@ export const IntegrateCommitsSection: React.FC<{
                   </span>
                 ))}
                 {ui.details.unmergedFiles.length > 6 && (
-                  <span className="text-xs text-muted-foreground">+{ui.details.unmergedFiles.length - 6} more</span>
+                  <span className="text-xs text-muted-foreground">{t('gitView.integrate.moreFiles', { count: ui.details.unmergedFiles.length - 6 })}</span>
                 )}
               </div>
               <div className="flex items-center gap-2 pt-1">
                 <Button size="sm" variant="ghost" className="typography-meta" onClick={() => void handleAbort()}>
-                  Abort
+                  {t('gitView.operation.abort')}
                 </Button>
                 <Button
                   size="sm"
@@ -490,7 +496,7 @@ export const IntegrateCommitsSection: React.FC<{
                   onClick={() => void handleResolveWithAi({ state: ui.state, details: ui.details }, false)}
                 >
                   <RiSparklingLine className="size-3.5" />
-                  Current Session
+                  {t('gitView.integrate.currentSession')}
                 </Button>
                 <Button
                   size="sm"
@@ -499,10 +505,10 @@ export const IntegrateCommitsSection: React.FC<{
                   onClick={() => void handleResolveWithAi({ state: ui.state, details: ui.details }, true)}
                 >
                   <RiSparklingLine className="size-3.5" />
-                  New Session
+                  {t('gitView.integrate.newSession')}
                 </Button>
                 <Button size="sm" className="typography-meta" onClick={() => void handleContinue()}>
-                  Continue
+                  {t('gitView.operation.continue')}
                 </Button>
               </div>
             </div>

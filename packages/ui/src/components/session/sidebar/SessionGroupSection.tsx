@@ -21,6 +21,7 @@ import { compareSessionsByPinnedAndTime, isBranchDifferentFromLabel, normalizePa
 import type { SessionFolder } from '@/stores/useSessionFoldersStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { openExternalUrl } from '@/lib/url';
+import { useI18n } from '@/lib/i18n';
 
 type DeleteFolderConfirm = {
   scopeKey: string;
@@ -96,6 +97,7 @@ type Props = {
 };
 
 export function SessionGroupSection(props: Props): React.ReactNode {
+  const { t } = useI18n();
   const {
     group,
     groupKey,
@@ -163,26 +165,32 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     [compareSessionNodes, group.sessions, searchData?.filteredNodes, shouldFilterGroupContents],
   );
   const folderScopeKey = group.folderScopeKey ?? normalizePath(group.directory ?? null);
-  const scopeFolders = folderScopeKey ? getFoldersForScope(folderScopeKey) : [];
+  const scopeFolders = React.useMemo(
+    () => folderScopeKey ? getFoldersForScope(folderScopeKey) : [],
+    [folderScopeKey, getFoldersForScope]
+  );
 
-  const nodeBySessionId = new Map<string, SessionNode>();
-  const collectNodeLookup = (nodes: SessionNode[]) => {
-    nodes.forEach((node) => {
-      nodeBySessionId.set(node.session.id, node);
-      if (node.children.length > 0) {
-        collectNodeLookup(node.children);
-      }
-    });
-  };
-  collectNodeLookup(sourceGroupNodes);
+  const nodeBySessionId = React.useMemo(() => {
+    const map = new Map<string, SessionNode>();
+    const collectNodeLookup = (nodes: SessionNode[]) => {
+      nodes.forEach((node) => {
+        map.set(node.session.id, node);
+        if (node.children.length > 0) {
+          collectNodeLookup(node.children);
+        }
+      });
+    };
+    collectNodeLookup(sourceGroupNodes);
+    return map;
+  }, [sourceGroupNodes]);
 
-  const allFoldersForGroupBase = scopeFolders.map((folder) => {
+  const allFoldersForGroupBase = React.useMemo(() => scopeFolders.map((folder) => {
     const nodes = folder.sessionIds
       .map((sid) => nodeBySessionId.get(sid))
       .filter((n): n is SessionNode => Boolean(n))
       .sort(compareSessionNodes);
     return { folder, nodes };
-  });
+  }), [scopeFolders, nodeBySessionId, compareSessionNodes]);
 
   const allFoldersForGroup = React.useMemo(() => {
     const folderMapById = new Map(allFoldersForGroupBase.map((entry) => [entry.folder.id, entry]));
@@ -236,9 +244,9 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     return allFoldersForGroupBase.filter(({ folder }) => shouldKeepFolder(folder.id));
   }, [allFoldersForGroupBase, group.isArchivedBucket, hasSessionSearchQuery, normalizedSessionSearchQuery]);
 
-  const sessionIdsInFolders = new Set(allFoldersForGroup.flatMap((f) => f.folder.sessionIds));
-  const ungroupedSessions = sourceGroupNodes.filter((node) => !sessionIdsInFolders.has(node.session.id));
-  const rootFolders = allFoldersForGroup.filter(({ folder }) => !folder.parentId);
+  const sessionIdsInFolders = React.useMemo(() => new Set(allFoldersForGroup.flatMap((f) => f.folder.sessionIds)), [allFoldersForGroup]);
+  const ungroupedSessions = React.useMemo(() => sourceGroupNodes.filter((node) => !sessionIdsInFolders.has(node.session.id)), [sourceGroupNodes, sessionIdsInFolders]);
+  const rootFolders = React.useMemo(() => allFoldersForGroup.filter(({ folder }) => !folder.parentId), [allFoldersForGroup]);
 
   if (hasSessionSearchQuery && !groupMatchesSearch && rootFolders.length === 0 && ungroupedSessions.length === 0) {
     return null;
@@ -277,21 +285,28 @@ export function SessionGroupSection(props: Props): React.ReactNode {
   const showBranchSubtitle = !prIndicator && !group.isMain && Boolean(group.branch);
   const prVisualState = prIndicator?.visualState ?? null;
   const checksSummary = prIndicator && prIndicator.state === 'open' && prIndicator.checks
-    ? `${prIndicator.checks.success}/${prIndicator.checks.total} checks passed`
+    ? t('sessions.sidebar.group.pr.checksPassed', {
+      success: prIndicator.checks.success,
+      total: prIndicator.checks.total,
+    })
     : null;
   const checksTail = prIndicator && prIndicator.state === 'open' && prIndicator.checks
     ? [
-      prIndicator.checks.failure > 0 ? `${prIndicator.checks.failure} failing` : null,
-      prIndicator.checks.pending > 0 ? `${prIndicator.checks.pending} pending` : null,
+      prIndicator.checks.failure > 0
+        ? t('sessions.sidebar.group.pr.failingCount', { count: prIndicator.checks.failure })
+        : null,
+      prIndicator.checks.pending > 0
+        ? t('sessions.sidebar.group.pr.pendingCount', { count: prIndicator.checks.pending })
+        : null,
     ].filter((item): item is string => Boolean(item)).join(', ')
     : null;
   const mergeabilityLabel = prIndicator && prIndicator.state === 'open'
     ? (prIndicator.mergeableState === 'blocked' || prIndicator.mergeableState === 'dirty'
-        ? 'Conflicts or blocked'
-        : (prIndicator.mergeableState === 'clean' || prIndicator.canMerge === true ? 'Mergeable' : null))
+        ? t('sessions.sidebar.group.pr.conflictsOrBlocked')
+        : (prIndicator.mergeableState === 'clean' || prIndicator.canMerge === true ? t('sessions.sidebar.group.pr.mergeable') : null))
     : null;
   const mergeStateLabel = prIndicator && prIndicator.state === 'open' && prIndicator.mergeableState
-    ? `Merge state: ${prIndicator.mergeableState}`
+    ? t('sessions.sidebar.group.pr.mergeState', { state: prIndicator.mergeableState })
     : null;
   const baseBranchLabel = prIndicator?.base ?? null;
   const headBranchLabel = prIndicator?.head ?? null;
@@ -303,20 +318,22 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     }
     switch (prIndicator.visualState) {
       case 'merged':
-        return { label: 'Merged', color: 'var(--pr-merged)' };
+        return { label: t('sessions.sidebar.group.pr.status.merged'), color: 'var(--pr-merged)' };
       case 'open':
         return (prIndicator.canMerge === true || prIndicator.mergeableState === 'clean' || prIndicator.checks?.state === 'success')
-          ? { label: 'Ready to merge', color: 'var(--pr-open)' }
-          : { label: 'PR open', color: 'var(--pr-open)' };
+          ? { label: t('sessions.sidebar.group.pr.status.readyToMerge'), color: 'var(--pr-open)' }
+          : { label: t('sessions.sidebar.group.pr.status.open'), color: 'var(--pr-open)' };
       case 'blocked':
         return {
-          label: prIndicator.mergeableState === 'dirty' ? 'Merge conflicts' : 'Merge blocked',
+          label: prIndicator.mergeableState === 'dirty'
+            ? t('sessions.sidebar.group.pr.status.mergeConflicts')
+            : t('sessions.sidebar.group.pr.status.mergeBlocked'),
           color: 'var(--pr-blocked)',
         };
       case 'draft':
-        return { label: 'Draft PR', color: 'var(--pr-draft)' };
+        return { label: t('sessions.sidebar.group.pr.status.draft'), color: 'var(--pr-draft)' };
       case 'closed':
-        return { label: 'Closed', color: 'var(--pr-closed)' };
+        return { label: t('sessions.sidebar.group.pr.status.closed'), color: 'var(--pr-closed)' };
       default:
         return null;
     }
@@ -448,7 +465,9 @@ export function SessionGroupSection(props: Props): React.ReactNode {
       {visibleSessions.map((node) => renderSessionNode(node, 0, group.directory, projectId, group.isArchivedBucket === true))}
       {totalSessions === 0 && allFoldersForGroup.length === 0 ? (
         <div className="py-1 text-left typography-micro text-muted-foreground">
-          {group.isArchivedBucket ? 'No archived sessions yet.' : 'No sessions in this workspace yet.'}
+          {group.isArchivedBucket
+            ? t('sessions.sidebar.group.empty.noArchivedSessions')
+            : t('sessions.sidebar.group.empty.noSessionsInWorkspace')}
         </div>
       ) : null}
       {remainingCount > 0 && !isExpanded ? (
@@ -457,7 +476,9 @@ export function SessionGroupSection(props: Props): React.ReactNode {
           onClick={() => toggleGroupSessionLimit(groupKey)}
           className="mt-0.5 flex items-center justify-start rounded-md px-1.5 py-0.5 text-left text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline"
         >
-          Show {remainingCount} more {remainingCount === 1 ? 'session' : 'sessions'}
+          {remainingCount === 1
+            ? t('sessions.sidebar.group.showMoreSingle', { count: remainingCount })
+            : t('sessions.sidebar.group.showMorePlural', { count: remainingCount })}
         </button>
       ) : null}
       {isExpanded && totalSessions > maxVisible ? (
@@ -466,7 +487,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
           onClick={() => toggleGroupSessionLimit(groupKey)}
           className="mt-0.5 flex items-center justify-start rounded-md px-1.5 py-0.5 text-left text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline"
         >
-          Show fewer sessions
+          {t('sessions.sidebar.group.showFewer')}
         </button>
       ) : null}
     </SessionFolderDndScope>
@@ -491,7 +512,9 @@ export function SessionGroupSection(props: Props): React.ReactNode {
             onToggleCollapsedGroup(groupKey);
           }
         }}
-        aria-label={isCollapsed ? `Expand ${group.label}` : `Collapse ${group.label}`}
+        aria-label={isCollapsed
+          ? t('sessions.sidebar.group.expandAria', { label: group.label })
+          : t('sessions.sidebar.group.collapseAria', { label: group.label })}
         aria-expanded={!isCollapsed}
       >
         <div
@@ -661,12 +684,12 @@ export function SessionGroupSection(props: Props): React.ReactNode {
                     });
                   }}
                   className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                  aria-label={`Delete archived sessions in ${group.label}`}
+                  aria-label={t('sessions.sidebar.group.actions.deleteArchivedInGroupAria', { label: group.label })}
                 >
                   <RiDeleteBinLine className="h-4 w-4" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="bottom" sideOffset={4}><p>Delete archived sessions</p></TooltipContent>
+              <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.group.actions.deleteArchivedSessions')}</p></TooltipContent>
             </Tooltip>
           </div>
         ) : null}
@@ -685,12 +708,12 @@ export function SessionGroupSection(props: Props): React.ReactNode {
                     });
                   }}
                   className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                  aria-label={`Delete ${group.label}`}
+                  aria-label={t('sessions.sidebar.group.actions.deleteGroupAria', { label: group.label })}
                 >
                   <RiDeleteBinLine className="h-4 w-4" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="bottom" sideOffset={4}><p>Delete worktree</p></TooltipContent>
+              <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.group.actions.deleteWorktree')}</p></TooltipContent>
             </Tooltip>
           </div>
         ) : null}
@@ -708,12 +731,12 @@ export function SessionGroupSection(props: Props): React.ReactNode {
                     openNewSessionDraft({ directoryOverride: group.directory });
                   }}
                   className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                   aria-label={`New draft session in ${group.label}`}
+                  aria-label={t('sessions.sidebar.group.actions.newDraftInGroupAria', { label: group.label })}
                  >
                    <RiAddLine className="h-4 w-4" />
                  </button>
                </TooltipTrigger>
-               <TooltipContent side="bottom" sideOffset={4}><p>New draft session</p></TooltipContent>
+               <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.project.actions.newDraftSession')}</p></TooltipContent>
              </Tooltip>
            </div>
          ) : null}

@@ -12,6 +12,7 @@ import { opencodeClient } from "@/lib/opencode/client"
 import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { registerSessionDirectory } from "./sync-refs"
+import { isSyntheticPart } from "@/lib/messages/synthetic"
 
 // Reference set by SyncProvider — allows actions to access SDK and stores
 let _sdk: OpencodeClient | null = null
@@ -67,14 +68,20 @@ function connectionLostError(): Error {
 // Wait briefly for the pipeline to re-establish connection before failing a
 // send. Transient reconnects (heartbeat race, WS→SSE fallback, brief network
 // blip) otherwise surface as a hard "Connection lost" toast even though the
-// pipeline recovers within a second. Poll isConnected at 100ms intervals.
+// pipeline recovers within a second. While waiting, run bounded health probes
+// inside the same grace window so stale disconnected state can recover quickly.
 const CONNECTION_GRACE_MS = 2000
 export async function waitForConnectionOrThrow(): Promise<void> {
-  if (useConfigStore.getState().isConnected) return
   const deadline = Date.now() + CONNECTION_GRACE_MS
   while (Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 100))
     if (useConfigStore.getState().isConnected) return
+    const remainingMs = deadline - Date.now()
+    if (remainingMs <= 0) break
+    if (await useConfigStore.getState().probeConnection({ timeoutMs: Math.min(500, remainingMs) })) return
+    const sleepMs = Math.min(100, deadline - Date.now())
+    if (sleepMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, sleepMs))
+    }
   }
   throw connectionLostError()
 }
@@ -437,9 +444,13 @@ export async function respondToPermission(
   response: "once" | "always" | "reject",
 ): Promise<void> {
   await waitForConnectionOrThrow()
+  const directory = resolveDirectoryForBlockingRequest("permission", sessionId, requestId)
+    || getSessionDirectory(sessionId)
+    || dir()
   const result = await getRequestReplyClient("permission", sessionId, requestId).permission.reply({
     requestID: requestId,
     reply: response,
+    ...(directory ? { directory } : {}),
   })
   if (!result.data) {
     throw new Error("Permission reply failed")
@@ -451,9 +462,13 @@ export async function dismissPermission(
   requestId: string,
 ): Promise<void> {
   await waitForConnectionOrThrow()
+  const directory = resolveDirectoryForBlockingRequest("permission", sessionId, requestId)
+    || getSessionDirectory(sessionId)
+    || dir()
   const result = await getRequestReplyClient("permission", sessionId, requestId).permission.reply({
     requestID: requestId,
     reply: "reject",
+    ...(directory ? { directory } : {}),
   })
   if (!result.data) {
     throw new Error("Permission dismissal failed")
@@ -470,9 +485,13 @@ export async function respondToQuestion(
   answers: string[] | string[][],
 ): Promise<void> {
   await waitForConnectionOrThrow()
+  const directory = resolveDirectoryForBlockingRequest("question", sessionId, requestId)
+    || getSessionDirectory(sessionId)
+    || dir()
   const result = await getRequestReplyClient("question", sessionId, requestId).question.reply({
     requestID: requestId,
     answers: answers as Array<Array<string>>,
+    ...(directory ? { directory } : {}),
   })
   if (!result.data) {
     throw new Error("Question reply failed")
@@ -484,8 +503,12 @@ export async function rejectQuestion(
   requestId: string,
 ): Promise<void> {
   await waitForConnectionOrThrow()
+  const directory = resolveDirectoryForBlockingRequest("question", sessionId, requestId)
+    || getSessionDirectory(sessionId)
+    || dir()
   const result = await getRequestReplyClient("question", sessionId, requestId).question.reject({
     requestID: requestId,
+    ...(directory ? { directory } : {}),
   })
   if (!result.data) {
     throw new Error("Question rejection failed")
@@ -519,13 +542,14 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
     }
   }
 
-  // Extract message text for prompt restoration
+  // Extract message text for prompt restoration (only non-synthetic text parts —
+  // the server adds file content as synthetic text parts that should not be restored)
   const messages = state.message[sessionId] ?? []
   const targetMsg = messages.find((m) => m.id === messageId)
   let messageText = ""
   if (targetMsg && targetMsg.role === "user") {
     const parts = state.part[messageId] ?? []
-    const textParts = parts.filter((p) => p.type === "text")
+    const textParts = parts.filter((p) => p.type === "text" && !isSyntheticPart(p))
     messageText = textParts
       .map((p: Record<string, unknown>) => (p as { text?: string }).text || (p as { content?: string }).content || "")
       .join("\n")
@@ -640,10 +664,11 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
   const store = dirStore()
   const state = store.getState()
 
-  // Extract message text for input restoration
+  // Extract message text for input restoration (only non-synthetic text parts —
+  // the server adds file content as synthetic text parts that should not be restored)
   const parts = state.part[messageId] ?? []
   let messageText = ""
-  const textParts = parts.filter((p) => p.type === "text")
+  const textParts = parts.filter((p) => p.type === "text" && !isSyntheticPart(p))
   messageText = textParts
     .map((p: Part) => ((p as Record<string, unknown>).text as string) || ((p as Record<string, unknown>).content as string) || "")
     .join("\n")

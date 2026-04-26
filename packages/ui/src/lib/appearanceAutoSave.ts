@@ -1,6 +1,7 @@
 import { useUIStore } from '@/stores/useUIStore';
 import { updateDesktopSettings } from '@/lib/persistence';
 import type { DesktopSettings } from '@/lib/desktop';
+import type { MonoFontOption, UiFontOption } from '@/lib/fontOptions';
 
 type AppearanceSlice = {
   showReasoningTraces: boolean;
@@ -26,6 +27,8 @@ type AppearanceSlice = {
   sessionRetentionAction: 'archive' | 'delete';
   fontSize: number;
   terminalFontSize: number;
+  uiFont: UiFontOption;
+  monoFont: MonoFontOption;
   padding: number;
   cornerRadius: number;
   inputBarOffset: number;
@@ -62,6 +65,8 @@ export const startAppearanceAutoSave = (): void => {
     sessionRetentionAction: useUIStore.getState().sessionRetentionAction,
     fontSize: useUIStore.getState().fontSize,
     terminalFontSize: useUIStore.getState().terminalFontSize,
+    uiFont: useUIStore.getState().uiFont,
+    monoFont: useUIStore.getState().monoFont,
     padding: useUIStore.getState().padding,
     cornerRadius: useUIStore.getState().cornerRadius,
     inputBarOffset: useUIStore.getState().inputBarOffset,
@@ -110,6 +115,8 @@ export const startAppearanceAutoSave = (): void => {
       sessionRetentionAction: state.sessionRetentionAction,
       fontSize: state.fontSize,
       terminalFontSize: state.terminalFontSize,
+      uiFont: state.uiFont,
+      monoFont: state.monoFont,
       padding: state.padding,
       cornerRadius: state.cornerRadius,
       inputBarOffset: state.inputBarOffset,
@@ -173,6 +180,12 @@ export const startAppearanceAutoSave = (): void => {
     }
     if (current.terminalFontSize !== previous.terminalFontSize) {
       diff.terminalFontSize = current.terminalFontSize;
+    }
+    if (current.uiFont !== previous.uiFont) {
+      diff.uiFont = current.uiFont;
+    }
+    if (current.monoFont !== previous.monoFont) {
+      diff.monoFont = current.monoFont;
     }
     if (current.padding !== previous.padding) {
       diff.padding = current.padding;

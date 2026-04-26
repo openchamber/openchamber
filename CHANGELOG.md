@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.9.9] - 2026-04-26
+
+- UI/Localization: added a localization foundation with translated interface strings for Spanish, Brazilian Portuguese, Ukrainian, and Simplified Chinese.
+- Settings/Appearance: added selectable interface and code fonts with 10 choices each.
+- Chat/Workflow: added keyboard turn navigation, widened chat content, and introduced a local workspace review and summarize slash commands for faster review handoff.
+- Chat/Mobile: improved mention and autocomplete behavior with complete results, clearer active-tab scoping, and less context-switching while drafting prompts.
+- Chat/Tasks: todo list progress now updates live as task status changes, and task/model status hints are steadier during active runs (thanks to @Yabuku-xD).
+- Files/Editor: added an "Open files in preview mode" setting and improved multi-file edit/diff safety so review flows stay cleaner (thanks to @daveotero).
+- Reliability/Performance: improved cold start and streaming responsiveness with lazy-loaded heavy components, chunk-load recovery, lower re-render churn, and safer reconnect/local-stream recovery (thanks to @Yabuku-xD, @jwcrystal, @vhqtvn).
+- Desktop/Web/Mobile: improved Electron update restart behavior, PWA service-worker notifications, mobile keyboard handling, and the Add Project panel flow (thanks to @Jovines, @vhqtvn).
+
 ## [1.9.8] - 2026-04-22
 
 - Sessions/Reliability: fixed parent-child session sync during reconnects and navigation, so status and progress stay aligned in complex session trees (thanks to @jwcrystal).

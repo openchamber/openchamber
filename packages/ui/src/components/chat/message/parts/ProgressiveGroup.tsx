@@ -738,10 +738,10 @@ export const StaticToolRow = React.memo(StaticToolRowInner, (prev, next) => {
 /**
  * Inline reasoning text block — rendered as dimmed italic markdown.
  */
-const InlineReasoningBlock: React.FC<{
+const InlineReasoningBlock = React.memo(({ activity, onContentChange }: {
     activity: TurnActivityPart;
     onContentChange?: (reason?: ContentChangeReason) => void;
-}> = ({ activity, onContentChange }) => {
+}) => {
     return (
         <ReasoningPart
             part={activity.part}
@@ -749,15 +749,15 @@ const InlineReasoningBlock: React.FC<{
             onContentChange={onContentChange}
         />
     );
-};
+});
 
 /**
  * Inline justification text block — rendered as normal assistant text between tools.
  */
-const InlineJustificationBlock: React.FC<{
+const InlineJustificationBlock = React.memo(({ activity, onContentChange }: {
     activity: TurnActivityPart;
     onContentChange?: (reason?: ContentChangeReason) => void;
-}> = ({ activity, onContentChange }) => {
+}) => {
     return (
         <JustificationBlock
             part={activity.part}
@@ -765,7 +765,7 @@ const InlineJustificationBlock: React.FC<{
             onContentChange={onContentChange}
         />
     );
-};
+});
 
 const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
     parts,

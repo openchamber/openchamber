@@ -80,7 +80,7 @@ interface UseChatTurnNavigationOptions {
 export interface ChatTurnNavigation {
     scrollToTurnId: (turnId: string, options?: { behavior?: ScrollBehavior; updateHash?: boolean }) => Promise<boolean>;
     scrollToMessageId: (messageId: string, options?: { behavior?: ScrollBehavior; updateHash?: boolean }) => Promise<boolean>;
-    scrollByTurnOffset: (offset: number) => Promise<boolean>;
+    scrollByTurnOffset: (offset: number, options?: { resumePastEnd?: boolean }) => Promise<boolean>;
     resumeToLatest: () => void;
 }
 
@@ -133,14 +133,23 @@ export const useChatTurnNavigation = ({
         return scrollToMessage(messageId, { behavior: options?.behavior });
     }, [scrollToMessage]);
 
-    const scrollByTurnOffset = React.useCallback(async (offset: number): Promise<boolean> => {
-        const target = resolveTurnOffsetTarget(turnIdsRef.current, activeTurnIdRef.current, offset);
+    const scrollByTurnOffset = React.useCallback(async (
+        offset: number,
+        options?: { resumePastEnd?: boolean },
+    ): Promise<boolean> => {
+        const turnIds = turnIdsRef.current;
+        const target = resolveTurnOffsetTarget(turnIds, activeTurnIdRef.current, offset);
 
         if (target.kind === 'noop') {
             return offset === 0;
         }
 
         if (target.kind === 'resume') {
+            if (options?.resumePastEnd === false) {
+                const lastTurnId = turnIds[turnIds.length - 1];
+                return lastTurnId ? scrollToTurnId(lastTurnId, { behavior: 'auto' }) : false;
+            }
+
             setHash(null);
             resumeToBottom();
             return true;

@@ -3,6 +3,7 @@ import { RiCheckLine, RiCloseLine, RiTimeLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import type { PermissionRequest as PermissionRequestPayload, PermissionResponse } from '@/types/permission';
 import * as sessionActions from '@/sync/session-actions';
+import { useI18n } from '@/lib/i18n';
 
 interface PermissionRequestProps {
   permission: PermissionRequestPayload;
@@ -13,9 +14,10 @@ export const PermissionRequest: React.FC<PermissionRequestProps> = ({
   permission,
   onResponse
 }) => {
+  const { t } = useI18n();
   const [isResponding, setIsResponding] = React.useState(false);
   const [hasResponded, setHasResponded] = React.useState(false);
-  const respondToPermission = sessionActions.respondToPermission;;
+  const respondToPermission = sessionActions.respondToPermission;
 
   const handleResponse = async (response: PermissionResponse) => {
     setIsResponding(true);
@@ -24,7 +26,9 @@ export const PermissionRequest: React.FC<PermissionRequestProps> = ({
       await respondToPermission(permission.sessionID, permission.id, response);
       setHasResponded(true);
       onResponse?.(response);
-    } catch { /* ignored */ } finally {
+    } catch (error) {
+      console.error('[PermissionRequest] Failed to respond to permission:', error);
+    } finally {
       setIsResponding(false);
     }
   };
@@ -42,7 +46,7 @@ export const PermissionRequest: React.FC<PermissionRequestProps> = ({
       <div className="flex items-center gap-2 min-w-0 flex-1">
         <div className="min-w-0">
           <span className="typography-ui-label font-medium text-muted-foreground">
-            Permission required:
+            {t('chat.permissionRequest.required')}
           </span>
           <code className="ml-2 typography-meta bg-amber-100/50 dark:bg-amber-800/30 px-1.5 py-0.5 rounded font-mono text-amber-800 dark:text-amber-200">
             {command}
@@ -70,7 +74,7 @@ export const PermissionRequest: React.FC<PermissionRequestProps> = ({
           }}
         >
           <RiCheckLine className="h-3 w-3" />
-          Once
+          {t('chat.permissionRequest.actions.once')}
         </button>
 
         <button
@@ -92,7 +96,7 @@ export const PermissionRequest: React.FC<PermissionRequestProps> = ({
           }}
         >
           <RiTimeLine className="h-3 w-3" />
-          Always
+          {t('chat.permissionRequest.actions.always')}
         </button>
 
         <button
@@ -114,7 +118,7 @@ export const PermissionRequest: React.FC<PermissionRequestProps> = ({
           }}
         >
           <RiCloseLine className="h-3 w-3" />
-          Reject
+          {t('chat.permissionRequest.actions.reject')}
         </button>
 
         {isResponding && (

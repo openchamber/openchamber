@@ -39,6 +39,7 @@ import { parseProjectPlanMarkdown } from '@/lib/openchamberConfig';
 import { createWorktreeSessionForNewBranch } from '@/lib/worktreeSessionCreator';
 import { TodoSendDialog, type TodoSendExecution } from '@/components/session/TodoSendDialog';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
+import { useI18n } from '@/lib/i18n';
 
 type PlanViewProps = {
   targetPath?: string | null;
@@ -142,6 +143,7 @@ type SelectedLineRange = {
 };
 
 export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
+  const { t } = useI18n();
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const createSession = useSessionUIStore((state) => state.createSession);
   const initializeNewOpenChamberSession = useSessionUIStore((state) => state.initializeNewOpenChamberSession);
@@ -195,15 +197,15 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
   const [content, setContent] = React.useState<string>('');
   const [saveError, setSaveError] = React.useState<string | null>(null);
   const planFileLabel = React.useMemo(() => {
-    return displayPath ? displayPath.split('/').pop() || 'plan' : 'plan';
-  }, [displayPath]);
+    return displayPath ? displayPath.split('/').pop() || t('planView.file.defaultName') : t('planView.file.defaultName');
+  }, [displayPath, t]);
   const parsedTitle = React.useMemo(() => {
     if (!content.trim()) {
-      return 'Plan';
+      return t('planView.title.default');
     }
-    return parseProjectPlanMarkdown(content).title || 'Plan';
-  }, [content]);
-  const sendPromptTitle = React.useMemo(() => parsedTitle.trim() || 'Plan', [parsedTitle]);
+    return parseProjectPlanMarkdown(content).title || t('planView.title.default');
+  }, [content, t]);
+  const sendPromptTitle = React.useMemo(() => parsedTitle.trim() || t('planView.title.default'), [parsedTitle, t]);
   const [loading, setLoading] = React.useState(false);
   const [copiedContent, setCopiedContent] = React.useState(false);
   const [mdViewMode, setMdViewMode] = React.useState<'preview' | 'edit'>('edit');
@@ -461,7 +463,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
         if (runtimeApis.files?.writeFile) {
           const result = await runtimeApis.files.writeFile(resolvedPath, content);
           if (!result?.success) {
-            throw new Error('Write failed');
+            throw new Error(t('planView.error.writeFailed'));
           }
         } else {
           const response = await fetch('/api/fs/write', {
@@ -470,18 +472,18 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
             body: JSON.stringify({ path: resolvedPath, content }),
           });
           if (!response.ok) {
-            throw new Error(`Failed to write plan file (${response.status})`);
+            throw new Error(t('planView.error.writePlanFileFailed', { status: response.status }));
           }
         }
       } catch (error) {
-        setSaveError(error instanceof Error ? error.message : 'Failed to save');
+        setSaveError(error instanceof Error ? error.message : t('planView.error.saveFailed'));
       }
     }, 350);
 
     return () => {
       window.clearTimeout(controller);
     };
-  }, [content, resolvedPath, runtimeApis.files]);
+  }, [content, resolvedPath, runtimeApis.files, t]);
 
   React.useEffect(() => {
     return () => {
@@ -609,7 +611,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
           <div className="typography-ui-label font-medium truncate">{parsedTitle}</div>
           {saveError ? (
             <div className="typography-micro text-[color:var(--status-error)] truncate" title={saveError}>
-              Save failed
+              {t('planView.error.saveFailed')}
             </div>
           ) : null}
         </div>
@@ -623,24 +625,24 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
                       variant="ghost"
                       size="sm"
                       className="h-5 w-5 p-0"
-                      aria-label="Improve plan"
+                      aria-label={t('planView.actions.improvePlanAria')}
                       disabled={!content.trim()}
                     >
                       <RiLoopRightAiLine className="size-4" />
                     </Button>
                   </DropdownMenuTrigger>
                 </TooltipTrigger>
-                <TooltipContent sideOffset={8}>Improve</TooltipContent>
+                <TooltipContent sideOffset={8}>{t('planView.actions.improve')}</TooltipContent>
               </Tooltip>
               <DropdownMenuContent align="end">
                 <DropdownMenuItem onClick={() => setPendingPlanSend({ action: 'improve', target: 'session' })}>
-                  Send to new session
+                  {t('planView.actions.sendToNewSession')}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={() => setPendingPlanSend({ action: 'improve', target: 'worktree' })}
                   disabled={!canCreateWorktree}
                 >
-                  Send to new worktree session
+                  {t('planView.actions.sendToNewWorktreeSession')}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -652,24 +654,24 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
                       variant="ghost"
                       size="sm"
                       className="h-5 w-5 p-0"
-                      aria-label="Implement plan"
+                      aria-label={t('planView.actions.implementPlanAria')}
                       disabled={!content.trim()}
                     >
                       <RiCodeAiLine className="size-4" />
                     </Button>
                   </DropdownMenuTrigger>
                 </TooltipTrigger>
-                <TooltipContent sideOffset={8}>Implement</TooltipContent>
+                <TooltipContent sideOffset={8}>{t('planView.actions.implement')}</TooltipContent>
               </Tooltip>
               <DropdownMenuContent align="end">
                 <DropdownMenuItem onClick={() => setPendingPlanSend({ action: 'implement', target: 'session' })}>
-                  Send to new session
+                  {t('planView.actions.sendToNewSession')}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={() => setPendingPlanSend({ action: 'implement', target: 'worktree' })}
                   disabled={!canCreateWorktree}
                 >
-                  Send to new worktree session
+                  {t('planView.actions.sendToNewWorktreeSession')}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -695,8 +697,8 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
                 }
               }}
               className="h-5 w-5 p-0"
-              title="Copy plan contents"
-              aria-label="Copy plan contents"
+              title={t('planView.actions.copyPlanContents')}
+              aria-label={t('planView.actions.copyPlanContents')}
             >
               {copiedContent ? (
                 <RiCheckLine className="h-4 w-4 text-[color:var(--status-success)]" />
@@ -724,7 +726,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
       <div className="flex-1 min-h-0 min-w-0 relative">
         <ScrollableOverlay outerClassName="h-full min-w-0" className="h-full min-w-0">
           {loading ? (
-            <div className="p-3 typography-ui text-muted-foreground">Loading…</div>
+            <div className="p-3 typography-ui text-muted-foreground">{t('planView.state.loading')}</div>
           ) : (
             <div className="relative h-full">
               <div className="h-full">
@@ -733,9 +735,9 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
                     <ErrorBoundary
                       fallback={
                         <div className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2">
-                          <div className="mb-1 font-medium text-destructive">Preview unavailable</div>
+                          <div className="mb-1 font-medium text-destructive">{t('planView.error.previewUnavailable')}</div>
                           <div className="text-sm text-muted-foreground">
-                            Switch to edit mode to fix the issue.
+                            {t('planView.error.switchToEditMode')}
                           </div>
                         </div>
                       }

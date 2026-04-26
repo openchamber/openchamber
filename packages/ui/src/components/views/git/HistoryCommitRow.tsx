@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import type { GitLogEntry, CommitFileEntry } from '@/lib/api/types';
+import { useI18n } from '@/lib/i18n';
 
 interface HistoryCommitRowProps {
   entry: GitLogEntry;
@@ -45,14 +46,15 @@ function getChangeTypeColor(changeType: string) {
   }
 }
 
-export const HistoryCommitRow: React.FC<HistoryCommitRowProps> = ({
+export const HistoryCommitRow = React.memo(({
   entry,
   isExpanded,
   onToggle,
   files,
   isLoadingFiles,
   onCopyHash,
-}) => {
+}: HistoryCommitRowProps) => {
+  const { t } = useI18n();
   return (
     <li>
       <button
@@ -100,7 +102,7 @@ export const HistoryCommitRow: React.FC<HistoryCommitRowProps> = ({
                   <RiFileCopyLine className="size-3" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent sideOffset={8}>Copy SHA</TooltipContent>
+              <TooltipContent sideOffset={8}>{t('gitView.history.copySha')}</TooltipContent>
             </Tooltip>
           </div>
         </div>
@@ -111,10 +113,10 @@ export const HistoryCommitRow: React.FC<HistoryCommitRowProps> = ({
           {isLoadingFiles ? (
             <div className="flex items-center gap-2 py-2">
               <RiLoader4Line className="size-4 animate-spin text-muted-foreground" />
-              <span className="typography-micro text-muted-foreground">Loading files...</span>
+              <span className="typography-micro text-muted-foreground">{t('gitView.history.loadingFiles')}</span>
             </div>
           ) : files.length === 0 ? (
-            <p className="typography-micro text-muted-foreground py-2">No files</p>
+            <p className="typography-micro text-muted-foreground py-2">{t('gitView.history.noFiles')}</p>
           ) : (
             <ul className="space-y-0.5 py-2">
               {files.map((file) => (
@@ -146,7 +148,7 @@ export const HistoryCommitRow: React.FC<HistoryCommitRowProps> = ({
                   )}
                   {file.isBinary && (
                     <span className="typography-micro text-muted-foreground shrink-0">
-                      binary
+                      {t('gitView.history.binary')}
                     </span>
                   )}
                 </li>
@@ -157,4 +159,4 @@ export const HistoryCommitRow: React.FC<HistoryCommitRowProps> = ({
       )}
     </li>
   );
-};
+});

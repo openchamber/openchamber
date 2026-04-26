@@ -512,14 +512,14 @@ Respond in the same language the user used most in the conversation.`,
     id: 'session.review.visible',
     title: 'Workspace Review Visible Prompt',
     group: 'Session',
-    description: 'Visible user message sent by the /review command.',
+    description: 'Visible user message sent by the /workspace-review command.',
     template: 'Review the changes made in this workspace.',
   },
   {
     id: 'session.review.instructions',
     title: 'Workspace Review Instructions',
     group: 'Session',
-    description: 'Hidden instructions attached to the /review command. Reviews current workspace changes for high-signal issues only.',
+    description: 'Hidden instructions attached to the /workspace-review command. Reviews current workspace changes for high-signal issues only.',
     template: `
 Report only real, high-signal issues introduced by these changes.
 

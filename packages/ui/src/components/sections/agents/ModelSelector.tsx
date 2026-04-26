@@ -2,6 +2,7 @@ import React from 'react';
 import {
     DropdownMenu,
     DropdownMenuContent,
+    DropdownMenuItem,
     DropdownMenuLabel,
     DropdownMenuSeparator,
     DropdownMenuTrigger,
@@ -17,6 +18,7 @@ import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useModelLists } from '@/hooks/useModelLists';
 import type { ModelMetadata } from '@/types';
+import { useI18n } from '@/lib/i18n';
 
 type ProviderModel = Record<string, unknown> & { id?: string; name?: string };
 
@@ -55,6 +57,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     allowedProviderIds,
     placeholder
 }) => {
+    const { t } = useI18n();
     const providers = useConfigStore((state) => state.providers);
     const modelsMetadata = useConfigStore((state) => state.modelsMetadata);
     const isMobile = useUIStore(state => state.isMobile);
@@ -71,7 +74,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     const [isDropdownOpen, setIsDropdownOpen] = React.useState(false);
     const [searchQuery, setSearchQuery] = React.useState('');
     const [selectedIndex, setSelectedIndex] = React.useState(0);
-    const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
+    const itemRefs = React.useRef<(HTMLElement | null)[]>([]);
 
     const allowedProviderSet = React.useMemo(() => {
         if (!Array.isArray(allowedProviderIds) || allowedProviderIds.length === 0) {
@@ -174,14 +177,14 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
         const showProviderLogo = keyPrefix === 'fav' || keyPrefix === 'recent';
 
         return (
-            <div
+            <DropdownMenuItem
                 key={`${keyPrefix}-${provID}-${modID}`}
                 ref={(el) => { itemRefs.current[flatIndex] = el; }}
                 className={cn(
-                    "typography-meta group flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer",
-                    isHighlighted ? "bg-interactive-selection" : "hover:bg-interactive-hover/50"
+                    "group flex items-center gap-2",
+                    isHighlighted && "bg-interactive-selection"
                 )}
-                onClick={() => handleProviderAndModelChange(provID, modID)}
+                onSelect={() => handleProviderAndModelChange(provID, modID)}
                 onMouseEnter={() => setSelectedIndex(flatIndex)}
             >
                 <div className="flex items-center gap-1.5 flex-1 min-w-0">
@@ -211,8 +214,8 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                             "model-favorite-button flex h-4 w-4 items-center justify-center hover:text-primary/80",
                             isFavorite ? "text-primary" : "text-muted-foreground"
                         )}
-                        aria-label={isFavorite ? "Unfavorite" : "Favorite"}
-                        title={isFavorite ? "Remove from favorites" : "Add to favorites"}
+                        aria-label={isFavorite ? t('settings.agents.modelSelector.actions.unfavorite') : t('settings.agents.modelSelector.actions.favorite')}
+                        title={isFavorite ? t('settings.agents.modelSelector.actions.removeFromFavorites') : t('settings.agents.modelSelector.actions.addToFavorites')}
                     >
                         {isFavorite ? (
                             <RiStarFill className="h-3.5 w-3.5" />
@@ -221,7 +224,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                         )}
                     </button>
                 </div>
-            </div>
+            </DropdownMenuItem>
         );
     };
 
@@ -266,14 +269,14 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             <MobileOverlayPanel
                 open={isMobilePanelOpen}
                 onClose={closeMobilePanel}
-                title="Select model"
+                title={t('settings.agents.modelSelector.title')}
             >
                 <div className="space-y-1">
                     {/* Favorites Section for Mobile */}
                     {favoriteModelsList.length > 0 && (
                         <div className="rounded-xl border border-border/40 bg-[var(--surface-elevated)] mb-2">
                             <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                                Favorites
+                                {t('settings.agents.modelSelector.section.favorites')}
                             </div>
                             <div className="border-t border-border/20">
                                 {favoriteModelsList.map(({ model, providerID, modelID }) => {
@@ -312,7 +315,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                                                     toggleFavoriteModel(providerID, modelID);
                                                 }}
                                                 className="model-favorite-button flex h-8 w-8 items-center justify-center text-primary hover:text-primary/80 active:scale-95 touch-manipulation"
-                                                aria-label="Unfavorite"
+                                                aria-label={t('settings.agents.modelSelector.actions.unfavorite')}
                                             >
                                                 <RiStarFill className="h-4 w-4" />
                                             </button>
@@ -327,7 +330,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                     {recentModelsList.length > 0 && (
                         <div className="rounded-xl border border-border/40 bg-[var(--surface-elevated)] mb-2">
                             <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                                Recents
+                                {t('settings.agents.modelSelector.section.recents')}
                             </div>
                             <div className="border-t border-border/20">
                                 {recentModelsList.map(({ model, providerID, modelID }) => {
@@ -366,7 +369,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                                                     toggleFavoriteModel(providerID, modelID);
                                                 }}
                                                 className="model-favorite-button flex h-8 w-8 items-center justify-center text-muted-foreground/50 hover:text-primary/80 active:scale-95 touch-manipulation"
-                                                aria-label="Favorite"
+                                                aria-label={t('settings.agents.modelSelector.actions.favorite')}
                                             >
                                                 <RiStarLine className="h-4 w-4" />
                                             </button>
@@ -400,7 +403,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                                             {provider.name}
                                         </span>
                                         {isActiveProvider && (
-                                            <span className="typography-micro text-primary/80">Current</span>
+                                            <span className="typography-micro text-primary/80">{t('settings.agents.modelSelector.badge.current')}</span>
                                         )}
                                     </div>
                                     {isExpanded ? (
@@ -448,7 +451,9 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                                                                     ? "text-primary"
                                                                     : "text-muted-foreground/50"
                                                             )}
-                                                            aria-label={isFavoriteModel(provider.id as string, modelItem.id as string) ? "Unfavorite" : "Favorite"}
+                                                            aria-label={isFavoriteModel(provider.id as string, modelItem.id as string)
+                                                                ? t('settings.agents.modelSelector.actions.unfavorite')
+                                                                : t('settings.agents.modelSelector.actions.favorite')}
                                                         >
                                                             {isFavoriteModel(provider.id as string, modelItem.id as string) ? (
                                                                 <RiStarFill className="h-4 w-4" />
@@ -478,7 +483,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                             closeMobilePanel();
                         }}
                     >
-                        <span className="typography-meta text-muted-foreground">{placeholder || 'No model (optional)'}</span>
+                        <span className="typography-meta text-muted-foreground">{placeholder || t('settings.agents.modelSelector.noModelOptional')}</span>
                     </button>
                 </div>
             </MobileOverlayPanel>
@@ -506,7 +511,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                             <RiPencilAiLine className="h-3 w-3 text-muted-foreground" />
                         )}
                         <span className="typography-meta font-medium text-foreground">
-                            {providerId && modelId ? `${providerId}/${modelId}` : (placeholder || 'Select model...')}
+                            {providerId && modelId ? `${providerId}/${modelId}` : (placeholder || t('settings.agents.modelSelector.selectPlaceholder'))}
                         </span>
                     </div>
                     <RiArrowDownSLine className="h-3 w-3 text-muted-foreground" />
@@ -530,7 +535,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                                 <RiPencilAiLine className="h-3.5 w-3.5 text-muted-foreground" />
                             )}
                             <span className="typography-ui-label font-normal whitespace-nowrap text-foreground">
-                                {providerId && modelId ? `${providerId}/${modelId}` : (placeholder || 'Not selected')}
+                                {providerId && modelId ? `${providerId}/${modelId}` : (placeholder || t('settings.agents.modelSelector.notSelected'))}
                             </span>
                             <RiArrowDownSLine className="h-4 w-4 flex-shrink-0 text-muted-foreground/50" />
                         </div>
@@ -595,7 +600,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                                             <RiSearchLine className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                                             <Input
                                                 type="text"
-                                                placeholder="Search models"
+                                                placeholder={t('settings.agents.modelSelector.searchPlaceholder')}
                                                 value={searchQuery}
                                                 onChange={(e) => setSearchQuery(e.target.value)}
                                                 onKeyDown={handleKeyDown}
@@ -609,25 +614,24 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                                     <ScrollableOverlay outerClassName="max-h-[min(400px,calc(100dvh-12rem))] flex-1">
                                         <div className="p-1">
                                             {/* Not selected option */}
-                                            <div
+                                            <DropdownMenuItem
                                                 className={cn(
-                                                    "typography-meta flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer",
-                                                    "hover:bg-interactive-hover/50"
+                                                    "flex items-center gap-2",
                                                 )}
-                                                onClick={() => handleProviderAndModelChange('', '')}
+                                                onSelect={() => handleProviderAndModelChange('', '')}
                                             >
                                                 <RiCloseLine className="h-3.5 w-3.5 text-muted-foreground" />
-                                                <span className="text-muted-foreground">{placeholder || 'Not selected'}</span>
+                                                <span className="text-muted-foreground">{placeholder || t('settings.agents.modelSelector.notSelected')}</span>
                                                 {!providerId && !modelId && (
                                                     <RiCheckLine className="h-4 w-4 text-primary ml-auto" />
                                                 )}
-                                            </div>
+                                            </DropdownMenuItem>
 
                                             <DropdownMenuSeparator />
 
                                             {!hasResults && searchQuery && (
                                                 <div className="px-2 py-4 text-center typography-meta text-muted-foreground">
-                                                    No models found
+                                                    {t('settings.agents.modelSelector.state.noModelsFound')}
                                                 </div>
                                             )}
 
@@ -636,7 +640,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                                                 <div>
                                                     <DropdownMenuLabel className="typography-micro font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2 -mx-1 px-3 py-1.5 border-b border-border/30">
                                                         <RiStarFill className="h-4 w-4 text-primary" />
-                                                        Favorites
+                                                        {t('settings.agents.modelSelector.section.favorites')}
                                                     </DropdownMenuLabel>
                                                     {filteredFavorites.map(({ model, providerID, modelID }) => {
                                                         const idx = currentFlatIndex++;
@@ -651,7 +655,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                                                     {filteredFavorites.length > 0 && <DropdownMenuSeparator />}
                                                     <DropdownMenuLabel className="typography-micro font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2 -mx-1 px-3 py-1.5 border-b border-border/30">
                                                         <RiTimeLine className="h-4 w-4" />
-                                                        Recent
+                                                        {t('settings.agents.modelSelector.section.recent')}
                                                     </DropdownMenuLabel>
                                                     {filteredRecents.map(({ model, providerID, modelID }) => {
                                                         const idx = currentFlatIndex++;
@@ -687,7 +691,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
 
                                     {/* Keyboard hints footer */}
                                     <div className="px-3 pt-1 pb-1.5 border-t border-border/40 typography-micro text-muted-foreground">
-                                        ↑↓ navigate • Enter select • Esc close
+                                        {t('settings.agents.modelSelector.keyboardHints')}
                                     </div>
                                 </>
                             );

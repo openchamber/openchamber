@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
+import { useI18n } from '@/lib/i18n';
 
 const LEFT_FACE_CELL_OPACITIES = [
   0.2, 0.45, 0.15, 0.55,
@@ -82,6 +83,7 @@ export const OpenChamberLogo: React.FC<OpenChamberLogoProps> = ({
   width = 70,
   height = 70,
 }) => {
+  const { t } = useI18n();
   const themeContext = useOptionalThemeSystem();
 
   let isDark = true;
@@ -189,7 +191,7 @@ export const OpenChamberLogo: React.FC<OpenChamberLogoProps> = ({
       xmlns="http://www.w3.org/2000/svg"
       className={className}
       role="img"
-      aria-label="OpenChamber logo"
+      aria-label={t('openChamberLogo.aria.logo')}
     >
       {/* Left face - base fill */}
       <path

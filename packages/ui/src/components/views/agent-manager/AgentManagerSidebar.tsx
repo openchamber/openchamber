@@ -28,8 +28,9 @@ import {
 import { cn } from '@/lib/utils';
 import { useAgentGroupsStore, type AgentGroup } from '@/stores/useAgentGroupsStore';
 import { useAllSessionStatuses } from '@/sync/sync-context';
+import { useI18n } from '@/lib/i18n';
 
-const formatRelativeTime = (timestamp: number): string => {
+const formatRelativeTime = (timestamp: number): { unit: 'now' | 'minutes' | 'hours' | 'days'; count?: number } => {
   const now = Date.now();
   const diff = now - timestamp;
 
@@ -37,10 +38,10 @@ const formatRelativeTime = (timestamp: number): string => {
   const hours = Math.floor(diff / (60 * 60 * 1000));
   const days = Math.floor(diff / (24 * 60 * 60 * 1000));
 
-  if (minutes < 1) return 'now';
-  if (minutes < 60) return `${minutes}m`;
-  if (hours < 24) return `${hours}h`;
-  return `${days}d`;
+  if (minutes < 1) return { unit: 'now' };
+  if (minutes < 60) return { unit: 'minutes', count: minutes };
+  if (hours < 24) return { unit: 'hours', count: hours };
+  return { unit: 'days', count: days };
 };
 
 interface AgentGroupItemProps {
@@ -51,6 +52,7 @@ interface AgentGroupItemProps {
 }
 
 const AgentGroupItem: React.FC<AgentGroupItemProps> = ({ group, isSelected, isBusy, onSelect }) => {
+  const { t } = useI18n();
   const [menuOpen, setMenuOpen] = React.useState(false);
   const [confirmOpen, setConfirmOpen] = React.useState(false);
   const [isDeleting, setIsDeleting] = React.useState(false);
@@ -59,16 +61,18 @@ const AgentGroupItem: React.FC<AgentGroupItemProps> = ({ group, isSelected, isBu
   const handleDeleteGroup = React.useCallback(async () => {
     if (isDeleting) return;
     setIsDeleting(true);
-    toast.info(`Deleting "${group.name}"...`);
+    toast.info(t('agentManager.sidebar.toast.deletingGroup', { group: group.name }));
     const { failedIds, failedWorktreePaths } = await deleteGroupSessions(group.sessions, { removeWorktrees: true });
     if (failedIds.length === 0 && failedWorktreePaths.length === 0) {
-      toast.success(`Deleted "${group.name}"`);
+      toast.success(t('agentManager.sidebar.toast.deletedGroup', { group: group.name }));
     } else {
-      toast.error(`Failed to fully delete "${group.name}"`);
+      toast.error(t('agentManager.sidebar.toast.failedToDeleteGroup', { group: group.name }));
     }
     setIsDeleting(false);
     setConfirmOpen(false);
-  }, [deleteGroupSessions, group.name, group.sessions, isDeleting]);
+  }, [deleteGroupSessions, group.name, group.sessions, isDeleting, t]);
+
+  const relativeTime = formatRelativeTime(group.lastActive);
 
   return (
     <>
@@ -91,12 +95,20 @@ const AgentGroupItem: React.FC<AgentGroupItemProps> = ({ group, isSelected, isBu
               {isBusy && <RiLoader4Line className="h-3 w-3 animate-spin text-amber-500 flex-shrink-0" />}
             </div>
             <div className="flex items-center gap-2">
-              <span className="typography-micro text-muted-foreground/60 flex items-center gap-1">
-                <RiGitBranchLine className="h-3 w-3" />
-                {group.sessionCount} model{group.sessionCount !== 1 ? 's' : ''}
-              </span>
+                <span className="typography-micro text-muted-foreground/60 flex items-center gap-1">
+                  <RiGitBranchLine className="h-3 w-3" />
+                  {group.sessionCount === 1
+                    ? t('agentManager.sidebar.item.modelCountSingle', { count: group.sessionCount })
+                    : t('agentManager.sidebar.item.modelCountPlural', { count: group.sessionCount })}
+                </span>
               <span className="typography-micro text-muted-foreground/60">
-                {formatRelativeTime(group.lastActive)}
+                {relativeTime.unit === 'now'
+                  ? t('agentManager.sidebar.relativeTime.now')
+                  : relativeTime.unit === 'minutes'
+                    ? t('agentManager.sidebar.relativeTime.minutes', { count: relativeTime.count ?? 0 })
+                    : relativeTime.unit === 'hours'
+                      ? t('agentManager.sidebar.relativeTime.hours', { count: relativeTime.count ?? 0 })
+                      : t('agentManager.sidebar.relativeTime.days', { count: relativeTime.count ?? 0 })}
               </span>
             </div>
           </button>
@@ -111,7 +123,7 @@ const AgentGroupItem: React.FC<AgentGroupItemProps> = ({ group, isSelected, isBu
                     'opacity-0 group-hover:opacity-100',
                     menuOpen && 'opacity-100',
                   )}
-                  aria-label="Group menu"
+                  aria-label={t('agentManager.sidebar.item.groupMenuAria')}
                   onClick={(e) => e.stopPropagation()}
                 >
                   <RiMore2Line className="h-3.5 w-3.5" />
@@ -126,7 +138,7 @@ const AgentGroupItem: React.FC<AgentGroupItemProps> = ({ group, isSelected, isBu
                     setConfirmOpen(true);
                   }}
                 >
-                  Delete
+                  {t('agentManager.sidebar.item.delete')}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -137,17 +149,17 @@ const AgentGroupItem: React.FC<AgentGroupItemProps> = ({ group, isSelected, isBu
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Delete agent group</DialogTitle>
+            <DialogTitle>{t('agentManager.sidebar.dialog.deleteGroupTitle')}</DialogTitle>
             <DialogDescription>
-              Delete <span className="text-foreground font-medium">{group.name}</span>? This removes all worktrees and sessions in this group.
+              {t('agentManager.sidebar.dialog.deleteGroupDescription', { group: group.name })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmOpen(false)} disabled={isDeleting}>
-              Cancel
+              {t('agentManager.sidebar.dialog.cancel')}
             </Button>
             <Button variant="destructive" onClick={() => void handleDeleteGroup()} disabled={isDeleting}>
-              {isDeleting ? 'Deleting…' : 'Delete'}
+              {isDeleting ? t('agentManager.sidebar.dialog.deleting') : t('agentManager.sidebar.dialog.delete')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -171,6 +183,7 @@ export const AgentManagerSidebar: React.FC<AgentManagerSidebarProps> = ({
   onGroupSelect,
   onNewAgent,
 }) => {
+  const { t } = useI18n();
   const [searchQuery, setSearchQuery] = React.useState('');
   const [showAll, setShowAll] = React.useState(false);
   const isLoading = useAgentGroupsStore((s) => s.isLoading);
@@ -209,7 +222,7 @@ export const AgentManagerSidebar: React.FC<AgentManagerSidebarProps> = ({
           <Input
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search Agent Groups..."
+            placeholder={t('agentManager.sidebar.search.placeholder')}
             className="pl-8 h-8 rounded-lg border-border/40 bg-background/50 typography-meta"
           />
         </div>
@@ -223,7 +236,7 @@ export const AgentManagerSidebar: React.FC<AgentManagerSidebarProps> = ({
           onClick={onNewAgent}
         >
           <RiAddLine className="h-4 w-4" />
-          <span className="typography-ui-label">New Agent Group</span>
+          <span className="typography-ui-label">{t('agentManager.sidebar.actions.newAgentGroup')}</span>
         </Button>
       </div>
 
@@ -231,11 +244,11 @@ export const AgentManagerSidebar: React.FC<AgentManagerSidebarProps> = ({
       <div className="px-2.5 py-1.5 flex items-center gap-1">
         <RiArrowDownSLine className="h-4 w-4 text-muted-foreground" />
         <span className="typography-micro font-medium text-muted-foreground uppercase tracking-wider">
-          Agent Groups
+          {t('agentManager.sidebar.section.agentGroups')}
         </span>
         {isLoading && (
           <span className="typography-micro text-muted-foreground/50 ml-auto">
-            Loading...
+            {t('agentManager.sidebar.state.loading')}
           </span>
         )}
       </div>
@@ -261,7 +274,7 @@ export const AgentManagerSidebar: React.FC<AgentManagerSidebarProps> = ({
             onClick={() => setShowAll(true)}
             className="mt-1 flex items-center justify-start rounded-md px-1.5 py-0.5 text-left typography-micro text-muted-foreground/70 hover:text-foreground hover:underline"
           >
-            ... More ({remainingCount})
+            {t('agentManager.sidebar.actions.more', { count: remainingCount })}
           </button>
         )}
 
@@ -271,18 +284,18 @@ export const AgentManagerSidebar: React.FC<AgentManagerSidebarProps> = ({
             onClick={() => setShowAll(false)}
             className="mt-1 flex items-center justify-start rounded-md px-1.5 py-0.5 text-left typography-micro text-muted-foreground/70 hover:text-foreground hover:underline"
           >
-            Show less
+            {t('agentManager.sidebar.actions.showLess')}
           </button>
         )}
 
         {!isLoading && filteredGroups.length === 0 && (
           <div className="py-4 text-center">
             <p className="typography-meta text-muted-foreground">
-              {searchQuery.trim() ? 'No groups found' : 'No agent groups yet'}
+              {searchQuery.trim() ? t('agentManager.sidebar.state.noGroupsFound') : t('agentManager.sidebar.state.noGroupsYet')}
             </p>
             {!searchQuery.trim() && (
               <p className="typography-micro text-muted-foreground/60 mt-1">
-                Create a new agent group to get started
+                {t('agentManager.sidebar.state.createToGetStarted')}
               </p>
             )}
           </div>

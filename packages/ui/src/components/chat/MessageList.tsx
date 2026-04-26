@@ -506,7 +506,7 @@ interface TurnBlockProps {
     activeStreamingPhase?: StreamPhase | null;
 }
 
-const TurnBlock: React.FC<TurnBlockProps> = ({
+const TurnBlock = React.memo(({
     turn,
     isLastTurn,
     sessionIsWorking,
@@ -522,7 +522,7 @@ const TurnBlock: React.FC<TurnBlockProps> = ({
     onUserAnimationConsumed,
     activeStreamingMessageId,
     activeStreamingPhase,
-}) => {
+}: TurnBlockProps) => {
     const turnUiState = turnUiStates.get(turn.turnId) ?? { isExpanded: defaultActivityExpanded };
     const handleToggleTurnGroup = React.useCallback(() => {
         onToggleTurnGroup(turn.turnId);
@@ -783,7 +783,7 @@ const TurnBlock: React.FC<TurnBlockProps> = ({
     return (
         <TurnItem turn={renderableTurn} stickyUserHeader={stickyUserHeader} renderMessage={renderMessage} />
     );
-};
+});
 
 TurnBlock.displayName = 'TurnBlock';
 
@@ -800,7 +800,7 @@ interface UngroupedMessageRowProps {
     activeStreamingPhase?: StreamPhase | null;
 }
 
-const UngroupedMessageRow: React.FC<UngroupedMessageRowProps> = ({
+const UngroupedMessageRow = React.memo(({
     message,
     previousMessage,
     nextMessage,
@@ -811,7 +811,7 @@ const UngroupedMessageRow: React.FC<UngroupedMessageRowProps> = ({
     onUserAnimationConsumed,
     activeStreamingMessageId,
     activeStreamingPhase,
-}) => {
+}: UngroupedMessageRowProps) => {
     return (
         <MessageRow
             message={message}
@@ -826,7 +826,7 @@ const UngroupedMessageRow: React.FC<UngroupedMessageRowProps> = ({
             activeStreamingPhase={message.info.id === activeStreamingMessageId ? activeStreamingPhase : null}
         />
     );
-};
+});
 
 UngroupedMessageRow.displayName = 'UngroupedMessageRow';
 
@@ -859,7 +859,7 @@ const turnContainsMessageId = (turn: TurnRecord, messageId: string | null | unde
     return turn.assistantMessages.some((assistant) => assistant.info.id === messageId);
 };
 
-const MessageListEntry: React.FC<MessageListEntryProps> = ({
+const MessageListEntry = React.memo(({
     entry,
     onMessageContentChange,
     getAnimationHandlers,
@@ -874,7 +874,7 @@ const MessageListEntry: React.FC<MessageListEntryProps> = ({
     onUserAnimationConsumed,
     activeStreamingMessageId,
     activeStreamingPhase,
-}) => {
+}: MessageListEntryProps) => {
     if (entry.kind === 'ungrouped') {
         return (
             <UngroupedMessageRow
@@ -911,7 +911,7 @@ const MessageListEntry: React.FC<MessageListEntryProps> = ({
             stickyUserHeader={stickyUserHeader}
         />
     );
-};
+});
 
 MessageListEntry.displayName = 'MessageListEntry';
 
@@ -1474,21 +1474,22 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                     return false;
                 }
 
-                const targetIsTail = trailingStreamingEntry !== undefined && index >= historyEntries.length;
-                if (targetIsTail) {
-                    return false;
-                }
-
                 const container = resolveScrollContainer();
                 if (!container) {
                     return false;
                 }
                 const turnElement = container.querySelector<HTMLElement>(`[data-turn-id="${turnId}"]`);
-                if (!turnElement) {
-                    return scrollHistoryIndexIntoView(index, behavior);
+                if (turnElement) {
+                    turnElement.scrollIntoView({ behavior, block: 'start' });
+                    return true;
                 }
-                turnElement.scrollIntoView({ behavior, block: 'start' });
-                return true;
+
+                const targetIsTail = trailingStreamingEntry !== undefined && index >= historyEntries.length;
+                if (targetIsTail) {
+                    return false;
+                }
+
+                return scrollHistoryIndexIntoView(index, behavior);
             },
 
             scrollToMessageId: (messageId: string, options?: { behavior?: ScrollBehavior }) => {
@@ -1498,13 +1499,12 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                     return false;
                 }
 
-                const targetIsTail = trailingStreamingEntry !== undefined && index >= historyEntries.length;
-                if (targetIsTail) {
-                    return false;
-                }
-
                 return scrollMessageElementIntoView(messageId, behavior)
-                    || scrollHistoryIndexIntoView(index, behavior);
+                    || (
+                        trailingStreamingEntry !== undefined && index >= historyEntries.length
+                            ? false
+                            : scrollHistoryIndexIntoView(index, behavior)
+                    );
             },
 
             captureViewportAnchor: () => {

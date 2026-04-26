@@ -19,6 +19,7 @@ import { useAgentsStore } from '@/stores/useAgentsStore';
 import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
 import { cn } from '@/lib/utils';
 import { RiArrowDownSLine } from '@remixicon/react';
+import { useI18n } from '@/lib/i18n';
 
 type TodoSendTarget = 'session' | 'worktree';
 
@@ -58,7 +59,8 @@ type ThinkingPillProps = {
 };
 
 const ThinkingPill = ({ value, options, disabled, onChange }: ThinkingPillProps) => {
-  const label = value || 'Default';
+  const { t } = useI18n();
+  const label = value || t('rightSidebar.contextNotesTodo.sendDialog.variant.default');
 
   const trigger = (
     <div
@@ -79,7 +81,9 @@ const ThinkingPill = ({ value, options, disabled, onChange }: ThinkingPillProps)
       <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="max-w-[220px]">
         <DropdownMenuItem className="typography-meta" onSelect={() => onChange('')}>
-          <span className={cn('font-medium', !value && 'text-primary')}>Default</span>
+          <span className={cn('font-medium', !value && 'text-primary')}>
+            {t('rightSidebar.contextNotesTodo.sendDialog.variant.default')}
+          </span>
         </DropdownMenuItem>
         {options.map((option) => (
           <DropdownMenuItem
@@ -98,6 +102,7 @@ const ThinkingPill = ({ value, options, disabled, onChange }: ThinkingPillProps)
 };
 
 export function TodoSendDialog(props: TodoSendDialogProps) {
+  const { t } = useI18n();
   const { open, onOpenChange, target, projectDirectory, submitting = false, onConfirm } = props;
 
   const loadProviders = useConfigStore((state) => state.loadProviders);
@@ -185,7 +190,9 @@ export function TodoSendDialog(props: TodoSendDialogProps) {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [open, handleSubmit]);
 
-  const title = target === 'worktree' ? 'Send to new worktree' : 'Send to new session';
+  const title = target === 'worktree'
+    ? t('rightSidebar.contextNotesTodo.sendDialog.title.newWorktree')
+    : t('rightSidebar.contextNotesTodo.sendDialog.title.newSession');
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => { if (!submitting) onOpenChange(nextOpen); }}>
@@ -217,10 +224,12 @@ export function TodoSendDialog(props: TodoSendDialogProps) {
 
         <div className="flex items-center justify-end gap-2">
           <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)} disabled={submitting}>
-            Cancel
+            {t('rightSidebar.contextNotesTodo.sendDialog.actions.cancel')}
           </Button>
           <Button size="sm" onClick={handleSubmit} disabled={!canConfirm || submitting}>
-            {submitting ? 'Sending' : 'Send'}
+            {submitting
+              ? t('rightSidebar.contextNotesTodo.sendDialog.actions.sending')
+              : t('rightSidebar.contextNotesTodo.sendDialog.actions.send')}
           </Button>
         </div>
       </DialogContent>

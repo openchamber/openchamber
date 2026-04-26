@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { pathLooksUserConfigured, mergePathValues } from './path-utils.js';
 
 export const createOpenCodeEnvRuntime = (deps) => {
   const {
@@ -162,26 +163,6 @@ export const createOpenCodeEnvRuntime = (deps) => {
     return null;
   };
 
-  const mergePathValues = (preferred, fallback) => {
-    const merged = new Set();
-
-    const addSegments = (value) => {
-      if (typeof value !== 'string' || !value) {
-        return;
-      }
-      for (const segment of value.split(path.delimiter)) {
-        if (segment) {
-          merged.add(segment);
-        }
-      }
-    };
-
-    addSegments(preferred);
-    addSegments(fallback);
-
-    return Array.from(merged).join(path.delimiter);
-  };
-
   const applyLoginShellEnvSnapshot = () => {
     const snapshot = getLoginShellEnvSnapshot();
     if (!snapshot) {
@@ -200,7 +181,12 @@ export const createOpenCodeEnvRuntime = (deps) => {
       process.env[key] = value;
     }
 
-    process.env.PATH = mergePathValues(snapshot.PATH || '', process.env.PATH || '');
+    const currentPath = process.env.PATH || '';
+    const shellPath = snapshot.PATH || '';
+    const home = os.homedir();
+    if (!pathLooksUserConfigured(currentPath, home, path.delimiter) && shellPath) {
+      process.env.PATH = mergePathValues(shellPath, currentPath, path.delimiter);
+    }
   };
 
   const isWslExecutableValue = (value) => {

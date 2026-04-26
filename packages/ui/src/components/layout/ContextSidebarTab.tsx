@@ -10,6 +10,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessions, useSessionMessageRecords } from '@/sync/sync-context';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { useI18n } from '@/lib/i18n';
 
 type SessionMessage = { info: Message; parts: Part[] };
 
@@ -230,14 +231,13 @@ const formatMoney = (value: number): string => {
 
 const formatDateTime = (timestamp: number | null): string => {
   if (!timestamp || !Number.isFinite(timestamp)) return '-';
-  const value = new Date(timestamp).toLocaleString(undefined, {
+  return new Date(timestamp).toLocaleString(undefined, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
   });
-  return value.replace(/, (\d{1,2}:\d{2} [AP]M)$/, ' at $1');
 };
 
 const formatMessageDateMeta = (timestamp: number | null): string => {
@@ -271,6 +271,7 @@ const resolveProviderAndModel = (
 };
 
 export const ContextPanelContent: React.FC = () => {
+  const { t } = useI18n();
   const { currentTheme } = useThemeSystem();
   const syntaxTheme = React.useMemo(() => generateSyntaxTheme(currentTheme), [currentTheme]);
   const [expandedRawMessages, setExpandedRawMessages] = React.useState<Record<string, boolean>>({});
@@ -367,7 +368,7 @@ export const ContextPanelContent: React.FC = () => {
       : null;
 
     return {
-      sessionTitle: currentSession?.title || 'Untitled Session',
+      sessionTitle: currentSession?.title || t('contextSidebar.session.untitled'),
       messagesCount: sessionMessages.length,
       userMessagesCount: userMessages.length,
       assistantMessagesCount: assistantMessages.length,
@@ -386,21 +387,21 @@ export const ContextPanelContent: React.FC = () => {
       },
       breakdownTotal,
     };
-  }, [currentSessionId, providers, sessionMessages, sessions]);
+  }, [currentSessionId, providers, sessionMessages, sessions, t]);
 
   if (!currentSessionId) {
     return (
-      <div className="flex h-full items-center justify-center p-6 text-center typography-ui-label text-muted-foreground">
-        Open a session to inspect context.
+        <div className="flex h-full items-center justify-center p-6 text-center typography-ui-label text-muted-foreground">
+        {t('contextSidebar.empty.openSession')}
       </div>
     );
   }
 
   const segments: Array<{ key: string; label: string; value: number; color: string }> = [
-    { key: 'user', label: 'User', value: viewModel.breakdown.user, color: 'var(--status-success)' },
-    { key: 'assistant', label: 'Assistant', value: viewModel.breakdown.assistant, color: 'var(--primary-base)' },
-    { key: 'tool', label: 'Tool Calls', value: viewModel.breakdown.tool, color: 'var(--status-warning)' },
-    { key: 'other', label: 'Other', value: viewModel.breakdown.other, color: 'var(--surface-muted-foreground)' },
+    { key: 'user', label: t('contextSidebar.breakdown.user'), value: viewModel.breakdown.user, color: 'var(--status-success)' },
+    { key: 'assistant', label: t('contextSidebar.breakdown.assistant'), value: viewModel.breakdown.assistant, color: 'var(--primary-base)' },
+    { key: 'tool', label: t('contextSidebar.breakdown.toolCalls'), value: viewModel.breakdown.tool, color: 'var(--status-warning)' },
+    { key: 'other', label: t('contextSidebar.breakdown.other'), value: viewModel.breakdown.other, color: 'var(--surface-muted-foreground)' },
   ];
 
   return (
@@ -424,7 +425,7 @@ export const ContextPanelContent: React.FC = () => {
         {/* ── Context usage ── */}
         <div className="mb-5 rounded-lg bg-[var(--surface-elevated)]/70 px-4 py-3.5">
           <div className="flex items-baseline justify-between">
-            <span className="typography-micro text-muted-foreground">Context</span>
+            <span className="typography-micro text-muted-foreground">{t('contextSidebar.section.context')}</span>
             <span className="typography-micro tabular-nums text-muted-foreground/70">
               {formatNumber(viewModel.tokenBreakdown.total)}
               {viewModel.contextLimit ? ` / ${formatNumber(viewModel.contextLimit)}` : ''}
@@ -442,17 +443,17 @@ export const ContextPanelContent: React.FC = () => {
             )}
           </div>
           <div className="mt-1.5 typography-micro font-medium tabular-nums text-foreground/80">
-            {viewModel.usagePercent.toFixed(1)}% used
+            {t('contextSidebar.context.percentUsed', { percent: viewModel.usagePercent.toFixed(1) })}
           </div>
         </div>
 
         {/* ── Stat grid ── */}
         <div className="mb-5 grid grid-cols-2 gap-2">
           {([
-            { label: 'Messages', value: formatNumber(viewModel.messagesCount) },
-            { label: 'User', value: formatNumber(viewModel.userMessagesCount) },
-            { label: 'Assistant', value: formatNumber(viewModel.assistantMessagesCount) },
-            { label: 'Cost', value: formatMoney(viewModel.totalAssistantCost) },
+            { label: t('contextSidebar.stats.messages'), value: formatNumber(viewModel.messagesCount) },
+            { label: t('contextSidebar.stats.user'), value: formatNumber(viewModel.userMessagesCount) },
+            { label: t('contextSidebar.stats.assistant'), value: formatNumber(viewModel.assistantMessagesCount) },
+            { label: t('contextSidebar.stats.cost'), value: formatMoney(viewModel.totalAssistantCost) },
           ] as const).map((item) => (
             <div key={item.label} className="rounded-lg bg-[var(--surface-elevated)]/70 px-3 py-2.5">
               <div className="typography-micro text-muted-foreground/70">{item.label}</div>
@@ -463,14 +464,14 @@ export const ContextPanelContent: React.FC = () => {
 
         {/* ── Last turn tokens ── */}
         <div className="mb-5 rounded-lg bg-[var(--surface-elevated)]/70 px-4 py-3.5">
-          <div className="typography-micro text-muted-foreground">Last Assistant Message</div>
+          <div className="typography-micro text-muted-foreground">{t('contextSidebar.section.lastAssistantMessage')}</div>
           <div className="mt-2.5 grid grid-cols-3 gap-x-4 gap-y-2.5">
             {([
-              { label: 'Input', value: viewModel.tokenBreakdown.input },
-              { label: 'Output', value: viewModel.tokenBreakdown.output },
-              { label: 'Reasoning', value: viewModel.tokenBreakdown.reasoning },
-              { label: 'Cache Read', value: viewModel.tokenBreakdown.cacheRead },
-              { label: 'Cache Write', value: viewModel.tokenBreakdown.cacheWrite },
+              { label: t('contextSidebar.tokens.input'), value: viewModel.tokenBreakdown.input },
+              { label: t('contextSidebar.tokens.output'), value: viewModel.tokenBreakdown.output },
+              { label: t('contextSidebar.tokens.reasoning'), value: viewModel.tokenBreakdown.reasoning },
+              { label: t('contextSidebar.tokens.cacheRead'), value: viewModel.tokenBreakdown.cacheRead },
+              { label: t('contextSidebar.tokens.cacheWrite'), value: viewModel.tokenBreakdown.cacheWrite },
             ] as const).map((item) => (
               <div key={item.label}>
                 <div className="typography-micro text-muted-foreground/70">{item.label}</div>
@@ -513,7 +514,7 @@ export const ContextPanelContent: React.FC = () => {
 
         {/* ── Raw messages ── */}
         <div>
-          <div className="typography-micro text-muted-foreground">Raw Messages</div>
+          <div className="typography-micro text-muted-foreground">{t('contextSidebar.section.rawMessages')}</div>
           <div className="mt-2.5 space-y-1">
             {[...sessionMessages].reverse().map((message) => {
               const role = deriveMessageRole(message.info).role;
@@ -561,8 +562,8 @@ export const ContextPanelContent: React.FC = () => {
                               event.stopPropagation();
                               void handleCopyRawMessage(message.info.id, jsonValue);
                             }}
-                            aria-label={isCopied ? 'Copied' : 'Copy JSON'}
-                            title={isCopied ? 'Copied' : 'Copy'}
+                            aria-label={isCopied ? t('contextSidebar.actions.copied') : t('contextSidebar.actions.copyJson')}
+                            title={isCopied ? t('contextSidebar.actions.copied') : t('contextSidebar.actions.copy')}
                           >
                             {isCopied ? <RiCheckLine className="size-3.5" /> : <RiFileCopyLine className="size-3.5" />}
                           </button>

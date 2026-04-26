@@ -756,6 +756,7 @@ const serverUtilsRuntime = createServerUtilsRuntime({
 const setOpenCodePort = (...args) => serverUtilsRuntime.setOpenCodePort(...args);
 const waitForOpenCodePort = (...args) => serverUtilsRuntime.waitForOpenCodePort(...args);
 const buildAugmentedPath = (...args) => serverUtilsRuntime.buildAugmentedPath(...args);
+const buildManagedOpenCodePath = (...args) => serverUtilsRuntime.buildManagedOpenCodePath(...args);
 const parseSseDataPayload = (...args) => serverUtilsRuntime.parseSseDataPayload(...args);
 const staticRoutesRuntime = createStaticRoutesRuntime({
   fs,
@@ -873,6 +874,8 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   setupProxy: (...args) => setupProxy(...args),
   ensureOpenCodeApiPrefix,
   clearResolvedOpenCodeBinary,
+  buildAugmentedPath,
+  buildManagedOpenCodePath,
 });
 
 const restartOpenCode = (...args) => openCodeLifecycleRuntime.restartOpenCode(...args);

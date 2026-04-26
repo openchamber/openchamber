@@ -358,6 +358,10 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     }
 
     const previousSessionId = get().currentSessionId
+
+    // Set currentSessionId immediately so the skeleton renders without delay.
+    set({ currentSessionId: id })
+
     const directoryState = useDirectoryStore.getState()
 
     const sessionDir = resolveSessionDirectory(
@@ -376,20 +380,21 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       console.warn("Failed to set OpenCode directory for session switch:", e)
     }
 
-    // Save viewport anchor for previous session
+    // Defer viewport anchor save for previous session — not needed for the
+    // skeleton to render and reads messages which can be expensive.
     if (previousSessionId && previousSessionId !== id) {
-      const memState = useViewportStore.getState().sessionMemoryState.get(previousSessionId)
-      if (!memState?.isStreaming) {
-        const prevMessages = getSyncMessages(previousSessionId)
-        if (prevMessages.length > 0) {
-          useViewportStore.getState().updateViewportAnchor(previousSessionId, prevMessages.length - 1)
+      const prevId = previousSessionId
+      setTimeout(() => {
+        const memState = useViewportStore.getState().sessionMemoryState.get(prevId)
+        if (!memState?.isStreaming) {
+          const prevMessages = getSyncMessages(prevId)
+          if (prevMessages.length > 0) {
+            useViewportStore.getState().updateViewportAnchor(prevId, prevMessages.length - 1)
+          }
         }
-      }
+      }, 0)
     }
 
-    set({ currentSessionId: id })
-
-    // Mark session viewed in notification store + update active session ref
     // Mark session viewed in notification store + update active session ref
     if (id) {
       markSessionViewed(id)
@@ -550,7 +555,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const messages = getSyncMessages(sessionId)
     if (messages.length === 0) return null
 
-    // Find last assistant message with token data
     type AssistantTokens = { input: number; output: number; reasoning: number; cache: { read: number; write: number } }
     let lastTokens: AssistantTokens | undefined
     let lastMessageId: string | undefined

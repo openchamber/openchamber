@@ -1,9 +1,16 @@
 import type { Message, Part } from '@opencode-ai/sdk/v2';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { isVSCodeRuntime, openDesktopPath, revealDesktopPath, saveDesktopMarkdownFile } from '@/lib/desktop';
-import { getRevealLabel } from '@/lib/utils';
+import { getRevealLabelKey } from '@/lib/utils';
 
 type SessionMessageRecord = { info: Message; parts: Part[] };
+
+export type ChildSessionExport = {
+  title: string;
+  agent?: string;
+  records: SessionMessageRecord[];
+  children: ChildSessionExport[];
+};
 
 function formatTimestamp(timestamp: number | undefined): string {
   if (typeof timestamp !== 'number' || !Number.isFinite(timestamp)) {
@@ -65,9 +72,29 @@ function formatMessageAsMarkdown(record: SessionMessageRecord): string {
   return `${role}\n\n${text}`;
 }
 
+function formatChildSessionAsMarkdown(child: ChildSessionExport, depth: number): string {
+  const heading = '#'.repeat(Math.min(depth + 1, 6));
+  const agentLabel = child.agent ? ` — ${child.agent}` : '';
+  const childHeader = `${heading} Sub-agent: ${child.title}${agentLabel}\n\n---\n\n`;
+
+  const childBody = child.records
+    .map(formatMessageAsMarkdown)
+    .filter(Boolean)
+    .join('\n\n---\n\n');
+
+  const parts = [childHeader + childBody];
+
+  for (const grandchild of child.children) {
+    parts.push(formatChildSessionAsMarkdown(grandchild, depth + 1));
+  }
+
+  return parts.join('\n\n---\n\n');
+}
+
 export function formatSessionAsMarkdown(
   messages: SessionMessageRecord[],
   sessionTitle?: string | null,
+  childSessions?: ChildSessionExport[],
 ): string {
   const title = sessionTitle?.trim() || 'Session';
   const date = new Date().toISOString().split('T')[0];
@@ -79,7 +106,16 @@ export function formatSessionAsMarkdown(
     .filter(Boolean)
     .join('\n\n---\n\n');
 
-  return header + body;
+  let result = header + body;
+
+  if (childSessions && childSessions.length > 0) {
+    const childMarkdown = childSessions
+      .map((child) => formatChildSessionAsMarkdown(child, 1))
+      .join('\n\n---\n\n');
+    result += '\n\n---\n\n' + childMarkdown;
+  }
+
+  return result;
 }
 
 export function downloadAsMarkdown(content: string, filename: string): void {
@@ -145,8 +181,8 @@ export async function revealExportedMarkdown(path: string): Promise<boolean> {
   return openDesktopPath(path);
 }
 
-export function getExportRevealLabel(): string {
-  return getRevealLabel();
+export function getExportRevealLabelKey() {
+  return getRevealLabelKey();
 }
 
 export function buildExportFilename(sessionTitle?: string | null): string {

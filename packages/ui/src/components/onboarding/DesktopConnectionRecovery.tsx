@@ -1,6 +1,7 @@
 import React from 'react';
 import { RiRefreshLine, RiServerLine, RiMacbookLine } from '@remixicon/react';
 import { Button } from '@/components/ui/button';
+import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { redactSensitiveUrl } from '@/lib/desktopHosts';
 import {
@@ -39,7 +40,21 @@ export function DesktopConnectionRecovery({
   onUseRemote,
   isRetrying = false,
 }: DesktopConnectionRecoveryProps) {
+  const { t } = useI18n();
   const config = getDesktopRecoveryConfig(variant, hostLabel, hostUrl);
+  const retryLabelKey = (config.retryLabelKey ?? 'onboarding.desktopRecovery.actions.retryConnection') as Parameters<typeof t>[0];
+  const descriptionParams = React.useMemo(() => {
+    if (config.descriptionParams?.host) {
+      return config.descriptionParams;
+    }
+    if (variant === 'remote-unreachable') {
+      return { host: t('onboarding.desktopRecovery.placeholders.remoteServer') };
+    }
+    if (variant === 'remote-wrong-service') {
+      return { host: t('onboarding.desktopRecovery.placeholders.unknownServer') };
+    }
+    return undefined;
+  }, [config.descriptionParams, t, variant]);
 
   return (
     <div className="flex flex-col items-center justify-center h-full p-8">
@@ -58,17 +73,20 @@ export function DesktopConnectionRecovery({
             </div>
           </div>
           <h1 className="typography-ui-header text-xl font-semibold text-foreground">
-            {config.title}
+            {t(config.titleKey as Parameters<typeof t>[0])}
           </h1>
           <p className="text-muted-foreground text-sm max-w-sm">
-            {config.description}
+            {t(
+              config.descriptionKey as Parameters<typeof t>[0],
+              descriptionParams
+            )}
           </p>
         </div>
 
         {/* Host info if available */}
         {hostUrl && (variant === 'remote-unreachable' || variant === 'remote-wrong-service') && (
           <div className="rounded-lg border border-border bg-background/50 p-3">
-            <div className="text-xs text-muted-foreground mb-1">Server Address</div>
+            <div className="text-xs text-muted-foreground mb-1">{t('onboarding.remoteConnection.field.serverAddress')}</div>
             <div className="font-mono text-sm text-foreground truncate">{redactSensitiveUrl(hostUrl)}</div>
           </div>
         )}
@@ -82,7 +100,9 @@ export function DesktopConnectionRecovery({
               className="w-full"
             >
               <RiRefreshLine className={cn('h-4 w-4', isRetrying && 'animate-spin')} />
-              {isRetrying ? 'Retrying…' : (config.retryLabel ?? 'Retry Connection')}
+              {isRetrying
+                ? t('onboarding.desktopRecovery.actions.retrying')
+                : t(retryLabelKey)}
             </Button>
           )}
 
@@ -95,7 +115,7 @@ export function DesktopConnectionRecovery({
                 className="flex-1"
               >
                 <RiMacbookLine className="h-4 w-4" />
-                {config.useLocalLabel}
+                {t(config.useLocalLabelKey as Parameters<typeof t>[0])}
               </Button>
             )}
 
@@ -107,7 +127,7 @@ export function DesktopConnectionRecovery({
                 className="flex-1"
               >
                 <RiServerLine className="h-4 w-4" />
-                {config.useRemoteLabel}
+                {t(config.useRemoteLabelKey as Parameters<typeof t>[0])}
               </Button>
             )}
           </div>

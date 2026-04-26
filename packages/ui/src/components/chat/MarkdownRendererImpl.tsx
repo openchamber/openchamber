@@ -15,6 +15,7 @@ import { RiFileCopyLine, RiCheckLine, RiDownloadLine } from '@remixicon/react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { useI18n } from '@/lib/i18n';
 
 import { isExternalHttpUrl, openExternalUrl } from '@/lib/url';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
@@ -176,6 +177,7 @@ const downloadFile = (filename: string, content: string, mimeType: string) => {
 
 // Table copy button with dropdown
 const TableCopyButton: React.FC<{ tableRef: React.RefObject<HTMLDivElement | null> }> = ({ tableRef }) => {
+  const { t } = useI18n();
   const [copied, setCopied] = React.useState(false);
   const [showMenu, setShowMenu] = React.useState(false);
   const menuRef = React.useRef<HTMLDivElement>(null);
@@ -224,7 +226,7 @@ const TableCopyButton: React.FC<{ tableRef: React.RefObject<HTMLDivElement | nul
       <button
         onClick={() => setShowMenu(!showMenu)}
         className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
-        title="Copy table"
+        title={t('markdownRenderer.table.actions.copyTitle')}
       >
         {copied ? <RiCheckLine className="size-3.5" /> : <RiFileCopyLine className="size-3.5" />}
       </button>
@@ -250,6 +252,7 @@ const TableCopyButton: React.FC<{ tableRef: React.RefObject<HTMLDivElement | nul
 
 // Table download button with dropdown
 const TableDownloadButton: React.FC<{ tableRef: React.RefObject<HTMLDivElement | null> }> = ({ tableRef }) => {
+  const { t } = useI18n();
   const [showMenu, setShowMenu] = React.useState(false);
   const menuRef = React.useRef<HTMLDivElement>(null);
 
@@ -273,7 +276,7 @@ const TableDownloadButton: React.FC<{ tableRef: React.RefObject<HTMLDivElement |
       const mimeType = format === 'csv' ? 'text/csv' : 'text/markdown';
       downloadFile(filename, content, mimeType);
       setShowMenu(false);
-      toast.success(`Table downloaded as ${format.toUpperCase()}`);
+      toast.success(t('markdownRenderer.table.toast.downloadedAsFormat', { format: format.toUpperCase() }));
     };
 
   return (
@@ -281,7 +284,7 @@ const TableDownloadButton: React.FC<{ tableRef: React.RefObject<HTMLDivElement |
       <button
         onClick={() => setShowMenu(!showMenu)}
         className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
-        title="Download table"
+        title={t('markdownRenderer.table.actions.downloadTitle')}
       >
         <RiDownloadLine className="size-3.5" />
       </button>
@@ -325,6 +328,7 @@ const TableWrapper: React.FC<{ children?: React.ReactNode; className?: string }>
 };
 
 const MermaidBlock: React.FC<{ source: string; mode: 'svg' | 'ascii' }> = ({ source, mode }) => {
+  const { t } = useI18n();
   const currentTheme = useCurrentMermaidTheme();
   const { isMobile } = useDeviceInfo();
   const [copied, setCopied] = React.useState(false);
@@ -393,7 +397,7 @@ const MermaidBlock: React.FC<{ source: string; mode: 'svg' | 'ascii' }> = ({ sou
       setDownloaded(true);
       setTimeout(() => setDownloaded(false), 2000);
     } catch {
-      toast.error('Failed to download diagram');
+      toast.error(t('markdownRenderer.mermaid.toast.downloadFailed'));
     }
   };
 
@@ -414,7 +418,7 @@ const MermaidBlock: React.FC<{ source: string; mode: 'svg' | 'ascii' }> = ({ sou
           <button
             onClick={() => handleCopyAscii(asciiText)}
             className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
-            title="Copy"
+            title={t('markdownRenderer.mermaid.actions.copyTitle')}
           >
             {copied ? <RiCheckLine className="size-3.5" /> : <RiFileCopyLine className="size-3.5" />}
           </button>
@@ -438,7 +442,7 @@ const MermaidBlock: React.FC<{ source: string; mode: 'svg' | 'ascii' }> = ({ sou
           <button
             onClick={() => handleCopyAscii(source)}
             className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
-            title="Copy"
+            title={t('markdownRenderer.mermaid.actions.copyTitle')}
           >
             {copied ? <RiCheckLine className="size-3.5" /> : <RiFileCopyLine className="size-3.5" />}
           </button>
@@ -461,14 +465,14 @@ const MermaidBlock: React.FC<{ source: string; mode: 'svg' | 'ascii' }> = ({ sou
         <button
           onClick={handleCopyMermaidSource}
           className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
-          title="Copy source"
+          title={t('markdownRenderer.mermaid.actions.copySourceTitle')}
         >
           {copied ? <RiCheckLine className="size-3.5" /> : <RiFileCopyLine className="size-3.5" />}
         </button>
         <button
           onClick={handleDownloadSvg}
           className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
-          title="Download SVG"
+          title={t('markdownRenderer.mermaid.actions.downloadSvgTitle')}
         >
           {downloaded ? <RiCheckLine className="size-3.5" /> : <RiDownloadLine className="size-3.5" />}
         </button>

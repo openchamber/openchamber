@@ -135,6 +135,8 @@ export type DesktopSettings = {
   stickyUserHeader?: boolean;
   fontSize?: number;
   terminalFontSize?: number;
+  uiFont?: string;
+  monoFont?: string;
   padding?: number;
   cornerRadius?: number;
   inputBarOffset?: number;

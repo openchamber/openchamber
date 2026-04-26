@@ -158,8 +158,7 @@
   }
 
   /* Fix mobile viewport height */
-  :root.mobile-pointer:not(.desktop-runtime),
-  :root.mobile-pointer:not(.desktop-runtime) body {
+  :root.mobile-pointer:not(.desktop-runtime) {
     height: 100%;
     height: -webkit-fill-available;
     overflow: hidden;

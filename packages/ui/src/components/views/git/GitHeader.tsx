@@ -25,6 +25,7 @@ import { WorktreeBranchDisplay } from './WorktreeBranchDisplay';
 import { SyncActions } from './SyncActions';
 import type { GitStatus, GitIdentityProfile, GitRemote } from '@/lib/api/types';
 import { useUIStore } from '@/stores/useUIStore';
+import { useI18n } from '@/lib/i18n';
 
 type SyncAction = 'fetch' | 'pull' | 'push' | null;
 
@@ -115,6 +116,7 @@ const IdentityDropdown: React.FC<IdentityDropdownProps> = ({
   tooltipDelayMs = 1000,
   iconOnly = false,
 }) => {
+  const { t } = useI18n();
   const isDisabled = isApplying || identities.length === 0;
 
   return (
@@ -140,20 +142,20 @@ const IdentityDropdown: React.FC<IdentityDropdownProps> = ({
               )}
               {!iconOnly && (
                 <span className="git-identity-label min-w-0 flex-1 truncate text-left">
-                  {activeProfile?.name || 'No identity'}
+                  {activeProfile?.name || t('gitView.header.noIdentity')}
                 </span>
               )}
               <RiArrowDownSLine className="size-4 opacity-60" />
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
-        <TooltipContent sideOffset={8}>Git identity</TooltipContent>
+        <TooltipContent sideOffset={8}>{t('gitView.header.identityTooltip')}</TooltipContent>
       </Tooltip>
       <DropdownMenuContent align="end" className="w-64">
         {identities.length === 0 ? (
           <div className="px-2 py-1.5">
             <p className="typography-meta text-muted-foreground">
-              No profiles available to apply.
+              {t('gitView.header.noProfiles')}
             </p>
           </div>
         ) : (
@@ -210,6 +212,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
   isWorktreeMode,
   onOpenHistory,
 }) => {
+  const { t } = useI18n();
   const isMobile = useUIStore((state) => state.isMobile);
 
   if (!status) {
@@ -232,7 +235,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
               <RiHistoryLine className="size-4" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent sideOffset={8}>History</TooltipContent>
+          <TooltipContent sideOffset={8}>{t('gitView.history.title')}</TooltipContent>
         </Tooltip>
       ) : null}
     </div>

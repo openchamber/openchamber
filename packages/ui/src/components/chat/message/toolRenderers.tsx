@@ -243,6 +243,8 @@ export const renderListOutput = (output: string, options?: { unstyled?: boolean 
     }
 };
 
+const GREP_DOT_STYLE = { backgroundColor: 'var(--status-info)', opacity: 0.6 };
+
 export const renderGrepOutput = (output: string, isMobile: boolean, options?: { unstyled?: boolean }) => {
     try {
         const lines = output.trim().split('\n').filter(Boolean);
@@ -287,7 +289,7 @@ export const renderGrepOutput = (output: string, isMobile: boolean, options?: { 
                                 }
                                 return (
                                     <div key={idx} className={cn('flex items-start gap-2 min-w-0', isMobile ? 'typography-micro' : 'typography-code')}>
-                                        <div className="w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1.5" style={{ backgroundColor: 'var(--status-info)', opacity: 0.6 }} />
+                                        <div className="w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1.5" style={GREP_DOT_STYLE} />
                                         <div className="flex gap-2 min-w-0 flex-1">
                                             {match.lineNum && (
                                                 <span className="text-muted-foreground font-mono whitespace-nowrap">
@@ -311,6 +313,8 @@ export const renderGrepOutput = (output: string, isMobile: boolean, options?: { 
         return null;
     }
 };
+
+const GLOB_DOT_STYLE = { backgroundColor: 'var(--status-info)', opacity: 0.6 };
 
 export const renderGlobOutput = (output: string, isMobile: boolean, options?: { unstyled?: boolean }) => {
     try {
@@ -350,7 +354,7 @@ export const renderGlobOutput = (output: string, isMobile: boolean, options?: { 
                         <div className={cn('pl-4 grid gap-1', isMobile ? 'grid-cols-1' : 'grid-cols-2')}>
                             {groups[dir].sort().map((filename) => (
                                 <div key={filename} className={cn('flex items-center gap-2 min-w-0', isMobile ? 'typography-micro' : 'typography-code')}>
-                                    <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'var(--status-info)', opacity: 0.6 }} />
+                                    <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={GLOB_DOT_STYLE} />
                                     <span className="text-foreground font-mono truncate">{filename}</span>
                                 </div>
                             ))}
@@ -371,19 +375,28 @@ type Todo = {
     priority?: 'high' | 'medium' | 'low';
 };
 
-export const renderTodoOutput = (output: string, options?: { unstyled?: boolean }) => {
+export const renderTodoOutput = (
+    output: string,
+    labels: {
+        total: string;
+        inProgress: string;
+        pending: string;
+        completed: string;
+        cancelled: string;
+    },
+    options?: { unstyled?: boolean },
+) => {
     try {
         const todos = JSON.parse(output) as Todo[];
         if (!Array.isArray(todos)) {
             return null;
         }
 
-        const todosByStatus = {
-            in_progress: todos.filter((t) => t.status === 'in_progress'),
-            pending: todos.filter((t) => t.status === 'pending'),
-            completed: todos.filter((t) => t.status === 'completed'),
-            cancelled: todos.filter((t) => t.status === 'cancelled'),
-        };
+        const todosByStatus = todos.reduce((acc, t) => {
+            const status = t.status as keyof typeof acc;
+            if (status in acc) acc[status].push(t);
+            return acc;
+        }, { in_progress: [] as Todo[], pending: [] as Todo[], completed: [] as Todo[], cancelled: [] as Todo[] });
 
         const getPriorityDot = (priority?: string) => {
             const baseClasses = 'w-2 h-2 rounded-full flex-shrink-0 mt-1';
@@ -408,18 +421,18 @@ export const renderTodoOutput = (output: string, options?: { unstyled?: boolean 
                 style={typography.tool.popup}
             >
                 <div className="flex gap-4 typography-meta pb-2 border-b border-border/20">
-                    <span className="font-medium" style={{ color: 'var(--muted-foreground)' }}>Total: {todos.length}</span>
+                    <span className="font-medium" style={{ color: 'var(--muted-foreground)' }}>{labels.total}: {todos.length}</span>
                     {todosByStatus.in_progress.length > 0 && (
-                        <span className="font-medium" style={{ color: 'var(--foreground)' }}>In Progress: {todosByStatus.in_progress.length}</span>
+                        <span className="font-medium" style={{ color: 'var(--foreground)' }}>{labels.inProgress}: {todosByStatus.in_progress.length}</span>
                     )}
                     {todosByStatus.pending.length > 0 && (
-                        <span style={{ color: 'var(--muted-foreground)' }}>Pending: {todosByStatus.pending.length}</span>
+                        <span style={{ color: 'var(--muted-foreground)' }}>{labels.pending}: {todosByStatus.pending.length}</span>
                     )}
                     {todosByStatus.completed.length > 0 && (
-                        <span style={{ color: 'var(--status-success)' }}>Completed: {todosByStatus.completed.length}</span>
+                        <span style={{ color: 'var(--status-success)' }}>{labels.completed}: {todosByStatus.completed.length}</span>
                     )}
                     {todosByStatus.cancelled.length > 0 && (
-                        <span style={{ color: 'var(--muted-foreground)', opacity: 0.5 }}>Cancelled: {todosByStatus.cancelled.length}</span>
+                        <span style={{ color: 'var(--muted-foreground)', opacity: 0.5 }}>{labels.cancelled}: {todosByStatus.cancelled.length}</span>
                     )}
                 </div>
 
@@ -427,7 +440,7 @@ export const renderTodoOutput = (output: string, options?: { unstyled?: boolean 
                     <div className="space-y-2">
                         <div className="flex items-center gap-2">
                             <div className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: 'var(--foreground)' }} />
-                            <span className="typography-meta font-semibold text-foreground uppercase tracking-wide">In Progress</span>
+                            <span className="typography-meta font-semibold text-foreground uppercase tracking-wide">{labels.inProgress}</span>
                         </div>
                         <div className="space-y-1.5 pl-4">
                             {todosByStatus.in_progress.map((todo, idx) => (
@@ -444,7 +457,7 @@ export const renderTodoOutput = (output: string, options?: { unstyled?: boolean 
                     <div className="space-y-2">
                         <div className="flex items-center gap-2">
                             <div className="w-2 h-2 rounded-full bg-muted-foreground/50" />
-                            <span className="typography-meta font-semibold text-muted-foreground uppercase tracking-wide">Pending</span>
+                            <span className="typography-meta font-semibold text-muted-foreground uppercase tracking-wide">{labels.pending}</span>
                         </div>
                         <div className="space-y-1.5 pl-4">
                             {todosByStatus.pending.map((todo, idx) => (
@@ -461,7 +474,7 @@ export const renderTodoOutput = (output: string, options?: { unstyled?: boolean 
                     <div className="space-y-2">
                         <div className="flex items-center gap-2">
                             <RiCheckLine className="w-3 h-3" style={{ color: 'var(--status-success)' }} />
-                            <span className="typography-meta font-semibold uppercase tracking-wide" style={{ color: 'var(--status-success)' }}>Completed</span>
+                            <span className="typography-meta font-semibold uppercase tracking-wide" style={{ color: 'var(--status-success)' }}>{labels.completed}</span>
                         </div>
                         <div className="space-y-1.5 pl-4">
                             {todosByStatus.completed.map((todo, idx) => (
@@ -478,7 +491,7 @@ export const renderTodoOutput = (output: string, options?: { unstyled?: boolean 
                     <div className="space-y-2">
                         <div className="flex items-center gap-2">
                             <span className="w-3 h-3 text-muted-foreground/50">×</span>
-                            <span className="typography-meta font-semibold text-muted-foreground/50 uppercase tracking-wide">Cancelled</span>
+                            <span className="typography-meta font-semibold text-muted-foreground/50 uppercase tracking-wide">{labels.cancelled}</span>
                         </div>
                         <div className="space-y-1.5 pl-4">
                             {todosByStatus.cancelled.map((todo, idx) => (

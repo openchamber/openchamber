@@ -38,8 +38,10 @@ import { isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
 import { useIsAndroidTwa } from '@/hooks/useIsAndroidTwa';
 import { SETTINGS_PAGE_METADATA, SETTINGS_GROUP_LABELS, type SettingsRuntimeContext } from '@/lib/settings/metadata';
 import { getSettingsNavIcon } from '@/components/views/SettingsView';
+import { useI18n } from '@/lib/i18n';
 
 export const CommandPalette: React.FC = () => {
+  const { t } = useI18n();
   const isCommandPaletteOpen = useUIStore((s) => s.isCommandPaletteOpen);
   const setCommandPaletteOpen = useUIStore((s) => s.setCommandPaletteOpen);
   const setHelpDialogOpen = useUIStore((s) => s.setHelpDialogOpen);
@@ -149,104 +151,137 @@ export const CommandPalette: React.FC = () => {
     return formatShortcutForDisplay(getEffectiveShortcutCombo(actionId, shortcutOverrides));
   }, [shortcutOverrides]);
 
+  const settingsGroupLabelMap: Record<string, string> = {
+    appearance: t('commandPalette.settingsGroup.appearance'),
+    projects: t('commandPalette.settingsGroup.projects'),
+    general: t('commandPalette.settingsGroup.general'),
+    opencode: t('commandPalette.settingsGroup.opencode'),
+    git: t('commandPalette.settingsGroup.git'),
+    skills: t('commandPalette.settingsGroup.skills'),
+    usage: t('commandPalette.settingsGroup.usage'),
+    advanced: t('commandPalette.settingsGroup.advanced'),
+  };
+
+  const settingsPageLabelMap: Record<string, string> = {
+    home: t('commandPalette.settingsPage.home'),
+    projects: t('commandPalette.settingsPage.projects'),
+    'remote-instances': t('commandPalette.settingsPage.remoteInstances'),
+    providers: t('commandPalette.settingsPage.providers'),
+    usage: t('commandPalette.settingsPage.usage'),
+    agents: t('commandPalette.settingsPage.agents'),
+    commands: t('commandPalette.settingsPage.commands'),
+    mcp: t('commandPalette.settingsPage.mcp'),
+    'skills.installed': t('commandPalette.settingsPage.skillsInstalled'),
+    'skills.catalog': t('commandPalette.settingsPage.skillsCatalog'),
+    git: t('commandPalette.settingsPage.git'),
+    appearance: t('commandPalette.settingsPage.appearance'),
+    chat: t('commandPalette.settingsPage.chat'),
+    shortcuts: t('commandPalette.settingsPage.shortcuts'),
+    sessions: t('commandPalette.settingsPage.sessions'),
+    'magic-prompts': t('commandPalette.settingsPage.magicPrompts'),
+    notifications: t('commandPalette.settingsPage.notifications'),
+    voice: t('commandPalette.settingsPage.voice'),
+    tunnel: t('commandPalette.settingsPage.tunnel'),
+  };
+
   return (
     <CommandDialog open={isCommandPaletteOpen} onOpenChange={setCommandPaletteOpen}>
-      <CommandInput placeholder="Type a command or search..." />
+      <CommandInput placeholder={t('commandPalette.input.placeholder')} />
       <CommandList>
-        <CommandEmpty>No results found.</CommandEmpty>
+        <CommandEmpty>{t('commandPalette.empty.noResults')}</CommandEmpty>
 
-        <CommandGroup heading="Sessions">
+        <CommandGroup heading={t('commandPalette.section.sessions')}>
           <CommandItem onSelect={handleOpenQuickOpen}>
             <RiFileLine className="mr-2 h-4 w-4" />
-            <span>Quick Open</span>
+            <span>{t('commandPalette.item.quickOpen')}</span>
             <CommandShortcut>{shortcut('open_quick_open')}</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={handleCreateSession}>
             <RiAddLine className="mr-2 h-4 w-4" />
-            <span>New Session</span>
+            <span>{t('commandPalette.item.newSession')}</span>
             <CommandShortcut>{shortcut('new_chat')}</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={handleCreateWorktreeSession}>
             <RiGitBranchLine className="mr-2 h-4 w-4" />
-            <span>New Worktree Draft</span>
+            <span>{t('commandPalette.item.newWorktreeDraft')}</span>
             <CommandShortcut>{shortcut('new_chat_worktree')}</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={handleOpenSessionList}>
             <RiLayoutLeftLine className="mr-2 h-4 w-4" />
-            <span>{isMobile ? 'Show Session Switcher' : 'Toggle Sidebar'}</span>
+            <span>{isMobile ? t('commandPalette.item.showSessionSwitcher') : t('commandPalette.item.toggleSidebar')}</span>
             <CommandShortcut>{shortcut('toggle_sidebar')}</CommandShortcut>
           </CommandItem>
         </CommandGroup>
 
         <CommandSeparator />
 
-        <CommandGroup heading="View">
+        <CommandGroup heading={t('commandPalette.section.view')}>
           <CommandItem onSelect={handleToggleRightSidebar}>
             <RiLayoutRightLine className="mr-2 h-4 w-4" />
-            <span>Toggle Right Sidebar</span>
+            <span>{t('commandPalette.item.toggleRightSidebar')}</span>
             <CommandShortcut>{shortcut('toggle_right_sidebar')}</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={handleOpenRightSidebarGit}>
             <RiGitBranchLine className="mr-2 h-4 w-4" />
-            <span>Show Git in Right Sidebar</span>
+            <span>{t('commandPalette.item.showGitRightSidebar')}</span>
             <CommandShortcut>{shortcut('open_right_sidebar_git')}</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={handleOpenRightSidebarFiles}>
             <RiFolderLine className="mr-2 h-4 w-4" />
-            <span>Show Files in Right Sidebar</span>
+            <span>{t('commandPalette.item.showFilesRightSidebar')}</span>
             <CommandShortcut>{shortcut('open_right_sidebar_files')}</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={handleShowContextUsage}>
             <RiPieChartLine className="mr-2 h-4 w-4" />
-            <span>Show Context Usage</span>
+            <span>{t('commandPalette.item.showContextUsage')}</span>
           </CommandItem>
           <CommandItem onSelect={handleShowPlan}>
             <RiClipboardLine className="mr-2 h-4 w-4" />
-            <span>Show Plan</span>
+            <span>{t('commandPalette.item.showPlan')}</span>
           </CommandItem>
           <CommandItem onSelect={handleToggleTerminalDock}>
             <RiTerminalBoxLine className="mr-2 h-4 w-4" />
-            <span>Toggle Terminal</span>
+            <span>{t('commandPalette.item.toggleTerminal')}</span>
             <CommandShortcut>{shortcut('toggle_terminal')}</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={handleToggleTerminalExpanded}>
             <RiTerminalBoxLine className="mr-2 h-4 w-4" />
-            <span>{isBottomTerminalExpanded ? 'Collapse Terminal' : 'Expand Terminal'}</span>
+            <span>{isBottomTerminalExpanded ? t('commandPalette.item.collapseTerminal') : t('commandPalette.item.expandTerminal')}</span>
             <CommandShortcut>{shortcut('toggle_terminal_expanded')}</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={handleShowHelp}>
             <RiQuestionLine className="mr-2 h-4 w-4" />
-            <span>Keyboard Shortcuts</span>
+            <span>{t('commandPalette.item.keyboardShortcuts')}</span>
             <CommandShortcut>{shortcut('open_help')}</CommandShortcut>
           </CommandItem>
         </CommandGroup>
 
         <CommandSeparator />
 
-        <CommandGroup heading="Theme">
+        <CommandGroup heading={t('commandPalette.section.theme')}>
           <CommandItem onSelect={() => handleSetThemeMode('light')()}>
             <RiSunLine className="mr-2 h-4 w-4" />
-            <span>Light</span>
+            <span>{t('commandPalette.item.themeLight')}</span>
             {themeMode === 'light' && <RiCheckLine className="ml-auto h-4 w-4" />}
           </CommandItem>
           <CommandItem onSelect={() => handleSetThemeMode('dark')()}>
             <RiMoonLine className="mr-2 h-4 w-4" />
-            <span>Dark</span>
+            <span>{t('commandPalette.item.themeDark')}</span>
             {themeMode === 'dark' && <RiCheckLine className="ml-auto h-4 w-4" />}
           </CommandItem>
           <CommandItem onSelect={() => handleSetThemeMode('system')()}>
             <RiComputerLine className="mr-2 h-4 w-4" />
-            <span>System</span>
+            <span>{t('commandPalette.item.themeSystem')}</span>
             {themeMode === 'system' && <RiCheckLine className="ml-auto h-4 w-4" />}
           </CommandItem>
         </CommandGroup>
 
         <CommandSeparator />
 
-        <CommandGroup heading="Settings">
+        <CommandGroup heading={t('commandPalette.section.settings')}>
           <CommandItem onSelect={handleOpenSettings}>
             <RiSettings3Line className="mr-2 h-4 w-4" />
-            <span>Open Settings…</span>
+            <span>{t('commandPalette.item.openSettings')}</span>
             <CommandShortcut>{shortcut('open_settings')}</CommandShortcut>
           </CommandItem>
           {settingsItems.map((page) => {
@@ -254,7 +289,7 @@ export const CommandPalette: React.FC = () => {
             return (
               <CommandItem key={page.slug} onSelect={() => handleOpenSettingsPage(page.slug)()}>
                 <Icon className="mr-2 h-4 w-4" />
-                <span>{SETTINGS_GROUP_LABELS[page.group]}: {page.title}</span>
+                <span>{settingsGroupLabelMap[page.group] ?? SETTINGS_GROUP_LABELS[page.group]}: {settingsPageLabelMap[page.slug] ?? page.title}</span>
               </CommandItem>
             );
           })}
@@ -263,14 +298,14 @@ export const CommandPalette: React.FC = () => {
         {recentSessions.length > 0 && (
           <>
             <CommandSeparator />
-            <CommandGroup heading="Recent Sessions">
+            <CommandGroup heading={t('commandPalette.section.recentSessions')}>
               {recentSessions.map((session) => (
                 <CommandItem
                   key={session.id}
                   onSelect={() => handleOpenSession(session.id, currentDirectory ?? null)()}
                 >
                   <RiChatAi3Line className="mr-2 h-4 w-4" />
-                  <span className="truncate">{session.title || 'Untitled Session'}</span>
+                  <span className="truncate">{session.title || t('commandPalette.session.untitled')}</span>
                 </CommandItem>
               ))}
             </CommandGroup>

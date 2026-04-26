@@ -61,6 +61,10 @@ export function WorkingPlaceholder({
 }: WorkingPlaceholderProps) {
   const [displayedText, setDisplayedText] = React.useState<string | null>(null);
   const [displayedPermission, setDisplayedPermission] = React.useState<boolean>(false);
+  const displayedTextRef = React.useRef(displayedText);
+  const displayedPermissionRef = React.useRef(displayedPermission);
+  displayedTextRef.current = displayedText;
+  displayedPermissionRef.current = displayedPermission;
 
   const statusShownAtRef = React.useRef<number>(0);
   const queuedStatusRef = React.useRef<{ text: string; permission: boolean } | null>(null);
@@ -141,12 +145,12 @@ export function WorkingPlaceholder({
       return;
     }
 
-    if (!displayedText) {
+    if (!displayedTextRef.current) {
       showStatus(incomingText, incomingPermission);
       return;
     }
 
-    if (incomingText === displayedText && incomingPermission === displayedPermission) {
+    if (incomingText === displayedTextRef.current && incomingPermission === displayedPermissionRef.current) {
       return;
     }
 
@@ -169,8 +173,6 @@ export function WorkingPlaceholder({
     isGenericStatus,
     isWaitingForPermission,
     retryInfo,
-    displayedText,
-    displayedPermission,
     clearTimers,
     showStatus,
     scheduleQueueProcess,

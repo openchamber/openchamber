@@ -42,6 +42,7 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
   const frameRef = React.useRef<number | null>(null);
   const metricsFrameRef = React.useRef<number | null>(null);
   const isDraggingRef = React.useRef(false);
+  const isHoveringRef = React.useRef(false);
   const lastUserIntentAtRef = React.useRef(0);
   const dragStartRef = React.useRef<{
     pointerX: number;
@@ -122,6 +123,10 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
   const scheduleHide = React.useCallback(() => {
     if (hideTimeoutRef.current) {
       clearTimeout(hideTimeoutRef.current);
+    }
+    // Don't schedule hide if hovering over the thumb
+    if (isHoveringRef.current) {
+      return;
     }
     hideTimeoutRef.current = setTimeout(() => setVisible(false), hideDelayMs);
   }, [hideDelayMs]);
@@ -287,6 +292,21 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
     scheduleHide();
   };
 
+  const handleThumbMouseEnter = React.useCallback(() => {
+    isHoveringRef.current = true;
+    // Cancel any pending hide when hovering
+    if (hideTimeoutRef.current) {
+      clearTimeout(hideTimeoutRef.current);
+      hideTimeoutRef.current = null;
+    }
+  }, []);
+
+  const handleThumbMouseLeave = React.useCallback(() => {
+    isHoveringRef.current = false;
+    // Schedule hide when leaving the thumb
+    scheduleHide();
+  }, [scheduleHide]);
+
   const showVertical = vertical.length > 0;
   const showHorizontal = horizontal.length > 0;
   if (!showVertical && !showHorizontal) return null;
@@ -311,6 +331,8 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerCancel={handlePointerUp}
+          onMouseEnter={handleThumbMouseEnter}
+          onMouseLeave={handleThumbMouseLeave}
         />
       )}
       {showHorizontal && (
@@ -325,6 +347,8 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerCancel={handlePointerUp}
+          onMouseEnter={handleThumbMouseEnter}
+          onMouseLeave={handleThumbMouseLeave}
         />
       )}
     </div>

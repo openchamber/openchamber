@@ -27,6 +27,7 @@ import { getWorktreeSetupCommands } from '@/lib/openchamberConfig';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import type { ProjectRef } from '@/lib/openchamberConfig';
 import type { CreateMultiRunParams, MultiRunFileAttachment } from '@/types/multirun';
+import { useI18n } from '@/lib/i18n';
 
 /** Max file size in bytes (10MB) */
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
@@ -55,6 +56,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
   onCreateGroup,
   isCreating = false,
 }) => {
+  const { t } = useI18n();
   const [groupName, setGroupName] = React.useState('');
   const [prompt, setPrompt] = React.useState('');
   const [selectedModels, setSelectedModels] = React.useState<ModelSelectionWithId[]>([]);
@@ -166,7 +168,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       if (file.size > MAX_FILE_SIZE) {
-        toast.error(`File "${file.name}" is too large (max 10MB)`);
+        toast.error(t('agentManager.empty.toast.fileTooLarge', { fileName: file.name }));
         continue;
       }
 
@@ -190,12 +192,16 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
         attachedCount++;
       } catch (error) {
         console.error('File attach failed', error);
-        toast.error(`Failed to attach "${file.name}"`);
+        toast.error(t('agentManager.empty.toast.failedToAttach', { fileName: file.name }));
       }
     }
 
     if (attachedCount > 0) {
-      toast.success(`Attached ${attachedCount} file${attachedCount > 1 ? 's' : ''}`);
+      toast.success(
+        attachedCount === 1
+          ? t('agentManager.empty.toast.attachedSingle', { count: attachedCount })
+          : t('agentManager.empty.toast.attachedPlural', { count: attachedCount })
+      );
     }
 
     if (fileInputRef.current) {
@@ -372,7 +378,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
       setMentionQuery('');
     } catch (error) {
       console.error('Failed to create agent group:', error);
-      toast.error('Failed to create agent group');
+      toast.error(t('agentManager.empty.toast.failedToCreateGroup'));
     } finally {
       setIsSubmitting(false);
     }
@@ -415,17 +421,17 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
         {/* Group Name Input */}
         <div className="space-y-1.5">
           <label htmlFor="group-name" className="typography-ui-label font-medium text-foreground">
-            Group Name
+            {t('agentManager.empty.groupName.label')}
           </label>
           <Input
             id="group-name"
             value={groupName}
             onChange={(e) => setGroupName(e.target.value)}
-            placeholder="e.g. feature-auth, bugfix-login"
+            placeholder={t('agentManager.empty.groupName.placeholder')}
             className="typography-body"
           />
           <p className="typography-micro text-muted-foreground">
-            Used for worktree directory and branch naming
+            {t('agentManager.empty.groupName.description')}
           </p>
         </div>
 
@@ -433,7 +439,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
         <div className="space-y-1.5">
           <label className="typography-ui-label font-medium text-foreground flex items-center gap-1.5">
             <RiGitBranchLine className="h-4 w-4 text-muted-foreground" />
-            Base Branch
+            {t('agentManager.empty.baseBranch.label')}
           </label>
           <BranchSelector
             directory={currentDirectory}
@@ -441,7 +447,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
             onChange={setBaseBranch}
           />
           <p className="typography-micro text-muted-foreground">
-            Creates new branches from <code className="font-mono text-xs">{baseBranch}</code>
+            {t('agentManager.empty.baseBranch.description', { branch: baseBranch })}
           </p>
         </div>
 
@@ -449,12 +455,15 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
         <Collapsible open={isSetupCommandsOpen} onOpenChange={setIsSetupCommandsOpen}>
           <CollapsibleTrigger className="w-full flex items-center justify-between py-1 hover:bg-[var(--interactive-hover)] rounded-md px-1 -mx-1 transition-colors">
             <p className="typography-ui-label font-medium text-foreground">
-              Setup commands
-              {setupCommands.filter(cmd => cmd.trim()).length > 0 && (
-                <span className="font-normal text-muted-foreground/70">
-                  {' '}({setupCommands.filter(cmd => cmd.trim()).length} configured)
-                </span>
-              )}
+              {t('agentManager.empty.setupCommands.label')}
+              {(() => {
+                const trimmedCommandCount = setupCommands.filter(cmd => cmd.trim()).length;
+                return trimmedCommandCount > 0 ? (
+                  <span className="font-normal text-muted-foreground/70">
+                    {' '}({t('agentManager.empty.setupCommands.configured', { count: trimmedCommandCount })})
+                  </span>
+                ) : null;
+              })()}
             </p>
             <RiArrowDownSLine className={cn(
               'h-4 w-4 text-muted-foreground transition-transform duration-200',
@@ -464,10 +473,10 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
           <CollapsibleContent>
             <div className="pt-2 space-y-2">
               <p className="typography-micro text-muted-foreground/70">
-                Commands run in each new worktree. Use <code className="font-mono text-xs">$ROOT_PROJECT_PATH</code> for project root.
+                {t('agentManager.empty.setupCommands.description')}
               </p>
               {isLoadingSetupCommands ? (
-                <p className="typography-meta text-muted-foreground/70">Loading...</p>
+                <p className="typography-meta text-muted-foreground/70">{t('agentManager.empty.setupCommands.loading')}</p>
               ) : (
                 <div className="space-y-1.5">
                   {setupCommands.map((command, index) => (
@@ -479,7 +488,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
                           newCommands[index] = e.target.value;
                           setSetupCommands(newCommands);
                         }}
-                        placeholder="e.g., bun install"
+                        placeholder={t('agentManager.empty.setupCommands.commandPlaceholder')}
                         className="h-8 flex-1 font-mono text-xs"
                       />
                       <button
@@ -489,7 +498,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
                           setSetupCommands(newCommands);
                         }}
                         className="flex-shrink-0 flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                        aria-label="Remove command"
+                        aria-label={t('agentManager.empty.setupCommands.removeCommandAria')}
                       >
                         <RiCloseLine className="h-4 w-4" />
                       </button>
@@ -501,7 +510,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
                     className="flex items-center gap-1.5 typography-meta text-muted-foreground hover:text-foreground transition-colors"
                   >
                     <RiAddLine className="h-3.5 w-3.5" />
-                    Add command
+                    {t('agentManager.empty.setupCommands.addCommand')}
                   </button>
                 </div>
               )}
@@ -512,21 +521,21 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
         {/* Agent Selection */}
         <div className="space-y-1.5">
           <label className="typography-ui-label font-medium text-foreground">
-            Agent
+            {t('agentManager.empty.agent.label')}
           </label>
           <AgentSelector
             value={selectedAgent}
             onChange={setSelectedAgent}
           />
           <p className="typography-micro text-muted-foreground">
-            Defaults to your configured default agent
+            {t('agentManager.empty.agent.description')}
           </p>
         </div>
 
         {/* Model Selection */}
         <div className="space-y-1.5">
           <label className="typography-ui-label font-medium text-foreground">
-            Models
+            {t('agentManager.empty.models.label')}
           </label>
           <ModelMultiSelect
             selectedModels={selectedModels}
@@ -534,7 +543,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
             onRemove={handleRemoveModel}
             onUpdate={handleUpdateModel}
             minModels={1}
-            addButtonLabel="Add model"
+            addButtonLabel={t('agentManager.empty.models.addModel')}
             maxModels={5}
           />
         </div>
@@ -542,7 +551,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
         {/* Chat Input Style Prompt */}
         <div className="space-y-1.5">
           <label htmlFor="prompt" className="typography-ui-label font-medium text-foreground">
-            Prompt
+            {t('agentManager.empty.prompt.label')}
           </label>
           <div className="relative">
             <div
@@ -561,7 +570,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
                   updateAutocompleteState(nextPrompt, cursorPosition);
                 }}
                 onKeyDown={handleKeyDown}
-                placeholder="Ask anything..."
+                placeholder={t('agentManager.empty.prompt.placeholder')}
                 className="min-h-[100px] max-h-[300px] resize-none border-0 bg-transparent dark:bg-transparent px-4 py-3 typography-markdown focus-visible:ring-0 focus-visible:ring-offset-0"
               />
             
@@ -609,7 +618,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground transition-colors"
-                  aria-label="Add attachment"
+                  aria-label={t('agentManager.empty.prompt.addAttachmentAria')}
                 >
                   <RiAddCircleLine className="h-[18px] w-[18px]" />
                 </button>
@@ -618,7 +627,9 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
               {/* Right Controls - Model Count */}
               <div className="flex items-center gap-2">
                 <span className="typography-meta text-muted-foreground">
-                  {selectedModels.length} model{selectedModels.length !== 1 ? 's' : ''} selected
+                  {selectedModels.length === 1
+                    ? t('agentManager.empty.models.selectedSingle', { count: selectedModels.length })
+                    : t('agentManager.empty.models.selectedPlural', { count: selectedModels.length })}
                 </span>
               </div>
               {/* Submit Button */}
@@ -631,7 +642,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
                           ? 'text-primary hover:text-primary'
                           : 'opacity-30'
                   )}
-                  aria-label="Start Agent Group"
+                  aria-label={t('agentManager.empty.actions.startAgentGroupAria')}
                 >
                   {isSubmittingOrCreating ? (
                     <RiHourglassFill className="h-[18px] w-[18px] animate-spin" />

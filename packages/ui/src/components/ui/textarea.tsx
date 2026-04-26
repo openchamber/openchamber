@@ -1,5 +1,6 @@
 import * as React from "react"
 
+import { useI18n } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 import { ScrollableOverlay } from "./ScrollableOverlay"
 
@@ -23,12 +24,18 @@ type TextareaProps = React.ComponentProps<"textarea"> & {
   endSlot?: React.ReactNode;
 };
 
-function ResizeHandle({ onResizeStart }: { onResizeStart: (event: React.PointerEvent<HTMLDivElement>) => void }) {
+function ResizeHandle({
+  onResizeStart,
+  ariaLabel,
+}: {
+  onResizeStart: (event: React.PointerEvent<HTMLDivElement>) => void;
+  ariaLabel: string;
+}) {
   return (
     <div
       role="separator"
       aria-orientation="horizontal"
-      aria-label="Resize textarea"
+      aria-label={ariaLabel}
       onPointerDown={onResizeStart}
       // generous hit area; SVG renders centered in the bottom-right corner
       className="pointer-events-auto -m-2 flex size-7 cursor-ns-resize items-end justify-end p-2 touch-none select-none"
@@ -68,6 +75,7 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
     },
     ref,
   ) => {
+    const { t } = useI18n();
     const wrapperRef = React.useRef<HTMLDivElement>(null);
     const dragStateRef = React.useRef<{ startY: number; startHeight: number } | null>(null);
     const [resizedHeight, setResizedHeight] = React.useState<number | null>(null);
@@ -185,7 +193,7 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
             />
           <div className="flex items-center justify-end gap-1.5 pl-3 pr-2.5">
             {endSlot}
-            <ResizeHandle onResizeStart={handleResizeStart} />
+            <ResizeHandle onResizeStart={handleResizeStart} ariaLabel={t('textarea.resizeHandleAria')} />
           </div>
         </div>
       </div>

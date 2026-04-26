@@ -1,6 +1,7 @@
 import type { DesktopSettings } from '@/lib/desktop';
 import { createProjectIdFromPath } from '@/lib/projectId';
 import { useUIStore } from '@/stores/useUIStore';
+import { isMonoFontOption, isUiFontOption } from '@/lib/fontOptions';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { setDirectoryShowHidden } from '@/lib/directoryShowHidden';
 import { setFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
@@ -439,6 +440,12 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.terminalFontSize === 'number' && Number.isFinite(settings.terminalFontSize) && settings.terminalFontSize !== store.terminalFontSize) {
     store.setTerminalFontSize(settings.terminalFontSize);
   }
+  if (isUiFontOption(settings.uiFont) && settings.uiFont !== store.uiFont) {
+    store.setUiFont(settings.uiFont);
+  }
+  if (isMonoFontOption(settings.monoFont) && settings.monoFont !== store.monoFont) {
+    store.setMonoFont(settings.monoFont);
+  }
   if (typeof settings.padding === 'number' && Number.isFinite(settings.padding) && settings.padding !== store.padding) {
     store.setPadding(settings.padding);
   }
@@ -851,6 +858,12 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.terminalFontSize === 'number' && Number.isFinite(candidate.terminalFontSize)) {
     result.terminalFontSize = candidate.terminalFontSize;
+  }
+  if (isUiFontOption(candidate.uiFont)) {
+    result.uiFont = candidate.uiFont;
+  }
+  if (isMonoFontOption(candidate.monoFont)) {
+    result.monoFont = candidate.monoFont;
   }
   if (typeof candidate.padding === 'number' && Number.isFinite(candidate.padding)) {
     result.padding = candidate.padding;

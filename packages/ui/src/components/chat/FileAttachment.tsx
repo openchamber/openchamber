@@ -9,10 +9,12 @@ import { openExternalUrl } from '@/lib/url';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { useIsVSCodeRuntime } from '@/hooks/useRuntimeAPIs';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
+import { useI18n } from '@/lib/i18n';
 
 import type { ToolPopupContent } from './message/types';
 
 export const FileAttachmentButton = memo(() => {
+  const { t } = useI18n();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const addAttachedFile = useInputStore((state) => state.addAttachedFile);
   const isMobile = useUIStore((state) => state.isMobile);
@@ -27,7 +29,7 @@ export const FileAttachmentButton = memo(() => {
         await addAttachedFile(file);
       } catch (error) {
         console.error('File attach failed', error);
-        toast.error(error instanceof Error ? error.message : 'Failed to attach file');
+        toast.error(error instanceof Error ? error.message : t('chat.fileAttachment.toast.attachFailed'));
       }
     }
   };
@@ -50,8 +52,8 @@ export const FileAttachmentButton = memo(() => {
       const skipped = Array.isArray(data?.skipped) ? data.skipped : [];
 
       if (skipped.length > 0) {
-        const summary = skipped.map((s: { name?: string; reason?: string }) => `${s?.name || 'file'}: ${s?.reason || 'skipped'}`).join('\n');
-        toast.error(`Some files were skipped:\n${summary}`);
+        const summary = skipped.map((s: { name?: string; reason?: string }) => `${s?.name || t('chat.fileAttachment.fileFallback')}: ${s?.reason || t('chat.fileAttachment.skippedFallback')}`).join('\n');
+        toast.error(t('chat.fileAttachment.toast.someFilesSkipped', { summary }));
       }
 
       const asFiles = picked
@@ -67,7 +69,7 @@ export const FileAttachmentButton = memo(() => {
               bytes[i] = binary.charCodeAt(i);
             }
             const blob = new Blob([bytes], { type: mime });
-            return new File([blob], file.name || 'file', { type: mime });
+            return new File([blob], file.name || t('chat.fileAttachment.fileFallback'), { type: mime });
           } catch (err) {
             console.error('Failed to decode VS Code picked file', err);
             return null;
@@ -80,7 +82,7 @@ export const FileAttachmentButton = memo(() => {
       }
     } catch (error) {
       console.error('VS Code file pick failed', error);
-      toast.error(error instanceof Error ? error.message : 'Failed to pick files in VS Code');
+      toast.error(error instanceof Error ? error.message : t('chat.fileAttachment.toast.vscodePickFailed'));
     }
   };
 
@@ -103,13 +105,13 @@ export const FileAttachmentButton = memo(() => {
               'hover:bg-muted text-muted-foreground',
               buttonSizeClass
             )}
-            aria-label="Attach files"
+            aria-label={t('chat.fileAttachment.actions.attachAria')}
           >
             <RiAttachment2 className={iconSizeClass} />
           </button>
         </TooltipTrigger>
         <TooltipContent side="top">
-          <p>Attach files</p>
+          <p>{t('chat.fileAttachment.actions.attach')}</p>
         </TooltipContent>
       </Tooltip>
     </>
@@ -124,6 +126,7 @@ interface ImagePreviewProps {
 }
 
 const ImagePreview = memo(({ file, onRemove }: ImagePreviewProps) => {
+  const { t } = useI18n();
   const isLocalImagePreview =
     file.source !== 'server' &&
     file.mimeType.startsWith('image/') &&
@@ -163,7 +166,7 @@ const ImagePreview = memo(({ file, onRemove }: ImagePreviewProps) => {
             onRemove();
           }}
           className="flex items-center justify-center h-5 w-5 flex-shrink-0 hover:bg-[var(--interactive-hover)] rounded-full transition-colors cursor-pointer"
-          aria-label={`Remove ${displayName}`}
+          aria-label={t('chat.fileAttachment.actions.removeNamed', { name: displayName })}
         >
           <RiCloseLine className="h-4 w-4 text-muted-foreground" />
         </span>
@@ -182,8 +185,8 @@ const ImagePreview = memo(({ file, onRemove }: ImagePreviewProps) => {
       <button
         onClick={onRemove}
         className="absolute top-0.5 right-0.5 h-4 w-4 rounded-full bg-background/80 text-foreground hover:text-destructive flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-        title="Remove image"
-        aria-label={`Remove ${displayName}`}
+        title={t('chat.fileAttachment.actions.removeImage')}
+        aria-label={t('chat.fileAttachment.actions.removeNamed', { name: displayName })}
       >
         <RiCloseLine className="h-2.5 w-2.5" />
       </button>
@@ -199,6 +202,7 @@ interface FileChipProps {
 }
 
 const FileChip = memo(({ file, onRemove }: FileChipProps) => {
+  const { t } = useI18n();
   const getFileExtension = (filename: string): string => {
     const parts = filename.split('.');
     return parts.length > 1 ? parts[parts.length - 1].toLowerCase() : '';
@@ -245,7 +249,7 @@ const FileChip = memo(({ file, onRemove }: FileChipProps) => {
           onRemove();
         }}
         className="flex items-center justify-center h-5 w-5 flex-shrink-0 hover:bg-[var(--interactive-hover)] rounded-full transition-colors cursor-pointer"
-        aria-label={`Remove ${displayName}`}
+        aria-label={t('chat.fileAttachment.actions.removeNamed', { name: displayName })}
       >
         <RiCloseLine className="h-4 w-4 text-muted-foreground" />
       </span>
@@ -518,7 +522,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
         if (isImage && file.url) {
           return (
             <div
-              key={index}
+              key={file.url || `${fileName}-${index}`}
               className="relative aspect-video rounded-lg border border-border/40 bg-muted/10 overflow-hidden group"
             >
               <img
@@ -538,7 +542,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
 
         if (githubLinkKind && file.url) {
           return (
-            <Tooltip key={index}>
+            <Tooltip key={file.url || `${fileName}-${index}`}>
               <TooltipTrigger asChild>
                 <button
                   type="button"
@@ -571,7 +575,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
         }
 
         return (
-          <Tooltip key={index}>
+          <Tooltip key={file.url || `${fileName}-${index}`}>
             <TooltipTrigger asChild>
               <button
                 type="button"
@@ -642,7 +646,7 @@ export const ImageGallery = memo(({ urls, caption, onShowPopup }: ImageGalleryPr
       <div className={cn("grid gap-2", getGridCols())}>
         {urls.map((url, index) => (
           <button
-            key={index}
+            key={url}
             type="button"
             onClick={() => onShowPopup?.({
               open: true,

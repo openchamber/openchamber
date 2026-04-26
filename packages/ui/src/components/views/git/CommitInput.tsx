@@ -1,6 +1,7 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
+import { useI18n } from '@/lib/i18n';
 
 interface CommitInputProps {
   value: string;
@@ -17,11 +18,12 @@ const MAX_HEIGHT = 200;
 export const CommitInput: React.FC<CommitInputProps> = ({
   value,
   onChange,
-  placeholder = 'Commit message',
+  placeholder,
   disabled = false,
   hasTouchInput = false,
   isMobile = false,
 }) => {
+  const { t } = useI18n();
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const inputSpellcheckEnabled = useUIStore((state) => state.inputSpellcheckEnabled);
 
@@ -56,7 +58,7 @@ export const CommitInput: React.FC<CommitInputProps> = ({
       ref={textareaRef}
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      placeholder={placeholder}
+      placeholder={placeholder ?? t('gitView.commit.messagePlaceholder')}
       rows={1}
       disabled={disabled}
       autoCorrect={hasTouchInput ? 'on' : 'off'}

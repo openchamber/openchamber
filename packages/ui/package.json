@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/ui",
-  "version": "1.9.8",
+  "version": "1.9.9",
   "private": true,
   "type": "module",
   "main": "src/main.tsx",
@@ -39,7 +39,7 @@
     "@fontsource/ibm-plex-sans": "^5.1.1",
     "@ibm/plex": "^6.4.1",
     "@lezer/highlight": "^1.2.3",
-    "@opencode-ai/sdk": "^1.4.19",
+    "@opencode-ai/sdk": "^1.4.25",
     "@pierre/diffs": "1.1.0-beta.13",
     "@base-ui/react": "^1.4.0",
     "@remixicon/react": "^4.7.0",

@@ -26,6 +26,7 @@ import {
     RiAlertLine,
 } from '@remixicon/react';
 import type { BrowserVoiceStatus } from '@/hooks/useBrowserVoice';
+import { useI18n } from '@/lib/i18n';
 
 export interface VoiceStatusIndicatorProps {
     /** Current voice status */
@@ -60,36 +61,41 @@ const statusConfig: Record<
     {
         icon: typeof RiMicLine;
         color: string;
-        label: string;
+        labelKey:
+          | 'voice.status.idle'
+          | 'voice.status.listening'
+          | 'voice.status.processing'
+          | 'voice.status.speaking'
+          | 'voice.status.error';
         animation?: string;
     }
 > = {
     idle: {
         icon: RiMicOffLine,
         color: 'text-muted-foreground',
-        label: 'Voice Ready',
+        labelKey: 'voice.status.idle',
     },
     listening: {
         icon: RiMicLine,
         color: 'text-primary',
-        label: 'Listening...',
+        labelKey: 'voice.status.listening',
         animation: 'animate-pulse',
     },
     processing: {
         icon: RiLoader4Line,
         color: 'text-primary',
-        label: 'Processing...',
+        labelKey: 'voice.status.processing',
         animation: 'animate-spin',
     },
     speaking: {
         icon: RiVolumeUpLine,
         color: 'text-green-500',
-        label: 'Speaking...',
+        labelKey: 'voice.status.speaking',
     },
     error: {
         icon: RiAlertLine,
         color: 'text-destructive',
-        label: 'Voice Error',
+        labelKey: 'voice.status.error',
     },
 };
 
@@ -103,6 +109,7 @@ export function VoiceStatusIndicator({
     className = '',
     conversationMode = false,
 }: VoiceStatusIndicatorProps) {
+    const { t } = useI18n();
     const config = statusConfig[status];
     const Icon = config.icon;
     const sizeClass = sizeClasses[size];
@@ -123,13 +130,13 @@ export function VoiceStatusIndicator({
                 {conversationMode && status === 'idle' && (
                     <span
                         className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-green-500 rounded-full"
-                        aria-label="Conversation mode active"
+                        aria-label={t('voice.status.conversationModeActiveAria')}
                     />
                 )}
             </div>
             {showLabel && (
                 <span className={`typography-meta ${config.color}`}>
-                    {config.label}
+                    {t(config.labelKey)}
                 </span>
             )}
         </div>

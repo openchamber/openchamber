@@ -22,6 +22,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     setupProxy,
     ensureOpenCodeApiPrefix,
     clearResolvedOpenCodeBinary,
+    buildAugmentedPath,
+    buildManagedOpenCodePath,
   } = deps;
 
   const killProcessOnPort = (port) => {
@@ -389,6 +391,11 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     await applyOpencodeBinaryFromSettings();
     ensureOpencodeCliEnv();
     const openCodePassword = await ensureLocalOpenCodeServerPassword({ rotateManaged: true });
+    const envPath = typeof buildManagedOpenCodePath === 'function'
+      ? buildManagedOpenCodePath()
+      : typeof buildAugmentedPath === 'function'
+        ? buildAugmentedPath()
+      : process.env.PATH;
 
     try {
       const serverInstance = await createManagedOpenCodeServerProcess({
@@ -398,6 +405,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         cwd: state.openCodeWorkingDirectory,
         env: {
           ...process.env,
+          PATH: envPath,
           OPENCODE_SERVER_PASSWORD: openCodePassword,
         },
       });

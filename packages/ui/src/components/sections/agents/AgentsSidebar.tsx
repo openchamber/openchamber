@@ -19,11 +19,13 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { RiAddLine, RiAiAgentFill, RiAiAgentLine, RiDeleteBinLine, RiFileCopyLine, RiMore2Line, RiRobot2Line, RiRobotLine, RiRestartLine, RiEditLine } from '@remixicon/react';
 import { useAgentsStore, isAgentBuiltIn, isAgentHidden, type AgentScope, type AgentDraft } from '@/stores/useAgentsStore';
+import { useShallow } from 'zustand/react/shallow';
 import { cn } from '@/lib/utils';
 import type { Agent } from '@opencode-ai/sdk/v2';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { SettingsProjectSelector } from '@/components/sections/shared/SettingsProjectSelector';
 import { SidebarGroup } from '@/components/sections/shared/SidebarGroup';
+import { useI18n } from '@/lib/i18n';
 
 interface AgentsSidebarProps {
   onItemSelect?: () => void;
@@ -99,6 +101,7 @@ const rulesetToPermissionConfig = (ruleset: unknown): AgentDraft['permission'] =
 };
 
 export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) => {
+  const { t } = useI18n();
   const [renameDialogAgent, setRenameDialogAgent] = React.useState<Agent | null>(null);
   const [renameNewName, setRenameNewName] = React.useState('');
   const [confirmActionAgent, setConfirmActionAgent] = React.useState<Agent | null>(null);
@@ -114,7 +117,15 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
     createAgent,
     deleteAgent,
     loadAgents,
-  } = useAgentsStore();
+  } = useAgentsStore(useShallow((s) => ({
+    selectedAgentName: s.selectedAgentName,
+    agents: s.agents,
+    setSelectedAgent: s.setSelectedAgent,
+    setAgentDraft: s.setAgentDraft,
+    createAgent: s.createAgent,
+    deleteAgent: s.deleteAgent,
+    loadAgents: s.loadAgents,
+  })));
 
   React.useEffect(() => {
     loadAgents();
@@ -141,7 +152,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
 
   const handleDeleteAgent = async (agent: Agent) => {
     if (isAgentBuiltIn(agent)) {
-      toast.error('Built-in agents cannot be deleted');
+      toast.error(t('settings.agents.sidebar.toast.builtInCannotDelete'));
       return;
     }
 
@@ -173,15 +184,15 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
 
     if (success) {
       if (confirmActionType === 'delete') {
-        toast.success(`Agent "${confirmActionAgent.name}" deleted successfully`);
+        toast.success(t('settings.agents.sidebar.toast.agentDeleted', { name: confirmActionAgent.name }));
       } else {
-        toast.success(`Agent "${confirmActionAgent.name}" reset to default`);
+        toast.success(t('settings.agents.sidebar.toast.agentReset', { name: confirmActionAgent.name }));
       }
       closeConfirmActionDialog();
     } else if (confirmActionType === 'delete') {
-      toast.error('Failed to delete agent');
+      toast.error(t('settings.agents.sidebar.toast.deleteFailed'));
     } else {
-      toast.error('Failed to reset agent');
+      toast.error(t('settings.agents.sidebar.toast.resetFailed'));
     }
 
     setIsConfirmActionPending(false);
@@ -231,7 +242,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
     const sanitizedName = renameNewName.trim().replace(/\s+/g, '-');
 
     if (!sanitizedName) {
-      toast.error('Agent name is required');
+      toast.error(t('settings.agents.sidebar.toast.agentNameRequired'));
       return;
     }
 
@@ -241,7 +252,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
     }
 
     if (agents.some((a) => a.name === sanitizedName)) {
-      toast.error('An agent with this name already exists');
+      toast.error(t('settings.agents.sidebar.toast.agentExists'));
       return;
     }
 
@@ -270,10 +281,10 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
         toast.success(`Agent renamed to "${sanitizedName}"`);
         setSelectedAgent(sanitizedName);
       } else {
-        toast.error('Failed to remove old agent after rename');
+        toast.error(t('settings.agents.sidebar.toast.removeOldAfterRenameFailed'));
       }
     } else {
-      toast.error('Failed to rename agent');
+      toast.error(t('settings.agents.sidebar.toast.renameFailed'));
     }
 
     setRenameDialogAgent(null);
@@ -319,10 +330,10 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
   return (
     <div className={cn('flex h-full flex-col', bgClass)}>
       <div className="border-b px-3 pt-4 pb-3">
-        <h2 className="text-base font-semibold text-foreground mb-3">Agents</h2>
+        <h2 className="text-base font-semibold text-foreground mb-3">{t('settings.agents.sidebar.title')}</h2>
         <SettingsProjectSelector className="mb-3" />
         <div className="flex items-center justify-between gap-2">
-          <span className="typography-meta text-muted-foreground">Total {visibleAgents.length}</span>
+          <span className="typography-meta text-muted-foreground">{t('settings.agents.sidebar.total', { count: visibleAgents.length })}</span>
           <Button size="sm"
             variant="ghost"
             className="h-7 w-7 px-0 -my-1 text-muted-foreground"
@@ -337,15 +348,15 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
         {visibleAgents.length === 0 ? (
           <div className="py-12 px-4 text-center text-muted-foreground">
             <RiRobot2Line className="mx-auto mb-3 h-10 w-10 opacity-50" />
-            <p className="typography-ui-label font-medium">No agents configured</p>
-            <p className="typography-meta mt-1 opacity-75">Use the + button above to create one</p>
+            <p className="typography-ui-label font-medium">{t('settings.agents.sidebar.empty.title')}</p>
+            <p className="typography-meta mt-1 opacity-75">{t('settings.agents.sidebar.empty.description')}</p>
           </div>
         ) : (
           <>
             {builtInAgents.length > 0 && (
               <>
                 <div className="px-2 pb-1.5 pt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Built-in Agents
+                  {t('settings.agents.sidebar.section.builtIn')}
                 </div>
                 {builtInAgents.map((agent) => (
                   <AgentListItem
@@ -370,7 +381,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
             {customAgents.length > 0 && (
               <>
                 <div className="px-2 pb-1.5 pt-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Custom Agents
+                  {t('settings.agents.sidebar.section.custom')}
                 </div>
 
                 {/* Grouped agents by subfolder */}
@@ -437,11 +448,11 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
       >
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>{confirmActionType === 'delete' ? 'Delete Agent' : 'Reset Agent'}</DialogTitle>
+            <DialogTitle>{confirmActionType === 'delete' ? t('settings.agents.sidebar.dialog.deleteTitle') : t('settings.agents.sidebar.dialog.resetTitle')}</DialogTitle>
             <DialogDescription>
               {confirmActionType === 'delete'
-                ? `Are you sure you want to delete agent "${confirmActionAgent?.name}"?`
-                : `Are you sure you want to reset agent "${confirmActionAgent?.name}" to its default configuration?`}
+                ? t('settings.agents.sidebar.dialog.deleteDescription', { name: confirmActionAgent?.name ?? '' })
+                : t('settings.agents.sidebar.dialog.resetDescription', { name: confirmActionAgent?.name ?? '' })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -451,10 +462,10 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
               onClick={closeConfirmActionDialog}
               disabled={isConfirmActionPending}
             >
-              Cancel
+              {t('settings.common.actions.cancel')}
             </Button>
             <Button size="sm" onClick={handleConfirmAction} disabled={isConfirmActionPending}>
-              {confirmActionType === 'delete' ? 'Delete' : 'Reset'}
+              {confirmActionType === 'delete' ? t('settings.common.actions.delete') : t('settings.common.actions.reset')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -464,15 +475,15 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
       <Dialog open={renameDialogAgent !== null} onOpenChange={(open) => !open && setRenameDialogAgent(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Rename Agent</DialogTitle>
+            <DialogTitle>{t('settings.agents.sidebar.renameDialog.title')}</DialogTitle>
             <DialogDescription>
-              Enter a new name for the agent "@{renameDialogAgent?.name}"
+              {t('settings.agents.sidebar.renameDialog.description', { name: renameDialogAgent?.name ?? '' })}
             </DialogDescription>
           </DialogHeader>
           <Input
             value={renameNewName}
             onChange={(e) => setRenameNewName(e.target.value)}
-            placeholder="New agent name..."
+            placeholder={t('settings.agents.sidebar.renameDialog.placeholder')}
             className="text-foreground placeholder:text-muted-foreground"
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
@@ -486,10 +497,10 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
               variant="ghost"
               onClick={() => setRenameDialogAgent(null)}
             >
-              Cancel
+              {t('settings.common.actions.cancel')}
             </Button>
             <Button size="sm" onClick={handleRenameAgent}>
-              Rename
+              {t('settings.common.actions.rename')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -523,6 +534,7 @@ const AgentListItem: React.FC<AgentListItemProps> = ({
   isMenuOpen,
   onMenuOpenChange,
 }) => {
+  const { t } = useI18n();
   const extAgent = agent as Agent & { scope?: AgentScope };
   const isMobile = isMobileDeviceViaCSS();
   
@@ -550,7 +562,7 @@ const AgentListItem: React.FC<AgentListItemProps> = ({
             {getAgentModeIcon(agent.mode)}
             {(extAgent.scope || isAgentBuiltIn(agent)) && (
               <span className="typography-micro text-muted-foreground bg-muted px-1 rounded flex-shrink-0 leading-none pb-px border border-border/50">
-                {isAgentBuiltIn(agent) ? 'system' : extAgent.scope}
+                {isAgentBuiltIn(agent) ? t('settings.agents.sidebar.badge.system') : extAgent.scope}
               </span>
             )}
           </div>
@@ -580,7 +592,7 @@ const AgentListItem: React.FC<AgentListItemProps> = ({
                 }}
               >
                 <RiEditLine className="h-4 w-4 mr-px" />
-                Rename
+                {t('settings.common.actions.rename')}
               </DropdownMenuItem>
             )}
 
@@ -591,7 +603,7 @@ const AgentListItem: React.FC<AgentListItemProps> = ({
               }}
             >
               <RiFileCopyLine className="h-4 w-4 mr-px" />
-              Duplicate
+              {t('settings.common.actions.duplicate')}
             </DropdownMenuItem>
 
             {onReset && (
@@ -602,7 +614,7 @@ const AgentListItem: React.FC<AgentListItemProps> = ({
                 }}
               >
                 <RiRestartLine className="h-4 w-4 mr-px" />
-                Reset
+                {t('settings.common.actions.reset')}
               </DropdownMenuItem>
             )}
 
@@ -615,7 +627,7 @@ const AgentListItem: React.FC<AgentListItemProps> = ({
                 className="text-destructive focus:text-destructive"
               >
                 <RiDeleteBinLine className="h-4 w-4 mr-px" />
-                Delete
+                {t('settings.common.actions.delete')}
               </DropdownMenuItem>
             )}
           </DropdownMenuContent>

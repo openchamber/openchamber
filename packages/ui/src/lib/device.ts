@@ -81,7 +81,6 @@ export function getDeviceInfo(): DeviceInfo {
   const prefersCoarsePointer = pointerQuery?.matches ?? false;
   const noHover = hoverQuery?.matches ?? false;
   const maxTouchPoints = typeof navigator !== 'undefined' ? navigator.maxTouchPoints ?? 0 : 0;
-
   const isDesktopShellRuntime = isDesktopShell();
 
   const hasTouchInput = prefersCoarsePointer || noHover || maxTouchPoints > 0;

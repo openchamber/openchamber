@@ -17,6 +17,7 @@ import {
 import { CSS as DndCSS } from '@dnd-kit/utilities';
 import { RiCloseLine } from '@remixicon/react';
 
+import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 
@@ -96,6 +97,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
   activePillLowercase = true,
   className,
 }) => {
+  const { t } = useI18n();
   const isMobile = useUIStore((state) => state.isMobile);
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const [overflow, setOverflow] = React.useState<{ left: boolean; right: boolean }>({ left: false, right: false });
@@ -330,7 +332,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
         )}
         style={isScrollable ? { scrollbarWidth: 'none', msOverflowStyle: 'none' } : undefined}
         role="tablist"
-        aria-label="Tabs"
+        aria-label={t('sortableTabsStrip.aria.tabs')}
       >
         {usesActivePillIndicator && pillRect ? (
           <div

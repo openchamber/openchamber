@@ -1,5 +1,59 @@
 import type { NotificationPayload, NotificationsAPI } from '@openchamber/ui/lib/api/types';
 
+const SW_READY_TIMEOUT_MS = 1500;
+
+const getNotificationRegistration = async (): Promise<ServiceWorkerRegistration | null> => {
+  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) {
+    return null;
+  }
+
+  let existing: ServiceWorkerRegistration | null = null;
+  try {
+    existing = (await navigator.serviceWorker.getRegistration()) ?? null;
+  } catch {
+    existing = null;
+  }
+
+  if (existing?.active) {
+    return existing;
+  }
+
+  if (!existing) {
+    return null;
+  }
+
+  try {
+    const ready = await Promise.race<ServiceWorkerRegistration | null>([
+      navigator.serviceWorker.ready,
+      new Promise<null>((resolve) => {
+        setTimeout(() => resolve(null), SW_READY_TIMEOUT_MS);
+      }),
+    ]);
+
+    return ready ?? existing;
+  } catch {
+    return existing;
+  }
+};
+
+const notifyWithServiceWorker = async (payload?: NotificationPayload): Promise<boolean> => {
+  const registration = await getNotificationRegistration();
+  if (!registration || typeof registration.showNotification !== 'function') {
+    return false;
+  }
+
+  try {
+    await registration.showNotification(payload?.title ?? 'OpenChamber', {
+      body: payload?.body,
+      tag: payload?.tag,
+    });
+    return true;
+  } catch (error) {
+    console.warn('Failed to send notification via service worker', error);
+    return false;
+  }
+};
+
 const notifyWithWebAPI = async (payload?: NotificationPayload): Promise<boolean> => {
   if (typeof Notification === 'undefined') {
     console.info('Notifications not supported in this environment', payload);
@@ -20,6 +74,12 @@ const notifyWithWebAPI = async (payload?: NotificationPayload): Promise<boolean>
   }
 
   try {
+    // Some installed PWAs expose Notification.permission but only allow
+    // notifications through an active service worker registration.
+    if (await notifyWithServiceWorker(payload)) {
+      return true;
+    }
+
     new Notification(payload?.title ?? 'OpenChamber', {
       body: payload?.body,
       tag: payload?.tag,
@@ -58,7 +118,7 @@ const notifyWithTauri = async (payload?: NotificationPayload): Promise<boolean> 
 
 export const createWebNotificationsAPI = (): NotificationsAPI => ({
   async notifyAgentCompletion(payload?: NotificationPayload): Promise<boolean> {
-    return (await notifyWithTauri(payload)) || notifyWithWebAPI(payload);
+    return (await notifyWithTauri(payload)) || (await notifyWithWebAPI(payload));
   },
   canNotify: () => {
     if (typeof window !== 'undefined') {

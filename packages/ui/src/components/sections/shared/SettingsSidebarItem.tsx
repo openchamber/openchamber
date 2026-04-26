@@ -107,11 +107,11 @@ export const SettingsSidebarItem: React.FC<SettingsSidebarItemProps> = ({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-fit min-w-20">
-              {actions.map((action, index) => {
+              {actions.map((action) => {
                 const Icon = action.icon;
                 return (
                   <DropdownMenuItem
-                    key={index}
+                    key={action.label}
                     onClick={(e) => {
                       e.stopPropagation();
                       action.onClick();

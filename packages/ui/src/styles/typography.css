@@ -25,19 +25,29 @@
   }
 
   .chat-column {
+    width: min(100%, 64rem);
+    margin-inline: auto;
+    padding-inline: calc(clamp(0.75rem, 2.5vw, 1rem) * var(--padding-scale, 1));
+  }
+
+  .chat-input-column {
     width: min(100%, 48rem);
     margin-inline: auto;
     padding-inline: calc(clamp(0.75rem, 2.5vw, 1rem) * var(--padding-scale, 1));
   }
 
   .chat-message-column {
-    width: min(100%, 48rem);
+    width: min(100%, 64rem);
     margin-inline: auto;
     padding-inline: calc(clamp(0.75rem, 2.5vw, 1rem) * var(--padding-scale, 1));
   }
 
   @media (min-width: 1024px) {
     .chat-column {
+      padding-inline: calc(clamp(1rem, 2.5vw, 1.5rem) * var(--padding-scale, 1));
+    }
+
+    .chat-input-column {
       padding-inline: calc(clamp(1rem, 2.5vw, 1.5rem) * var(--padding-scale, 1));
     }
 

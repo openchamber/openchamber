@@ -41,6 +41,7 @@ import { getToolIcon } from './toolPresentation';
 import { useDurationTickerNow } from './useDurationTicker';
 import { resolveFallbackTaskSessionId } from './resolveFallbackTaskSessionId';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
+import { useI18n } from '@/lib/i18n';
 
 type ToolStateWithMetadata = ToolStateUnion & { metadata?: Record<string, unknown>; input?: Record<string, unknown>; output?: string; error?: string; time?: { start: number; end?: number } };
 
@@ -757,17 +758,8 @@ const ToolScrollableTextOutput: React.FC<{
                 style={syntaxTheme}
                 language={outputLanguage}
                 PreTag="div"
-                customStyle={{
-                    ...toolDisplayStyles.getCollapsedStyles(),
-                    padding: 0,
-                    overflow: 'visible',
-                }}
-                codeTagProps={{
-                    style: {
-                        background: 'transparent',
-                        backgroundColor: 'transparent',
-                    },
-                }}
+                customStyle={TOOL_COLLAPSED_CUSTOM_STYLE}
+                codeTagProps={CODE_TAG_PROPS}
                 wrapLongLines
             >
                 {renderedOutput}
@@ -1060,6 +1052,7 @@ const TaskToolSummary: React.FC<{
     animateTailText?: boolean;
     isActive?: boolean;
 }> = ({ entries, isExpanded, isMobile, output, sessionId, onShowPopup, input, animateTailText = true, isActive = false }) => {
+    const { t } = useI18n();
     const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
     const showToolFileIcons = useUIStore((state) => state.showToolFileIcons);
     const displayEntries = entries;
@@ -1171,7 +1164,7 @@ const TaskToolSummary: React.FC<{
                     onClick={handleOpenSession}
                 >
                     <RiExternalLinkLine className="h-3.5 w-3.5 flex-shrink-0" />
-                    <span className="typography-meta text-primary font-medium">Open {agentType.charAt(0).toUpperCase() + agentType.slice(1)} subtask</span>
+                    <span className="typography-meta text-primary font-medium">{t('chat.toolPart.openSubtask', { type: agentType.charAt(0).toUpperCase() + agentType.slice(1) })}</span>
                 </button>
             )}
 
@@ -1192,7 +1185,7 @@ const TaskToolSummary: React.FC<{
                         ) : (
                             <RiArrowRightSLine className="h-3.5 w-3.5 flex-shrink-0" />
                         )}
-                        <span className="typography-meta text-foreground/80 font-medium">Output</span>
+                        <span className="typography-meta text-foreground/80 font-medium">{t('chat.toolPart.output')}</span>
                     </button>
                     {isOutputExpanded ? (
                         <ToolScrollableSection maxHeightClass="max-h-[50vh]">
@@ -1231,10 +1224,73 @@ const TOOL_DIFF_METRICS = {
     fileGap: 0,
 };
 
+const TOOL_COLLAPSED_CUSTOM_STYLE: React.CSSProperties = {
+    ...toolDisplayStyles.getCollapsedStyles(),
+    padding: 0,
+    overflow: 'visible',
+};
+
+const CODE_TAG_PROPS = { style: { background: 'transparent', backgroundColor: 'transparent' } };
+
+const TOOL_ERROR_ICON_STYLE: React.CSSProperties = { color: 'var(--status-error)' };
+const TOOL_NORMAL_ICON_STYLE: React.CSSProperties = { color: 'var(--tools-icon)' };
+const TOOL_ERROR_TITLE_STYLE: React.CSSProperties = { color: 'var(--status-error)' };
+const TOOL_NORMAL_TITLE_STYLE: React.CSSProperties = { color: 'var(--tools-title)' };
+
 type DiffPatchEntry = {
     id: string;
     title: string;
     patch: string;
+};
+
+const hasUnifiedDiffHunk = (patch: string): boolean => /^@@\s+-\d+(?:,\d+)?\s+\+\d+(?:,\d+)?\s+@@/m.test(patch);
+
+const getUnifiedDiffPath = (patch: string, fallbackTitle: string): string => {
+    const plusHeader = patch.match(/^\+\+\+\s+(?:[ab]\/(.+)|(.+))$/m);
+    const rawPath = plusHeader?.[1] ?? plusHeader?.[2];
+    if (!rawPath || rawPath === '/dev/null') {
+        return fallbackTitle;
+    }
+    return rawPath;
+};
+
+const splitUnifiedDiffPatch = (patch: string): DiffPatchEntry[] => {
+    const normalized = patch.replace(/\r\n/g, '\n').trim();
+    if (!normalized) {
+        return [];
+    }
+
+    const lines = normalized.split('\n');
+    const starts: number[] = [];
+
+    for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index] ?? '';
+        const nextLine = lines[index + 1] ?? '';
+        const isUnifiedFileHeader = /^---\s+(?:[ab]\/|\/dev\/null|\/)/.test(line)
+            && /^\+\+\+\s+(?:[ab]\/|\/dev\/null|\/)/.test(nextLine);
+        if (line.startsWith('diff --git ') || line.startsWith('Index: ') || isUnifiedFileHeader) {
+            starts.push(index);
+        }
+    }
+
+    const chunks = starts.length > 0
+        ? starts.map((start, index) => lines.slice(start, starts[index + 1] ?? lines.length).join('\n').trim())
+        : [normalized];
+
+    return chunks
+        .map((chunk, index) => {
+            if (!hasUnifiedDiffHunk(chunk)) {
+                return null;
+            }
+
+            const title = getUnifiedDiffPath(chunk, `Diff ${index + 1}`);
+            return {
+                id: `${title}-${index}`,
+                title,
+                patch: chunk,
+            } satisfies DiffPatchEntry;
+        })
+        .filter((entry): entry is DiffPatchEntry => entry !== null);
 };
 
 const renderPathLikeGitChanges = (path: string, grow = true) => {
@@ -1332,7 +1388,7 @@ const getDiffPatchEntries = (
 
             const record = file as { relativePath?: unknown; filePath?: unknown; patch?: unknown; diff?: unknown };
             const patch = getPatchText(record.patch) ?? getPatchText(record.diff) ?? '';
-            if (!patch) {
+            if (!patch || !hasUnifiedDiffHunk(patch)) {
                 return null;
             }
 
@@ -1358,34 +1414,42 @@ const getDiffPatchEntries = (
         return entries;
     }
 
-    return [
-        {
-            id: 'diff-0',
-            title: 'Diff',
-            patch: fallbackDiff,
-        },
-    ];
+    const splitEntries = splitUnifiedDiffPatch(fallbackDiff).map((entry) => ({
+        ...entry,
+        title: getRelativePath(entry.title, currentDirectory),
+    }));
+
+    if (splitEntries.length > 0) {
+        return splitEntries;
+    }
+
+    return [];
 };
 
 const DiffPreview: React.FC<DiffPreviewProps> = React.memo(({ diff, pierreTheme, pierreThemeType, diffViewMode }) => {
+    const options = React.useMemo(
+        () => ({
+            diffStyle: diffViewMode === 'side-by-side' ? 'split' as const : 'unified' as const,
+            diffIndicators: 'none' as const,
+            hunkSeparators: 'line-info-basic' as const,
+            lineDiffType: 'none' as const,
+            disableFileHeader: true,
+            maxLineDiffLength: 1000,
+            expansionLineCount: 20,
+            overflow: 'wrap' as const,
+            theme: pierreTheme,
+            themeType: pierreThemeType,
+            unsafeCSS: TOOL_DIFF_UNSAFE_CSS,
+        }),
+        [diffViewMode, pierreTheme, pierreThemeType]
+    );
+
     return (
         <div className="typography-code px-1 pb-1 pt-0">
             <PatchDiff
                 patch={diff}
                 metrics={TOOL_DIFF_METRICS}
-                options={{
-                    diffStyle: diffViewMode === 'side-by-side' ? 'split' : 'unified',
-                    diffIndicators: 'none',
-                    hunkSeparators: 'line-info-basic',
-                    lineDiffType: 'none',
-                    disableFileHeader: true,
-                    maxLineDiffLength: 1000,
-                    expansionLineCount: 20,
-                    overflow: 'wrap',
-                    theme: pierreTheme,
-                    themeType: pierreThemeType,
-                    unsafeCSS: TOOL_DIFF_UNSAFE_CSS,
-                }}
+                options={options}
                 className="block w-full"
             />
         </div>
@@ -1409,6 +1473,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     currentDirectory,
     onShowPopup,
 }) => {
+    const { t } = useI18n();
     const { pierreTheme, pierreThemeType } = usePierreThemeConfig();
     const [diffViewMode, setDiffViewMode] = React.useState<DiffViewMode>('unified');
     const stateWithData = state as ToolStateWithMetadata;
@@ -1497,7 +1562,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                     }}
                 >
                     <div className="typography-meta font-medium" style={{ color: 'var(--status-error)' }}>
-                        LSP errors
+                        {t('chat.toolPart.lspErrors')}
                     </div>
                     <div className="space-y-1">
                         <div className="flex items-center gap-1 min-w-0">
@@ -1519,7 +1584,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                         </div>
                         {diagnosticSection.remaining > 0 ? (
                             <div className="typography-micro text-muted-foreground">
-                                +{diagnosticSection.remaining} more errors
+                                {t('chat.toolPart.moreErrors', { count: diagnosticSection.remaining })}
                             </div>
                         ) : null}
                     </div>
@@ -1549,7 +1614,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
             if (state.status === 'error' && 'error' in state) {
                 return (
                     <div>
-                        <div className="typography-meta font-medium text-muted-foreground mb-1">Error:</div>
+                        <div className="typography-meta font-medium text-muted-foreground mb-1">{t('chat.toolPart.error')}</div>
                         <div className="typography-meta p-2 rounded-xl border" style={{
                             backgroundColor: 'var(--status-error-background)',
                             color: 'var(--status-error)',
@@ -1590,7 +1655,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                 );
             }
 
-            return <div className="typography-meta text-muted-foreground">Awaiting response...</div>;
+            return <div className="typography-meta text-muted-foreground">{t('chat.toolPart.awaitingResponse')}</div>;
         }
 
         if (part.tool === 'task' && hasStringOutput) {
@@ -1655,7 +1720,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         }
 
         return renderScrollableBlock(
-            <div className="typography-meta text-muted-foreground/70">No output produced</div>,
+            <div className="typography-meta text-muted-foreground/70">{t('chat.toolPart.noOutputProduced')}</div>,
             { maxHeightClass: 'max-h-60' }
         );
     };
@@ -1714,7 +1779,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
 
                     {state.status === 'error' && 'error' in state && (
                         <div>
-                            <div className="typography-meta font-medium text-muted-foreground/80 mb-1">Error:</div>
+                            <div className="typography-meta font-medium text-muted-foreground/80 mb-1">{t('chat.toolPart.error')}</div>
                             <div className="typography-meta p-2 rounded-xl border" style={{
                                 backgroundColor: 'var(--status-error-background)',
                                 color: 'var(--status-error)',
@@ -1794,14 +1859,17 @@ const ToolPart: React.FC<ToolPartProps> = ({
 
     const shouldNotifyStructuralChange = isFinalized || isTaskTool;
 
+    const onContentChangeRef = React.useRef(onContentChange);
+    onContentChangeRef.current = onContentChange;
+
     React.useEffect(() => {
         if (!shouldNotifyStructuralChange) {
             return;
         }
         if (typeof isExpanded === 'boolean') {
-            onContentChange?.('structural');
+            onContentChangeRef.current?.('structural');
         }
-    }, [isExpanded, onContentChange, shouldNotifyStructuralChange]);
+    }, [isExpanded, shouldNotifyStructuralChange]);
 
     const stateWithData = state as ToolStateWithMetadata;
     const metadata = stateWithData.metadata;
@@ -2422,6 +2490,9 @@ const ToolPart: React.FC<ToolPartProps> = ({
         handleMainClick(event);
     };
 
+    const iconStyle = !isTaskTool && isError ? TOOL_ERROR_ICON_STYLE : TOOL_NORMAL_ICON_STYLE;
+    const titleStyle = !isTaskTool && isError ? TOOL_ERROR_TITLE_STYLE : TOOL_NORMAL_TITLE_STYLE;
+
     if (!shouldTreatAsFinalized && !isActive && !isTaskTool) {
         return null;
     }
@@ -2452,7 +2523,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
                                 isExpanded && 'opacity-0',
                                 !isExpanded && 'group-hover/tool:opacity-0'
                             )}
-                            style={!isTaskTool && isError ? { color: 'var(--status-error)' } : { color: 'var(--tools-icon)' }}
+                            style={iconStyle}
                         >
                             {getToolIcon(normalizedPartTool || part.tool)}
                         </div>
@@ -2473,7 +2544,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
                                 active={Boolean(isActive && !isError)}
                                 minDurationMs={300}
                                 className="typography-meta font-medium flex-shrink-0"
-                                style={!isTaskTool && isError ? { color: 'var(--status-error)' } : { color: 'var(--tools-title)' }}
+                                style={titleStyle}
                                 title={displayName}
                             >
                                 {displayName}
@@ -2487,7 +2558,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
                                     active={Boolean(isActive && !isError)}
                                     minDurationMs={300}
                                     className="typography-meta font-medium flex-shrink-0"
-                                    style={!isTaskTool && isError ? { color: 'var(--status-error)' } : { color: 'var(--tools-title)' }}
+                                    style={titleStyle}
                                     title={displayName}
                                 >
                                     {displayName}

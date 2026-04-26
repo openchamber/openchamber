@@ -1,4 +1,5 @@
 import React from 'react';
+import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 
 // Thin lazy wrapper around the heavy MarkdownRenderer implementation.
 // The full implementation (marked, react-markdown, beautiful-mermaid,
@@ -8,11 +9,11 @@ import React from 'react';
 export type { MarkdownVariant } from './MarkdownRendererImpl';
 
 
-const MarkdownRendererLazy = React.lazy(() =>
+const MarkdownRendererLazy = lazyWithChunkRecovery(() =>
   import('./MarkdownRendererImpl').then((m) => ({ default: m.MarkdownRenderer }))
 );
 
-const SimpleMarkdownRendererLazy = React.lazy(() =>
+const SimpleMarkdownRendererLazy = lazyWithChunkRecovery(() =>
   import('./MarkdownRendererImpl').then((m) => ({ default: m.SimpleMarkdownRenderer }))
 );
 

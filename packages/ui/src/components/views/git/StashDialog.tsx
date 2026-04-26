@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from '@/components/ui';
 import { RiAlertLine, RiLoader4Line } from '@remixicon/react';
+import { useI18n } from '@/lib/i18n';
 
 interface StashDialogProps {
   open: boolean;
@@ -27,10 +28,11 @@ export const StashDialog: React.FC<StashDialogProps> = ({
   targetBranch,
   onConfirm,
 }) => {
+  const { t } = useI18n();
   const [restoreAfter, setRestoreAfter] = React.useState(true);
   const [isProcessing, setIsProcessing] = React.useState(false);
 
-  const operationLabel = operation === 'merge' ? 'Merge' : 'Rebase';
+  const operationLabel = operation === 'merge' ? t('gitView.operation.merge') : t('gitView.operation.rebase');
 
   const handleConfirm = async () => {
     setIsProcessing(true);
@@ -58,26 +60,25 @@ export const StashDialog: React.FC<StashDialogProps> = ({
         <DialogHeader>
           <div className="flex items-center gap-2">
             <RiAlertLine className="size-5 text-[var(--status-warning)]" />
-            <DialogTitle>Uncommitted Changes</DialogTitle>
+            <DialogTitle>{t('gitView.stash.title')}</DialogTitle>
           </div>
           <DialogDescription>
-            You have uncommitted changes that would be overwritten by this {operation}.
-            Would you like to stash them temporarily?
+            {t('gitView.stash.description', { operation })}
           </DialogDescription>
         </DialogHeader>
 
         <div className="py-2">
           <p className="typography-meta text-muted-foreground mb-3">
-            This will:
+            {t('gitView.stash.thisWill')}
           </p>
           <ol className="list-decimal list-inside space-y-1 typography-meta text-foreground">
-            <li>Stash your uncommitted changes</li>
+            <li>{t('gitView.stash.stepStash')}</li>
             <li>
-              {operation === 'merge' ? 'Merge' : 'Rebase'}{' '}
-              {operation === 'merge' ? 'with' : 'onto'}{' '}
+              {operation === 'merge' ? t('gitView.operation.merge') : t('gitView.operation.rebase')}{' '}
+              {operation === 'merge' ? t('gitView.stash.mergeWith') : t('gitView.stash.rebaseOnto')}{' '}
               <span className="font-mono text-primary">{targetBranch}</span>
             </li>
-            {restoreAfter && <li>Restore your stashed changes</li>}
+            {restoreAfter && <li>{t('gitView.stash.stepRestore')}</li>}
           </ol>
         </div>
 
@@ -86,13 +87,13 @@ export const StashDialog: React.FC<StashDialogProps> = ({
             checked={restoreAfter}
             onChange={setRestoreAfter}
             disabled={isProcessing}
-            ariaLabel="Restore changes after operation"
+            ariaLabel={t('gitView.stash.restoreAria')}
           />
           <span
             className="typography-ui-label text-foreground cursor-pointer select-none"
             onClick={() => !isProcessing && setRestoreAfter(!restoreAfter)}
           >
-            Restore changes after the {operation}
+            {t('gitView.stash.restoreAfterOperation', { operation })}
           </span>
         </div>
 
@@ -103,7 +104,7 @@ export const StashDialog: React.FC<StashDialogProps> = ({
             onClick={handleCancel}
             disabled={isProcessing}
           >
-            Cancel
+            {t('gitView.common.cancel')}
           </Button>
           <Button
             variant="default"
@@ -115,10 +116,10 @@ export const StashDialog: React.FC<StashDialogProps> = ({
             {isProcessing ? (
               <>
                 <RiLoader4Line className="size-4 animate-spin" />
-                Processing...
+                {t('gitView.common.processing')}
               </>
             ) : (
-              `Stash & ${operationLabel}`
+              t('gitView.stash.confirmButton', { operation: operationLabel })
             )}
           </Button>
         </DialogFooter>

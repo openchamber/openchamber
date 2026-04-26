@@ -1,6 +1,7 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
+import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 
 export const SIDEBAR_CONTENT_WIDTH = 280;
@@ -15,6 +16,7 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, className }) => {
+    const { t } = useI18n();
     const sidebarWidth = useUIStore((state) => state.sidebarWidth);
     const setSidebarWidth = useUIStore((state) => state.setSidebarWidth);
     const [isResizing, setIsResizing] = React.useState(false);
@@ -143,7 +145,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
                     onPointerCancel={handlePointerEnd}
                     role="separator"
                     aria-orientation="vertical"
-                    aria-label="Resize left panel"
+                    aria-label={t('sidebar.resize.leftPanelAria')}
                 />
             )}
             <div
@@ -155,7 +157,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
                 style={{ width: 'var(--oc-left-sidebar-width)', overflowX: 'hidden' }}
                 aria-hidden={!isOpen}
             >
-                <div className="flex-1 overflow-hidden">
+                <div className="flex-1 overflow-y-auto">
                     <ErrorBoundary>{children}</ErrorBoundary>
                 </div>
             </div>

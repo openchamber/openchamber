@@ -5,6 +5,12 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useContextStore } from '@/stores/contextStore';
 import { formatEffortLabel, getAgentDisplayName, getModelDisplayName } from './mobileControlsUtils';
 
+const STATUS_CHIP_STYLE = {
+    height: '28px',
+    maxHeight: '28px',
+    minHeight: '28px',
+};
+
 interface StatusChipProps {
     onClick: () => void;
     className?: string;
@@ -42,11 +48,7 @@ export const StatusChip: React.FC<StatusChipProps> = ({ onClick, className }) =>
                 'focus:outline-none hover:bg-[var(--interactive-hover)]',
                 className
             )}
-            style={{ 
-                height: '28px',
-                maxHeight: '28px',
-                minHeight: '28px',
-            }}
+            style={STATUS_CHIP_STYLE}
             title={fullLabel}
         >
             <span className="shrink-0">{agentLabel}</span>

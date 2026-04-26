@@ -26,6 +26,7 @@ import { updateDesktopSettings } from '@/lib/persistence';
 import type { DesktopSettings, SkillCatalogConfig } from '@/lib/desktop';
 import { useSkillsCatalogStore } from '@/stores/useSkillsCatalogStore';
 import { useGitIdentitiesStore } from '@/stores/useGitIdentitiesStore';
+import { useI18n } from '@/lib/i18n';
 
 const generateCatalogId = () => `custom:${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
@@ -77,7 +78,10 @@ interface AddCatalogDialogProps {
 }
 
 export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpenChange }) => {
-  const { scanRepo, loadCatalog, isScanning } = useSkillsCatalogStore();
+  const { t } = useI18n();
+  const scanRepo = useSkillsCatalogStore((s) => s.scanRepo);
+  const loadCatalog = useSkillsCatalogStore((s) => s.loadCatalog);
+  const isScanning = useSkillsCatalogStore((s) => s.isScanning);
   const defaultGitIdentityId = useGitIdentitiesStore((s) => s.defaultGitIdentityId);
   const loadDefaultGitIdentityId = useGitIdentitiesStore((s) => s.loadDefaultGitIdentityId);
 
@@ -126,7 +130,7 @@ export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpen
   const handleScan = async () => {
     const trimmedSource = source.trim();
     if (!trimmedSource) {
-      toast.error('Repository source is required');
+      toast.error(t('settings.skills.catalog.add.toast.repositoryRequired'));
       return;
     }
 
@@ -146,7 +150,7 @@ export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpen
     if (!result.ok) {
       if (result.error?.kind === 'authRequired') {
         if (isVSCodeRuntime()) {
-          toast.error('Private repositories are not supported in VS Code yet');
+          toast.error(t('settings.skills.catalog.shared.toast.privateRepoNotSupportedVsCode'));
           return;
         }
 
@@ -161,25 +165,25 @@ export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpen
               : ids[0].id;
           setGitIdentityId(preferred);
         }
-        toast.error('Authentication required. Select a Git identity and scan again.');
+        toast.error(t('settings.skills.catalog.add.toast.authenticationRequiredScan'));
         return;
       }
 
-      toast.error(result.error?.message || 'Failed to scan repository');
+      toast.error(result.error?.message || t('settings.skills.catalog.add.toast.scanFailed'));
       return;
     }
 
     const count = result.items?.length || 0;
     setScanCount(count);
     if (count === 0) {
-      toast.error('No skills found in this repository');
+      toast.error(t('settings.skills.catalog.add.toast.noSkillsFound'));
       setScanOk(false);
       return;
     }
 
     setIdentityOptions([]);
     setScanOk(true);
-    toast.success(`Found ${count} skill(s)`);
+    toast.success(t('settings.skills.catalog.shared.toast.foundSkills', { count }));
   };
 
   const handleAdd = async () => {
@@ -188,22 +192,22 @@ export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpen
     const trimmedSubpath = subpath.trim();
 
     if (!trimmedLabel) {
-      toast.error('Catalog name is required');
+      toast.error(t('settings.skills.catalog.add.toast.catalogNameRequired'));
       return;
     }
 
     if (!trimmedSource) {
-      toast.error('Repository source is required');
+      toast.error(t('settings.skills.catalog.add.toast.repositoryRequired'));
       return;
     }
 
     if (!scanOk) {
-      toast.error('Scan the repository before adding this catalog');
+      toast.error(t('settings.skills.catalog.add.toast.scanBeforeAdd'));
       return;
     }
 
     if (isDuplicate) {
-      toast.error('This catalog already exists');
+      toast.error(t('settings.skills.catalog.add.toast.catalogAlreadyExists'));
       return;
     }
 
@@ -220,11 +224,11 @@ export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpen
     try {
       await updateDesktopSettings({ skillCatalogs: updated });
       setExistingCatalogs(updated);
-      toast.success('Catalog added');
+      toast.success(t('settings.skills.catalog.add.toast.catalogAdded'));
       await loadCatalog({ refresh: true });
       onOpenChange(false);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to save catalog');
+      toast.error(error instanceof Error ? error.message : t('settings.skills.catalog.add.toast.saveFailed'));
     }
   };
 
@@ -232,20 +236,23 @@ export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpen
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>Add skills catalog</DialogTitle>
+          <DialogTitle>{t('settings.skills.catalog.add.title')}</DialogTitle>
           <DialogDescription>
-            Add a Git repository as a new catalog source. OpenChamber will scan it for folders containing <code className="font-mono">SKILL.md</code>.
+            {t('settings.skills.catalog.add.descriptionPrefix')}
+            {' '}
+            <code className="font-mono">SKILL.md</code>
+            {t('settings.skills.catalog.add.descriptionSuffix')}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           <div className="space-y-2">
-            <label className="typography-ui-label text-foreground">Catalog name</label>
-            <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. Team Skills" />
+            <label className="typography-ui-label text-foreground">{t('settings.skills.catalog.add.field.catalogName')}</label>
+            <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={t('settings.skills.catalog.add.field.catalogNamePlaceholder')} />
           </div>
 
           <div className="space-y-2">
-            <label className="typography-ui-label text-foreground">Repository</label>
+            <label className="typography-ui-label text-foreground">{t('settings.skills.catalog.add.field.repository')}</label>
             <Input
               value={source}
               onChange={(e) => {
@@ -253,15 +260,15 @@ export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpen
                 setScanOk(false);
                 setScanCount(null);
               }}
-              placeholder="owner/repo or git@github.com:owner/repo.git"
+              placeholder={t('settings.skills.catalog.shared.field.repositoryPlaceholder')}
             />
             <p className="typography-micro text-muted-foreground">
-              Public repos work everywhere. Private repos require SSH identity (Desktop/Web only).
+              {t('settings.skills.catalog.add.field.repositoryHint')}
             </p>
           </div>
 
           <div className="space-y-2">
-            <label className="typography-ui-label text-foreground">Optional subpath</label>
+            <label className="typography-ui-label text-foreground">{t('settings.skills.catalog.add.field.optionalSubpath')}</label>
             <Input
               value={subpath}
               onChange={(e) => {
@@ -269,19 +276,19 @@ export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpen
                 setScanOk(false);
                 setScanCount(null);
               }}
-              placeholder="e.g. skills"
+              placeholder={t('settings.skills.catalog.shared.field.subpathPlaceholder')}
             />
           </div>
 
           {identityOptions.length > 0 && !isVSCodeRuntime() ? (
             <div className="space-y-2">
               <div>
-                <span className="typography-ui-label text-[var(--status-warning)]">Authentication required</span>
-                <span className="typography-meta text-muted-foreground ml-2">Select a Git identity (SSH key)</span>
+                <span className="typography-ui-label text-[var(--status-warning)]">{t('settings.skills.catalog.shared.auth.title')}</span>
+                <span className="typography-meta text-muted-foreground ml-2">{t('settings.skills.catalog.shared.auth.description')}</span>
               </div>
               <Select value={gitIdentityId || ''} onValueChange={(v) => setGitIdentityId(v)}>
                 <SelectTrigger className="w-fit">
-                  <span>{identityOptions.find((i) => i.id === gitIdentityId)?.name || 'Choose identity'}</span>
+                  <span>{identityOptions.find((i) => i.id === gitIdentityId)?.name || t('settings.skills.catalog.shared.auth.chooseIdentity')}</span>
                 </SelectTrigger>
                 <SelectContent align="start">
                   {identityOptions.map((id) => (
@@ -292,27 +299,27 @@ export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpen
                 </SelectContent>
               </Select>
               <p className="typography-micro text-muted-foreground">
-                Configure identities in Settings - Git Identities.
+                {t('settings.skills.catalog.shared.auth.footerHint')}
               </p>
             </div>
           ) : null}
 
           {scanCount !== null ? (
             <div className="typography-meta text-muted-foreground">
-              Scan result: {scanCount} skill(s) found
+              {t('settings.skills.catalog.add.scanResult', { count: scanCount })}
             </div>
           ) : null}
 
           {isDuplicate ? (
             <div className="typography-meta text-muted-foreground">
-              This catalog is already added.
+              {t('settings.skills.catalog.add.duplicateMessage')}
             </div>
           ) : null}
         </div>
 
         <DialogFooter>
           <Button size="sm" variant="ghost" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t('settings.common.actions.cancel')}
           </Button>
           <Button
             size="sm"
@@ -322,14 +329,14 @@ export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpen
             disabled={isScanning || !source.trim()}
           >
             <RiGitRepositoryLine className="h-4 w-4" />
-            {isScanning ? 'Scanning...' : 'Scan'}
+            {isScanning ? t('settings.skills.catalog.shared.actions.scanning') : t('settings.skills.catalog.shared.actions.scan')}
           </Button>
           <Button
             size="sm"
             onClick={() => void handleAdd()}
             disabled={!scanOk || isDuplicate || !label.trim() || !source.trim()}
           >
-            Add catalog
+            {t('settings.skills.catalog.add.actions.addCatalog')}
           </Button>
         </DialogFooter>
       </DialogContent>

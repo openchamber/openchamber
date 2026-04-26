@@ -11,6 +11,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { useI18n } from '@/lib/i18n';
 
 interface InlineCommentCardProps {
   draft: InlineCommentDraft;
@@ -27,6 +28,7 @@ export function InlineCommentCard({
   className,
   maxWidth,
 }: InlineCommentCardProps) {
+  const { t } = useI18n();
   const themeContext = useOptionalThemeSystem();
   const currentTheme = themeContext?.currentTheme;
   const [isOpen, setIsOpen] = useState(false);
@@ -56,7 +58,7 @@ export function InlineCommentCard({
               {draft.fileLabel}
             </span>
             <span>•</span>
-            <span>Lines {draft.startLine}-{draft.endLine}</span>
+            <span>{t('inlineComment.range.lines', { start: draft.startLine, end: draft.endLine })}</span>
             {draft.side && <span>({draft.side})</span>}
           </div>
           
@@ -75,12 +77,12 @@ export function InlineCommentCard({
                   {isOpen ? (
                     <>
                       <RiArrowUpSLine className="size-3 mr-1" />
-                      Show less
+                      {t('inlineComment.actions.showLess')}
                     </>
                   ) : (
                     <>
                       <RiArrowDownSLine className="size-3 mr-1" />
-                      Show more
+                      {t('inlineComment.actions.showMore')}
                     </>
                   )}
                 </Button>
@@ -106,11 +108,11 @@ export function InlineCommentCard({
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={onEdit}>
               <RiEditLine className="size-4 mr-2" />
-              Edit comment
+              {t('inlineComment.actions.editComment')}
             </DropdownMenuItem>
             <DropdownMenuItem onClick={onDelete} className="text-destructive">
               <RiDeleteBinLine className="size-4 mr-2" />
-              Delete comment
+              {t('inlineComment.actions.deleteComment')}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

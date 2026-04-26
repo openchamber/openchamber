@@ -2,6 +2,7 @@ import React from 'react';
 import { RiArrowDownSLine, RiArrowRightSLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import type { SessionNode } from './types';
+import { useI18n } from '@/lib/i18n';
 
 type ActivityItem = {
   node: SessionNode;
@@ -27,6 +28,7 @@ type Props = {
 const MAX_VISIBLE_RECENT_SESSIONS = 7;
 
 export function SidebarActivitySections({ sections, renderSessionNode }: Props): React.ReactNode {
+  const { t } = useI18n();
   const [collapsed, setCollapsed] = React.useState<Set<string>>(new Set());
   const [expandedSections, setExpandedSections] = React.useState<Set<string>>(new Set());
 
@@ -86,18 +88,20 @@ export function SidebarActivitySections({ sections, renderSessionNode }: Props):
                   <button
                     type="button"
                     onClick={() => toggleSectionLimit(section.key)}
-                    className="mt-0.5 flex items-center justify-start rounded-md px-1.5 py-0.5 text-left text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline"
-                  >
-                    Show {remainingCount} more {remainingCount === 1 ? 'session' : 'sessions'}
+                  className="mt-0.5 flex items-center justify-start rounded-md px-1.5 py-0.5 text-left text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline"
+                >
+                    {remainingCount === 1
+                      ? t('sessions.sidebar.group.showMoreSingle', { count: remainingCount })
+                      : t('sessions.sidebar.group.showMorePlural', { count: remainingCount })}
                   </button>
                 ) : null}
                 {isExpanded && section.items.length > MAX_VISIBLE_RECENT_SESSIONS ? (
                   <button
                     type="button"
                     onClick={() => toggleSectionLimit(section.key)}
-                    className="mt-0.5 flex items-center justify-start rounded-md px-1.5 py-0.5 text-left text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline"
-                  >
-                    Show fewer sessions
+                  className="mt-0.5 flex items-center justify-start rounded-md px-1.5 py-0.5 text-left text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline"
+                >
+                    {t('sessions.sidebar.group.showFewer')}
                   </button>
                 ) : null}
               </div>

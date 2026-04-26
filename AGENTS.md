@@ -375,7 +375,7 @@ A single store with N properties means every subscriber re-evaluates on every st
 
 ## Validation expectations
 
-- Run `bun run type-check`, `bun run lint`, and `bun run build` before finalizing.
+- Run `bun run type-check` and `bun run lint` before finalizing.
 - For hot-path changes, verify behavior under streaming or repeated events, not just static render.
 - For sync or startup changes, verify fresh load, retry/failure, and restart behavior.
 - For session changes, verify create, stream, abort, permission, archive/delete, and revisit flows when relevant.
