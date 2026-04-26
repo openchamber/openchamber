@@ -66,7 +66,15 @@ describe('server utils runtime', () => {
 
     const runtime = createRuntime(loginShellPath);
 
-    expect(runtime.buildManagedOpenCodePath()).toBe(loginShellPath);
+    // Should prefer login shell PATH but merge in any process entries not already present.
+    expect(runtime.buildManagedOpenCodePath()).toBe([
+      path.join(home, '.opencode', 'bin'),
+      path.join(home, '.bun', 'bin'),
+      '/opt/homebrew/bin',
+      '/usr/bin',
+      '/usr/local/bin',
+      '/bin',
+    ].join(path.delimiter));
   });
 
   it('preserves user-configured process PATH order before appending shell-only entries', () => {

@@ -116,4 +116,51 @@ describe('OpenCode lifecycle', () => {
 
     await server.close();
   });
+
+  it('falls back to buildAugmentedPath when buildManagedOpenCodePath is not provided', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const child = createMockChild();
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => {
+        child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return child;
+    });
+
+    const runtime = createRuntime({
+      buildManagedOpenCodePath: undefined,
+      buildAugmentedPath: vi.fn(() => '/home/user/.cargo/bin:/usr/local/bin'),
+    });
+    const server = await runtime.startOpenCode();
+    const [, , options] = spawnMock.mock.calls[0];
+
+    expect(options.env.PATH).toBe('/home/user/.cargo/bin:/usr/local/bin');
+
+    await server.close();
+  });
+
+  it('falls back to process.env.PATH when neither build function is provided', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const originalPath = process.env.PATH;
+    process.env.PATH = '/usr/bin:/bin';
+    const child = createMockChild();
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => {
+        child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return child;
+    });
+
+    const runtime = createRuntime({
+      buildManagedOpenCodePath: undefined,
+      buildAugmentedPath: undefined,
+    });
+    const server = await runtime.startOpenCode();
+    const [, , options] = spawnMock.mock.calls[0];
+
+    expect(options.env.PATH).toBe('/usr/bin:/bin');
+    process.env.PATH = originalPath;
+
+    await server.close();
+  });
 });

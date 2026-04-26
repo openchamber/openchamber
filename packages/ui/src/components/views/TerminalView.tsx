@@ -3,7 +3,6 @@ import { RiAddLine, RiArrowDownLine, RiArrowGoBackLine, RiArrowLeftLine, RiArrow
 
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useTerminalStore } from '@/stores/useTerminalStore';
-import { useShallow } from 'zustand/react/shallow';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { type TerminalStreamEvent } from '@/lib/api/types';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
@@ -99,29 +98,16 @@ export const TerminalView: React.FC = () => {
     const hasActiveContext = currentSessionId !== null || newSessionDraft?.open === true;
 
     const effectiveDirectory = useEffectiveDirectory() ?? null;
-    const {
-      sessions: terminalSessions,
-      hasHydrated: terminalHydrated,
-      ensureDirectory,
-      createTab,
-      setActiveTab,
-      closeTab,
-      setTabSessionId,
-      setTabLifecycle,
-      setConnecting,
-      appendToBuffer,
-    } = useTerminalStore(useShallow((s) => ({
-      sessions: s.sessions,
-      hasHydrated: s.hasHydrated,
-      ensureDirectory: s.ensureDirectory,
-      createTab: s.createTab,
-      setActiveTab: s.setActiveTab,
-      closeTab: s.closeTab,
-      setTabSessionId: s.setTabSessionId,
-      setTabLifecycle: s.setTabLifecycle,
-      setConnecting: s.setConnecting,
-      appendToBuffer: s.appendToBuffer,
-    })));
+    const terminalSessions = useTerminalStore((s) => s.sessions);
+    const terminalHydrated = useTerminalStore((s) => s.hasHydrated);
+    const ensureDirectory = useTerminalStore((s) => s.ensureDirectory);
+    const createTab = useTerminalStore((s) => s.createTab);
+    const setActiveTab = useTerminalStore((s) => s.setActiveTab);
+    const closeTab = useTerminalStore((s) => s.closeTab);
+    const setTabSessionId = useTerminalStore((s) => s.setTabSessionId);
+    const setTabLifecycle = useTerminalStore((s) => s.setTabLifecycle);
+    const setConnecting = useTerminalStore((s) => s.setConnecting);
+    const appendToBuffer = useTerminalStore((s) => s.appendToBuffer);
 
     const directoryTerminalState = React.useMemo(() => {
         if (!effectiveDirectory) return undefined;

@@ -716,13 +716,15 @@ const inheritUserShellEnv = () => {
 
   const homeDir = os.homedir();
   const currentPath = process.env.PATH || '';
-  const currentPathLooksUserConfigured = currentPath.split(':').some((segment) => (
-    segment.startsWith(`${homeDir}${path.sep}`)
-    || segment === homeDir
-    || segment.startsWith('/opt/homebrew/')
-    || segment.startsWith('/opt/pkg/')
-    || segment.startsWith('/opt/pmk/')
-  ));
+  const homeWithSep = homeDir + path.sep;
+  const currentPathLooksUserConfigured = currentPath.split(':').some((segment) => {
+    if (!segment) return false;
+    if (segment === homeDir || segment.startsWith(homeWithSep)) return true;
+    if (segment.startsWith('/opt/homebrew/') || segment.startsWith('/opt/pkg/') || segment.startsWith('/opt/pmk/') || segment.startsWith('/snap/')) return true;
+    const last = segment.split('/').filter(Boolean).pop();
+    if (last && ['.cargo', '.bun', '.nvm', '.pyenv', '.rbenv', '.sdkman', '.asdf', '.volta', '.fnm', '.local', '.opencode', 'node_modules'].some((d) => last === d)) return true;
+    return false;
+  });
 
   for (const [key, value] of Object.entries(shellEnv)) {
     if (key === 'PATH') continue;
@@ -730,8 +732,19 @@ const inheritUserShellEnv = () => {
       process.env[key] = value;
     }
   }
-  if (!currentPathLooksUserConfigured && typeof shellEnv.PATH === 'string' && shellEnv.PATH.length > 0) {
-    process.env.PATH = shellEnv.PATH;
+
+  const shellPath = typeof shellEnv.PATH === 'string' ? shellEnv.PATH : '';
+  if (!currentPathLooksUserConfigured && shellPath) {
+    // Merge: prefer shell PATH, append any current entries not already present.
+    const seen = new Set();
+    const merged = [];
+    for (const segment of [...shellPath.split(':'), ...currentPath.split(':')]) {
+      if (segment && !seen.has(segment)) {
+        seen.add(segment);
+        merged.push(segment);
+      }
+    }
+    process.env.PATH = merged.join(':');
   }
 };
 

@@ -1228,6 +1228,11 @@ const TOOL_DIFF_METRICS = {
 
 const CODE_TAG_PROPS = { style: { background: 'transparent', backgroundColor: 'transparent' } };
 
+const TOOL_ERROR_ICON_STYLE: React.CSSProperties = { color: 'var(--status-error)' };
+const TOOL_NORMAL_ICON_STYLE: React.CSSProperties = { color: 'var(--tools-icon)' };
+const TOOL_ERROR_TITLE_STYLE: React.CSSProperties = { color: 'var(--status-error)' };
+const TOOL_NORMAL_TITLE_STYLE: React.CSSProperties = { color: 'var(--tools-title)' };
+
 type DiffPatchEntry = {
     id: string;
     title: string;
@@ -2427,14 +2432,8 @@ const ToolPart: React.FC<ToolPartProps> = ({
         handleMainClick(event);
     };
 
-    const iconStyle = React.useMemo(
-        () => !isTaskTool && isError ? { color: 'var(--status-error)' } : { color: 'var(--tools-icon)' },
-        [isTaskTool, isError]
-    );
-    const titleStyle = React.useMemo(
-        () => !isTaskTool && isError ? { color: 'var(--status-error)' } : { color: 'var(--tools-title)' },
-        [isTaskTool, isError]
-    );
+    const iconStyle = !isTaskTool && isError ? TOOL_ERROR_ICON_STYLE : TOOL_NORMAL_ICON_STYLE;
+    const titleStyle = !isTaskTool && isError ? TOOL_ERROR_TITLE_STYLE : TOOL_NORMAL_TITLE_STYLE;
 
     if (!shouldTreatAsFinalized && !isActive && !isTaskTool) {
         return null;

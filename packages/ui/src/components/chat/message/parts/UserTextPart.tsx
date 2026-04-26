@@ -76,7 +76,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
         return () => resizeObserver.disconnect();
     }, [textContent, isExpanded]);
 
-    const handleClick = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    const handleClick = React.useCallback(() => {
         const element = textRef.current;
         if (!element) {
             return;

@@ -298,17 +298,21 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const collectChildExports = React.useCallback(async (children: SessionNode[]): Promise<ChildSessionExport[]> => {
     const results: ChildSessionExport[] = [];
     for (const child of children) {
-      await sync.syncSession(child.session.id);
-      const childRecords = buildSessionMessageRecordsSnapshot(directoryStore.getState(), child.session.id).list;
-      const childTitle = child.session.title || 'Untitled Sub-agent';
-      const childAgent = (child.session as Session & { agent?: string }).agent;
-      const grandChildren = await collectChildExports(child.children);
-      results.push({
-        title: childTitle,
-        agent: childAgent,
-        records: childRecords,
-        children: grandChildren,
-      });
+      try {
+        await sync.syncSession(child.session.id);
+        const childRecords = buildSessionMessageRecordsSnapshot(directoryStore.getState(), child.session.id).list;
+        const childTitle = child.session.title || 'Untitled Sub-agent';
+        const childAgent = (child.session as Session & { agent?: string }).agent;
+        const grandChildren = await collectChildExports(child.children);
+        results.push({
+          title: childTitle,
+          agent: childAgent,
+          records: childRecords,
+          children: grandChildren,
+        });
+      } catch {
+        // Skip children that fail to sync — continue exporting the rest.
+      }
     }
     return results;
   }, [directoryStore, sync]);

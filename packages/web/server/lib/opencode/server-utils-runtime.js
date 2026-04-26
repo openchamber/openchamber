@@ -1,4 +1,5 @@
 import { registerOpenCodeProxy } from './proxy.js';
+import { pathLooksUserConfigured, mergePathValues } from './path-utils.js';
 
 export const createServerUtilsRuntime = (dependencies) => {
   const {
@@ -45,21 +46,6 @@ export const createServerUtilsRuntime = (dependencies) => {
     clearLastOpenCodeError();
   };
 
-  const pathLooksUserConfigured = (value) => {
-    if (typeof value !== 'string' || !value) {
-      return false;
-    }
-
-    const home = os.homedir();
-    return value.split(path.delimiter).some((segment) => (
-      segment.startsWith(home + path.sep)
-      || segment === home
-      || segment.startsWith('/opt/homebrew/')
-      || segment.startsWith('/opt/pkg/')
-      || segment.startsWith('/opt/pmk/')
-    ));
-  };
-
   const waitForOpenCodePort = async (timeoutMs = 15000) => {
     if (getOpenCodePort() !== null) {
       return getOpenCodePort();
@@ -77,40 +63,26 @@ export const createServerUtilsRuntime = (dependencies) => {
   };
 
   const buildAugmentedPath = () => {
-    const home = os.homedir();
     const currentPath = process.env.PATH || '';
     const loginShellPath = getLoginShellPath();
-    const currentPathLooksUserConfigured = pathLooksUserConfigured(currentPath);
+    const home = os.homedir();
+    const currentPathLooksUserConfigured = pathLooksUserConfigured(currentPath, home, path.delimiter);
     const primaryPath = currentPathLooksUserConfigured ? currentPath : loginShellPath;
     const fallbackPath = currentPathLooksUserConfigured ? loginShellPath : currentPath;
-    const seen = new Set();
-    const augmented = [];
 
-    const addSegments = (value) => {
-      if (typeof value !== 'string' || !value) {
-        return;
-      }
-      for (const segment of value.split(path.delimiter)) {
-        if (segment && !seen.has(segment)) {
-          seen.add(segment);
-          augmented.push(segment);
-        }
-      }
-    };
-
-    addSegments(primaryPath);
-    addSegments(fallbackPath);
-
-    return augmented.join(path.delimiter);
+    return mergePathValues(primaryPath, fallbackPath, path.delimiter);
   };
 
   const buildManagedOpenCodePath = () => {
     const currentPath = process.env.PATH || '';
-    if (pathLooksUserConfigured(currentPath)) {
+    const loginShellPath = getLoginShellPath();
+    const home = os.homedir();
+
+    if (pathLooksUserConfigured(currentPath, home, path.delimiter)) {
       return currentPath;
     }
 
-    return getLoginShellPath() || currentPath;
+    return mergePathValues(loginShellPath || '', currentPath, path.delimiter);
   };
 
   const parseSseDataPayload = (block) => {

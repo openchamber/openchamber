@@ -366,16 +366,21 @@ function App({ apis }: AppProps) {
 
     let active = true;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    let retryCount = 0;
+    const MAX_RETRIES = 10;
+    const BASE_DELAY_MS = 1000;
 
     const retryInitialization = async () => {
       if (!active) return;
+      if (retryCount >= MAX_RETRIES) return;
       const state = useConfigStore.getState();
       if (state.isInitialized) return;
       if (initializationInFlightRef.current) {
-        retryTimer = setTimeout(retryInitialization, 1000);
+        retryTimer = setTimeout(retryInitialization, BASE_DELAY_MS);
         return;
       }
 
+      retryCount += 1;
       initializationInFlightRef.current = true;
       try {
         await state.initializeApp();
@@ -385,10 +390,11 @@ function App({ apis }: AppProps) {
 
       const next = useConfigStore.getState();
       if (!active || next.isInitialized) return;
-      retryTimer = setTimeout(retryInitialization, 1000);
+      const delay = Math.min(BASE_DELAY_MS * Math.pow(2, retryCount - 1), 16000);
+      retryTimer = setTimeout(retryInitialization, delay);
     };
 
-    retryTimer = setTimeout(retryInitialization, 1000);
+    retryTimer = setTimeout(retryInitialization, BASE_DELAY_MS);
 
     return () => {
       active = false;

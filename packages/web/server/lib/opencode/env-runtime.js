@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { pathLooksUserConfigured, mergePathValues } from './path-utils.js';
 
 export const createOpenCodeEnvRuntime = (deps) => {
   const {
@@ -162,21 +163,6 @@ export const createOpenCodeEnvRuntime = (deps) => {
     return null;
   };
 
-  const pathLooksUserConfigured = (value) => {
-    if (typeof value !== 'string' || !value) {
-      return false;
-    }
-
-    const home = os.homedir();
-    return value.split(path.delimiter).some((segment) => (
-      segment.startsWith(home + path.sep)
-      || segment === home
-      || segment.startsWith('/opt/homebrew/')
-      || segment.startsWith('/opt/pkg/')
-      || segment.startsWith('/opt/pmk/')
-    ));
-  };
-
   const applyLoginShellEnvSnapshot = () => {
     const snapshot = getLoginShellEnvSnapshot();
     if (!snapshot) {
@@ -197,8 +183,9 @@ export const createOpenCodeEnvRuntime = (deps) => {
 
     const currentPath = process.env.PATH || '';
     const shellPath = snapshot.PATH || '';
-    if (!pathLooksUserConfigured(currentPath) && shellPath) {
-      process.env.PATH = shellPath;
+    const home = os.homedir();
+    if (!pathLooksUserConfigured(currentPath, home, path.delimiter) && shellPath) {
+      process.env.PATH = mergePathValues(shellPath, currentPath, path.delimiter);
     }
   };
 
