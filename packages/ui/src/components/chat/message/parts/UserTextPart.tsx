@@ -154,7 +154,8 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
             )}
             <div
                 className={cn(
-                    "break-words font-sans typography-markdown pb-3",
+                    "break-words font-sans typography-markdown",
+                    isExpanded && "pb-3",
                     normalizedRenderingMode === 'plain' && 'whitespace-pre-wrap',
                     !isExpanded && "line-clamp-2",
                     isTruncated && !isExpanded && "cursor-pointer"
