@@ -1036,22 +1036,6 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
             e.preventDefault();
           }}
         >
-          {hasChildren && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                togglePinnedExpanded(item.path);
-              }}
-              className="p-0.5 hover:bg-interactive-hover rounded"
-            >
-              {isExpanded ? (
-                <RiArrowDownSLine className="h-3 w-3" />
-              ) : (
-                <RiArrowRightSLine className="h-3 w-3" />
-              )}
-            </button>
-          )}
-          {!hasChildren && <div className="w-4" />}
           {rowContent}
         </DropdownMenuItem>
         {isExpanded && children && (
