@@ -36,7 +36,6 @@ import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo }
 import { SkillAutocomplete, type SkillAutocompleteHandle } from './SkillAutocomplete';
 import { cn, formatDirectoryName, isMacOS } from '@/lib/utils';
 import { ModelControls } from './ModelControls';
-import { UnifiedControlsDrawer } from './UnifiedControlsDrawer';
 import { parseAgentMentions } from '@/lib/messages/agentMentions';
 import { StatusRow } from './StatusRow';
 import { PendingChangesBar } from './PendingChangesBar';
@@ -228,7 +227,6 @@ const getProjectIconColor = (projectColor?: string | null): string | undefined =
 };
 
 const MemoModelControls = React.memo(ModelControls);
-const MemoUnifiedControlsDrawer = React.memo(UnifiedControlsDrawer);
 const MemoBrowserVoiceButton = React.memo(BrowserVoiceButton);
 const MemoMobileAgentButton = React.memo(MobileAgentButton);
 const MemoMobileModelButton = React.memo(MobileModelButton);
@@ -721,7 +719,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const [showSkillAutocomplete, setShowSkillAutocomplete] = React.useState(false);
     const [skillQuery, setSkillQuery] = React.useState('');
     const [textareaSize, setTextareaSize] = React.useState<{ height: number; maxHeight: number } | null>(null);
-    const [mobileControlsOpen, setMobileControlsOpen] = React.useState(false);
     const [mobileControlsPanel, setMobileControlsPanel] = React.useState<MobileControlsPanel>(null);
     // Message history navigation state (up/down arrow to recall previous messages)
     const [historyIndex, setHistoryIndex] = React.useState(-1); // -1 = not browsing, 0+ = index from most recent
@@ -1169,47 +1166,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     // Session activity for queue availability and controls
     const { phase: sessionPhase } = useCurrentSessionActivity();
 
-    const handleOpenMobileControls = React.useCallback(() => {
-        if (!isMobile) {
-            return;
-        }
-
-        if (mobileControlsOpen) {
-            setMobileControlsOpen(false);
-            return;
-        }
-
-        setMobileControlsPanel(null);
-
-        if (document.activeElement instanceof HTMLElement) {
-            document.activeElement.blur();
-        }
-
-        setMobileControlsOpen(true);
-    }, [isMobile, mobileControlsOpen]);
-
-    const handleCloseMobileControls = React.useCallback(() => {
-        setMobileControlsOpen(false);
-    }, []);
-
     const handleOpenMobilePanel = React.useCallback((panel: MobileControlsPanel) => {
         if (!isMobile) {
             return;
         }
-        setMobileControlsOpen(false);
         textareaRef.current?.blur();
         requestAnimationFrame(() => {
             setMobileControlsPanel(panel);
-        });
-    }, [isMobile]);
-
-    const handleReturnToUnifiedControls = React.useCallback(() => {
-        if (!isMobile) {
-            return;
-        }
-        setMobileControlsPanel(null);
-        requestAnimationFrame(() => {
-            setMobileControlsOpen(true);
         });
     }, [isMobile]);
 
@@ -2495,7 +2458,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     React.useEffect(() => {
         if (!isMobile) {
-            setMobileControlsOpen(false);
             setMobileControlsPanel(null);
         }
     }, [isMobile]);
@@ -3730,7 +3692,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                     </div>
                                     <div className="flex items-center min-w-0 gap-x-1 justify-end">
                                         <div className="flex items-center gap-x-1 min-w-0 max-w-[60vw] flex-shrink">
-                                            <MemoMobileModelButton onOpenModel={handleOpenMobileControls} className="min-w-0 flex-shrink" />
+                                            <MemoMobileModelButton onOpenModel={() => handleOpenMobilePanel('model')} className="min-w-0 flex-shrink" />
                                             <MemoMobileAgentButton
                                                 onOpenAgentPanel={handleOpenAgentPanel}
                                                 onCycleAgent={handleCycleAgent}
@@ -3760,14 +3722,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                     className="hidden"
                                     mobilePanel={mobileControlsPanel}
                                     onMobilePanelChange={setMobileControlsPanel}
-                                    onMobilePanelSelection={handleReturnToUnifiedControls}
-                                    onAgentPanelSelection={() => setMobileControlsPanel(null)}
-                                />
-                                <MemoUnifiedControlsDrawer
-                                    open={mobileControlsOpen}
-                                    onClose={handleCloseMobileControls}
-                                    onOpenModel={() => handleOpenMobilePanel('model')}
-                                    onOpenEffort={() => handleOpenMobilePanel('variant')}
                                 />
                             </>
                         ) : (

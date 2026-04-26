@@ -65,7 +65,7 @@ import { useSync } from '@/sync/use-sync';
 import { useUIStore } from '@/stores/useUIStore';
 import { useModelLists } from '@/hooks/useModelLists';
 import { useIsTextTruncated } from '@/hooks/useIsTextTruncated';
-import { getCycledPrimaryAgentName, type MobileControlsPanel } from './mobileControlsUtils';
+import { formatEffortLabel, getCycledPrimaryAgentName, type MobileControlsPanel } from './mobileControlsUtils';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type IconComponent = ComponentType<any>;
@@ -80,8 +80,10 @@ type SortableFavoriteHandleProps = {
     setActivatorNodeRef: ReturnType<typeof useSortable>['setActivatorNodeRef'];
     isDragging: boolean;
 };
+type MobileVariantTarget = { providerId: string; modelId: string };
 
 const buildModelRefKey = (providerID: string, modelID: string) => `${providerID}:${modelID}`;
+const MAX_INLINE_MOBILE_VARIANT_OPTIONS = 6;
 
 const SortableFavoriteModelRow: React.FC<{
     id: string;
@@ -330,16 +332,12 @@ interface ModelControlsProps {
     className?: string;
     mobilePanel?: MobileControlsPanel;
     onMobilePanelChange?: (panel: MobileControlsPanel) => void;
-    onMobilePanelSelection?: () => void;
-    onAgentPanelSelection?: () => void;
 }
 
 export const ModelControls: React.FC<ModelControlsProps> = ({
     className,
     mobilePanel,
     onMobilePanelChange,
-    onMobilePanelSelection,
-    onAgentPanelSelection,
 }) => {
     const providers = useConfigStore((state) => state.providers);
     const currentProviderId = useConfigStore((state) => state.currentProviderId);
@@ -433,6 +431,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const setActiveMobilePanel = usingExternalMobilePanel ? onMobilePanelChange : setLocalMobilePanel;
     const [mobileTooltipOpen, setMobileTooltipOpen] = React.useState<'model' | 'agent' | null>(null);
     const [mobileModelQuery, setMobileModelQuery] = React.useState('');
+    const [expandedMobileModelKey, setExpandedMobileModelKey] = React.useState<string | null>(null);
+    const [mobileVariantTarget, setMobileVariantTarget] = React.useState<MobileVariantTarget | null>(null);
     const manualVariantSelectionRef = React.useRef(false);
     const closeMobilePanel = React.useCallback(() => setActiveMobilePanel(null), [setActiveMobilePanel]);
     const closeMobileTooltip = React.useCallback(() => setMobileTooltipOpen(null), []);
@@ -476,10 +476,23 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     }, [activeMobilePanel, currentProviderId]);
 
     React.useEffect(() => {
+        if (activeMobilePanel === null) {
+            setExpandedMobileModelKey(null);
+        }
+        if (activeMobilePanel !== 'variant') {
+            setMobileVariantTarget(null);
+        }
+    }, [activeMobilePanel]);
+
+    React.useEffect(() => {
         if (activeMobilePanel !== 'model') {
             setMobileModelQuery('');
         }
     }, [activeMobilePanel]);
+
+    React.useEffect(() => {
+        setExpandedMobileModelKey(null);
+    }, [mobileModelQuery]);
 
     // Handle model selector close behavior (separate from agent selector)
     const prevModelSelectorOpenRef = React.useRef(isModelSelectorOpen);
@@ -590,6 +603,39 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             })
             .filter((provider) => provider.models.length > 0);
     }, [providers, hiddenModels]);
+
+    const normalizeModelSearchValue = React.useCallback((value: string) => {
+        const lower = value.toLowerCase().trim();
+        const compact = lower.replace(/[^a-z0-9]/g, '');
+        const tokens = lower.split(/[^a-z0-9]+/).filter(Boolean);
+        return { lower, compact, tokens };
+    }, []);
+
+    const matchesModelSearch = React.useCallback((candidate: string, query: string) => {
+        const normalizedQuery = normalizeModelSearchValue(query);
+        if (!normalizedQuery.lower) {
+            return true;
+        }
+
+        const normalizedCandidate = normalizeModelSearchValue(candidate);
+        if (normalizedCandidate.lower.includes(normalizedQuery.lower)) {
+            return true;
+        }
+
+        if (normalizedQuery.compact.length >= 2 && normalizedCandidate.compact.includes(normalizedQuery.compact)) {
+            return true;
+        }
+
+        if (normalizedQuery.tokens.length === 0) {
+            return false;
+        }
+
+        return normalizedQuery.tokens.every((queryToken) =>
+            normalizedCandidate.tokens.some((candidateToken) =>
+                candidateToken.startsWith(queryToken) || candidateToken.includes(queryToken)
+            )
+        );
+    }, [normalizeModelSearchValue]);
 
     const getDesktopModelPickerSelectedIndex = React.useCallback((query: string) => {
         const normalizedQuery = query.trim();
@@ -768,6 +814,86 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         },
         [providers, currentProviderId, currentModelId, setProvider, setModel, currentSessionId, saveAgentModelForSession, saveSessionModelSelection],
     );
+
+    const getModelVariantOptions = React.useCallback((providerId: string, modelId: string) => {
+        const provider = providers.find((entry) => entry.id === providerId);
+        const model = provider?.models.find((entry) => entry.id === modelId) as { variants?: Record<string, unknown> } | undefined;
+        const variants = model?.variants;
+        return variants ? Object.keys(variants) : [];
+    }, [providers]);
+
+    const resolveModelVariantSelection = React.useCallback((providerId: string, modelId: string) => {
+        const variantOptions = getModelVariantOptions(providerId, modelId);
+        if (variantOptions.length === 0) {
+            return undefined;
+        }
+
+        const effectiveAgentName = uiAgentName || currentAgentName;
+        if (currentSessionId && effectiveAgentName) {
+            const savedVariant = getAgentModelVariantForSession(currentSessionId, effectiveAgentName, providerId, modelId);
+            if (savedVariant && variantOptions.includes(savedVariant)) {
+                return savedVariant;
+            }
+        }
+
+        if (currentProviderId === providerId && currentModelId === modelId && currentVariant && variantOptions.includes(currentVariant)) {
+            return currentVariant;
+        }
+
+        if (!currentSessionId && settingsDefaultVariant && variantOptions.includes(settingsDefaultVariant)) {
+            return settingsDefaultVariant;
+        }
+
+        return undefined;
+    }, [
+        currentAgentName,
+        currentModelId,
+        currentProviderId,
+        currentSessionId,
+        currentVariant,
+        getAgentModelVariantForSession,
+        getModelVariantOptions,
+        settingsDefaultVariant,
+        uiAgentName,
+    ]);
+
+    const commitVariantSelectionForModel = React.useCallback((providerId: string, modelId: string, variant: string | undefined) => {
+        const variantOptions = getModelVariantOptions(providerId, modelId);
+        if (variantOptions.length === 0) {
+            manualVariantSelectionRef.current = false;
+            setCurrentVariant(undefined);
+            return;
+        }
+
+        manualVariantSelectionRef.current = true;
+        setCurrentVariant(variant);
+        addRecentEffort(providerId, modelId, variant);
+
+        const effectiveAgentName = uiAgentName || currentAgentName;
+        if (currentSessionId && effectiveAgentName) {
+            saveAgentModelVariantForSession(currentSessionId, effectiveAgentName, providerId, modelId, variant);
+        }
+    }, [
+        addRecentEffort,
+        currentAgentName,
+        currentSessionId,
+        getModelVariantOptions,
+        saveAgentModelVariantForSession,
+        setCurrentVariant,
+        uiAgentName,
+    ]);
+
+    const applyModelSelectionWithVariant = React.useCallback((providerId: string, modelId: string, variant: string | undefined) => {
+        const effectiveAgentName = uiAgentName || currentAgentName || undefined;
+        const result = tryApplyModelSelection(providerId, modelId, effectiveAgentName);
+        if (result !== 'applied') {
+            return result;
+        }
+
+        addRecentModel(providerId, modelId);
+        commitVariantSelectionForModel(providerId, modelId, variant);
+        return 'applied';
+    }, [addRecentModel, commitVariantSelectionForModel, currentAgentName, tryApplyModelSelection, uiAgentName]);
 
     React.useEffect(() => {
         if (!currentSessionId) {
@@ -1077,31 +1203,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     }, [currentProviderId, currentModelId]);
 
     const handleVariantSelect = React.useCallback((variant: string | undefined) => {
-        manualVariantSelectionRef.current = true;
-        setCurrentVariant(variant);
-
         if (currentProviderId && currentModelId) {
-            addRecentEffort(currentProviderId, currentModelId, variant);
+            commitVariantSelectionForModel(currentProviderId, currentModelId, variant);
         }
-
-        if (currentSessionId && currentAgentName && currentProviderId && currentModelId) {
-            saveAgentModelVariantForSession(
-                currentSessionId,
-                currentAgentName,
-                currentProviderId,
-                currentModelId,
-                variant,
-            );
-        }
-    }, [
-        addRecentEffort,
-        currentAgentName,
-        currentModelId,
-        currentProviderId,
-        currentSessionId,
-        saveAgentModelVariantForSession,
-        setCurrentVariant,
-    ]);
+    }, [commitVariantSelectionForModel, currentModelId, currentProviderId]);
 
     const handleAgentChange = React.useCallback((agentName: string, options?: { closeModelSelector?: boolean }) => {
         try {
@@ -1116,12 +1221,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             }
             if (isCompact) {
                 closeMobilePanel();
-                const callback = onAgentPanelSelection || onMobilePanelSelection;
-                if (callback) {
-                    requestAnimationFrame(() => {
-                        callback();
-                    });
-                }
             }
         } catch (error) {
             console.error('[ModelControls] Handle agent change error:', error);
@@ -1131,8 +1230,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         closeMobilePanel,
         currentSessionId,
         isCompact,
-        onAgentPanelSelection,
-        onMobilePanelSelection,
         saveSessionAgentSelection,
         setAgent,
         setAgentMenuOpen,
@@ -1148,7 +1245,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
     const handleProviderAndModelChange = (providerId: string, modelId: string) => {
         try {
-            const result = tryApplyModelSelection(providerId, modelId, currentAgentName || undefined);
+            const result = tryApplyModelSelection(providerId, modelId, uiAgentName || currentAgentName || undefined);
             if (result !== 'applied') {
                 if (result === 'provider-missing') {
                     console.error('[ModelControls] Provider not available for selection:', providerId);
@@ -1162,19 +1259,12 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             setAgentMenuOpen(false);
             if (isCompact) {
                 closeMobilePanel();
-                if (onMobilePanelSelection) {
-                    requestAnimationFrame(() => {
-                        onMobilePanelSelection();
-                    });
-                }
             }
-            if (!isCompact || !onMobilePanelSelection) {
-                // Restore focus to chat input after model selection
-                requestAnimationFrame(() => {
-                    const textarea = document.querySelector<HTMLTextAreaElement>('textarea[data-chat-input="true"]');
-                    textarea?.focus();
-                });
-            }
+            // Restore focus to chat input after model selection.
+            requestAnimationFrame(() => {
+                const textarea = document.querySelector<HTMLTextAreaElement>('textarea[data-chat-input="true"]');
+                textarea?.focus();
+            });
         } catch (error) {
             console.error('[ModelControls] Handle model change error:', error);
         }
@@ -1479,43 +1569,28 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         );
     };
 
-    const normalizeModelSearchValue = React.useCallback((value: string) => {
-        const lower = value.toLowerCase().trim();
-        const compact = lower.replace(/[^a-z0-9]/g, '');
-        const tokens = lower.split(/[^a-z0-9]+/).filter(Boolean);
-        return { lower, compact, tokens };
-    }, []);
-
-    const matchesModelSearch = React.useCallback((candidate: string, query: string) => {
-        const normalizedQuery = normalizeModelSearchValue(query);
-        if (!normalizedQuery.lower) {
-            return true;
-        }
-
-        const normalizedCandidate = normalizeModelSearchValue(candidate);
-        if (normalizedCandidate.lower.includes(normalizedQuery.lower)) {
-            return true;
-        }
-
-        if (normalizedQuery.compact.length >= 2 && normalizedCandidate.compact.includes(normalizedQuery.compact)) {
-            return true;
-        }
-
-        if (normalizedQuery.tokens.length === 0) {
-            return false;
-        }
-
-        return normalizedQuery.tokens.every((queryToken) =>
-            normalizedCandidate.tokens.some((candidateToken) =>
-                candidateToken.startsWith(queryToken) || candidateToken.includes(queryToken)
-            )
-        );
-    }, [normalizeModelSearchValue]);
-
     const renderMobileModelPanel = () => {
         if (!isCompact) return null;
 
         const normalizedQuery = mobileModelQuery.trim();
+        const filteredFavorites = favoriteModelsList.filter(({ model, providerID }) => {
+            const provider = providers.find((entry) => entry.id === providerID);
+            const providerName = provider?.name || providerID;
+            const modelName = getModelDisplayName(model);
+            return normalizedQuery.length === 0
+                || matchesModelSearch(modelName, normalizedQuery)
+                || matchesModelSearch(providerName, normalizedQuery);
+        });
+
+        const filteredRecents = recentModelsList.filter(({ model, providerID }) => {
+            const provider = providers.find((entry) => entry.id === providerID);
+            const providerName = provider?.name || providerID;
+            const modelName = getModelDisplayName(model);
+            return normalizedQuery.length === 0
+                || matchesModelSearch(modelName, normalizedQuery)
+                || matchesModelSearch(providerName, normalizedQuery);
+        });
+
         const filteredProviders = visibleProviders
             .map((provider) => {
                 const providerModels = Array.isArray(provider.models) ? provider.models : [];
@@ -1529,9 +1604,198 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         const id = typeof model.id === 'string' ? model.id : '';
                         return matchesModelSearch(name, normalizedQuery) || matchesModelSearch(id, normalizedQuery);
                     });
-                return { provider, providerModels: matchingModels, matchesProvider };
+                return {
+                    provider,
+                    providerModels: matchesProvider && normalizedQuery.length > 0 ? providerModels : matchingModels,
+                    matchesProvider,
+                };
             })
             .filter(({ matchesProvider, providerModels }) => matchesProvider || providerModels.length > 0);
+
+        const focusMobileComposer = () => {
+            requestAnimationFrame(() => {
+                const textarea = document.querySelector<HTMLTextAreaElement>('textarea[data-chat-input="true"]');
+                textarea?.focus();
+            });
+        };
+
+        const handleMobileModelApply = (providerId: string, modelId: string, variant: string | undefined) => {
+            const result = applyModelSelectionWithVariant(providerId, modelId, variant);
+            if (result !== 'applied') {
+                if (result === 'provider-missing') {
+                    console.error('[ModelControls] Provider not available for selection:', providerId);
+                } else if (result === 'model-missing') {
+                    console.error('[ModelControls] Model not available for selection:', { providerId, modelId });
+                }
+                return;
+            }
+
+            setExpandedMobileModelKey(null);
+            closeMobilePanel();
+            focusMobileComposer();
+        };
+
+        const openMobileVariantOverflow = (providerId: string, modelId: string) => {
+            setMobileVariantTarget({ providerId, modelId });
+            setActiveMobilePanel('variant');
+        };
+
+        const renderMobileModelRow = ({
+            model,
+            providerId,
+            modelId,
+            showProviderLogo,
+            showCapabilities,
+        }: {
+            model: ProviderModel;
+            providerId: string;
+            modelId: string;
+            showProviderLogo: boolean;
+            showCapabilities: boolean;
+        }) => {
+            const rowKey = buildModelRefKey(providerId, modelId);
+            const isSelected = providerId === currentProviderId && modelId === currentModelId;
+            const metadata = getModelMetadata(providerId, modelId);
+            const variantOptions = getModelVariantOptions(providerId, modelId);
+            const hasVariants = variantOptions.length > 0;
+            const resolvedVariant = resolveModelVariantSelection(providerId, modelId);
+            const variantLabel = hasVariants ? formatEffortLabel(resolvedVariant) : null;
+            const isExpanded = expandedMobileModelKey === rowKey;
+            const inlineVariantOptions = [undefined, ...variantOptions].slice(0, MAX_INLINE_MOBILE_VARIANT_OPTIONS);
+            const hasVariantOverflow = variantOptions.length + 1 > MAX_INLINE_MOBILE_VARIANT_OPTIONS;
+            const capabilityIcons = showCapabilities ? getCapabilityIcons(metadata).slice(0, 3) : [];
+            const inputIcons = showCapabilities ? getModalityIcons(metadata, 'input') : [];
+
+            return (
+                <div
+                    key={`mobile-model-${providerId}-${modelId}`}
+                    className={cn(
+                        'border-b border-border/30 last:border-b-0',
+                        isSelected && 'bg-interactive-selection/15 text-interactive-selection-foreground'
+                    )}
+                >
+                    <div className="flex items-start gap-2 px-2 py-1.5">
+                        <button
+                            type="button"
+                            onClick={() => handleMobileModelApply(providerId, modelId, resolvedVariant)}
+                            className={cn(
+                                'flex flex-1 min-w-0 items-start gap-2 text-left',
+                                'focus:outline-none focus-visible:ring-1 focus-visible:ring-primary rounded-lg'
+                            )}
+                        >
+                            {showProviderLogo ? (
+                                <ProviderLogo providerId={providerId} className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+                            ) : null}
+                            <div className="flex min-w-0 flex-1 flex-col gap-1">
+                                <div className="flex min-w-0 items-start gap-2">
+                                    <span className="typography-meta font-medium text-foreground truncate">
+                                        {getModelDisplayName(model)}
+                                    </span>
+                                    {isSelected ? <RiCheckLine className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" /> : null}
+                                </div>
+                                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                    {(metadata?.limit?.context || metadata?.limit?.output) ? (
+                                        <div className="typography-micro text-muted-foreground whitespace-nowrap">
+                                            {metadata?.limit?.context ? `${formatTokens(metadata?.limit?.context)} ctx` : ''}
+                                            {metadata?.limit?.context && metadata?.limit?.output ? ' • ' : ''}
+                                            {metadata?.limit?.output ? `${formatTokens(metadata?.limit?.output)} out` : ''}
+                                        </div>
+                                    ) : null}
+                                    {variantLabel ? (
+                                        <span className="typography-micro text-muted-foreground whitespace-nowrap">
+                                            Thinking: {variantLabel}
+                                        </span>
+                                    ) : null}
+                                    {capabilityIcons.length > 0 || inputIcons.length > 0 ? (
+                                        <div className="flex items-center gap-1">
+                                            {[...capabilityIcons, ...inputIcons].map(({ key, icon: IconComponent, label }) => (
+                                                <span
+                                                    key={`meta-${providerId}-${modelId}-${key}`}
+                                                    className="flex h-4 w-4 items-center justify-center text-muted-foreground"
+                                                    title={label}
+                                                    aria-label={label}
+                                                >
+                                                    <IconComponent className="h-3 w-3" />
+                                                </span>
+                                            ))}
+                                        </div>
+                                    ) : null}
+                                </div>
+                            </div>
+                        </button>
+                        {hasVariants ? (
+                            <button
+                                type="button"
+                                onClick={() => setExpandedMobileModelKey((prev) => prev === rowKey ? null : rowKey)}
+                                className="flex items-center gap-1 rounded-lg border border-border/40 px-2 py-1 typography-micro font-medium text-muted-foreground hover:bg-interactive-hover/50"
+                                aria-expanded={isExpanded}
+                                aria-label={isExpanded ? 'Hide thinking modes' : 'Show thinking modes'}
+                            >
+                                <span className="whitespace-nowrap">{variantLabel}</span>
+                                {isExpanded ? <RiArrowDownSLine className="h-3.5 w-3.5" /> : <RiArrowRightSLine className="h-3.5 w-3.5" />}
+                            </button>
+                        ) : null}
+                        <button
+                            type="button"
+                            onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                toggleFavoriteModel(providerId, modelId);
+                            }}
+                            className={cn(
+                                'model-favorite-button flex h-5 w-5 items-center justify-center hover:text-primary/80 flex-shrink-0',
+                                isFavoriteModel(providerId, modelId) ? 'text-primary' : 'text-muted-foreground'
+                            )}
+                            aria-label={isFavoriteModel(providerId, modelId) ? 'Unfavorite' : 'Favorite'}
+                            title={isFavoriteModel(providerId, modelId) ? 'Remove from favorites' : 'Add to favorites'}
+                        >
+                            {isFavoriteModel(providerId, modelId) ? (
+                                <RiStarFill className="h-4 w-4" />
+                            ) : (
+                                <RiStarLine className="h-4 w-4" />
+                            )}
+                        </button>
+                    </div>
+                    {isExpanded && hasVariants ? (
+                        <div className="border-t border-border/30 px-2 py-2">
+                            <div className="flex flex-wrap gap-2">
+                                {inlineVariantOptions.map((variantOption) => {
+                                    const isVariantSelected = variantOption === resolvedVariant || (!variantOption && !resolvedVariant);
+                                    return (
+                                        <button
+                                            key={`${rowKey}-variant-${variantOption ?? 'default'}`}
+                                            type="button"
+                                            onClick={() => handleMobileModelApply(providerId, modelId, variantOption)}
+                                            className={cn(
+                                                'inline-flex items-center rounded-full border px-2.5 py-1 typography-meta font-medium',
+                                                isVariantSelected
+                                                    ? 'border-primary/30 bg-primary/10 text-foreground'
+                                                    : 'border-border/40 text-muted-foreground hover:bg-interactive-hover/50'
+                                            )}
+                                            aria-pressed={isVariantSelected}
+                                        >
+                                            {formatEffortLabel(variantOption)}
+                                        </button>
+                                    );
+                                })}
+                                {hasVariantOverflow ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => openMobileVariantOverflow(providerId, modelId)}
+                                        className="inline-flex items-center rounded-full border border-border/40 px-2.5 py-1 typography-meta font-medium text-muted-foreground hover:bg-interactive-hover/50"
+                                        aria-label="More thinking modes"
+                                    >
+                                        More
+                                    </button>
+                                ) : null}
+                            </div>
+                        </div>
+                    ) : null}
+                </div>
+            );
+        };
+
+        const hasResults = filteredFavorites.length > 0 || filteredRecents.length > 0 || filteredProviders.length > 0;
 
         return (
             <MobileOverlayPanel
@@ -1562,106 +1826,52 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         </div>
                     </div>
 
-                    {filteredProviders.length === 0 && (
+                    {!hasResults && (
                         <div className="px-3 py-8 text-center typography-meta text-muted-foreground">
                             No providers or models match your search.
                         </div>
                     )}
 
                     {/* Favorites Section for Mobile */}
-                    {!mobileModelQuery && favoriteModelsList.length > 0 && (
+                    {filteredFavorites.length > 0 && (
                         <div className="rounded-xl border border-border/40 bg-[var(--surface-elevated)] overflow-hidden">
                             <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                                 <RiStarFill className="h-3 w-3 inline-block mr-1.5 text-primary" />
                                 Favorites
                             </div>
                             <div className="flex flex-col border-t border-border/30">
-                                {favoriteModelsList.map(({ model, providerID, modelID }) => {
-                                    const isSelected = providerID === currentProviderId && modelID === currentModelId;
-                                    const metadata = getModelMetadata(providerID, modelID);
-
-                                    return (
-                                        <button
-                                            key={`fav-mobile-${providerID}-${modelID}`}
-                                            type="button"
-                                            onClick={() => handleProviderAndModelChange(providerID, modelID)}
-                                            className={cn(
-                                                'flex w-full items-start gap-2 border-b border-border/30 px-2 py-1.5 text-left last:border-b-0',
-                                                'focus:outline-none focus-visible:ring-1 focus-visible:ring-primary',
-                                                'first:rounded-t-xl last:rounded-b-xl transition-colors',
-                                                 isSelected ? 'bg-interactive-selection/15 text-interactive-selection-foreground' : 'hover:bg-interactive-hover'
-                                            )}
-                                        >
-                                            <div className="flex items-center gap-2 min-w-0">
-                                                <ProviderLogo providerId={providerID} className="h-3.5 w-3.5 flex-shrink-0" />
-                                                <span className="typography-meta font-medium text-foreground truncate">
-                                                    {getModelDisplayName(model)}
-                                                </span>
-                                            </div>
-                                            <div className="ml-auto flex items-center gap-2">
-                                                {(metadata?.limit?.context || metadata?.limit?.output) && (
-                                                    <div className="typography-micro text-muted-foreground whitespace-nowrap">
-                                                        {metadata?.limit?.context ? `${formatTokens(metadata?.limit?.context)} ctx` : ''}
-                                                        {metadata?.limit?.context && metadata?.limit?.output ? ' • ' : ''}
-                                                        {metadata?.limit?.output ? `${formatTokens(metadata?.limit?.output)} out` : ''}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </button>
-                                    );
-                                })}
+                                {filteredFavorites.map(({ model, providerID, modelID }) => renderMobileModelRow({
+                                    model,
+                                    providerId: providerID,
+                                    modelId: modelID,
+                                    showProviderLogo: true,
+                                    showCapabilities: false,
+                                }))}
                             </div>
                         </div>
                     )}
 
                     {/* Recent Section for Mobile */}
-                    {!mobileModelQuery && recentModelsList.length > 0 && (
+                    {filteredRecents.length > 0 && (
                         <div className="rounded-xl border border-border/40 bg-[var(--surface-elevated)] overflow-hidden">
                             <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                                 <RiTimeLine className="h-3 w-3 inline-block mr-1.5" />
                                 Recent
                             </div>
                             <div className="flex flex-col border-t border-border/30">
-                                {recentModelsList.map(({ model, providerID, modelID }) => {
-                                    const isSelected = providerID === currentProviderId && modelID === currentModelId;
-                                    const metadata = getModelMetadata(providerID, modelID);
-
-                                    return (
-                                        <button
-                                            key={`recent-mobile-${providerID}-${modelID}`}
-                                            type="button"
-                                            onClick={() => handleProviderAndModelChange(providerID, modelID)}
-                                            className={cn(
-                                                'flex w-full items-start gap-2 border-b border-border/30 px-2 py-1.5 text-left last:border-b-0',
-                                                'focus:outline-none focus-visible:ring-1 focus-visible:ring-primary',
-                                                'first:rounded-t-xl last:rounded-b-xl transition-colors',
-                                                 isSelected ? 'bg-interactive-selection/15 text-interactive-selection-foreground' : 'hover:bg-interactive-hover'
-                                            )}
-                                        >
-                                            <div className="flex items-center gap-2 min-w-0">
-                                                <ProviderLogo providerId={providerID} className="h-3.5 w-3.5 flex-shrink-0" />
-                                                <span className="typography-meta font-medium text-foreground truncate">
-                                                    {getModelDisplayName(model)}
-                                                </span>
-                                            </div>
-                                            <div className="ml-auto flex items-center gap-2">
-                                                {(metadata?.limit?.context || metadata?.limit?.output) && (
-                                                    <div className="typography-micro text-muted-foreground whitespace-nowrap">
-                                                        {metadata?.limit?.context ? `${formatTokens(metadata?.limit?.context)} ctx` : ''}
-                                                        {metadata?.limit?.context && metadata?.limit?.output ? ' • ' : ''}
-                                                        {metadata?.limit?.output ? `${formatTokens(metadata?.limit?.output)} out` : ''}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </button>
-                                    );
-                                })}
+                                {filteredRecents.map(({ model, providerID, modelID }) => renderMobileModelRow({
+                                    model,
+                                    providerId: providerID,
+                                    modelId: modelID,
+                                    showProviderLogo: true,
+                                    showCapabilities: false,
+                                }))}
                             </div>
                         </div>
                     )}
 
                     {filteredProviders.map(({ provider, providerModels }) => {
-                        if (providerModels.length === 0 && !normalizedQuery.length) {
+                        if (providerModels.length === 0) {
                             return null;
                         }
 
@@ -1672,7 +1882,12 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                              <div key={provider.id} className="rounded-xl border border-border/40 bg-[var(--surface-elevated)] overflow-hidden">
                                 <button
                                     type="button"
-                                    onClick={() => toggleMobileProviderExpansion(provider.id)}
+                                    onClick={() => {
+                                        if (normalizedQuery.length > 0) {
+                                            return;
+                                        }
+                                        toggleMobileProviderExpansion(provider.id);
+                                    }}
                                     className="flex w-full items-center justify-between gap-1.5 px-2 py-1.5 text-left"
                                     aria-expanded={isExpanded}
                                 >
@@ -1697,86 +1912,13 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
                                 {isExpanded && providerModels.length > 0 && (
                                     <div className="flex flex-col border-t border-border/30">
-                                        {providerModels.map((model: ProviderModel) => {
-                                            const isSelected = isActiveProvider && model.id === currentModelId;
-                                            const metadata = getModelMetadata(provider.id, model.id!);
-                                            const capabilityIcons = getCapabilityIcons(metadata).slice(0, 3);
-                                            const inputIcons = getModalityIcons(metadata, 'input');
-
-                                            return (
-                                                <div
-                                                    key={model.id}
-                                                    className={cn(
-                                                        'flex w-full items-start gap-2 border-b border-border/30 px-2 py-1.5 last:border-b-0',
-                                                        'rounded-lg transition-colors',
-                                                        !isSelected && 'hover:bg-interactive-hover',
-                                                        isSelected
-                                                            ? 'bg-interactive-selection/15 text-interactive-selection-foreground'
-                                                            : ''
-                                                    )}
-                                                >
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => handleProviderAndModelChange(provider.id as string, model.id as string)}
-                                                        className={cn(
-                                                            'flex flex-1 min-w-0 items-start gap-2 text-left',
-                                                            'focus:outline-none focus-visible:ring-1 focus-visible:ring-primary'
-                                                        )}
-                                                    >
-                                                        <div className="flex min-w-0 flex-col">
-                                                            <span className="typography-meta font-medium text-foreground">
-                                                                {getModelDisplayName(model)}
-                                                            </span>
-                                                        </div>
-                                                        <div className="ml-auto flex flex-col items-end gap-1 text-right">
-                                                            {(metadata?.limit?.context || metadata?.limit?.output) && (
-                                                                <div className="flex items-center gap-1 typography-micro text-muted-foreground">
-                                                                    {metadata?.limit?.context ? <span>{formatTokens(metadata?.limit?.context)} ctx</span> : null}
-                                                                    {metadata?.limit?.context && metadata?.limit?.output ? <span>•</span> : null}
-                                                                    {metadata?.limit?.output ? <span>{formatTokens(metadata?.limit?.output)} out</span> : null}
-                                                                </div>
-                                                            )}
-                                                            {(capabilityIcons.length > 0 || inputIcons.length > 0) && (
-                                                                <div className="flex items-center justify-end gap-1">
-                                                                    {[...capabilityIcons, ...inputIcons].map(({ key, icon: IconComponent, label }) => (
-                                                                        <span
-                                                                            key={`meta-${provider.id}-${model.id}-${key}`}
-                                                                            className="flex h-4 w-4 items-center justify-center text-muted-foreground"
-                                                                            title={label}
-                                                                            aria-label={label}
-                                                                        >
-                                                                            <IconComponent className="h-3 w-3" />
-                                                                        </span>
-                                                                    ))}
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={(e) => {
-                                                            e.preventDefault();
-                                                            e.stopPropagation();
-                                                            toggleFavoriteModel(provider.id as string, model.id as string);
-                                                        }}
-                                                        className={cn(
-                                                            "model-favorite-button flex h-5 w-5 items-center justify-center hover:text-primary/80 flex-shrink-0",
-                                                            isFavoriteModel(provider.id as string, model.id as string)
-                                                                ? "text-primary"
-                                                                : "text-muted-foreground"
-                                                        )}
-                                                        aria-label={isFavoriteModel(provider.id as string, model.id as string) ? "Unfavorite" : "Favorite"}
-                                                        title={isFavoriteModel(provider.id as string, model.id as string) ? "Remove from favorites" : "Add to favorites"}
-                                                    >
-                                                        {isFavoriteModel(provider.id as string, model.id as string) ? (
-                                                            <RiStarFill className="h-4 w-4" />
-                                                        ) : (
-                                                            <RiStarLine className="h-4 w-4" />
-                                                        )}
-                                                    </button>
-                                                </div>
-                                            );
-                                        })}
+                                        {providerModels.map((model: ProviderModel) => renderMobileModelRow({
+                                            model,
+                                            providerId: provider.id as string,
+                                            modelId: model.id as string,
+                                            showProviderLogo: false,
+                                            showCapabilities: true,
+                                        }))}
                                     </div>
                                 )}
                             </div>
@@ -1788,19 +1930,29 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     };
 
     const renderMobileVariantPanel = () => {
-        if (!isCompact || !hasVariants) return null;
+        if (!isCompact) return null;
 
-        const isDefault = !currentVariant;
+        const targetProviderId = mobileVariantTarget?.providerId ?? currentProviderId;
+        const targetModelId = mobileVariantTarget?.modelId ?? currentModelId;
+        if (!targetProviderId || !targetModelId) return null;
+
+        const targetVariants = getModelVariantOptions(targetProviderId, targetModelId);
+        if (targetVariants.length === 0) return null;
+
+        const selectedVariant = resolveModelVariantSelection(targetProviderId, targetModelId);
+        const isDefault = !selectedVariant;
+
+        const handleBack = () => {
+            setActiveMobilePanel('model');
+        };
 
         const handleSelect = (variant: string | undefined) => {
-            handleVariantSelect(variant);
-            closeMobilePanel();
-            if (onMobilePanelSelection) {
-                requestAnimationFrame(() => {
-                    onMobilePanelSelection();
-                });
+            const result = applyModelSelectionWithVariant(targetProviderId, targetModelId, variant);
+            if (result !== 'applied') {
                 return;
             }
+
+            closeMobilePanel();
             requestAnimationFrame(() => {
                 const textarea = document.querySelector<HTMLTextAreaElement>('textarea[data-chat-input="true"]');
                 textarea?.focus();
@@ -1812,6 +1964,20 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 open={activeMobilePanel === 'variant'}
                 onClose={closeMobilePanel}
                 title="Thinking"
+                renderHeader={mobileVariantTarget ? ((closeButton) => (
+                    <div className="flex items-center justify-between px-3 py-2 border-b border-border/40">
+                        <button
+                            type="button"
+                            onClick={handleBack}
+                            className="flex items-center gap-1 rounded-lg px-1.5 py-1 typography-meta text-muted-foreground hover:bg-interactive-hover"
+                        >
+                            <RiArrowGoBackLine className="h-4 w-4" />
+                            <span>Back</span>
+                        </button>
+                        <h2 className="typography-ui-label font-semibold text-foreground">Thinking</h2>
+                        {closeButton}
+                    </div>
+                )) : undefined}
             >
                 <div className="flex flex-col gap-1.5">
                     <button
@@ -1827,9 +1993,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         {isDefault && <RiCheckLine className="h-4 w-4 text-primary flex-shrink-0" />}
                     </button>
 
-                    {availableVariants.map((variant) => {
-                        const selected = currentVariant === variant;
-                        const label = variant.charAt(0).toUpperCase() + variant.slice(1);
+                    {targetVariants.map((variant) => {
+                        const selected = selectedVariant === variant;
+                        const label = formatEffortLabel(variant);
 
                         return (
                             <button
