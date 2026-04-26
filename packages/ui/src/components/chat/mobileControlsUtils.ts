@@ -4,7 +4,7 @@ export type MobileControlsPanel = 'model' | 'agent' | 'variant' | null;
 
 export const isPrimaryMode = (mode?: string) => mode === 'primary' || mode === 'all' || mode === undefined || mode === null;
 
-export const getCyclablePrimaryAgents = (agents: Agent[]) => agents.filter((agent) => agent.mode === 'primary');
+export const getCyclablePrimaryAgents = (agents: Agent[]) => agents.filter((agent) => isPrimaryMode(agent.mode));
 
 export const getCycledPrimaryAgentName = (
     agents: Agent[],
