@@ -100,7 +100,7 @@ export const useMenuActions = (
   const setActiveMainTab = useUIStore((s) => s.setActiveMainTab);
   const setSettingsDialogOpen = useUIStore((s) => s.setSettingsDialogOpen);
   const setAboutDialogOpen = useUIStore((s) => s.setAboutDialogOpen);
-  const { addProject } = useProjectsStore();
+  const addProject = useProjectsStore((s) => s.addProject);
   const checkForUpdates = useUpdateStore((state) => state.checkForUpdates);
   const { requestAccess, startAccessing } = useFileSystemAccess();
   const { setThemeMode } = useThemeSystem();

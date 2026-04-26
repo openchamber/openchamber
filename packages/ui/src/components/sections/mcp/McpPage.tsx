@@ -13,6 +13,7 @@ import {
   type McpDraft,
   type McpScope,
 } from '@/stores/useMcpConfigStore';
+import { useShallow } from 'zustand/react/shallow';
 import {
   parseImportedMcpSnippet,
   applyImportedMcpToDraft,
@@ -559,7 +560,17 @@ export const McpPage: React.FC = () => {
     createMcp,
     updateMcp,
     deleteMcp,
-  } = useMcpConfigStore();
+  } = useMcpConfigStore(useShallow((s) => ({
+    selectedMcpName: s.selectedMcpName,
+    mcpServers: s.mcpServers,
+    mcpDraft: s.mcpDraft,
+    setMcpDraft: s.setMcpDraft,
+    setSelectedMcp: s.setSelectedMcp,
+    getMcpByName: s.getMcpByName,
+    createMcp: s.createMcp,
+    updateMcp: s.updateMcp,
+    deleteMcp: s.deleteMcp,
+  })));
 
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const isVSCodeAuthRuntime = React.useMemo(() => isVSCodeRuntime(), []);

@@ -450,11 +450,14 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
           <CollapsibleTrigger className="w-full flex items-center justify-between py-1 hover:bg-[var(--interactive-hover)] rounded-md px-1 -mx-1 transition-colors">
             <p className="typography-ui-label font-medium text-foreground">
               Setup commands
-              {setupCommands.filter(cmd => cmd.trim()).length > 0 && (
-                <span className="font-normal text-muted-foreground/70">
-                  {' '}({setupCommands.filter(cmd => cmd.trim()).length} configured)
-                </span>
-              )}
+              {(() => {
+                const trimmedCommandCount = setupCommands.filter(cmd => cmd.trim()).length;
+                return trimmedCommandCount > 0 ? (
+                  <span className="font-normal text-muted-foreground/70">
+                    {' '}({trimmedCommandCount} configured)
+                  </span>
+                ) : null;
+              })()}
             </p>
             <RiArrowDownSLine className={cn(
               'h-4 w-4 text-muted-foreground transition-transform duration-200',

@@ -70,8 +70,12 @@ export const SessionDialogs: React.FC = () => {
     const archiveSessions = useSessionUIStore((s) => s.archiveSessions);
     const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
     const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
-    const { currentDirectory, homeDirectory, isHomeReady } = useDirectoryStore();
-    const { projects, addProject, activeProjectId } = useProjectsStore();
+    const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
+    const homeDirectory = useDirectoryStore((s) => s.homeDirectory);
+    const isHomeReady = useDirectoryStore((s) => s.isHomeReady);
+    const projects = useProjectsStore((s) => s.projects);
+    const addProject = useProjectsStore((s) => s.addProject);
+    const activeProjectId = useProjectsStore((s) => s.activeProjectId);
     const { requestAccess, startAccessing } = useFileSystemAccess();
     const { isMobile, isTablet, hasTouchInput } = useDeviceInfo();
     const useMobileOverlay = isMobile || isTablet || hasTouchInput;

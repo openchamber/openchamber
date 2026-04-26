@@ -248,14 +248,14 @@ export const HelpDialog: React.FC = () => {
                   {section.category}
                 </h3>
                 <div className="space-y-1">
-                  {section.items.map((shortcut, index) => {
+                  {section.items.map((shortcut) => {
                     const displayKeys = shortcut.id
                       ? renderShortcut(shortcut.id, Array.isArray(shortcut.keys) ? shortcut.keys[0] : shortcut.keys, shortcutOverrides)
                       : (Array.isArray(shortcut.keys) ? shortcut.keys : shortcut.keys.split(" / "));
 
                     return (
                       <div
-                        key={index}
+                        key={shortcut.id || shortcut.description}
                         className="flex items-center justify-between py-1 px-2"
                       >
                         <div className="flex items-center gap-2">

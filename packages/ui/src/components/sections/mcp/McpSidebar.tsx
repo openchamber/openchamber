@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/dialog';
 import { RiAddLine, RiDeleteBinLine, RiMore2Line, RiPlugLine, RiRefreshLine, RiServerLine, RiGlobalLine } from '@remixicon/react';
 import { useMcpConfigStore, type McpDraft, type McpServerConfig } from '@/stores/useMcpConfigStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { isMobileDeviceViaCSS } from '@/lib/device';
@@ -62,7 +63,14 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
   const bgClass = 'bg-background';
 
   const { mcpServers, selectedMcpName, setSelectedMcp, setMcpDraft, loadMcpConfigs, deleteMcp } =
-    useMcpConfigStore();
+    useMcpConfigStore(useShallow((s) => ({
+      mcpServers: s.mcpServers,
+      selectedMcpName: s.selectedMcpName,
+      setSelectedMcp: s.setSelectedMcp,
+      setMcpDraft: s.setMcpDraft,
+      loadMcpConfigs: s.loadMcpConfigs,
+      deleteMcp: s.deleteMcp,
+    })));
 
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const mcpStatus = useMcpStore((state) => state.getStatusForDirectory(currentDirectory ?? null));

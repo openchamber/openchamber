@@ -30,7 +30,8 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
   const [selectedIndex, setSelectedIndex] = React.useState(0);
   const [filteredSkills, setFilteredSkills] = React.useState<SkillInfo[]>([]);
   const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
-  const { skills, loadSkills } = useSkillsStore();
+  const skills = useSkillsStore((s) => s.skills);
+  const loadSkills = useSkillsStore((s) => s.loadSkills);
 
   React.useEffect(() => {
     // Always trigger loadSkills when autocomplete opens to ensure project context is fresh

@@ -11,6 +11,36 @@ import { generateSyntaxTheme } from '@/lib/theme/syntaxThemeGenerator';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { DiffPreview, WritePreview } from './DiffPreview';
 
+const PERMISSION_BASH_CUSTOM_STYLE: React.CSSProperties = {
+  margin: 0,
+  padding: '0.5rem',
+  fontSize: 'var(--text-meta)',
+  lineHeight: '1.25rem',
+  background: 'rgb(var(--muted) / 0.3)',
+  borderRadius: '0.25rem',
+  whiteSpace: 'pre-wrap',
+  wordBreak: 'break-word',
+  overflowWrap: 'break-word',
+  overflow: 'visible',
+};
+
+const PERMISSION_BASH_CODE_TAG_PROPS = {
+  style: {
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+    overflowWrap: 'break-word',
+  } as React.CSSProperties,
+};
+
+const PERMISSION_JSON_CUSTOM_STYLE: React.CSSProperties = {
+  margin: 0,
+  padding: '0.5rem',
+  fontSize: 'var(--text-meta)',
+  lineHeight: '1.25rem',
+  background: 'rgb(var(--muted) / 0.3)',
+  borderRadius: '0.25rem',
+};
+
 interface PermissionCardProps {
   permission: PermissionRequest;
   onResponse?: (response: 'once' | 'always' | 'reject') => void;
@@ -140,25 +170,8 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
                 language="bash"
                 style={syntaxTheme}
                 PreTag="div"
-                customStyle={{
-                  margin: 0,
-                  padding: '0.5rem',
-                  fontSize: 'var(--text-meta)',
-                  lineHeight: '1.25rem',
-                  background: 'rgb(var(--muted) / 0.3)',
-                  borderRadius: '0.25rem',
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                  overflowWrap: 'break-word',
-                  overflow: 'visible'
-                }}
-                codeTagProps={{
-                  style: {
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-word',
-                    overflowWrap: 'break-word'
-                  }
-                }}
+                customStyle={PERMISSION_BASH_CUSTOM_STYLE}
+                codeTagProps={PERMISSION_BASH_CODE_TAG_PROPS}
                 wrapLongLines={true}
               >
                 {command}
@@ -235,14 +248,7 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
                 <SyntaxHighlighter
                   language="json"
                   style={syntaxTheme}
-                  customStyle={{
-                    margin: 0,
-                    padding: '0.5rem',
-                    fontSize: 'var(--text-meta)',
-                    lineHeight: '1.25rem',
-                    background: 'rgb(var(--muted) / 0.3)',
-                    borderRadius: '0.25rem'
-                  }}
+                  customStyle={PERMISSION_JSON_CUSTOM_STYLE}
                   wrapLongLines={true}
                 >
                   {JSON.stringify(headers, null, 2)}
@@ -257,14 +263,7 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
                 <SyntaxHighlighter
                   language={typeof body === 'object' ? 'json' : 'text'}
                   style={syntaxTheme}
-                  customStyle={{
-                    margin: 0,
-                    padding: '0.5rem',
-                    fontSize: 'var(--text-meta)',
-                    lineHeight: '1.25rem',
-                    background: 'rgb(var(--muted) / 0.3)',
-                    borderRadius: '0.25rem'
-                  }}
+                  customStyle={PERMISSION_JSON_CUSTOM_STYLE}
                   wrapLongLines={true}
                 >
                   {typeof body === 'object' ? JSON.stringify(body, null, 2) : String(body)}

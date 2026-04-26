@@ -5,6 +5,7 @@ import { NumberInput } from '@/components/ui/number-input';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
 import { useAgentsStore, type AgentConfig, type AgentScope } from '@/stores/useAgentsStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useDirectorySync } from '@/sync/sync-context';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useDeviceInfo } from '@/lib/device';
@@ -182,7 +183,23 @@ const buildPermissionConfigWithGlobal = (
 
 export const AgentsPage: React.FC = () => {
   const { isMobile } = useDeviceInfo();
-  const { selectedAgentName, getAgentByName, createAgent, updateAgent, agents, agentDraft, setAgentDraft } = useAgentsStore();
+  const {
+    selectedAgentName,
+    getAgentByName,
+    createAgent,
+    updateAgent,
+    agents,
+    agentDraft,
+    setAgentDraft,
+  } = useAgentsStore(useShallow((s) => ({
+    selectedAgentName: s.selectedAgentName,
+    getAgentByName: s.getAgentByName,
+    createAgent: s.createAgent,
+    updateAgent: s.updateAgent,
+    agents: s.agents,
+    agentDraft: s.agentDraft,
+    setAgentDraft: s.setAgentDraft,
+  })));
 
   const selectedAgent = selectedAgentName ? getAgentByName(selectedAgentName) : null;
   const isNewAgent = Boolean(agentDraft && agentDraft.name === selectedAgentName && !selectedAgent);

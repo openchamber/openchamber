@@ -118,9 +118,10 @@ function useSessionGrouping(
   }, [parentChildMap, getStatusType]);
 
   const processedSessions = React.useMemo(() => {
+    const sessionIds = new Set(sessions.map((s) => s.id));
     const topLevel = sessions.filter((session) => {
       const parentID = (session as { parentID?: string }).parentID;
-      return !parentID || !new Set(sessions.map((s) => s.id)).has(parentID);
+      return !parentID || !sessionIds.has(parentID);
     });
 
     const running: SessionWithStatus[] = [];

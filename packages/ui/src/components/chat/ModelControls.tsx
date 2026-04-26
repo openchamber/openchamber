@@ -2020,20 +2020,20 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         );
     };
 
-    // Filter models based on search query
-    const filterByQuery = (modelName: string, providerName: string, query: string) => {
-        if (!query.trim()) return true;
-        return (
-            matchesModelSearch(modelName, query) ||
-            matchesModelSearch(providerName, query)
-        );
-    };
+    type FlatModelItem = { model: ProviderModel; providerID: string; modelID: string; section: string };
 
-    const renderModelSelector = () => {
+    const modelSelectorData = React.useMemo(() => {
+        const filterByQuery = (modelName: string, providerName: string, query: string) => {
+            if (!query.trim()) return true;
+            return (
+                matchesModelSearch(modelName, query) ||
+                matchesModelSearch(providerName, query)
+            );
+        };
+
         const normalizedDesktopQuery = desktopModelQuery.trim();
         const forceExpandProviders = normalizedDesktopQuery.length > 0;
 
-        // Filter favorites
         const filteredFavorites = favoriteModelsList.filter(({ model, providerID }) => {
             const provider = providers.find(p => p.id === providerID);
             const providerName = provider?.name || providerID;
@@ -2041,7 +2041,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             return filterByQuery(modelName, providerName, desktopModelQuery);
         });
 
-        // Filter recents
         const filteredRecents = recentModelsList.filter(({ model, providerID }) => {
             const provider = providers.find(p => p.id === providerID);
             const providerName = provider?.name || providerID;
@@ -2049,7 +2048,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             return filterByQuery(modelName, providerName, desktopModelQuery);
         });
 
-        // Filter providers and their models
         const filteredProviders = visibleProviders
             .map((provider) => {
                 const providerModels = Array.isArray(provider.models) ? provider.models : [];
@@ -2078,8 +2076,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             filteredRecents.length > 0 ||
             filteredProviders.length > 0;
 
-        // Build flat list for keyboard navigation
-        type FlatModelItem = { model: ProviderModel; providerID: string; modelID: string; section: string };
         const flatModelList: FlatModelItem[] = [];
 
         filteredFavorites.forEach(({ model, providerID, modelID }) => {
@@ -2093,6 +2089,12 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 flatModelList.push({ model, providerID: provider.id as string, modelID: model.id as string, section: 'provider' });
             });
         });
+
+        return { filteredFavorites, filteredRecents, filteredProviders, providerSections, flatModelList, hasResults, forceExpandProviders };
+    }, [desktopModelQuery, favoriteModelsList, recentModelsList, visibleProviders, providers, collapsedProviderSet, matchesModelSearch]);
+
+    const renderModelSelector = () => {
+        const { filteredFavorites, filteredRecents, filteredProviders, providerSections, flatModelList, hasResults, forceExpandProviders } = modelSelectorData;
 
         const totalItems = flatModelList.length;
 

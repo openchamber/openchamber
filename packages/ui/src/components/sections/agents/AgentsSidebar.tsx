@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { RiAddLine, RiAiAgentFill, RiAiAgentLine, RiDeleteBinLine, RiFileCopyLine, RiMore2Line, RiRobot2Line, RiRobotLine, RiRestartLine, RiEditLine } from '@remixicon/react';
 import { useAgentsStore, isAgentBuiltIn, isAgentHidden, type AgentScope, type AgentDraft } from '@/stores/useAgentsStore';
+import { useShallow } from 'zustand/react/shallow';
 import { cn } from '@/lib/utils';
 import type { Agent } from '@opencode-ai/sdk/v2';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
@@ -114,7 +115,15 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
     createAgent,
     deleteAgent,
     loadAgents,
-  } = useAgentsStore();
+  } = useAgentsStore(useShallow((s) => ({
+    selectedAgentName: s.selectedAgentName,
+    agents: s.agents,
+    setSelectedAgent: s.setSelectedAgent,
+    setAgentDraft: s.setAgentDraft,
+    createAgent: s.createAgent,
+    deleteAgent: s.deleteAgent,
+    loadAgents: s.loadAgents,
+  })));
 
   React.useEffect(() => {
     loadAgents();

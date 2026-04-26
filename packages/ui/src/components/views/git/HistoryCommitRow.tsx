@@ -45,14 +45,14 @@ function getChangeTypeColor(changeType: string) {
   }
 }
 
-export const HistoryCommitRow: React.FC<HistoryCommitRowProps> = ({
+export const HistoryCommitRow = React.memo(({
   entry,
   isExpanded,
   onToggle,
   files,
   isLoadingFiles,
   onCopyHash,
-}) => {
+}: HistoryCommitRowProps) => {
   return (
     <li>
       <button
@@ -157,4 +157,4 @@ export const HistoryCommitRow: React.FC<HistoryCommitRowProps> = ({
       )}
     </li>
   );
-};
+});

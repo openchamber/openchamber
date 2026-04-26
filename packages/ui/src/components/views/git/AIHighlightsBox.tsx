@@ -43,7 +43,7 @@ export const AIHighlightsBox: React.FC<AIHighlightsBoxProps> = ({
       </div>
       <ul className="space-y-1">
         {highlights.map((highlight, index) => (
-          <li key={index} className="typography-meta text-foreground">
+          <li key={`${highlight}-${index}`} className="typography-meta text-foreground">
             {highlight}
           </li>
         ))}

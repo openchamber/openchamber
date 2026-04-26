@@ -36,8 +36,11 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   open,
   onOpenChange,
 }) => {
-  const { currentDirectory, homeDirectory, isHomeReady } = useDirectoryStore();
-  const { addProject, getActiveProject } = useProjectsStore();
+  const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
+  const homeDirectory = useDirectoryStore((s) => s.homeDirectory);
+  const isHomeReady = useDirectoryStore((s) => s.isHomeReady);
+  const addProject = useProjectsStore((s) => s.addProject);
+  const getActiveProject = useProjectsStore((s) => s.getActiveProject);
   const [pendingPath, setPendingPath] = React.useState<string | null>(null);
   const [pathInputValue, setPathInputValue] = React.useState('');
   const [hasUserSelection, setHasUserSelection] = React.useState(false);

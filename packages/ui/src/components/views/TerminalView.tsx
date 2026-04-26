@@ -3,6 +3,7 @@ import { RiAddLine, RiArrowDownLine, RiArrowGoBackLine, RiArrowLeftLine, RiArrow
 
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useTerminalStore } from '@/stores/useTerminalStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { type TerminalStreamEvent } from '@/lib/api/types';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
@@ -98,17 +99,29 @@ export const TerminalView: React.FC = () => {
     const hasActiveContext = currentSessionId !== null || newSessionDraft?.open === true;
 
     const effectiveDirectory = useEffectiveDirectory() ?? null;
-    const terminalStore = useTerminalStore();
-    const terminalSessions = terminalStore.sessions;
-    const terminalHydrated = terminalStore.hasHydrated;
-    const ensureDirectory = terminalStore.ensureDirectory;
-    const createTab = terminalStore.createTab;
-    const setActiveTab = terminalStore.setActiveTab;
-    const closeTab = terminalStore.closeTab;
-    const setTabSessionId = terminalStore.setTabSessionId;
-    const setTabLifecycle = terminalStore.setTabLifecycle;
-    const setConnecting = terminalStore.setConnecting;
-    const appendToBuffer = terminalStore.appendToBuffer;
+    const {
+      sessions: terminalSessions,
+      hasHydrated: terminalHydrated,
+      ensureDirectory,
+      createTab,
+      setActiveTab,
+      closeTab,
+      setTabSessionId,
+      setTabLifecycle,
+      setConnecting,
+      appendToBuffer,
+    } = useTerminalStore(useShallow((s) => ({
+      sessions: s.sessions,
+      hasHydrated: s.hasHydrated,
+      ensureDirectory: s.ensureDirectory,
+      createTab: s.createTab,
+      setActiveTab: s.setActiveTab,
+      closeTab: s.closeTab,
+      setTabSessionId: s.setTabSessionId,
+      setTabLifecycle: s.setTabLifecycle,
+      setConnecting: s.setConnecting,
+      appendToBuffer: s.appendToBuffer,
+    })));
 
     const directoryTerminalState = React.useMemo(() => {
         if (!effectiveDirectory) return undefined;

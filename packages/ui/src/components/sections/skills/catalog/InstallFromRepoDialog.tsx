@@ -45,7 +45,10 @@ interface InstallFromRepoDialogProps {
 type IdentityOption = { id: string; name: string };
 
 export const InstallFromRepoDialog: React.FC<InstallFromRepoDialogProps> = ({ open, onOpenChange }) => {
-  const { scanRepo, installSkills, isScanning, isInstalling } = useSkillsCatalogStore();
+  const scanRepo = useSkillsCatalogStore((s) => s.scanRepo);
+  const installSkills = useSkillsCatalogStore((s) => s.installSkills);
+  const isScanning = useSkillsCatalogStore((s) => s.isScanning);
+  const isInstalling = useSkillsCatalogStore((s) => s.isInstalling);
   const installedSkills = useSkillsStore((s) => s.skills);
   const defaultGitIdentityId = useGitIdentitiesStore((s) => s.defaultGitIdentityId);
   const loadDefaultGitIdentityId = useGitIdentitiesStore((s) => s.loadDefaultGitIdentityId);

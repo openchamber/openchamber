@@ -4,6 +4,23 @@ import { cn } from '@/lib/utils';
 import { getLanguageFromExtension } from '@/lib/toolHelpers';
 import { parseDiffToUnified } from './message/toolRenderers';
 
+const DIFF_CUSTOM_STYLE: React.CSSProperties = {
+    margin: 0,
+    padding: 0,
+    fontSize: 'inherit',
+    background: 'transparent',
+    backgroundColor: 'transparent',
+    borderRadius: 0,
+    overflow: 'visible',
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-all',
+    overflowWrap: 'anywhere',
+};
+
+const DIFF_CODE_TAG_PROPS = {
+    style: { background: 'transparent', backgroundColor: 'transparent', fontSize: 'inherit' } as React.CSSProperties,
+};
+
 interface DiffPreviewProps {
     diff: string;
     syntaxTheme: { [key: string]: React.CSSProperties };
@@ -46,21 +63,8 @@ export const DiffPreview: React.FC<DiffPreviewProps> = ({ diff, syntaxTheme, fil
                                     PreTag="div"
                                     wrapLines
                                     wrapLongLines
-                                    customStyle={{
-                                        margin: 0,
-                                        padding: 0,
-                                        fontSize: 'inherit',
-                                        background: 'transparent',
-                                        backgroundColor: 'transparent',
-                                        borderRadius: 0,
-                                        overflow: 'visible',
-                                        whiteSpace: 'pre-wrap',
-                                        wordBreak: 'break-all',
-                                        overflowWrap: 'anywhere',
-                                    }}
-                                    codeTagProps={{
-                                        style: { background: 'transparent', backgroundColor: 'transparent', fontSize: 'inherit' },
-                                    }}
+                                    customStyle={DIFF_CUSTOM_STYLE}
+                                    codeTagProps={DIFF_CODE_TAG_PROPS}
                                 >
                                     {line.content}
                                 </SyntaxHighlighter>
@@ -104,21 +108,8 @@ export const WritePreview: React.FC<WritePreviewProps> = ({ content, syntaxTheme
                                 PreTag="div"
                                 wrapLines
                                 wrapLongLines
-                                customStyle={{
-                                    margin: 0,
-                                    padding: 0,
-                                    fontSize: 'inherit',
-                                    background: 'transparent',
-                                    backgroundColor: 'transparent',
-                                    borderRadius: 0,
-                                    overflow: 'visible',
-                                    whiteSpace: 'pre-wrap',
-                                    wordBreak: 'break-all',
-                                    overflowWrap: 'anywhere',
-                                }}
-                                codeTagProps={{
-                                    style: { background: 'transparent', backgroundColor: 'transparent', fontSize: 'inherit' },
-                                }}
+                                customStyle={DIFF_CUSTOM_STYLE}
+                                codeTagProps={DIFF_CODE_TAG_PROPS}
                             >
                                 {line || ' '}
                             </SyntaxHighlighter>

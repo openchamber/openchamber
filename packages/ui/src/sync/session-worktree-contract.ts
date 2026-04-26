@@ -169,12 +169,18 @@ export function getSessionWorktreeRepairActions(
 export type MutationBlockingReason =
   | { reason: 'attention'; attentionReason: NonNullable<SessionWorktreeAttachment['attentionReason']> }
   | { reason: 'missing' }
-  | { reason: 'invalid' };
+  | { reason: 'invalid' }
+  | { reason: 'dirty'; dirtyFiles?: number };
 
 export function getMutationBlockingReasons(
-  attachment: SessionWorktreeAttachment | null | undefined
+  attachment: SessionWorktreeAttachment | null | undefined,
+  gitStatus?: { isClean?: boolean; files?: Array<{ path: string }> }
 ): MutationBlockingReason[] {
   const reasons: MutationBlockingReason[] = [];
+  if (gitStatus && gitStatus.isClean === false) {
+    const dirtyFiles = gitStatus.files?.length;
+    reasons.push(dirtyFiles != null ? { reason: 'dirty', dirtyFiles } : { reason: 'dirty' });
+  }
   if (!attachment) return reasons;
   if (attachment.worktreeStatus === 'missing') {
     reasons.push({ reason: 'missing' });

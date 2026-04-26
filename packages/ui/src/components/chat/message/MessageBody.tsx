@@ -43,6 +43,9 @@ import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useSessions } from '@/sync/sync-context';
 
+const CONTAIN_LAYOUT_STYLE = { contain: 'layout' as const, transform: 'translateZ(0)' };
+const MESSAGE_FOOTER_CONTAINER_STYLE = { containerType: 'inline-size' as const, containerName: 'message-footer' };
+
 type SubtaskPartLike = Part & {
     type: 'subtask';
     description?: unknown;
@@ -317,7 +320,7 @@ const writeRevealedToolIds = (messageId: string, value: Set<string>): void => {
     revealedToolIdsByMessage.set(messageId, new Set(value));
 };
 
-const UserMessageBody: React.FC<{
+const UserMessageBody = React.memo(({ messageId, parts, isMobile, hasTouchInput, hasTextContent, onCopyMessage, copiedMessage, onShowPopup, agentMention, onRevert, onFork, userActionsMode = 'inline', stickyUserHeaderEnabled = true }: {
     messageId: string;
     parts: Part[];
     isMobile: boolean;
@@ -331,7 +334,7 @@ const UserMessageBody: React.FC<{
     onFork?: () => void;
     userActionsMode?: 'inline' | 'external-content' | 'external-actions';
     stickyUserHeaderEnabled?: boolean;
-}> = ({ messageId, parts, isMobile, hasTouchInput, hasTextContent, onCopyMessage, copiedMessage, onShowPopup, agentMention, onRevert, onFork, userActionsMode = 'inline', stickyUserHeaderEnabled = true }) => {
+}) => {
     const [copyHintVisible, setCopyHintVisible] = React.useState(false);
     const copyHintTimeoutRef = React.useRef<number | null>(null);
 
@@ -515,7 +518,7 @@ const UserMessageBody: React.FC<{
     return (
         <div
             className="relative w-full group/message"
-            style={{ contain: 'layout', transform: 'translateZ(0)' }}
+            style={CONTAIN_LAYOUT_STYLE}
             onTouchStart={isTouchContext && canCopyMessage && hasCopyableText ? revealCopyHint : undefined}
         >
             <div
@@ -568,9 +571,9 @@ const UserMessageBody: React.FC<{
             {actionsBlock}
         </div>
     );
-};
+});
 
-const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
+const AssistantMessageBody = React.memo(({
     sessionId,
     messageId,
     parts,
@@ -595,7 +598,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
     showReasoningTraces = false,
     turnGroupingContext,
     errorMessage,
-}) => {
+}: Omit<MessageBodyProps, 'isUser'>) => {
     const streamPhase = _streamPhase;
     void _allowAnimation;
     const [copyHintVisible, setCopyHintVisible] = React.useState(false);
@@ -1559,13 +1562,10 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
              className={cn(
                  'relative w-full group/message'
              )}
-             style={{
-                 contain: 'layout',
-                 transform: 'translateZ(0)',
-             }}
-             onTouchStart={isTouchContext && canCopyMessage && hasCopyableText ? revealCopyHint : undefined}
-         >
-             <TextSelectionMenu containerRef={messageContentRef} />
+              style={CONTAIN_LAYOUT_STYLE}
+              onTouchStart={isTouchContext && canCopyMessage && hasCopyableText ? revealCopyHint : undefined}
+          >
+              <TextSelectionMenu containerRef={messageContentRef} />
              <SaveProjectPlanDialog
                  open={isPlanDialogOpen}
                  onOpenChange={setIsPlanDialogOpen}
@@ -1596,7 +1596,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                 {shouldShowFooter && (
                     <div
                         className="mt-2 mb-1 flex items-center justify-start gap-1.5"
-                        style={{ containerType: 'inline-size', containerName: 'message-footer' }}
+                        style={MESSAGE_FOOTER_CONTAINER_STYLE}
                     >
                         <div className="flex items-center gap-1.5">
                             {footerButtons}
@@ -1637,9 +1637,9 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
             </div>
         </div>
     );
-};
+});
 
-const MessageBody: React.FC<MessageBodyProps> = ({ isUser, ...props }) => {
+const MessageBody = React.memo(({ isUser, ...props }: MessageBodyProps) => {
 
     if (isUser) {
         return (
@@ -1662,6 +1662,6 @@ const MessageBody: React.FC<MessageBodyProps> = ({ isUser, ...props }) => {
     }
 
     return <AssistantMessageBody {...props} />;
-};
+});
 
 export default MessageBody;

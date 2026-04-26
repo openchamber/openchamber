@@ -4,6 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
 import { useCommandsStore, type CommandConfig, type CommandScope } from '@/stores/useCommandsStore';
+import { useShallow } from 'zustand/react/shallow';
 import { RiTerminalBoxLine, RiUser3Line, RiFolderLine } from '@remixicon/react';
 import { ModelSelector } from '../agents/ModelSelector';
 import { AgentSelector } from './AgentSelector';
@@ -17,7 +18,23 @@ import {
 } from '@/components/ui/select';
 
 export const CommandsPage: React.FC = () => {
-  const { selectedCommandName, getCommandByName, createCommand, updateCommand, commands, commandDraft, setCommandDraft } = useCommandsStore();
+  const {
+    selectedCommandName,
+    getCommandByName,
+    createCommand,
+    updateCommand,
+    commands,
+    commandDraft,
+    setCommandDraft,
+  } = useCommandsStore(useShallow((s) => ({
+    selectedCommandName: s.selectedCommandName,
+    getCommandByName: s.getCommandByName,
+    createCommand: s.createCommand,
+    updateCommand: s.updateCommand,
+    commands: s.commands,
+    commandDraft: s.commandDraft,
+    setCommandDraft: s.setCommandDraft,
+  })));
 
   const selectedCommand = selectedCommandName ? getCommandByName(selectedCommandName) : null;
   const isNewCommand = Boolean(commandDraft && commandDraft.name === selectedCommandName && !selectedCommand);

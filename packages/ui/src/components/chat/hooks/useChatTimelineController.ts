@@ -120,41 +120,15 @@ export const useChatTimelineController = ({
 
     const historySignalsRef = React.useRef(historySignals);
 
-    React.useEffect(() => {
-        turnModelRef.current = turnWindowModel;
-    }, [turnWindowModel]);
-
-    React.useEffect(() => {
-        turnStartRef.current = turnStart;
-    }, [turnStart]);
-
-    React.useEffect(() => {
-        isPinnedRef.current = isPinned;
-    }, [isPinned]);
-
-    React.useEffect(() => {
-        isLoadingOlderRef.current = isLoadingOlder;
-    }, [isLoadingOlder]);
-
-    React.useEffect(() => {
-        pendingRevealWorkRef.current = pendingRevealWork;
-    }, [pendingRevealWork]);
-
-    React.useEffect(() => {
-        historySignalsRef.current = historySignals;
-    }, [historySignals]);
-
-    React.useEffect(() => {
-        sessionIdRef.current = sessionId;
-    }, [sessionId]);
-
-    React.useEffect(() => {
-        messagesRef.current = messages;
-    }, [messages]);
-
-    React.useEffect(() => {
-        historyMetaRef.current = historyMeta;
-    }, [historyMeta]);
+    turnModelRef.current = turnWindowModel;
+    turnStartRef.current = turnStart;
+    isPinnedRef.current = isPinned;
+    isLoadingOlderRef.current = isLoadingOlder;
+    pendingRevealWorkRef.current = pendingRevealWork;
+    historySignalsRef.current = historySignals;
+    sessionIdRef.current = sessionId;
+    messagesRef.current = messages;
+    historyMetaRef.current = historyMeta;
 
     React.useLayoutEffect(() => {
         if (initializedSessionRef.current === sessionId) {

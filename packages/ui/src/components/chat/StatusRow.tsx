@@ -23,6 +23,8 @@ import { WorkingPlaceholder } from "./message/parts/WorkingPlaceholder";
 import { isVSCodeRuntime } from "@/lib/desktop";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
+const STATUS_ROW_CONTAINER_STYLE = { containerType: "inline-size" as const, containerName: "status-row" };
+
 const statusConfig: Record<TodoStatus, { textClassName: string }> = {
   in_progress: {
     textClassName: "text-foreground",
@@ -273,7 +275,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
   }
 
   return (
-    <div className={cn("mb-1", !hasLeftAccessory && "chat-column")} style={{ containerType: "inline-size", containerName: "status-row" }}>
+    <div className={cn("mb-1", !hasLeftAccessory && "chat-column")} style={STATUS_ROW_CONTAINER_STYLE}>
       <div className={cn("flex items-center justify-between py-0.5 gap-2 h-[1.2rem]", hasLeftAccessory && "px-0.5")}>
         {/* Left: Abort status or Working placeholder or leftAccessory */}
         <div className={cn("flex-1 flex items-center min-w-0", hasLeftAccessory ? "pl-1.5" : "overflow-hidden")}>

@@ -23,6 +23,7 @@ import {
 import { RiAddLine, RiDeleteBinLine, RiRefreshLine, RiDownloadLine, RiStarLine, RiSearchLine } from '@remixicon/react';
 
 import { useSkillsCatalogStore } from '@/stores/useSkillsCatalogStore';
+import { useShallow } from 'zustand/react/shallow';
 import { cn } from '@/lib/utils';
 import type { SkillsCatalogItem } from '@/lib/api/types';
 
@@ -79,7 +80,21 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
     loadedSourceIds,
     clawdhubHasMoreBySource,
     lastCatalogError,
-  } = useSkillsCatalogStore();
+  } = useSkillsCatalogStore(useShallow((s) => ({
+    sources: s.sources,
+    itemsBySource: s.itemsBySource,
+    selectedSourceId: s.selectedSourceId,
+    setSelectedSource: s.setSelectedSource,
+    loadCatalog: s.loadCatalog,
+    loadSource: s.loadSource,
+    loadMoreClawdHub: s.loadMoreClawdHub,
+    isLoadingCatalog: s.isLoadingCatalog,
+    isLoadingSource: s.isLoadingSource,
+    isLoadingMore: s.isLoadingMore,
+    loadedSourceIds: s.loadedSourceIds,
+    clawdhubHasMoreBySource: s.clawdhubHasMoreBySource,
+    lastCatalogError: s.lastCatalogError,
+  })));
 
   const [search, setSearch] = React.useState('');
   const [addCatalogOpen, setAddCatalogOpen] = React.useState(false);

@@ -163,26 +163,32 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     [compareSessionNodes, group.sessions, searchData?.filteredNodes, shouldFilterGroupContents],
   );
   const folderScopeKey = group.folderScopeKey ?? normalizePath(group.directory ?? null);
-  const scopeFolders = folderScopeKey ? getFoldersForScope(folderScopeKey) : [];
+  const scopeFolders = React.useMemo(
+    () => folderScopeKey ? getFoldersForScope(folderScopeKey) : [],
+    [folderScopeKey, getFoldersForScope]
+  );
 
-  const nodeBySessionId = new Map<string, SessionNode>();
-  const collectNodeLookup = (nodes: SessionNode[]) => {
-    nodes.forEach((node) => {
-      nodeBySessionId.set(node.session.id, node);
-      if (node.children.length > 0) {
-        collectNodeLookup(node.children);
-      }
-    });
-  };
-  collectNodeLookup(sourceGroupNodes);
+  const nodeBySessionId = React.useMemo(() => {
+    const map = new Map<string, SessionNode>();
+    const collectNodeLookup = (nodes: SessionNode[]) => {
+      nodes.forEach((node) => {
+        map.set(node.session.id, node);
+        if (node.children.length > 0) {
+          collectNodeLookup(node.children);
+        }
+      });
+    };
+    collectNodeLookup(sourceGroupNodes);
+    return map;
+  }, [sourceGroupNodes]);
 
-  const allFoldersForGroupBase = scopeFolders.map((folder) => {
+  const allFoldersForGroupBase = React.useMemo(() => scopeFolders.map((folder) => {
     const nodes = folder.sessionIds
       .map((sid) => nodeBySessionId.get(sid))
       .filter((n): n is SessionNode => Boolean(n))
       .sort(compareSessionNodes);
     return { folder, nodes };
-  });
+  }), [scopeFolders, nodeBySessionId, compareSessionNodes]);
 
   const allFoldersForGroup = React.useMemo(() => {
     const folderMapById = new Map(allFoldersForGroupBase.map((entry) => [entry.folder.id, entry]));
@@ -236,9 +242,9 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     return allFoldersForGroupBase.filter(({ folder }) => shouldKeepFolder(folder.id));
   }, [allFoldersForGroupBase, group.isArchivedBucket, hasSessionSearchQuery, normalizedSessionSearchQuery]);
 
-  const sessionIdsInFolders = new Set(allFoldersForGroup.flatMap((f) => f.folder.sessionIds));
-  const ungroupedSessions = sourceGroupNodes.filter((node) => !sessionIdsInFolders.has(node.session.id));
-  const rootFolders = allFoldersForGroup.filter(({ folder }) => !folder.parentId);
+  const sessionIdsInFolders = React.useMemo(() => new Set(allFoldersForGroup.flatMap((f) => f.folder.sessionIds)), [allFoldersForGroup]);
+  const ungroupedSessions = React.useMemo(() => sourceGroupNodes.filter((node) => !sessionIdsInFolders.has(node.session.id)), [sourceGroupNodes, sessionIdsInFolders]);
+  const rootFolders = React.useMemo(() => allFoldersForGroup.filter(({ folder }) => !folder.parentId), [allFoldersForGroup]);
 
   if (hasSessionSearchQuery && !groupMatchesSearch && rootFolders.length === 0 && ungroupedSessions.length === 0) {
     return null;

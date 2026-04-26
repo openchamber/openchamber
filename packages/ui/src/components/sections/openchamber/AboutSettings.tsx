@@ -1,6 +1,7 @@
 import React from 'react';
 import { RiDiscordFill, RiDownloadLine, RiGithubFill, RiLoaderLine, RiTwitterXFill } from '@remixicon/react';
 import { useUpdateStore } from '@/stores/useUpdateStore';
+import { useShallow } from 'zustand/react/shallow';
 import { UpdateDialog } from '@/components/ui/UpdateDialog';
 import { useDeviceInfo } from '@/lib/device';
 import { toast } from '@/components/ui';
@@ -14,7 +15,19 @@ const MIN_CHECKING_DURATION = 800; // ms
 export const AboutSettings: React.FC = () => {
   const [updateDialogOpen, setUpdateDialogOpen] = React.useState(false);
   const [showChecking, setShowChecking] = React.useState(false);
-  const updateStore = useUpdateStore();
+  const updateStore = useUpdateStore(useShallow((s) => ({
+    info: s.info,
+    checking: s.checking,
+    available: s.available,
+    error: s.error,
+    downloading: s.downloading,
+    downloaded: s.downloaded,
+    progress: s.progress,
+    runtimeType: s.runtimeType,
+    checkForUpdates: s.checkForUpdates,
+    downloadUpdate: s.downloadUpdate,
+    restartToUpdate: s.restartToUpdate,
+  })));
   const { isMobile } = useDeviceInfo();
 
   const currentVersion = updateStore.info?.currentVersion || 'unknown';

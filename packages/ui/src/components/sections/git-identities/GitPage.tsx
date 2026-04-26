@@ -29,6 +29,7 @@ import {
   RiShieldKeyholeLine,
 } from '@remixicon/react';
 import { useGitIdentitiesStore, type GitIdentityProfile, type DiscoveredGitCredential } from '@/stores/useGitIdentitiesStore';
+import { useShallow } from 'zustand/react/shallow';
 import { GitSettings } from '@/components/sections/openchamber/GitSettings';
 import { GitHubSettings } from '@/components/sections/openchamber/GitHubSettings';
 import { GitIdentityEditorDialog } from './GitIdentityEditorDialog';
@@ -64,7 +65,18 @@ export const GitPage: React.FC = () => {
     loadDefaultGitIdentityId,
     setDefaultGitIdentityId,
     getUnimportedCredentials,
-  } = useGitIdentitiesStore();
+  } = useGitIdentitiesStore(useShallow((s) => ({
+    profiles: s.profiles,
+    globalIdentity: s.globalIdentity,
+    defaultGitIdentityId: s.defaultGitIdentityId,
+    deleteProfile: s.deleteProfile,
+    loadProfiles: s.loadProfiles,
+    loadGlobalIdentity: s.loadGlobalIdentity,
+    loadDiscoveredCredentials: s.loadDiscoveredCredentials,
+    loadDefaultGitIdentityId: s.loadDefaultGitIdentityId,
+    setDefaultGitIdentityId: s.setDefaultGitIdentityId,
+    getUnimportedCredentials: s.getUnimportedCredentials,
+  })));
 
   const [editorOpen, setEditorOpen] = React.useState(false);
   const [editorProfileId, setEditorProfileId] = React.useState<string | null>(null);

@@ -737,7 +737,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
                   ) : (
                     <>
                       {setupCommands.map((command, index) => (
-                        <div key={index} className="flex gap-1.5">
+                        <div key={`${command}-${index}`} className="flex gap-1.5">
                           <Input
                             value={command}
                             onChange={(e) => {

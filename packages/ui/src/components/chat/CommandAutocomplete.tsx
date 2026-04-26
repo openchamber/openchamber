@@ -54,8 +54,10 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
 
   const [commands, setCommands] = React.useState<CommandInfo[]>([]);
   const [loading, setLoading] = React.useState(false);
-  const { commands: commandsWithMetadata, loadCommands: refreshCommands } = useCommandsStore();
-  const { skills, loadSkills: refreshSkills } = useSkillsStore();
+  const commandsWithMetadata = useCommandsStore((s) => s.commands);
+  const refreshCommands = useCommandsStore((s) => s.loadCommands);
+  const skills = useSkillsStore((s) => s.skills);
+  const refreshSkills = useSkillsStore((s) => s.loadSkills);
   const [selectedIndex, setSelectedIndex] = React.useState(0);
   const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
   const containerRef = React.useRef<HTMLDivElement | null>(null);

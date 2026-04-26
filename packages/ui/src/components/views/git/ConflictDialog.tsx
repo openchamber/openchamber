@@ -202,9 +202,9 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
               </div>
               <div className="bg-[var(--surface-elevated)] rounded-lg p-3 max-h-40 overflow-y-auto overflow-x-hidden">
                 <ul className="space-y-1">
-                  {displayFiles.map((file, index) => (
+                  {displayFiles.map((file) => (
                     <li
-                      key={index}
+                      key={file}
                       className="typography-micro text-foreground font-mono truncate block"
                       title={file}
                     >

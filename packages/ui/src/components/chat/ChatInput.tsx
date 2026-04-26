@@ -808,11 +808,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     const sendableAttachedFiles = attachedFiles;
 
+    const knownAgentNames = React.useMemo(
+        () => new Set(agents.map((agent) => agent.name.toLowerCase())),
+        [agents]
+    );
+    const knownAgentNamesRef = React.useRef(knownAgentNames);
+    knownAgentNamesRef.current = knownAgentNames;
+
     const hasInlineMentionForHighlight = React.useMemo(() => {
         if (!message || !message.includes('@') || inputMode === 'shell') {
             return false;
         }
-        const knownAgentNames = new Set(agents.map((agent) => agent.name.toLowerCase()));
         const mentionRegex = /@([^\s]+)/g;
         let match: RegExpExecArray | null;
         while ((match = mentionRegex.exec(message)) !== null) {
@@ -833,7 +839,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             }
         }
         return false;
-    }, [agents, inputMode, message]);
+    }, [inputMode, message, knownAgentNames]);
 
     const highlightedComposerContent = React.useMemo(() => {
         if (!hasInlineMentionForHighlight) {
@@ -841,7 +847,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
 
         const parts: Array<{ text: string; mentionKind: 'none' | 'file' | 'agent' }> = [];
-        const knownAgentNames = new Set(agents.map((agent) => agent.name.toLowerCase()));
         const mentionRegex = /@([^\s]+)/g;
         let lastIndex = 0;
         let match: RegExpExecArray | null;
@@ -874,7 +879,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
 
         return parts;
-    }, [agents, hasInlineMentionForHighlight, message]);
+    }, [hasInlineMentionForHighlight, message, knownAgentNames]);
 
     const sanitizeAttachmentsForSend = React.useCallback(
         (files: AttachedFile[] | undefined): AttachedFile[] => (files ?? [])
@@ -894,7 +899,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         const clientDirectory = opencodeClient.getDirectory() || '';
         const root = (chatSearchDirectory || clientDirectory).replace(/\\/g, '/').replace(/\/+$/, '');
-        const knownAgentNames = new Set(agents.map((agent) => agent.name.toLowerCase()));
         const seenPaths = new Set<string>();
         const attachments: AttachedFile[] = [];
 
@@ -917,7 +921,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 continue;
             }
 
-            if (knownAgentNames.has(mentionPath.toLowerCase())) {
+            if (knownAgentNamesRef.current.has(mentionPath.toLowerCase())) {
                 continue;
             }
 
@@ -964,7 +968,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             sanitizedText: rawText,
             attachments,
         };
-    }, [agents, chatSearchDirectory]);
+    }, [chatSearchDirectory]);
     const [autocompleteOverlayPosition, setAutocompleteOverlayPosition] = React.useState<AutocompleteOverlayPosition | null>(null);
     const abortTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const prevWasAbortedRef = React.useRef(false);
@@ -1664,7 +1668,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             const selectionStart = textarea?.selectionStart ?? message.length;
             const selectionEnd = textarea?.selectionEnd ?? message.length;
             const hasCollapsedSelection = selectionStart === selectionEnd;
-            const knownAgentNames = new Set(agents.map((agent) => agent.name.toLowerCase()));
 
             if (hasCollapsedSelection) {
                 const probeIndex = e.key === 'Backspace' ? selectionStart - 1 : selectionStart;
@@ -1682,7 +1685,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     const token = message.slice(tokenStart, tokenEnd);
                     const mentionContent = token.slice(1);
                     const looksLikeFileMention = FILE_MENTION_TOKEN.test(token)
-                        && !knownAgentNames.has(mentionContent.toLowerCase())
+                        && !knownAgentNamesRef.current.has(mentionContent.toLowerCase())
                         && isConfirmedFilePath(mentionContent);
 
                     if (looksLikeFileMention) {

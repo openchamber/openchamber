@@ -77,7 +77,9 @@ interface AddCatalogDialogProps {
 }
 
 export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpenChange }) => {
-  const { scanRepo, loadCatalog, isScanning } = useSkillsCatalogStore();
+  const scanRepo = useSkillsCatalogStore((s) => s.scanRepo);
+  const loadCatalog = useSkillsCatalogStore((s) => s.loadCatalog);
+  const isScanning = useSkillsCatalogStore((s) => s.isScanning);
   const defaultGitIdentityId = useGitIdentitiesStore((s) => s.defaultGitIdentityId);
   const loadDefaultGitIdentityId = useGitIdentitiesStore((s) => s.loadDefaultGitIdentityId);
 

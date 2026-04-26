@@ -20,6 +20,7 @@ import {
 import { RiAddLine, RiTerminalBoxLine, RiMore2Line, RiDeleteBinLine, RiFileCopyLine, RiRestartLine, RiEditLine } from '@remixicon/react';
 import { useCommandsStore, isCommandBuiltIn, type Command } from '@/stores/useCommandsStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
+import { useShallow } from 'zustand/react/shallow';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { cn } from '@/lib/utils';
 import { SettingsProjectSelector } from '@/components/sections/shared/SettingsProjectSelector';
@@ -44,8 +45,17 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
     createCommand,
     deleteCommand,
     loadCommands,
-  } = useCommandsStore();
-  const { skills, loadSkills } = useSkillsStore();
+  } = useCommandsStore(useShallow((s) => ({
+    selectedCommandName: s.selectedCommandName,
+    commands: s.commands,
+    setSelectedCommand: s.setSelectedCommand,
+    setCommandDraft: s.setCommandDraft,
+    createCommand: s.createCommand,
+    deleteCommand: s.deleteCommand,
+    loadCommands: s.loadCommands,
+  })));
+  const skills = useSkillsStore((s) => s.skills);
+  const loadSkills = useSkillsStore((s) => s.loadSkills);
 
   React.useEffect(() => {
     loadCommands();

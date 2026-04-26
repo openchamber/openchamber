@@ -4,6 +4,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useFireworksCelebration } from '@/contexts/FireworksContext';
 import type { GitIdentityProfile, CommitFileEntry } from '@/lib/api/types';
 import { useGitIdentitiesStore } from '@/stores/useGitIdentitiesStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import {
@@ -270,7 +271,14 @@ export const GitView: React.FC = () => {
   }, [currentSessionId, inferredWorktreeMetadata, newSessionDraft?.open, worktreeMap]);
 
   const { profiles, globalIdentity, defaultGitIdentityId, loadProfiles, loadGlobalIdentity, loadDefaultGitIdentityId } =
-    useGitIdentitiesStore();
+    useGitIdentitiesStore(useShallow((s) => ({
+      profiles: s.profiles,
+      globalIdentity: s.globalIdentity,
+      defaultGitIdentityId: s.defaultGitIdentityId,
+      loadProfiles: s.loadProfiles,
+      loadGlobalIdentity: s.loadGlobalIdentity,
+      loadDefaultGitIdentityId: s.loadDefaultGitIdentityId,
+    })));
 
   const isGitRepo = useIsGitRepo(currentDirectory ?? null);
   const status = useGitStatus(currentDirectory ?? null);

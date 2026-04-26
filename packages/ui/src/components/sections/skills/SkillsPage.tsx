@@ -4,6 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
 import { useSkillsStore, type SkillConfig, type SkillScope, type SupportingFile, type PendingFile } from '@/stores/useSkillsStore';
+import { useShallow } from 'zustand/react/shallow';
 import { RiAddLine, RiBookOpenLine, RiDeleteBinLine, RiFileLine, RiFolderLine, RiRobot2Line, RiUser3Line } from '@remixicon/react';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
@@ -38,17 +39,27 @@ const SkillsCatalogStandalone: React.FC = () => (
 );
 
 const SkillsInstalledPage: React.FC = () => {
-  const { 
-    selectedSkillName, 
-    getSkillByName, 
+  const {
+    selectedSkillName,
+    getSkillByName,
     getSkillDetail,
-    createSkill, 
-    updateSkill, 
-    skills, 
-    skillDraft, 
+    createSkill,
+    updateSkill,
+    skills,
+    skillDraft,
     setSkillDraft,
     setSelectedSkill,
-  } = useSkillsStore();
+  } = useSkillsStore(useShallow((s) => ({
+    selectedSkillName: s.selectedSkillName,
+    getSkillByName: s.getSkillByName,
+    getSkillDetail: s.getSkillDetail,
+    createSkill: s.createSkill,
+    updateSkill: s.updateSkill,
+    skills: s.skills,
+    skillDraft: s.skillDraft,
+    setSkillDraft: s.setSkillDraft,
+    setSelectedSkill: s.setSelectedSkill,
+  })));
 
   const selectedSkill = selectedSkillName ? getSkillByName(selectedSkillName) : null;
   const isNewSkill = Boolean(skillDraft && skillDraft.name === selectedSkillName && !selectedSkill);

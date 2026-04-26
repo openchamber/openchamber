@@ -243,6 +243,8 @@ export const renderListOutput = (output: string, options?: { unstyled?: boolean 
     }
 };
 
+const GREP_DOT_STYLE = { backgroundColor: 'var(--status-info)', opacity: 0.6 };
+
 export const renderGrepOutput = (output: string, isMobile: boolean, options?: { unstyled?: boolean }) => {
     try {
         const lines = output.trim().split('\n').filter(Boolean);
@@ -287,7 +289,7 @@ export const renderGrepOutput = (output: string, isMobile: boolean, options?: { 
                                 }
                                 return (
                                     <div key={idx} className={cn('flex items-start gap-2 min-w-0', isMobile ? 'typography-micro' : 'typography-code')}>
-                                        <div className="w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1.5" style={{ backgroundColor: 'var(--status-info)', opacity: 0.6 }} />
+                                        <div className="w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1.5" style={GREP_DOT_STYLE} />
                                         <div className="flex gap-2 min-w-0 flex-1">
                                             {match.lineNum && (
                                                 <span className="text-muted-foreground font-mono whitespace-nowrap">
@@ -311,6 +313,8 @@ export const renderGrepOutput = (output: string, isMobile: boolean, options?: { 
         return null;
     }
 };
+
+const GLOB_DOT_STYLE = { backgroundColor: 'var(--status-info)', opacity: 0.6 };
 
 export const renderGlobOutput = (output: string, isMobile: boolean, options?: { unstyled?: boolean }) => {
     try {
@@ -350,7 +354,7 @@ export const renderGlobOutput = (output: string, isMobile: boolean, options?: { 
                         <div className={cn('pl-4 grid gap-1', isMobile ? 'grid-cols-1' : 'grid-cols-2')}>
                             {groups[dir].sort().map((filename) => (
                                 <div key={filename} className={cn('flex items-center gap-2 min-w-0', isMobile ? 'typography-micro' : 'typography-code')}>
-                                    <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'var(--status-info)', opacity: 0.6 }} />
+                                    <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={GLOB_DOT_STYLE} />
                                     <span className="text-foreground font-mono truncate">{filename}</span>
                                 </div>
                             ))}
@@ -378,12 +382,11 @@ export const renderTodoOutput = (output: string, options?: { unstyled?: boolean 
             return null;
         }
 
-        const todosByStatus = {
-            in_progress: todos.filter((t) => t.status === 'in_progress'),
-            pending: todos.filter((t) => t.status === 'pending'),
-            completed: todos.filter((t) => t.status === 'completed'),
-            cancelled: todos.filter((t) => t.status === 'cancelled'),
-        };
+        const todosByStatus = todos.reduce((acc, t) => {
+            const status = t.status as keyof typeof acc;
+            if (status in acc) acc[status].push(t);
+            return acc;
+        }, { in_progress: [] as Todo[], pending: [] as Todo[], completed: [] as Todo[], cancelled: [] as Todo[] });
 
         const getPriorityDot = (priority?: string) => {
             const baseClasses = 'w-2 h-2 rounded-full flex-shrink-0 mt-1';
