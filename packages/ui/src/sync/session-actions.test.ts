@@ -45,7 +45,8 @@ const mockSdk = {
 // Mock opencodeClient singleton
 mock.module("@/lib/opencode/client", () => ({
   opencodeClient: {
-    getScopedSdkClient: (_directory: string) => mockScopedClient,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    getScopedSdkClient: (_: string) => mockScopedClient,
     getDirectory: () => "/test/project",
   },
 }))
@@ -94,9 +95,9 @@ mock.module("@/lib/messages/synthetic", () => ({
 }))
 
 import { create, type StoreApi } from "zustand"
-import type { State } from "./types"
 import { INITIAL_STATE } from "./types"
 import type { DirectoryStore } from "./child-store"
+import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
 
 function createStore(permissions: Record<string, PermissionRequest[]>): StoreApi<DirectoryStore> {
   return create<DirectoryStore>()((set) => ({
@@ -115,7 +116,7 @@ function createChildStores(entries: Array<[string, StoreApi<DirectoryStore>]>) {
       if (!store) throw new Error(`No store for ${dir}`)
       return store
     },
-  } as any
+  } as unknown as import("./child-store").ChildStoreManager
 }
 
 describe("respondToPermission passes directory", () => {
@@ -137,7 +138,7 @@ describe("respondToPermission passes directory", () => {
     const childStores = createChildStores([["/test/project", store]])
 
     const { setActionRefs, respondToPermission } = await import("./session-actions")
-    setActionRefs(mockSdk as any, childStores, () => "/test/project")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
 
     await respondToPermission("session-a", "perm-1", "once")
 
@@ -151,7 +152,7 @@ describe("respondToPermission passes directory", () => {
     const childStores = createChildStores([])
 
     const { setActionRefs, respondToPermission } = await import("./session-actions")
-    setActionRefs(mockSdk as any, childStores, () => "/test/project")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
 
     await respondToPermission("session-b", "perm-2", "always")
 
@@ -165,7 +166,7 @@ describe("respondToPermission passes directory", () => {
     const childStores = createChildStores([])
 
     const { setActionRefs, respondToPermission } = await import("./session-actions")
-    setActionRefs(mockSdk as any, childStores, () => "/fallback/dir")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/fallback/dir")
 
     await respondToPermission("unknown-session", "perm-3", "reject")
 
@@ -195,7 +196,7 @@ describe("dismissPermission passes directory", () => {
     const childStores = createChildStores([["/test/project", store]])
 
     const { setActionRefs, dismissPermission } = await import("./session-actions")
-    setActionRefs(mockSdk as any, childStores, () => "/test/project")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
 
     await dismissPermission("session-a", "perm-10")
 
@@ -215,7 +216,7 @@ describe("respondToQuestion passes directory", () => {
     const childStores = createChildStores([])
 
     const { setActionRefs, respondToQuestion } = await import("./session-actions")
-    setActionRefs(mockSdk as any, childStores, () => "/test/project")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
 
     await respondToQuestion("session-a", "q-1", [["answer1"]])
 
@@ -234,7 +235,7 @@ describe("rejectQuestion passes directory", () => {
     const childStores = createChildStores([])
 
     const { setActionRefs, rejectQuestion } = await import("./session-actions")
-    setActionRefs(mockSdk as any, childStores, () => "/test/project")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
 
     await rejectQuestion("session-a", "q-2")
 
