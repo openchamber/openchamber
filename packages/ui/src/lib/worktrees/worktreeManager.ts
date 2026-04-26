@@ -358,6 +358,22 @@ export async function removeProjectWorktree(project: ProjectRef, worktree: Workt
 
   _worktreeListCache.delete(normalizePath(project.path));
 
+  // Update sidebar store so removed worktree disappears immediately
+  const normalizedWorktreePath = normalizePath(worktree.path);
+  const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
+  const updatedByProject = new Map(currentByProject);
+  const projectWorktrees = updatedByProject.get(normalizePath(project.path)) ?? [];
+  updatedByProject.set(
+    normalizePath(project.path),
+    projectWorktrees.filter((w) => normalizePath(w.path) !== normalizedWorktreePath),
+  );
+  useSessionUIStore.setState({
+    availableWorktreesByProject: updatedByProject,
+    availableWorktrees: useSessionUIStore.getState().availableWorktrees.filter(
+      (w) => normalizePath(w.path) !== normalizedWorktreePath,
+    ),
+  });
+
   const branchName = (worktree.branch || '').replace(/^refs\/heads\//, '').trim();
   if (deleteRemote && branchName) {
     await deleteRemoteBranch(projectDirectory, { branch: branchName, remote: remoteName }).catch(() => undefined);
