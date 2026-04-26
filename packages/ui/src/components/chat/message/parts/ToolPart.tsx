@@ -739,10 +739,6 @@ const ToolScrollableTextOutput: React.FC<{
     const renderedOutput = getToolOutputText(output, part, metadata);
     const outputLanguage = getToolOutputLanguage(output, part, metadata, input);
     const jsonResult = React.useMemo(() => tryParseJsonOutput(renderedOutput), [renderedOutput]);
-    const collapsedCustomStyle = React.useMemo(
-        () => ({ ...toolDisplayStyles.getCollapsedStyles(), padding: 0, overflow: 'visible' }),
-        []
-    );
 
     if (jsonResult.isJson) {
         return (
@@ -762,7 +758,7 @@ const ToolScrollableTextOutput: React.FC<{
                 style={syntaxTheme}
                 language={outputLanguage}
                 PreTag="div"
-                customStyle={collapsedCustomStyle}
+                customStyle={TOOL_COLLAPSED_CUSTOM_STYLE}
                 codeTagProps={CODE_TAG_PROPS}
                 wrapLongLines
             >
@@ -1226,6 +1222,12 @@ const TOOL_DIFF_METRICS = {
     diffHeaderHeight: 44,
     hunkSeparatorHeight: 24,
     fileGap: 0,
+};
+
+const TOOL_COLLAPSED_CUSTOM_STYLE: React.CSSProperties = {
+    ...toolDisplayStyles.getCollapsedStyles(),
+    padding: 0,
+    overflow: 'visible',
 };
 
 const CODE_TAG_PROPS = { style: { background: 'transparent', backgroundColor: 'transparent' } };

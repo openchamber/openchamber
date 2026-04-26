@@ -707,6 +707,8 @@ const loadShellEnv = () => {
 };
 
 // Merge the user's login-shell env (PATH, etc.) into this process before we
+import { pathLooksUserConfigured, mergePathValues } from '@openchamber/web/server/lib/opencode/path-utils.js';
+
 // import/start the server in-process. The server and its children (opencode
 // CLI, git, etc.) inherit process.env directly now — there is no sidecar
 // subprocess to hand a custom env to.
@@ -716,15 +718,7 @@ const inheritUserShellEnv = () => {
 
   const homeDir = os.homedir();
   const currentPath = process.env.PATH || '';
-  const homeWithSep = homeDir + path.sep;
-  const currentPathLooksUserConfigured = currentPath.split(':').some((segment) => {
-    if (!segment) return false;
-    if (segment === homeDir || segment.startsWith(homeWithSep)) return true;
-    if (segment.startsWith('/opt/homebrew/') || segment.startsWith('/opt/pkg/') || segment.startsWith('/opt/pmk/') || segment.startsWith('/snap/')) return true;
-    const last = segment.split('/').filter(Boolean).pop();
-    if (last && ['.cargo', '.bun', '.nvm', '.pyenv', '.rbenv', '.sdkman', '.asdf', '.volta', '.fnm', '.local', '.opencode', 'node_modules'].some((d) => last === d)) return true;
-    return false;
-  });
+  const currentPathLooksUserConfigured = pathLooksUserConfigured(currentPath, homeDir, ':');
 
   for (const [key, value] of Object.entries(shellEnv)) {
     if (key === 'PATH') continue;
@@ -735,16 +729,7 @@ const inheritUserShellEnv = () => {
 
   const shellPath = typeof shellEnv.PATH === 'string' ? shellEnv.PATH : '';
   if (!currentPathLooksUserConfigured && shellPath) {
-    // Merge: prefer shell PATH, append any current entries not already present.
-    const seen = new Set();
-    const merged = [];
-    for (const segment of [...shellPath.split(':'), ...currentPath.split(':')]) {
-      if (segment && !seen.has(segment)) {
-        seen.add(segment);
-        merged.push(segment);
-      }
-    }
-    process.env.PATH = merged.join(':');
+    process.env.PATH = mergePathValues(shellPath, currentPath, ':');
   }
 };
 
