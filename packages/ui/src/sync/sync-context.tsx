@@ -34,6 +34,7 @@ import { appendNotification } from "./notification-store"
 import type { State } from "./types"
 import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
 import type { PermissionRequest } from "@/types/permission"
+import { EMPTY_MESSAGES, EMPTY_PARTS, EMPTY_PERMISSION_REQUESTS, EMPTY_QUESTION_REQUESTS } from "@/constants/empty"
 import type { QuestionRequest } from "@/types/question"
 import * as sessionActions from "./session-actions"
 
@@ -2048,7 +2049,5 @@ export function useIsSessionWorking(sessionID: string, directory?: string): bool
   }, [status, permissions, messages])
 }
 
-const EMPTY_MESSAGES: Message[] = []
-const EMPTY_PARTS: Part[] = []
-const EMPTY_PERMISSION_REQUESTS: PermissionRequest[] = []
-const EMPTY_QUESTION_REQUESTS: QuestionRequest[] = []
+// Re-exported from centralized constants for consumers that import from this file.
+export { EMPTY_MESSAGES, EMPTY_PARTS, EMPTY_PERMISSION_REQUESTS, EMPTY_QUESTION_REQUESTS }

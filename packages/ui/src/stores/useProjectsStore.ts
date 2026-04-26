@@ -326,10 +326,13 @@ const getVSCodeWorkspaceProject = (): { projects: ProjectEntry[]; activeProjectI
 // Always prefer the workspace project over any persisted multi-project registry.
 const vscodeWorkspace = getVSCodeWorkspaceProject();
 const effectiveInitialProjects = vscodeWorkspace?.projects ?? initialProjects;
-const persistedInitialActiveProjectId = vscodeWorkspace?.activeProjectId ?? readPersistedActiveProjectId();
-const initialActiveProjectId = effectiveInitialProjects.some((project) => project.id === persistedInitialActiveProjectId)
-  ? persistedInitialActiveProjectId
-  : effectiveInitialProjects[0]?.id ?? null;
+const persistedActiveProjectId = readPersistedActiveProjectId();
+const initialActiveProjectId = vscodeWorkspace?.activeProjectId
+  ?? (persistedActiveProjectId && effectiveInitialProjects.some((project) => project.id === persistedActiveProjectId)
+    ? persistedActiveProjectId
+    : null)
+  ?? effectiveInitialProjects[0]?.id
+  ?? null;
 
 if (vscodeWorkspace) {
   cacheProjects(effectiveInitialProjects, initialActiveProjectId);
@@ -465,6 +468,9 @@ export const useProjectsStore = create<ProjectsStore>()(
 
       set({ projects: nextProjects, activeProjectId: id });
       persistProjects(nextProjects, id);
+
+      opencodeClient.setDirectory(target.path);
+      useDirectoryStore.getState().setDirectory(target.path, { showOverlay: false });
     },
 
     renameProject: (id: string, label: string) => {
@@ -653,6 +659,9 @@ export const useProjectsStore = create<ProjectsStore>()(
       const incomingActive = typeof settings.activeProjectId === 'string' && settings.activeProjectId.trim()
         ? settings.activeProjectId.trim()
         : null;
+      const resolvedIncomingActive = incomingActive && incomingProjects.some((project) => project.id === incomingActive)
+        ? incomingActive
+        : incomingProjects[0]?.id ?? null;
 
       const current = get();
 
@@ -675,22 +684,24 @@ export const useProjectsStore = create<ProjectsStore>()(
       }
 
       const projectsChanged = JSON.stringify(current.projects) !== JSON.stringify(incomingProjects);
-      const activeChanged = current.activeProjectId !== incomingActive;
+      const activeChanged = current.activeProjectId !== resolvedIncomingActive;
 
       if (!projectsChanged && !activeChanged) {
         return;
       }
 
-      set({ projects: incomingProjects, activeProjectId: incomingActive });
-      cacheProjects(incomingProjects, incomingActive);
+      set({ projects: incomingProjects, activeProjectId: resolvedIncomingActive });
+      cacheProjects(incomingProjects, resolvedIncomingActive);
 
-      if (incomingActive) {
-        const activeProject = incomingProjects.find((project) => project.id === incomingActive);
+      if (resolvedIncomingActive) {
+        const activeProject = incomingProjects.find((project) => project.id === resolvedIncomingActive);
         if (activeProject) {
           opencodeClient.setDirectory(activeProject.path);
           useDirectoryStore.getState().setDirectory(activeProject.path, { showOverlay: false });
         }
       }
+
+      void reconcileMissingActiveProject();
     },
 
     getActiveProject: () => {
@@ -703,6 +714,95 @@ export const useProjectsStore = create<ProjectsStore>()(
 
   }), { name: 'projects-store' })
 );
+
+const projectPathExists = async (path: string): Promise<boolean> => {
+  const normalized = normalizeProjectPath(path);
+  if (!normalized) {
+    return false;
+  }
+  return await opencodeClient.probeDirectory(normalized);
+};
+
+const findFirstExistingProject = async (
+  projects: ProjectEntry[],
+  excludedProjectId?: string | null,
+): Promise<ProjectEntry | null> => {
+  for (const project of projects) {
+    if (project.id === excludedProjectId) {
+      continue;
+    }
+    if (await projectPathExists(project.path)) {
+      return project;
+    }
+  }
+  return null;
+};
+
+const reconcileMissingActiveProject = async (): Promise<void> => {
+  if (vscodeWorkspace || typeof window === 'undefined') {
+    return;
+  }
+
+  const state = useProjectsStore.getState();
+  const activeProjectId = state.activeProjectId;
+  if (!activeProjectId) {
+    return;
+  }
+
+  const activeProject = state.projects.find((project) => project.id === activeProjectId);
+  if (!activeProject) {
+    const fallbackProject = state.projects[0] ?? null;
+    const nextActiveProjectId = fallbackProject?.id ?? null;
+    useProjectsStore.setState({ activeProjectId: nextActiveProjectId });
+    persistProjects(state.projects, nextActiveProjectId);
+    if (fallbackProject) {
+      useDirectoryStore.getState().setDirectory(fallbackProject.path, { showOverlay: false });
+    }
+    return;
+  }
+
+  if (await projectPathExists(activeProject.path)) {
+    return;
+  }
+
+  const fallbackProject = await findFirstExistingProject(state.projects, activeProject.id);
+  const latest = useProjectsStore.getState();
+  if (latest.activeProjectId !== activeProject.id) {
+    return;
+  }
+
+  const nextActiveProjectId = fallbackProject?.id ?? null;
+  useProjectsStore.setState({ activeProjectId: nextActiveProjectId });
+  persistProjects(latest.projects, nextActiveProjectId);
+
+  if (streamDebugEnabled()) {
+    console.warn('[ProjectsStore] Active project path is missing; switching active project', {
+      missingProjectId: activeProject.id,
+      missingProjectPath: activeProject.path,
+      nextActiveProjectId,
+      nextActiveProjectPath: fallbackProject?.path ?? null,
+    });
+  }
+
+  if (fallbackProject) {
+    useDirectoryStore.getState().setDirectory(fallbackProject.path, { showOverlay: false });
+    return;
+  }
+
+  void useDirectoryStore.getState().goHome();
+};
+
+if (!vscodeWorkspace && typeof window !== 'undefined' && initialActiveProjectId) {
+  const initialActiveProject = effectiveInitialProjects.find((project) => project.id === initialActiveProjectId) ?? null;
+  if (initialActiveProject) {
+    const currentDirectory = useDirectoryStore.getState().currentDirectory;
+    if (currentDirectory !== initialActiveProject.path) {
+      useDirectoryStore.getState().setDirectory(initialActiveProject.path, { showOverlay: false });
+    }
+  }
+
+  void reconcileMissingActiveProject();
+}
 
 if (typeof window !== 'undefined') {
   window.addEventListener('openchamber:settings-synced', (event: Event) => {

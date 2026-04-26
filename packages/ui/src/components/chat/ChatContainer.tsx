@@ -42,9 +42,8 @@ import { usePlanDetection } from '@/hooks/usePlanDetection';
 import { getAllSyncSessions } from '@/sync/sync-refs';
 import { useI18n } from '@/lib/i18n';
 
-const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = [];
-const EMPTY_PERMISSIONS: PermissionRequest[] = [];
-const EMPTY_QUESTIONS: QuestionRequest[] = [];
+import { EMPTY_OBJECT, EMPTY_PERMISSION_REQUESTS, EMPTY_QUESTION_REQUESTS, emptyArray } from '@/constants/empty';
+const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = emptyArray<{ info: Message; parts: Part[] }>() as Array<{ info: Message; parts: Part[] }>;
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
 const SESSION_RESELECTED_EVENT = 'openchamber:session-reselected';
 const DEFAULT_RETRY_MESSAGE = 'Quota limit reached. Retrying automatically.';
@@ -376,10 +375,10 @@ export const ChatContainer: React.FC = () => {
 
     // Permissions & questions from sync system
     const allPermissions = useDirectorySync(
-        React.useCallback((s) => s.permission ?? {}, []),
+        React.useCallback((s) => s.permission ?? EMPTY_OBJECT, []),
     );
     const allQuestions = useDirectorySync(
-        React.useCallback((s) => s.question ?? {}, []),
+        React.useCallback((s) => s.question ?? EMPTY_OBJECT, []),
     );
 
     // Convert Record → Map for blockingRequests helpers
@@ -404,12 +403,12 @@ export const ChatContainer: React.FC = () => {
     );
 
     const sessionPermissions = React.useMemo(() => {
-        if (scopedSessionIds.length === 0) return EMPTY_PERMISSIONS;
+        if (scopedSessionIds.length === 0) return EMPTY_PERMISSION_REQUESTS;
         return flattenBlockingRequests(permissionsMap, scopedSessionIds);
     }, [permissionsMap, scopedSessionIds]);
 
     const sessionQuestions = React.useMemo(() => {
-        if (scopedSessionIds.length === 0) return EMPTY_QUESTIONS;
+        if (scopedSessionIds.length === 0) return EMPTY_QUESTION_REQUESTS;
         return flattenBlockingRequests(questionsMap, scopedSessionIds);
     }, [questionsMap, scopedSessionIds]);
     const sessionIsWorking = React.useMemo(() => {

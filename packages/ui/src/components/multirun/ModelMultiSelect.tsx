@@ -21,6 +21,7 @@ export interface ModelSelectionWithId {
   modelID: string;
   displayName?: string;
   variant?: string;
+  backendId?: string;
   instanceId: string;
 }
 
@@ -30,6 +31,7 @@ export interface ModelSelection {
   modelID: string;
   displayName?: string;
   variant?: string;
+  backendId?: string;
 }
 
 // eslint-disable-next-line react-refresh/only-export-components -- Utility is tightly coupled with ModelMultiSelect
@@ -100,6 +102,8 @@ export interface ModelMultiSelectProps {
   maxModels?: number;
   /** Optional className for add model trigger button */
   addButtonClassName?: string;
+  /** Backend currently being browsed in the parent UI */
+  activeBackendId?: string;
 }
 
 /**
@@ -115,6 +119,7 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
   showChips = true,
   maxModels,
   addButtonClassName,
+  activeBackendId,
 }) => {
   const { t } = useI18n();
   const providers = useConfigStore((state) => state.providers);
@@ -281,13 +286,14 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
         key={`${keyPrefix}-${key}`}
         ref={(el) => { itemRefs.current[flatIndex] = el; }}
         type="button"
-        onClick={() => {
-          onAdd({
-            providerID,
-            modelID,
-            displayName: (model.name as string) || modelID,
-            instanceId: generateInstanceId(),
-          });
+          onClick={() => {
+            onAdd({
+              providerID,
+              modelID,
+              displayName: (model.name as string) || modelID,
+              backendId: activeBackendId,
+              instanceId: generateInstanceId(),
+            });
           // Don't close dropdown - allow selecting multiple
         }}
         onMouseEnter={() => setSelectedIndex(flatIndex)}

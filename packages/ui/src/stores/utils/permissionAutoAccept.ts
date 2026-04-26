@@ -1,6 +1,59 @@
 import type { Session } from "@opencode-ai/sdk/v2/client";
 
-export type PermissionAutoAcceptMap = Record<string, boolean>;
+export type PermissionLevel = 'manual' | 'auto-accept' | 'full-access';
+
+export type PermissionAutoAcceptMap = Record<string, boolean | PermissionLevel>;
+
+/**
+ * Normalize a stored value (boolean or string) to a PermissionLevel.
+ * Handles backward compatibility with legacy boolean values.
+ */
+export const resolvePermissionLevel = (value: boolean | PermissionLevel | undefined): PermissionLevel => {
+    if (value === true || value === 'auto-accept') return 'auto-accept';
+    if (value === 'full-access') return 'full-access';
+    return 'manual';
+};
+
+/**
+ * Returns true for permission levels that auto-reply to permission requests.
+ */
+export const isAutoAcceptingLevel = (level: PermissionLevel): boolean => {
+    return level === 'auto-accept' || level === 'full-access';
+};
+
+const DIRECTORY_WILDCARD = '*';
+
+const encodeBase64 = (value: string): string => {
+    try {
+        const bytes = new TextEncoder().encode(value);
+        let binary = '';
+        for (const byte of bytes) {
+            binary += String.fromCharCode(byte);
+        }
+        return btoa(binary);
+    } catch {
+        return btoa(value);
+    }
+};
+
+export const normalizeDirectory = (value: string | null | undefined): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+        return null;
+    }
+    const normalized = trimmed.replace(/\\/g, '/');
+    if (normalized === '/') {
+        return '/';
+    }
+    return normalized.length > 1 ? normalized.replace(/\/+$/g, '') : normalized;
+};
+
+export const directoryAcceptKey = (directory: string): string => `${encodeBase64(directory)}/${DIRECTORY_WILDCARD}`;
+
+export const sessionAcceptKey = (sessionID: string, directory: string): string => `${encodeBase64(directory)}/${sessionID}`;
 
 const buildSessionMap = (sessions: Session[]): Map<string, Session> => {
   const map = new Map<string, Session>();
@@ -25,20 +78,47 @@ const resolveLineage = (sessionID: string, sessions: Session[]): string[] => {
   return result;
 };
 
+/**
+ * Look up the resolved PermissionLevel for a session, walking the lineage.
+ */
+export const getPermissionLevel = (input: {
+    autoAccept: PermissionAutoAcceptMap;
+    sessions: Session[];
+    sessionID: string;
+    directory: string;
+}): PermissionLevel => {
+    const { autoAccept, sessions, sessionID, directory } = input;
+
+    for (const id of resolveLineage(sessionID, sessions)) {
+        const key = sessionAcceptKey(id, directory);
+        if (key in autoAccept) {
+            return resolvePermissionLevel(autoAccept[key]);
+        }
+
+        // Legacy fallback for pre-directory keys.
+        if (id in autoAccept) {
+            return resolvePermissionLevel(autoAccept[id]);
+        }
+    }
+
+    const directoryKey = directoryAcceptKey(directory);
+    if (directoryKey in autoAccept) {
+        return resolvePermissionLevel(autoAccept[directoryKey]);
+    }
+
+    return 'manual';
+};
+
 export const autoRespondsPermission = (input: {
   autoAccept: PermissionAutoAcceptMap;
   sessions: Session[];
   sessionID: string;
+  directory: string;
 }): boolean => {
-  const { autoAccept, sessions, sessionID } = input;
-  const lineage = resolveLineage(sessionID, sessions);
+    return isAutoAcceptingLevel(getPermissionLevel(input));
+};
 
-  for (const id of lineage) {
-    if (!Object.prototype.hasOwnProperty.call(autoAccept, id)) {
-      continue;
-    }
-    return autoAccept[id] === true;
-  }
-
-  return false;
+export const isDirectoryAutoAccepting = (autoAccept: PermissionAutoAcceptMap, directory: string): boolean => {
+    const key = directoryAcceptKey(directory);
+    return isAutoAcceptingLevel(resolvePermissionLevel(autoAccept[key]));
 };

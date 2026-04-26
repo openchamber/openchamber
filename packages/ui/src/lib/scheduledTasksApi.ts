@@ -15,6 +15,7 @@ export type ScheduledTask = {
   };
   execution: {
     prompt: string;
+    backendId: string;
     providerID: string;
     modelID: string;
     variant?: string;

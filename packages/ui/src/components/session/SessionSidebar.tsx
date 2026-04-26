@@ -247,26 +247,38 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const setDirectory = useDirectoryStore((state) => state.setDirectory);
 
-  const projects = useProjectsStore((state) => state.projects);
-  const activeProjectId = useProjectsStore((state) => state.activeProjectId);
-  const addProject = useProjectsStore((state) => state.addProject);
-  const removeProject = useProjectsStore((state) => state.removeProject);
-  const setActiveProjectIdOnly = useProjectsStore((state) => state.setActiveProjectIdOnly);
-  const updateProjectMeta = useProjectsStore((state) => state.updateProjectMeta);
-  const reorderProjects = useProjectsStore((state) => state.reorderProjects);
+  const {
+    projects, activeProjectId, addProject, removeProject,
+    setActiveProjectIdOnly, updateProjectMeta, reorderProjects,
+  } = useProjectsStore(useShallow((state) => ({
+    projects: state.projects,
+    activeProjectId: state.activeProjectId,
+    addProject: state.addProject,
+    removeProject: state.removeProject,
+    setActiveProjectIdOnly: state.setActiveProjectIdOnly,
+    updateProjectMeta: state.updateProjectMeta,
+    reorderProjects: state.reorderProjects,
+  })));
 
-  const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
-  const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
-  const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
-  const toggleHelpDialog = useUIStore((state) => state.toggleHelpDialog);
-  const setAboutDialogOpen = useUIStore((state) => state.setAboutDialogOpen);
-  const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
-  const setScheduledTasksDialogOpen = useUIStore((state) => state.setScheduledTasksDialogOpen);
-  const toggleSidebar = useUIStore((state) => state.toggleSidebar);
-  const openMultiRunLauncher = useUIStore((state) => state.openMultiRunLauncher);
-  const notifyOnSubtasks = useUIStore((state) => state.notifyOnSubtasks);
-  const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
-  const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
+  const {
+    setActiveMainTab, openContextPanelTab, setSettingsDialogOpen,
+    toggleHelpDialog, setAboutDialogOpen, setSessionSwitcherOpen,
+    setScheduledTasksDialogOpen, toggleSidebar, openMultiRunLauncher, notifyOnSubtasks,
+    showDeletionDialog, setShowDeletionDialog,
+  } = useUIStore(useShallow((state) => ({
+    setActiveMainTab: state.setActiveMainTab,
+    openContextPanelTab: state.openContextPanelTab,
+    setSettingsDialogOpen: state.setSettingsDialogOpen,
+    toggleHelpDialog: state.toggleHelpDialog,
+    setAboutDialogOpen: state.setAboutDialogOpen,
+    setSessionSwitcherOpen: state.setSessionSwitcherOpen,
+    setScheduledTasksDialogOpen: state.setScheduledTasksDialogOpen,
+    toggleSidebar: state.toggleSidebar,
+    openMultiRunLauncher: state.openMultiRunLauncher,
+    notifyOnSubtasks: state.notifyOnSubtasks,
+    showDeletionDialog: state.showDeletionDialog,
+    setShowDeletionDialog: state.setShowDeletionDialog,
+  })));
 
   const debouncedSessionSearchQuery = useDebouncedValue(sessionSearchQuery, 120);
   const normalizedSessionSearchQuery = React.useMemo(
@@ -277,19 +289,26 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const hasSessionSearchQuery = normalizedSessionSearchQuery.length > 0;
 
   // Session Folders store
-  const collapsedFolderIds = useSessionFoldersStore((state) => state.collapsedFolderIds);
-  const foldersMap = useSessionFoldersStore((state) => state.foldersMap);
-  const getFoldersForScope = useSessionFoldersStore((state) => state.getFoldersForScope);
-  const createFolder = useSessionFoldersStore((state) => state.createFolder);
-  const renameFolder = useSessionFoldersStore((state) => state.renameFolder);
-  const deleteFolder = useSessionFoldersStore((state) => state.deleteFolder);
-  const addSessionToFolder = useSessionFoldersStore((state) => state.addSessionToFolder);
-  const addSessionsToFolder = useSessionFoldersStore((state) => state.addSessionsToFolder);
-  const removeSessionFromFolder = useSessionFoldersStore((state) => state.removeSessionFromFolder);
-  const removeSessionsFromFolders = useSessionFoldersStore((state) => state.removeSessionsFromFolders);
-  const toggleFolderCollapse = useSessionFoldersStore((state) => state.toggleFolderCollapse);
-  const cleanupSessions = useSessionFoldersStore((state) => state.cleanupSessions);
-  const getSessionFolderId = useSessionFoldersStore((state) => state.getSessionFolderId);
+  const {
+    collapsedFolderIds, foldersMap, getFoldersForScope,
+    createFolder, renameFolder, deleteFolder,
+    addSessionToFolder, addSessionsToFolder, removeSessionFromFolder, removeSessionsFromFolders,
+    toggleFolderCollapse, cleanupSessions, getSessionFolderId,
+  } = useSessionFoldersStore(useShallow((state) => ({
+    collapsedFolderIds: state.collapsedFolderIds,
+    foldersMap: state.foldersMap,
+    getFoldersForScope: state.getFoldersForScope,
+    createFolder: state.createFolder,
+    renameFolder: state.renameFolder,
+    deleteFolder: state.deleteFolder,
+    addSessionToFolder: state.addSessionToFolder,
+    addSessionsToFolder: state.addSessionsToFolder,
+    removeSessionFromFolder: state.removeSessionFromFolder,
+    removeSessionsFromFolders: state.removeSessionsFromFolders,
+    toggleFolderCollapse: state.toggleFolderCollapse,
+    cleanupSessions: state.cleanupSessions,
+    getSessionFolderId: state.getSessionFolderId,
+  })));
 
   useSessionSearchEffects({
     isSessionSearchOpen,
@@ -302,20 +321,29 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   const sync = useSync();
   const liveSessions = useAllLiveSessions();
+  const { globalActiveSessions, archivedSessions, hasLoadedGlobalSessions } = useGlobalSessionsStore(
+    useShallow((state) => ({
+      globalActiveSessions: state.activeSessions,
+      archivedSessions: state.archivedSessions,
+      hasLoadedGlobalSessions: state.hasLoaded,
+    })),
+  );
+  const {
+    currentSessionId, newSessionDraftOpen, setCurrentSession,
+    updateSessionTitle, shareSession, unshareSession,
+    worktreeMetadata, availableWorktreesByProject, openNewSessionDraft,
+  } = useSessionUIStore(useShallow((state) => ({
+    currentSessionId: state.currentSessionId,
+    newSessionDraftOpen: Boolean(state.newSessionDraft?.open),
+    setCurrentSession: state.setCurrentSession,
+    updateSessionTitle: state.updateSessionTitle,
+    shareSession: state.shareSession,
+    unshareSession: state.unshareSession,
+    worktreeMetadata: state.worktreeMetadata,
+    availableWorktreesByProject: state.availableWorktreesByProject,
+    openNewSessionDraft: state.openNewSessionDraft,
+  })));
   const liveSessionStatuses = useAllSessionStatuses();
-  const hasLoadedGlobalSessions = useGlobalSessionsStore((state) => state.hasLoaded);
-  const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
-  const archivedSessions = useGlobalSessionsStore((state) => state.archivedSessions);
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const newSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
-  const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
-  const updateSessionTitle = useSessionUIStore((state) => state.updateSessionTitle);
-  const shareSession = useSessionUIStore((state) => state.shareSession);
-  const unshareSession = useSessionUIStore((state) => state.unshareSession);
-  // sessionAttentionStates removed — now using notification-store directly in SessionNodeItem
-  const worktreeMetadata = useSessionUIStore((state) => state.worktreeMetadata);
-  const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
-  const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
   const updateStore = useUpdateStore(useShallow((s) => ({
     checkForUpdates: s.checkForUpdates,
     available: s.available,
@@ -1092,7 +1120,12 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   });
 
   const sectionsForSidebarRender = React.useMemo(() => {
-    if (!isVSCode || hasSessionSearchQuery || recentSessionIds.size === 0) {
+    if (
+      !isVSCode
+      || showOnlyMainWorkspace
+      || hasSessionSearchQuery
+      || recentSessionIds.size === 0
+    ) {
       return sectionsForRender;
     }
 
@@ -1123,7 +1156,13 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         sessions: filterNodes(group.sessions),
       })),
     }));
-  }, [isVSCode, hasSessionSearchQuery, recentSessionIds, sectionsForRender]);
+  }, [
+    isVSCode,
+    showOnlyMainWorkspace,
+    hasSessionSearchQuery,
+    recentSessionIds,
+    sectionsForRender,
+  ]);
 
   const prLookupKeys = React.useMemo(() => {
     const keys = new Set<string>();
@@ -1233,6 +1272,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       renderContext: 'project' | 'recent' = 'project',
     ): React.ReactNode => (
       <SessionNodeItem
+        key={node.session.id}
         node={node}
         depth={depth}
         groupDirectory={groupDirectory}

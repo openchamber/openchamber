@@ -50,12 +50,23 @@ import {
 import { useInputStore, type SyntheticContextPart } from "./input-store"
 import { useSelectionStore } from "./selection-store"
 import { useViewportStore } from "./viewport-store"
+import { usePermissionStore } from "@/stores/permissionStore"
+import { useBackendsStore } from "@/stores/useBackendsStore"
 import { useSessionWorktreeStore } from "./session-worktree-store"
 import { getAttachedSessionDirectory } from "./session-worktree-contract"
 
 export type { AttachedFile }
 
 // ---------------------------------------------------------------------------
+/**
+ * Resolve sandbox override based on the session's permission level.
+ * Returns 'danger-full-access' when full-access is active, undefined otherwise.
+ */
+function resolveSandboxOverride(sessionId: string): string | undefined {
+  const level = usePermissionStore.getState().getSessionPermissionLevel(sessionId)
+  return level === 'full-access' ? 'danger-full-access' : undefined
+}
+
 // Send routing — shell mode, slash commands, or normal prompt
 // ---------------------------------------------------------------------------
 
@@ -69,10 +80,24 @@ function routeMessage(params: {
   inputMode?: "normal" | "shell"
   files?: Array<{ type: "file"; mime: string; url: string; filename: string }>
   additionalParts?: Array<{ text: string; synthetic?: boolean; files?: Array<{ type: "file"; mime: string; url: string; filename: string }> }>
+  sandboxOverride?: string
 }): Promise<void> {
   const sdk = opencodeClient.getSdkClient()
+  const explicitBackendId = useSelectionStore.getState().getSessionBackendSelection(params.sessionId)
+  const liveSession = getAllSyncSessions().find((session) => session.id === params.sessionId) as { backendId?: string | null } | undefined
+  const sessionBackendId =
+    (typeof explicitBackendId === 'string' && explicitBackendId.trim().length > 0
+      ? explicitBackendId.trim()
+      : '')
+    || (typeof liveSession?.backendId === 'string' && liveSession.backendId.trim().length > 0
+      ? liveSession.backendId.trim()
+      : '')
+    || 'opencode'
 
   if (params.inputMode === "shell") {
+    if (sessionBackendId !== 'opencode') {
+      return Promise.reject(new Error(`Shell mode is not supported for backend "${sessionBackendId}"`))
+    }
     const dir = opencodeClient.getDirectory() || undefined
     return sdk.session.shell({
       sessionID: params.sessionId,
@@ -92,20 +117,19 @@ function routeMessage(params: {
     const syncCommands = dirState?.command ?? []
     const storeCommands = useCommandsStore.getState().commands
 
-    const isCommand = syncCommands.find((c) => c.name === cmdName)
-      || storeCommands.find((c) => c.name === cmdName)
+    const syncCommand = syncCommands.find((c) => c.name === cmdName)
+    const storeCommand = storeCommands.find((c) => c.name === cmdName)
 
-    if (isCommand) {
-      const dir = opencodeClient.getDirectory() || undefined
-      return sdk.session.command({
-        sessionID: params.sessionId,
-        directory: dir,
+    if ((syncCommand || storeCommand) && storeCommand?.executionMode !== 'prompt-text') {
+      return opencodeClient.sendCommand({
+        id: params.sessionId,
+        providerID: params.providerID,
+        modelID: params.modelID,
         command: cmdName,
         arguments: tail.join(" "),
         agent: params.agent,
-        model: `${params.providerID}/${params.modelID}`,
         variant: params.variant,
-        parts: params.files,
+        files: params.files,
       }).then(() => {})
     }
   }
@@ -128,6 +152,7 @@ function routeMessage(params: {
       files: params.files,
       additionalParts: params.additionalParts,
       messageId: messageID,
+      sandboxOverride: params.sandboxOverride,
     }).then(() => {}),
   })
 }
@@ -143,6 +168,7 @@ export type { VoiceStatus, VoiceMode } from "./voice-store"
 export type NewSessionDraftState = {
   open: boolean
   selectedProjectId?: string | null
+  backendId?: string | null
   directoryOverride: string | null
   pendingWorktreeRequestId?: string | null
   bootstrapPendingDirectory?: string | null
@@ -225,7 +251,7 @@ export type SessionUIState = {
     inputMode?: "normal" | "shell",
   ) => Promise<void>
 
-  createSession: (title?: string, directoryOverride?: string | null, parentID?: string | null) => Promise<Session | null>
+  createSession: (title?: string, directoryOverride?: string | null, parentID?: string | null, backendId?: string | null) => Promise<Session | null>
   deleteSession: (id: string, options?: Record<string, unknown>) => Promise<boolean>
   deleteSessions: (ids: string[], options?: Record<string, unknown>) => Promise<{ deletedIds: string[]; failedIds: string[] }>
   archiveSession: (id: string) => Promise<boolean>
@@ -324,6 +350,7 @@ const activateConfigForDirectory = async (directory: string | null | undefined):
 
 const DEFAULT_DRAFT: NewSessionDraftState = {
   open: false,
+  backendId: null,
   directoryOverride: null,
   parentID: null,
 }
@@ -455,6 +482,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       newSessionDraft: {
         open: true,
         selectedProjectId: selectedProject?.id ?? null,
+        backendId: options?.backendId ?? null,
         directoryOverride: directory,
         pendingWorktreeRequestId: options?.pendingWorktreeRequestId ?? null,
         bootstrapPendingDirectory: normalizePath(options?.bootstrapPendingDirectory ?? null),
@@ -484,6 +512,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       newSessionDraft: {
         open: false,
         selectedProjectId: null,
+        backendId: null,
         directoryOverride: null,
         pendingWorktreeRequestId: null,
         bootstrapPendingDirectory: null,
@@ -705,7 +734,12 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         get().resolvePendingDraftWorktreeTarget(draft.pendingWorktreeRequestId, draftDirectoryOverride)
       }
 
-      const created = await get().createSession(draft.title, draftDirectoryOverride, draft.parentID ?? null)
+      const selectionState = useSelectionStore.getState()
+      const draftBackendId = draft.backendId
+        || selectionState.draftBackendId
+        || selectionState.lastUsedBackendId
+        || "opencode"
+      const created = await get().createSession(draft.title, draftDirectoryOverride, draft.parentID ?? null, draftBackendId)
       if (!created?.id) throw new Error("Failed to create session")
 
       persistDraftTarget({
@@ -782,6 +816,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
             filename: a.filename,
           })),
         })),
+        sandboxOverride: resolveSandboxOverride(created.id),
       })
       return
     }
@@ -857,21 +892,29 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           filename: a.filename,
         })),
       })),
+      sandboxOverride: currentSessionId ? resolveSandboxOverride(currentSessionId) : undefined,
     })
   },
 
   // ---------------------------------------------------------------------------
   // createSession
   // ---------------------------------------------------------------------------
-  createSession: async (title, directoryOverride, parentID) => {
+  createSession: async (title, directoryOverride, parentID, backendId) => {
     const draft = get().newSessionDraft
     const targetFolderId = draft.targetFolderId
     get().closeNewSessionDraft()
 
     try {
       const dir = directoryOverride ?? opencodeClient.getDirectory()
-      const session = await createSessionAction(title, dir, parentID ?? null)
+      const session = await createSessionAction(title, dir, parentID ?? null, backendId ?? null)
       if (!session) return null
+
+      const resolvedBackendId =
+        (session as { backendId?: string }).backendId
+        ?? backendId
+        ?? useBackendsStore.getState().defaultBackendId
+        ?? 'opencode'
+      useSelectionStore.getState().saveSessionBackendSelection(session.id, resolvedBackendId)
 
       if (targetFolderId) {
         const scopeKey = directoryOverride || get().lastLoadedDirectory || session.directory
@@ -1061,23 +1104,22 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       sourceSessionId ?? null,
       (sid) => get().worktreeMetadata.get(sid),
     )
+    const sourceSession = sourceSessionId
+      ? getAllSyncSessions().find((session) => session.id === sourceSessionId) ?? null
+      : null
+    const sourceBackendId = (
+      (sourceSession as { backendId?: string | null } | null)?.backendId
+      ?? (sourceSessionId ? useSelectionStore.getState().getSessionBackendSelection(sourceSessionId) : null)
+      ?? useSelectionStore.getState().lastUsedBackendId
+      ?? "opencode"
+    )
 
-    const session = await get().createSession(undefined, directory ?? null, null)
-    if (!session) return
-
-    const { currentProviderId, currentModelId, currentAgentName } = useConfigStore.getState()
-    const pID = currentProviderId || useSelectionStore.getState().lastUsedProvider?.providerID
-    const mID = currentModelId || useSelectionStore.getState().lastUsedProvider?.modelID
-
-    if (!pID || !mID) return
-
-    await opencodeClient.sendMessage({
-      id: session.id,
-      providerID: pID,
-      modelID: mID,
-      text: assistantPlanText,
-      prefaceText: EXECUTION_FORK_META_TEXT,
-      agent: currentAgentName ?? undefined,
+    useSelectionStore.getState().setDraftBackendId(sourceBackendId)
+    get().openNewSessionDraft({
+      backendId: sourceBackendId,
+      directoryOverride: directory ?? null,
+      initialPrompt: assistantPlanText,
+      syntheticParts: [{ text: EXECUTION_FORK_META_TEXT, synthetic: true }],
     })
   },
 

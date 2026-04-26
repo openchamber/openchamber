@@ -24,6 +24,9 @@ import { cn } from '@/lib/utils';
 import type { Agent } from '@opencode-ai/sdk/v2';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { SettingsProjectSelector } from '@/components/sections/shared/SettingsProjectSelector';
+import { BackendSwitcher } from '@/components/sections/shared/BackendSwitcher';
+import { BackendUnsupported } from '@/components/sections/shared/BackendUnsupported';
+import { useBackendsStore } from '@/stores/useBackendsStore';
 import { SidebarGroup } from '@/components/sections/shared/SidebarGroup';
 import { useI18n } from '@/lib/i18n';
 
@@ -101,6 +104,31 @@ const rulesetToPermissionConfig = (ruleset: unknown): AgentDraft['permission'] =
 };
 
 export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) => {
+  const defaultBackendId = useBackendsStore((state) => state.defaultBackendId);
+  const hasCapability = useBackendsStore((state) => state.hasCapability);
+  const getBackendFn = useBackendsStore((state) => state.getBackend);
+  const [selectedBackendId, setSelectedBackendId] = React.useState('');
+
+  React.useEffect(() => {
+    if (defaultBackendId && !selectedBackendId) {
+      setSelectedBackendId(defaultBackendId);
+    }
+  }, [defaultBackendId, selectedBackendId]);
+
+  const backendSupportsAgents = selectedBackendId ? hasCapability(selectedBackendId, 'agents') : true;
+  const selectedBackend = selectedBackendId ? getBackendFn(selectedBackendId) : undefined;
+  const isCodexBackend = selectedBackendId === 'codex';
+
+  // Clear selection when switching backends so the page resets
+  const prevBackendRef = React.useRef(selectedBackendId);
+  React.useEffect(() => {
+    if (prevBackendRef.current && prevBackendRef.current !== selectedBackendId) {
+      useAgentsStore.getState().setSelectedAgent(null);
+      useAgentsStore.getState().setAgentDraft(null);
+    }
+    prevBackendRef.current = selectedBackendId;
+  }, [selectedBackendId]);
+
   const { t } = useI18n();
   const [renameDialogAgent, setRenameDialogAgent] = React.useState<Agent | null>(null);
   const [renameNewName, setRenameNewName] = React.useState('');
@@ -330,6 +358,15 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
   return (
     <div className={cn('flex h-full flex-col', bgClass)}>
       <div className="border-b px-3 pt-4 pb-3">
+        <h2 className="text-base font-semibold text-foreground mb-3">
+          {isCodexBackend ? 'Modes' : 'Agents'}
+        </h2>
+        <BackendSwitcher
+          capability="agents"
+          selectedBackendId={selectedBackendId}
+          onBackendChange={setSelectedBackendId}
+          className="mb-3"
+        />
         <h2 className="text-base font-semibold text-foreground mb-3">{t('settings.agents.sidebar.title')}</h2>
         <SettingsProjectSelector className="mb-3" />
         <div className="flex items-center justify-between gap-2">
@@ -344,6 +381,42 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
         </div>
       </div>
 
+      {!backendSupportsAgents ? (
+        <div className="flex-1 min-h-0">
+          <BackendUnsupported
+            backendId={selectedBackendId}
+            backendLabel={selectedBackend?.label || selectedBackendId}
+            featureName="Agents"
+            comingSoon={selectedBackend?.comingSoon}
+          />
+        </div>
+      ) : isCodexBackend ? (
+        <ScrollableOverlay outerClassName="flex-1 min-h-0" className="space-y-1 px-3 py-2 overflow-x-hidden">
+          <div className="px-2 pb-1.5 pt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Modes
+          </div>
+          {[
+            { name: 'build', description: 'Write code and execute changes' },
+            { name: 'plan', description: 'Analyze and plan without executing' },
+          ].map((mode) => (
+            <div
+              key={mode.name}
+              className="flex items-center rounded-md px-1.5 py-1.5 hover:bg-interactive-hover"
+            >
+              <div className="flex min-w-0 flex-1 flex-col">
+                <span className="typography-ui-label font-normal text-foreground capitalize">{mode.name}</span>
+                <span className="typography-micro text-muted-foreground/60">{mode.description}</span>
+              </div>
+              <span className="typography-micro text-muted-foreground/50 px-1.5 py-0.5 rounded bg-muted/40 leading-none">
+                built-in
+              </span>
+            </div>
+          ))}
+          <div className="px-4 pt-4 typography-micro text-muted-foreground/50">
+            Codex modes are built-in and cannot be customized.
+          </div>
+        </ScrollableOverlay>
+      ) : (
       <ScrollableOverlay outerClassName="flex-1 min-h-0" className="space-y-1 px-3 py-2 overflow-x-hidden">
         {visibleAgents.length === 0 ? (
           <div className="py-12 px-4 text-center text-muted-foreground">
@@ -437,6 +510,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
           </>
         )}
       </ScrollableOverlay>
+      )}
 
       <Dialog
         open={confirmActionAgent !== null && confirmActionType !== null}

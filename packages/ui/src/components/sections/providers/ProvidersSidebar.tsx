@@ -7,6 +7,9 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { RiAddLine, RiStackLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { SettingsProjectSelector } from '@/components/sections/shared/SettingsProjectSelector';
+import { BackendSwitcher } from '@/components/sections/shared/BackendSwitcher';
+import { BackendUnsupported } from '@/components/sections/shared/BackendUnsupported';
+import { useBackendsStore } from '@/stores/useBackendsStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useI18n } from '@/lib/i18n';
 
@@ -37,10 +40,34 @@ interface ProvidersSidebarProps {
 }
 
 export const ProvidersSidebar: React.FC<ProvidersSidebarProps> = ({ onItemSelect }) => {
+  const defaultBackendId = useBackendsStore((state) => state.defaultBackendId);
+  const hasCapability = useBackendsStore((state) => state.hasCapability);
+  const getBackendFn = useBackendsStore((state) => state.getBackend);
+  const [selectedBackendId, setSelectedBackendId] = React.useState('');
+
+  React.useEffect(() => {
+    if (defaultBackendId && !selectedBackendId) {
+      setSelectedBackendId(defaultBackendId);
+    }
+  }, [defaultBackendId, selectedBackendId]);
+
+  const backendSupportsProviders = selectedBackendId ? hasCapability(selectedBackendId, 'providers') : true;
+  const selectedBackend = selectedBackendId ? getBackendFn(selectedBackendId) : undefined;
+
+  // Clear selection when switching backends so the page resets
+  const prevBackendRef = React.useRef(selectedBackendId);
+  React.useEffect(() => {
+    if (prevBackendRef.current && prevBackendRef.current !== selectedBackendId) {
+      useConfigStore.getState().setSelectedProvider('');
+    }
+    prevBackendRef.current = selectedBackendId;
+  }, [selectedBackendId]);
+
   const { t } = useI18n();
   const providers = useConfigStore((state) => state.providers);
   const selectedProviderId = useConfigStore((state) => state.selectedProviderId);
   const setSelectedProvider = useConfigStore((state) => state.setSelectedProvider);
+  const loadProviders = useConfigStore((state) => state.loadProviders);
   const activeProjectId = useProjectsStore((s) => s.activeProjectId);
   const [sourcesByProvider, setSourcesByProvider] = React.useState<Record<string, ProviderSources>>({});
   const directory = React.useMemo(() => {
@@ -48,6 +75,10 @@ export const ProvidersSidebar: React.FC<ProvidersSidebarProps> = ({ onItemSelect
     void activeProjectId;
     return getCurrentDirectory();
   }, [activeProjectId]);
+
+  React.useEffect(() => {
+    void loadProviders({ directory, backendId: selectedBackendId || defaultBackendId || null });
+  }, [defaultBackendId, directory, loadProviders, selectedBackendId]);
 
   React.useEffect(() => {
     if (providers.length === 0) {
@@ -108,6 +139,13 @@ export const ProvidersSidebar: React.FC<ProvidersSidebarProps> = ({ onItemSelect
   return (
     <div className={cn('flex h-full flex-col', bgClass)}>
       <div className="border-b px-3 pt-4 pb-3">
+        <h2 className="text-base font-semibold text-foreground mb-3">Providers</h2>
+        <BackendSwitcher
+          capability="providers"
+          selectedBackendId={selectedBackendId}
+          onBackendChange={setSelectedBackendId}
+          className="mb-3"
+        />
         <h2 className="text-base font-semibold text-foreground mb-3">{t('settings.providers.sidebar.title')}</h2>
         <SettingsProjectSelector className="mb-3" />
         <div className="flex items-center justify-between gap-2">
@@ -127,10 +165,22 @@ export const ProvidersSidebar: React.FC<ProvidersSidebarProps> = ({ onItemSelect
         </div>
       </div>
 
+      {!backendSupportsProviders ? (
+        <div className="flex-1 min-h-0">
+          <BackendUnsupported
+            backendId={selectedBackendId}
+            backendLabel={selectedBackend?.label || selectedBackendId}
+            featureName="Providers"
+            comingSoon={selectedBackend?.comingSoon}
+          />
+        </div>
+      ) : (
       <ScrollableOverlay outerClassName="flex-1 min-h-0" className="space-y-1 px-3 py-2 overflow-x-hidden">
         {providers.length === 0 ? (
           <div className="py-12 px-4 text-center text-muted-foreground">
             <RiStackLine className="mx-auto mb-3 h-10 w-10 opacity-50" />
+            <p className="typography-ui-label font-medium">No providers found</p>
+            <p className="typography-meta mt-1 opacity-75">Check your backend configuration</p>
             <p className="typography-ui-label font-medium">{t('settings.providers.sidebar.empty.title')}</p>
             <p className="typography-meta mt-1 opacity-75">{t('settings.providers.sidebar.empty.description')}</p>
           </div>
@@ -176,6 +226,7 @@ export const ProvidersSidebar: React.FC<ProvidersSidebarProps> = ({ onItemSelect
           </>
         )}
       </ScrollableOverlay>
+      )}
     </div>
   );
 };

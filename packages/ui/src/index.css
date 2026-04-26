@@ -874,9 +874,8 @@ html:not(.dark) .chat-scroll {
 .markdown-content.markdown-reasoning b,
 .markdown-content.markdown-reasoning [data-markdown="strong"],
 .markdown-content.markdown-reasoning [data-markdown="bold"] {
-  font-weight: inherit !important;
+  font-weight: 600 !important;
   color: inherit !important;
-  font-style: inherit !important;
 }
 
 .markdown-content.markdown-tool code,

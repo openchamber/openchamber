@@ -25,7 +25,7 @@ export type SettingsPageGroup =
   | 'appearance'
   | 'projects'
   | 'general'
-  | 'opencode'
+  | 'backends'
   | 'git'
   | 'skills'
   | 'usage'
@@ -51,7 +51,7 @@ export const SETTINGS_GROUP_LABELS: Record<SettingsPageGroup, string> = {
   appearance: 'Appearance',
   projects: 'Projects',
   general: 'General',
-  opencode: 'OpenCode',
+  backends: 'Configuration',
   git: 'Git',
   skills: 'Skills',
   usage: 'Usage',
@@ -85,7 +85,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
   {
     slug: 'providers',
     title: 'Providers',
-    group: 'opencode',
+    group: 'backends',
     kind: 'split',
     keywords: ['provider', 'providers', 'models', 'model', 'api key', 'api keys', 'openai', 'anthropic', 'ollama', 'credentials'],
   },
@@ -99,21 +99,21 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
   {
     slug: 'agents',
     title: 'Agents',
-    group: 'opencode',
+    group: 'backends',
     kind: 'split',
     keywords: ['agent', 'agents', 'prompts', 'tools', 'permissions'],
   },
   {
     slug: 'commands',
     title: 'Commands',
-    group: 'opencode',
+    group: 'backends',
     kind: 'split',
     keywords: ['command', 'commands', 'slash', 'macros', 'automation'],
   },
   {
     slug: 'mcp',
     title: 'MCP',
-    group: 'opencode',
+    group: 'backends',
     kind: 'split',
     keywords: ['mcp', 'model context protocol', 'servers', 'tools', 'remote', 'stdio'],
   },

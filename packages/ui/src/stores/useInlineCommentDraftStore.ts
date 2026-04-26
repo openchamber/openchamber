@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import { devtools, persist, createJSONStorage } from 'zustand/middleware';
-import { getSafeStorage } from './utils/safeStorage';
+import { devtools, persist } from 'zustand/middleware';
+import { createDebouncedJSONStorage } from './utils/debouncedStorage';
 
 export type InlineCommentSource = 'diff' | 'plan' | 'file';
 
@@ -207,7 +207,7 @@ export const useInlineCommentDraftStore = create<InlineCommentDraftStore>()(
       }),
       {
         name: 'openchamber-inline-comment-drafts',
-        storage: createJSONStorage(() => getSafeStorage()),
+        storage: createDebouncedJSONStorage(),
         version: 1,
         migrate: (persistedState: unknown) => {
           if (!persistedState || typeof persistedState !== 'object') {

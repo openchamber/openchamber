@@ -22,6 +22,7 @@ import { usePwaInstallPrompt } from '@/hooks/usePwaInstallPrompt';
 import { useWindowControlsOverlayLayout } from '@/hooks/useWindowControlsOverlayLayout';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useBackendsStore } from '@/stores/useBackendsStore';
 import { hasModifier } from '@/lib/utils';
 import { isDesktopLocalOriginActive, isDesktopShell, isTauriShell, restartDesktopApp } from '@/lib/desktop';
 import {
@@ -35,6 +36,7 @@ import {
 } from '@/lib/desktopBoot';
 import type { RecoveryVariant } from '@/components/onboarding/DesktopConnectionRecovery';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSelectionStore } from '@/sync/selection-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { opencodeClient } from '@/lib/opencode/client';
@@ -209,6 +211,12 @@ function App({ apis }: AppProps) {
   const agentsCount = useConfigStore((state) => state.agents.length);
   const loadProviders = useConfigStore((state) => state.loadProviders);
   const loadAgents = useConfigStore((state) => state.loadAgents);
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const draftBackendId = useSelectionStore((state) => state.draftBackendId);
+  const lastUsedBackendId = useSelectionStore((state) => state.lastUsedBackendId);
+  const sessionBackendSelections = useSelectionStore((state) => state.sessionBackendSelections);
+  const defaultBackendId = useBackendsStore((state) => state.defaultBackendId);
+  const sessions = useSessions();
   const error = useSessionUIStore((s) => s.error);
   const clearError = useSessionUIStore((s) => s.clearError);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
@@ -237,6 +245,15 @@ function App({ apis }: AppProps) {
   const initializationInFlightRef = React.useRef(false);
   const embeddedSessionChat = React.useMemo<EmbeddedSessionChatConfig | null>(() => readEmbeddedSessionChatConfig(), []);
   const embeddedBackgroundWorkEnabled = !embeddedSessionChat || isEmbeddedVisible;
+  const activeBackendId = React.useMemo(() => {
+    if (currentSessionId) {
+      const selectedBackendId = sessionBackendSelections.get(currentSessionId);
+      const liveSession = sessions.find((session) => session.id === currentSessionId) as { backendId?: string | null } | undefined;
+      return selectedBackendId || liveSession?.backendId?.trim() || defaultBackendId || 'opencode';
+    }
+    return draftBackendId || lastUsedBackendId || defaultBackendId || 'opencode';
+  }, [currentSessionId, defaultBackendId, draftBackendId, lastUsedBackendId, sessionBackendSelections, sessions]);
+  const requiresOpenCodeConfig = activeBackendId === 'opencode';
   const isMcpOAuthCallback = React.useMemo(() => isMcpOAuthCallbackPath(), []);
 
   React.useEffect(() => {
@@ -467,7 +484,7 @@ function App({ apis }: AppProps) {
   // loadProviders/loadAgents resolve normally even on failure (errors swallowed),
   // so a reactive effect can't detect failure — we need an interval.
   React.useEffect(() => {
-    if (isVSCodeRuntime || !isConnected) return;
+    if (isVSCodeRuntime || !isConnected || !requiresOpenCodeConfig) return;
     if (providersCount > 0 && agentsCount > 0) return;
 
     let active = true;
@@ -489,7 +506,7 @@ function App({ apis }: AppProps) {
       void attempt();
     }, 2000);
     return () => { active = false; clearInterval(id); };
-  }, [isConnected, isVSCodeRuntime, loadAgents, loadProviders, providersCount, agentsCount]);
+  }, [agentsCount, isConnected, isVSCodeRuntime, loadAgents, loadProviders, providersCount, requiresOpenCodeConfig]);
 
   React.useEffect(() => {
     if (isSwitchingDirectory) {

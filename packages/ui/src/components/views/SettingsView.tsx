@@ -7,6 +7,7 @@ import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useSkillsCatalogStore } from '@/stores/useSkillsCatalogStore';
+import { useBackendsStore } from '@/stores/useBackendsStore';
 import {
   RiAiAgentLine,
   RiAiGenerate2,
@@ -330,6 +331,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     event.preventDefault();
   };
 
+  // Load backends store when settings open.
+  React.useEffect(() => {
+    if (isSettingsDialogOpen || runtimeCtx.isVSCode) {
+      void useBackendsStore.getState().loadBackends();
+    }
+  }, [isSettingsDialogOpen, runtimeCtx.isVSCode]);
+
   // Load stores when project changes or when a page becomes active.
   React.useEffect(() => {
     if (!isSettingsDialogOpen && !runtimeCtx.isVSCode) {
@@ -613,14 +621,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                       'text-sm font-semibold text-sidebar-foreground/90',
                       'hover:text-sidebar-foreground hover:bg-interactive-hover',
                     )}
-                    onClick={() => void reloadOpenCodeConfiguration({ message: 'Restarting OpenCode…', mode: 'projects', scopes: ['all'] })}
+                    onClick={() => void reloadOpenCodeConfiguration({ message: 'Restarting backend\u2026', mode: 'projects', scopes: ['all'] })}
                   >
                     <RiRestartLine className="h-4 w-4 shrink-0" />
-                    <span>{t('settings.view.actions.reloadOpenCode')}</span>
+                    <span>Reload Backend</span>
                   </button>
                 </TooltipTrigger>
                 <TooltipContent>
-                  {t('settings.view.actions.reloadOpenCodeTooltip')}
+                  Restart the active backend and reload its configuration.
                 </TooltipContent>
               </Tooltip>
             )}

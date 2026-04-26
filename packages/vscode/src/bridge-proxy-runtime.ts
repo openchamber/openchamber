@@ -1,5 +1,32 @@
 import type { BridgeContext, BridgeResponse } from './bridge';
 import { waitForApiUrl } from './opencode-ready';
+// @ts-expect-error Cross-package JS module has no local d.ts in vscode package.
+import * as sharedBackendsModule from '../../web/server/lib/harness/backends.js';
+
+type BackendDescriptor = {
+  id: string;
+  label: string;
+  available: boolean;
+  comingSoon?: boolean;
+  capabilities: {
+    chat: boolean;
+    sessions: boolean;
+    models: boolean;
+    agents: boolean;
+    providers: boolean;
+    commands: boolean;
+    config: boolean;
+    skills: boolean;
+  };
+};
+
+// Single source of truth from web backend registry module.
+const sharedBackends = sharedBackendsModule as {
+  BACKEND_DESCRIPTORS: readonly BackendDescriptor[];
+  DEFAULT_BACKEND_ID: string;
+};
+
+const { BACKEND_DESCRIPTORS, DEFAULT_BACKEND_ID } = sharedBackends;
 
 type BridgeMessageInput = {
   id: string;
@@ -32,6 +59,7 @@ type ProxyRuntimeDeps = {
   sanitizeForwardHeaders: (input: Record<string, string> | undefined) => Record<string, string>;
   collectHeaders: (headers: Headers) => Record<string, string>;
   base64EncodeUtf8: (text: string) => string;
+  readSettings: (ctx: BridgeContext | undefined) => Record<string, unknown>;
 };
 
 export async function handleProxyBridgeMessage(
@@ -57,6 +85,28 @@ export async function handleProxyBridgeMessage(
         return { id, type, success: true, data: localFsResponse };
       }
 
+      if (normalizedMethod === 'GET' && normalizedPath === '/openchamber/backends') {
+        const settings = deps.readSettings(ctx);
+        const configuredDefaultBackend =
+          typeof settings?.defaultBackend === 'string' && settings.defaultBackend.trim().length > 0
+            ? settings.defaultBackend.trim()
+            : DEFAULT_BACKEND_ID;
+        const backends = BACKEND_DESCRIPTORS.map((descriptor) => ({
+          ...descriptor,
+          capabilities: { ...descriptor.capabilities },
+        }));
+        const body = JSON.stringify({
+          defaultBackend: configuredDefaultBackend,
+          backends,
+        });
+        const data: ApiProxyResponsePayload = {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+          bodyBase64: deps.base64EncodeUtf8(body),
+        };
+        return { id, type, success: true, data };
+      }
+
       const apiUrl = await waitForApiUrl(ctx?.manager);
       if (!apiUrl) {
         const data = deps.buildUnavailableApiResponse();
@@ -69,6 +119,23 @@ export async function handleProxyBridgeMessage(
         ...deps.sanitizeForwardHeaders(headers),
         ...ctx?.manager?.getOpenCodeAuthHeaders(),
       };
+
+      let requestBodyBase64 = bodyBase64;
+      let requestedBackendId = 'opencode';
+      if (normalizedMethod === 'POST' && normalizedPath === '/session' && typeof bodyBase64 === 'string' && bodyBase64.length > 0) {
+        try {
+          const decoded = Buffer.from(bodyBase64, 'base64').toString('utf8');
+          const parsed = JSON.parse(decoded) as Record<string, unknown>;
+          requestedBackendId =
+            typeof parsed?.backendId === 'string' && parsed.backendId.trim().length > 0
+              ? parsed.backendId.trim()
+              : 'opencode';
+          delete parsed.backendId;
+          requestBodyBase64 = Buffer.from(JSON.stringify(parsed), 'utf8').toString('base64');
+        } catch {
+          requestBodyBase64 = bodyBase64;
+        }
+      }
 
       if (normalizedPath === '/event' || normalizedPath === '/global/event') {
         if (!requestHeaders.Accept) {
@@ -83,16 +150,29 @@ export async function handleProxyBridgeMessage(
           method: normalizedMethod,
           headers: requestHeaders,
           body:
-            typeof bodyBase64 === 'string' && bodyBase64.length > 0 && normalizedMethod !== 'GET' && normalizedMethod !== 'HEAD'
-              ? Buffer.from(bodyBase64, 'base64')
+            typeof requestBodyBase64 === 'string' && requestBodyBase64.length > 0 && normalizedMethod !== 'GET' && normalizedMethod !== 'HEAD'
+              ? Buffer.from(requestBodyBase64, 'base64')
               : undefined,
         });
 
         const arrayBuffer = await response.arrayBuffer();
+        let responseBodyBase64 = Buffer.from(arrayBuffer).toString('base64');
+        if (normalizedMethod === 'POST' && normalizedPath === '/session') {
+          try {
+            const decoded = Buffer.from(responseBodyBase64, 'base64').toString('utf8');
+            const parsed = JSON.parse(decoded) as Record<string, unknown>;
+            if (parsed && typeof parsed === 'object' && typeof parsed.id === 'string') {
+              parsed.backendId = requestedBackendId;
+              responseBodyBase64 = Buffer.from(JSON.stringify(parsed), 'utf8').toString('base64');
+            }
+          } catch {
+            // Leave the upstream response body unchanged when it is not JSON.
+          }
+        }
         const data: ApiProxyResponsePayload = {
           status: response.status,
           headers: deps.collectHeaders(response.headers),
-          bodyBase64: Buffer.from(arrayBuffer).toString('base64'),
+          bodyBase64: responseBodyBase64,
         };
 
         return { id, type, success: true, data };

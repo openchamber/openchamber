@@ -209,13 +209,17 @@ const normalizeExecution = (value) => {
   }
 
   const prompt = clampLength(asNonEmptyString(value.prompt) || '', MAX_TASK_PROMPT_LENGTH);
-  const providerID = asNonEmptyString(value.providerID);
+  const backendId = asNonEmptyString(value.backendId) || 'opencode';
+  const providerID = asNonEmptyString(value.providerID) || (backendId === 'opencode' ? null : backendId);
   const modelID = asNonEmptyString(value.modelID);
   const variant = asNonEmptyString(value.variant);
   const agent = asNonEmptyString(value.agent);
 
   if (!prompt) {
     throw new Error('execution.prompt is required');
+  }
+  if (!backendId) {
+    throw new Error('execution.backendId is required');
   }
   if (!providerID) {
     throw new Error('execution.providerID is required');
@@ -226,6 +230,7 @@ const normalizeExecution = (value) => {
 
   return {
     prompt,
+    backendId,
     providerID,
     modelID,
     ...(variant ? { variant } : {}),

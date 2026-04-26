@@ -1,5 +1,4 @@
 import * as React from 'react';
-import { Checkbox as BaseCheckbox } from '@base-ui/react/checkbox';
 import { RiCheckLine, RiSubtractLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 
@@ -28,12 +27,30 @@ export const Checkbox = React.memo<CheckboxProps>(function Checkbox({
   const boxSize = 'h-[14px] w-[14px] min-h-[14px] min-w-[14px]';
   const iconSize = 'h-[10px] w-[10px] min-h-[10px] min-w-[10px]';
   const isOn = checked || indeterminate;
+  const handleClick = React.useCallback(() => {
+    if (disabled) {
+      return;
+    }
+    onChange(!checked);
+  }, [checked, disabled, onChange]);
+  const handleKeyDown = React.useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (disabled) {
+      return;
+    }
+    if (event.key === ' ' || event.key === 'Enter') {
+      event.preventDefault();
+      onChange(!checked);
+    }
+  }, [checked, disabled, onChange]);
+
   return (
-    <BaseCheckbox.Root
-      checked={checked}
-      onCheckedChange={(next) => onChange(Boolean(next))}
-      disabled={disabled}
-      indeterminate={indeterminate}
+    <div
+      role="checkbox"
+      tabIndex={disabled ? undefined : 0}
+      onClick={handleClick}
+      onKeyDown={handleKeyDown}
+      aria-checked={indeterminate ? 'mixed' : checked}
+      aria-disabled={disabled || undefined}
       aria-label={ariaLabel}
       className={cn(
         // AlignUI-style rounded box, no explicit border (rely on inset shadow for unchecked)
@@ -48,16 +65,14 @@ export const Checkbox = React.memo<CheckboxProps>(function Checkbox({
         // focus
         'focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)] focus-visible:ring-offset-1 focus-visible:ring-offset-background',
         // disabled
-        'disabled:cursor-not-allowed disabled:opacity-50',
+        disabled && 'cursor-not-allowed opacity-50',
         className,
       )}
     >
-      <BaseCheckbox.Indicator
-        keepMounted
+      <span
         className={cn(
           'flex items-center justify-center text-[var(--primary-base)]',
-          // hide when fully unchecked (no state)
-          'data-[unchecked]:hidden',
+          !isOn && 'hidden',
           iconClassName,
         )}
       >
@@ -66,7 +81,7 @@ export const Checkbox = React.memo<CheckboxProps>(function Checkbox({
         ) : (
           <RiCheckLine className={cn(iconSize, 'text-[var(--primary-base)]')} />
         )}
-      </BaseCheckbox.Indicator>
-    </BaseCheckbox.Root>
+      </span>
+    </div>
   );
 });

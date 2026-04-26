@@ -6,6 +6,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { useBackendsStore } from '@/stores/useBackendsStore';
+import { BackendIcon } from '@/components/ui/BackendIcon';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
@@ -38,10 +40,19 @@ export const DefaultsSettings: React.FC = () => {
   const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
   const providers = useConfigStore((state) => state.providers);
 
+  const backends = useBackendsStore((state) => state.backends);
+  const storeDefaultBackendId = useBackendsStore((state) => state.defaultBackendId);
+  const [defaultBackend, setDefaultBackend] = React.useState<string | undefined>();
   const [defaultModel, setDefaultModel] = React.useState<string | undefined>();
   const [defaultVariant, setDefaultVariant] = React.useState<string | undefined>();
   const [defaultAgent, setDefaultAgent] = React.useState<string | undefined>();
   const [isLoading, setIsLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    if (storeDefaultBackendId && !defaultBackend) {
+      setDefaultBackend(storeDefaultBackendId);
+    }
+  }, [storeDefaultBackendId, defaultBackend]);
 
   const parsedModel = React.useMemo(() => getDisplayModel(defaultModel), [defaultModel]);
 
@@ -52,6 +63,7 @@ export const DefaultsSettings: React.FC = () => {
           defaultModel?: string;
           defaultVariant?: string;
           defaultAgent?: string;
+          defaultBackend?: string;
         } | null = null;
 
         if (!data) {
@@ -68,6 +80,9 @@ export const DefaultsSettings: React.FC = () => {
                       ? ((settings as Record<string, unknown>).defaultVariant as string)
                       : undefined,
                   defaultAgent: typeof settings.defaultAgent === 'string' ? settings.defaultAgent : undefined,
+                  defaultBackend: typeof (settings as Record<string, unknown>).defaultBackend === 'string'
+                    ? ((settings as Record<string, unknown>).defaultBackend as string)
+                    : undefined,
                 };
               }
             } catch {
@@ -100,6 +115,12 @@ export const DefaultsSettings: React.FC = () => {
               ? data.defaultAgent.trim()
               : undefined;
 
+          const backend =
+            typeof data.defaultBackend === 'string' && data.defaultBackend.trim().length > 0
+              ? data.defaultBackend.trim()
+              : undefined;
+
+          if (backend !== undefined) setDefaultBackend(backend);
           if (model !== undefined) setDefaultModel(model);
           if (variant !== undefined) setDefaultVariant(variant);
           if (agent !== undefined) setDefaultAgent(agent);
@@ -112,6 +133,26 @@ export const DefaultsSettings: React.FC = () => {
     };
     loadSettings();
   }, []);
+
+  const handleBackendChange = React.useCallback(
+    async (backendId: string) => {
+      setDefaultBackend(backendId);
+      try {
+        await updateDesktopSettings({ defaultBackend: backendId });
+        const response = await fetch('/api/config/settings', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ defaultBackend: backendId }),
+        });
+        if (!response.ok) {
+          console.warn('Failed to save default backend to server:', response.status);
+        }
+      } catch (error) {
+        console.warn('Failed to save default backend:', error);
+      }
+    },
+    [],
+  );
 
   const handleModelChange = React.useCallback(
     async (providerId: string, modelId: string) => {
@@ -252,6 +293,45 @@ export const DefaultsSettings: React.FC = () => {
             </>
           )}
         </div>
+
+        {backends.length > 1 && (
+          <div className={cn('flex flex-col gap-2 py-1 sm:flex-row sm:items-center sm:gap-8')}>
+            <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
+              <span className="typography-ui-label text-foreground">Default Backend</span>
+            </div>
+            <div className="flex items-center gap-2 sm:w-fit">
+              <Select value={defaultBackend || ''} onValueChange={handleBackendChange}>
+                <SelectTrigger className="w-fit min-w-[160px]">
+                  <SelectValue placeholder="Select backend">
+                    {defaultBackend && (
+                      <span className="flex items-center gap-2">
+                        <BackendIcon backendId={defaultBackend} className="h-3.5 w-3.5" />
+                        <span>{backends.find((b) => b.id === defaultBackend)?.label || defaultBackend}</span>
+                      </span>
+                    )}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {backends.map((backend) => (
+                    <SelectItem
+                      key={backend.id}
+                      value={backend.id}
+                      disabled={!backend.available || backend.comingSoon}
+                    >
+                      <span className="flex items-center gap-2">
+                        <BackendIcon backendId={backend.id} className="h-3.5 w-3.5" />
+                        <span>{backend.label}</span>
+                        {backend.comingSoon && (
+                          <span className="typography-micro text-muted-foreground/60">(coming soon)</span>
+                        )}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        )}
 
         <div className={cn('flex flex-col gap-2 py-1 sm:flex-row sm:items-center sm:gap-8')}>
           <div className="flex min-w-0 flex-col sm:w-56 shrink-0">

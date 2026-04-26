@@ -12,6 +12,76 @@ export interface RuntimeDescriptor {
   label?: string;
 }
 
+export interface BackendCapabilities {
+  chat: boolean;
+  sessions: boolean;
+  models: boolean;
+  agents: boolean;
+  providers: boolean;
+  commands: boolean;
+  config: boolean;
+  skills: boolean;
+}
+
+export interface BackendDescriptor {
+  id: string;
+  label: string;
+  available: boolean;
+  comingSoon?: boolean;
+  capabilities: BackendCapabilities;
+}
+
+export interface BackendControlSurfaceOption {
+  id: string;
+  label: string;
+  description?: string;
+  available?: boolean;
+  color?: string;
+}
+
+export interface BackendModeSelectorSurface {
+  kind: 'agent' | 'mode';
+  label: string;
+  items: BackendControlSurfaceOption[];
+}
+
+export interface BackendModelSelectorSurface {
+  label: string;
+  source: 'providers' | 'backend';
+  options?: BackendControlSurfaceOption[];
+  providerId?: string;
+  defaultOptionId?: string | null;
+}
+
+export interface BackendEffortSelectorSurface {
+  label: string;
+  source: 'model-variants' | 'backend';
+  options: BackendControlSurfaceOption[];
+  defaultOptionId?: string | null;
+}
+
+export interface BackendCommandSurfaceItem {
+  name: string;
+  description?: string;
+  agent?: string;
+  model?: string;
+  template?: string;
+  executionMode?: 'session-command' | 'prompt-text';
+}
+
+export interface BackendCommandSelectorSurface {
+  source: 'config' | 'backend';
+  items: BackendCommandSurfaceItem[];
+}
+
+export interface BackendControlSurface {
+  backendId: string;
+  modeSelector?: BackendModeSelectorSurface | null;
+  modelSelector?: BackendModelSelectorSurface | null;
+  effortSelector?: BackendEffortSelectorSurface | null;
+  commandSelector?: BackendCommandSelectorSurface | null;
+}
+
 export interface ApiError {
   message: string;
   code?: string;

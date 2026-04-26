@@ -9,9 +9,11 @@ import { useSessionUIStore } from "./session-ui-store"
 import { useInputStore } from "./input-store"
 import type { ChildStoreManager } from "./child-store"
 import { opencodeClient } from "@/lib/opencode/client"
-import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
+import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { useConfigStore } from "@/stores/useConfigStore"
+import { useBackendsStore } from "@/stores/useBackendsStore"
 import { registerSessionDirectory } from "./sync-refs"
+import { useSelectionStore } from "./selection-store"
 import { isSyntheticPart } from "@/lib/messages/synthetic"
 
 // Reference set by SyncProvider — allows actions to access SDK and stores
@@ -55,6 +57,23 @@ function dir() {
   return _getDirectory() || undefined
 }
 
+function findGlobalSessionDirectory(sessionId: string): string | undefined {
+  const { activeSessions, archivedSessions } = useGlobalSessionsStore.getState()
+  for (const session of activeSessions) {
+    if (session.id !== sessionId) {
+      continue
+    }
+    return resolveGlobalSessionDirectory(session) ?? undefined
+  }
+  for (const session of archivedSessions) {
+    if (session.id !== sessionId) {
+      continue
+    }
+    return resolveGlobalSessionDirectory(session) ?? undefined
+  }
+  return undefined
+}
+
 function connectionLostError(): Error {
   const { hasEverConnected, lastDisconnectReason } = useConfigStore.getState()
   const suffix = lastDisconnectReason
@@ -87,7 +106,11 @@ export async function waitForConnectionOrThrow(): Promise<void> {
 }
 
 function getSessionDirectory(sessionId: string): string | undefined {
-  return useSessionUIStore.getState().getDirectoryForSession(sessionId) || dir()
+  return (
+    useSessionUIStore.getState().getDirectoryForSession(sessionId)
+    || findGlobalSessionDirectory(sessionId)
+    || dir()
+  )
 }
 
 function getDirectoryStore(directory?: string) {
@@ -98,9 +121,7 @@ function getDirectoryStore(directory?: string) {
 }
 
 function getSessionReplyClient(sessionId?: string): OpencodeClient {
-  const directory = sessionId
-    ? useSessionUIStore.getState().getDirectoryForSession(sessionId)
-    : null
+  const directory = sessionId ? getSessionDirectory(sessionId) : null
   if (directory) {
     return opencodeClient.getScopedSdkClient(directory)
   }
@@ -168,22 +189,34 @@ export async function createSession(
   title?: string,
   directoryOverride?: string | null,
   parentID?: string | null,
+  backendId?: string | null,
 ): Promise<Session | null> {
   try {
-    const result = await sdk().session.create({
-      directory: directoryOverride ?? dir(),
+    const previousDirectory = opencodeClient.getDirectory()
+    if (directoryOverride ?? dir()) {
+      opencodeClient.setDirectory(directoryOverride ?? dir())
+    }
+    const session = await opencodeClient.createSession({
       title,
       parentID: parentID ?? undefined,
+      backendId: backendId ?? undefined,
+    }).finally(() => {
+      opencodeClient.setDirectory(previousDirectory)
     })
-    const session = result.data
     if (!session) return null
 
       const sessionDirectory = (session as { directory?: string }).directory ?? directoryOverride ?? null
+      const sessionBackendId =
+        (session as { backendId?: string }).backendId
+        ?? backendId
+        ?? useBackendsStore.getState().defaultBackendId
+        ?? 'opencode'
       // Pre-populate routing index so SSE events arriving before session.created
       // can be routed to the correct child store
       if (sessionDirectory) {
         registerSessionDirectory(session.id, sessionDirectory)
       }
+      useSelectionStore.getState().saveSessionBackendSelection(session.id, sessionBackendId)
       useSessionUIStore.getState().setCurrentSession(session.id, sessionDirectory)
       useSessionUIStore.getState().markSessionAsOpenChamberCreated(session.id)
       useGlobalSessionsStore.getState().upsertSession(session)
@@ -264,7 +297,13 @@ export async function archiveSession(sessionId: string): Promise<boolean> {
   }
   try {
     const archivedAt = Date.now()
-    await sdk().session.update({ sessionID: sessionId, directory: sessionDirectory, time: { archived: archivedAt } })
+    const previousDirectory = opencodeClient.getDirectory()
+    if (sessionDirectory) {
+      opencodeClient.setDirectory(sessionDirectory)
+    }
+    await opencodeClient.archiveSession(sessionId, archivedAt).finally(() => {
+      opencodeClient.setDirectory(previousDirectory)
+    })
     useGlobalSessionsStore.getState().archiveSessions([sessionId], archivedAt)
     return true
   } catch (error) {
@@ -428,7 +467,14 @@ export async function optimisticSend(input: {
 
 export async function abortCurrentOperation(sessionId: string): Promise<void> {
   try {
-    await sdk().session.abort({ sessionID: sessionId, directory: dir() })
+    const previousDirectory = opencodeClient.getDirectory()
+    const nextDirectory = getSessionDirectory(sessionId)
+    if (nextDirectory) {
+      opencodeClient.setDirectory(nextDirectory)
+    }
+    await opencodeClient.abortSession(sessionId).finally(() => {
+      opencodeClient.setDirectory(previousDirectory)
+    })
   } catch (error) {
     console.error("[session-actions] abort failed", error)
   }
@@ -674,10 +720,15 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
     .join("\n")
     .trim()
 
-  const result = await sdk().session.fork({ sessionID: sessionId, directory: dir(), messageID: messageId })
-  if (!result.data) return
-
-  const forkedSession = result.data
+  const previousDirectory = opencodeClient.getDirectory()
+  const sessionDirectory = getSessionDirectory(sessionId) ?? dir() ?? null
+  if (sessionDirectory) {
+    opencodeClient.setDirectory(sessionDirectory)
+  }
+  const forkedSession = await opencodeClient.forkSession(sessionId, messageId).finally(() => {
+    opencodeClient.setDirectory(previousDirectory)
+  })
+  if (!forkedSession) return
 
   // Insert new session into child store so sidebar updates immediately
   const current = store.getState()
@@ -689,6 +740,10 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
   }
 
   // Switch to new session
+  const forkedBackendId = (forkedSession as { backendId?: string | null }).backendId;
+  if (typeof forkedBackendId === 'string' && forkedBackendId.trim().length > 0) {
+    useSelectionStore.getState().saveSessionBackendSelection(forkedSession.id, forkedBackendId.trim());
+  }
   useSessionUIStore.getState().setCurrentSession(forkedSession.id)
 
   // Restore forked message text to input

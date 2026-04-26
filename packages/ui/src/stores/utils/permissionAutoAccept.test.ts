@@ -7,11 +7,14 @@ function makeSession(id: string, parentID?: string): Session {
 }
 
 describe("autoRespondsPermission", () => {
+  const directory = "/repo"
+
   test("returns false when autoAccept is empty", () => {
     expect(autoRespondsPermission({
       autoAccept: {},
       sessions: [makeSession("s1")],
       sessionID: "s1",
+      directory,
     })).toBe(false)
   })
 
@@ -21,6 +24,7 @@ describe("autoRespondsPermission", () => {
       autoAccept,
       sessions: [makeSession("s1")],
       sessionID: "s1",
+      directory,
     })).toBe(true)
   })
 
@@ -30,6 +34,7 @@ describe("autoRespondsPermission", () => {
       autoAccept,
       sessions: [makeSession("s1")],
       sessionID: "s1",
+      directory,
     })).toBe(false)
   })
 
@@ -43,6 +48,7 @@ describe("autoRespondsPermission", () => {
       autoAccept,
       sessions,
       sessionID: "child",
+      directory,
     })).toBe(true)
   })
 
@@ -57,6 +63,7 @@ describe("autoRespondsPermission", () => {
       autoAccept,
       sessions,
       sessionID: "child",
+      directory,
     })).toBe(true)
   })
 
@@ -71,6 +78,7 @@ describe("autoRespondsPermission", () => {
       autoAccept,
       sessions,
       sessionID: "child",
+      directory,
     })).toBe(false)
   })
 
@@ -84,6 +92,7 @@ describe("autoRespondsPermission", () => {
       autoAccept,
       sessions,
       sessionID: "child",
+      directory,
     })).toBe(false)
   })
 
@@ -93,6 +102,7 @@ describe("autoRespondsPermission", () => {
       autoAccept,
       sessions: [],
       sessionID: "unknown",
+      directory,
     })).toBe(false)
   })
 })

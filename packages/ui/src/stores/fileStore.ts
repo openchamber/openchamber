@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { devtools, persist, createJSONStorage } from "zustand/middleware";
-import type { AttachedFile } from "./types/sessionTypes";
 import { getSafeStorage } from "./utils/safeStorage";
+import type { AttachedFile } from "./types/sessionTypes";
 
 interface FileState {
     attachedFiles: AttachedFile[];

@@ -156,20 +156,21 @@ const mkdirp = async (path: string): Promise<boolean> => {
   return Boolean(res.ok);
 };
 
-const readTextFile = async (path: string): Promise<string | null> => {
-  const runtimeFiles = getRuntimeFilesAPI();
-  if (runtimeFiles?.readFile) {
-    try {
-      const result = await runtimeFiles.readFile(path);
-      const content = typeof result?.content === 'string' ? result.content : '';
-      return content;
-    } catch {
-      return null;
-    }
-  }
-
+const readTextFile = async (path: string, directory?: string | null): Promise<string | null> => {
+  // Always use the direct fetch path with allowMissing=true so the server returns
+  // 204 (not 404) for missing config files, avoiding noisy browser console errors.
+  // The runtime files API (runtimeFiles.readFile) does not support allowMissing and
+  // would trigger a 404 that shows as a red error in the console even though we
+  // catch it here.
   try {
-    const response = await fetch(`${getBaseUrl()}/fs/read?path=${encodeURIComponent(path)}`);
+    const normalizedDirectory = typeof directory === 'string' ? directory.trim() : '';
+    const queryParams = new URLSearchParams({ path, allowMissing: 'true' });
+    if (normalizedDirectory) {
+      queryParams.set('directory', normalizedDirectory);
+    }
+    const response = await fetch(`${getBaseUrl()}/fs/read?${queryParams.toString()}`, {
+      headers: normalizedDirectory ? { 'x-opencode-directory': normalizedDirectory } : undefined,
+    });
     if (!response.ok) {
       return null;
     }
@@ -548,9 +549,9 @@ export async function readOpenChamberConfig(project: ProjectRef): Promise<OpenCh
 
   const configPath = await getUserConfigPath(project);
 
-  const readText = async (path: string): Promise<string | null> => {
+  const readText = async (path: string, directory?: string | null): Promise<string | null> => {
     // Keep behavior consistent with other helpers.
-    const text = await readTextFile(path);
+    const text = await readTextFile(path, directory);
     if (text === null) {
       return null;
     }
@@ -587,7 +588,7 @@ export async function readOpenChamberConfig(project: ProjectRef): Promise<OpenCh
   // 2) Migrate legacy <project>/.openchamber/openchamber.json.
   // LEGACY_PROJECT_CONFIG: migrate project-local openchamber.json -> ~/.config/openchamber/projects/<projectId>.json
   const legacyPath = getLegacyConfigPath(projectDirectory);
-  const legacyConfig = parseConfig(await readText(legacyPath));
+  const legacyConfig = parseConfig(await readText(legacyPath, projectDirectory));
   if (!legacyConfig) {
     return null;
   }
