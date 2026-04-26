@@ -103,7 +103,7 @@ function DialogContent({
         data-slot="dialog-content"
         data-state-slot="dialog"
         className={cn(
-          "bg-background text-foreground fixed top-[50%] left-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 rounded-xl border p-6 shadow-none overflow-hidden pwa-dialog-content",
+          "bg-background text-foreground fixed top-[50%] left-[50%] z-50 flex flex-col w-full max-w-lg max-h-[calc(100dvh-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-xl border p-6 shadow-none overflow-y-auto pwa-dialog-content",
           className
         )}
         {...props}
