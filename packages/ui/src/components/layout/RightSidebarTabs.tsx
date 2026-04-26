@@ -11,6 +11,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { formatDirectoryName } from '@/lib/utils';
+import { useI18n } from '@/lib/i18n';
 import { SidebarFilesTree } from './SidebarFilesTree';
 
 type RightTab = 'git' | 'files' | 'context';
@@ -90,6 +91,7 @@ const ContextSidebarPanel: React.FC = () => {
 };
 
 export const RightSidebarTabs: React.FC = () => {
+  const { t } = useI18n();
   const rightSidebarTab = useUIStore((state) => state.rightSidebarTab);
   const setRightSidebarTab = useUIStore((state) => state.setRightSidebarTab);
   const isRightSidebarOpen = useUIStore((state) => state.isRightSidebarOpen);
@@ -100,20 +102,20 @@ export const RightSidebarTabs: React.FC = () => {
   const tabItems = React.useMemo(() => [
     {
       id: 'git',
-      label: 'Git',
+      label: t('layout.rightSidebar.git'),
       icon: <RiGitBranchLine className="h-3.5 w-3.5" />,
     },
     {
       id: 'files',
-      label: 'Files',
+      label: t('layout.rightSidebar.files'),
       icon: <RiFolder3Line className="h-3.5 w-3.5" />,
     },
     {
       id: 'context',
-      label: 'Context',
+      label: t('layout.rightSidebar.context'),
       icon: <RiBookletLine className="h-3.5 w-3.5" />,
     },
-  ], []);
+  ], [t]);
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-sidebar">

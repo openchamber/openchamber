@@ -18,6 +18,7 @@ import { FileMentionAutocomplete, type FileMentionHandle } from '@/components/ch
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import type { ScheduledTask } from '@/lib/scheduledTasksApi';
+import { useI18n } from '@/lib/i18n';
 
 const WEEKDAY_INDEXES = [0, 1, 2, 3, 4, 5, 6] as const;
 
@@ -71,12 +72,12 @@ const formatLocalDateISO = (date: Date): string => {
   return `${year}-${month}-${day}`;
 };
 
-const formatDateLabel = (isoDate: string): string => {
+const formatDateLabel = (isoDate: string, fallbackLabel: string, locale: string): string => {
   const date = parseISODateToLocal(isoDate);
   if (!date) {
-    return 'Select date';
+    return fallbackLabel;
   }
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(locale, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
@@ -236,6 +237,11 @@ interface TimePillProps {
   value: string;
   onChange: (next: string) => void;
   use24Hour: boolean;
+  hourAriaLabel: string;
+  minuteAriaLabel: string;
+  periodAriaLabel: string;
+  amLabel: string;
+  pmLabel: string;
 }
 
 const FieldLabel: React.FC<{
@@ -251,7 +257,16 @@ const FieldLabel: React.FC<{
   </div>
 );
 
-const TimePill: React.FC<TimePillProps> = ({ value, onChange, use24Hour }) => {
+const TimePill: React.FC<TimePillProps> = ({
+  value,
+  onChange,
+  use24Hour,
+  hourAriaLabel,
+  minuteAriaLabel,
+  periodAriaLabel,
+  amLabel,
+  pmLabel,
+}) => {
   const parts = React.useMemo(() => parse24hTime(value), [value]);
   const hourRef = React.useRef<HTMLInputElement>(null);
   const minuteRef = React.useRef<HTMLInputElement>(null);
@@ -383,7 +398,7 @@ const TimePill: React.FC<TimePillProps> = ({ value, onChange, use24Hour }) => {
         onFocus={() => setHourDraft('')}
         onBlur={commitHour}
         maxLength={2}
-        aria-label="Hours"
+        aria-label={hourAriaLabel}
         className="h-7 w-7 shrink-0 rounded-sm bg-transparent text-center font-mono text-sm tabular-nums text-foreground outline-none caret-transparent focus:bg-interactive-hover"
       />
       <span className="font-mono text-sm text-muted-foreground">:</span>
@@ -396,20 +411,20 @@ const TimePill: React.FC<TimePillProps> = ({ value, onChange, use24Hour }) => {
         onFocus={() => setMinuteDraft('')}
         onBlur={commitMinute}
         maxLength={2}
-        aria-label="Minutes"
+        aria-label={minuteAriaLabel}
         className="h-7 w-7 shrink-0 rounded-sm bg-transparent text-center font-mono text-sm tabular-nums text-foreground outline-none caret-transparent focus:bg-interactive-hover"
       />
       {!use24Hour ? (
         <Select value={parts.meridiem} onValueChange={(next) => setPeriod(next as 'AM' | 'PM')}>
           <SelectTrigger
-            aria-label="Period"
+            aria-label={periodAriaLabel}
             className="ml-1 h-7 w-fit border-0 bg-transparent pl-2 pr-1 shadow-none hover:bg-interactive-hover focus:ring-0"
           >
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="AM">AM</SelectItem>
-            <SelectItem value="PM">PM</SelectItem>
+            <SelectItem value="AM">{amLabel}</SelectItem>
+            <SelectItem value="PM">{pmLabel}</SelectItem>
           </SelectContent>
         </Select>
       ) : null}
@@ -529,37 +544,37 @@ const toDraft = (
   };
 };
 
-const validateDraft = (draft: ScheduledTaskDraft): string | null => {
+const validateDraft = (draft: ScheduledTaskDraft, t: ReturnType<typeof useI18n>['t']): string | null => {
   if (!draft.name.trim()) {
-    return 'Task name is required';
+    return t('sessions.scheduledTasks.editor.validation.taskNameRequired');
   }
   if (!draft.execution.prompt.trim()) {
-    return 'Prompt is required';
+    return t('sessions.scheduledTasks.editor.validation.promptRequired');
   }
   if (!draft.execution.providerID.trim() || !draft.execution.modelID.trim()) {
-    return 'Model is required';
+    return t('sessions.scheduledTasks.editor.validation.modelRequired');
   }
 
   if (draft.schedule.kind === 'once') {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(draft.schedule.onceDate)) {
-      return 'Date must use YYYY-MM-DD';
+      return t('sessions.scheduledTasks.editor.validation.dateFormat');
     }
     if (!/^([01]\d|2[0-3]):([0-5]\d)$/.test(draft.schedule.onceTime)) {
-      return 'Time must use HH:mm';
+      return t('sessions.scheduledTasks.editor.validation.timeFormat');
     }
   } else {
     const validTimes = draft.schedule.times.filter((value) => /^([01]\d|2[0-3]):([0-5]\d)$/.test(value));
     if (validTimes.length === 0) {
-      return 'Add at least one valid time';
+      return t('sessions.scheduledTasks.editor.validation.atLeastOneTime');
     }
   }
 
   if (draft.schedule.kind === 'weekly' && draft.schedule.weekdays.length === 0) {
-    return 'Select at least one weekday';
+    return t('sessions.scheduledTasks.editor.validation.atLeastOneWeekday');
   }
 
   if (!draft.schedule.timezone.trim()) {
-    return 'Timezone is required';
+    return t('sessions.scheduledTasks.editor.validation.timezoneRequired');
   }
 
   return null;
@@ -577,6 +592,7 @@ export function ScheduledTaskEditorDialog(props: {
   onSave: (draft: Partial<ScheduledTask>) => Promise<void>;
 }) {
   const { open, task, onOpenChange, onSave } = props;
+  const { t, locale } = useI18n();
   const loadProviders = useConfigStore((state) => state.loadProviders);
   const loadAgents = useConfigStore((state) => state.loadAgents);
   const providers = useConfigStore((state) => state.providers);
@@ -610,12 +626,6 @@ export function ScheduledTaskEditorDialog(props: {
   const promptTextareaRef = React.useRef<HTMLTextAreaElement>(null);
   const mentionRef = React.useRef<FileMentionHandle>(null);
   const commandRef = React.useRef<CommandAutocompleteHandle>(null);
-  const locale = React.useMemo(() => {
-    if (typeof navigator !== 'undefined' && navigator.language) {
-      return navigator.language;
-    }
-    return Intl.DateTimeFormat().resolvedOptions().locale || 'en-US';
-  }, []);
   const localeUse24Hour = React.useMemo(() => getUses24Hour(locale), [locale]);
   const localeWeekStartsOn = React.useMemo(() => getWeekStartsOn(locale), [locale]);
   const use24Hour = React.useMemo(() => {
@@ -783,10 +793,10 @@ export function ScheduledTaskEditorDialog(props: {
       return null;
     }
     if (isSameCalendarDay(selectedDate, todayDate)) {
-      return 'Today';
+      return t('sessions.scheduledTasks.editor.date.today');
     }
-    return new Intl.DateTimeFormat(undefined, { weekday: 'short' }).format(selectedDate);
-  }, [draft.schedule.onceDate, todayDate]);
+    return new Intl.DateTimeFormat(locale, { weekday: 'short' }).format(selectedDate);
+  }, [draft.schedule.onceDate, locale, t, todayDate]);
   const isAtCurrentMonth = React.useMemo(
     () => startOfMonth(calendarMonth).getTime() <= currentMonthStart.getTime(),
     [calendarMonth, currentMonthStart],
@@ -942,7 +952,7 @@ export function ScheduledTaskEditorDialog(props: {
   }, [showCommandAutocomplete, showFileMention]);
 
   const handleSubmit = React.useCallback(async () => {
-    const validationError = validateDraft(draft);
+    const validationError = validateDraft(draft, t);
     if (validationError) {
       toast.error(validationError);
       return;
@@ -981,42 +991,42 @@ export function ScheduledTaskEditorDialog(props: {
       await onSave(payload);
       onOpenChange(false);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to save task');
+      toast.error(error instanceof Error ? error.message : t('sessions.scheduledTasks.editor.toast.saveFailed'));
     } finally {
       setSaving(false);
     }
-  }, [draft, onOpenChange, onSave]);
+  }, [draft, onOpenChange, onSave, t]);
 
   const descriptionId = React.useId();
   const hasOpenFloatingMenu = React.useCallback(() => {
     if (typeof document === 'undefined') return false;
     return Boolean(
       document.querySelector(
-        '[data-slot="dropdown-menu-content"][data-state="open"], [data-slot="select-content"][data-state="open"]'
+        '[data-slot="dropdown-menu-content"], [data-slot="select-content"]'
       )
     );
   }, []);
 
-  const title = task ? 'Edit scheduled task' : 'New scheduled task';
-  const description = 'Configure a server-side task that creates a new session and sends a prompt.';
+  const title = task ? t('sessions.scheduledTasks.editor.title.edit') : t('sessions.scheduledTasks.editor.title.new');
+  const description = t('sessions.scheduledTasks.editor.description');
 
   const formBody = (
     <div className="flex flex-col gap-5">
                 <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
                   <div className="flex flex-col gap-1">
-                    <FieldLabel htmlFor="sched-name" required>Task name</FieldLabel>
+                    <FieldLabel htmlFor="sched-name" required>{t('sessions.scheduledTasks.editor.taskName.label')}</FieldLabel>
                     <Input
                       id="sched-name"
                       value={draft.name}
                       onChange={(event) => setDraft((prev) => ({ ...prev, name: event.target.value }))}
-                      placeholder="Daily sync"
+                      placeholder={t('sessions.scheduledTasks.editor.taskName.placeholder')}
                       maxLength={80}
                       className="w-full sm:max-w-[220px]"
                     />
                   </div>
 
                   <div className="flex flex-col gap-1">
-                    <FieldLabel>Schedule type</FieldLabel>
+                    <FieldLabel>{t('sessions.scheduledTasks.editor.scheduleType.label')}</FieldLabel>
                     <Select
                       value={draft.schedule.kind}
                       onValueChange={(value: 'daily' | 'weekly' | 'once') => {
@@ -1026,11 +1036,19 @@ export function ScheduledTaskEditorDialog(props: {
                         }));
                       }}
                     >
-                      <SelectTrigger className="w-fit max-w-full"><SelectValue /></SelectTrigger>
+                      <SelectTrigger className="w-fit max-w-full">
+                        <SelectValue>
+                          {(value) => value === 'daily'
+                            ? t('sessions.scheduledTasks.editor.scheduleType.daily')
+                            : value === 'weekly'
+                              ? t('sessions.scheduledTasks.editor.scheduleType.weekly')
+                              : t('sessions.scheduledTasks.editor.scheduleType.once')}
+                        </SelectValue>
+                      </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="daily">Daily</SelectItem>
-                        <SelectItem value="weekly">Weekly</SelectItem>
-                        <SelectItem value="once">One-time</SelectItem>
+                        <SelectItem value="daily">{t('sessions.scheduledTasks.editor.scheduleType.daily')}</SelectItem>
+                        <SelectItem value="weekly">{t('sessions.scheduledTasks.editor.scheduleType.weekly')}</SelectItem>
+                        <SelectItem value="once">{t('sessions.scheduledTasks.editor.scheduleType.once')}</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -1040,7 +1058,7 @@ export function ScheduledTaskEditorDialog(props: {
           {draft.schedule.kind === 'once' ? (
             <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
               <div className="flex flex-col gap-1" ref={datePickerRef}>
-                <FieldLabel>Date</FieldLabel>
+                <FieldLabel>{t('sessions.scheduledTasks.editor.date.label')}</FieldLabel>
                 <div className="relative">
                   <button
                     type="button"
@@ -1049,7 +1067,7 @@ export function ScheduledTaskEditorDialog(props: {
                   >
                     <span className="inline-flex items-center gap-2">
                       <RiCalendarLine className="h-4 w-4 text-muted-foreground" />
-                      <span className="typography-ui-label text-foreground">{formatDateLabel(draft.schedule.onceDate)}</span>
+                      <span className="typography-ui-label text-foreground">{formatDateLabel(draft.schedule.onceDate, t('sessions.scheduledTasks.editor.date.placeholder'), locale)}</span>
                     </span>
                     <RiArrowDownSLine className="h-4 w-4 text-muted-foreground" />
                   </button>
@@ -1061,19 +1079,19 @@ export function ScheduledTaskEditorDialog(props: {
                           type="button"
                           className="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-interactive-hover disabled:cursor-not-allowed disabled:opacity-40"
                           onClick={() => setCalendarMonth((prev) => shiftMonth(prev, -1))}
-                          aria-label="Previous month"
+                          aria-label={t('sessions.scheduledTasks.editor.date.previousMonth')}
                           disabled={isAtCurrentMonth}
                         >
                           <RiArrowLeftSLine className="h-4 w-4" />
                         </button>
                         <div className="typography-ui-label text-foreground">
-                          {new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(calendarMonth)}
+                          {new Intl.DateTimeFormat(locale, { month: 'long', year: 'numeric' }).format(calendarMonth)}
                         </div>
                         <button
                           type="button"
                           className="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-interactive-hover"
                           onClick={() => setCalendarMonth((prev) => shiftMonth(prev, 1))}
-                          aria-label="Next month"
+                          aria-label={t('sessions.scheduledTasks.editor.date.nextMonth')}
                         >
                           <RiArrowRightSLine className="h-4 w-4" />
                         </button>
@@ -1138,7 +1156,7 @@ export function ScheduledTaskEditorDialog(props: {
                             setCalendarMonth(new Date(todayDate.getFullYear(), todayDate.getMonth(), 1));
                           }}
                         >
-                          Jump to today
+                          {t('sessions.scheduledTasks.editor.date.jumpToToday')}
                         </Button>
                       </div>
                     </div>
@@ -1147,10 +1165,15 @@ export function ScheduledTaskEditorDialog(props: {
               </div>
 
               <div className="flex min-w-0 flex-col gap-1">
-                <FieldLabel>Time</FieldLabel>
+                <FieldLabel>{t('sessions.scheduledTasks.editor.time.label')}</FieldLabel>
                 <TimePill
                   value={draft.schedule.onceTime}
                   use24Hour={use24Hour}
+                  hourAriaLabel={t('sessions.scheduledTasks.editor.time.hourAria')}
+                  minuteAriaLabel={t('sessions.scheduledTasks.editor.time.minuteAria')}
+                  periodAriaLabel={t('sessions.scheduledTasks.editor.time.periodAria')}
+                  amLabel={t('sessions.scheduledTasks.editor.time.period.am')}
+                  pmLabel={t('sessions.scheduledTasks.editor.time.period.pm')}
                   onChange={(next) => setDraft((prev) => ({
                     ...prev,
                     schedule: { ...prev.schedule, onceTime: next },
@@ -1158,7 +1181,7 @@ export function ScheduledTaskEditorDialog(props: {
                 />
 
                 <div className="mt-2 flex flex-col gap-1">
-                  <FieldLabel>Timezone</FieldLabel>
+                  <FieldLabel>{t('sessions.scheduledTasks.editor.timezone.label')}</FieldLabel>
                   <Select
                     value={draft.schedule.timezone}
                     onValueChange={(timezone) => {
@@ -1182,7 +1205,7 @@ export function ScheduledTaskEditorDialog(props: {
             <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
               {draft.schedule.kind === 'weekly' ? (
                 <div className="flex flex-col gap-1 sm:col-span-2">
-                  <FieldLabel>Weekdays</FieldLabel>
+                  <FieldLabel>{t('sessions.scheduledTasks.editor.weekdays.label')}</FieldLabel>
                   <div className="flex flex-wrap gap-x-3 gap-y-2">
                     {orderedWeekdays.map((weekday) => {
                       const checked = draft.schedule.weekdays.includes(weekday.value);
@@ -1207,13 +1230,18 @@ export function ScheduledTaskEditorDialog(props: {
               ) : null}
 
               <div className="flex flex-col gap-2">
-                <FieldLabel>Times</FieldLabel>
+                <FieldLabel>{t('sessions.scheduledTasks.editor.times.label')}</FieldLabel>
                 <div className="flex flex-col gap-2">
                   {draft.schedule.times.map((time, index) => (
                     <div key={index} className="flex items-center gap-2">
                       <TimePill
                         value={time}
                         use24Hour={use24Hour}
+                        hourAriaLabel={t('sessions.scheduledTasks.editor.time.hourAria')}
+                        minuteAriaLabel={t('sessions.scheduledTasks.editor.time.minuteAria')}
+                        periodAriaLabel={t('sessions.scheduledTasks.editor.time.periodAria')}
+                        amLabel={t('sessions.scheduledTasks.editor.time.period.am')}
+                        pmLabel={t('sessions.scheduledTasks.editor.time.period.pm')}
                         onChange={(next) => updateTimeAt(index, next)}
                       />
                       {draft.schedule.times.length > 1 ? (
@@ -1222,7 +1250,7 @@ export function ScheduledTaskEditorDialog(props: {
                           size="icon"
                           variant="ghost"
                           onClick={() => removeTimeAt(index)}
-                          aria-label="Remove time"
+                          aria-label={t('sessions.scheduledTasks.editor.times.removeAria')}
                         >
                           <RiCloseLine className="h-4 w-4" />
                         </Button>
@@ -1232,13 +1260,13 @@ export function ScheduledTaskEditorDialog(props: {
                 </div>
                 <div>
                   <Button type="button" size="sm" variant="outline" onClick={addTime}>
-                    <RiAddLine className="mr-1 h-4 w-4" /> Add time
+                    <RiAddLine className="mr-1 h-4 w-4" /> {t('sessions.scheduledTasks.editor.times.add')}
                   </Button>
                 </div>
               </div>
 
               <div className="flex flex-col gap-1">
-                <FieldLabel>Timezone</FieldLabel>
+                <FieldLabel>{t('sessions.scheduledTasks.editor.timezone.label')}</FieldLabel>
                 <Select
                   value={draft.schedule.timezone}
                   onValueChange={(timezone) => {
@@ -1261,7 +1289,7 @@ export function ScheduledTaskEditorDialog(props: {
 
           <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
             <div className="flex min-w-0 flex-col gap-1">
-              <FieldLabel required>Model</FieldLabel>
+              <FieldLabel required>{t('sessions.scheduledTasks.editor.model.label')}</FieldLabel>
               <ModelSelector
                 providerId={draft.execution.providerID}
                 modelId={draft.execution.modelID}
@@ -1280,7 +1308,7 @@ export function ScheduledTaskEditorDialog(props: {
             </div>
 
             <div className="flex min-w-0 flex-col gap-1">
-              <FieldLabel>Thinking level</FieldLabel>
+              <FieldLabel>{t('sessions.scheduledTasks.editor.thinkingLevel.label')}</FieldLabel>
               <Select
                 value={selectedVariantValue}
                 disabled={!hasVariantOptions}
@@ -1294,9 +1322,15 @@ export function ScheduledTaskEditorDialog(props: {
                   }));
                 }}
               >
-                <SelectTrigger className="w-fit max-w-full"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="w-fit max-w-full">
+                  <SelectValue>
+                    {(value) => value === '__default'
+                      ? t('sessions.scheduledTasks.editor.thinkingLevel.default')
+                      : value}
+                  </SelectValue>
+                </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="__default">Default</SelectItem>
+                  <SelectItem value="__default">{t('sessions.scheduledTasks.editor.thinkingLevel.default')}</SelectItem>
                   {variantOptions.map((variant) => (
                     <SelectItem key={variant} value={variant}>{variant}</SelectItem>
                   ))}
@@ -1306,7 +1340,7 @@ export function ScheduledTaskEditorDialog(props: {
           </div>
 
           <div className="flex min-w-0 flex-col gap-1">
-            <FieldLabel>Agent</FieldLabel>
+            <FieldLabel>{t('sessions.scheduledTasks.editor.agent.label')}</FieldLabel>
             <AgentSelector
               agentName={draft.execution.agent}
               filter={(agent) => isPrimaryMode(agent.mode)}
@@ -1321,7 +1355,7 @@ export function ScheduledTaskEditorDialog(props: {
           </div>
 
           <div className="flex flex-col gap-1">
-            <FieldLabel htmlFor="sched-prompt" required>Prompt</FieldLabel>
+            <FieldLabel htmlFor="sched-prompt" required>{t('sessions.scheduledTasks.editor.prompt.label')}</FieldLabel>
             <div className="relative">
               <Textarea
                 id="sched-prompt"
@@ -1335,7 +1369,7 @@ export function ScheduledTaskEditorDialog(props: {
                 }}
                 onKeyDown={handlePromptKeyDown}
                 rows={8}
-                placeholder="Summarize open tasks and propose next actions"
+                placeholder={t('sessions.scheduledTasks.editor.prompt.placeholder')}
                 className="typography-meta min-h-[120px] max-h-[300px] resize-none overflow-y-auto"
               />
 
@@ -1382,17 +1416,17 @@ export function ScheduledTaskEditorDialog(props: {
         <Checkbox
           checked={draft.enabled}
           onChange={(enabled) => setDraft((prev) => ({ ...prev, enabled }))}
-          ariaLabel="Enable task"
+          ariaLabel={t('sessions.scheduledTasks.editor.enabled.aria')}
         />
-        <span className="typography-meta">Enabled</span>
+        <span className="typography-meta">{t('sessions.scheduledTasks.editor.enabled.label')}</span>
       </label>
 
       <div className="flex items-center gap-2">
         <Button type="button" variant="ghost" size="sm" onClick={() => onOpenChange(false)} disabled={saving}>
-          Cancel
+          {t('sessions.scheduledTasks.editor.actions.cancel')}
         </Button>
         <Button type="button" size="sm" onClick={handleSubmit} disabled={saving}>
-          {saving ? 'Saving...' : 'Save'}
+          {saving ? t('sessions.scheduledTasks.editor.actions.saving') : t('sessions.scheduledTasks.editor.actions.save')}
         </Button>
       </div>
     </div>
@@ -1422,14 +1456,19 @@ export function ScheduledTaskEditorDialog(props: {
   }
 
   return (
-    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
+    <DialogPrimitive.Root
+      open={open}
+      onOpenChange={(next) => {
+        if (!next && hasOpenFloatingMenu()) {
+          return;
+        }
+        onOpenChange(next);
+      }}
+    >
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/50 dark:bg-black/75" />
         <DialogPrimitive.Content
           aria-describedby={descriptionId}
-          onInteractOutside={(event) => {
-            if (hasOpenFloatingMenu()) event.preventDefault();
-          }}
           className={cn(
             'fixed z-50 top-[50%] left-[50%] translate-x-[-50%] translate-y-[-50%]',
             'w-[90vw] max-w-[720px] h-[680px] max-h-[85vh]',
@@ -1441,7 +1480,7 @@ export function ScheduledTaskEditorDialog(props: {
             <button
               type="button"
               onClick={() => onOpenChange(false)}
-              aria-label="Close"
+              aria-label={t('sessions.scheduledTasks.editor.actions.closeAria')}
               className="inline-flex h-7 w-7 items-center justify-center rounded-md p-0.5 text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
               <RiCloseLine className="h-5 w-5" />

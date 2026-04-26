@@ -9,6 +9,7 @@ import { restartDesktopApp } from '@/lib/desktop';
 import { cn } from '@/lib/utils';
 import { RemoteConnectionForm } from './RemoteConnectionForm';
 import { desktopHostsGet, desktopHostsSet } from '@/lib/desktopHosts';
+import { useI18n } from '@/lib/i18n';
 
 const INSTALL_COMMAND = 'curl -fsSL https://opencode.ai/install | bash';
 const DOCS_URL = 'https://opencode.ai/docs';
@@ -21,7 +22,7 @@ type ChooserScreenProps = {
   onCliAvailable?: () => void;
 };
 
-function BashCommand({ onCopy }: { onCopy: () => void }) {
+function BashCommand({ onCopy, copyTitle }: { onCopy: () => void; copyTitle: string }) {
   return (
     <div className="flex items-center justify-center gap-3">
       <code>
@@ -34,7 +35,7 @@ function BashCommand({ onCopy }: { onCopy: () => void }) {
       <button
         onClick={onCopy}
         className="inline-flex items-center text-muted-foreground hover:text-foreground transition-colors"
-        title="Copy to clipboard"
+        title={copyTitle}
       >
         <RiFileCopyLine className="h-4 w-4" />
       </button>
@@ -45,6 +46,7 @@ function BashCommand({ onCopy }: { onCopy: () => void }) {
 const HINT_DELAY_MS = 30000;
 
 export function ChooserScreen({ onCliAvailable }: ChooserScreenProps) {
+  const { t } = useI18n();
   const [copied, setCopied] = React.useState(false);
   const [showHint, setShowHint] = React.useState(false);
   const [isDesktopApp, setIsDesktopApp] = React.useState(false);
@@ -149,7 +151,7 @@ export function ChooserScreen({ onCliAvailable }: ChooserScreenProps) {
 
     try {
       const selected = await tauri.dialog.open({
-        title: 'Select opencode binary',
+        title: t('onboarding.localSetup.dialog.selectOpencodeBinary'),
         multiple: false,
         directory: false,
       });
@@ -159,7 +161,7 @@ export function ChooserScreen({ onCliAvailable }: ChooserScreenProps) {
     } catch {
       // ignore
     }
-  }, [isDesktopApp]);
+  }, [isDesktopApp, t]);
 
   // Persist the user's first choice (local or remote)
   const persistFirstChoice = React.useCallback(async (choice: 'local' | 'remote') => {
@@ -226,14 +228,14 @@ export function ChooserScreen({ onCliAvailable }: ChooserScreenProps) {
         }
         onCliAvailable?.();
       } else {
-        setCheckError('OpenCode CLI is not ready yet. Please confirm installation is complete and try again.');
+        setCheckError(t('onboarding.localSetup.errors.cliNotReady'));
       }
     } catch (err) {
-      setCheckError(err instanceof Error ? err.message : 'Detection failed');
+      setCheckError(err instanceof Error ? err.message : t('onboarding.localSetup.errors.detectionFailed'));
     } finally {
       setIsChecking(false);
     }
-  }, [checkCliAvailability, onCliAvailable, persistFirstChoice]);
+  }, [checkCliAvailability, onCliAvailable, persistFirstChoice, t]);
 
   const docsUrl = platform === 'windows' ? WINDOWS_WSL_DOCS_URL : DOCS_URL;
   const binaryPlaceholder =
@@ -251,10 +253,10 @@ export function ChooserScreen({ onCliAvailable }: ChooserScreenProps) {
       <div className="w-full space-y-4 text-center">
         <div className="space-y-4">
           <h1 className="text-3xl font-semibold tracking-tight text-foreground">
-            Welcome to OpenChamber
+            {t('onboarding.chooser.title')}
           </h1>
           <p className="text-muted-foreground">
-            Choose how you want to connect to get started.
+            {t('onboarding.chooser.description')}
           </p>
         </div>
 
@@ -270,7 +272,7 @@ export function ChooserScreen({ onCliAvailable }: ChooserScreenProps) {
               )}
               onClick={() => setActiveTab('local')}
             >
-              Local Install
+              {t('onboarding.chooser.tabs.localInstall')}
             </button>
             <button
               type="button"
@@ -282,7 +284,7 @@ export function ChooserScreen({ onCliAvailable }: ChooserScreenProps) {
               )}
               onClick={handleChooseRemote}
             >
-              Connect Remote
+              {t('onboarding.chooser.tabs.connectRemote')}
             </button>
           </div>
         )}
@@ -299,11 +301,11 @@ export function ChooserScreen({ onCliAvailable }: ChooserScreenProps) {
               <>
                 {platform === 'windows' && (
                   <div className="mx-auto max-w-2xl rounded-lg border border-border bg-background/50 p-4 text-left">
-                    <div className="text-sm text-foreground">Windows setup (WSL recommended)</div>
+                    <div className="text-sm text-foreground">{t('onboarding.localSetup.windows.title')}</div>
                     <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
-                      <li>Install WSL (if needed) with <code className="text-foreground/80">wsl --install</code> in PowerShell.</li>
-                      <li>Run the install command below inside your WSL terminal.</li>
-                      <li>If OpenChamber does not detect OpenCode automatically, set the binary path below.</li>
+                      <li>{t('onboarding.localSetup.windows.stepInstallWsl')} <code className="text-foreground/80">wsl --install</code> {t('onboarding.localSetup.windows.stepInstallWslSuffix')}</li>
+                      <li>{t('onboarding.localSetup.windows.stepRunInstallInWsl')}</li>
+                      <li>{t('onboarding.localSetup.windows.stepSetBinaryPath')}</li>
                     </ol>
                   </div>
                 )}
@@ -313,10 +315,10 @@ export function ChooserScreen({ onCliAvailable }: ChooserScreenProps) {
                     {copied ? (
                       <div className="flex items-center justify-center gap-2" style={{ color: 'var(--status-success)' }}>
                         <RiCheckLine className="h-4 w-4" />
-                        Copied to clipboard
+                        {t('onboarding.common.status.copiedToClipboard')}
                       </div>
                     ) : (
-                      <BashCommand onCopy={handleCopy} />
+                      <BashCommand onCopy={handleCopy} copyTitle={t('onboarding.common.copyToClipboard')} />
                     )}
                   </div>
                 </div>
@@ -327,7 +329,7 @@ export function ChooserScreen({ onCliAvailable }: ChooserScreenProps) {
                   rel="noopener noreferrer"
                   className="text-sm text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1 justify-center"
                 >
-                  {platform === 'windows' ? 'View Windows + WSL documentation' : 'View documentation'}
+                  {platform === 'windows' ? t('onboarding.localSetup.docs.windows') : t('onboarding.localSetup.docs.default')}
                   <RiExternalLinkLine className="h-3 w-3" />
                 </a>
 
@@ -345,17 +347,17 @@ export function ChooserScreen({ onCliAvailable }: ChooserScreenProps) {
                     className="w-full max-w-xs"
                     size="lg"
                   >
-                    {isChecking ? 'Checking...' : "I've completed installation, check and continue"}
+                    {isChecking ? t('onboarding.localSetup.actions.checking') : t('onboarding.localSetup.actions.checkAndContinue')}
                   </Button>
 
                   <p className="text-xs text-muted-foreground">
-                    Click to check if OpenCode CLI is available. If successful, you'll automatically enter the main screen.
+                    {t('onboarding.localSetup.helper.checkAndContinue')}
                   </p>
                 </div>
 
                 <div className="mx-auto w-full max-w-xl pt-4">
                   <div className="space-y-2">
-                    <div className="text-sm text-muted-foreground">Already installed? Set the OpenCode CLI path:</div>
+                    <div className="text-sm text-muted-foreground">{t('onboarding.localSetup.field.alreadyInstalled')}</div>
                     <div className="flex gap-2">
                       <Input
                         value={opencodeBinary}
@@ -370,17 +372,17 @@ export function ChooserScreen({ onCliAvailable }: ChooserScreenProps) {
                         onClick={handleBrowse}
                         disabled={isRetrying || !isDesktopApp || !isTauriShell()}
                       >
-                        Browse
+                        {t('onboarding.localSetup.actions.browse')}
                       </Button>
                       <Button
                         type="button"
                         onClick={handleApplyPath}
                         disabled={isRetrying}
                       >
-                        Apply
+                        {t('onboarding.localSetup.actions.apply')}
                       </Button>
                     </div>
-                    <div className="text-xs text-muted-foreground/70">Saves to OpenChamber settings and reloads OpenCode configuration.</div>
+                    <div className="text-xs text-muted-foreground/70">{t('onboarding.localSetup.helper.saveAndReload')}</div>
                   </div>
                 </div>
               </>
@@ -394,22 +396,22 @@ export function ChooserScreen({ onCliAvailable }: ChooserScreenProps) {
           {platform === 'windows' ? (
             <>
               <p className="text-sm text-muted-foreground/70">
-                On Windows, install and run OpenCode in WSL for best compatibility.
+                {t('onboarding.localSetup.windows.hintInstallInWsl')}
               </p>
               <p className="text-sm text-muted-foreground/70">
-                If detection fails, set a native path (<code className="text-foreground/70">opencode.cmd</code>/<code className="text-foreground/70">opencode.exe</code>), <code className="text-foreground/70">wsl.exe</code>, or <code className="text-foreground/70">wsl:/usr/local/bin/opencode</code>.
+                {t('onboarding.localSetup.windows.hintDetectionFailed')}
               </p>
             </>
           ) : (
             <>
               <p className="text-sm text-muted-foreground/70">
-                Already installed? Make sure <code className="text-foreground/70">opencode</code> is in your PATH
+                {t('onboarding.localSetup.hint.ensurePath')}
               </p>
               <p className="text-sm text-muted-foreground/70">
-                or set <code className="text-foreground/70">OPENCODE_BINARY</code> environment variable.
+                {t('onboarding.localSetup.hint.setEnv')}
               </p>
               <p className="text-sm text-muted-foreground/70">
-                If you see <code className="text-foreground/70">env: node: No such file or directory</code> or <code className="text-foreground/70">env: bun: No such file or directory</code>, install that runtime or ensure it is on PATH.
+                {t('onboarding.localSetup.hint.missingRuntime')}
               </p>
             </>
           )}

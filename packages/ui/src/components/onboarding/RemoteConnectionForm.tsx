@@ -9,6 +9,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { isTauriShell } from '@/lib/desktop';
+import { useI18n } from '@/lib/i18n';
 
 type ConnectionState = 'idle' | 'testing' | 'success' | 'error';
 
@@ -30,16 +31,16 @@ export interface RemoteConnectionFormProps {
 
 type ProbeStatus = HostProbeResult['status'] | null;
 
-function getProbeStatusMessage(status: ProbeStatus): string | null {
+function getProbeStatusMessageKey(status: ProbeStatus): string | null {
   switch (status) {
     case 'ok':
       return null; // Success is shown separately
     case 'auth':
-      return 'Server requires authentication. You can still connect, but may need to provide credentials.';
+      return 'onboarding.remoteConnection.probe.authMessage';
     case 'wrong-service':
-      return 'Server responded but is not running OpenChamber. Verify the address points to an OpenChamber server.';
+      return 'onboarding.remoteConnection.probe.wrongServiceMessage';
     case 'unreachable':
-      return 'Server is unreachable. Check your network connection and verify the server address.';
+      return 'onboarding.remoteConnection.probe.unreachableMessage';
     default:
       return null;
   }
@@ -58,6 +59,7 @@ export function RemoteConnectionForm({
   onConnect,
   onSwitchToLocal,
 }: RemoteConnectionFormProps) {
+  const { t } = useI18n();
   const [url, setUrl] = useState(initialUrl);
   const [label, setLabel] = useState(initialLabel);
   const [state, setState] = useState<ConnectionState>('idle');
@@ -89,10 +91,10 @@ export function RemoteConnectionForm({
       setProbeResult(result);
       setState(result.status === 'ok' ? 'success' : 'error');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Connection test failed');
+      setError(err instanceof Error ? err.message : t('onboarding.remoteConnection.errors.connectionTestFailed'));
       setState('error');
     }
-  }, [normalizedUrl]);
+  }, [normalizedUrl, t]);
 
   const handleConnect = useCallback(async () => {
     if (!normalizedUrl) return;
@@ -144,16 +146,16 @@ export function RemoteConnectionForm({
         await tauri?.core?.invoke?.('desktop_restart');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save connection');
+      setError(err instanceof Error ? err.message : t('onboarding.remoteConnection.errors.failedToSaveConnection'));
       setState('error');
     }
-  }, [normalizedUrl, label, onConnect]);
+  }, [normalizedUrl, label, onConnect, t]);
 
   const isTesting = state === 'testing';
   const canTest = normalizedUrl !== null && !isTesting;
   const canConnect = normalizedUrl !== null && !isTesting && !isBlockingStatus(probeResult?.status ?? null);
 
-  const probeMessage = getProbeStatusMessage(probeResult?.status ?? null);
+  const probeMessageKey = getProbeStatusMessageKey(probeResult?.status ?? null);
   const isSuccess = probeResult?.status === 'ok';
   const isAuth = probeResult?.status === 'auth';
   const isBlocking = isBlockingStatus(probeResult?.status ?? null);
@@ -164,47 +166,47 @@ export function RemoteConnectionForm({
         {showBackButton && (
           <div className="flex items-center">
             <Button variant="ghost" onClick={onBack} className="p-0 text-muted-foreground hover:text-foreground">
-              &larr; Back
+              {t('onboarding.common.actions.back')}
             </Button>
           </div>
         )}
 
         <div className="space-y-2 text-center">
-          <h1 className="typography-ui-header text-xl font-semibold text-foreground">
-            {isRecoveryMode ? 'Connect to a Different Server' : 'Connect to Remote Server'}
-          </h1>
-          <p className="text-muted-foreground text-sm">
+            <h1 className="typography-ui-header text-xl font-semibold text-foreground">
             {isRecoveryMode
-              ? 'Enter the address of an OpenChamber server to connect to.'
-              : 'Enter the address of an OpenChamber server to connect to.'}
-          </p>
-        </div>
+              ? t('onboarding.remoteConnection.titleRecovery')
+              : t('onboarding.remoteConnection.title')}
+            </h1>
+            <p className="text-muted-foreground text-sm">
+              {t('onboarding.remoteConnection.description')}
+            </p>
+          </div>
 
         <div className="space-y-4">
           <div className="space-y-2">
             <label htmlFor="remote-url" className="text-sm text-foreground">
-              Server Address
+              {t('onboarding.remoteConnection.field.serverAddress')}
             </label>
             <Input
               id="remote-url"
               type="url"
               value={url}
               onChange={handleUrlChange}
-              placeholder="https://your-server.example.com:4096"
+              placeholder={t('onboarding.remoteConnection.field.serverAddressPlaceholder')}
               disabled={isTesting}
             />
           </div>
 
           <div className="space-y-2">
             <label htmlFor="remote-label" className="text-sm text-foreground">
-              Name (optional)
+              {t('onboarding.remoteConnection.field.nameOptional')}
             </label>
             <Input
               id="remote-label"
               type="text"
               value={label}
               onChange={handleLabelChange}
-              placeholder="My Remote Server"
+              placeholder={t('onboarding.remoteConnection.field.namePlaceholder')}
               disabled={isTesting}
             />
           </div>
@@ -219,7 +221,7 @@ export function RemoteConnectionForm({
               color: 'var(--status-success)',
             }}
           >
-            Connected successfully ({probeResult.latencyMs}ms)
+            {t('onboarding.remoteConnection.status.connectedSuccessfully', { latencyMs: probeResult.latencyMs })}
           </div>
         )}
 
@@ -232,7 +234,7 @@ export function RemoteConnectionForm({
               color: 'var(--status-warning)',
             }}
           >
-            Server requires authentication. You can still connect.
+            {t('onboarding.remoteConnection.status.authWarning')}
           </div>
         )}
 
@@ -246,13 +248,13 @@ export function RemoteConnectionForm({
             }}
           >
             <div>
-              <div className="font-semibold mb-1">Connection Failed</div>
-              <div className="opacity-90">{probeMessage}</div>
+              <div className="font-semibold mb-1">{t('onboarding.remoteConnection.status.connectionFailed')}</div>
+              <div className="opacity-90">{probeMessageKey ? t(probeMessageKey as Parameters<typeof t>[0]) : null}</div>
             </div>
             <div className="text-xs opacity-80">
               {probeResult.status === 'unreachable'
-                ? 'Suggestions: Check the server address, verify the server is running, or check your network connection.'
-                : 'Suggestions: Verify the URL points to an OpenChamber server, or contact the server administrator.'}
+                ? t('onboarding.remoteConnection.status.suggestionsUnreachable')
+                : t('onboarding.remoteConnection.status.suggestionsWrongService')}
             </div>
           </div>
         )}
@@ -276,20 +278,20 @@ export function RemoteConnectionForm({
             onClick={handleTest}
             disabled={!canTest}
           >
-            {isTesting ? 'Testing\u2026' : 'Test Connection'}
+            {isTesting ? t('onboarding.remoteConnection.actions.testing') : t('onboarding.remoteConnection.actions.testConnection')}
           </Button>
           <Button
             onClick={handleConnect}
             disabled={!canConnect}
           >
-            Connect &amp; Restart
+            {t('onboarding.remoteConnection.actions.connectAndRestart')}
           </Button>
         </div>
 
         {/* Suggested actions when connection is blocked */}
         {isBlocking && (
           <div className="flex flex-col gap-2 pt-2 border-t border-border">
-            <div className="text-xs text-muted-foreground text-center">What would you like to do?</div>
+            <div className="text-xs text-muted-foreground text-center">{t('onboarding.remoteConnection.actions.whatToDo')}</div>
             <div className="flex gap-2">
               <Button
                 variant="outline"
@@ -297,7 +299,7 @@ export function RemoteConnectionForm({
                 onClick={onBack}
                 className="flex-1"
               >
-                Choose Different Server
+                {t('onboarding.remoteConnection.actions.chooseDifferentServer')}
               </Button>
               {!isRecoveryMode && onSwitchToLocal && (
                 <Button
@@ -306,7 +308,7 @@ export function RemoteConnectionForm({
                   onClick={onSwitchToLocal}
                   className="flex-1"
                 >
-                  Use Local Instead
+                  {t('onboarding.remoteConnection.actions.useLocalInstead')}
                 </Button>
               )}
             </div>

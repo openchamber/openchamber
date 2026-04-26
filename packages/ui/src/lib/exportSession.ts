@@ -1,7 +1,7 @@
 import type { Message, Part } from '@opencode-ai/sdk/v2';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { isVSCodeRuntime, openDesktopPath, revealDesktopPath, saveDesktopMarkdownFile } from '@/lib/desktop';
-import { getRevealLabel } from '@/lib/utils';
+import { getRevealLabelKey } from '@/lib/utils';
 
 type SessionMessageRecord = { info: Message; parts: Part[] };
 
@@ -181,8 +181,8 @@ export async function revealExportedMarkdown(path: string): Promise<boolean> {
   return openDesktopPath(path);
 }
 
-export function getExportRevealLabel(): string {
-  return getRevealLabel();
+export function getExportRevealLabelKey() {
+  return getRevealLabelKey();
 }
 
 export function buildExportFilename(sessionTitle?: string | null): string {

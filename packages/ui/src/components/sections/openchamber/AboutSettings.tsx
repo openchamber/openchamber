@@ -7,12 +7,14 @@ import { useDeviceInfo } from '@/lib/device';
 import { toast } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { useI18n } from '@/lib/i18n';
 
 const GITHUB_URL = 'https://github.com/btriapitsyn/openchamber';
 
 const MIN_CHECKING_DURATION = 800; // ms
 
 export const AboutSettings: React.FC = () => {
+  const { t } = useI18n();
   const [updateDialogOpen, setUpdateDialogOpen] = React.useState(false);
   const [showChecking, setShowChecking] = React.useState(false);
   const updateStore = useUpdateStore(useShallow((s) => ({
@@ -45,13 +47,13 @@ export const AboutSettings: React.FC = () => {
         setShowChecking(false);
         // Show toast if check completed with no update available
         if (didInitiateCheck.current && !updateStore.available && !updateStore.error) {
-          toast.success('You are on the latest version');
+          toast.success(t('settings.openchamber.about.toast.latestVersion'));
           didInitiateCheck.current = false;
         }
       }, MIN_CHECKING_DURATION);
       return () => clearTimeout(timer);
     }
-  }, [updateStore.checking, showChecking, updateStore.available, updateStore.error]);
+  }, [t, updateStore.checking, showChecking, updateStore.available, updateStore.error]);
 
   const isChecking = updateStore.checking || showChecking;
 
@@ -74,7 +76,7 @@ export const AboutSettings: React.FC = () => {
                 isChecking && 'animate-pulse [animation-duration:1s]'
               )}
             >
-              Check updates
+              {t('settings.openchamber.about.actions.checkUpdates')}
             </button>
           )}
 
@@ -84,7 +86,7 @@ export const AboutSettings: React.FC = () => {
               className="flex items-center gap-1 typography-meta text-[var(--primary-base)] hover:underline"
             >
               <RiDownloadLine className="h-3.5 w-3.5" />
-              Update
+              {t('settings.openchamber.about.actions.update')}
             </button>
           )}
         </div>
@@ -148,14 +150,14 @@ export const AboutSettings: React.FC = () => {
     <div className="mb-8">
       <div className="mb-3 px-1">
         <h3 className="typography-ui-header font-semibold text-foreground">
-          About OpenChamber
+          {t('settings.openchamber.about.title')}
         </h3>
       </div>
 
       <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-4 py-3 border-b border-[var(--surface-subtle)]">
           <div className="flex min-w-0 flex-col">
-            <span className="typography-ui-label text-foreground">Version</span>
+            <span className="typography-ui-label text-foreground">{t('settings.openchamber.about.field.version')}</span>
             <span className="typography-meta text-muted-foreground font-mono">{currentVersion}</span>
           </div>
           
@@ -163,7 +165,7 @@ export const AboutSettings: React.FC = () => {
             {updateStore.checking && (
               <div className="flex items-center gap-2 text-muted-foreground">
                 <RiLoaderLine className="h-4 w-4 animate-spin" />
-                <span className="typography-meta">Checking...</span>
+                <span className="typography-meta">{t('settings.openchamber.about.state.checking')}</span>
               </div>
             )}
 
@@ -173,12 +175,12 @@ export const AboutSettings: React.FC = () => {
                 onClick={() => setUpdateDialogOpen(true)}
               >
                 <RiDownloadLine className="h-4 w-4 mr-1" />
-                Update to {updateStore.info?.version}
+                {t('settings.openchamber.about.actions.updateToVersion', { version: updateStore.info?.version || '' })}
               </Button>
             )}
 
             {!updateStore.checking && !updateStore.available && !updateStore.error && (
-              <span className="typography-meta text-muted-foreground">Up to date</span>
+              <span className="typography-meta text-muted-foreground">{t('settings.openchamber.about.state.upToDate')}</span>
             )}
 
             <Button size="sm"
@@ -186,7 +188,7 @@ export const AboutSettings: React.FC = () => {
               onClick={() => updateStore.checkForUpdates()}
               disabled={updateStore.checking}
             >
-              Check for updates
+              {t('settings.openchamber.about.actions.checkForUpdates')}
             </Button>
           </div>
         </div>

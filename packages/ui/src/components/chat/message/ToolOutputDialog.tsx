@@ -26,6 +26,7 @@ import type { ToolPopupContent, DiffViewMode } from './types';
 import { DiffViewToggle } from './DiffViewToggle';
 import { VirtualizedCodeBlock, type CodeLine } from './parts/VirtualizedCodeBlock';
 import { JsonTreeView } from '@/components/ui/JsonTreeView';
+import { useI18n } from '@/lib/i18n';
 
 interface ToolOutputDialogProps {
     popup: ToolPopupContent;
@@ -306,6 +307,7 @@ const ImagePreviewDialog: React.FC<{
     onOpenChange: (open: boolean) => void;
     isMobile: boolean;
 }> = ({ popup, onOpenChange, isMobile }) => {
+    const { t } = useI18n();
     const gallery = React.useMemo(() => {
         const baseImage = popup.image;
         if (!baseImage) return [] as Array<{ url: string; mimeType?: string; filename?: string; size?: number }>;
@@ -438,7 +440,7 @@ const ImagePreviewDialog: React.FC<{
                         onMouseDown={(event) => event.stopPropagation()}
                         onClick={showPrevious}
                         className="absolute left-3 top-1/2 -translate-y-1/2 z-10 h-10 w-10 flex items-center justify-center rounded-full bg-black/40 text-foreground/90 hover:bg-black/55 focus:outline-none focus:ring-2 focus:ring-primary/60"
-                        aria-label="Previous image"
+                        aria-label={t('chat.toolOutputDialog.image.previousAria')}
                     >
                         <RiArrowLeftSLine className="h-6 w-6" />
                     </button>
@@ -447,7 +449,7 @@ const ImagePreviewDialog: React.FC<{
                         onMouseDown={(event) => event.stopPropagation()}
                         onClick={showNext}
                         className="absolute right-3 top-1/2 -translate-y-1/2 z-10 h-10 w-10 flex items-center justify-center rounded-full bg-black/40 text-foreground/90 hover:bg-black/55 focus:outline-none focus:ring-2 focus:ring-primary/60"
-                        aria-label="Next image"
+                        aria-label={t('chat.toolOutputDialog.image.nextAria')}
                     >
                         <RiArrowRightSLine className="h-6 w-6" />
                     </button>
@@ -476,7 +478,7 @@ const ImagePreviewDialog: React.FC<{
                             type="button"
                             className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground/80 hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/60"
                             onClick={() => onOpenChange(false)}
-                            aria-label="Close image preview"
+                            aria-label={t('chat.toolOutputDialog.image.closeAria')}
                         >
                             <RiCloseLine className="h-4 w-4" />
                         </button>
@@ -636,6 +638,7 @@ const MermaidPreviewDialog: React.FC<{
     onOpenChange: (open: boolean) => void;
     isMobile: boolean;
 }> = ({ popup, onOpenChange, isMobile }) => {
+    const { t } = useI18n();
     const [source, setSource] = React.useState<string>(popup.mermaid?.source || '');
     const [status, setStatus] = React.useState<'idle' | 'loading' | 'ready' | 'error'>(popup.mermaid?.source ? 'ready' : 'idle');
     const [errorMessage, setErrorMessage] = React.useState<string>('');
@@ -711,7 +714,7 @@ const MermaidPreviewDialog: React.FC<{
         const target = popup.mermaid;
         if (!target?.url) {
             setStatus('error');
-            setErrorMessage('Missing Mermaid source URL.');
+            setErrorMessage(t('chat.toolOutputDialog.mermaid.missingSource'));
             return;
         }
 
@@ -777,7 +780,7 @@ const MermaidPreviewDialog: React.FC<{
                     return;
                 }
                 setStatus('error');
-                setErrorMessage(error instanceof Error ? error.message : 'Unable to load Mermaid diagram.');
+                setErrorMessage(error instanceof Error ? error.message : t('chat.toolOutputDialog.mermaid.loadFailed'));
             });
     }, [decodeDataUrl, normalizeFilePath, popup.mermaid]);
 
@@ -922,7 +925,7 @@ const MermaidPreviewDialog: React.FC<{
                             type="button"
                             className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground/80 hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/60"
                             onClick={() => onOpenChange(false)}
-                            aria-label="Close diagram preview"
+                            aria-label={t('chat.toolOutputDialog.mermaid.closeAria')}
                         >
                             <RiCloseLine className="h-4 w-4" />
                         </button>
@@ -935,14 +938,14 @@ const MermaidPreviewDialog: React.FC<{
                             {status === 'loading' && (
                                 <div className="h-full min-h-28 flex items-center justify-center gap-2 text-muted-foreground typography-meta">
                                     <RiLoader4Line className="h-4 w-4 animate-spin" />
-                                    <span>Loading diagram...</span>
+                                    <span>{t('chat.toolOutputDialog.mermaid.loading')}</span>
                                 </div>
                             )}
 
                             {status === 'error' && (
                                 <div className="rounded-xl border border-border/30 bg-muted/20 p-3 space-y-3">
                                     <p className="typography-markdown" style={{ color: 'var(--status-error)' }}>
-                                        {errorMessage || 'Unable to render Mermaid diagram.'}
+                                        {errorMessage || t('chat.toolOutputDialog.mermaid.renderFailed')}
                                     </p>
                                     <button
                                         type="button"
@@ -955,7 +958,7 @@ const MermaidPreviewDialog: React.FC<{
                                             color: 'var(--surface-foreground)',
                                         }}
                                     >
-                                        Retry
+                                        {t('chat.toolOutputDialog.mermaid.retry')}
                                     </button>
                                 </div>
                             )}
@@ -982,6 +985,7 @@ const MermaidPreviewDialog: React.FC<{
 };
 
 const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange, syntaxTheme, isMobile }) => {
+    const { t } = useI18n();
     const [diffViewMode, setDiffViewMode] = React.useState<DiffViewMode>('unified');
     const pierreThemeConfig = usePierreThemeConfig();
 
@@ -1111,7 +1115,13 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
 
                                 if (tool === 'todowrite' || tool === 'todoread') {
                                     return (
-                                        renderTodoOutput(popup.content) || (
+                                        renderTodoOutput(popup.content, {
+                                            total: t('chat.todo.total'),
+                                            inProgress: t('chat.todo.inProgress'),
+                                            pending: t('chat.todo.pending'),
+                                            completed: t('chat.todo.completed'),
+                                            cancelled: t('chat.todo.cancelled'),
+                                        }) || (
                                             <SyntaxHighlighter
                                                 style={syntaxTheme}
                                                 language="json"
@@ -1213,8 +1223,8 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                         </div>
                     ) : (
                         <div className="p-8 text-muted-foreground typography-ui-header">
-                            <div className="mb-2">Command completed successfully</div>
-                            <div className="typography-meta">No output was produced</div>
+                            <div className="mb-2">{t('chat.toolOutputDialog.commandCompleted')}</div>
+                            <div className="typography-meta">{t('chat.toolOutputDialog.noOutputProduced')}</div>
                         </div>
                     )}
                     </div>

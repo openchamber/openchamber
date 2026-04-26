@@ -1,6 +1,7 @@
 import React from 'react';
 import { RiGitBranchLine, RiEditLine, RiCheckLine, RiCloseLine, RiLoader4Line } from '@remixicon/react';
 import { Button } from '@/components/ui/button';
+import { useI18n } from '@/lib/i18n';
 
 interface WorktreeBranchDisplayProps {
   currentBranch: string | null | undefined;
@@ -26,6 +27,7 @@ export const WorktreeBranchDisplay: React.FC<WorktreeBranchDisplayProps> = ({
   onRename,
   showEditButton = true,
 }) => {
+  const { t } = useI18n();
   const [isEditing, setIsEditing] = React.useState(false);
   const [editBranchName, setEditBranchName] = React.useState(currentBranch || '');
   const [isRenaming, setIsRenaming] = React.useState(false);
@@ -90,7 +92,7 @@ export const WorktreeBranchDisplay: React.FC<WorktreeBranchDisplayProps> = ({
             value={editBranchName}
             onChange={(e) => setEditBranchName(e.target.value)}
             className="flex-1 min-w-0 bg-transparent typography-ui-label outline-none placeholder:text-muted-foreground"
-            placeholder="Branch name"
+            placeholder={t('gitView.branch.namePlaceholder')}
             onKeyDown={handleKeyDown}
             autoFocus
           />
@@ -123,7 +125,7 @@ export const WorktreeBranchDisplay: React.FC<WorktreeBranchDisplayProps> = ({
       <RiGitBranchLine className="size-4 text-primary shrink-0" />
       <div className="inline-flex min-w-0 max-w-full items-center gap-1">
         <span className="truncate typography-ui-label font-normal text-foreground">
-          {currentBranch || 'Detached HEAD'}
+          {currentBranch || t('gitView.branch.detachedHead')}
         </span>
         {showEditButton && onRename && currentBranch && (
           <Button
@@ -131,7 +133,7 @@ export const WorktreeBranchDisplay: React.FC<WorktreeBranchDisplayProps> = ({
             size="sm"
             className="h-7 w-7 p-0 shrink-0"
             onClick={handleStartEdit}
-            title="Rename branch"
+            title={t('gitView.branch.renameTitle')}
           >
             <RiEditLine className="size-4" />
           </Button>

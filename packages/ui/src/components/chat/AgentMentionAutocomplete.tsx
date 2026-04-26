@@ -3,6 +3,7 @@ import { cn, fuzzyMatch } from '@/lib/utils';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useAgentsStore, isAgentBuiltIn, type AgentWithExtras } from '@/stores/useAgentsStore';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { useI18n } from '@/lib/i18n';
 
 interface AgentInfo {
   name: string;
@@ -40,6 +41,7 @@ export const AgentMentionAutocomplete = React.forwardRef<AgentMentionAutocomplet
   activeTab = 'agents',
   onTabSelect,
 }, ref) => {
+  const { t } = useI18n();
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const [selectedIndex, setSelectedIndex] = React.useState(0);
   const [agents, setAgents] = React.useState<AgentInfo[]>([]);
@@ -157,7 +159,7 @@ export const AgentMentionAutocomplete = React.forwardRef<AgentMentionAutocomplet
             <span className="font-semibold">#{agent.name}</span>
             {isSystem ? (
               <span className="text-[10px] leading-none uppercase font-bold tracking-tight bg-[var(--status-warning-background)] text-[var(--status-warning)] border-[var(--status-warning-border)] px-1.5 py-1 rounded border flex-shrink-0">
-                system
+                {t('chat.agentMentionAutocomplete.badge.system')}
               </span>
             ) : agent.scope ? (
               <span className={cn(
@@ -180,6 +182,12 @@ export const AgentMentionAutocomplete = React.forwardRef<AgentMentionAutocomplet
     );
   };
 
+  const tabs = React.useMemo(() => ([
+    { id: 'commands' as const, label: t('chat.autocomplete.tabs.commands') },
+    { id: 'agents' as const, label: t('chat.autocomplete.tabs.agents') },
+    { id: 'files' as const, label: t('chat.autocomplete.tabs.files') },
+  ]), [t]);
+
   return (
     <div
       ref={containerRef}
@@ -188,11 +196,7 @@ export const AgentMentionAutocomplete = React.forwardRef<AgentMentionAutocomplet
       {showTabs ? (
         <div className="px-2 pt-2 pb-1 border-b border-border/60">
           <div className="flex items-center gap-1 rounded-lg bg-[var(--surface-elevated)] p-1">
-            {([
-              { id: 'commands' as const, label: 'Commands' },
-              { id: 'agents' as const, label: 'Agents' },
-              { id: 'files' as const, label: 'Files' },
-            ]).map((tab) => (
+            {tabs.map((tab) => (
               <button
                 key={tab.id}
                 type="button"
@@ -232,12 +236,12 @@ export const AgentMentionAutocomplete = React.forwardRef<AgentMentionAutocomplet
           </div>
         ) : (
           <div className="px-3 py-2 typography-ui-label text-muted-foreground">
-            No agents found
+            {t('chat.agentMentionAutocomplete.empty')}
           </div>
         )}
       </ScrollableOverlay>
       <div className="px-3 pt-1 pb-1.5 border-t typography-meta text-muted-foreground">
-        ↑↓ navigate • Enter select • Esc close
+        {t('chat.autocomplete.keyboardHint')}
       </div>
     </div>
   );

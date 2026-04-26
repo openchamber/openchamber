@@ -10,6 +10,7 @@ import {
   normalizePath,
 } from '../utils';
 import { formatDirectoryName, formatPathForDisplay } from '@/lib/utils';
+import { useI18n } from '@/lib/i18n';
 
 type Args = {
   homeDirectory: string | null;
@@ -22,15 +23,16 @@ type Args = {
 const isArchivedSession = (session: Session): boolean => Boolean(session.time?.archived);
 
 export const useSessionGrouping = (args: Args) => {
+  const { t } = useI18n();
   const buildGroupSearchText = React.useCallback((group: SessionGroup): string => {
     return [group.label, group.branch ?? '', group.description ?? '', group.directory ?? ''].join(' ').toLowerCase();
   }, []);
 
   const buildSessionSearchText = React.useCallback((session: Session): string => {
     const sessionDirectory = normalizePath((session as Session & { directory?: string | null }).directory ?? null) ?? '';
-    const sessionTitle = (session.title || 'Untitled Session').trim();
+    const sessionTitle = (session.title || t('sessions.sidebar.session.untitled')).trim();
     return `${sessionTitle} ${sessionDirectory}`.toLowerCase();
-  }, []);
+  }, [t]);
 
   const filterSessionNodesForSearch = React.useCallback(
     (nodes: SessionNode[], query: string): SessionNode[] => {
@@ -142,7 +144,9 @@ export const useSessionGrouping = (args: Args) => {
       const rootKey = normalizedProjectRoot ?? '__project_root__';
       const groups: SessionGroup[] = [{
         id: 'root',
-        label: (projectIsRepo && projectRootBranch && projectRootBranch !== 'HEAD') ? `project root: ${projectRootBranch}` : 'project root',
+        label: (projectIsRepo && projectRootBranch && projectRootBranch !== 'HEAD')
+          ? t('sessions.sidebar.grouping.projectRootWithBranch', { branch: projectRootBranch })
+          : t('sessions.sidebar.grouping.projectRoot'),
         branch: projectRootBranch ?? null,
         description: normalizedProjectRoot ? formatPathForDisplay(normalizedProjectRoot, args.homeDirectory) : null,
         isMain: true,
@@ -223,9 +227,9 @@ export const useSessionGrouping = (args: Args) => {
       if (archivedSessions.length > 0) {
         groups.push({
           id: 'archived',
-          label: 'archived',
+          label: t('sessions.sidebar.grouping.archived'),
           branch: null,
-          description: 'Archived and unassigned sessions',
+          description: t('sessions.sidebar.grouping.archivedDescription'),
           isMain: false,
           isArchivedBucket: true,
           worktree: null,
@@ -237,7 +241,7 @@ export const useSessionGrouping = (args: Args) => {
 
       return groups;
     },
-    [args.homeDirectory, args.worktreeMetadata, args.pinnedSessionIds, args.gitBranches, args.isVSCode],
+    [args.homeDirectory, args.worktreeMetadata, args.pinnedSessionIds, args.gitBranches, args.isVSCode, t],
   );
 
   return {

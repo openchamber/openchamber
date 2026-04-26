@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/command';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { GitRemote } from '@/lib/api/types';
+import { useI18n } from '@/lib/i18n';
 
 interface BranchInfo {
   ahead?: number;
@@ -66,6 +67,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
   disabled = false,
   tooltipDelayMs = 1000,
 }) => {
+  const { t } = useI18n();
   const [isOpen, setIsOpen] = React.useState(false);
   const [search, setSearch] = React.useState('');
   const [showCreate, setShowCreate] = React.useState(false);
@@ -179,21 +181,21 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
             >
               <RiGitBranchLine className="size-4 text-primary" />
               <span className="min-w-0 truncate font-medium text-left">
-                {currentBranch || 'Detached HEAD'}
+                {currentBranch || t('gitView.branch.detachedHead')}
               </span>
               <RiArrowDownSLine className="size-4 opacity-60" />
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
         <TooltipContent sideOffset={8}>
-          Current branch
+          {t('gitView.branch.currentBranchTooltip')}
         </TooltipContent>
       </Tooltip>
 
       <DropdownMenuContent align="start" className="w-72 p-0 max-h-[60vh] flex flex-col">
         <Command className="h-full min-h-0">
           <CommandInput
-            placeholder="Search branches..."
+            placeholder={t('gitView.branch.searchPlaceholder')}
             value={search}
             onValueChange={setSearch}
           />
@@ -201,7 +203,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
             scrollbarClassName="overlay-scrollbar--flush overlay-scrollbar--dense overlay-scrollbar--zero"
             disableHorizontal
           >
-            <CommandEmpty>No branches found.</CommandEmpty>
+            <CommandEmpty>{t('gitView.branch.empty')}</CommandEmpty>
 
             <CommandGroup>
               {showRemoteSelect ? (
@@ -217,7 +219,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
                       <RiArrowLeftLine className="size-4" />
                     </button>
                     <span className="typography-meta text-muted-foreground">
-                      Push <span className="text-foreground font-medium">{sanitizedNewBranch}</span> to:
+                      {t('gitView.branch.pushToPrefix')} <span className="text-foreground font-medium">{sanitizedNewBranch}</span> {t('gitView.branch.pushToSuffix')}
                     </span>
                   </div>
                   <div className="flex flex-col gap-1">
@@ -245,13 +247,13 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
               ) : !showCreate ? (
                 <CommandItem onSelect={handleShowCreate}>
                   <RiAddLine className="size-4" />
-                  <span>Create new branch...</span>
+                  <span>{t('gitView.branch.create')}</span>
                 </CommandItem>
               ) : (
                 <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg">
                   <input
                     ref={createInputRef}
-                    placeholder="New branch name"
+                    placeholder={t('gitView.branch.newBranchPlaceholder')}
                     value={newBranchName}
                     onChange={(e) => setNewBranchName(e.target.value)}
                     onClick={(e) => e.stopPropagation()}
@@ -293,7 +295,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
 
             <CommandSeparator />
 
-            <CommandGroup heading="Local branches">
+            <CommandGroup heading={t('gitView.branch.localBranches')}>
               {filteredLocal.map((branch) => (
                 <CommandItem
                   key={`local-${branch}`}
@@ -311,14 +313,14 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
                     )}
                   </span>
                   {currentBranch === branch && (
-                    <span className="typography-micro text-primary">Current</span>
+                    <span className="typography-micro text-primary">{t('gitView.branch.currentBadge')}</span>
                   )}
                 </CommandItem>
               ))}
               {filteredLocal.length === 0 && (
                 <CommandItem disabled className="justify-center">
                   <span className="typography-meta text-muted-foreground">
-                    No local branches
+                    {t('gitView.branch.noLocalBranches')}
                   </span>
                 </CommandItem>
               )}
@@ -326,7 +328,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
 
             <CommandSeparator />
 
-            <CommandGroup heading="Remote branches">
+            <CommandGroup heading={t('gitView.branch.remoteBranches')}>
               {filteredRemote.map((branch) => (
                 <CommandItem
                   key={`remote-${branch}`}
@@ -338,7 +340,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
               {filteredRemote.length === 0 && (
                 <CommandItem disabled className="justify-center">
                   <span className="typography-meta text-muted-foreground">
-                    No remote branches
+                    {t('gitView.branch.noRemoteBranches')}
                   </span>
                 </CommandItem>
               )}

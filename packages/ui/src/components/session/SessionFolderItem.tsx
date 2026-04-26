@@ -13,6 +13,7 @@ import {
 } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import type { SessionFolder } from '@/stores/useSessionFoldersStore';
+import { useI18n } from '@/lib/i18n';
 
 interface SessionFolderItemProps<TSessionNode> {
   folder: SessionFolder;
@@ -79,6 +80,7 @@ const SessionFolderItemBase = <TSessionNode,>({
   hideActions = false,
   archivedBucket = false,
 }: SessionFolderItemProps<TSessionNode>) => {
+  const { t } = useI18n();
   const [localRenaming, setLocalRenaming] = React.useState(false);
   const [localDraft, setLocalDraft] = React.useState('');
   const inputRef = React.useRef<HTMLInputElement | null>(null);
@@ -165,7 +167,9 @@ const SessionFolderItemBase = <TSessionNode,>({
                 }
               }
         }
-        aria-label={isCollapsed ? `Expand folder ${folder.name}` : `Collapse folder ${folder.name}`}
+        aria-label={isCollapsed
+          ? t('sessions.sidebar.folderItem.expandAria', { folderName: folder.name })
+          : t('sessions.sidebar.folderItem.collapseAria', { folderName: folder.name })}
       >
         <div className={cn(
           'min-w-0 flex items-center gap-1.5 pl-1.5 flex-1 transition-[padding]',
@@ -192,7 +196,7 @@ const SessionFolderItemBase = <TSessionNode,>({
                 onChange={(event) => handleDraftChange(event.target.value)}
                 className="flex-1 min-w-0 bg-transparent typography-ui-label outline-none placeholder:text-muted-foreground"
                 autoFocus
-                placeholder="Folder name"
+                placeholder={t('sessions.sidebar.folderItem.namePlaceholder')}
                 onClick={(event) => event.stopPropagation()}
                 onPointerDown={(event) => event.stopPropagation()}
                 onMouseDown={(event) => event.stopPropagation()}
@@ -265,8 +269,8 @@ const SessionFolderItemBase = <TSessionNode,>({
                     onNewSession();
                   }}
                   className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                  aria-label={`New session in ${folder.name}`}
-                  title="New session"
+                  aria-label={t('sessions.sidebar.folderItem.newSessionAria', { folderName: folder.name })}
+                  title={t('sessions.sidebar.project.actions.newSession')}
                 >
                   <RiAddLine className="h-3.5 w-3.5" />
                 </button>
@@ -280,8 +284,8 @@ const SessionFolderItemBase = <TSessionNode,>({
                     onNewSubFolder();
                   }}
                   className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                  aria-label={`New sub-folder in ${folder.name}`}
-                  title="New sub-folder"
+                  aria-label={t('sessions.sidebar.folderItem.newSubfolderAria', { folderName: folder.name })}
+                  title={t('sessions.sidebar.folderItem.newSubfolder')}
                 >
                   <RiFolderAddLine className="h-3.5 w-3.5" />
                 </button>
@@ -294,7 +298,7 @@ const SessionFolderItemBase = <TSessionNode,>({
                     handleStartRename();
                   }}
                   className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                  aria-label={`Rename folder ${folder.name}`}
+                  aria-label={t('sessions.sidebar.folderItem.renameAria', { folderName: folder.name })}
                 >
                   <RiPencilAiLine className="h-3.5 w-3.5" />
                 </button>
@@ -306,7 +310,9 @@ const SessionFolderItemBase = <TSessionNode,>({
                   onDelete();
                 }}
                 className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                aria-label={archivedBucket ? `Delete archived sessions in folder ${folder.name}` : `Delete folder ${folder.name}`}
+                aria-label={archivedBucket
+                  ? t('sessions.sidebar.folderItem.deleteArchivedInFolderAria', { folderName: folder.name })
+                  : t('sessions.sidebar.folderItem.deleteFolderAria', { folderName: folder.name })}
               >
                 <RiDeleteBinLine className="h-3.5 w-3.5" />
               </button>
@@ -327,7 +333,7 @@ const SessionFolderItemBase = <TSessionNode,>({
             )
           ) : !subFolderItems ? (
             <div className="py-1 pl-1.5 text-left typography-micro text-muted-foreground/70">
-              Empty folder
+              {t('sessions.sidebar.folderItem.emptyFolder')}
             </div>
           ) : null}
         </div>

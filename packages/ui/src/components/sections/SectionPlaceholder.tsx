@@ -1,6 +1,7 @@
 import React from 'react';
 import { SIDEBAR_SECTION_CONFIG_MAP, SIDEBAR_SECTION_DESCRIPTIONS } from '@/constants/sidebar';
 import type { SidebarSection } from '@/constants/sidebar';
+import { useI18n } from '@/lib/i18n';
 
 interface SectionPlaceholderProps {
     sectionId: SidebarSection;
@@ -8,6 +9,7 @@ interface SectionPlaceholderProps {
 }
 
 export const SectionPlaceholder: React.FC<SectionPlaceholderProps> = ({ sectionId, variant }) => {
+    const { t } = useI18n();
     const config = SIDEBAR_SECTION_CONFIG_MAP[sectionId];
     const Icon = config.icon;
 
@@ -36,7 +38,7 @@ export const SectionPlaceholder: React.FC<SectionPlaceholderProps> = ({ sectionI
                     {SIDEBAR_SECTION_DESCRIPTIONS[sectionId]}
                 </p>
             </div>
-            <p className="typography-meta text-muted-foreground/60">Coming soon...</p>
+            <p className="typography-meta text-muted-foreground/60">{t('settings.common.state.comingSoon')}</p>
         </div>
     );
 };

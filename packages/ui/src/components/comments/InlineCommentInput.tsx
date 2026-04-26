@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { useDeviceInfo } from '@/lib/device';
+import { useI18n } from '@/lib/i18n';
 
 export interface InlineCommentInputProps {
   initialText?: string;
@@ -26,6 +27,7 @@ export function InlineCommentInput({
   className,
   maxWidth,
 }: InlineCommentInputProps) {
+  const { t } = useI18n();
   const themeContext = useOptionalThemeSystem();
   const currentTheme = themeContext?.currentTheme;
   const { isMobile } = useDeviceInfo();
@@ -131,7 +133,11 @@ export function InlineCommentInput({
           <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground mb-2">
             {fileLabel && <span className="truncate max-w-[200px]">{fileLabel}</span>}
             {fileLabel && lineRange && <span>•</span>}
-            {displayRange && <span>Lines {displayRange.start}-{displayRange.end}</span>}
+            {displayRange && (
+              <span>
+                {t('inlineComment.range.lines', { start: displayRange.start, end: displayRange.end })}
+              </span>
+            )}
           </div>
         )}
         
@@ -141,7 +147,7 @@ export function InlineCommentInput({
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Add a comment... (Cmd+Enter to save)"
+          placeholder={t('inlineComment.input.placeholder')}
           outerClassName="rounded-[var(--radius-xl)] bg-[var(--surface-subtle)] ring-1 ring-inset ring-border/60 focus-within:ring-2 focus-within:ring-[var(--interactive-focus-ring)]"
           className="min-h-[80px] px-3 py-2.5 text-sm resize-y"
         />
@@ -155,7 +161,7 @@ export function InlineCommentInput({
             onTouchStart={(e) => e.stopPropagation()}
             className="h-8 text-muted-foreground hover:text-foreground"
           >
-            Cancel
+            {t('inlineComment.actions.cancel')}
           </Button>
           <Button
             size="sm"
@@ -169,7 +175,7 @@ export function InlineCommentInput({
               color: currentTheme?.colors?.status?.successForeground,
             }}
           >
-            {isEditing ? 'Save' : 'Comment'}
+            {isEditing ? t('inlineComment.actions.save') : t('inlineComment.actions.comment')}
           </Button>
         </div>
       </div>

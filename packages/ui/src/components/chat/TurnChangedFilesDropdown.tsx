@@ -25,6 +25,8 @@ interface TurnChangedFilesDropdownProps {
 
 export const TurnChangedFilesDropdown: React.FC<TurnChangedFilesDropdownProps> = React.memo(({ activityParts }) => {
     const [isExpanded, setIsExpanded] = React.useState(false);
+    const [portalContainer, setPortalContainer] = React.useState<HTMLElement | null>(null);
+    const triggerButtonRef = React.useRef<HTMLButtonElement | null>(null);
     const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
     const runtime = React.useContext(RuntimeAPIContext);
     const isGitRepo = useIsGitRepo(currentDirectory);
@@ -45,6 +47,11 @@ export const TurnChangedFilesDropdown: React.FC<TurnChangedFilesDropdownProps> =
     }, [activityParts, isGitRepo]);
 
     if (changedFiles.length === 0) return null;
+
+    const syncPortalContainer = () => {
+        const container = triggerButtonRef.current?.closest('[data-slot="dialog-content"], [role="dialog"]') as HTMLElement | null;
+        setPortalContainer(container || null);
+    };
 
     const handleOpenFile = (file: ChangedFileEntry) => {
         if (!currentDirectory) return;
@@ -82,9 +89,12 @@ export const TurnChangedFilesDropdown: React.FC<TurnChangedFilesDropdownProps> =
                     <Popover.Trigger
                         render={
                             <button
+                                ref={triggerButtonRef}
                                 type="button"
                                 className="flex items-center gap-1 text-sm text-muted-foreground/60 hover:text-muted-foreground tabular-nums"
                                 aria-label={`${label} changed in this turn`}
+                                onPointerDownCapture={syncPortalContainer}
+                                onFocusCapture={syncPortalContainer}
                             >
                                 <RiFileEditLine className="h-3.5 w-3.5" />
                                 <span className="message-footer__label">{label}</span>
@@ -99,7 +109,7 @@ export const TurnChangedFilesDropdown: React.FC<TurnChangedFilesDropdownProps> =
                 </TooltipTrigger>
                 <TooltipContent>{label} changed in this turn</TooltipContent>
             </Tooltip>
-            <Popover.Portal>
+            <Popover.Portal container={portalContainer || undefined}>
                 <Popover.Positioner side="top" align="start" sideOffset={4} collisionPadding={8}>
                     <Popover.Popup
                         style={changedFilesPopoverStyle}

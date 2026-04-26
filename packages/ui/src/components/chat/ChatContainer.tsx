@@ -40,6 +40,7 @@ import {
 import { useSync } from '@/sync/use-sync';
 import { usePlanDetection } from '@/hooks/usePlanDetection';
 import { getAllSyncSessions } from '@/sync/sync-refs';
+import { useI18n } from '@/lib/i18n';
 
 const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = [];
 const EMPTY_PERMISSIONS: PermissionRequest[] = [];
@@ -231,6 +232,7 @@ const HYDRATING_SKELETON_ITEMS: Array<{
 ];
 
 export const ChatContainer: React.FC = () => {
+    const { t } = useI18n();
     // Session UI state
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
     const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
@@ -432,11 +434,13 @@ export const ChatContainer: React.FC = () => {
             size="xs"
             onClick={handleReturnToParentSession}
             className="absolute left-3 top-3 z-20 !font-normal bg-[var(--surface-background)]/95"
-            aria-label="Return to parent session"
-            title={parentSession.title?.trim() ? `Return to: ${parentSession.title}` : 'Return to parent session'}
+            aria-label={t('chat.container.returnToParent.aria')}
+            title={parentSession.title?.trim()
+                ? t('chat.container.returnToParent.titleNamed', { title: parentSession.title })
+                : t('chat.container.returnToParent.title')}
         >
             <RiArrowLeftLine className="h-4 w-4" />
-            Parent
+            {t('chat.container.returnToParent.label')}
         </Button>
     ) : null;
 

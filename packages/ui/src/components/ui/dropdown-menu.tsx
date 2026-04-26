@@ -10,6 +10,20 @@ type AsChildRenderProps = {
   children?: React.ReactNode;
 };
 
+type DropdownPortalContextValue = {
+  portalContainer: HTMLElement | null;
+  setPortalContainer: (container: HTMLElement | null) => void;
+};
+
+const DropdownPortalContext = React.createContext<DropdownPortalContextValue | null>(null);
+
+const resolveDialogContainer = (element: HTMLElement | null): HTMLElement | null => {
+  if (!element) {
+    return null;
+  }
+  return element.closest('[data-slot="dialog-content"], [role="dialog"]') as HTMLElement | null;
+};
+
 function renderFromAsChild(asChild: boolean | undefined, children: React.ReactNode) {
   if (asChild && React.isValidElement(children)) {
     return { render: children as React.ReactElement } satisfies AsChildRenderProps;
@@ -20,24 +34,54 @@ function renderFromAsChild(asChild: boolean | undefined, children: React.ReactNo
 function DropdownMenu({
   ...props
 }: React.ComponentProps<typeof BaseMenu.Root>) {
-  return <BaseMenu.Root {...props} />
+  const [portalContainer, setPortalContainer] = React.useState<HTMLElement | null>(null);
+  const portalContextValue = React.useMemo<DropdownPortalContextValue>(() => ({
+    portalContainer,
+    setPortalContainer,
+  }), [portalContainer]);
+
+  return (
+    <DropdownPortalContext.Provider value={portalContextValue}>
+      <BaseMenu.Root {...props} />
+    </DropdownPortalContext.Provider>
+  )
 }
 
 function DropdownMenuPortal({
   ...props
 }: React.ComponentProps<typeof BaseMenu.Portal>) {
-  return <BaseMenu.Portal {...props} />
+  const portalContext = React.useContext(DropdownPortalContext);
+  return <BaseMenu.Portal {...props} container={portalContext?.portalContainer || props.container} />
 }
 
 function DropdownMenuTrigger({
   asChild,
   children,
+  onPointerDownCapture,
+  onFocusCapture,
   ...props
 }: React.ComponentProps<typeof BaseMenu.Trigger> & AsChildProps) {
+  const portalContext = React.useContext(DropdownPortalContext);
+  const syncPortalContainer = React.useCallback((target: EventTarget | null) => {
+    if (!portalContext) {
+      return;
+    }
+    const element = target instanceof HTMLElement ? target : null;
+    portalContext.setPortalContainer(resolveDialogContainer(element));
+  }, [portalContext]);
+
   const r = renderFromAsChild(asChild, children);
   return (
     <BaseMenu.Trigger
       data-slot="dropdown-menu-trigger"
+      onPointerDownCapture={(event) => {
+        syncPortalContainer(event.currentTarget);
+        onPointerDownCapture?.(event);
+      }}
+      onFocusCapture={(event) => {
+        syncPortalContainer(event.currentTarget);
+        onFocusCapture?.(event);
+      }}
       {...props}
       {...r}
     />
@@ -66,10 +110,11 @@ function DropdownMenuContent({
   onCloseAutoFocus,
   ...props
 }: ContentProps) {
+  const portalContext = React.useContext(DropdownPortalContext);
   void onCloseAutoFocus
 
   return (
-    <BaseMenu.Portal>
+    <BaseMenu.Portal container={portalContext?.portalContainer || undefined}>
       <BaseMenu.Positioner
         sideOffset={sideOffset}
         align={align}
@@ -278,8 +323,9 @@ function DropdownMenuSubContent({
   children,
   ...props
 }: React.ComponentProps<typeof BaseMenu.Popup>) {
+  const portalContext = React.useContext(DropdownPortalContext);
   return (
-    <BaseMenu.Portal>
+    <BaseMenu.Portal container={portalContext?.portalContainer || undefined}>
       <BaseMenu.Positioner className="z-50">
         <BaseMenu.Popup
           data-slot="dropdown-menu-sub-content"

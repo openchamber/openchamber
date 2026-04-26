@@ -9,6 +9,7 @@ import {
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useI18n } from '@/lib/i18n';
 
 export interface AgentSelectorProps {
   /** Currently selected agent name (empty string for no agent) */
@@ -34,6 +35,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
   disabled,
   id,
 }) => {
+  const { t } = useI18n();
   const getVisibleAgents = useConfigStore((state) => state.getVisibleAgents);
   const loadAgents = useConfigStore((state) => state.loadAgents);
   const defaultAgentName = useConfigStore((state) => state.currentAgentName);
@@ -91,7 +93,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
           className,
         )}
       >
-        <SelectValue placeholder="Select an agent" />
+        <SelectValue placeholder={t('multirun.agentSelector.placeholder')} />
       </SelectTrigger>
       <SelectContent fitContent>
         {selectableAgents.length > 0 && (

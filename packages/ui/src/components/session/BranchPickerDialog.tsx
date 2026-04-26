@@ -28,6 +28,7 @@ import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { getWorktreeSetupCommands } from '@/lib/openchamberConfig';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { useSessions } from '@/sync/sync-context';
+import { useI18n } from '@/lib/i18n';
 
 export interface BranchPickerProject {
   id: string;
@@ -65,6 +66,7 @@ const normalizePath = (value: string | null | undefined): string => {
 };
 
 export function BranchPickerDialog({ open, onOpenChange, project }: BranchPickerDialogProps) {
+  const { t } = useI18n();
   const sessions = useSessions();
   const [searchQuery, setSearchQuery] = React.useState('');
   const [branches, setBranches] = React.useState<GitBranch | null>(null);
@@ -95,14 +97,14 @@ export function BranchPickerDialog({ open, onOpenChange, project }: BranchPicker
       setWorktrees(w);
       setRootBranchName(rootBranch);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load');
+      setError(err instanceof Error ? err.message : t('branchPickerDialog.error.failedToLoad'));
       setBranches(null);
       setWorktrees([]);
       setRootBranchName(null);
     } finally {
       setLoading(false);
     }
-  }, [project]);
+  }, [project, t]);
 
   React.useEffect(() => {
     if (!open) {
@@ -152,18 +154,18 @@ export function BranchPickerDialog({ open, onOpenChange, project }: BranchPicker
     try {
       const result = await renameBranch(project.path, oldName, newName);
       if (!result?.success) {
-        throw new Error('Rename rejected');
+        throw new Error(t('branchPickerDialog.error.renameRejected'));
       }
       await refresh();
       cancelRename();
-      toast.success('Branch renamed', { description: `${oldName} -> ${newName}` });
+      toast.success(t('branchPickerDialog.toast.branchRenamed'), { description: `${oldName} -> ${newName}` });
     } catch (err) {
-      toast.error('Failed to rename branch', {
-        description: err instanceof Error ? err.message : 'Rename failed',
+      toast.error(t('branchPickerDialog.toast.failedToRenameBranch'), {
+        description: err instanceof Error ? err.message : t('branchPickerDialog.error.renameFailed'),
       });
       setRenamingBranchKey(null);
     }
-  }, [project, editValue, refresh, cancelRename]);
+  }, [project, editValue, refresh, cancelRename, t]);
 
   const handleDeleteBranch = React.useCallback(async (branchName: string) => {
     if (!project) return;
@@ -172,27 +174,27 @@ export function BranchPickerDialog({ open, onOpenChange, project }: BranchPicker
       const force = forceDeleteBranch === branchName;
       const result = await deleteGitBranch(project.path, { branch: branchName, force });
       if (!result?.success) {
-        throw new Error('Delete rejected');
+        throw new Error(t('branchPickerDialog.error.deleteRejected'));
       }
       await refresh();
-      toast.success('Branch deleted', { description: branchName });
+      toast.success(t('branchPickerDialog.toast.branchDeleted'), { description: branchName });
       setConfirmingDelete(null);
       setForceDeleteBranch(null);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Delete failed';
+      const message = err instanceof Error ? err.message : t('branchPickerDialog.error.deleteFailed');
       // If branch isn't merged, prompt for force delete on next confirm.
       if (/not fully merged/i.test(message) && forceDeleteBranch !== branchName) {
         setForceDeleteBranch(branchName);
-        toast.error('Branch not merged', {
-          description: 'Confirm again to force delete',
+        toast.error(t('branchPickerDialog.toast.branchNotMerged'), {
+          description: t('branchPickerDialog.toast.confirmAgainToForceDelete'),
         });
       } else {
-        toast.error('Failed to delete branch', { description: message });
+        toast.error(t('branchPickerDialog.toast.failedToDeleteBranch'), { description: message });
       }
     } finally {
       setDeletingBranch(null);
     }
-  }, [project, refresh, forceDeleteBranch]);
+  }, [project, refresh, forceDeleteBranch, t]);
 
   const handleCreateWorktreeForBranch = React.useCallback(async (branchName: string) => {
     if (!project) {
@@ -220,15 +222,15 @@ export function BranchPickerDialog({ open, onOpenChange, project }: BranchPicker
         }
       );
       await refresh();
-      toast.success('Worktree created', { description: branchName });
+      toast.success(t('branchPickerDialog.toast.worktreeCreated'), { description: branchName });
     } catch (err) {
-      toast.error('Failed to create worktree', {
-        description: err instanceof Error ? err.message : 'Create worktree failed',
+      toast.error(t('branchPickerDialog.toast.failedToCreateWorktree'), {
+        description: err instanceof Error ? err.message : t('branchPickerDialog.error.createWorktreeFailed'),
       });
     } finally {
       setCreatingWorktreeBranch(null);
     }
-  }, [project, refresh]);
+  }, [project, refresh, t]);
 
   const handleRemoveWorktree = React.useCallback((worktree: GitWorktreeInfo | null) => {
     if (!project || !worktree) {
@@ -303,17 +305,17 @@ export function BranchPickerDialog({ open, onOpenChange, project }: BranchPicker
         <DialogHeader className="flex-shrink-0">
           <DialogTitle className="flex items-center gap-2">
             <RiGitBranchLine className="h-5 w-5" />
-            Manage Branches
+            {t('branchPickerDialog.title')}
           </DialogTitle>
           <DialogDescription>
-            {project ? `Local branches for ${displayProjectName(project)}` : 'Select a project'}
+            {project ? t('branchPickerDialog.description.localBranchesForProject', { project: displayProjectName(project) }) : t('branchPickerDialog.description.selectProject')}
           </DialogDescription>
         </DialogHeader>
 
         <div className="relative flex-shrink-0">
           <RiSearchLine className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search branches..."
+            placeholder={t('branchPickerDialog.search.placeholder')}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-9"
@@ -323,14 +325,14 @@ export function BranchPickerDialog({ open, onOpenChange, project }: BranchPicker
         <div className="flex-1 min-h-0 overflow-y-auto">
           <div className="space-y-1">
             {!project ? (
-              <div className="text-center py-8 text-muted-foreground">No project selected</div>
+              <div className="text-center py-8 text-muted-foreground">{t('branchPickerDialog.state.noProjectSelected')}</div>
             ) : loading ? (
-              <div className="px-2 py-2 text-muted-foreground text-sm">Loading branches...</div>
+              <div className="px-2 py-2 text-muted-foreground text-sm">{t('branchPickerDialog.state.loadingBranches')}</div>
             ) : error ? (
               <div className="px-2 py-2 text-destructive text-sm">{error}</div>
             ) : localBranches.length === 0 ? (
               <div className="px-2 py-2 text-muted-foreground text-sm">
-                {searchQuery ? 'No matching branches' : 'No branches found'}
+                {searchQuery ? t('branchPickerDialog.state.noMatchingBranches') : t('branchPickerDialog.state.noBranchesFound')}
               </div>
             ) : (
               localBranches.map((branchName) => {
@@ -386,7 +388,7 @@ export function BranchPickerDialog({ open, onOpenChange, project }: BranchPicker
                               onChange={(event) => setEditValue(event.target.value)}
                               className="flex-1 min-w-0 h-5 bg-transparent text-sm leading-none outline-none placeholder:text-muted-foreground"
                               autoFocus
-                              placeholder="Rename branch"
+                              placeholder={t('branchPickerDialog.search.renameBranchPlaceholder')}
                               onKeyDown={(event) => {
                                 if (event.key === 'Escape') {
                                   event.preventDefault();
@@ -407,13 +409,13 @@ export function BranchPickerDialog({ open, onOpenChange, project }: BranchPicker
 
                         {isCurrent && (
                           <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded flex-shrink-0 whitespace-nowrap">
-                            HEAD
+                            {t('branchPickerDialog.badge.head')}
                           </span>
                         )}
 
                         {hasAttachedWorktree && !isEditing && (
                           <span className="text-xs bg-muted/40 text-muted-foreground px-1.5 py-0.5 rounded flex-shrink-0 whitespace-nowrap">
-                            worktree
+                            {t('branchPickerDialog.badge.worktree')}
                           </span>
                         )}
                       </div>
@@ -440,7 +442,7 @@ export function BranchPickerDialog({ open, onOpenChange, project }: BranchPicker
                               onClick={() => void handleCreateWorktreeForBranch(branchName)}
                               disabled={disableCreateWorktree}
                               className="inline-flex h-7 w-7 items-center justify-center rounded-md hover:bg-interactive-hover/40 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-                              aria-label="Create worktree"
+                              aria-label={t('branchPickerDialog.actions.createWorktreeAria')}
                             >
                               {isCreatingWorktree ? (
                                 <RiLoader4Line className="h-4 w-4 animate-spin" />
@@ -450,7 +452,7 @@ export function BranchPickerDialog({ open, onOpenChange, project }: BranchPicker
                             </button>
                           </TooltipTrigger>
                           <TooltipContent side="left">
-                            {hasAttachedWorktree ? 'Worktree already exists' : 'Create worktree'}
+                            {hasAttachedWorktree ? t('branchPickerDialog.tooltip.worktreeAlreadyExists') : t('branchPickerDialog.tooltip.createWorktree')}
                           </TooltipContent>
                         </Tooltip>
 
@@ -461,13 +463,13 @@ export function BranchPickerDialog({ open, onOpenChange, project }: BranchPicker
                               onClick={() => beginRename(branchName)}
                               disabled={disableRename}
                               className="inline-flex h-7 w-7 items-center justify-center rounded-md hover:bg-interactive-hover/40 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-                              aria-label="Rename"
+                              aria-label={t('branchPickerDialog.actions.renameAria')}
                             >
                               <RiPencilLine className="h-4 w-4" />
                             </button>
                           </TooltipTrigger>
                           <TooltipContent side="left">
-                            {isProjectRootBranch ? 'Rename disabled for root branch' : 'Rename'}
+                            {isProjectRootBranch ? t('branchPickerDialog.tooltip.renameDisabledForRoot') : t('branchPickerDialog.tooltip.rename')}
                           </TooltipContent>
                         </Tooltip>
 
@@ -484,7 +486,7 @@ export function BranchPickerDialog({ open, onOpenChange, project }: BranchPicker
                               }}
                               disabled={hasAttachedWorktree ? disableWorktreeDelete : disableDelete}
                               className="inline-flex h-7 w-7 items-center justify-center rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50"
-                              aria-label={hasAttachedWorktree ? 'Delete worktree' : 'Delete'}
+                              aria-label={hasAttachedWorktree ? t('branchPickerDialog.actions.deleteWorktreeAria') : t('branchPickerDialog.actions.deleteAria')}
                             >
                               {isDeleting ? (
                                 <RiLoader4Line className="h-4 w-4 animate-spin" />
@@ -496,13 +498,13 @@ export function BranchPickerDialog({ open, onOpenChange, project }: BranchPicker
                           <TooltipContent side="left">
                             {hasAttachedWorktree
                               ? isProjectRootBranch
-                                ? 'Delete worktree (root branch protected)'
-                                : 'Delete worktree'
+                                ? t('branchPickerDialog.tooltip.deleteWorktreeRootProtected')
+                                : t('branchPickerDialog.tooltip.deleteWorktree')
                               : isCurrent
-                                ? 'Delete (current branch)'
+                                ? t('branchPickerDialog.tooltip.deleteCurrentBranch')
                                 : isProjectRootBranch
-                                  ? 'Delete disabled for root branch'
-                                  : 'Delete'}
+                                  ? t('branchPickerDialog.tooltip.deleteDisabledForRoot')
+                                  : t('branchPickerDialog.tooltip.delete')}
                           </TooltipContent>
                         </Tooltip>
                       </div>
@@ -515,7 +517,7 @@ export function BranchPickerDialog({ open, onOpenChange, project }: BranchPicker
                           onClick={() => void commitRename(branchName)}
                           disabled={isRenaming}
                           className="inline-flex h-7 w-7 items-center justify-center rounded-md hover:bg-interactive-hover/40 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-                          aria-label="Confirm rename"
+                          aria-label={t('branchPickerDialog.actions.confirmRenameAria')}
                         >
                           {isRenaming ? (
                             <RiLoader4Line className="h-4 w-4 animate-spin" />
@@ -527,7 +529,7 @@ export function BranchPickerDialog({ open, onOpenChange, project }: BranchPicker
                           type="button"
                           onClick={cancelRename}
                           className="inline-flex h-7 w-7 items-center justify-center rounded-md hover:bg-interactive-hover/40 text-muted-foreground hover:text-foreground transition-colors"
-                          aria-label="Cancel rename"
+                          aria-label={t('branchPickerDialog.actions.cancelRenameAria')}
                         >
                           <RiCloseLine className="h-4 w-4" />
                         </button>
@@ -540,7 +542,7 @@ export function BranchPickerDialog({ open, onOpenChange, project }: BranchPicker
                           'text-xs mr-1',
                           isForceDelete ? 'text-destructive' : 'text-muted-foreground'
                         )}>
-                          {isForceDelete ? 'Force delete?' : 'Delete?'}
+                          {isForceDelete ? t('branchPickerDialog.actions.forceDeletePrompt') : t('branchPickerDialog.actions.deletePrompt')}
                         </span>
                         <button
                           type="button"
@@ -552,7 +554,7 @@ export function BranchPickerDialog({ open, onOpenChange, project }: BranchPicker
                               ? 'bg-destructive/10 text-destructive hover:bg-destructive/15'
                               : 'hover:bg-destructive/10 text-muted-foreground hover:text-destructive'
                           )}
-                          aria-label="Confirm delete"
+                          aria-label={t('branchPickerDialog.actions.confirmDeleteAria')}
                         >
                           {isDeleting ? (
                             <RiLoader4Line className="h-4 w-4 animate-spin" />
@@ -564,7 +566,7 @@ export function BranchPickerDialog({ open, onOpenChange, project }: BranchPicker
                           type="button"
                           onClick={cancelDelete}
                           className="inline-flex h-7 w-7 items-center justify-center rounded-md hover:bg-interactive-hover/40 text-muted-foreground hover:text-foreground transition-colors"
-                          aria-label="Cancel delete"
+                          aria-label={t('branchPickerDialog.actions.cancelDeleteAria')}
                         >
                           <RiCloseLine className="h-4 w-4" />
                         </button>

@@ -7,16 +7,18 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionAutoCleanup } from '@/hooks/useSessionAutoCleanup';
+import { useI18n } from '@/lib/i18n';
 
 const MIN_DAYS = 1;
 const MAX_DAYS = 365;
 const DEFAULT_RETENTION_DAYS = 30;
 const RETENTION_ACTION_OPTIONS = [
-  { value: 'archive', label: 'Archive' },
-  { value: 'delete', label: 'Delete' },
+  { value: 'archive', labelKey: 'settings.openchamber.sessionRetention.action.archive' },
+  { value: 'delete', labelKey: 'settings.openchamber.sessionRetention.action.delete' },
 ] as const;
 
 export const SessionRetentionSettings: React.FC = () => {
+  const { t } = useI18n();
   const autoDeleteEnabled = useUIStore((state) => state.autoDeleteEnabled);
   const autoDeleteAfterDays = useUIStore((state) => state.autoDeleteAfterDays);
   const sessionRetentionAction = useUIStore((state) => state.sessionRetentionAction);
@@ -29,35 +31,44 @@ export const SessionRetentionSettings: React.FC = () => {
 
   const handleRunCleanup = React.useCallback(async () => {
     const result = await runCleanup({ force: true });
-    const verb = result.action === 'archive' ? 'archiving' : 'deletion';
-    const pastTense = result.action === 'archive' ? 'Archived' : 'Deleted';
-    const failureVerb = result.action === 'archive' ? 'archive' : 'delete';
 
     if (result.completedIds.length === 0 && result.failedIds.length === 0) {
-      toast.message(`No sessions eligible for ${verb}`);
+      toast.message(
+        result.action === 'archive'
+          ? t('settings.openchamber.sessionRetention.toast.noneEligibleArchive')
+          : t('settings.openchamber.sessionRetention.toast.noneEligibleDelete')
+      );
       return;
     }
     if (result.completedIds.length > 0) {
-      toast.success(`${pastTense} ${result.completedIds.length} session${result.completedIds.length === 1 ? '' : 's'}`);
+      toast.success(
+        result.action === 'archive'
+          ? t('settings.openchamber.sessionRetention.toast.archivedCount', { count: result.completedIds.length })
+          : t('settings.openchamber.sessionRetention.toast.deletedCount', { count: result.completedIds.length })
+      );
     }
     if (result.failedIds.length > 0) {
-      toast.error(`Failed to ${failureVerb} ${result.failedIds.length} session${result.failedIds.length === 1 ? '' : 's'}`);
+      toast.error(
+        result.action === 'archive'
+          ? t('settings.openchamber.sessionRetention.toast.failedArchiveCount', { count: result.failedIds.length })
+          : t('settings.openchamber.sessionRetention.toast.failedDeleteCount', { count: result.failedIds.length })
+      );
     }
-  }, [runCleanup]);
+  }, [runCleanup, t]);
 
   return (
     <div className="mb-8">
       <div className="mb-1 px-1">
         <div className="flex items-center gap-2">
           <h3 className="typography-ui-header font-medium text-foreground">
-            Session Retention
+            {t('settings.openchamber.sessionRetention.title')}
           </h3>
           <Tooltip delayDuration={1000}>
             <TooltipTrigger asChild>
               <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
             </TooltipTrigger>
             <TooltipContent sideOffset={8} className="max-w-xs">
-              Automatically archive or delete inactive sessions based on last activity. Keeps the 5 most recent sessions.
+              {t('settings.openchamber.sessionRetention.tooltip')}
             </TooltipContent>
           </Tooltip>
         </div>
@@ -80,14 +91,14 @@ export const SessionRetentionSettings: React.FC = () => {
           <Checkbox
             checked={autoDeleteEnabled}
             onChange={setAutoDeleteEnabled}
-            ariaLabel="Enable auto-cleanup"
+            ariaLabel={t('settings.openchamber.sessionRetention.field.enableAutoCleanupAria')}
           />
-          <span className="typography-ui-label text-foreground">Enable Auto-Cleanup</span>
+          <span className="typography-ui-label text-foreground">{t('settings.openchamber.sessionRetention.field.enableAutoCleanup')}</span>
         </div>
 
         <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
           <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-            <span className="typography-ui-label text-foreground">Retention Period</span>
+            <span className="typography-ui-label text-foreground">{t('settings.openchamber.sessionRetention.field.retentionPeriod')}</span>
           </div>
           <div className="flex items-center gap-2 sm:w-fit">
             <NumberInput
@@ -96,18 +107,18 @@ export const SessionRetentionSettings: React.FC = () => {
               min={MIN_DAYS}
               max={MAX_DAYS}
               step={1}
-              aria-label="Retention period in days"
+              aria-label={t('settings.openchamber.sessionRetention.field.retentionPeriodAria')}
               className="w-20 tabular-nums"
             />
-            <span className="typography-ui-label text-muted-foreground">days</span>
+            <span className="typography-ui-label text-muted-foreground">{t('settings.openchamber.sessionRetention.field.days')}</span>
             <Button size="sm"
               type="button"
               variant="ghost"
               onClick={() => setAutoDeleteAfterDays(DEFAULT_RETENTION_DAYS)}
               disabled={autoDeleteAfterDays === DEFAULT_RETENTION_DAYS}
               className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
-              aria-label="Reset retention period"
-              title="Reset"
+              aria-label={t('settings.openchamber.sessionRetention.actions.resetRetentionAria')}
+              title={t('settings.common.actions.reset')}
             >
               <RiRestartLine className="h-3.5 w-3.5" />
             </Button>
@@ -116,7 +127,7 @@ export const SessionRetentionSettings: React.FC = () => {
 
         <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
           <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-            <span className="typography-ui-label text-foreground">When sessions expire</span>
+            <span className="typography-ui-label text-foreground">{t('settings.openchamber.sessionRetention.field.whenSessionsExpire')}</span>
           </div>
           <div className="flex flex-wrap items-center gap-1 sm:w-fit">
             {RETENTION_ACTION_OPTIONS.map((option) => (
@@ -129,7 +140,7 @@ export const SessionRetentionSettings: React.FC = () => {
                 className="!font-normal"
                 onClick={() => setSessionRetentionAction(option.value)}
               >
-                {option.label}
+                {t(option.labelKey)}
               </Button>
             ))}
           </div>
@@ -139,7 +150,7 @@ export const SessionRetentionSettings: React.FC = () => {
       <div className="mt-1 px-2 py-1.5 space-y-1">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-8">
           <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-            <p className="typography-meta text-foreground font-medium">Manual Cleanup</p>
+            <p className="typography-meta text-foreground font-medium">{t('settings.openchamber.sessionRetention.manualCleanup.title')}</p>
           </div>
           <div className="flex items-center gap-2 sm:w-fit">
             <Button
@@ -150,12 +161,14 @@ export const SessionRetentionSettings: React.FC = () => {
               disabled={isRunning}
               className="!font-normal"
             >
-              {isRunning ? 'Cleaning up...' : 'Run cleanup now'}
+              {isRunning ? t('settings.openchamber.sessionRetention.actions.cleaningUp') : t('settings.openchamber.sessionRetention.actions.runCleanupNow')}
             </Button>
           </div>
         </div>
         <p className="typography-meta text-muted-foreground">
-          Eligible for {action === 'archive' ? 'archiving' : 'deletion'} right now: <span className="tabular-nums">{pendingCount}</span>
+          {action === 'archive'
+            ? t('settings.openchamber.sessionRetention.manualCleanup.eligibleArchiveNow', { count: pendingCount })
+            : t('settings.openchamber.sessionRetention.manualCleanup.eligibleDeleteNow', { count: pendingCount })}
         </p>
       </div>
     </div>

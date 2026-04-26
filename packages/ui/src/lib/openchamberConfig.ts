@@ -197,26 +197,32 @@ const writeTextFile = async (path: string, content: string): Promise<boolean> =>
 };
 
 const resolveHomeDirectory = async (): Promise<string | null> => {
-  // VSCode webview sets __OPENCHAMBER_HOME__ to workspace folder (not OS home).
-  // For user config (~/.config/openchamber), always use /api/fs/home in VSCode.
+  // Use server-reported home as the source of truth for user config paths.
+  // In some runtimes, window.__OPENCHAMBER_HOME__ can be workspace/project-root
+  // scoped, which would incorrectly route writes into the project directory.
+  try {
+    const response = await fetch(`${getBaseUrl()}/fs/home`);
+    if (!response.ok) {
+      throw new Error('Failed to resolve home directory from API');
+    }
+    const payload = await response.json().catch(() => null) as { home?: unknown } | null;
+    const home = typeof payload?.home === 'string' ? payload.home.trim() : '';
+    if (home) {
+      return normalize(home);
+    }
+  } catch {
+    // fall through
+  }
+
+  // Fallback for environments where /api/fs/home is unavailable.
+  // VSCode intentionally avoids this because embedded home equals workspace path.
   if (!isVSCodeRuntime()) {
     const desktopHome = await getDesktopHomeDirectory().catch(() => null);
     if (desktopHome && desktopHome.trim().length > 0) {
       return normalize(desktopHome);
     }
   }
-
-  try {
-    const response = await fetch(`${getBaseUrl()}/fs/home`);
-    if (!response.ok) {
-      return null;
-    }
-    const payload = await response.json().catch(() => null) as { home?: unknown } | null;
-    const home = typeof payload?.home === 'string' ? payload.home.trim() : '';
-    return home ? normalize(home) : null;
-  } catch {
-    return null;
-  }
+  return null;
 };
 
 const getUserProjectsDirectory = async (): Promise<string | null> => {

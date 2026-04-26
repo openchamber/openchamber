@@ -7,6 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Checkbox } from '@/components/ui/checkbox';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import type { GitStatus } from '@/lib/api/types';
+import { useI18n } from '@/lib/i18n';
 
 type ChangeDescriptor = {
   code: string;
@@ -64,6 +65,7 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
   indentPx = 0,
 }) {
   const descriptor = useMemo(() => describeChange(file), [file]);
+  const { t } = useI18n();
   const indicatorLabel = descriptor.description;
   const insertions = stats?.insertions ?? 0;
   const deletions = stats?.deletions ?? 0;
@@ -104,7 +106,7 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
             size="sm"
             checked={checked}
             onChange={() => onToggle()}
-            ariaLabel={`Select ${file.path}`}
+            ariaLabel={t('gitView.changes.selectFileAria', { path: file.path })}
           />
         </div>
         <span
@@ -155,7 +157,7 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
               onClick={handleRevertClick}
               disabled={isReverting}
               className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
-              aria-label={`Revert changes for ${file.path}`}
+              aria-label={t('gitView.changes.revertFileAria', { path: file.path })}
             >
               {isReverting ? (
                 <RiLoader4Line className="size-3.5 animate-spin" />
@@ -164,7 +166,7 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
               )}
             </button>
           </TooltipTrigger>
-          <TooltipContent sideOffset={8}>Revert changes</TooltipContent>
+          <TooltipContent sideOffset={8}>{t('gitView.changes.revertFileTooltip')}</TooltipContent>
         </Tooltip>
     </div>
   );

@@ -22,6 +22,7 @@ import { useTodosPersistStore } from "@/stores/useTodosPersistStore";
 import { WorkingPlaceholder } from "./message/parts/WorkingPlaceholder";
 import { isVSCodeRuntime } from "@/lib/desktop";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useI18n } from "@/lib/i18n";
 
 const STATUS_ROW_CONTAINER_STYLE = { containerType: "inline-size" as const, containerName: "status-row" };
 
@@ -52,17 +53,17 @@ const priorityIcon: Record<TodoPriority, React.ReactNode> = {
   low: <RiArrowDownSLine className="h-3.5 w-3.5" aria-hidden="true" />,
 };
 
-const statusLabel: Record<TodoStatus, string> = {
-  in_progress: "In progress",
-  pending: "Pending",
-  completed: "Completed",
-  cancelled: "Cancelled",
+const statusLabelKey: Record<TodoStatus, string> = {
+  in_progress: "chat.statusRow.todo.status.inProgress",
+  pending: "chat.statusRow.todo.status.pending",
+  completed: "chat.statusRow.todo.status.completed",
+  cancelled: "chat.statusRow.todo.status.cancelled",
 };
 
-const priorityLabel: Record<TodoPriority, string> = {
-  high: "High priority",
-  medium: "Medium priority",
-  low: "Low priority",
+const priorityLabelKey: Record<TodoPriority, string> = {
+  high: "chat.statusRow.todo.priority.high",
+  medium: "chat.statusRow.todo.priority.medium",
+  low: "chat.statusRow.todo.priority.low",
 };
 
 interface TodoItemRowProps {
@@ -70,7 +71,10 @@ interface TodoItemRowProps {
 }
 
 const TodoItemRow: React.FC<TodoItemRowProps> = ({ todo }) => {
+  const { t } = useI18n();
   const config = statusConfig[todo.status] || statusConfig.pending;
+  const statusKey = statusLabelKey[todo.status] ?? statusLabelKey.pending;
+  const priorityKey = priorityLabelKey[todo.priority] ?? priorityLabelKey.medium;
 
   const statusIcon =
     todo.status === "in_progress" ? (
@@ -88,7 +92,7 @@ const TodoItemRow: React.FC<TodoItemRowProps> = ({ todo }) => {
           <span className="flex-shrink-0">{statusIcon}</span>
         </TooltipTrigger>
         <TooltipContent side="left" sideOffset={6}>
-          {statusLabel[todo.status] ?? statusLabel.pending}
+          {t(statusKey as never)}
         </TooltipContent>
       </Tooltip>
       <span
@@ -111,7 +115,7 @@ const TodoItemRow: React.FC<TodoItemRowProps> = ({ todo }) => {
           </span>
         </TooltipTrigger>
         <TooltipContent side="right" sideOffset={6}>
-          {priorityLabel[todo.priority] ?? priorityLabel.medium}
+          {t(priorityKey as never)}
         </TooltipContent>
       </Tooltip>
     </div>
@@ -156,6 +160,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
   agentName,
   leftAccessory,
 }) => {
+  const { t } = useI18n();
   const [isExpanded, setIsExpanded] = React.useState(false);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const todosRecord = useDirectorySync((state) => state.todo);
@@ -237,7 +242,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
       type="button"
       onClick={onAbort}
       className="flex items-center justify-center h-[1.2rem] w-[1.2rem] text-[var(--status-error)] transition-opacity hover:opacity-80 focus-visible:outline-none flex-shrink-0"
-      aria-label="Stop generating"
+      aria-label={t('chat.statusRow.actions.stopGeneratingAria')}
     >
       <RiCloseCircleLine size={18} aria-hidden="true" />
     </button>
@@ -256,10 +261,10 @@ export const StatusRow: React.FC<StatusRowProps> = ({
           {activeTodo.content}
         </span>
       ) : (
-        <span className="typography-ui-label">Tasks</span>
+        <span className="typography-ui-label">{t('chat.statusRow.tasksTitle')}</span>
       )}
       <span className="typography-meta">
-        {statusSummary.active} active · {statusSummary.left} left
+        {t('chat.statusRow.summary.activeLeft', { active: statusSummary.active, left: statusSummary.left })}
       </span>
       {isExpanded ? (
         <RiArrowUpSLine className="h-3.5 w-3.5" />
@@ -283,7 +288,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
             <div className="flex h-full items-center text-[var(--status-error)] pl-0.5">
               <span className="flex items-center gap-1.5 typography-ui-label">
                 <RiCloseCircleLine size={16} aria-hidden="true" />
-                Aborted
+                {t('chat.statusRow.aborted')}
               </span>
             </div>
           ) : showAssistantStatus && shouldRenderPlaceholder ? (
@@ -325,7 +330,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
             >
               {/* Header */}
               <div className="flex items-center gap-1.5 px-2 py-1 typography-ui-label font-medium text-muted-foreground">
-                <span>Tasks</span>
+                <span>{t('chat.statusRow.tasksTitle')}</span>
                 <span className="typography-meta tabular-nums">
                   {progress.completed}/{progress.total}
                 </span>

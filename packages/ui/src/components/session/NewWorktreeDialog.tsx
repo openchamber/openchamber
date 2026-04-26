@@ -65,6 +65,7 @@ import type {
   GitHubPullRequestSummary,
 } from '@/lib/api/types';
 import type { ProjectRef } from '@/lib/worktrees/worktreeManager';
+import { useI18n } from '@/lib/i18n';
 
 type Mode = 'new-branch' | 'existing-branch';
 
@@ -203,6 +204,7 @@ export function NewWorktreeDialog({
   onOpenChange,
   onWorktreeCreated,
 }: NewWorktreeDialogProps) {
+  const { t } = useI18n();
   const { github, git } = useRuntimeAPIs();
   const isMobile = useUIStore((state) => state.isMobile);
   const githubAuthStatus = useGitHubAuthStore((state) => state.status);
@@ -519,7 +521,7 @@ export function NewWorktreeDialog({
     const agentName = resolveDefaultAgentName() || configState.currentAgentName || undefined;
 
     if (!providerID || !modelID) {
-      toast.error('No model selected');
+      toast.error(t('session.newWorktree.error.noModelSelected'));
       return;
     }
 
@@ -571,7 +573,7 @@ export function NewWorktreeDialog({
         ],
       });
 
-      toast.success('Session created from issue');
+      toast.success(t('session.newWorktree.toast.sessionFromIssue'));
       return;
     }
 
@@ -607,7 +609,7 @@ export function NewWorktreeDialog({
         ],
       });
 
-      toast.success('Session created from PR');
+      toast.success(t('session.newWorktree.toast.sessionFromPr'));
     }
   }, [
     applySessionModelAndAgentDefaults,
@@ -729,11 +731,11 @@ export function NewWorktreeDialog({
       let worktreeError: string | null = null;
       
       if (!normalizedBranch) {
-        branchError = 'Branch name is required';
+        branchError = t('session.newWorktree.error.branchNameRequired');
       }
-      
+
       if (!normalizedWorktree) {
-        worktreeError = 'Worktree directory is required';
+        worktreeError = t('session.newWorktree.error.worktreeDirectoryRequired');
       }
       
       // Only run server validation if we have values
@@ -805,7 +807,7 @@ export function NewWorktreeDialog({
   // Handle worktree creation
   const handleCreate = async () => {
     if (!projectRef || !projectDirectory) {
-      toast.error('No active project');
+      toast.error(t('session.newWorktree.error.noActiveProject'));
       return;
     }
     
@@ -818,12 +820,12 @@ export function NewWorktreeDialog({
     const normalizedWorktree = slugifyWorktreeName(worktreeName);
     
     if (!normalizedBranch) {
-      toast.error('Branch name is required');
+      toast.error(t('session.newWorktree.error.branchNameRequired'));
       return;
     }
     
     if (!normalizedWorktree) {
-      toast.error('Worktree directory is required');
+      toast.error(t('session.newWorktree.error.worktreeDirectoryRequired'));
       return;
     }
 
@@ -892,7 +894,7 @@ export function NewWorktreeDialog({
           ? `#${linkedIssue.number} ${linkedIssue.title}`.trim()
           : linkedPrState
             ? `#${linkedPrState.number} ${linkedPrState.title}`.trim()
-            : 'New session';
+            : t('session.newWorktree.newSessionTitle');
 
         const session = await sessionActions.createSession(sessionTitle, metadata.path, null);
         if (!session?.id) {
@@ -914,8 +916,10 @@ export function NewWorktreeDialog({
         localStorage.setItem(LAST_SOURCE_BRANCH_KEY, newBranchState.sourceBranch);
       }
       
-      toast.success('Worktree created', {
-        description: `${metadata.branch || metadata.name}${sourceLabel ? ` from ${sourceLabel}` : ''} - bootstrapping in background`,
+      toast.success(t('session.newWorktree.toast.worktreeCreated'), {
+        description: t('session.newWorktree.toast.worktreeCreatedDescription', {
+          target: `${metadata.branch || metadata.name}${sourceLabel ? ` ${t('session.newWorktree.fromSource', { source: sourceLabel })}` : ''}`,
+        }),
       });
 
       onOpenChange(false);
@@ -928,15 +932,15 @@ export function NewWorktreeDialog({
           pr: linkedPrState,
           includeDiff: includePrDiff,
         }).catch((error) => {
-          const message = error instanceof Error ? error.message : 'Failed to send GitHub context';
-          toast.error('Failed to send GitHub context', { description: message });
+          const message = error instanceof Error ? error.message : t('session.newWorktree.error.sendGitHubContextFailed');
+          toast.error(t('session.newWorktree.error.sendGitHubContextFailed'), { description: message });
         });
       } else {
         onWorktreeCreated?.(metadata.path);
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to create worktree';
-      toast.error('Failed to create worktree', { description: message });
+      const message = error instanceof Error ? error.message : t('session.newWorktree.error.createWorktreeFailed');
+      toast.error(t('session.newWorktree.error.createWorktreeFailed'), { description: message });
     } finally {
       setIsCreating(false);
     }
@@ -1036,7 +1040,7 @@ export function NewWorktreeDialog({
           disabled={isCreating}
           className={cn(isMobile && 'flex-1')}
         >
-          Cancel
+          {t('session.newWorktree.actions.cancel')}
         </Button>
         <Button
           size="sm"
@@ -1045,7 +1049,7 @@ export function NewWorktreeDialog({
           className={cn('gap-1.5', isMobile && 'flex-1')}
         >
           {isCreating && <RiLoader4Line className="h-3.5 w-3.5 animate-spin" />}
-          {isCreating ? 'Creating...' : 'Create Worktree'}
+          {isCreating ? t('session.newWorktree.actions.creating') : t('session.newWorktree.actions.createWorktree')}
         </Button>
       </div>
     </div>
@@ -1056,7 +1060,7 @@ export function NewWorktreeDialog({
       {isMobile ? (
         <MobileOverlayPanel
           open={open}
-          title="New Worktree"
+          title={t('session.newWorktree.title')}
           onClose={() => onOpenChange(false)}
           footer={footerContent}
         >
@@ -1064,8 +1068,8 @@ export function NewWorktreeDialog({
           <div className="w-full mb-4">
             <SortableTabsStrip
               items={[
-                { id: 'new-branch', label: 'New Branch', icon: <RiGitBranchLine className="h-3.5 w-3.5" /> },
-                { id: 'existing-branch', label: 'Existing Branch', icon: <RiGitRepositoryLine className="h-3.5 w-3.5" /> },
+                { id: 'new-branch', label: t('session.newWorktree.mode.newBranch'), icon: <RiGitBranchLine className="h-3.5 w-3.5" /> },
+                { id: 'existing-branch', label: t('session.newWorktree.mode.existingBranch'), icon: <RiGitRepositoryLine className="h-3.5 w-3.5" /> },
               ]}
               activeId={mode}
               onSelect={(id) => handleModeChange(id as Mode)}
@@ -1080,7 +1084,7 @@ export function NewWorktreeDialog({
             {mode === 'existing-branch' ? (
               <div className="space-y-1.5">
                 <label className="typography-ui-label text-foreground block font-semibold">
-                  Select Branch
+                  {t('session.newWorktree.selectBranch')}
                 </label>
                 <div className="flex items-center gap-2">
                   <Button
@@ -1090,7 +1094,7 @@ export function NewWorktreeDialog({
                     className="flex-1 justify-between h-9"
                   >
                     <span className={existingBranchState.selectedBranch ? 'text-foreground' : 'text-muted-foreground'}>
-                      {existingBranchState.selectedBranch || 'Choose a branch...'}
+                      {existingBranchState.selectedBranch || t('session.newWorktree.chooseBranch')}
                     </span>
                     <RiGitBranchLine className="h-4 w-4 text-muted-foreground" />
                   </Button>
@@ -1100,7 +1104,7 @@ export function NewWorktreeDialog({
                     className="h-8 w-8 px-0 shrink-0"
                     onClick={handleFetchBranches}
                     disabled={!canFetchBranches || isLoadingBranches}
-                    title="Fetch branches"
+                    title={t('session.newWorktree.fetchBranches')}
                   >
                     {isLoadingBranches ? <RiLoader4Line className="size-4 animate-spin" /> : <RiRefreshLine className="size-4" />}
                   </Button>
@@ -1109,30 +1113,30 @@ export function NewWorktreeDialog({
                 {/* Mobile Branch Picker Overlay */}
                 <MobileOverlayPanel
                   open={existingBranchPickerOpen}
-                  title="Select Branch"
+                  title={t('session.newWorktree.selectBranch')}
                   onClose={() => setExistingBranchPickerOpen(false)}
                 >
                   <div className="space-y-4" ref={existingBranchMobileListWrapperRef}>
                     <Input
                       value={existingBranchQuery}
                       onChange={(e) => setExistingBranchQuery(e.target.value)}
-                      placeholder="Search branches..."
+                      placeholder={t('session.newWorktree.searchBranches')}
                       className="h-8"
                     />
                     {isLoadingBranches ? (
                       <div className="px-2 py-8 text-center typography-small text-muted-foreground">
-                        Loading branches...
+                        {t('session.newWorktree.loadingBranches')}
                       </div>
                     ) : localBranches.length === 0 && remoteBranches.length === 0 ? (
                       <div className="px-2 py-8 text-center typography-small text-muted-foreground">
-                        No branches found
+                        {t('session.newWorktree.noBranchesFound')}
                       </div>
                     ) : (
                       <div className="space-y-4">
                         {hasExistingBranchQuery && hasExistingBranchMatches && (
                           <div className="space-y-2">
                             <div className="typography-small font-semibold text-foreground px-2">
-                              Matching branches
+                              {t('session.newWorktree.matchingBranches')}
                             </div>
                             <div className="space-y-1">
                               {existingBranchRankedGroups.matching.map((branch) => (
@@ -1163,14 +1167,14 @@ export function NewWorktreeDialog({
 
                         {hasExistingBranchQuery && !hasExistingBranchMatches && (
                           <div className="px-2 py-1 text-center typography-small text-muted-foreground">
-                            No matching branches
+                            {t('session.newWorktree.noMatchingBranches')}
                           </div>
                         )}
 
                         {existingBranchRankedGroups.otherLocal.length > 0 && (
                           <div className="space-y-2">
                             <div className="typography-small font-semibold text-foreground px-2">
-                              {hasExistingBranchQuery ? 'Other local branches' : 'Local branches'}
+                              {hasExistingBranchQuery ? t('session.newWorktree.otherLocalBranches') : t('session.newWorktree.localBranches')}
                             </div>
                             <div className="space-y-1">
                               {existingBranchRankedGroups.otherLocal.map((branch) => (
@@ -1202,7 +1206,7 @@ export function NewWorktreeDialog({
                         {existingBranchRankedGroups.otherRemote.length > 0 && (
                           <div className="space-y-2">
                             <div className="typography-small font-semibold text-foreground px-2">
-                              {hasExistingBranchQuery ? 'Other remote branches' : 'Remote branches'}
+                              {hasExistingBranchQuery ? t('session.newWorktree.otherRemoteBranches') : t('session.newWorktree.remoteBranches')}
                             </div>
                             <div className="space-y-1">
                               {existingBranchRankedGroups.otherRemote.map((branch) => (
@@ -1239,7 +1243,7 @@ export function NewWorktreeDialog({
               <div className="space-y-1.5">
                 <div className="flex flex-col items-start gap-1.5">
                   <label className="typography-ui-label text-foreground block font-semibold">
-                    Branch Name
+                    {t('session.newWorktree.branchName')}
                   </label>
                   {mode === 'new-branch' && isGitHubConnected && (
                     <Button
@@ -1249,7 +1253,7 @@ export function NewWorktreeDialog({
                       className="gap-1.5 h-7"
                     >
                       <RiGithubLine className="size-4 text-status-success" />
-                        {newBranchState.linkedIssue || newBranchState.linkedPr ? 'Change' : 'Start from GitHub Issue/PR'}
+                        {newBranchState.linkedIssue || newBranchState.linkedPr ? t('session.newWorktree.actions.change') : t('session.newWorktree.actions.startFromGitHubIssuePr')}
                     </Button>
                   )}
                 </div>
@@ -1265,7 +1269,7 @@ export function NewWorktreeDialog({
                     }));
                   }}
                   onBlur={() => setValidation(prev => ({ ...prev, touched: true }))}
-                  placeholder="feature/my-awesome-feature"
+                  placeholder={t('session.newWorktree.branchNamePlaceholder')}
                   disabled={!!newBranchState.linkedPr}
                   className={cn(
                     'h-8',
@@ -1277,7 +1281,7 @@ export function NewWorktreeDialog({
                   <div className="flex items-center gap-1.5 text-muted-foreground">
                     <RiCheckLine className="h-3.5 w-3.5 text-status-success" />
                     <span className="typography-micro">
-                      Using PR branch: {newBranchState.linkedPr.head}
+                      {t('session.newWorktree.usingPrBranch', { branch: newBranchState.linkedPr.head })}
                     </span>
                   </div>
                 )}
@@ -1285,7 +1289,7 @@ export function NewWorktreeDialog({
                   <div className="flex items-center gap-1.5 text-muted-foreground">
                     <RiCheckLine className="h-3.5 w-3.5 text-status-success" />
                     <span className="typography-micro">
-                      From issue #{newBranchState.linkedIssue.number}: {newBranchState.linkedIssue.title}
+                      {t('session.newWorktree.fromIssue', { number: newBranchState.linkedIssue.number, title: newBranchState.linkedIssue.title })}
                     </span>
                   </div>
                 )}
@@ -1296,7 +1300,7 @@ export function NewWorktreeDialog({
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <label className="typography-ui-label text-foreground font-semibold">
-                  Worktree Directory
+                  {t('session.newWorktree.worktreeDirectory')}
                 </label>
                 {mode !== 'existing-branch' && (
                   <button
@@ -1315,10 +1319,10 @@ export function NewWorktreeDialog({
                         ? 'text-muted-foreground/40 cursor-not-allowed'
                         : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                     )}
-                    title="Reset to match branch name"
+                    title={t('session.newWorktree.resetToMatchBranchName')}
                   >
                     <RiRefreshLine className="h-3 w-3" />
-                    <span>Reset</span>
+                    <span>{t('session.newWorktree.actions.reset')}</span>
                   </button>
                 )}
               </div>
@@ -1339,7 +1343,7 @@ export function NewWorktreeDialog({
                   }
                 }}
                 onBlur={() => setValidation(prev => ({ ...prev, touched: true }))}
-                placeholder="my-worktree-directory"
+                placeholder={t('session.newWorktree.worktreeDirectoryPlaceholder')}
                 className={cn(
                   'h-8',
                   validation.touched && validation.worktreeError && 'border-destructive'
@@ -1351,7 +1355,7 @@ export function NewWorktreeDialog({
             {mode === 'new-branch' && !newBranchState.linkedPr && (
               <div className="space-y-1.5">
                 <label className="typography-ui-label text-foreground block font-semibold">
-                  Source Branch
+                  {t('session.newWorktree.sourceBranch')}
                 </label>
                 <Button
                   variant="outline"
@@ -1360,43 +1364,43 @@ export function NewWorktreeDialog({
                   className="w-full justify-between h-9"
                 >
                   <span className={newBranchState.sourceBranch ? 'text-foreground' : 'text-muted-foreground'}>
-                    {newBranchState.sourceBranch || 'Select source branch...'}
+                    {newBranchState.sourceBranch || t('session.newWorktree.selectSourceBranchPlaceholder')}
                   </span>
                   <RiGitBranchLine className="h-4 w-4 text-muted-foreground" />
                 </Button>
                 {newBranchState.sourceBranch && (
                   <div className="typography-micro text-muted-foreground">
-                    New branch will be created from {newBranchState.sourceBranch}
+                    {t('session.newWorktree.newBranchFromSource', { source: newBranchState.sourceBranch })}
                   </div>
                 )}
                 
                 {/* Mobile Source Branch Picker Overlay */}
                 <MobileOverlayPanel
                   open={sourceBranchPickerOpen}
-                  title="Select Source Branch"
+                  title={t('session.newWorktree.selectSourceBranch')}
                   onClose={() => setSourceBranchPickerOpen(false)}
                 >
                   <div className="space-y-4" ref={sourceBranchMobileListWrapperRef}>
                     <Input
                       value={sourceBranchQuery}
                       onChange={(e) => setSourceBranchQuery(e.target.value)}
-                      placeholder="Search branches..."
+                      placeholder={t('session.newWorktree.searchBranches')}
                       className="h-8"
                     />
                     {isLoadingBranches ? (
                       <div className="px-2 py-8 text-center typography-small text-muted-foreground">
-                        Loading branches...
+                        {t('session.newWorktree.loadingBranches')}
                       </div>
                     ) : localBranches.length === 0 && remoteBranches.length === 0 ? (
                       <div className="px-2 py-8 text-center typography-small text-muted-foreground">
-                        No branches found
+                        {t('session.newWorktree.noBranchesFound')}
                       </div>
                     ) : (
                       <div className="space-y-4">
                         {hasSourceBranchQuery && hasSourceBranchMatches && (
                           <div className="space-y-2">
                             <div className="typography-small font-semibold text-foreground px-2">
-                              Matching branches
+                              {t('session.newWorktree.matchingBranches')}
                             </div>
                             <div className="space-y-1">
                               {sourceBranchRankedGroups.matching.map((branch) => (
@@ -1422,14 +1426,14 @@ export function NewWorktreeDialog({
 
                         {hasSourceBranchQuery && !hasSourceBranchMatches && (
                           <div className="px-2 py-1 text-center typography-small text-muted-foreground">
-                            No matching branches
+                            {t('session.newWorktree.noMatchingBranches')}
                           </div>
                         )}
 
                         {sourceBranchRankedGroups.otherLocal.length > 0 && (
                           <div className="space-y-2">
                             <div className="typography-small font-semibold text-foreground px-2">
-                              {hasSourceBranchQuery ? 'Other local branches' : 'Local branches'}
+                              {hasSourceBranchQuery ? t('session.newWorktree.otherLocalBranches') : t('session.newWorktree.localBranches')}
                             </div>
                             <div className="space-y-1">
                               {sourceBranchRankedGroups.otherLocal.map((branch) => (
@@ -1456,7 +1460,7 @@ export function NewWorktreeDialog({
                         {sourceBranchRankedGroups.otherRemote.length > 0 && (
                           <div className="space-y-2">
                             <div className="typography-small font-semibold text-foreground px-2">
-                              {hasSourceBranchQuery ? 'Other remote branches' : 'Remote branches'}
+                              {hasSourceBranchQuery ? t('session.newWorktree.otherRemoteBranches') : t('session.newWorktree.remoteBranches')}
                             </div>
                             <div className="space-y-1">
                               {sourceBranchRankedGroups.otherRemote.map((branch) => (
@@ -1493,16 +1497,16 @@ export function NewWorktreeDialog({
                 <div className="flex items-center gap-2">
                   <RiGithubLine className="h-3.5 w-3.5 text-status-success shrink-0" />
                   
-                  {newBranchState.linkedIssue && (
-                    <span className="typography-micro text-muted-foreground shrink-0">
-                      Issue #{newBranchState.linkedIssue.number}
-                    </span>
-                  )}
-                  {newBranchState.linkedPr && (
-                    <span className="typography-micro text-muted-foreground shrink-0">
-                      PR #{newBranchState.linkedPr.number}
-                    </span>
-                  )}
+                    {newBranchState.linkedIssue && (
+                      <span className="typography-micro text-muted-foreground shrink-0">
+                        {t('session.newWorktree.issueNumber', { number: newBranchState.linkedIssue.number })}
+                      </span>
+                    )}
+                    {newBranchState.linkedPr && (
+                      <span className="typography-micro text-muted-foreground shrink-0">
+                        {t('session.newWorktree.prNumber', { number: newBranchState.linkedPr.number })}
+                      </span>
+                    )}
                   
                   <span className="typography-micro text-foreground truncate flex-1">
                     {newBranchState.linkedIssue?.title || newBranchState.linkedPr?.title}
@@ -1532,11 +1536,11 @@ export function NewWorktreeDialog({
                     <span className="typography-micro text-muted-foreground">
                       {newBranchState.linkedPr.head} → {newBranchState.linkedPr.base}
                     </span>
-                    {newBranchState.includePrDiff && (
-                      <span className="typography-micro px-1 py-0.5 rounded bg-status-success/10 text-status-success">
-                        +diff
-                      </span>
-                    )}
+                      {newBranchState.includePrDiff && (
+                        <span className="typography-micro px-1 py-0.5 rounded bg-status-success/10 text-status-success">
+                          {t('session.newWorktree.includeDiffBadge')}
+                        </span>
+                      )}
                   </div>
                 )}
               </div>
@@ -1550,15 +1554,15 @@ export function NewWorktreeDialog({
               <div className="flex items-center gap-3">
                 <DialogTitle className="flex items-center gap-2 shrink-0">
                   <RiGitBranchLine className="h-5 w-5" />
-                  New Worktree
+                  {t('session.newWorktree.title')}
                 </DialogTitle>
                 
                 {/* Mode Selection - using SortableTabsStrip */}
                 <div className="w-[280px] shrink-0">
                   <SortableTabsStrip
                     items={[
-                      { id: 'new-branch', label: 'New Branch', icon: <RiGitBranchLine className="h-3.5 w-3.5" /> },
-                      { id: 'existing-branch', label: 'Existing Branch', icon: <RiGitRepositoryLine className="h-3.5 w-3.5" /> },
+                      { id: 'new-branch', label: t('session.newWorktree.mode.newBranch'), icon: <RiGitBranchLine className="h-3.5 w-3.5" /> },
+                      { id: 'existing-branch', label: t('session.newWorktree.mode.existingBranch'), icon: <RiGitRepositoryLine className="h-3.5 w-3.5" /> },
                     ]}
                     activeId={mode}
                     onSelect={(id) => handleModeChange(id as Mode)}
@@ -1575,14 +1579,14 @@ export function NewWorktreeDialog({
               {mode === 'existing-branch' ? (
                 <div className="space-y-1.5">
                   <label className="typography-ui-label text-foreground block font-semibold">
-                    Select Branch
+                    {t('session.newWorktree.selectBranch')}
                   </label>
                   <div className="flex items-center gap-2">
                     <DropdownMenu open={existingBranchDropdownOpen} onOpenChange={setExistingBranchDropdownOpen}>
                       <DropdownMenuTrigger asChild>
                         <Button variant="outline" size="sm" className="h-9 min-w-[220px] max-w-full justify-between gap-2">
                           <span className={cn('truncate', existingBranchState.selectedBranch ? 'text-foreground' : 'text-muted-foreground')}>
-                            {existingBranchState.selectedBranch || 'Choose a branch...'}
+                            {existingBranchState.selectedBranch || t('session.newWorktree.chooseBranch')}
                           </span>
                           <RiArrowDownSLine className="h-4 w-4 shrink-0 text-muted-foreground" />
                         </Button>
@@ -1590,21 +1594,21 @@ export function NewWorktreeDialog({
                       <DropdownMenuContent align="start" sideOffset={6} className="w-[320px] p-0 max-h-[min(var(--available-height),24rem)] flex flex-col overflow-hidden" ref={existingBranchDropdownContentRef}>
                         <Command shouldFilter={false}>
                         <CommandInput
-                          placeholder="Search branches..."
+                          placeholder={t('session.newWorktree.searchBranches')}
                           value={existingBranchQuery}
                           onValueChange={setExistingBranchQuery}
                         />
                         <CommandList disableHorizontal>
                           {isLoadingBranches ? (
                             <div className="px-2 py-4 text-center typography-small text-muted-foreground">
-                              Loading branches...
+                              {t('session.newWorktree.loadingBranches')}
                             </div>
                           ) : localBranches.length === 0 && remoteBranches.length === 0 ? (
-                            <CommandEmpty>No branches found</CommandEmpty>
+                            <CommandEmpty>{t('session.newWorktree.noBranchesFound')}</CommandEmpty>
                           ) : (
                             <>
                               {hasExistingBranchQuery && hasExistingBranchMatches && (
-                                <CommandGroup heading="Matching branches">
+                                <CommandGroup heading={t('session.newWorktree.matchingBranches')}>
                                   {existingBranchRankedGroups.matching.map((branch) => (
                                     <CommandItem
                                       key={`${branch.source}-${branch.value}`}
@@ -1627,14 +1631,14 @@ export function NewWorktreeDialog({
 
                               {hasExistingBranchQuery && !hasExistingBranchMatches && (
                                 <div className="px-2 py-1 text-center typography-small text-muted-foreground">
-                                  No matching branches
+                                  {t('session.newWorktree.noMatchingBranches')}
                                 </div>
                               )}
 
                               {existingBranchRankedGroups.otherLocal.length > 0 && (
                                 <>
                                   {hasExistingBranchQuery && <CommandSeparator />}
-                                  <CommandGroup heading={hasExistingBranchQuery ? 'Other local branches' : 'Local branches'}>
+                                  <CommandGroup heading={hasExistingBranchQuery ? t('session.newWorktree.otherLocalBranches') : t('session.newWorktree.localBranches')}>
                                     {existingBranchRankedGroups.otherLocal.map((branch) => (
                                       <CommandItem
                                         key={`local-${branch}`}
@@ -1661,7 +1665,7 @@ export function NewWorktreeDialog({
                                   {(existingBranchRankedGroups.otherLocal.length > 0 || hasExistingBranchQuery) && (
                                     <CommandSeparator />
                                   )}
-                                  <CommandGroup heading={hasExistingBranchQuery ? 'Other remote branches' : 'Remote branches'}>
+                                  <CommandGroup heading={hasExistingBranchQuery ? t('session.newWorktree.otherRemoteBranches') : t('session.newWorktree.remoteBranches')}>
                                     {existingBranchRankedGroups.otherRemote.map((branch) => (
                                       <CommandItem
                                         key={`remote-${branch}`}
@@ -1694,7 +1698,7 @@ export function NewWorktreeDialog({
                       className="h-8 w-8 px-0 shrink-0"
                       onClick={handleFetchBranches}
                       disabled={!canFetchBranches || isLoadingBranches}
-                      title="Fetch branches"
+                      title={t('session.newWorktree.fetchBranches')}
                     >
                       {isLoadingBranches ? <RiLoader4Line className="size-4 animate-spin" /> : <RiRefreshLine className="size-4" />}
                     </Button>
@@ -1704,7 +1708,7 @@ export function NewWorktreeDialog({
               <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
                     <label className="typography-ui-label text-foreground block font-semibold">
-                      Branch Name
+                      {t('session.newWorktree.branchName')}
                     </label>
                     {mode === 'new-branch' && isGitHubConnected && (
                       <Button
@@ -1714,7 +1718,7 @@ export function NewWorktreeDialog({
                         className="gap-1.5 h-7"
                       >
                         <RiGithubLine className="size-4 text-status-success" />
-                      {newBranchState.linkedIssue || newBranchState.linkedPr ? 'Change' : 'Start from GitHub Issue/PR'}
+                      {newBranchState.linkedIssue || newBranchState.linkedPr ? t('session.newWorktree.actions.change') : t('session.newWorktree.actions.startFromGitHubIssuePr')}
                       </Button>
                     )}
                   </div>
@@ -1730,7 +1734,7 @@ export function NewWorktreeDialog({
                       }));
                     }}
                     onBlur={() => setValidation(prev => ({ ...prev, touched: true }))}
-                    placeholder="feature/my-awesome-feature"
+                    placeholder={t('session.newWorktree.branchNamePlaceholder')}
                     disabled={!!newBranchState.linkedPr}
                     className={cn(
                       'h-8',
@@ -1742,7 +1746,7 @@ export function NewWorktreeDialog({
                     <div className="flex items-center gap-1.5 text-muted-foreground">
                       <RiCheckLine className="h-3.5 w-3.5 text-status-success" />
                       <span className="typography-micro">
-                        Using PR branch: {newBranchState.linkedPr.head}
+                        {t('session.newWorktree.usingPrBranch', { branch: newBranchState.linkedPr.head })}
                       </span>
                     </div>
                   )}
@@ -1750,7 +1754,7 @@ export function NewWorktreeDialog({
                     <div className="flex items-center gap-1.5 text-muted-foreground">
                       <RiCheckLine className="h-3.5 w-3.5 text-status-success" />
                       <span className="typography-micro">
-                        From issue #{newBranchState.linkedIssue.number}: {newBranchState.linkedIssue.title}
+                        {t('session.newWorktree.fromIssue', { number: newBranchState.linkedIssue.number, title: newBranchState.linkedIssue.title })}
                       </span>
                     </div>
                   )}
@@ -1761,7 +1765,7 @@ export function NewWorktreeDialog({
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <label className="typography-ui-label text-foreground font-semibold">
-                    Worktree Directory
+                    {t('session.newWorktree.worktreeDirectory')}
                   </label>
                   {mode !== 'existing-branch' && (
                     <button
@@ -1780,10 +1784,10 @@ export function NewWorktreeDialog({
                           ? 'text-muted-foreground/40 cursor-not-allowed'
                           : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                       )}
-                      title="Reset to match branch name"
+                      title={t('session.newWorktree.resetToMatchBranchName')}
                     >
                       <RiRefreshLine className="h-3 w-3" />
-                      <span>Reset</span>
+                      <span>{t('session.newWorktree.actions.reset')}</span>
                     </button>
                   )}
                 </div>
@@ -1804,7 +1808,7 @@ export function NewWorktreeDialog({
                     }
                   }}
                   onBlur={() => setValidation(prev => ({ ...prev, touched: true }))}
-                  placeholder="my-worktree-directory"
+                  placeholder={t('session.newWorktree.worktreeDirectoryPlaceholder')}
                   className={cn(
                     'h-8',
                     validation.touched && validation.worktreeError && 'border-destructive'
@@ -1815,14 +1819,14 @@ export function NewWorktreeDialog({
               {/* Source Branch - Only for New Branch mode, hide when PR is selected */}
               {mode === 'new-branch' && !newBranchState.linkedPr && (
                 <div className="space-y-1.5">
-                  <label className="typography-ui-label text-foreground block font-semibold">
-                    Source Branch
-                  </label>
+                <label className="typography-ui-label text-foreground block font-semibold">
+                  {t('session.newWorktree.sourceBranch')}
+                </label>
                   <DropdownMenu open={sourceBranchDropdownOpen} onOpenChange={setSourceBranchDropdownOpen}>
                     <DropdownMenuTrigger asChild>
                       <Button variant="outline" size="sm" className="h-9 min-w-[220px] max-w-full justify-between gap-2">
                         <span className={cn('truncate', newBranchState.sourceBranch ? 'text-foreground' : 'text-muted-foreground')}>
-                          {newBranchState.sourceBranch || 'Select source branch...'}
+                            {newBranchState.sourceBranch || t('session.newWorktree.selectSourceBranchPlaceholder')}
                         </span>
                         <RiArrowDownSLine className="h-4 w-4 shrink-0 text-muted-foreground" />
                       </Button>
@@ -1830,21 +1834,21 @@ export function NewWorktreeDialog({
                     <DropdownMenuContent align="start" className="w-[320px] p-0" ref={sourceBranchDropdownContentRef}>
                       <Command shouldFilter={false}>
                         <CommandInput
-                          placeholder="Search branches..."
+                          placeholder={t('session.newWorktree.searchBranches')}
                           value={sourceBranchQuery}
                           onValueChange={setSourceBranchQuery}
                         />
                         <CommandList disableHorizontal>
                           {isLoadingBranches ? (
                             <div className="px-2 py-4 text-center typography-small text-muted-foreground">
-                              Loading branches...
+                              {t('session.newWorktree.loadingBranches')}
                             </div>
                           ) : localBranches.length === 0 && remoteBranches.length === 0 ? (
-                            <CommandEmpty>No branches found</CommandEmpty>
+                            <CommandEmpty>{t('session.newWorktree.noBranchesFound')}</CommandEmpty>
                           ) : (
                             <>
                               {hasSourceBranchQuery && hasSourceBranchMatches && (
-                                <CommandGroup heading="Matching branches">
+                                <CommandGroup heading={t('session.newWorktree.matchingBranches')}>
                                   {sourceBranchRankedGroups.matching.map((branch) => (
                                     <CommandItem
                                       key={`${branch.source}-${branch.value}`}
@@ -1862,14 +1866,14 @@ export function NewWorktreeDialog({
 
                               {hasSourceBranchQuery && !hasSourceBranchMatches && (
                                 <div className="px-2 py-1 text-center typography-small text-muted-foreground">
-                                  No matching branches
+                                  {t('session.newWorktree.noMatchingBranches')}
                                 </div>
                               )}
 
                               {sourceBranchRankedGroups.otherLocal.length > 0 && (
                                 <>
                                   {hasSourceBranchQuery && <CommandSeparator />}
-                                  <CommandGroup heading={hasSourceBranchQuery ? 'Other local branches' : 'Local branches'}>
+                                  <CommandGroup heading={hasSourceBranchQuery ? t('session.newWorktree.otherLocalBranches') : t('session.newWorktree.localBranches')}>
                                     {sourceBranchRankedGroups.otherLocal.map((branch) => (
                                       <CommandItem
                                         key={`local-${branch}`}
@@ -1891,7 +1895,7 @@ export function NewWorktreeDialog({
                                   {(sourceBranchRankedGroups.otherLocal.length > 0 || hasSourceBranchQuery) && (
                                     <CommandSeparator />
                                   )}
-                                  <CommandGroup heading={hasSourceBranchQuery ? 'Other remote branches' : 'Remote branches'}>
+                                  <CommandGroup heading={hasSourceBranchQuery ? t('session.newWorktree.otherRemoteBranches') : t('session.newWorktree.remoteBranches')}>
                                     {sourceBranchRankedGroups.otherRemote.map((branch) => (
                                       <CommandItem
                                         key={`remote-${branch}`}
@@ -1915,7 +1919,7 @@ export function NewWorktreeDialog({
                   </DropdownMenu>
                   {newBranchState.sourceBranch && (
                     <div className="typography-micro text-muted-foreground">
-                      New branch will be created from {newBranchState.sourceBranch}
+                      {t('session.newWorktree.newBranchFromSource', { source: newBranchState.sourceBranch })}
                     </div>
                   )}
                 </div>
@@ -1930,12 +1934,12 @@ export function NewWorktreeDialog({
                     
                     {newBranchState.linkedIssue && (
                       <span className="typography-micro text-muted-foreground shrink-0">
-                        Issue #{newBranchState.linkedIssue.number}
+                        {t('session.newWorktree.issueNumber', { number: newBranchState.linkedIssue.number })}
                       </span>
                     )}
                     {newBranchState.linkedPr && (
                       <span className="typography-micro text-muted-foreground shrink-0">
-                        PR #{newBranchState.linkedPr.number}
+                        {t('session.newWorktree.prNumber', { number: newBranchState.linkedPr.number })}
                       </span>
                     )}
                     
@@ -1969,7 +1973,7 @@ export function NewWorktreeDialog({
                       </span>
                       {newBranchState.includePrDiff && (
                         <span className="typography-micro px-1 py-0.5 rounded bg-status-success/10 text-status-success">
-                          +diff
+                          {t('session.newWorktree.includeDiffBadge')}
                         </span>
                       )}
                     </div>
@@ -1999,7 +2003,7 @@ export function NewWorktreeDialog({
                   onClick={() => onOpenChange(false)}
                   disabled={isCreating}
                 >
-                  Cancel
+                  {t('session.newWorktree.actions.cancel')}
                 </Button>
                 <Button
                   size="sm"
@@ -2008,7 +2012,7 @@ export function NewWorktreeDialog({
                   className="gap-1.5"
                 >
                   {isCreating && <RiLoader4Line className="h-3.5 w-3.5 animate-spin" />}
-                  {isCreating ? 'Creating...' : 'Create Worktree'}
+                  {isCreating ? t('session.newWorktree.actions.creating') : t('session.newWorktree.actions.createWorktree')}
                 </Button>
               </div>
             </DialogFooter>

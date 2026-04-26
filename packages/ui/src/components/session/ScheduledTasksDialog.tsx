@@ -32,6 +32,7 @@ import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { cn, formatDirectoryName } from '@/lib/utils';
+import { useI18n } from '@/lib/i18n';
 import type { ProjectEntry } from '@/lib/api/types';
 import {
   deleteScheduledTask,
@@ -43,8 +44,6 @@ import {
 } from '@/lib/scheduledTasksApi';
 import { ScheduledTaskEditorDialog } from './ScheduledTaskEditorDialog';
 
-const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
 const scheduleTimes = (task: ScheduledTask): string[] => {
   const raw = Array.isArray(task.schedule.times)
     ? task.schedule.times
@@ -53,27 +52,63 @@ const scheduleTimes = (task: ScheduledTask): string[] => {
   return Array.from(new Set(valid)).sort((a, b) => a.localeCompare(b));
 };
 
-const formatSchedule = (task: ScheduledTask): string => {
+const formatSchedule = (task: ScheduledTask, t: ReturnType<typeof useI18n>['t']): string => {
   const timesLabel = scheduleTimes(task).join(', ') || '--:--';
+  const formatWeekday = (value: number) => {
+    if (value === 0) return t('sessions.scheduledTasks.dialog.schedule.weekdayShort.sun');
+    if (value === 1) return t('sessions.scheduledTasks.dialog.schedule.weekdayShort.mon');
+    if (value === 2) return t('sessions.scheduledTasks.dialog.schedule.weekdayShort.tue');
+    if (value === 3) return t('sessions.scheduledTasks.dialog.schedule.weekdayShort.wed');
+    if (value === 4) return t('sessions.scheduledTasks.dialog.schedule.weekdayShort.thu');
+    if (value === 5) return t('sessions.scheduledTasks.dialog.schedule.weekdayShort.fri');
+    if (value === 6) return t('sessions.scheduledTasks.dialog.schedule.weekdayShort.sat');
+    return t('sessions.scheduledTasks.dialog.schedule.weekdayShort.unknown');
+  };
   if (task.schedule.kind === 'daily') {
-    return `Daily ${timesLabel}${task.schedule.timezone ? ` (${task.schedule.timezone})` : ''}`;
+    if (task.schedule.timezone) {
+      return t('sessions.scheduledTasks.dialog.schedule.dailyWithTimezone', {
+        time: timesLabel,
+        timezone: task.schedule.timezone,
+      });
+    }
+    return t('sessions.scheduledTasks.dialog.schedule.daily', { time: timesLabel });
   }
   if (task.schedule.kind === 'weekly') {
     const days = Array.isArray(task.schedule.weekdays)
-      ? task.schedule.weekdays.map((value) => WEEKDAY_NAMES[value] || '?').join(', ')
+      ? task.schedule.weekdays.map((value) => formatWeekday(value)).join(', ')
       : '';
-    return `Weekly ${days} ${timesLabel}${task.schedule.timezone ? ` (${task.schedule.timezone})` : ''}`;
+    if (task.schedule.timezone) {
+      return t('sessions.scheduledTasks.dialog.schedule.weeklyWithTimezone', {
+        days,
+        time: timesLabel,
+        timezone: task.schedule.timezone,
+      });
+    }
+    return t('sessions.scheduledTasks.dialog.schedule.weekly', { days, time: timesLabel });
   }
   if (task.schedule.kind === 'once') {
     const date = typeof task.schedule.date === 'string' && task.schedule.date.trim().length > 0
       ? task.schedule.date
-      : 'Unknown date';
+      : t('sessions.scheduledTasks.dialog.schedule.unknownDate');
     const time = typeof task.schedule.time === 'string' && task.schedule.time.trim().length > 0
       ? task.schedule.time
       : '--:--';
-    return `One-time ${date} ${time}${task.schedule.timezone ? ` (${task.schedule.timezone})` : ''}`;
+    if (task.schedule.timezone) {
+      return t('sessions.scheduledTasks.dialog.schedule.onceWithTimezone', {
+        date,
+        time,
+        timezone: task.schedule.timezone,
+      });
+    }
+    return t('sessions.scheduledTasks.dialog.schedule.once', { date, time });
   }
-  return `Cron: ${task.schedule.cron || ''}${task.schedule.timezone ? ` (${task.schedule.timezone})` : ''}`;
+  if (task.schedule.timezone) {
+    return t('sessions.scheduledTasks.dialog.schedule.cronWithTimezone', {
+      cron: task.schedule.cron || '',
+      timezone: task.schedule.timezone,
+    });
+  }
+  return t('sessions.scheduledTasks.dialog.schedule.cron', { cron: task.schedule.cron || '' });
 };
 
 const formatClockTime = (value?: number): string => {
@@ -83,7 +118,7 @@ const formatClockTime = (value?: number): string => {
   return new Date(value).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 };
 
-const formatRelativeTime = (value?: number): string => {
+const formatRelativeTime = (value: number | undefined, t: ReturnType<typeof useI18n>['t']): string => {
   if (!value || !Number.isFinite(value)) {
     return '';
   }
@@ -94,22 +129,28 @@ const formatRelativeTime = (value?: number): string => {
   const day = 24 * hour;
   const future = diff >= 0;
   if (abs < minute) {
-    return future ? 'in <1m' : 'just now';
+    return future ? t('sessions.scheduledTasks.dialog.relativeTime.inLessThanOneMinute') : t('sessions.scheduledTasks.dialog.relativeTime.justNow');
   }
   if (abs < hour) {
     const m = Math.round(abs / minute);
-    return future ? `in ${m}m` : `${m}m ago`;
+    return future
+      ? t('sessions.scheduledTasks.dialog.relativeTime.inMinutes', { count: m })
+      : t('sessions.scheduledTasks.dialog.relativeTime.minutesAgo', { count: m });
   }
   if (abs < day) {
     const h = Math.floor(abs / hour);
     const m = Math.round((abs % hour) / minute);
     const body = m > 0 ? `${h}h ${m}m` : `${h}h`;
-    return future ? `in ${body}` : `${body} ago`;
+    return future
+      ? t('sessions.scheduledTasks.dialog.relativeTime.inDuration', { duration: body })
+      : t('sessions.scheduledTasks.dialog.relativeTime.durationAgo', { duration: body });
   }
   const d = Math.floor(abs / day);
   const h = Math.round((abs % day) / hour);
   const body = h > 0 ? `${d}d ${h}h` : `${d}d`;
-  return future ? `in ${body}` : `${body} ago`;
+  return future
+    ? t('sessions.scheduledTasks.dialog.relativeTime.inDuration', { duration: body })
+    : t('sessions.scheduledTasks.dialog.relativeTime.durationAgo', { duration: body });
 };
 
 type StatusTone = 'success' | 'error' | 'warning' | 'muted';
@@ -118,15 +159,14 @@ const STATUS_META: Record<
   ScheduledTaskStatus,
   {
     tone: StatusTone;
-    label: string;
     Icon: React.ComponentType<{ className?: string }>;
     spin?: boolean;
   }
 > = {
-  success: { tone: 'success', label: 'Success', Icon: RiCheckboxCircleLine },
-  error: { tone: 'error', label: 'Error', Icon: RiErrorWarningLine },
-  running: { tone: 'warning', label: 'Running', Icon: RiLoader4Line, spin: true },
-  idle: { tone: 'muted', label: 'Idle', Icon: RiPulseLine },
+  success: { tone: 'success', Icon: RiCheckboxCircleLine },
+  error: { tone: 'error', Icon: RiErrorWarningLine },
+  running: { tone: 'warning', Icon: RiLoader4Line, spin: true },
+  idle: { tone: 'muted', Icon: RiPulseLine },
 };
 
 const toneStyle = (tone: StatusTone): React.CSSProperties => {
@@ -141,6 +181,7 @@ const toneStyle = (tone: StatusTone): React.CSSProperties => {
 };
 
 export function ScheduledTasksDialog() {
+  const { t } = useI18n();
   const open = useUIStore((state) => state.isScheduledTasksDialogOpen);
   const setOpen = useUIStore((state) => state.setScheduledTasksDialogOpen);
   const isMobile = useUIStore((state) => state.isMobile);
@@ -214,7 +255,7 @@ export function ScheduledTasksDialog() {
       });
       setTasks(nextTasks);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to load scheduled tasks');
+      toast.error(error instanceof Error ? error.message : t('sessions.scheduledTasks.dialog.toast.loadFailed'));
       if (!options?.silent) {
         setTasks([]);
       }
@@ -223,7 +264,7 @@ export function ScheduledTasksDialog() {
         setLoading(false);
       }
     }
-  }, []);
+  }, [t]);
 
   React.useEffect(() => {
     if (!open) {
@@ -267,12 +308,12 @@ export function ScheduledTasksDialog() {
 
   const handleSaveTask = React.useCallback(async (taskDraft: Partial<ScheduledTask>) => {
     if (!selectedProjectID) {
-      throw new Error('Choose a project first');
+      throw new Error(t('sessions.scheduledTasks.dialog.error.chooseProjectFirst'));
     }
     await upsertScheduledTask(selectedProjectID, taskDraft);
     await reloadTasks(selectedProjectID);
-    toast.success('Scheduled task saved');
-  }, [selectedProjectID, reloadTasks]);
+    toast.success(t('sessions.scheduledTasks.dialog.toast.saved'));
+  }, [selectedProjectID, reloadTasks, t]);
 
   const handleToggleEnabled = React.useCallback(async (task: ScheduledTask, enabled: boolean) => {
     if (!selectedProjectID) {
@@ -287,18 +328,18 @@ export function ScheduledTasksDialog() {
       });
       await reloadTasks(selectedProjectID, { silent: true });
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to update task');
+      toast.error(error instanceof Error ? error.message : t('sessions.scheduledTasks.dialog.toast.updateFailed'));
       await reloadTasks(selectedProjectID, { silent: true });
     } finally {
       setMutatingTaskID(null);
     }
-  }, [selectedProjectID, reloadTasks]);
+  }, [selectedProjectID, reloadTasks, t]);
 
   const handleDeleteTask = React.useCallback(async (task: ScheduledTask) => {
     if (!selectedProjectID) {
       return;
     }
-    const confirmed = window.confirm(`Delete scheduled task "${task.name}"?`);
+    const confirmed = window.confirm(t('sessions.scheduledTasks.dialog.confirm.deleteTask', { taskName: task.name }));
     if (!confirmed) {
       return;
     }
@@ -307,13 +348,13 @@ export function ScheduledTasksDialog() {
     try {
       await deleteScheduledTask(selectedProjectID, task.id);
       await reloadTasks(selectedProjectID, { silent: true });
-      toast.success('Scheduled task deleted');
+      toast.success(t('sessions.scheduledTasks.dialog.toast.deleted'));
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to delete task');
+      toast.error(error instanceof Error ? error.message : t('sessions.scheduledTasks.dialog.toast.deleteFailed'));
     } finally {
       setMutatingTaskID(null);
     }
-  }, [selectedProjectID, reloadTasks]);
+  }, [selectedProjectID, reloadTasks, t]);
 
   const handleRunNow = React.useCallback(async (task: ScheduledTask) => {
     if (!selectedProjectID) {
@@ -326,17 +367,17 @@ export function ScheduledTasksDialog() {
         reloadTasks(selectedProjectID, { silent: true }),
         refreshGlobalSessions(),
       ]);
-      toast.success('Task started');
+      toast.success(t('sessions.scheduledTasks.dialog.toast.started'));
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to run task');
+      toast.error(error instanceof Error ? error.message : t('sessions.scheduledTasks.dialog.toast.runFailed'));
     } finally {
       setMutatingTaskID(null);
     }
-  }, [selectedProjectID, reloadTasks]);
+  }, [selectedProjectID, reloadTasks, t]);
 
   const projectSelector = (
     <div className="flex flex-col items-start gap-1">
-      <span className="typography-meta text-muted-foreground">Project</span>
+      <span className="typography-meta text-muted-foreground">{t('sessions.scheduledTasks.dialog.project.label')}</span>
       <Select
         value={selectedProjectID || '__none'}
         onValueChange={(value) => {
@@ -353,11 +394,11 @@ export function ScheduledTasksDialog() {
           {selectedProject ? (
             <SelectValue>{renderProjectLabel(selectedProject)}</SelectValue>
           ) : (
-            <SelectValue placeholder="Select project" />
+            <SelectValue placeholder={t('sessions.scheduledTasks.dialog.project.placeholder')} />
           )}
         </SelectTrigger>
         <SelectContent>
-          {projects.length === 0 ? <SelectItem value="__none">No projects</SelectItem> : null}
+          {projects.length === 0 ? <SelectItem value="__none">{t('sessions.scheduledTasks.dialog.project.empty')}</SelectItem> : null}
           {projects.map((project) => (
             <SelectItem key={project.id} value={project.id}>
               {renderProjectLabel(project)}
@@ -379,7 +420,7 @@ export function ScheduledTasksDialog() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           {projectSelector}
           <Button onClick={openNewTaskEditor} disabled={!selectedProjectID}>
-            <RiAddLine className="mr-1 h-4 w-4" /> New task
+            <RiAddLine className="mr-1 h-4 w-4" /> {t('sessions.scheduledTasks.dialog.actions.newTask')}
           </Button>
         </div>
       ) : (
@@ -388,11 +429,11 @@ export function ScheduledTasksDialog() {
 
       {loading ? (
         <div className="flex items-center gap-2 typography-meta text-muted-foreground">
-          <RiLoader4Line className="h-4 w-4 animate-spin" /> Loading tasks...
+          <RiLoader4Line className="h-4 w-4 animate-spin" /> {t('sessions.scheduledTasks.dialog.loading')}
         </div>
       ) : tasks.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border p-4 typography-meta text-muted-foreground">
-          {selectedProjectID ? 'No scheduled tasks yet.' : 'Select a project to manage scheduled tasks.'}
+          {selectedProjectID ? t('sessions.scheduledTasks.dialog.empty.noTasks') : t('sessions.scheduledTasks.dialog.empty.selectProject')}
         </div>
       ) : (
         <div className="space-y-2.5">
@@ -400,6 +441,13 @@ export function ScheduledTasksDialog() {
             const isBusy = mutatingTaskID === task.id;
             const status = (task.state?.lastStatus || 'idle') as ScheduledTaskStatus;
             const meta = STATUS_META[status];
+            const statusLabel = status === 'success'
+              ? t('sessions.scheduledTasks.dialog.status.success')
+              : status === 'error'
+                ? t('sessions.scheduledTasks.dialog.status.error')
+                : status === 'running'
+                  ? t('sessions.scheduledTasks.dialog.status.running')
+                  : t('sessions.scheduledTasks.dialog.status.idle');
             const nextAt = task.state?.nextRunAt;
             const lastAt = task.state?.lastRunAt;
 
@@ -416,17 +464,17 @@ export function ScheduledTasksDialog() {
                     {task.name}
                   </div>
                   <div className="typography-micro truncate text-muted-foreground">
-                    {formatSchedule(task)}
+                    {formatSchedule(task, t)}
                   </div>
                 </div>
 
                 <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 typography-micro text-muted-foreground">
                   <span className="inline-flex items-center gap-1.5">
                     <RiTimerLine className="h-3.5 w-3.5" />
-                    <span className="font-medium text-foreground">Next</span>
+                    <span className="font-medium text-foreground">{t('sessions.scheduledTasks.dialog.nextRun.label')}</span>
                     {nextAt ? (
                       <>
-                        <span className="text-foreground">{formatRelativeTime(nextAt)}</span>
+                        <span className="text-foreground">{formatRelativeTime(nextAt, t)}</span>
                         <span className="text-muted-foreground/50">·</span>
                         <span>{formatClockTime(nextAt)}</span>
                       </>
@@ -436,14 +484,14 @@ export function ScheduledTasksDialog() {
                   </span>
                   <span className="inline-flex items-center gap-1.5">
                     <RiHistoryLine className="h-3.5 w-3.5" />
-                    <span className="font-medium text-foreground">Last run</span>
+                    <span className="font-medium text-foreground">{t('sessions.scheduledTasks.dialog.lastRun.label')}</span>
                     {status === 'running' ? (
                       <span
                         className="inline-flex items-center gap-1"
                         style={{ color: 'var(--status-warning)' }}
                       >
                         <RiLoader4Line className="h-3.5 w-3.5 animate-spin" />
-                        running now
+                        {t('sessions.scheduledTasks.dialog.lastRun.runningNow')}
                       </span>
                     ) : lastAt ? (
                       <>
@@ -453,14 +501,14 @@ export function ScheduledTasksDialog() {
                             style={{ color: `var(--status-${meta.tone})` }}
                           >
                             <meta.Icon className="h-3.5 w-3.5" />
-                            {meta.label}
+                            {statusLabel}
                           </span>
                         ) : null}
                         <span className="text-muted-foreground/50">·</span>
-                        <span>{formatRelativeTime(lastAt)}</span>
+                        <span>{formatRelativeTime(lastAt, t)}</span>
                       </>
                     ) : (
-                      <span>never</span>
+                      <span>{t('sessions.scheduledTasks.dialog.lastRun.never')}</span>
                     )}
                   </span>
                 </div>
@@ -486,10 +534,12 @@ export function ScheduledTasksDialog() {
                     <Checkbox
                       checked={task.enabled}
                       onChange={(enabled) => void handleToggleEnabled(task, enabled)}
-                      ariaLabel={task.enabled ? `Pause ${task.name}` : `Enable ${task.name}`}
+                      ariaLabel={task.enabled
+                        ? t('sessions.scheduledTasks.dialog.taskToggle.pauseAria', { taskName: task.name })
+                        : t('sessions.scheduledTasks.dialog.taskToggle.enableAria', { taskName: task.name })}
                       disabled={isBusy}
                     />
-                    {task.enabled ? 'Enabled' : 'Paused'}
+                    {task.enabled ? t('sessions.scheduledTasks.dialog.taskToggle.enabled') : t('sessions.scheduledTasks.dialog.taskToggle.paused')}
                   </label>
 
                   <div className="flex flex-wrap items-center gap-1.5">
@@ -499,7 +549,7 @@ export function ScheduledTasksDialog() {
                       onClick={() => void handleRunNow(task)}
                       disabled={isBusy}
                     >
-                      <RiPlayLine className="h-4 w-4" /> run now
+                      <RiPlayLine className="h-4 w-4" /> {t('sessions.scheduledTasks.dialog.actions.runNow')}
                     </Button>
                     <Button
                       variant="outline"
@@ -509,16 +559,16 @@ export function ScheduledTasksDialog() {
                         setEditorOpen(true);
                       }}
                       disabled={isBusy}
-                      aria-label={`Edit ${task.name}`}
+                      aria-label={t('sessions.scheduledTasks.dialog.actions.editAria', { taskName: task.name })}
                     >
-                      <RiEdit2Line className="h-4 w-4" /> edit
+                      <RiEdit2Line className="h-4 w-4" /> {t('sessions.scheduledTasks.dialog.actions.edit')}
                     </Button>
                     <Button
                       variant="destructive"
                       size="sm"
                       onClick={() => void handleDeleteTask(task)}
                       disabled={isBusy}
-                      aria-label={`Delete ${task.name}`}
+                      aria-label={t('sessions.scheduledTasks.dialog.actions.deleteAria', { taskName: task.name })}
                     >
                       <RiDeleteBinLine className="h-4 w-4" />
                     </Button>
@@ -537,17 +587,17 @@ export function ScheduledTasksDialog() {
       {isMobile ? (
         <MobileOverlayPanel
           open={open}
-          title="Scheduled tasks"
+          title={t('sessions.scheduledTasks.dialog.title')}
           onClose={() => setOpen(false)}
           contentMaxHeightClassName="max-h-[min(80vh,640px)]"
           renderHeader={(closeButton) => (
             <div className="flex flex-col gap-1 border-b border-border/40 px-3 py-2">
               <div className="flex items-center justify-between gap-2">
-                <h2 className="typography-ui-label font-semibold text-foreground">Scheduled tasks</h2>
+                <h2 className="typography-ui-label font-semibold text-foreground">{t('sessions.scheduledTasks.dialog.title')}</h2>
                 {closeButton}
               </div>
               <p className="typography-micro text-muted-foreground">
-                Server-side tasks that create a new session and send a configured prompt.
+                {t('sessions.scheduledTasks.dialog.description')}
               </p>
             </div>
           )}
@@ -557,7 +607,7 @@ export function ScheduledTasksDialog() {
               onClick={openNewTaskEditor}
               disabled={!selectedProjectID}
             >
-              <RiAddLine className="mr-1 h-4 w-4" /> New task
+              <RiAddLine className="mr-1 h-4 w-4" /> {t('sessions.scheduledTasks.dialog.actions.newTask')}
             </Button>
           )}
         >
@@ -567,8 +617,8 @@ export function ScheduledTasksDialog() {
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Scheduled tasks</DialogTitle>
-              <DialogDescription>Server-side tasks that create a new session and send a configured prompt.</DialogDescription>
+              <DialogTitle>{t('sessions.scheduledTasks.dialog.title')}</DialogTitle>
+              <DialogDescription>{t('sessions.scheduledTasks.dialog.description')}</DialogDescription>
             </DialogHeader>
 
             {tasksContent}

@@ -25,6 +25,7 @@ import { useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { useI18n } from '@/lib/i18n';
 
 type RecentQuickOpenFile = {
   path: string;
@@ -72,6 +73,7 @@ const getRelativePath = (root: string, filePath: string): string => {
 };
 
 export const QuickOpenDialog: React.FC = () => {
+  const { t } = useI18n();
   const { files } = useRuntimeAPIs();
   const isQuickOpenOpen = useUIStore((state) => state.isQuickOpenOpen);
   const setQuickOpenOpen = useUIStore((state) => state.setQuickOpenOpen);
@@ -200,16 +202,16 @@ export const QuickOpenDialog: React.FC = () => {
   const hasTypedQuery = query.trim().length > 0;
   const visibleFiles = hasTypedQuery ? searchResults : recentFiles;
   const emptyMessage = !currentRoot
-    ? 'Open a project to quick-open files'
+    ? t('quickOpenDialog.empty.openProjectFirst')
     : hasTypedQuery
-      ? (isSearching ? 'Searching files…' : 'No matching files')
-      : 'No matching recent files';
+      ? (isSearching ? t('quickOpenDialog.empty.searchingFiles') : t('quickOpenDialog.empty.noMatchingFiles'))
+      : t('quickOpenDialog.empty.noMatchingRecentFiles');
 
   return (
     <Dialog open={isQuickOpenOpen} onOpenChange={setQuickOpenOpen}>
       <DialogHeader className="sr-only">
-        <DialogTitle>Quick Open</DialogTitle>
-        <DialogDescription>Type a file name or path</DialogDescription>
+        <DialogTitle>{t('quickOpenDialog.title')}</DialogTitle>
+        <DialogDescription>{t('quickOpenDialog.description')}</DialogDescription>
       </DialogHeader>
       <DialogContent
         className="overflow-hidden p-0 transform-gpu will-change-transform"
@@ -222,14 +224,14 @@ export const QuickOpenDialog: React.FC = () => {
           <CommandInput
             value={query}
             onValueChange={setQuery}
-            placeholder="Type a file name or path"
+            placeholder={t('quickOpenDialog.input.placeholder')}
             disabled={!currentRoot}
           />
           <CommandList>
             <CommandEmpty>{emptyMessage}</CommandEmpty>
 
             {currentRoot && visibleFiles.length > 0 && (
-              <CommandGroup heading={hasTypedQuery ? 'Files' : 'Recent Files'}>
+              <CommandGroup heading={hasTypedQuery ? t('quickOpenDialog.group.files') : t('quickOpenDialog.group.recentFiles')}>
                 {visibleFiles.map((file) => (
                   <CommandItem
                     key={file.path}

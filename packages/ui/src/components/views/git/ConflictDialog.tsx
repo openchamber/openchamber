@@ -15,6 +15,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { toast } from '@/components/ui';
 import { getConflictDetails, type MergeConflictDetails } from '@/lib/gitApi';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
+import { useI18n } from '@/lib/i18n';
 
 interface ConflictDialogProps {
   open: boolean;
@@ -35,6 +36,7 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
   onAbort,
   onClearState,
 }) => {
+  const { t } = useI18n();
   const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const setPendingInputText = useInputStore((state) => state.setPendingInputText);
@@ -58,7 +60,7 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
         setConflictDetails(details);
       })
       .catch((err) => {
-        const message = err instanceof Error ? err.message : 'Failed to load conflict details';
+        const message = err instanceof Error ? err.message : t('gitView.conflict.loadFailed');
         setLoadError(message);
       })
       .finally(() => {
@@ -119,12 +121,12 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
   const handleResolveInCurrentSession = async () => {
     const context = await buildConflictContext();
     if (!context) {
-      toast.error('No conflict details available');
+      toast.error(t('gitView.conflict.noDetailsAvailable'));
       return;
     }
 
     if (!currentSessionId) {
-      toast.error('No active session', { description: 'Open a chat session first or use "New Session".' });
+      toast.error(t('gitView.conflict.noActiveSession'), { description: t('gitView.conflict.noActiveSessionDescription') });
       return;
     }
 
@@ -143,7 +145,7 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
   const handleResolveInNewSession = async () => {
     const context = await buildConflictContext();
     if (!context) {
-      toast.error('No conflict details available');
+      toast.error(t('gitView.conflict.noDetailsAvailable'));
       return;
     }
 
@@ -162,7 +164,7 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
     onOpenChange(false);
   };
 
-  const operationLabel = operation === 'merge' ? 'Merge' : 'Rebase';
+  const operationLabel = operation === 'merge' ? t('gitView.operation.merge') : t('gitView.operation.rebase');
   const displayFiles = conflictDetails?.unmergedFiles || conflictFiles;
 
   return (
@@ -172,30 +174,30 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
           <DialogHeader>
             <div className="flex items-center gap-2">
               <RiAlertLine className="size-5 shrink-0 text-[var(--status-warning)]" />
-              <DialogTitle>{operationLabel} Conflicts Detected</DialogTitle>
+              <DialogTitle>{t('gitView.conflict.detectedTitle', { operation: operationLabel })}</DialogTitle>
             </div>
             <DialogDescription>
-              The {operation} operation resulted in conflicts that need to be resolved.
+              {t('gitView.conflict.detectedDescription', { operation })}
             </DialogDescription>
           </DialogHeader>
 
           {isLoading && (
             <div className="flex items-center justify-center gap-2 py-4 text-muted-foreground">
               <RiLoader4Line className="size-4 animate-spin" />
-              <span className="typography-meta">Loading conflict details...</span>
+              <span className="typography-meta">{t('gitView.conflict.loading')}</span>
             </div>
           )}
 
           {loadError && (
             <div className="rounded-lg bg-[var(--status-error-bg)] p-3 text-[var(--status-error)] typography-meta break-words">
-              Error loading details: {loadError}
+              {t('gitView.conflict.errorLoadingDetails', { message: loadError })}
             </div>
           )}
 
           {displayFiles.length > 0 && (
             <div className="space-y-2 overflow-hidden">
               <div className="flex items-center justify-between">
-                <p className="typography-meta text-muted-foreground">Conflicted files:</p>
+                <p className="typography-meta text-muted-foreground">{t('gitView.conflict.conflictedFiles')}</p>
                 <span className="typography-micro px-1.5 py-0.5 rounded bg-[var(--surface-elevated)] text-muted-foreground">
                   {displayFiles.length}
                 </span>
@@ -218,7 +220,7 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
 
           {conflictDetails?.headInfo && (
             <div className="space-y-1 overflow-hidden">
-              <p className="typography-meta text-muted-foreground">HEAD information:</p>
+              <p className="typography-meta text-muted-foreground">{t('gitView.conflict.headInfo')}</p>
               <div className="typography-micro text-foreground font-mono bg-[var(--surface-elevated)] rounded-lg p-3 max-h-24 overflow-y-auto break-words whitespace-pre-wrap">
                 {conflictDetails.headInfo}
               </div>
@@ -239,7 +241,7 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
               ) : (
                 <RiAddLine className="size-4" />
               )}
-              Resolve in New Session
+              {t('gitView.conflict.resolveNewSession')}
             </Button>
             <Button
               variant="outline"
@@ -252,14 +254,14 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
               ) : (
                 <RiChat1Line className="size-4" />
               )}
-              Resolve in Current Session
+              {t('gitView.conflict.resolveCurrentSession')}
             </Button>
             <div className="flex gap-2 pt-1">
               <Button variant="ghost" size="sm" onClick={handleContinueLater} className="flex-1">
-                Continue Later
+                {t('gitView.conflict.continueLater')}
               </Button>
               <Button variant="destructive" size="sm" onClick={handleAbort} className="flex-1">
-                Abort {operationLabel}
+                {t('gitView.conflict.abortOperation', { operation: operationLabel })}
               </Button>
             </div>
           </div>
