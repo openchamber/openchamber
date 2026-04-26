@@ -1014,7 +1014,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
                 ? 'bg-primary/10 text-primary' 
                 : 'hover:bg-interactive-hover/50 text-foreground'
             )}
-            title={t('directoryTree.actions.unpinDirectory')}
+            title={isPinned ? t('directoryTree.actions.unpinDirectory') : undefined}
             style={{ paddingLeft: `${level * (isMobile ? 12 : 14) + (isMobile ? 4 : 6)}px` }}
           >
             {rowContent}
