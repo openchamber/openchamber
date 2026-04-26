@@ -342,8 +342,12 @@ export const useKeyboardShortcuts = () => {
         const target = e.target as Element | null;
         const isInsideDialog = Boolean(target?.closest('[role="dialog"]'));
         const isSettingsMounted = Boolean(document.querySelector('[data-settings-view="true"]'));
+        const isInsideTerminal = Boolean(
+          target?.closest('.terminal-viewport-container') ||
+          target?.getAttribute('data-terminal-hidden-input') === 'true'
+        );
 
-        if (isInsideDialog || isSettingsMounted) {
+        if (isInsideDialog || isSettingsMounted || isInsideTerminal) {
           resetAbortPriming();
           return;
         }

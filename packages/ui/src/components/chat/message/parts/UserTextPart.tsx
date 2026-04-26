@@ -142,9 +142,19 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
 
     return (
         <div className="relative" key={part.id || `${messageId}-user-text`}>
+            {isExpanded && (
+                <button
+                    type="button"
+                    onClick={handleCollapse}
+                    className="absolute top-0 right-0 flex items-center justify-center rounded-sm p-0.5 text-[var(--surface-mutedForeground)] hover:text-[var(--surface-foreground)] hover:bg-[var(--interactive-hover)] transition-colors"
+                    aria-label="Collapse"
+                >
+                    <RiArrowUpSLine className="h-3.5 w-3.5" />
+                </button>
+            )}
             <div
                 className={cn(
-                    "break-words font-sans typography-markdown",
+                    "break-words font-sans typography-markdown pb-3",
                     normalizedRenderingMode === 'plain' && 'whitespace-pre-wrap',
                     !isExpanded && "line-clamp-2",
                     isTruncated && !isExpanded && "cursor-pointer"
@@ -161,16 +171,6 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
                     plainTextContent
                 )}
             </div>
-            {isExpanded && (
-                <button
-                    type="button"
-                    onClick={handleCollapse}
-                    className="absolute -bottom-1 right-0 flex items-center justify-center rounded-sm p-0.5 text-[var(--surface-mutedForeground)] hover:text-[var(--surface-foreground)] hover:bg-[var(--interactive-hover)] transition-colors"
-                    aria-label="Collapse"
-                >
-                    <RiArrowUpSLine className="h-3.5 w-3.5" />
-                </button>
-            )}
         </div>
     );
 };
