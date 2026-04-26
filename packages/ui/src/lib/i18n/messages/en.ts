@@ -1261,7 +1261,7 @@ export const dict = {
   'chat.commandAutocomplete.command.redoDescription': 'Redo previously undone messages',
   'chat.commandAutocomplete.command.compactDescription': 'Compress session history using AI to reduce context size',
   'chat.commandAutocomplete.command.summaryDescription': 'Non-destructive session summary. Optional topic hint after the command.',
-  'chat.commandAutocomplete.command.reviewDescription': 'Review current workspace changes for high-signal issues only.',
+  'chat.commandAutocomplete.command.workspaceReviewDescription': 'Review current workspace changes for high-signal issues only.',
   'chat.commandAutocomplete.badge.skill': 'skill',
   'chat.commandAutocomplete.badge.system': 'system',
   'chat.commandAutocomplete.empty': 'No commands found',

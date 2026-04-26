@@ -1492,7 +1492,7 @@ export const settingsDict = {
   "settings.magicPrompts.page.group.sessionSummary.title": "Resumo de sessão",
   "settings.magicPrompts.page.group.sessionSummary.description": "Prompts usados pelo comando /summary: mensagem visível do usuário + instruções ocultas. Não destrutivo: não compacta o histórico da sessão.",
   "settings.magicPrompts.page.group.sessionWorkspaceReview.title": "Revisão do workspace",
-  "settings.magicPrompts.page.group.sessionWorkspaceReview.description": "Prompts usados pelo comando /review: mensagem visível do usuário + instruções ocultas. Revise apenas problemas importantes nas alterações atuais do workspace.",
+  "settings.magicPrompts.page.group.sessionWorkspaceReview.description": "Prompts usados pelo comando /workspace-review: mensagem visível do usuário + instruções ocultas. Revise apenas problemas importantes nas alterações atuais do workspace.",
   "settings.magicPrompts.page.actions.resetting": "Redefinindo...",
   "settings.magicPrompts.page.actions.resetAllOverrides": "Reiniciar todas as sobrescrituras",
   "settings.magicPrompts.page.actions.resetToDefault": "Reiniciar valores padrões",

@@ -1492,7 +1492,7 @@ export const settingsDict = {
   "settings.magicPrompts.page.group.sessionSummary.title": "Підсумок сесії",
   "settings.magicPrompts.page.group.sessionSummary.description": "Промпти, які використовуються командою /summary: видиме повідомлення користувача + приховані інструкції. Неруйнівний – не стискає історію сесії.",
   "settings.magicPrompts.page.group.sessionWorkspaceReview.title": "Огляд робочого простору",
-  "settings.magicPrompts.page.group.sessionWorkspaceReview.description": "Промпти, які використовуються командою /review: видиме повідомлення користувача + приховані інструкції. Переглядає поточні зміни робочого простору лише для проблем із сильним сигналом.",
+  "settings.magicPrompts.page.group.sessionWorkspaceReview.description": "Промпти, які використовуються командою /workspace-review: видиме повідомлення користувача + приховані інструкції. Переглядає поточні зміни робочого простору лише для проблем із сильним сигналом.",
   "settings.magicPrompts.page.actions.resetting": "Скидання...",
   "settings.magicPrompts.page.actions.resetAllOverrides": "Скинути всі перевизначення",
   "settings.magicPrompts.page.actions.resetToDefault": "Скинути до замовчування",

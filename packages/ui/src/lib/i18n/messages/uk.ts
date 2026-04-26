@@ -1262,7 +1262,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.commandAutocomplete.command.redoDescription": "Повторити раніше скасовані повідомлення",
   "chat.commandAutocomplete.command.compactDescription": "Стиснути історію сесії за допомогою ШІ, щоб зменшити розмір контексту",
   "chat.commandAutocomplete.command.summaryDescription": "Неруйнівний підсумок сесії. Після команди можна додати тему.",
-  "chat.commandAutocomplete.command.reviewDescription": "Перегляньте поточні зміни в робочому середовищі лише для проблем із сильним сигналом.",
+  "chat.commandAutocomplete.command.workspaceReviewDescription": "Перегляньте поточні зміни в робочому середовищі лише для проблем із сильним сигналом.",
   "chat.commandAutocomplete.badge.skill": "навичка",
   "chat.commandAutocomplete.badge.system": "система",
   "chat.commandAutocomplete.empty": "Команди не знайдено",

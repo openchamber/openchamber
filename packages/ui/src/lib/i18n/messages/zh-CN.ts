@@ -1262,7 +1262,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.commandAutocomplete.command.redoDescription': '重做之前撤销的消息',
   'chat.commandAutocomplete.command.compactDescription': '使用 AI 压缩会话历史以减少上下文大小',
   'chat.commandAutocomplete.command.summaryDescription': '非破坏性会话总结。命令后可选填主题提示。',
-  'chat.commandAutocomplete.command.reviewDescription': '仅审查当前工作区中高价值的问题。',
+  'chat.commandAutocomplete.command.workspaceReviewDescription': '仅审查当前工作区中高价值的问题。',
   'chat.commandAutocomplete.badge.skill': '技能',
   'chat.commandAutocomplete.badge.system': '系统',
   'chat.commandAutocomplete.empty': '未找到命令',

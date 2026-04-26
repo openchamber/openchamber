@@ -1262,7 +1262,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.commandAutocomplete.command.redoDescription": "Refazer mensagens desfeitas anteriormente",
   "chat.commandAutocomplete.command.compactDescription": "Comprimir o histórico da sessão usando IA para reduzir o tamanho do contexto",
   "chat.commandAutocomplete.command.summaryDescription": "Resumo não destrutivo da sessão. Dica opcional do tema após o comando.",
-  "chat.commandAutocomplete.command.reviewDescription": "Revisar as alterações atuais do workspace apenas para problemas de alto impacto.",
+  "chat.commandAutocomplete.command.workspaceReviewDescription": "Revisar as alterações atuais do workspace apenas para problemas de alto impacto.",
   "chat.commandAutocomplete.badge.skill": "habilidade",
   "chat.commandAutocomplete.badge.system": "sistema",
   "chat.commandAutocomplete.empty": "Nenhum comando encontrado",

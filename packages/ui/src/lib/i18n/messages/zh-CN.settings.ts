@@ -1492,7 +1492,7 @@ export const settingsDict = {
   'settings.magicPrompts.page.group.sessionSummary.title': '会话总结',
   'settings.magicPrompts.page.group.sessionSummary.description': '由 /summary 斜杠命令使用的提示词：可见用户消息 + 隐藏说明。非破坏性，不会压缩会话历史。',
   'settings.magicPrompts.page.group.sessionWorkspaceReview.title': '工作区审查',
-  'settings.magicPrompts.page.group.sessionWorkspaceReview.description': '由 /review 斜杠命令使用的提示词：可见用户消息 + 隐藏说明。仅审查当前工作区的高信号问题。',
+  'settings.magicPrompts.page.group.sessionWorkspaceReview.description': '由 /workspace-review 斜杠命令使用的提示词：可见用户消息 + 隐藏说明。仅审查当前工作区的高信号问题。',
   'settings.magicPrompts.page.actions.resetting': '重置中...',
   'settings.magicPrompts.page.actions.resetAllOverrides': '重置全部覆盖',
   'settings.magicPrompts.page.actions.resetToDefault': '重置为默认',

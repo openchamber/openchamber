@@ -53,6 +53,8 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
   const sessionMessages = useSessionMessages(currentSessionId ?? '');
   const hasMessagesInCurrentSession = sessionMessages.length > 0;
   const hasSession = Boolean(currentSessionId);
+  const hasNewSessionDraft = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
+  const canStartSessionCommand = hasSession || hasNewSessionDraft;
 
   const [commands, setCommands] = React.useState<CommandInfo[]>([]);
   const [loading, setLoading] = React.useState(false);
@@ -126,8 +128,8 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
             ? [{ id: 'openchamber:summary', name: 'summary', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.summaryDescription'), isOpenChamber: true }]
             : []
           ),
-          ...(hasSession
-            ? [{ id: 'openchamber:review', name: 'review', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.reviewDescription'), isOpenChamber: true }]
+          ...(canStartSessionCommand
+            ? [{ id: 'openchamber:workspace-review', name: 'workspace-review', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.workspaceReviewDescription'), isOpenChamber: true }]
             : []
           ),
         ];
@@ -170,8 +172,8 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
             ? [{ id: 'openchamber:summary', name: 'summary', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.summaryDescription'), isOpenChamber: true }]
             : []
           ),
-          ...(hasSession
-            ? [{ id: 'openchamber:review', name: 'review', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.reviewDescription'), isOpenChamber: true }]
+          ...(canStartSessionCommand
+            ? [{ id: 'openchamber:workspace-review', name: 'workspace-review', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.workspaceReviewDescription'), isOpenChamber: true }]
             : []
           ),
         ];
@@ -190,7 +192,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
     };
 
     loadCommands();
-  }, [searchQuery, hasMessagesInCurrentSession, hasSession, commandsWithMetadata, skills, t]);
+  }, [searchQuery, hasMessagesInCurrentSession, hasSession, canStartSessionCommand, commandsWithMetadata, skills, t]);
 
   React.useEffect(() => {
     setSelectedIndex(0);

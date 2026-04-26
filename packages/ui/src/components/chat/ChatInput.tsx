@@ -1531,7 +1531,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 }
                 return;
             }
-            else if (commandName === 'review' && currentSessionId) {
+            else if (commandName === 'workspace-review' && (currentSessionId || newSessionDraftOpen)) {
                 try {
                     await sessionActions.waitForConnectionOrThrow();
                     const visibleText = await renderMagicPrompt('session.review.visible');

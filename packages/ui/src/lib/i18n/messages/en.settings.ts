@@ -1492,7 +1492,7 @@ export const settingsDict = {
   'settings.magicPrompts.page.group.sessionSummary.title': 'Session Summary',
   'settings.magicPrompts.page.group.sessionSummary.description': 'Prompts used by the /summary slash command: visible user message + hidden instructions. Non-destructive - does not compact session history.',
   'settings.magicPrompts.page.group.sessionWorkspaceReview.title': 'Workspace Review',
-  'settings.magicPrompts.page.group.sessionWorkspaceReview.description': 'Prompts used by the /review slash command: visible user message + hidden instructions. Reviews current workspace changes for high-signal issues only.',
+  'settings.magicPrompts.page.group.sessionWorkspaceReview.description': 'Prompts used by the /workspace-review slash command: visible user message + hidden instructions. Reviews current workspace changes for high-signal issues only.',
   'settings.magicPrompts.page.actions.resetting': 'Resetting...',
   'settings.magicPrompts.page.actions.resetAllOverrides': 'Reset All Overrides',
   'settings.magicPrompts.page.actions.resetToDefault': 'Reset to Default',
