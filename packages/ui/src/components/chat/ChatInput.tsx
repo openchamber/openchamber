@@ -50,7 +50,7 @@ import { isTauriShell, isVSCodeRuntime } from '@/lib/desktop';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { StopIcon } from '@/components/icons/StopIcon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import type { MobileControlsPanel } from './mobileControlsUtils';
+import { getCycledPrimaryAgentName, type MobileControlsPanel } from './mobileControlsUtils';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -784,7 +784,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const setAgent = useConfigStore((state) => state.setAgent);
     const getVisibleAgents = useConfigStore((state) => state.getVisibleAgents);
     const agents = getVisibleAgents();
-    const primaryAgents = React.useMemo(() => agents.filter((agent) => agent.mode === 'primary'), [agents]);
     const isMobile = useUIStore((state) => state.isMobile);
     const isKeyboardOpen = useUIStore((state) => state.isKeyboardOpen);
     const inputBarOffset = useUIStore((state) => state.inputBarOffset);
@@ -1962,18 +1961,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     }, [abortCurrentOperation, clearAbortPrompt, currentSessionId, startAbortIndicator]);
 
     const handleCycleAgent = React.useCallback(() => {
-        if (primaryAgents.length <= 1) return;
+        const nextAgentName = getCycledPrimaryAgentName(agents, currentAgentName);
+        if (!nextAgentName) return;
 
-        const currentIndex = primaryAgents.findIndex(agent => agent.name === currentAgentName);
-        const nextIndex = (currentIndex + 1) % primaryAgents.length;
-        const nextAgent = primaryAgents[nextIndex];
-
-        setAgent(nextAgent.name);
+        setAgent(nextAgentName);
 
         if (currentSessionId) {
-            saveSessionAgentSelection(currentSessionId, nextAgent.name);
+            saveSessionAgentSelection(currentSessionId, nextAgentName);
         }
-    }, [primaryAgents, currentAgentName, currentSessionId, setAgent, saveSessionAgentSelection]);
+    }, [agents, currentAgentName, currentSessionId, setAgent, saveSessionAgentSelection]);
 
     const adjustTextareaHeight = React.useCallback((options?: { allowShrink?: boolean }) => {
         const textarea = textareaRef.current;

@@ -1,6 +1,16 @@
 import React from 'react';
 import type { ComponentType } from 'react';
 import {
+    DndContext,
+    PointerSensor,
+    closestCenter,
+    useSensor,
+    useSensors,
+    type DragEndEvent,
+} from '@dnd-kit/core';
+import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS as DndCSS } from '@dnd-kit/utilities';
+import {
     RiAddLine,
     RiAiAgentLine,
     RiArrowDownSLine,
@@ -10,6 +20,7 @@ import {
     RiCheckLine,
     RiCheckboxCircleLine,
     RiCloseCircleLine,
+    RiDragMove2Line,
     RiFileImageLine,
     RiFileMusicLine,
     RiFilePdfLine,
@@ -54,7 +65,7 @@ import { useSync } from '@/sync/use-sync';
 import { useUIStore } from '@/stores/useUIStore';
 import { useModelLists } from '@/hooks/useModelLists';
 import { useIsTextTruncated } from '@/hooks/useIsTextTruncated';
-import type { MobileControlsPanel } from './mobileControlsUtils';
+import { getCycledPrimaryAgentName, type MobileControlsPanel } from './mobileControlsUtils';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type IconComponent = ComponentType<any>;
@@ -63,6 +74,43 @@ type ProviderModel = Record<string, unknown> & { id?: string; name?: string };
 
 type PermissionAction = 'allow' | 'ask' | 'deny';
 type PermissionRule = { permission: string; pattern: string; action: PermissionAction };
+type SortableFavoriteHandleProps = {
+    attributes: ReturnType<typeof useSortable>['attributes'];
+    listeners: ReturnType<typeof useSortable>['listeners'];
+    setActivatorNodeRef: ReturnType<typeof useSortable>['setActivatorNodeRef'];
+    isDragging: boolean;
+};
+
+const buildModelRefKey = (providerID: string, modelID: string) => `${providerID}:${modelID}`;
+
+const SortableFavoriteModelRow: React.FC<{
+    id: string;
+    disabled?: boolean;
+    children: (dragHandleProps: SortableFavoriteHandleProps) => React.ReactNode;
+}> = ({ id, disabled = false, children }) => {
+    const {
+        attributes,
+        listeners,
+        setNodeRef,
+        setActivatorNodeRef,
+        transform,
+        transition,
+        isDragging,
+    } = useSortable({ id, disabled });
+
+    return (
+        <div
+            ref={setNodeRef}
+            style={{
+                transform: DndCSS.Transform.toString(transform),
+                transition,
+            }}
+            className={cn(isDragging && 'opacity-60')}
+        >
+            {children({ attributes, listeners, setActivatorNodeRef, isDragging })}
+        </div>
+    );
+};
 
 const asPermissionRuleset = (value: unknown): PermissionRule[] | null => {
     if (!Array.isArray(value)) {
@@ -352,9 +400,11 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         : currentAgentName;
 
     const toggleFavoriteModel = useUIStore((state) => state.toggleFavoriteModel);
+    const reorderFavoriteModel = useUIStore((state) => state.reorderFavoriteModel);
     const isFavoriteModel = useUIStore((state) => state.isFavoriteModel);
     const collapsedModelProviders = useUIStore((state) => state.collapsedModelProviders);
     const toggleModelProviderCollapsed = useUIStore((state) => state.toggleModelProviderCollapsed);
+    const setModelProvidersCollapsed = useUIStore((state) => state.setModelProvidersCollapsed);
     const addRecentModel = useUIStore((state) => state.addRecentModel);
     const addRecentAgent = useUIStore((state) => state.addRecentAgent);
     const addRecentEffort = useUIStore((state) => state.addRecentEffort);
@@ -409,6 +459,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const modelItemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
     const [pendingThinkingVariants, setPendingThinkingVariants] = React.useState<Map<string, string | undefined>>(new Map());
     const [adjustedThinkingModels, setAdjustedThinkingModels] = React.useState<Set<string>>(new Set());
+    const favoriteRowSensors = useSensors(
+        useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    );
 
     React.useEffect(() => {
         if (activeMobilePanel === 'model') {
@@ -879,18 +932,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 return;
                             }
                         }
-
-                        const agent = agents.find(a => a.name === currentAgentName);
-                        if (agent?.model?.providerID && agent?.model?.modelID) {
-                            const result = tryApplyModelSelection(
-                                agent.model.providerID,
-                                agent.model.modelID,
-                                currentAgentName,
-                            );
-                            if (result === 'provider-missing') {
-                                return;
-                            }
-                        }
                     }
                 }
             } catch (error) {
@@ -899,7 +940,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         };
 
         handleAgentSwitch();
-    }, [currentAgentName, currentSessionId, getAgentModelForSession, tryApplyModelSelection, agents, contextHydrated]);
+    }, [currentAgentName, currentSessionId, getAgentModelForSession, tryApplyModelSelection, contextHydrated]);
 
     React.useEffect(() => {
         if (!contextHydrated || !currentAgentName) {
@@ -994,11 +1035,13 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         setCurrentVariant,
     ]);
 
-    const handleAgentChange = (agentName: string) => {
+    const handleAgentChange = React.useCallback((agentName: string, options?: { closeModelSelector?: boolean }) => {
         try {
             setAgent(agentName);
             addRecentAgent(agentName);
-            setAgentMenuOpen(false);
+            if (options?.closeModelSelector ?? true) {
+                setAgentMenuOpen(false);
+            }
 
             if (currentSessionId) {
                 saveSessionAgentSelection(currentSessionId, agentName);
@@ -1015,7 +1058,25 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         } catch (error) {
             console.error('[ModelControls] Handle agent change error:', error);
         }
-    };
+    }, [
+        addRecentAgent,
+        closeMobilePanel,
+        currentSessionId,
+        isCompact,
+        onAgentPanelSelection,
+        onMobilePanelSelection,
+        saveSessionAgentSelection,
+        setAgent,
+        setAgentMenuOpen,
+    ]);
+
+    const handleCycleAgentFromModelPicker = React.useCallback((direction: 1 | -1) => {
+        const nextAgentName = getCycledPrimaryAgentName(agents, currentAgentName, direction);
+        if (!nextAgentName) {
+            return;
+        }
+        handleAgentChange(nextAgentName, { closeModelSelector: false });
+    }, [agents, currentAgentName, handleAgentChange]);
 
     const handleProviderAndModelChange = (providerId: string, modelId: string) => {
         try {
@@ -1867,7 +1928,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         modelID: string,
         keyPrefix: string,
         flatIndex: number,
-        isHighlighted: boolean
+        isHighlighted: boolean,
+        dragHandleProps?: SortableFavoriteHandleProps | null,
     ) => {
         const metadata = getModelMetadata(providerID, modelID);
         const capabilityIcons = getCapabilityIcons(metadata).map((icon) => ({
@@ -1891,7 +1953,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         // Check if model supports thinking variants - variants are on the model object, not metadata
         const modelVariants = (model as { variants?: Record<string, unknown> } | undefined)?.variants;
         const hasThinkingVariants = modelVariants && Object.keys(modelVariants).length > 0;
-        const mapKey = `${providerID}:${modelID}`;
+        const mapKey = buildModelRefKey(providerID, modelID);
         const wasAdjusted = adjustedThinkingModels.has(mapKey);
         const pendingVariant = pendingThinkingVariants.get(mapKey);
         const effectiveVariant = pendingVariant ?? (isSelected ? currentVariant : undefined);
@@ -1996,6 +2058,23 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     {isSelected && (
                         <RiCheckLine className="h-4 w-4 text-primary" />
                     )}
+                    {dragHandleProps ? (
+                        <button
+                            type="button"
+                            ref={dragHandleProps.setActivatorNodeRef}
+                            {...dragHandleProps.attributes}
+                            {...dragHandleProps.listeners}
+                            onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                            }}
+                            className="model-favorite-drag-handle flex h-4 w-4 items-center justify-center text-muted-foreground hover:text-foreground"
+                            aria-label="Reorder favorite"
+                            title="Drag to reorder favorite"
+                        >
+                            <RiDragMove2Line className="h-3.5 w-3.5" />
+                        </button>
+                    ) : null}
                     <button
                         onClick={(e) => {
                             e.preventDefault();
@@ -2040,6 +2119,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             const modelName = getModelDisplayName(model);
             return filterByQuery(modelName, providerName, desktopModelQuery);
         });
+        const favoriteSortingEnabled = normalizedDesktopQuery.length === 0 && filteredFavorites.length > 1;
 
         // Filter recents
         const filteredRecents = recentModelsList.filter(({ model, providerID }) => {
@@ -2078,6 +2158,14 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             filteredRecents.length > 0 ||
             filteredProviders.length > 0;
 
+        const filteredProviderIds = filteredProviders
+            .map((provider) => (typeof provider.id === 'string' ? provider.id : ''))
+            .filter(Boolean);
+
+        const favoriteModelLookup = new Map(
+            filteredFavorites.map(({ providerID, modelID }) => [buildModelRefKey(providerID, modelID), { providerID, modelID }])
+        );
+
         // Build flat list for keyboard navigation
         type FlatModelItem = { model: ProviderModel; providerID: string; modelID: string; section: string };
         const flatModelList: FlatModelItem[] = [];
@@ -2107,7 +2195,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         const handleModelKeyDown = (e: React.KeyboardEvent) => {
             e.stopPropagation();
 
-            if (e.key === 'ArrowDown') {
+            if (e.key === 'Tab') {
+                e.preventDefault();
+                handleCycleAgentFromModelPicker(e.shiftKey ? -1 : 1);
+            } else if (e.key === 'ArrowDown') {
                 e.preventDefault();
                 setModelSelectedIndex((prev) => (prev + 1) % Math.max(1, totalItems));
                 // Scroll into view
@@ -2135,7 +2226,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 const variantKeys = Object.keys(modelVariants);
                 if (variantKeys.length === 0) return;
 
-                const mapKey = `${providerID}:${modelID}`;
+                const mapKey = buildModelRefKey(providerID, modelID);
                 const currentPending = pendingThinkingVariants.get(mapKey);
                 const activeModelVariant = currentPending ?? (currentProviderId === providerID && currentModelId === modelID ? currentVariant : undefined);
 
@@ -2161,7 +2252,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 const selectedItem = flatModelList[modelSelectedIndex];
                 if (selectedItem) {
                     const { providerID, modelID } = selectedItem;
-                    const mapKey = `${providerID}:${modelID}`;
+                    const mapKey = buildModelRefKey(providerID, modelID);
                     const pendingVariant = pendingThinkingVariants.get(mapKey);
                     const wasAdjusted = adjustedThinkingModels.has(mapKey);
 
@@ -2177,6 +2268,34 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 e.preventDefault();
                 setAgentMenuOpen(false);
             }
+        };
+
+        const handleFavoriteDragEnd = (event: DragEndEvent) => {
+            const { active, over } = event;
+            if (!over || active.id === over.id) {
+                return;
+            }
+
+            const activeFavorite = favoriteModelLookup.get(String(active.id));
+            const overFavorite = favoriteModelLookup.get(String(over.id));
+            if (!activeFavorite || !overFavorite) {
+                return;
+            }
+
+            reorderFavoriteModel(
+                activeFavorite.providerID,
+                activeFavorite.modelID,
+                overFavorite.providerID,
+                overFavorite.modelID,
+            );
+        };
+
+        const handleProviderSectionToggle = (expand: boolean) => {
+            if (filteredProviderIds.length === 0) {
+                return;
+            }
+            setModelProvidersCollapsed(filteredProviderIds, !expand);
+            setModelSelectedIndex(0);
         };
 
         // Build index mapping for rendering
@@ -2280,10 +2399,43 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                                 <RiStarFill className="h-4 w-4 text-primary" />
                                                 Favorites
                                             </DropdownMenuLabel>
-                                            {filteredFavorites.map(({ model, providerID, modelID }) => {
-                                                const idx = currentFlatIndex++;
-                                                return renderModelRow(model, providerID, modelID, 'fav', idx, modelSelectedIndex === idx);
-                                            })}
+                                            {favoriteSortingEnabled ? (
+                                                <DndContext
+                                                    sensors={favoriteRowSensors}
+                                                    collisionDetection={closestCenter}
+                                                    onDragEnd={handleFavoriteDragEnd}
+                                                >
+                                                    <SortableContext
+                                                        items={filteredFavorites.map(({ providerID, modelID }) => buildModelRefKey(providerID, modelID))}
+                                                        strategy={verticalListSortingStrategy}
+                                                    >
+                                                        {filteredFavorites.map(({ model, providerID, modelID }) => {
+                                                            const idx = currentFlatIndex++;
+                                                            return (
+                                                                <SortableFavoriteModelRow
+                                                                    key={buildModelRefKey(providerID, modelID)}
+                                                                    id={buildModelRefKey(providerID, modelID)}
+                                                                >
+                                                                    {(dragHandleProps) => renderModelRow(
+                                                                        model,
+                                                                        providerID,
+                                                                        modelID,
+                                                                        'fav',
+                                                                        idx,
+                                                                        modelSelectedIndex === idx,
+                                                                        dragHandleProps,
+                                                                    )}
+                                                                </SortableFavoriteModelRow>
+                                                            );
+                                                        })}
+                                                    </SortableContext>
+                                                </DndContext>
+                                            ) : (
+                                                filteredFavorites.map(({ model, providerID, modelID }) => {
+                                                    const idx = currentFlatIndex++;
+                                                    return renderModelRow(model, providerID, modelID, 'fav', idx, modelSelectedIndex === idx);
+                                                })
+                                            )}
                                         </div>
                                     )}
 
@@ -2317,10 +2469,16 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                                 role="button"
                                                 tabIndex={forceExpandProviders ? -1 : 0}
                                                 aria-disabled={forceExpandProviders}
-                                                onClick={() => {
+                                                onClick={(event) => {
                                                     if (forceExpandProviders) {
                                                         return;
                                                     }
+
+                                                    if (event.metaKey || event.ctrlKey) {
+                                                        handleProviderSectionToggle(!isExpanded);
+                                                        return;
+                                                    }
+
                                                     toggleModelProviderCollapsed(String(provider.id));
                                                     setModelSelectedIndex(0);
                                                 }}
@@ -2368,7 +2526,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
                             {/* Keyboard hints footer */}
                             <div className="px-3 pt-1 pb-1.5 border-t border-border/40 typography-micro text-muted-foreground">
-                                ↑↓ navigate{highlightedSupportsThinking ? ' • ←→ thinking' : ''} • Enter select • Esc close
+                                ↑↓ navigate • Tab switch agent{highlightedSupportsThinking ? ' • ←→ thinking' : ''} • Enter select • Esc close
                             </div>
                         </DropdownMenuContent>
                     </DropdownMenu>
