@@ -155,7 +155,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
                 style={{ width: 'var(--oc-left-sidebar-width)', overflowX: 'hidden' }}
                 aria-hidden={!isOpen}
             >
-                <div className="flex-1 overflow-hidden">
+                <div className="flex-1 overflow-y-auto">
                     <ErrorBoundary>{children}</ErrorBoundary>
                 </div>
             </div>

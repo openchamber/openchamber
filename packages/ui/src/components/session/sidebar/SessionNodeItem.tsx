@@ -267,6 +267,12 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const liveSession = useSession(session.id);
   const resolvedSession = liveSession ?? session;
 
+  const sessionDirectory =
+    normalizePath((session as Session & { directory?: string | null }).directory ?? null)
+    ?? normalizePath(groupDirectory ?? null);
+  const directoryStore = useDirectoryStore(sessionDirectory ?? undefined);
+  const sync = useSync();
+
   const selectionModeEnabled = useSessionMultiSelectStore((state) => state.enabled);
   const isRowSelected = useSessionMultiSelectStore(
     React.useCallback((state) => state.selectedIds.has(session.id), [session.id]),
@@ -350,14 +356,9 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     toast.success('Session exported');
   }, [collectChildExports, directoryStore, node.children, resolvedSession.title, session.id, sessionDirectory, sync]);
   const menuInstanceKey = `${renderContext}:${archivedBucket ? 'archived' : 'active'}:${session.id}`;
-  const sessionDirectory =
-    normalizePath((session as Session & { directory?: string | null }).directory ?? null)
-    ?? normalizePath(groupDirectory ?? null);
   const isZombie = useViewportStore(
     React.useCallback((state) => Boolean(state.sessionMemoryState.get(session.id)?.isZombie), [session.id]),
   );
-  const directoryStore = useDirectoryStore(sessionDirectory ?? undefined);
-  const sync = useSync();
   const sessionStatus = useGlobalSessionStatus(session.id);
   const sessionPermissions = useSessionPermissions(session.id, sessionDirectory ?? undefined);
   const directoryState = sessionDirectory ? directoryStatus.get(sessionDirectory) : null;
