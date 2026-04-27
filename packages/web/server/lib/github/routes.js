@@ -964,61 +964,78 @@ export function registerGitHubRoutes(app) {
       }
 
       const { resolveGitHubRepoFromDirectory } = await import('./index.js');
+      const { resolveRepoNetwork } = await import('./repo/fork-detection.js');
+
+      const repoNetwork = await resolveRepoNetwork(octokit, directory);
       const { repo } = await resolveGitHubRepoFromDirectory(directory);
       if (!repo) {
         return res.json({ connected: true, repo: null, prs: [] });
       }
 
-      const list = await octokit.rest.pulls.list({
-        owner: repo.owner,
-        repo: repo.repo,
-        state: 'open',
-        per_page: 50,
-        page: Number.isFinite(page) && page > 0 ? page : 1,
-      });
+      const effectivePage = Number.isFinite(page) && page > 0 ? page : 1;
+      const reposToQuery = repoNetwork || [{ ...repo, source: 'origin' }];
 
-      const link = typeof list?.headers?.link === 'string' ? list.headers.link : '';
-      const hasMore = /rel="next"/.test(link);
+      const queryRepo = async (repoRef) => {
+        try {
+          const list = await octokit.rest.pulls.list({
+            owner: repoRef.owner,
+            repo: repoRef.repo,
+            state: 'open',
+            per_page: 50,
+            page: effectivePage,
+          });
+          const link = typeof list?.headers?.link === 'string' ? list.headers.link : '';
+          const hasMore = /rel="next"/.test(link);
+          const prs = (Array.isArray(list?.data) ? list.data : []).map((pr) => {
+            const mergedState = pr.merged_at ? 'merged' : (pr.state === 'closed' ? 'closed' : 'open');
+            const headRepo = pr.head?.repo
+              ? {
+                  owner: pr.head.repo.owner?.login,
+                  repo: pr.head.repo.name,
+                  url: pr.head.repo.html_url,
+                  cloneUrl: pr.head.repo.clone_url,
+                  sshUrl: pr.head.repo.ssh_url,
+                }
+              : null;
+            return {
+              number: pr.number,
+              title: pr.title,
+              url: pr.html_url,
+              state: mergedState,
+              draft: Boolean(pr.draft),
+              base: pr.base?.ref,
+              head: pr.head?.ref,
+              headSha: pr.head?.sha,
+              mergeable: pr.mergeable,
+              mergeableState: pr.mergeable_state,
+              author: pr.user ? { login: pr.user.login, id: pr.user.id, avatarUrl: pr.user.avatar_url } : null,
+              headLabel: pr.head?.label,
+              headRepo: headRepo && headRepo.owner && headRepo.repo && headRepo.url
+                ? headRepo
+                : null,
+              sourceRepo: { owner: repoRef.owner, repo: repoRef.repo, source: repoRef.source },
+            };
+          });
+          return { prs, hasMore };
+        } catch (error) {
+          console.warn(`Failed to list PRs for ${repoRef.owner}/${repoRef.repo}:`, error?.message || error);
+          return { prs: [], hasMore: false };
+        }
+      };
 
-      const prs = (Array.isArray(list?.data) ? list.data : []).map((pr) => {
-        const mergedState = pr.merged_at ? 'merged' : (pr.state === 'closed' ? 'closed' : 'open');
-        const headRepo = pr.head?.repo
-          ? {
-              owner: pr.head.repo.owner?.login,
-              repo: pr.head.repo.name,
-              url: pr.head.repo.html_url,
-              cloneUrl: pr.head.repo.clone_url,
-              sshUrl: pr.head.repo.ssh_url,
-            }
-          : null;
-        return {
-          number: pr.number,
-          title: pr.title,
-          url: pr.html_url,
-          state: mergedState,
-          draft: Boolean(pr.draft),
-          base: pr.base?.ref,
-          head: pr.head?.ref,
-          headSha: pr.head?.sha,
-          mergeable: pr.mergeable,
-          mergeableState: pr.mergeable_state,
-          author: pr.user ? { login: pr.user.login, id: pr.user.id, avatarUrl: pr.user.avatar_url } : null,
-          headLabel: pr.head?.label,
-          headRepo: headRepo && headRepo.owner && headRepo.repo && headRepo.url
-            ? headRepo
-            : null,
-        };
-      });
+      const results = await Promise.all(reposToQuery.map(queryRepo));
+      const allPrs = results.flatMap((r) => r.prs);
+      const anyHasMore = results.some((r) => r.hasMore);
 
-      return res.json({ connected: true, repo, prs, page: Number.isFinite(page) && page > 0 ? page : 1, hasMore });
+      return res.json({ connected: true, repo, prs: allPrs, page: effectivePage, hasMore: anyHasMore });
     } catch (error) {
       if (error?.status === 401) {
         const { clearGitHubAuth } = await getGitHubLibraries();
         clearGitHubAuth();
         return res.json({ connected: false });
       }
-      console.error('Failed to list GitHub PRs:', error);
-      return res.status(500).json({ error: error.message || 'Failed to list GitHub PRs' });
+      console.error('Failed to list GitHub pull requests:', error);
+      return res.status(500).json({ error: error.message || 'Failed to list GitHub pull requests' });
     }
   });
 
