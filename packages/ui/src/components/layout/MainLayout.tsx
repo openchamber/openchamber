@@ -383,6 +383,7 @@ export const MainLayout: React.FC = () => {
     return (
         <DiffWorkerProvider>
             <div
+                data-page-scroll-lock="true"
                 className={cn(
                     'main-content-safe-area h-[100dvh]',
                     isMobile ? 'flex flex-col' : 'flex',
@@ -491,10 +492,11 @@ export const MainLayout: React.FC = () => {
                         aria-hidden={!mobileLeftDrawerOpen}
                     >
                         <div
+                            data-page-scroll-lock="true"
                             className="h-full overflow-hidden flex bg-[var(--surface-background)] shadow-none drawer-safe-area"
                             style={{ backgroundImage: 'linear-gradient(var(--surface-muted), var(--surface-muted))' }}
                         >
-                            <div className="flex-1 min-w-0 overflow-hidden flex flex-col">
+                            <div className="flex-1 min-w-0 overflow-hidden flex flex-col" data-page-scroll-lock="true">
                                 <ErrorBoundary>
                                     <SessionSidebar mobileVariant />
                                 </ErrorBoundary>
@@ -541,7 +543,7 @@ export const MainLayout: React.FC = () => {
                         )}
                         aria-hidden={!isRightSidebarOpen}
                     >
-                        <div className="h-full overflow-hidden flex flex-col bg-background shadow-none drawer-safe-area">
+                        <div className="h-full overflow-hidden flex flex-col bg-background shadow-none drawer-safe-area" data-page-scroll-lock="true">
                             <ErrorBoundary>
                                 <React.Suspense fallback={null}><GitView /></React.Suspense>
                             </ErrorBoundary>
@@ -550,12 +552,13 @@ export const MainLayout: React.FC = () => {
                     
                     {/* Main content area (fixed) */}
                     <div
+                        data-page-scroll-lock="true"
                         className={cn(
                             'flex flex-1 overflow-hidden relative',
                             isSettingsDialogOpen && 'hidden'
                         )}
                     >
-                        <main className="w-full h-full overflow-hidden bg-background relative">
+                        <main className="w-full h-full overflow-hidden bg-background relative" data-page-scroll-lock="true">
                             <div className={cn('absolute inset-0', !isChatActive && 'invisible')}>
                                 <ErrorBoundary><ChatView /></ErrorBoundary>
                             </div>
@@ -599,7 +602,7 @@ export const MainLayout: React.FC = () => {
                         <div className={cn(
                             'absolute inset-0 flex overflow-hidden',
                             isDesktopShellRuntime ? 'bg-sidebar' : 'bg-sidebar'
-                        )}>
+                        )} data-page-scroll-lock="true">
                             {isSidebarOpen ? (
                                 <>
                                     <div
@@ -676,15 +679,15 @@ export const MainLayout: React.FC = () => {
                                 'bg-sidebar',
                                 isSidebarOpen && 'border-l border-border/50 rounded-tl-[10px] rounded-bl-[10px]',
                                 isRightSidebarOpen && 'border-r border-border/50 rounded-tr-[10px] rounded-br-[10px]'
-                            )}>
+                            )} data-page-scroll-lock="true">
                                 <Header desktopRightSidebarActionsHost={desktopRightSidebarActionsHost} />
                                 <div className={cn(
                                     'flex flex-1 min-h-0 overflow-hidden',
                                     isSidebarOpen || isChatActive ? '' : 'border-l border-border/50',
                                     isRightSidebarOpen ? '' : 'border-r border-border/50'
-                                )}>
-                                    <div className="relative flex flex-1 min-h-0 min-w-0 overflow-hidden">
-                                        <main className="flex-1 overflow-hidden bg-background relative">
+                                )} data-page-scroll-lock="true">
+                                    <div className="relative flex flex-1 min-h-0 min-w-0 overflow-hidden" data-page-scroll-lock="true">
+                                        <main className="flex-1 overflow-hidden bg-background relative" data-page-scroll-lock="true">
                                             <div className={cn('absolute inset-0', !isChatActive && 'invisible')}>
                                                 <ErrorBoundary><ChatView /></ErrorBoundary>
                                             </div>
