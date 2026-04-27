@@ -189,7 +189,7 @@ describe('OpenCode backend runtime baseline contract', () => {
       },
       modelSelector: {
         label: 'Model',
-        source: 'providers',
+        source: 'provider-snapshot',
       },
       effortSelector: {
         label: 'Thinking',

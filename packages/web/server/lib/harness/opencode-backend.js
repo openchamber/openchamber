@@ -287,7 +287,11 @@ export const createOpenCodeBackendRuntime = (dependencies) => {
       : [];
     const rawCommands = Array.isArray(commandsResponse.data) ? commandsResponse.data : [];
 
-    const modelOptions = Object.entries(providerModels).map(([id, modelEntry]) => {
+    const modelOptions = Object.entries(providerMap).flatMap(([snapshotProviderId, snapshotProvider]) => {
+      const snapshotModels = snapshotProvider?.models && typeof snapshotProvider.models === 'object'
+        ? snapshotProvider.models
+        : {};
+      return Object.entries(snapshotModels).map(([id, modelEntry]) => {
       const label = typeof modelEntry?.name === 'string' && modelEntry.name.trim().length > 0
         ? modelEntry.name.trim()
         : id;
@@ -311,7 +315,9 @@ export const createOpenCodeBackendRuntime = (dependencies) => {
             }
           : {}),
         raw: modelEntry,
+        providerId: snapshotProviderId,
       };
+      });
     });
 
     return {
@@ -357,7 +363,7 @@ export const createOpenCodeBackendRuntime = (dependencies) => {
       },
       modelSelector: {
         label: 'Model',
-        source: 'providers',
+        source: 'provider-snapshot',
       },
       effortSelector: {
         label: 'Thinking',

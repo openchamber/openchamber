@@ -1876,10 +1876,34 @@ const ToolPart: React.FC<ToolPartProps> = ({
     }, [isExpanded, shouldNotifyStructuralChange]);
 
     const stateWithData = state as ToolStateWithMetadata;
-    const metadata = stateWithData.metadata;
+    const activityInput = activity.input && typeof activity.input === 'object' && !Array.isArray(activity.input)
+        ? activity.input as Record<string, unknown>
+        : undefined;
+    const activityMetadata = React.useMemo<Record<string, unknown> | undefined>(() => {
+        const base = stateWithData.metadata ? { ...stateWithData.metadata } : {};
+        if (activity.files && activity.files.length > 0) {
+            base.files = activity.files.map((file) => ({
+                relativePath: file.path,
+                filePath: file.path,
+                additions: file.additions,
+                deletions: file.deletions,
+            }));
+        }
+        if (activity.diff) {
+            base.diff = activity.diff;
+        }
+        if (activity.linkedSessionId) {
+            base.linkedSessionId = activity.linkedSessionId;
+        }
+        return Object.keys(base).length > 0 ? base : undefined;
+    }, [activity.diff, activity.files, activity.linkedSessionId, stateWithData.metadata]);
+    const metadata = activityMetadata;
     const partMetadata = (part as unknown as { metadata?: unknown }).metadata;
-    const input = stateWithData.input;
-    const time = stateWithData.time;
+    const input = activityInput ?? stateWithData.input;
+    const time = {
+        start: activity.startedAt ?? stateWithData.time?.start,
+        end: activity.endedAt ?? stateWithData.time?.end,
+    };
 
     const [pinnedTime, setPinnedTime] = React.useState<{ start?: number; end?: number }>({});
     const [localStartAt, setLocalStartAt] = React.useState<number | undefined>(undefined);
@@ -1946,8 +1970,8 @@ const ToolPart: React.FC<ToolPartProps> = ({
     }, [localStartAt, pinnedTime.start, time?.start]);
 
     const taskOutputString = React.useMemo(() => {
-        return typeof stateWithData.output === 'string' ? stateWithData.output : undefined;
-    }, [stateWithData.output]);
+        return typeof activity.output === 'string' ? activity.output : (typeof stateWithData.output === 'string' ? stateWithData.output : undefined);
+    }, [activity.output, stateWithData.output]);
 
     const parsedTaskMetadata = React.useMemo(() => {
         return parseTaskMetadataBlock(taskOutputString);

@@ -78,6 +78,7 @@ import { useI18n } from '@/lib/i18n';
 type IconComponent = ComponentType<any>;
 
 type ProviderModel = Provider["models"][string];
+type SnapshotProviderModel = HarnessProviderModel & { providerId?: string; raw?: { providerId?: string } | unknown };
 
 type PermissionAction = 'allow' | 'ask' | 'deny';
 type PermissionRule = { permission: string; pattern: string; action: PermissionAction };
@@ -666,30 +667,67 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         return descriptor?.type === 'select' ? descriptor : undefined;
     }, [backendEffortSelector?.optionId]);
 
+    const backendSnapshotProviders = React.useMemo(() => {
+        if (backendModelSelector?.source !== 'provider-snapshot') {
+            return [];
+        }
+        const models = (providerSnapshot?.models ?? []) as SnapshotProviderModel[];
+        const byProvider = new Map<string, ProviderModel[]>();
+        for (const option of models) {
+            const raw = option.raw && typeof option.raw === 'object' ? option.raw as { providerId?: string } : null;
+            const providerId = option.providerId || raw?.providerId || backendModelProviderId;
+            const optionDescriptor = getSnapshotModelOptionDescriptor(option);
+            const optionChoices = optionDescriptor?.type === 'select' ? optionDescriptor.options : backendEffortSelector?.options;
+            const variants = optionChoices?.length ? Object.fromEntries(optionChoices.map((choice) => [choice.id, {}])) : undefined;
+            const list = byProvider.get(providerId) ?? [];
+            list.push({
+                id: option.id,
+                providerID: providerId,
+                api: { id: currentBackendId || 'backend', url: '', npm: '' },
+                name: option.label,
+                family: undefined,
+                capabilities: {
+                    temperature: false,
+                    reasoning: Boolean(variants),
+                    attachment: true,
+                    toolcall: false,
+                    input: { text: true, audio: false, image: true, video: false, pdf: true },
+                    output: { text: true, audio: false, image: false, video: false, pdf: false },
+                    interleaved: false,
+                },
+                cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+                limit: { context: 0, output: 0 },
+                status: 'active',
+                options: {},
+                headers: {},
+                release_date: '',
+                ...(variants ? { variants } : {}),
+            });
+            byProvider.set(providerId, list);
+        }
+        return Array.from(byProvider.entries()).map(([providerId, models]) => ({
+            id: providerId,
+            name: providerId,
+            models,
+        }));
+    }, [backendEffortSelector?.options, backendModelProviderId, backendModelSelector?.source, currentBackendId, getSnapshotModelOptionDescriptor, providerSnapshot?.models]);
+
     const backendModelOptions = React.useMemo<ProviderModel[]>(() => {
         if (
             backendModelSelector?.source !== 'backend'
-            && backendModelSelector?.source !== 'provider-snapshot'
         ) {
             return [];
         }
 
-        const snapshotModels = backendModelSelector?.source === 'provider-snapshot'
-            ? (providerSnapshot?.models ?? [])
-            : [];
         const selectorModels = backendModelSelector?.source === 'backend'
             ? (backendModelSelector.options ?? [])
             : [];
-        if (snapshotModels.length === 0 && selectorModels.length === 0) {
+        if (selectorModels.length === 0) {
             return [];
         }
 
-        return (snapshotModels.length > 0 ? snapshotModels : selectorModels).map((option) => {
-            const snapshotModel = 'optionDescriptors' in option ? option as HarnessProviderModel : null;
-            const optionDescriptor = snapshotModel ? getSnapshotModelOptionDescriptor(snapshotModel) : undefined;
-            const optionChoices = optionDescriptor?.type === 'select'
-                ? optionDescriptor.options
-                : backendEffortSelector?.options;
+        return selectorModels.map((option) => {
+            const optionChoices = backendEffortSelector?.options;
             const variants = optionChoices?.length
                 ? Object.fromEntries(optionChoices.map((choice) => [choice.id, {}]))
                 : undefined;
@@ -744,7 +782,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             ...(variants ? { variants } : {}),
             };
         });
-    }, [backendEffortSelector?.options, backendModelProviderId, backendModelSelector, currentBackendId, getSnapshotModelOptionDescriptor, providerSnapshot?.models]);
+    }, [backendEffortSelector?.options, backendModelProviderId, backendModelSelector, currentBackendId]);
     const usesBackendModelCatalog = (
         backendModelSelector?.source === 'backend'
         || backendModelSelector?.source === 'provider-snapshot'
@@ -754,12 +792,16 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             return providers;
         }
 
+        if (backendModelSelector?.source === 'provider-snapshot' && backendSnapshotProviders.length > 0) {
+            return backendSnapshotProviders;
+        }
+
         return [{
             id: backendModelProviderId,
             name: currentBackend?.label || currentBackendId || 'Backend',
             models: backendModelOptions,
         }];
-    }, [backendModelOptions, backendModelProviderId, currentBackend, currentBackendId, providers, usesBackendModelCatalog]);
+    }, [backendModelOptions, backendModelProviderId, backendModelSelector?.source, backendSnapshotProviders, currentBackend, currentBackendId, providers, usesBackendModelCatalog]);
 
     const sortedAndFilteredAgents = React.useMemo(() => {
         const sorted = [...backendModeItems].sort((a, b) => a.label.localeCompare(b.label));

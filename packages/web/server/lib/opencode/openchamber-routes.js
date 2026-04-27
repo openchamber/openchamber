@@ -371,6 +371,47 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
     if (typeof req.query?.directory === 'string') return req.query.directory;
     return fallback;
   };
+  const toHarnessSession = (session, backendId) => {
+    if (!session || typeof session !== 'object' || typeof session.id !== 'string') {
+      throw new Error('Invalid harness session response');
+    }
+    return {
+      id: session.id,
+      backendId: typeof session.backendId === 'string' ? session.backendId : backendId,
+      title: typeof session.title === 'string' ? session.title : '',
+      directory: typeof session.directory === 'string' ? session.directory : (typeof session.cwd === 'string' ? session.cwd : null),
+      parentId: typeof session.parentId === 'string' ? session.parentId : (typeof session.parentID === 'string' ? session.parentID : null),
+      time: session.time && typeof session.time === 'object' ? session.time : { created: 0 },
+      ...(session.metadata && typeof session.metadata === 'object' ? { metadata: session.metadata } : {}),
+    };
+  };
+  const toHarnessMessageRecord = (record, backendId) => {
+    if (!record || typeof record !== 'object' || !record.info || !Array.isArray(record.parts)) {
+      throw new Error('Invalid harness message response');
+    }
+    const info = record.info;
+    const message = {
+      id: info.id,
+      sessionId: info.sessionId || info.sessionID || '',
+      role: info.role === 'assistant' || info.role === 'system' ? info.role : 'user',
+      time: info.time && typeof info.time === 'object' ? info.time : { created: 0 },
+      ...(typeof info.finish === 'string' ? { finish: info.finish } : {}),
+      ...(info.attribution && typeof info.attribution === 'object' ? { attribution: info.attribution } : {}),
+    };
+    if (typeof message.id !== 'string') {
+      throw new Error('Invalid harness message response');
+    }
+    const parts = record.parts.map((part) => {
+      if (part?.kind) return part;
+      const base = { id: part.id, sessionId: part.sessionId || part.sessionID || message.sessionId, messageId: part.messageId || part.messageID || message.id };
+      if (part.type === 'text') return { ...base, kind: 'text', text: typeof part.text === 'string' ? part.text : '' };
+      if (part.type === 'reasoning') return { ...base, kind: 'reasoning', text: typeof part.text === 'string' ? part.text : '' };
+      if (part.type === 'tool') return { ...base, kind: 'tool', tool: { id: part.callID || part.id, name: part.tool || 'tool', category: 'custom', status: part.state?.status === 'completed' ? 'completed' : part.state?.status === 'error' ? 'failed' : 'running', input: part.state?.input, output: typeof part.state?.output === 'string' ? part.state.output : undefined, error: typeof part.state?.error === 'string' ? part.state.error : undefined, raw: part } };
+      if (part.type === 'file') return { ...base, kind: 'attachment', attachment: { id: part.id, name: part.filename, mimeType: part.mime, url: part.url } };
+      return { ...base, kind: 'custom', content: part };
+    });
+    return { info: message, parts, backendId };
+  };
   const toRuntimeModel = (runConfig) => {
     const modelId = typeof runConfig?.model?.modelId === 'string' ? runConfig.model.modelId : '';
     const slashIndex = modelId.indexOf('/');
@@ -449,7 +490,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         }
         const backendSessions = await runtime.listSessions({ directory, limit, archived, roots });
         if (Array.isArray(backendSessions)) {
-          sessions.push(...backendSessions.map((session) => sessionBindingsRuntime.annotateSession({ ...session, backendId: descriptor.id })));
+          sessions.push(...backendSessions.map((session) => toHarnessSession(sessionBindingsRuntime.annotateSession({ ...session, backendId: descriptor.id }), descriptor.id)));
         }
       }
 
@@ -484,7 +525,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
       if (!payload) {
         return res.status(404).json({ error: 'Session not found' });
       }
-      return res.status(200).json(sessionBindingsRuntime.annotateSession(payload));
+      return res.status(200).json(toHarnessSession(sessionBindingsRuntime.annotateSession(payload), binding.backendId));
     } catch (error) {
       console.error('Failed to read harness session:', error);
       const message = error?.body?.error || error?.message || 'Failed to read session';
@@ -513,7 +554,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         limit: parsePositiveNumber(req.query?.limit),
         before: typeof req.query?.before === 'string' ? req.query.before : undefined,
       });
-      return res.status(200).json(Array.isArray(payload) ? payload : []);
+      return res.status(200).json(Array.isArray(payload) ? payload.map((record) => toHarnessMessageRecord(record, binding.backendId)) : []);
     } catch (error) {
       console.error('Failed to read harness session messages:', error);
       const message = error?.body?.error || error?.message || 'Failed to read session messages';
@@ -547,7 +588,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         });
       }
 
-      return res.status(200).json(sessionBindingsRuntime.annotateSession(payload));
+      return res.status(200).json(toHarnessSession(sessionBindingsRuntime.annotateSession(payload), backendId));
     } catch (error) {
       console.error('Failed to create harness session:', error);
       const message = error?.body?.error || error?.message || 'Failed to create session';
@@ -709,7 +750,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         time: req.body?.time && typeof req.body.time === 'object' ? req.body.time : undefined,
       });
 
-      return res.status(200).json(sessionBindingsRuntime.annotateSession(payload));
+      return res.status(200).json(toHarnessSession(sessionBindingsRuntime.annotateSession(payload), binding.backendId));
     } catch (error) {
       console.error('Failed to update harness session:', error);
       const message = error?.body?.error || error?.message || 'Failed to update session';
@@ -747,7 +788,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         });
       }
 
-      return res.status(200).json(sessionBindingsRuntime.annotateSession(payload));
+      return res.status(200).json(toHarnessSession(sessionBindingsRuntime.annotateSession(payload), binding.backendId));
     } catch (error) {
       console.error('Failed to fork harness session:', error);
       const message = error?.body?.error || error?.message || 'Failed to fork session';
