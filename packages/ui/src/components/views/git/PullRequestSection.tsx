@@ -1340,6 +1340,11 @@ export const PullRequestSection: React.FC<{
                 {checks.total > 0 ? `${checks.success}/${checks.total} checks` : `${checks.state} checks`}
               </span>
             ) : null}
+            {trackingBranch && selectedRemote && trackingBranch.split('/')[0] !== selectedRemote.name ? (
+              <span className="typography-micro text-muted-foreground">
+                {trackingBranch.split('/')[0]} → {selectedRemote.name}
+              </span>
+            ) : null}
             {hasMultipleRemotes ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
