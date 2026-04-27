@@ -151,7 +151,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Chat',
     group: 'general',
     kind: 'single',
-    keywords: ['tools', 'diff', 'reasoning', 'dotfiles', 'draft', 'queue', 'output'],
+    keywords: ['tools', 'diff', 'reasoning', 'dotfiles', 'draft', 'queue', 'output', 'copy', 'image', 'split messages', 'message actions'],
   },
   {
     slug: 'shortcuts',

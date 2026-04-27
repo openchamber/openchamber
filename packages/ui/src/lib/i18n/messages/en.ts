@@ -7,6 +7,7 @@ export const dict = {
   'common.language.ukrainian': 'Ukrainian',
   'common.language.spanish': 'Spanish',
   'common.language.brazilianPortuguese': 'Brazilian Portuguese',
+  'common.language.korean': 'Korean',
   'common.revealPath.finder': 'Reveal in Finder',
   'common.revealPath.fileExplorer': 'Open in File Explorer',
   'common.revealPath.fileManager': 'Open in File Manager',

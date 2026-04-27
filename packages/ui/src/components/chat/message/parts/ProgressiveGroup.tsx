@@ -37,6 +37,7 @@ interface ProgressiveGroupProps {
     showHeader: boolean;
     animateRows?: boolean;
     animatedToolIds?: Set<string>;
+    renderJustificationActions?: (activity: TurnActivityPart) => React.ReactNode;
 }
 
 const isActivityRunning = (activity: TurnActivityPart): boolean => {
@@ -754,15 +755,17 @@ const InlineReasoningBlock = React.memo(({ activity, onContentChange }: {
 /**
  * Inline justification text block — rendered as normal assistant text between tools.
  */
-const InlineJustificationBlock = React.memo(({ activity, onContentChange }: {
+const InlineJustificationBlock = React.memo(({ activity, onContentChange, actions }: {
     activity: TurnActivityPart;
     onContentChange?: (reason?: ContentChangeReason) => void;
+    actions?: React.ReactNode;
 }) => {
     return (
         <JustificationBlock
             part={activity.part}
             messageId={activity.messageId}
             onContentChange={onContentChange}
+            actions={actions}
         />
     );
 });
@@ -782,6 +785,7 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
     showHeader,
     animateRows = true,
     animatedToolIds,
+    renderJustificationActions,
 }) => {
     void _streamPhase;
     const previewCount = showHeader && !isExpanded
@@ -849,6 +853,7 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                         <InlineJustificationBlock
                             activity={row.activity}
                             onContentChange={onContentChange}
+                            actions={renderJustificationActions?.(row.activity)}
                         />
                     </>
                 );

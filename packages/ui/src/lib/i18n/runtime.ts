@@ -1,15 +1,16 @@
-export type Locale = 'en' | 'zh-CN' | 'uk' | 'es' | 'pt-BR';
+export type Locale = 'en' | 'zh-CN' | 'uk' | 'es' | 'pt-BR' | 'ko';
 
-export const LOCALES = ['en', 'zh-CN', 'uk', 'es', 'pt-BR'] as const satisfies readonly Locale[];
+export const LOCALES = ['en', 'zh-CN', 'uk', 'es', 'pt-BR', 'ko'] as const satisfies readonly Locale[];
 
 export const DEFAULT_LOCALE: Locale = 'en';
 
-export const LOCALE_LABEL_KEYS: Record<Locale, 'common.language.english' | 'common.language.simplifiedChinese' | 'common.language.ukrainian' | 'common.language.spanish' | 'common.language.brazilianPortuguese'> = {
+export const LOCALE_LABEL_KEYS: Record<Locale, 'common.language.english' | 'common.language.simplifiedChinese' | 'common.language.ukrainian' | 'common.language.spanish' | 'common.language.brazilianPortuguese' | 'common.language.korean'> = {
   en: 'common.language.english',
   'zh-CN': 'common.language.simplifiedChinese',
   uk: 'common.language.ukrainian',
   es: 'common.language.spanish',
   'pt-BR': 'common.language.brazilianPortuguese',
+  ko: 'common.language.korean',
 };
 
 export const LOCALE_STORAGE_KEY = 'openchamber.i18n.v1';
@@ -41,6 +42,9 @@ export function normalizeLocale(value: string | undefined | null): Locale {
   }
   if (normalized === 'pt' || normalized === 'pt-br' || normalized.startsWith('pt-br-')) {
     return 'pt-BR';
+  }
+  if (normalized === 'ko' || normalized.startsWith('ko-')) {
+    return 'ko';
   }
   return DEFAULT_LOCALE;
 }

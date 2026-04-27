@@ -150,6 +150,11 @@
     -webkit-overflow-scrolling: touch;
   }
 
+  :root.mobile-pointer:not(.desktop-runtime) [data-page-scroll-lock="true"] {
+    overflow: hidden !important;
+    overscroll-behavior: none;
+  }
+
   /* Keep markdown code blocks horizontally scrollable on mobile. */
   :root.mobile-pointer:not(.desktop-runtime) .markdown-content [data-markdown="code-block-body"] {
     overflow-x: auto !important;
