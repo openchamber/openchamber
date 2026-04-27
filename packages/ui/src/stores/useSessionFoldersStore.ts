@@ -14,7 +14,7 @@ export interface SessionFolder {
   parentId?: string | null;
 }
 
-type SessionFoldersMap = Record<string, SessionFolder[]>;
+export type SessionFoldersMap = Record<string, SessionFolder[]>;
 
 interface SessionFoldersState {
   foldersMap: SessionFoldersMap;

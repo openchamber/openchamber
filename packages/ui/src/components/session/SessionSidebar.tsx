@@ -407,7 +407,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [currentDirectory, syncSessionStructureSignature]);
+  }, [currentDirectory, syncSessionStructureSignature, projects]);
 
   React.useEffect(() => {
     let refreshTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -922,7 +922,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     normalizedSessionSearchQuery,
     filterSessionNodesForSearch,
     buildGroupSearchText,
-    getFoldersForScope,
+    foldersMap,
   });
 
   const searchEmptyState = (
@@ -1355,7 +1355,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         expandedSessionGroups={expandedSessionGroups}
         collapsedGroups={collapsedGroups}
         hideDirectoryControls={hideDirectoryControls}
-        getFoldersForScope={getFoldersForScope}
         collapsedFolderIds={collapsedFolderIds}
         toggleFolderCollapse={toggleFolderCollapse}
         renameFolder={renameFolder}
@@ -1393,7 +1392,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       expandedSessionGroups,
       collapsedGroups,
       hideDirectoryControls,
-      getFoldersForScope,
       collapsedFolderIds,
       toggleFolderCollapse,
       renameFolder,

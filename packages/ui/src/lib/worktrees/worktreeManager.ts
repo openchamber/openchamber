@@ -13,6 +13,7 @@ import type {
   CreateGitWorktreePayload,
   GitWorktreeValidationResult,
 } from '@/lib/api/types';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 
 type WorktreeListEntry = {
   path?: string;
@@ -316,6 +317,16 @@ export async function createWorktree(project: ProjectRef, args: CreateWorktreeAr
 
   _worktreeListCache.delete(projectDirectory);
 
+  // Update sidebar store so new worktree appears immediately
+  const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
+  const updatedByProject = new Map(currentByProject);
+  const existing = updatedByProject.get(metadataProjectDirectory) ?? [];
+  updatedByProject.set(metadataProjectDirectory, [...existing, metadata]);
+  useSessionUIStore.setState({
+    availableWorktreesByProject: updatedByProject,
+    availableWorktrees: [...useSessionUIStore.getState().availableWorktrees, metadata],
+  });
+
   return metadata;
 }
 
@@ -330,7 +341,8 @@ export async function removeProjectWorktree(project: ProjectRef, worktree: Workt
   deleteLocalBranch?: boolean;
   remoteName?: string;
 }): Promise<void> {
-  const projectDirectory = project.path;
+  const projectDirectory = normalizePath(project.path);
+  const metadataProjectDirectory = await resolvePrimaryWorktreeDirectory(projectDirectory).catch(() => projectDirectory);
 
   const deleteRemote = Boolean(options?.deleteRemoteBranch);
   const deleteLocalBranch = options?.deleteLocalBranch === true;
@@ -346,6 +358,33 @@ export async function removeProjectWorktree(project: ProjectRef, worktree: Workt
   clearWorktreeBootstrapState(worktree.path);
 
   _worktreeListCache.delete(normalizePath(project.path));
+
+  // Update sidebar store so removed worktree disappears immediately
+  const normalizedWorktreePath = normalizePath(worktree.path);
+  const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
+  const updatedByProject = new Map(currentByProject);
+  const projectWorktrees = updatedByProject.get(metadataProjectDirectory) ?? [];
+  updatedByProject.set(
+    metadataProjectDirectory,
+    projectWorktrees.filter((w) => normalizePath(w.path) !== normalizedWorktreePath),
+  );
+
+  // Clean up worktreeMetadata for sessions in the removed worktree
+  const currentMetadata = useSessionUIStore.getState().worktreeMetadata;
+  const updatedMetadata = new Map(currentMetadata);
+  for (const [sid, meta] of currentMetadata.entries()) {
+    if (meta && normalizePath(meta.path) === normalizedWorktreePath) {
+      updatedMetadata.delete(sid);
+    }
+  }
+
+  useSessionUIStore.setState({
+    availableWorktreesByProject: updatedByProject,
+    availableWorktrees: useSessionUIStore.getState().availableWorktrees.filter(
+      (w) => normalizePath(w.path) !== normalizedWorktreePath,
+    ),
+    worktreeMetadata: updatedMetadata,
+  });
 
   const branchName = (worktree.branch || '').replace(/^refs\/heads\//, '').trim();
   if (deleteRemote && branchName) {

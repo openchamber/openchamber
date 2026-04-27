@@ -9,6 +9,7 @@ import { getSafeStorage } from './utils/safeStorage';
 import { useDirectoryStore } from './useDirectoryStore';
 import { streamDebugEnabled } from '@/stores/utils/streamDebug';
 import { PROJECT_COLORS } from '@/lib/projectMeta';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 
 /** Pick a color key that's least used among existing projects */
 const pickAutoColor = (projects: ProjectEntry[]): string => {
@@ -399,6 +400,7 @@ export const useProjectsStore = create<ProjectsStore>()(
         return;
       }
       const current = get();
+      const project = current.projects.find((p) => p.id === id);
       const nextProjects = current.projects.filter((project) => project.id !== id);
       let nextActiveId = current.activeProjectId;
 
@@ -408,6 +410,16 @@ export const useProjectsStore = create<ProjectsStore>()(
 
       set({ projects: nextProjects, activeProjectId: nextActiveId });
       persistProjects(nextProjects, nextActiveId);
+
+      // Clean up worktree entries for the removed project
+      if (project) {
+        const normalizedPath = project.path.replace(/\\/g, '/').replace(/\/+$/, '') || '/';
+        useSessionUIStore.setState((s) => {
+          const next = new Map(s.availableWorktreesByProject);
+          next.delete(normalizedPath);
+          return { availableWorktreesByProject: next };
+        });
+      }
 
       if (nextActiveId) {
         const nextActive = nextProjects.find((project) => project.id === nextActiveId);
