@@ -318,10 +318,11 @@ export async function createWorktree(project: ProjectRef, args: CreateWorktreeAr
   _worktreeListCache.delete(projectDirectory);
 
   // Update sidebar store so new worktree appears immediately
+  const sidebarProjectKey = projectDirectory;
   const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
   const updatedByProject = new Map(currentByProject);
-  const existing = updatedByProject.get(metadataProjectDirectory) ?? [];
-  updatedByProject.set(metadataProjectDirectory, [...existing, metadata]);
+  const existing = updatedByProject.get(sidebarProjectKey) ?? [];
+  updatedByProject.set(sidebarProjectKey, [...existing, metadata]);
   useSessionUIStore.setState({
     availableWorktreesByProject: updatedByProject,
     availableWorktrees: [...useSessionUIStore.getState().availableWorktrees, metadata],
@@ -342,7 +343,6 @@ export async function removeProjectWorktree(project: ProjectRef, worktree: Workt
   remoteName?: string;
 }): Promise<void> {
   const projectDirectory = normalizePath(project.path);
-  const metadataProjectDirectory = await resolvePrimaryWorktreeDirectory(projectDirectory).catch(() => projectDirectory);
 
   const deleteRemote = Boolean(options?.deleteRemoteBranch);
   const deleteLocalBranch = options?.deleteLocalBranch === true;
@@ -361,11 +361,12 @@ export async function removeProjectWorktree(project: ProjectRef, worktree: Workt
 
   // Update sidebar store so removed worktree disappears immediately
   const normalizedWorktreePath = normalizePath(worktree.path);
+  const sidebarProjectKey = projectDirectory;
   const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
   const updatedByProject = new Map(currentByProject);
-  const projectWorktrees = updatedByProject.get(metadataProjectDirectory) ?? [];
+  const projectWorktrees = updatedByProject.get(sidebarProjectKey) ?? [];
   updatedByProject.set(
-    metadataProjectDirectory,
+    sidebarProjectKey,
     projectWorktrees.filter((w) => normalizePath(w.path) !== normalizedWorktreePath),
   );
 
