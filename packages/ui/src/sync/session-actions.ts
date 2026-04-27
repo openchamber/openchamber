@@ -9,7 +9,7 @@ import { Binary } from "./binary"
 import { useSessionUIStore } from "./session-ui-store"
 import { useInputStore } from "./input-store"
 import type { ChildStoreManager } from "./child-store"
-import { opencodeClient } from "@/lib/opencode/client"
+import type { HarnessClient } from "@/lib/harness/client"
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { useBackendsStore } from "@/stores/useBackendsStore"
@@ -17,22 +17,22 @@ import { registerSessionDirectory } from "./sync-refs"
 import { useSelectionStore } from "./selection-store"
 import { isSyntheticPart } from "@/lib/messages/synthetic"
 import { fromOpenCodeSession } from "./adapters/opencode"
-import { toOpenCodeCompatiblePart } from "./compat"
+import { toOpenCodeCompatiblePart, toOpenCodeCompatibleSession } from "./compat"
 import type { OptimisticAddInput, OptimisticRemoveInput } from "./optimistic"
 
 // Reference set by SyncProvider — allows actions to access SDK and stores
-let _sdk: OpencodeClient | null = null
+let _harness: HarnessClient | null = null
 let _childStores: ChildStoreManager | null = null
 let _getDirectory: () => string = () => ""
 let _optimisticAdd: ((input: OptimisticAddInput) => void) | null = null
 let _optimisticRemove: ((input: OptimisticRemoveInput) => void) | null = null
 
 export function setActionRefs(
-  sdk: OpencodeClient,
+  harness: HarnessClient,
   childStores: ChildStoreManager,
   getDirectory: () => string,
 ) {
-  _sdk = sdk
+  _harness = harness
   _childStores = childStores
   _getDirectory = getDirectory
 }
@@ -46,8 +46,12 @@ export function setOptimisticRefs(
 }
 
 function sdk() {
-  if (!_sdk) throw new Error("SDK not initialized — is SyncProvider mounted?")
-  return _sdk
+  return harness().getSdkClient()
+}
+
+function harness() {
+  if (!_harness) throw new Error("Harness client not initialized — is SyncProvider mounted?")
+  return _harness
 }
 
 function dirStore() {
@@ -127,7 +131,7 @@ function getDirectoryStore(directory?: string) {
 function getSessionReplyClient(sessionId?: string): OpencodeClient {
   const directory = sessionId ? getSessionDirectory(sessionId) : null
   if (directory) {
-    return opencodeClient.getScopedSdkClient(directory)
+    return harness().getScopedSdkClient(directory)
   }
   return sdk()
 }
@@ -180,7 +184,7 @@ function getRequestReplyClient(
 ): OpencodeClient {
   const requestDirectory = resolveDirectoryForBlockingRequest(type, sessionId, requestId)
   if (requestDirectory) {
-    return opencodeClient.getScopedSdkClient(requestDirectory)
+    return harness().getScopedSdkClient(requestDirectory)
   }
   return getSessionReplyClient(sessionId)
 }
@@ -196,22 +200,18 @@ export async function createSession(
   backendId?: string | null,
 ): Promise<Session | null> {
   try {
-    const previousDirectory = opencodeClient.getDirectory()
-    if (directoryOverride ?? dir()) {
-      opencodeClient.setDirectory(directoryOverride ?? dir())
-    }
-    const session = await opencodeClient.createSession({
+    const neutralSession = await harness().createSession({
+      directory: directoryOverride ?? dir() ?? null,
       title,
-      parentID: parentID ?? undefined,
+      parentId: parentID ?? null,
       backendId: backendId ?? undefined,
-    }).finally(() => {
-      opencodeClient.setDirectory(previousDirectory)
     })
+    const session = toOpenCodeCompatibleSession(neutralSession)
     if (!session) return null
 
-      const sessionDirectory = (session as { directory?: string }).directory ?? directoryOverride ?? null
+      const sessionDirectory = neutralSession.directory ?? directoryOverride ?? null
       const sessionBackendId =
-        (session as { backendId?: string }).backendId
+        neutralSession.backendId
         ?? backendId
         ?? useBackendsStore.getState().defaultBackendId
         ?? 'opencode'
@@ -326,13 +326,7 @@ export async function archiveSession(sessionId: string): Promise<boolean> {
   }
   try {
     const archivedAt = Date.now()
-    const previousDirectory = opencodeClient.getDirectory()
-    if (sessionDirectory) {
-      opencodeClient.setDirectory(sessionDirectory)
-    }
-    await opencodeClient.archiveSession(sessionId, archivedAt).finally(() => {
-      opencodeClient.setDirectory(previousDirectory)
-    })
+    await harness().archiveSession(sessionId, archivedAt, sessionDirectory)
     useGlobalSessionsStore.getState().archiveSessions([sessionId], archivedAt)
     return true
   } catch (error) {
@@ -511,14 +505,8 @@ export async function optimisticSend(input: {
 
 export async function abortCurrentOperation(sessionId: string): Promise<void> {
   try {
-    const previousDirectory = opencodeClient.getDirectory()
     const nextDirectory = getSessionDirectory(sessionId)
-    if (nextDirectory) {
-      opencodeClient.setDirectory(nextDirectory)
-    }
-    await opencodeClient.abortSession(sessionId).finally(() => {
-      opencodeClient.setDirectory(previousDirectory)
-    })
+    await harness().abortSession({ sessionId, directory: nextDirectory })
   } catch (error) {
     console.error("[session-actions] abort failed", error)
   }
@@ -768,14 +756,8 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
     .join("\n")
     .trim()
 
-  const previousDirectory = opencodeClient.getDirectory()
   const sessionDirectory = getSessionDirectory(sessionId) ?? dir() ?? null
-  if (sessionDirectory) {
-    opencodeClient.setDirectory(sessionDirectory)
-  }
-  const forkedSession = await opencodeClient.forkSession(sessionId, messageId).finally(() => {
-    opencodeClient.setDirectory(previousDirectory)
-  })
+  const forkedSession = await harness().forkSession({ sessionId, messageId, directory: sessionDirectory })
   if (!forkedSession) return
 
   // Insert new session into child store so sidebar updates immediately
@@ -783,12 +765,12 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
   const sessions = [...current.session]
   const searchResult = Binary.search(sessions, forkedSession.id, (s) => s.id)
   if (!searchResult.found) {
-    sessions.splice(searchResult.index, 0, fromOpenCodeSession(forkedSession))
+    sessions.splice(searchResult.index, 0, forkedSession)
     store.setState({ session: sessions })
   }
 
   // Switch to new session
-  const forkedBackendId = (forkedSession as { backendId?: string | null }).backendId;
+  const forkedBackendId = forkedSession.backendId;
   if (typeof forkedBackendId === 'string' && forkedBackendId.trim().length > 0) {
     useSelectionStore.getState().saveSessionBackendSelection(forkedSession.id, forkedBackendId.trim());
   }

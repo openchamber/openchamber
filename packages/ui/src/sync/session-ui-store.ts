@@ -17,6 +17,7 @@ import type { Session, Part, Message, TextPart } from "@opencode-ai/sdk/v2/clien
 import type { AttachedFile, SessionContextUsage, SessionWorktreeAttachment } from "@/stores/types/sessionTypes"
 import type { WorktreeMetadata } from "@/types/worktree"
 import { opencodeClient } from "@/lib/opencode/client"
+import { harnessClient, toOpenCodeHarnessRunConfig } from "@/lib/harness/client"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { useProjectsStore } from "@/stores/useProjectsStore"
 import { useDirectoryStore } from "@/stores/useDirectoryStore"
@@ -130,14 +131,16 @@ function routeMessage(params: {
         modelID: params.modelID,
         agent: params.agent,
         files: params.files,
-        send: (messageID) => opencodeClient.sendCommand({
-          id: params.sessionId,
-          providerID: params.providerID,
-          modelID: params.modelID,
-          command: cmdName,
+        send: (messageID) => harnessClient.sendCommand({
+          sessionId: params.sessionId,
+          commandId: cmdName,
           arguments: tail.join(" "),
-          agent: params.agent,
-          variant: params.variant,
+          runConfig: toOpenCodeHarnessRunConfig({
+            providerID: params.providerID,
+            modelID: params.modelID,
+            agent: params.agent,
+            variant: params.variant,
+          }),
           files: params.files,
           messageId: messageID,
         }).then(() => {}),
@@ -153,13 +156,15 @@ function routeMessage(params: {
     modelID: params.modelID,
     agent: params.agent,
     files: params.files,
-    send: (messageID) => opencodeClient.sendMessage({
-      id: params.sessionId,
-      providerID: params.providerID,
-      modelID: params.modelID,
+    send: (messageID) => harnessClient.sendMessage({
+      sessionId: params.sessionId,
       text: params.content,
-      agent: params.agent,
-      variant: params.variant,
+      runConfig: toOpenCodeHarnessRunConfig({
+        providerID: params.providerID,
+        modelID: params.modelID,
+        agent: params.agent,
+        variant: params.variant,
+      }),
       files: params.files,
       additionalParts: params.additionalParts,
       messageId: messageID,

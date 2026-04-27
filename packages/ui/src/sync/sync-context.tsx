@@ -39,6 +39,7 @@ import { stripMessageDiffSnapshots, stripSessionDiffSnapshots } from "./sanitize
 import { syncDebug } from "./debug"
 import { getReconnectCandidateSessionIds } from "./reconnect-recovery"
 import { opencodeClient } from "@/lib/opencode/client"
+import { harnessClient, type HarnessClient } from "@/lib/harness/client"
 import { usePermissionStore } from "@/stores/permissionStore"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
@@ -58,6 +59,7 @@ import * as sessionActions from "./session-actions"
 type SyncSystem = {
   childStores: ChildStoreManager
   sdk: OpencodeClient
+  harness: HarnessClient
   directory: string
 }
 
@@ -1297,6 +1299,7 @@ export function SyncProvider(props: {
     () => ({
       childStores,
       sdk: props.sdk,
+      harness: harnessClient,
       directory: props.directory,
     }),
     [childStores, props.sdk, props.directory],
@@ -1489,7 +1492,7 @@ export function SyncProvider(props: {
       setIndexedSessionDirectory(routingIndex, sessionID, dir)
     })
     setActionRefs(
-      props.sdk,
+      harnessClient,
       childStores,
       () => opencodeClient.getDirectory() || props.directory,
     )

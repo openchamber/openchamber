@@ -42,6 +42,11 @@ const mockSdk = {
   },
 }
 
+const mockHarnessClient = {
+  getSdkClient: () => mockSdk,
+  getScopedSdkClient: () => mockScopedClient,
+}
+
 // Mock opencodeClient singleton
 mock.module("@/lib/opencode/client", () => ({
   opencodeClient: {
@@ -95,7 +100,7 @@ mock.module("./sync-refs", () => ({
 import { create, type StoreApi } from "zustand"
 import { INITIAL_STATE } from "./types"
 import type { DirectoryStore } from "./child-store"
-import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
+import type { HarnessClient } from "@/lib/harness/client"
 
 function createStore(permissions: Record<string, PermissionRequest[]>): StoreApi<DirectoryStore> {
   return create<DirectoryStore>()((set) => ({
@@ -136,7 +141,7 @@ describe("respondToPermission passes directory", () => {
     const childStores = createChildStores([["/test/project", store]])
 
     const { setActionRefs, respondToPermission } = await import("./session-actions")
-    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+    setActionRefs(mockHarnessClient as unknown as HarnessClient, childStores, () => "/test/project")
 
     await respondToPermission("session-a", "perm-1", "once")
 
@@ -150,7 +155,7 @@ describe("respondToPermission passes directory", () => {
     const childStores = createChildStores([])
 
     const { setActionRefs, respondToPermission } = await import("./session-actions")
-    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+    setActionRefs(mockHarnessClient as unknown as HarnessClient, childStores, () => "/test/project")
 
     await respondToPermission("session-b", "perm-2", "always")
 
@@ -164,7 +169,7 @@ describe("respondToPermission passes directory", () => {
     const childStores = createChildStores([])
 
     const { setActionRefs, respondToPermission } = await import("./session-actions")
-    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/fallback/dir")
+    setActionRefs(mockHarnessClient as unknown as HarnessClient, childStores, () => "/fallback/dir")
 
     await respondToPermission("unknown-session", "perm-3", "reject")
 
@@ -194,7 +199,7 @@ describe("dismissPermission passes directory", () => {
     const childStores = createChildStores([["/test/project", store]])
 
     const { setActionRefs, dismissPermission } = await import("./session-actions")
-    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+    setActionRefs(mockHarnessClient as unknown as HarnessClient, childStores, () => "/test/project")
 
     await dismissPermission("session-a", "perm-10")
 
@@ -214,7 +219,7 @@ describe("respondToQuestion passes directory", () => {
     const childStores = createChildStores([])
 
     const { setActionRefs, respondToQuestion } = await import("./session-actions")
-    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+    setActionRefs(mockHarnessClient as unknown as HarnessClient, childStores, () => "/test/project")
 
     await respondToQuestion("session-a", "q-1", [["answer1"]])
 
@@ -233,7 +238,7 @@ describe("rejectQuestion passes directory", () => {
     const childStores = createChildStores([])
 
     const { setActionRefs, rejectQuestion } = await import("./session-actions")
-    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+    setActionRefs(mockHarnessClient as unknown as HarnessClient, childStores, () => "/test/project")
 
     await rejectQuestion("session-a", "q-2")
 
