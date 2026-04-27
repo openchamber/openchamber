@@ -161,6 +161,23 @@ export const registerOpenCodeProxy = (app, deps) => {
         res.socket.setNoDelay(true);
       }
 
+      const SSE_HEARTBEAT_INTERVAL_MS = 20_000;
+      let heartbeatTimer = null;
+
+      const scheduleHeartbeat = () => {
+        heartbeatTimer = setTimeout(async () => {
+          if (abortController.signal.aborted || res.writableEnded || res.destroyed) {
+            return;
+          }
+          const canContinue = await writeSseChunkWithBackpressure(res, ':heartbeat\n\n', abortController.signal);
+          if (canContinue) {
+            scheduleHeartbeat();
+          }
+        }, SSE_HEARTBEAT_INTERVAL_MS);
+      };
+
+      scheduleHeartbeat();
+
       reader = upstream.body.getReader();
       while (!abortController.signal.aborted) {
         const { done, value } = await reader.read();
@@ -173,6 +190,11 @@ export const registerOpenCodeProxy = (app, deps) => {
             break;
           }
         }
+      }
+
+      if (heartbeatTimer) {
+        clearTimeout(heartbeatTimer);
+        heartbeatTimer = null;
       }
 
       res.end();
