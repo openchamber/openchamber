@@ -16,6 +16,7 @@
     "baseUrl": "./src",
     "paths": {
       "@/*": ["./*"],
+      "@openchamber/harness-contracts": ["../../harness-contracts/src/index.ts"],
       "@openchamber/ui/*": ["./*"]
     }
   },
