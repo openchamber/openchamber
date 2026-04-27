@@ -9,6 +9,12 @@ import { createEventPipeline } from "./event-pipeline"
 import { reduceGlobalEvent, applyGlobalProject, applyDirectoryEvent } from "./event-reducer"
 import type { DirectorySyncEvent } from "./event-reducer"
 import { fromOpenCodeEvent } from "./adapters/opencode"
+import {
+  getOpenCodeCompatibleMessages,
+  getOpenCodeCompatibleParts,
+  getOpenCodeCompatibleSession,
+  getOpenCodeCompatibleSessions,
+} from "./compat"
 import { useGlobalSyncStore, type GlobalSyncStore } from "./global-sync-store"
 import { ChildStoreManager, type DirectoryStore } from "./child-store"
 import {
@@ -1538,7 +1544,7 @@ export function useSessionRevertMessageID(sessionID: string, directory?: string)
 /** Get session messages for a specific session */
 export function useSessionMessages(sessionID: string, directory?: string) {
   return useDirectorySync(
-    useCallback((state: State) => state.message[sessionID] ?? EMPTY_MESSAGES, [sessionID]),
+    useCallback((state: State) => getOpenCodeCompatibleMessages(state, sessionID), [sessionID]),
     directory,
   )
 }
@@ -1570,7 +1576,7 @@ export function useSessionMessagesResolved(sessionID: string, directory?: string
 /** Get parts for a specific message */
 export function useSessionParts(messageID: string, directory?: string) {
   return useDirectorySync(
-    useCallback((state: State) => state.part[messageID] ?? EMPTY_PARTS, [messageID]),
+    useCallback((state: State) => getOpenCodeCompatibleParts(state, messageID), [messageID]),
     directory,
   )
 }
@@ -1602,7 +1608,7 @@ export function useSessionQuestions(sessionID: string, directory?: string) {
 /** Get sessions list for a directory */
 export function useSessions(directory?: string) {
   return useDirectorySync(
-    useCallback((state: State) => state.session, []),
+    useCallback((state: State) => getOpenCodeCompatibleSessions(state), []),
     directory,
   )
 }
@@ -1640,7 +1646,7 @@ export function useSidebarSessions(directory?: string): Session[] {
 
   const getSnapshot = React.useCallback(() => {
     const state = store.getState()
-    const source = state.session
+    const source = getOpenCodeCompatibleSessions(state)
     const cached = cacheRef.current
     const streamingSignature = source
       .map((session) => {
@@ -1722,7 +1728,8 @@ export function useSession(sessionID?: string | null, directory?: string) {
   const { childStores } = useSyncSystem()
   const getSnapshot = useCallback(() => {
     if (directory) {
-      return childStores.getChild(directory)?.getState().session.find((session) => session.id === sessionID)
+      const state = childStores.getChild(directory)?.getState()
+      return state ? getOpenCodeCompatibleSession(state, sessionID) : undefined
     }
     return findLiveSession(getLiveStates(childStores), sessionID)
   }, [childStores, directory, sessionID])
@@ -1802,7 +1809,7 @@ function getVisibleMessagesForSession(state: State, sessionID: string, previous?
   visibleMessages: Message[]
   revertMessageID?: string
 } {
-  const sourceMessages = state.message[sessionID] ?? EMPTY_MESSAGES
+  const sourceMessages = getOpenCodeCompatibleMessages(state, sessionID)
   const session = state.session.find((candidate) => candidate.id === sessionID)
   const revertMessageID = (session as { revert?: { messageID?: string } } | undefined)?.revert?.messageID
 
@@ -1837,7 +1844,7 @@ export function buildSessionMessageRecordsSnapshot(
     const previousRecord = previous?.byId.get(message.id)
     const parts = suspendPartUpdates && previousRecord
       ? previousRecord.parts
-      : (state.part[message.id] ?? EMPTY_PARTS)
+      : getOpenCodeCompatibleParts(state, message.id)
 
     const nextRecord = previousRecord && previousRecord.info === message && previousRecord.parts === parts
       ? previousRecord

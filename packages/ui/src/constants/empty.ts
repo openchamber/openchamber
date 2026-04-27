@@ -1,4 +1,4 @@
-import type { Message, Part } from '@opencode-ai/sdk/v2';
+import type { Message, Part, Session } from '@opencode-ai/sdk/v2';
 import type { PermissionRequest } from '@/types/permission';
 import type { QuestionRequest } from '@/types/question';
 
@@ -19,5 +19,6 @@ export function emptyArray<T>(): readonly T[] {
 // Domain-specific typed empty arrays used across multiple files.
 export const EMPTY_MESSAGES: Message[] = EMPTY_ARRAY as unknown as Message[];
 export const EMPTY_PARTS: Part[] = EMPTY_ARRAY as unknown as Part[];
+export const EMPTY_SESSIONS: Session[] = EMPTY_ARRAY as unknown as Session[];
 export const EMPTY_PERMISSION_REQUESTS: PermissionRequest[] = EMPTY_ARRAY as unknown as PermissionRequest[];
 export const EMPTY_QUESTION_REQUESTS: QuestionRequest[] = EMPTY_ARRAY as unknown as QuestionRequest[];
