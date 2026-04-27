@@ -340,6 +340,12 @@ export function createEventPipeline(input: EventPipelineInput) {
     const events = await sdk.global.event({
       signal,
       ...(lastEventId && lastEventId.length > 0 ? { headers: { "Last-Event-ID": lastEventId } } : {}),
+      onSseEvent: (event: { id?: unknown }) => {
+        resetHeartbeat()
+        if (typeof event.id === "string" && event.id.length > 0) {
+          lastEventId = event.id
+        }
+      },
       onSseError: (error: unknown) => {
         if (isAbortError(error)) return
         if (streamErrorLogged) return
@@ -356,6 +362,7 @@ export function createEventPipeline(input: EventPipelineInput) {
     for await (const event of events.stream) {
       resetHeartbeat()
       streamErrorLogged = false
+
       const payload = resolveEventPayload((event as { payload?: Event }).payload ?? event)
       if (!payload) {
         continue

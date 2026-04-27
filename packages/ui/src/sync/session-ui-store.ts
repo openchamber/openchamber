@@ -70,9 +70,8 @@ function routeMessage(params: {
   files?: Array<{ type: "file"; mime: string; url: string; filename: string }>
   additionalParts?: Array<{ text: string; synthetic?: boolean; files?: Array<{ type: "file"; mime: string; url: string; filename: string }> }>
 }): Promise<void> {
-  const sdk = opencodeClient.getSdkClient()
-
   if (params.inputMode === "shell") {
+    const sdk = opencodeClient.getSdkClient()
     const dir = opencodeClient.getDirectory() || undefined
     return sdk.session.shell({
       sessionID: params.sessionId,
@@ -96,17 +95,25 @@ function routeMessage(params: {
       || storeCommands.find((c) => c.name === cmdName)
 
     if (isCommand) {
-      const dir = opencodeClient.getDirectory() || undefined
-      return sdk.session.command({
-        sessionID: params.sessionId,
-        directory: dir,
-        command: cmdName,
-        arguments: tail.join(" "),
+      return optimisticSend({
+        sessionId: params.sessionId,
+        content: params.content,
+        providerID: params.providerID,
+        modelID: params.modelID,
         agent: params.agent,
-        model: `${params.providerID}/${params.modelID}`,
-        variant: params.variant,
-        parts: params.files,
-      }).then(() => {})
+        files: params.files,
+        send: (messageID) => opencodeClient.sendCommand({
+          id: params.sessionId,
+          providerID: params.providerID,
+          modelID: params.modelID,
+          command: cmdName,
+          arguments: tail.join(" "),
+          agent: params.agent,
+          variant: params.variant,
+          files: params.files,
+          messageId: messageID,
+        }).then(() => {}),
+      })
     }
   }
 
@@ -130,6 +137,11 @@ function routeMessage(params: {
       messageId: messageID,
     }).then(() => {}),
   })
+}
+
+function notifyMessageSent(sessionId: string): void {
+  fetch(`/api/sessions/${sessionId}/message-sent`, { method: "POST" })
+    .catch(() => { /* ignore */ })
 }
 
 // ---------------------------------------------------------------------------
@@ -754,6 +766,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         await waitForWorktreeBootstrap(createdDirectory)
       }
 
+      notifyMessageSent(created.id)
+
       markPendingUserSendAnimation(created.id)
 
       const files = attachments?.map((a) => ({
@@ -823,8 +837,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     }
 
     if (currentSessionId) {
-      fetch(`/api/sessions/${currentSessionId}/message-sent`, { method: "POST" })
-        .catch(() => { /* ignore */ })
+      notifyMessageSent(currentSessionId)
     }
 
     if (currentSessionId) {

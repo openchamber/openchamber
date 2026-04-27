@@ -125,11 +125,11 @@
     font-weight: var(--ui-regular-font-weight, 400);
   }
 
-  /* Desktop shell: prevent rubber-band scrolling of the page itself.
+  /* Prevent rubber-band scrolling of the page itself.
      App scroll should live inside dedicated scroll containers. */
-  :root.desktop-runtime,
-  :root.desktop-runtime body,
-  :root.desktop-runtime #root {
+  :root,
+  :root body,
+  :root #root {
     height: 100%;
     overflow: hidden;
     overscroll-behavior: none;

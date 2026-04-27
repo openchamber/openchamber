@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import { isTauriShell, requestDirectoryAccess, startAccessingDirectory, stopAccessingDirectory } from '@/lib/desktop';
+import { isDesktopShell, requestDirectoryAccess, startAccessingDirectory, stopAccessingDirectory } from '@/lib/desktop';
 
 export const useFileSystemAccess = () => {
   const [isDesktop, setIsDesktop] = useState(false);
 
   useEffect(() => {
-    setIsDesktop(isTauriShell());
+    setIsDesktop(isDesktopShell());
   }, []);
 
   const requestAccess = useCallback(async (directoryPath: string): Promise<{ success: boolean; path?: string; projectId?: string; error?: string }> => {

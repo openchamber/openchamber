@@ -1746,6 +1746,19 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return null;
     }
 
+    case 'desktop_open_external_url': {
+      const target = typeof args.url === 'string' ? args.url.trim() : '';
+      if (!target) throw new Error('URL is required');
+
+      const parsed = new URL(target);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        throw new Error('Only HTTP URLs can be opened externally');
+      }
+
+      await shell.openExternal(parsed.toString());
+      return null;
+    }
+
     case 'desktop_reveal_path': {
       const targetPath = typeof args.path === 'string' ? args.path.trim() : '';
       if (!targetPath) {

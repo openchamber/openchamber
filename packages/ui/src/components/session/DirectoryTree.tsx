@@ -39,6 +39,7 @@ interface DirectoryTreeProps {
   isRootReady?: boolean;
   /** Always show action icons (add, pin) instead of only on hover */
   alwaysShowActions?: boolean;
+  disabledPaths?: Iterable<string>;
 }
 
 export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
@@ -53,6 +54,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
   rootDirectory = null,
   isRootReady,
   alwaysShowActions = false,
+  disabledPaths,
 }) => {
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
@@ -65,6 +67,8 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
   const [creatingInPath, setCreatingInPath] = React.useState<string | null>(null);
   const [newDirName, setNewDirName] = React.useState('');
   const [isPinnedExpanded, setIsPinnedExpanded] = React.useState(true);
+  const [pinnedExpandedPaths, setPinnedExpandedPaths] = React.useState<Set<string>>(new Set());
+  const [pinnedItemChildren, setPinnedItemChildren] = React.useState<Map<string, DirectoryItem[]>>(new Map());
   const inputRef = React.useRef<HTMLInputElement>(null);
   const { requestAccess, startAccessing, isDesktop } = useFileSystemAccess();
   const previousShowHidden = React.useRef(showHidden);
@@ -82,6 +86,20 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
     }
     return trimmed.length === 0 ? '/' : trimmed;
   }, []);
+
+  const normalizedDisabledPaths = React.useMemo(() => {
+    const normalized = new Set<string>();
+    for (const path of disabledPaths ?? []) {
+      const value = stripTrailingSlashes(path.replace(/\\/g, '/'));
+      if (value) normalized.add(value.toLowerCase());
+    }
+    return normalized;
+  }, [disabledPaths, stripTrailingSlashes]);
+
+  const isPathDisabled = React.useCallback((path: string) => {
+    const normalized = stripTrailingSlashes(path.replace(/\\/g, '/'));
+    return normalized ? normalizedDisabledPaths.has(normalized.toLowerCase()) : false;
+  }, [normalizedDisabledPaths, stripTrailingSlashes]);
 
   const normalizedHomeDirectory = React.useMemo(() => {
     if (!homeDirectory) {
@@ -311,6 +329,33 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
     });
   }, [effectiveRoot, isPathWithinHome, stripTrailingSlashes]);
 
+  // Clean up pinned expansion state when pinned paths are removed (e.g., unpinned or filtered out)
+  React.useEffect(() => {
+    const pinnedRoots = Array.from(pinnedPaths);
+    const isWithinPinnedRoot = (path: string) => pinnedRoots.some((root) => (
+      path === root || path.startsWith(`${root}/`)
+    ));
+
+    setPinnedExpandedPaths(prev => {
+      const next = new Set(prev);
+      for (const path of prev) {
+        if (!isWithinPinnedRoot(path)) {
+          next.delete(path);
+        }
+      }
+      return next;
+    });
+    setPinnedItemChildren(prev => {
+      const next = new Map(prev);
+      for (const [path] of prev) {
+        if (!isWithinPinnedRoot(path)) {
+          next.delete(path);
+        }
+      }
+      return next;
+    });
+  }, [pinnedPaths]);
+
   // Reload directories when showHidden changes, but keep expanded state
   React.useEffect(() => {
     if (previousShowHidden.current !== showHidden) {
@@ -495,6 +540,30 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
     setDirectories((prev) => updateItems(prev));
   };
 
+  const togglePinnedExpanded = async (path: string) => {
+    if (!rootReady) {
+      return;
+    }
+    const isCurrentlyExpanded = pinnedExpandedPaths.has(path);
+    const newExpanded = new Set(pinnedExpandedPaths);
+
+    if (isCurrentlyExpanded) {
+      newExpanded.delete(path);
+      setPinnedExpandedPaths(newExpanded);
+      return;
+    }
+
+    newExpanded.add(path);
+    setPinnedExpandedPaths(newExpanded);
+
+    const children = await loadDirectory(path);
+    setPinnedItemChildren(prev => {
+      const next = new Map(prev);
+      next.set(path, children);
+      return next;
+    });
+  };
+
   React.useEffect(() => {
     if (creatingInPath && inputRef.current) {
       inputRef.current.focus();
@@ -612,6 +681,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
     const isPinned = pinnedPaths.has(item.path);
     const isSelected = currentPath === item.path;
     const isInlineVariant = variant === 'inline';
+    const isDisabled = isPathDisabled(item.path);
 
     const rowContent = (
       <>
@@ -635,6 +705,9 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
         <button
           onClick={(e) => {
             e.stopPropagation();
+            if (isDisabled) {
+              return;
+            }
             handleDirectorySelect(item.path);
             if (variant === 'dropdown' && selectionBehavior === 'immediate') {
               setIsOpen(false);
@@ -642,13 +715,15 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
           }}
           onDoubleClick={(e) => {
             e.stopPropagation();
-            if (onDoubleClickPath) {
+            if (!isDisabled && onDoubleClickPath) {
               onDoubleClickPath(item.path);
             }
           }}
+          disabled={isDisabled}
           className={cn(
             'flex items-center flex-1 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60 rounded',
             isMobile ? 'gap-1.5' : 'gap-1.5',
+            isDisabled && 'cursor-not-allowed opacity-45',
             isInlineVariant ? (isSelected ? 'text-primary' : 'text-foreground') : 'text-foreground'
           )}
         >
@@ -656,6 +731,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
             className={cn(
               'text-muted-foreground flex-shrink-0',
               isMobile ? 'h-4 w-4' : 'h-3.5 w-3.5',
+              isDisabled && 'text-muted-foreground',
               isInlineVariant && isSelected && 'text-primary'
             )}
           />
@@ -663,6 +739,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
             className={cn(
               'font-medium truncate',
               isMobile ? 'typography-ui-label' : 'typography-ui-label',
+              isDisabled && 'text-muted-foreground',
               isInlineVariant && isSelected ? 'text-primary' : 'text-foreground'
             )}
           >
@@ -715,7 +792,9 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
               isMobile ? 'px-1.5 py-1' : 'px-2 py-1.5',
               isSelected 
                 ? 'bg-primary/10 text-primary' 
-                : 'hover:bg-interactive-hover/50 text-foreground'
+                : isDisabled
+                  ? 'text-muted-foreground'
+                  : 'hover:bg-interactive-hover/50 text-foreground'
             )}
             style={{ paddingLeft: `${level * (isMobile ? 12 : 14) + (isMobile ? 4 : 6)}px` }}
           >
@@ -869,100 +948,270 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
     );
   };
 
-  const renderPinnedRow = (name: string, path: string) => {
-    if (variant === 'inline') {
-      const isSelected = currentPath === path;
-      return (
-        <div
-          key={path}
+  const renderPinnedTreeItem = (item: DirectoryItem, level: number = 0) => {
+    const isExpanded = pinnedExpandedPaths.has(item.path);
+    const children = pinnedItemChildren.get(item.path);
+    const hasChildren = item.isDirectory;
+    const isPinned = pinnedPaths.has(item.path);
+    const isSelected = currentPath === item.path;
+    const isInlineVariant = variant === 'inline';
+
+    const rowContent = (
+      <>
+        {hasChildren && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              togglePinnedExpanded(item.path);
+            }}
+            className={cn("hover:bg-interactive-hover rounded", isMobile ? "p-0.5" : "p-0.5")}
+          >
+            {isExpanded ? (
+              <RiArrowDownSLine className={isMobile ? "h-3.5 w-3.5" : "h-3 w-3"} />
+            ) : (
+              <RiArrowRightSLine className={isMobile ? "h-3.5 w-3.5" : "h-3 w-3"} />
+            )}
+          </button>
+        )}
+        {!hasChildren && <div className={isMobile ? "w-4.5" : "w-4"} />}
+
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            handleDirectorySelect(item.path);
+            if (variant === 'dropdown' && selectionBehavior === 'immediate') {
+              setIsOpen(false);
+            }
+          }}
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            if (onDoubleClickPath) {
+              onDoubleClickPath(item.path);
+            }
+          }}
           className={cn(
-            'group flex items-center gap-2 mx-1 rounded-lg transition-colors',
-            isMobile ? 'px-1.5 py-1' : 'px-2 py-1.5',
-            isSelected 
-              ? 'bg-primary/10' 
-              : 'hover:bg-interactive-hover/50'
+            'flex items-center flex-1 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60 rounded',
+            isMobile ? 'gap-1.5' : 'gap-1.5',
+            isInlineVariant ? (isSelected ? 'text-primary' : 'text-foreground') : 'text-foreground'
           )}
         >
-          <button
-            onClick={() => handleDirectorySelect(path)}
-            onDoubleClick={(e) => {
-              e.stopPropagation();
-              if (onDoubleClickPath) {
-                onDoubleClickPath(path);
-              }
-            }}
+          <RiFolder6Line
             className={cn(
-              'flex flex-1 items-center gap-1.5 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60 rounded min-w-0',
-              isSelected ? 'text-primary' : 'text-foreground'
+              'text-muted-foreground flex-shrink-0',
+              isMobile ? 'h-4 w-4' : 'h-3.5 w-3.5',
+              isInlineVariant && isSelected && 'text-primary'
+            )}
+          />
+          <span
+            className={cn(
+              'font-medium truncate',
+              isMobile ? 'typography-ui-label' : 'typography-ui-label',
+              isInlineVariant && isSelected ? 'text-primary' : 'text-foreground'
             )}
           >
-            <RiFolder6Line
-              className={cn(
-                'flex-shrink-0',
-                isMobile ? 'h-4 w-4' : 'h-3.5 w-3.5',
-                isSelected ? 'text-primary' : 'text-muted-foreground'
-              )}
-            />
-            <span
-              className={cn(
-                'typography-ui-label font-medium truncate flex-shrink-0',
-                isSelected ? 'text-primary' : 'text-foreground'
-              )}
-            >
-              {name}
-            </span>
-            <span className="typography-meta text-muted-foreground/60 truncate">
-              {formatPathForDisplay(path, homeDirectory)}
-            </span>
-          </button>
-          <button
-            onClick={() => togglePin(path)}
+            {item.name}
+          </span>
+        </button>
+
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            togglePin(item.path);
+          }}
+          className={cn(
+            "hover:bg-interactive-hover rounded transition-opacity",
+            isMobile ? "p-1.5" : "p-1",
+            alwaysShowActions ? "opacity-60" : "opacity-0 group-hover:opacity-100"
+          )}
+          title={isPinned ? t('directoryTree.actions.unpinDirectory') : t('directoryTree.actions.pinDirectory')}
+        >
+          {isPinned ? (
+            <RiPushpin2Line className={cn("text-primary", isMobile ? "h-3.5 w-3.5" : "h-3 w-3")} />
+          ) : (
+            <RiPushpinLine className={cn("text-muted-foreground", isMobile ? "h-3.5 w-3.5" : "h-3 w-3")} />
+          )}
+        </button>
+      </>
+    );
+
+    if (isInlineVariant) {
+      return (
+        <div key={item.path}>
+          <div
             className={cn(
-              "hover:bg-interactive-hover rounded-md transition-opacity",
-              isMobile ? "p-1.5 opacity-60" : "p-1 opacity-0 group-hover:opacity-100"
+              'group flex items-center gap-1 rounded-lg mx-1 text-left transition-colors',
+              isMobile ? 'px-1.5 py-1' : 'px-2 py-1.5',
+              isSelected 
+                ? 'bg-primary/10 text-primary' 
+                : 'hover:bg-interactive-hover/50 text-foreground'
             )}
-            title={t('directoryTree.actions.unpinDirectory')}
+            title={isPinned ? t('directoryTree.actions.unpinDirectory') : undefined}
+            style={{ paddingLeft: `${level * (isMobile ? 12 : 14) + (isMobile ? 4 : 6)}px` }}
           >
-            <RiPushpin2Line className={cn("text-primary", isMobile ? "h-3.5 w-3.5" : "h-3.5 w-3.5")} />
-          </button>
+            {rowContent}
+          </div>
+          {isExpanded && children && children.map((child) => renderPinnedTreeItem(child, level + 1))}
         </div>
       );
     }
 
     return (
-      <DropdownMenuItem
-        key={path}
-        onSelect={(e) => {
-          e.preventDefault();
-          handleDirectorySelect(path);
-          if (selectionBehavior === 'immediate') {
-            setIsOpen(false);
-          }
-        }}
-        className={cn(
-          'flex items-start gap-2 cursor-pointer group py-2',
-          currentPath === path && 'bg-interactive-selection'
-        )}
-      >
-        <RiFolder6Line className="h-3.5 w-3.5 text-muted-foreground mt-0.5" />
-        <div className="flex-1 min-w-0">
-          <div className="typography-ui-label font-medium">{name}</div>
-          <div className="typography-meta text-muted-foreground">
-            {formatPathForDisplay(path, homeDirectory)}
-          </div>
-        </div>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
+      <div key={item.path}>
+        <DropdownMenuItem
+          className={cn(
+            'flex items-center gap-1 cursor-pointer group',
+            currentPath === item.path && 'bg-interactive-selection'
+          )}
+          style={{ paddingLeft: `${level * 12 + 8}px` }}
+          onSelect={(e) => {
             e.preventDefault();
-            togglePin(path);
           }}
-          className="p-1 opacity-0 group-hover:opacity-100 hover:bg-interactive-hover rounded transition-opacity"
-          title={t('directoryTree.actions.unpinDirectory')}
         >
-          <RiPushpin2Line className="h-3 w-3 text-primary" />
-        </button>
-      </DropdownMenuItem>
+          {rowContent}
+        </DropdownMenuItem>
+        {isExpanded && children && (
+          <div>
+            {children.map((child) => renderPinnedTreeItem(child, level + 1))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderPinnedRow = (name: string, path: string) => {
+    const isExpanded = pinnedExpandedPaths.has(path);
+    const children = pinnedItemChildren.get(path);
+    const isSelected = currentPath === path;
+    const isInlineVariant = variant === 'inline';
+
+    if (isInlineVariant) {
+      return (
+        <div key={path}>
+          <div
+            className={cn(
+              'group flex items-center gap-2 mx-1 rounded-lg transition-colors',
+              isMobile ? 'px-1.5 py-1' : 'px-2 py-1.5',
+              isSelected 
+                ? 'bg-primary/10' 
+                : 'hover:bg-interactive-hover/50'
+            )}
+          >
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                togglePinnedExpanded(path);
+              }}
+              className={cn("hover:bg-interactive-hover rounded flex-shrink-0", isMobile ? "p-0.5" : "p-0.5")}
+            >
+              {isExpanded ? (
+                <RiArrowDownSLine className={isMobile ? "h-3.5 w-3.5" : "h-3 w-3"} />
+              ) : (
+                <RiArrowRightSLine className={isMobile ? "h-3.5 w-3.5" : "h-3 w-3"} />
+              )}
+            </button>
+
+            <button
+              onClick={() => handleDirectorySelect(path)}
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                if (onDoubleClickPath) {
+                  onDoubleClickPath(path);
+                }
+              }}
+              className={cn(
+                'flex flex-1 items-center gap-1.5 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60 rounded min-w-0',
+                isSelected ? 'text-primary' : 'text-foreground'
+              )}
+            >
+              <RiFolder6Line
+                className={cn(
+                  'flex-shrink-0',
+                  isMobile ? 'h-4 w-4' : 'h-3.5 w-3.5',
+                  isSelected ? 'text-primary' : 'text-muted-foreground'
+                )}
+              />
+              <span
+                className={cn(
+                  'typography-ui-label font-medium truncate flex-shrink-0',
+                  isSelected ? 'text-primary' : 'text-foreground'
+                )}
+              >
+                {name}
+              </span>
+              <span className="typography-meta text-muted-foreground/60 truncate">
+                {formatPathForDisplay(path, homeDirectory)}
+              </span>
+            </button>
+            <button
+              onClick={() => togglePin(path)}
+              className={cn(
+                "hover:bg-interactive-hover rounded-md transition-opacity",
+                isMobile ? "p-1.5 opacity-60" : "p-1 opacity-0 group-hover:opacity-100"
+              )}
+              title={t('directoryTree.actions.unpinDirectory')}
+            >
+              <RiPushpin2Line className={cn("text-primary", isMobile ? "h-3.5 w-3.5" : "h-3.5 w-3.5")} />
+            </button>
+          </div>
+          {isExpanded && children && children.map((child) => renderPinnedTreeItem(child, 1))}
+        </div>
+      );
+    }
+
+    return (
+      <div key={path}>
+        <DropdownMenuItem
+          onSelect={(e) => {
+            e.preventDefault();
+            handleDirectorySelect(path);
+            if (selectionBehavior === 'immediate') {
+              setIsOpen(false);
+            }
+          }}
+          className={cn(
+            'flex items-start gap-2 cursor-pointer group py-2',
+            currentPath === path && 'bg-interactive-selection'
+          )}
+        >
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              togglePinnedExpanded(path);
+            }}
+            className="p-0.5 hover:bg-interactive-hover rounded flex-shrink-0"
+          >
+            {isExpanded ? (
+              <RiArrowDownSLine className="h-3 w-3" />
+            ) : (
+              <RiArrowRightSLine className="h-3 w-3" />
+            )}
+          </button>
+          <RiFolder6Line className="h-3.5 w-3.5 text-muted-foreground mt-0.5 flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <div className="typography-ui-label font-medium">{name}</div>
+            <div className="typography-meta text-muted-foreground">
+              {formatPathForDisplay(path, homeDirectory)}
+            </div>
+          </div>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              togglePin(path);
+            }}
+            className="p-1 opacity-0 group-hover:opacity-100 hover:bg-interactive-hover rounded transition-opacity flex-shrink-0"
+            title={t('directoryTree.actions.unpinDirectory')}
+          >
+            <RiPushpin2Line className="h-3 w-3 text-primary" />
+          </button>
+        </DropdownMenuItem>
+        {isExpanded && children && (
+          <div>
+            {children.map((child) => renderPinnedTreeItem(child, 1))}
+          </div>
+        )}
+      </div>
     );
   };
 
