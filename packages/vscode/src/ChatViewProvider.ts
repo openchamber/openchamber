@@ -6,6 +6,7 @@ import { getWebviewShikiThemes } from './shikiThemes';
 import { getWebviewHtml } from './webviewHtml';
 import { openSseProxy } from './sseProxy';
 import { resolveWebviewDevServerUrl } from './webviewDevServer';
+import { normalizeWindowsDriveLetter } from './pathUtils';
 
 export class ChatViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'openchamber.chatView';
@@ -392,7 +393,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
 
   private _getHtmlForWebview(webview: vscode.Webview) {
-    const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+    const workspaceFolder = normalizeWindowsDriveLetter(
+      vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || ''
+    );
     // Use cached values which are updated by onStatusChange callback
     const initialStatus = this._cachedStatus;
     const cliAvailable = this._openCodeManager?.isCliAvailable() ?? false;

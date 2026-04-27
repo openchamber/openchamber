@@ -6,12 +6,13 @@ import { getWebviewShikiThemes } from './shikiThemes';
 import { getWebviewHtml } from './webviewHtml';
 import { openSseProxy } from './sseProxy';
 import { resolveWebviewDevServerUrl } from './webviewDevServer';
+import { normalizeWindowsDriveLetter } from './pathUtils';
 
 export class AgentManagerPanelProvider {
   public static readonly viewType = 'openchamber.agentManager';
 
   private _panel?: vscode.WebviewPanel;
-  
+
   // Cache latest status/URL for when webview is resolved after connection is ready
   private _cachedStatus: ConnectionStatus = 'connecting';
   private _cachedError?: string;
@@ -54,10 +55,10 @@ export class AgentManagerPanelProvider {
     };
 
     this._panel.webview.html = this._getHtmlForWebview(this._panel.webview);
-    
+
     // Send theme payload (including optional Shiki theme JSON) after the webview is set up.
     void this.updateTheme(vscode.window.activeColorTheme.kind);
-    
+
     // Send cached connection status
     this._sendCachedState();
 
@@ -115,16 +116,16 @@ export class AgentManagerPanelProvider {
     // Cache the latest state
     this._cachedStatus = status;
     this._cachedError = error;
-    
+
     // Send to webview if it exists
     this._sendCachedState();
   }
-  
+
   private _sendCachedState() {
     if (!this._panel) {
       return;
     }
-    
+
     this._panel.webview.postMessage({
       type: 'connectionStatus',
       status: this._cachedStatus,
@@ -221,7 +222,9 @@ export class AgentManagerPanelProvider {
   }
 
   private _getHtmlForWebview(webview: vscode.Webview): string {
-    const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+    const workspaceFolder = normalizeWindowsDriveLetter(
+      vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || ''
+    );
     const cliAvailable = this._openCodeManager?.isCliAvailable() ?? false;
 
     return getWebviewHtml({
