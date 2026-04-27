@@ -287,7 +287,7 @@ export const useCommandsStore = create<CommandsStore>()(
                       const response = await fetch(`/api/config/commands/${encodeURIComponent(cmd.name)}${queryParams}`, {
                         headers: {
                           'Cache-Control': 'no-cache',
-                          ...(directory ? { 'x-opencode-directory': directory } : {}),
+                          ...(directory ? { 'x-openchamber-directory': directory, 'x-opencode-directory': directory } : {}),
                         }
                       });
 
@@ -390,7 +390,7 @@ export const useCommandsStore = create<CommandsStore>()(
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
-                ...(directory ? { 'x-opencode-directory': directory } : {}),
+                ...(directory ? { 'x-openchamber-directory': directory, 'x-opencode-directory': directory } : {}),
               },
               body: JSON.stringify(commandConfig)
             });
@@ -455,7 +455,7 @@ export const useCommandsStore = create<CommandsStore>()(
               method: 'PATCH',
               headers: {
                 'Content-Type': 'application/json',
-                ...(directory ? { 'x-opencode-directory': directory } : {}),
+                ...(directory ? { 'x-openchamber-directory': directory, 'x-opencode-directory': directory } : {}),
               },
               body: JSON.stringify(commandConfig)
             });
@@ -507,7 +507,7 @@ export const useCommandsStore = create<CommandsStore>()(
 
             const response = await fetch(`/api/config/commands/${encodeURIComponent(name)}${queryParams}`, {
               method: 'DELETE',
-              headers: directory ? { 'x-opencode-directory': directory } : undefined,
+              headers: directory ? { 'x-openchamber-directory': directory, 'x-opencode-directory': directory } : undefined,
             });
 
             const payload = await response.json().catch(() => null);

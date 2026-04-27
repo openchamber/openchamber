@@ -242,7 +242,7 @@ export const useAgentsStore = create<AgentsStore>()(
                       const response = await fetch(`/api/config/agents/${encodeURIComponent(agent.name)}${queryParams}`, {
                         headers: {
                           'Cache-Control': 'no-cache',
-                          ...(configDirectory ? { 'x-opencode-directory': configDirectory } : {}),
+                          ...(configDirectory ? { 'x-openchamber-directory': configDirectory, 'x-opencode-directory': configDirectory } : {}),
                         }
                       });
 
@@ -332,7 +332,7 @@ export const useAgentsStore = create<AgentsStore>()(
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
-                ...(configDirectory ? { 'x-opencode-directory': configDirectory } : {}),
+                ...(configDirectory ? { 'x-openchamber-directory': configDirectory, 'x-opencode-directory': configDirectory } : {}),
               },
               body: JSON.stringify(agentConfig)
             });
@@ -393,7 +393,7 @@ export const useAgentsStore = create<AgentsStore>()(
               method: 'PATCH',
               headers: {
                 'Content-Type': 'application/json',
-                ...(configDirectory ? { 'x-opencode-directory': configDirectory } : {}),
+                ...(configDirectory ? { 'x-openchamber-directory': configDirectory, 'x-opencode-directory': configDirectory } : {}),
               },
               body: JSON.stringify(agentConfig)
             });
@@ -441,7 +441,7 @@ export const useAgentsStore = create<AgentsStore>()(
 
             const response = await fetch(`/api/config/agents/${encodeURIComponent(name)}${queryParams}`, {
               method: 'DELETE',
-              headers: configDirectory ? { 'x-opencode-directory': configDirectory } : undefined,
+              headers: configDirectory ? { 'x-openchamber-directory': configDirectory, 'x-opencode-directory': configDirectory } : undefined,
             });
 
             const payload = await response.json().catch(() => null);

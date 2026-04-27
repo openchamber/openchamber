@@ -8,6 +8,15 @@ export const createProjectDirectoryRuntime = (dependencies) => {
     sanitizeProjects,
   } = dependencies;
 
+  const getRequestedDirectory = (req) => {
+    const neutralHeader = typeof req.get === 'function' ? req.get('x-openchamber-directory') : null;
+    const legacyHeader = typeof req.get === 'function' ? req.get('x-opencode-directory') : null;
+    const queryDirectory = Array.isArray(req.query?.directory)
+      ? req.query.directory[0]
+      : req.query?.directory;
+    return neutralHeader || legacyHeader || queryDirectory || null;
+  };
+
   const resolveDirectoryCandidate = (value) => {
     if (typeof value !== 'string') {
       return null;
@@ -44,11 +53,7 @@ export const createProjectDirectoryRuntime = (dependencies) => {
   };
 
   const resolveProjectDirectory = async (req) => {
-    const headerDirectory = typeof req.get === 'function' ? req.get('x-opencode-directory') : null;
-    const queryDirectory = Array.isArray(req.query?.directory)
-      ? req.query.directory[0]
-      : req.query?.directory;
-    const requested = headerDirectory || queryDirectory || null;
+    const requested = getRequestedDirectory(req);
 
     if (requested) {
       const validated = await validateDirectoryPath(requested);
@@ -97,11 +102,7 @@ export const createProjectDirectoryRuntime = (dependencies) => {
   };
 
   const resolveOptionalProjectDirectory = async (req) => {
-    const headerDirectory = typeof req.get === 'function' ? req.get('x-opencode-directory') : null;
-    const queryDirectory = Array.isArray(req.query?.directory)
-      ? req.query.directory[0]
-      : req.query?.directory;
-    const requested = headerDirectory || queryDirectory || null;
+    const requested = getRequestedDirectory(req);
 
     if (!requested) {
       return { directory: null, error: null };

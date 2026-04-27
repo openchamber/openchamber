@@ -21,6 +21,7 @@ export interface BackendCapabilities {
   sessions: boolean;
   models: boolean;
   shell?: boolean;
+  auth?: boolean;
   agents: boolean;
   providers: boolean;
   commands: boolean;

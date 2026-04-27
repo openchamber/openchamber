@@ -22,6 +22,7 @@ export interface HarnessBackendCapabilities {
   models: boolean;
   commands?: boolean;
   shell?: boolean;
+  auth?: boolean;
   approvals?: boolean;
   providers?: boolean;
   config?: boolean;

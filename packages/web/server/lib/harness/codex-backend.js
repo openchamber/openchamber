@@ -1230,6 +1230,7 @@ export const createCodexBackendRuntime = (dependencies) => {
           models: true,
           commands: true,
           providers: false,
+          auth: false,
           config: false,
           skills: false,
           shell: false,

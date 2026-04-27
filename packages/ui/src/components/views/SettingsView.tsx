@@ -84,6 +84,8 @@ interface SettingsViewProps {
   isWindowed?: boolean;
 }
 
+type BackendCapabilityKey = 'agents' | 'commands' | 'providers' | 'config' | 'skills';
+
 const pageOrder: SettingsPageSlug[] = [
   'appearance',
   'chat',
@@ -116,6 +118,24 @@ function isPageAvailable(page: SettingsPageMeta, ctx: SettingsRuntimeContext): b
     return true;
   }
   return page.isAvailable(ctx);
+}
+
+function getPageCapability(slug: SettingsPageSlug): BackendCapabilityKey | null {
+  switch (slug) {
+    case 'providers':
+      return 'providers';
+    case 'agents':
+      return 'agents';
+    case 'commands':
+      return 'commands';
+    case 'mcp':
+      return 'config';
+    case 'skills.installed':
+    case 'skills.catalog':
+      return 'skills';
+    default:
+      return null;
+  }
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
@@ -253,6 +273,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   const isSettingsDialogOpen = useUIStore((state) => state.isSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const settingsSlug = resolveSettingsSlug(settingsPageRaw);
+  const backends = useBackendsStore((state) => state.backends);
+  const backendsLoaded = useBackendsStore((state) => state.isLoaded);
 
   const [mobileStage, setMobileStage] = React.useState<MobileStage>('nav');
   const autoNavSlugRef = React.useRef<string | null>(null);
@@ -273,12 +295,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   const runtimeCtx = React.useMemo(() => buildRuntimeContext(isDesktopApp), [isDesktopApp]);
 
   const visiblePages = React.useMemo(() => {
+    const hasCapability = (capability: BackendCapabilityKey) => {
+      if (!backendsLoaded) return true;
+      return backends.some((backend) => backend.available && Boolean(backend.capabilities[capability]));
+    };
+
     return SETTINGS_PAGE_METADATA
       .filter((page) => page.slug !== 'home')
       .filter((page) => isPageAvailable(page, runtimeCtx))
+      .filter((page) => {
+        const capability = getPageCapability(page.slug);
+        return capability ? hasCapability(capability) : true;
+      })
       .filter((page) => !(runtimeCtx.isVSCode && page.slug === 'projects'))
       .filter((page) => !(isMobile && page.slug === 'shortcuts'));
-  }, [runtimeCtx, isMobile]);
+  }, [backends, backendsLoaded, runtimeCtx, isMobile]);
 
   const sortedFilteredPages = React.useMemo(() => {
     const rank = new Map<SettingsPageSlug, number>(pageOrder.map((s, i) => [s, i]));
@@ -478,6 +509,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     if (meta && !isPageAvailable(meta, runtimeCtx)) {
       return renderUnavailable();
     }
+    const capability = getPageCapability(slug);
+    if (capability && backendsLoaded && !backends.some((backend) => backend.available && Boolean(backend.capabilities[capability]))) {
+      return renderUnavailable();
+    }
 
     switch (slug) {
       case 'home':
@@ -517,7 +552,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       default:
         return <SettingsHome onOpen={openPage} />;
     }
-  }, [openChamberSectionBySlug, openPage, renderUnavailable, runtimeCtx]);
+  }, [backends, backendsLoaded, openChamberSectionBySlug, openPage, renderUnavailable, runtimeCtx]);
 
   // Mobile: if opened via deep-link / palette to a non-home page, jump into it once.
   React.useEffect(() => {

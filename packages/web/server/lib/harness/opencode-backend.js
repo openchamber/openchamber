@@ -327,6 +327,7 @@ export const createOpenCodeBackendRuntime = (dependencies) => {
           models: true,
           commands: true,
           providers: true,
+          auth: true,
           config: true,
           skills: true,
           shell: true,

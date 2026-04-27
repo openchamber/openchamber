@@ -169,7 +169,7 @@ const readTextFile = async (path: string, directory?: string | null): Promise<st
       queryParams.set('directory', normalizedDirectory);
     }
     const response = await fetch(`${getBaseUrl()}/fs/read?${queryParams.toString()}`, {
-      headers: normalizedDirectory ? { 'x-opencode-directory': normalizedDirectory } : undefined,
+      headers: normalizedDirectory ? { 'x-openchamber-directory': normalizedDirectory, 'x-opencode-directory': normalizedDirectory } : undefined,
     });
     if (!response.ok) {
       return null;

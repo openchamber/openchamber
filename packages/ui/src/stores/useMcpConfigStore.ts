@@ -166,7 +166,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
             try {
               const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
               const response = await fetch(`/api/config/mcp${queryParams}`, {
-                headers: configDirectory ? { 'x-opencode-directory': configDirectory } : undefined,
+                headers: configDirectory ? { 'x-openchamber-directory': configDirectory, 'x-opencode-directory': configDirectory } : undefined,
               });
               if (!response.ok) {
                 throw new Error('Failed to load MCP configs');
@@ -201,7 +201,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
-                ...(configDirectory ? { 'x-opencode-directory': configDirectory } : {}),
+                ...(configDirectory ? { 'x-openchamber-directory': configDirectory, 'x-opencode-directory': configDirectory } : {}),
               },
               body: JSON.stringify(body),
             });
@@ -255,7 +255,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
               method: 'PATCH',
               headers: {
                 'Content-Type': 'application/json',
-                ...(configDirectory ? { 'x-opencode-directory': configDirectory } : {}),
+                ...(configDirectory ? { 'x-openchamber-directory': configDirectory, 'x-opencode-directory': configDirectory } : {}),
               },
               body: JSON.stringify(body),
             });
@@ -306,7 +306,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
             const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
             const response = await fetch(`/api/config/mcp/${encodeURIComponent(name)}${queryParams}`, {
               method: 'DELETE',
-              headers: configDirectory ? { 'x-opencode-directory': configDirectory } : undefined,
+              headers: configDirectory ? { 'x-openchamber-directory': configDirectory, 'x-opencode-directory': configDirectory } : undefined,
             });
 
             const payload = await response.json().catch(() => null);
