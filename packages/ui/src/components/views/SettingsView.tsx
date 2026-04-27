@@ -86,6 +86,11 @@ interface SettingsViewProps {
 
 type BackendCapabilityKey = 'agents' | 'commands' | 'providers' | 'config' | 'skills';
 
+type BackendCapabilityRequirement = {
+  capability: BackendCapabilityKey;
+  backendIds?: string[];
+};
+
 const pageOrder: SettingsPageSlug[] = [
   'appearance',
   'chat',
@@ -120,22 +125,36 @@ function isPageAvailable(page: SettingsPageMeta, ctx: SettingsRuntimeContext): b
   return page.isAvailable(ctx);
 }
 
-function getPageCapability(slug: SettingsPageSlug): BackendCapabilityKey | null {
+function getPageCapability(slug: SettingsPageSlug): BackendCapabilityRequirement | null {
   switch (slug) {
     case 'providers':
-      return 'providers';
+      return { capability: 'providers', backendIds: ['opencode'] };
     case 'agents':
-      return 'agents';
+      return { capability: 'agents', backendIds: ['opencode'] };
     case 'commands':
-      return 'commands';
+      return { capability: 'commands' };
     case 'mcp':
-      return 'config';
+      return { capability: 'config' };
     case 'skills.installed':
     case 'skills.catalog':
-      return 'skills';
+      return { capability: 'skills' };
     default:
       return null;
   }
+}
+
+function hasBackendCapability(
+  backends: ReturnType<typeof useBackendsStore.getState>['backends'],
+  defaultBackendId: string | null,
+  requirement: BackendCapabilityRequirement,
+): boolean {
+  if (requirement.backendIds && defaultBackendId && !requirement.backendIds.includes(defaultBackendId)) {
+    return false;
+  }
+  const candidateBackends = requirement.backendIds && requirement.backendIds.length > 0
+    ? backends.filter((backend) => requirement.backendIds?.includes(backend.id))
+    : backends.filter((backend) => !defaultBackendId || backend.id === defaultBackendId);
+  return candidateBackends.some((backend) => backend.available && Boolean(backend.capabilities[requirement.capability]));
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
@@ -275,6 +294,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   const settingsSlug = resolveSettingsSlug(settingsPageRaw);
   const backends = useBackendsStore((state) => state.backends);
   const backendsLoaded = useBackendsStore((state) => state.isLoaded);
+  const defaultBackendId = useBackendsStore((state) => state.defaultBackendId);
 
   const [mobileStage, setMobileStage] = React.useState<MobileStage>('nav');
   const autoNavSlugRef = React.useRef<string | null>(null);
@@ -295,10 +315,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   const runtimeCtx = React.useMemo(() => buildRuntimeContext(isDesktopApp), [isDesktopApp]);
 
   const visiblePages = React.useMemo(() => {
-    const hasCapability = (capability: BackendCapabilityKey) => {
-      if (!backendsLoaded) return true;
-      return backends.some((backend) => backend.available && Boolean(backend.capabilities[capability]));
-    };
+    const hasCapability = (requirement: BackendCapabilityRequirement) => !backendsLoaded || hasBackendCapability(backends, defaultBackendId, requirement);
 
     return SETTINGS_PAGE_METADATA
       .filter((page) => page.slug !== 'home')
@@ -309,7 +326,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       })
       .filter((page) => !(runtimeCtx.isVSCode && page.slug === 'projects'))
       .filter((page) => !(isMobile && page.slug === 'shortcuts'));
-  }, [backends, backendsLoaded, runtimeCtx, isMobile]);
+  }, [backends, backendsLoaded, defaultBackendId, runtimeCtx, isMobile]);
 
   const sortedFilteredPages = React.useMemo(() => {
     const rank = new Map<SettingsPageSlug, number>(pageOrder.map((s, i) => [s, i]));
@@ -510,7 +527,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       return renderUnavailable();
     }
     const capability = getPageCapability(slug);
-    if (capability && backendsLoaded && !backends.some((backend) => backend.available && Boolean(backend.capabilities[capability]))) {
+    if (capability && backendsLoaded && !hasBackendCapability(backends, defaultBackendId, capability)) {
       return renderUnavailable();
     }
 
@@ -552,7 +569,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       default:
         return <SettingsHome onOpen={openPage} />;
     }
-  }, [backends, backendsLoaded, openChamberSectionBySlug, openPage, renderUnavailable, runtimeCtx]);
+  }, [backends, backendsLoaded, defaultBackendId, openChamberSectionBySlug, openPage, renderUnavailable, runtimeCtx]);
 
   // Mobile: if opened via deep-link / palette to a non-home page, jump into it once.
   React.useEffect(() => {

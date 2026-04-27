@@ -1231,8 +1231,8 @@ export const createCodexBackendRuntime = (dependencies) => {
           commands: true,
           providers: false,
           auth: false,
-          config: false,
-          skills: false,
+          config: true,
+          skills: true,
           shell: false,
         },
         models: modelOptions.map((option) => ({

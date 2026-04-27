@@ -1,7 +1,13 @@
 import type { BridgeContext, BridgeResponse } from './bridge';
+import * as os from 'os';
+import * as path from 'path';
+import { promises as fsPromises } from 'fs';
+import { randomBytes } from 'crypto';
 import { waitForApiUrl } from './opencode-ready';
 // @ts-expect-error Cross-package JS module has no local d.ts in vscode package.
 import * as sharedBackendsModule from '../../web/server/lib/harness/backends.js';
+// @ts-expect-error Cross-package JS module has no local d.ts in vscode package.
+import { createCodexBackendRuntime } from '../../web/server/lib/harness/codex-backend.js';
 
 type BackendDescriptor = {
   id: string;
@@ -77,6 +83,34 @@ type HarnessForwardInput = Omit<ForwardRequestInput, 'deps'>;
 
 type JsonRecord = Record<string, unknown>;
 
+type CodexRuntime = ReturnType<typeof createCodexBackendRuntime>;
+
+let codexRuntime: CodexRuntime | null = null;
+const codexEventSubscribers = new Set<(event: { directory?: string; payload: unknown; eventId?: string }) => void>();
+
+export const subscribeCodexHarnessEvents = (callback: (event: { directory?: string; payload: unknown; eventId?: string }) => void): (() => void) => {
+  codexEventSubscribers.add(callback);
+  return () => codexEventSubscribers.delete(callback);
+};
+
+const getCodexRuntime = (): CodexRuntime => {
+  if (codexRuntime) return codexRuntime;
+  const dataDir = process.env.OPENCHAMBER_DATA_DIR
+    ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
+    : path.join(os.homedir(), '.config', 'openchamber');
+  codexRuntime = createCodexBackendRuntime({
+    crypto: { randomBytes },
+    fsPromises,
+    sessionsFilePath: path.join(dataDir, 'codex-sessions.json'),
+    publishEvent: (event: { directory?: string; payload: unknown; eventId?: string }) => {
+      for (const subscriber of codexEventSubscribers) {
+        subscriber(event);
+      }
+    },
+  });
+  return codexRuntime;
+};
+
 class HarnessRuntimeManager {
   constructor(private readonly deps: ProxyRuntimeDeps) {}
 
@@ -95,6 +129,9 @@ class HarnessRuntimeManager {
     const harnessPath = parsed.pathname.slice('/openchamber/harness'.length) || '/';
     const body = decodeJsonBody(input.bodyBase64);
     const requestedBackendId = getRequestedBackendId(parsed, body);
+    if (requestedBackendId === 'codex') {
+      return this.handleCodex(input.method, harnessPath, parsed, body);
+    }
     if (requestedBackendId !== 'opencode') {
       return this.json(400, { error: `Unsupported backend: ${requestedBackendId}` });
     }
@@ -219,6 +256,96 @@ class HarnessRuntimeManager {
     });
   }
 
+  private async handleCodex(method: string, harnessPath: string, parsed: URL, body: JsonRecord | null): Promise<ApiProxyResponsePayload> {
+    const runtime = getCodexRuntime();
+    const directory = getBodyString(body, 'directory') ?? parsed.searchParams.get('directory') ?? undefined;
+
+    if (method === 'GET' && harnessPath === '/control-surface') {
+      const payload = await runtime.getControlSurface({
+        directory,
+        modelId: parsed.searchParams.get('modelId') ?? undefined,
+      });
+      return this.json(200, payload);
+    }
+
+    if (method === 'GET' && harnessPath === '/sessions') {
+      const limit = parsePositiveNumber(parsed.searchParams.get('limit'));
+      const archived = parsed.searchParams.get('archived') === 'true';
+      const roots = parsed.searchParams.get('roots') === 'false' ? false : undefined;
+      const sessions = await runtime.listSessions({ directory, limit, archived, roots });
+      return this.json(200, Array.isArray(sessions) ? sessions.map((session) => ({ ...session, backendId: 'codex' })) : []);
+    }
+
+    if (method === 'POST' && harnessPath === '/session') {
+      const session = await runtime.createSession({
+        directory,
+        title: getBodyString(body, 'title'),
+        parentID: getBodyString(body, 'parentSessionId') ?? getBodyString(body, 'parentID'),
+      });
+      return this.json(200, { ...session, backendId: 'codex' });
+    }
+
+    const sessionMatch = harnessPath.match(/^\/session\/([^/]+)(?:\/(messages|message|prompt|command|abort|update|fork))?$/);
+    if (!sessionMatch) {
+      return this.json(404, { error: 'Harness route not found' });
+    }
+
+    const sessionID = decodeURIComponent(sessionMatch[1]);
+    const action = sessionMatch[2] || '';
+    if (method === 'GET' && !action) {
+      const session = await runtime.getSession({ sessionID, directory });
+      return session ? this.json(200, { ...session, backendId: 'codex' }) : this.json(404, { error: 'Session not found' });
+    }
+    if (method === 'GET' && action === 'messages') {
+      const messages = await runtime.getMessages({
+        sessionID,
+        directory,
+        limit: parsePositiveNumber(parsed.searchParams.get('limit')),
+        before: parsed.searchParams.get('before') ?? undefined,
+      });
+      return this.json(200, Array.isArray(messages) ? messages : []);
+    }
+    if (method === 'POST' && action === 'message') {
+      await runtime.promptAsync(toCodexPromptInput(sessionID, directory, body));
+      return { status: 204, headers: {}, bodyBase64: '' };
+    }
+    if (method === 'POST' && action === 'prompt') {
+      const payload = await runtime.prompt(toCodexPromptInput(sessionID, directory, body));
+      return this.json(200, payload ?? {});
+    }
+    if (method === 'POST' && action === 'command') {
+      const payload = await runtime.command({
+        ...toCodexPromptInput(sessionID, directory, body),
+        command: getBodyString(body, 'command') ?? getBodyString(body, 'commandId') ?? '',
+        arguments: getBodyString(body, 'arguments') ?? '',
+      });
+      return this.json(200, payload ?? {});
+    }
+    if (method === 'POST' && action === 'abort') {
+      const ok = await runtime.abortSession({ sessionID, directory });
+      return this.json(200, { ok: Boolean(ok) });
+    }
+    if (method === 'POST' && action === 'update') {
+      const session = await runtime.updateSession({
+        sessionID,
+        directory,
+        title: getBodyString(body, 'title'),
+        time: isRecord(body?.time) ? body.time : undefined,
+      });
+      return this.json(200, { ...session, backendId: 'codex' });
+    }
+    if (method === 'POST' && action === 'fork') {
+      const session = await runtime.forkSession({
+        sessionID,
+        directory,
+        messageID: getBodyString(body, 'messageId') ?? getBodyString(body, 'messageID'),
+      });
+      return this.json(200, { ...session, backendId: 'codex' });
+    }
+
+    return this.json(404, { error: 'Harness route not found' });
+  }
+
   private async fetchJson(apiUrl: string, path: string, headers: Record<string, string>): Promise<unknown> {
     const response = await fetch(new URL(path.replace(/^\/+/, ''), `${apiUrl.replace(/\/+$/, '')}/`).toString(), { headers });
     return response.json().catch(() => null);
@@ -270,12 +397,37 @@ const getRunConfigOption = (runConfig: unknown, optionId: string): string | unde
   return isRecord(option) && typeof option.value === 'string' ? option.value : undefined;
 };
 
+const getBodyString = (body: JsonRecord | null | undefined, key: string): string | undefined => {
+  const value = body?.[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+};
+
+const parsePositiveNumber = (value: unknown): number | undefined => {
+  const parsed = typeof value === 'string' ? Number(value) : typeof value === 'number' ? value : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+};
+
 const toRuntimeModel = (runConfig: unknown): string | undefined => {
   if (!isRecord(runConfig) || !isRecord(runConfig.model)) return undefined;
   const providerId = typeof runConfig.model.providerId === 'string' ? runConfig.model.providerId : undefined;
   const modelId = typeof runConfig.model.modelId === 'string' ? runConfig.model.modelId : undefined;
   if (providerId && modelId) return `${providerId}/${modelId}`;
   return modelId;
+};
+
+const toCodexPromptInput = (sessionID: string, directory: string | undefined, body: JsonRecord | null) => {
+  const runConfig = body?.runConfig;
+  return {
+    sessionID,
+    directory,
+    messageID: getBodyString(body, 'messageId') ?? getBodyString(body, 'messageID'),
+    model: body?.model ?? toRuntimeModel(runConfig),
+    agent: getBodyString(body, 'agent') ?? (isRecord(runConfig) ? getBodyString(runConfig, 'interactionMode') : undefined),
+    variant: getBodyString(body, 'variant') ?? getRunConfigOption(runConfig, 'variant') ?? getRunConfigOption(runConfig, 'effort'),
+    format: body?.format,
+    parts: Array.isArray(body?.parts) ? body.parts : undefined,
+    sandboxOverride: getBodyString(body, 'sandboxOverride'),
+  };
 };
 
 const toOpenCodeMessageBody = (bodyBase64: string | undefined): string | undefined => {
