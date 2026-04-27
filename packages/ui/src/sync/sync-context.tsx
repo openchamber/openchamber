@@ -7,6 +7,8 @@ import { useStore } from "zustand"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
 import { createEventPipeline } from "./event-pipeline"
 import { reduceGlobalEvent, applyGlobalProject, applyDirectoryEvent } from "./event-reducer"
+import type { DirectorySyncEvent } from "./event-reducer"
+import { fromOpenCodeEvent } from "./adapters/opencode"
 import { useGlobalSyncStore, type GlobalSyncStore } from "./global-sync-store"
 import { ChildStoreManager, type DirectoryStore } from "./child-store"
 import {
@@ -1176,11 +1178,11 @@ function handleEvent(
   // so Zustand selectors skip re-renders for unrelated subscribers.
   const current = store.getState()
   const draft: State = { ...current }
+  const syncEvent = fromOpenCodeEvent(payload) ?? payload
 
-  switch (payload.type) {
-    case "session.created":
-    case "session.updated":
-    case "session.deleted":
+  switch (syncEvent.type) {
+    case "session.upserted":
+    case "session.removed":
       draft.session = [...current.session]
       draft.permission = { ...current.permission }
       draft.todo = { ...current.todo }
@@ -1189,24 +1191,22 @@ function handleEvent(
     case "session.diff":
       draft.session_diff = { ...current.session_diff }
       break
-    case "session.status":
-    case "session.idle":
-    case "session.error":
+    case "session.status.updated":
       draft.session_status = { ...(current.session_status ?? {}) }
       break
     case "todo.updated":
       draft.todo = { ...current.todo }
       break
-    case "message.updated":
+    case "message.upserted":
       draft.message = { ...current.message }
       break
     case "message.removed":
       draft.message = { ...current.message }
       draft.part = { ...current.part }
       break
-    case "message.part.updated":
-    case "message.part.removed":
-    case "message.part.delta":
+    case "part.upserted":
+    case "part.removed":
+    case "part.delta":
       draft.part = { ...current.part }
       break
     case "vcs.branch.updated":
@@ -1227,7 +1227,7 @@ function handleEvent(
       break
   }
 
-  if (applyDirectoryEvent(draft, payload, {
+  if (applyDirectoryEvent(draft, syncEvent as DirectorySyncEvent, {
     onSetSessionTodo: (sessionID, todos) => {
       useTodosPersistStore.getState().setSessionTodos(sessionID, todos)
     },
@@ -1235,7 +1235,7 @@ function handleEvent(
     store.setState(draft)
     const sessionID = getSessionIdFromPayload(payload) ?? undefined
     const messageID = getMessageIdFromPayload(payload) ?? undefined
-    syncDebug.dispatch.eventApplied(payload.type, sessionID, messageID)
+    syncDebug.dispatch.eventApplied(syncEvent.type, sessionID, messageID)
 
     // Parts-gap recovery on message.updated: if the message was inserted or
     // replaced but draft.part[messageID] is empty, the parts were lost or
@@ -1250,7 +1250,7 @@ function handleEvent(
   } else {
     const sessionID = getSessionIdFromPayload(payload) ?? undefined
     const messageID = getMessageIdFromPayload(payload) ?? undefined
-    syncDebug.dispatch.eventNoChange(payload.type, sessionID, messageID)
+    syncDebug.dispatch.eventNoChange(syncEvent.type, sessionID, messageID)
 
     // Parts-gap recovery: if a part event was dropped because the parts array
     // was missing (message not yet inserted or parts lost), trigger a repair

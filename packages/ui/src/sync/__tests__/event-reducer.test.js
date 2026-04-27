@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'bun:test'
 import { applyDirectoryEvent } from '../event-reducer'
+import { fromOpenCodeEvent } from '../adapters/opencode'
 import { INITIAL_STATE } from '../types'
+
+const applyOpenCodeEvent = (state, event) => {
+  const syncEvent = fromOpenCodeEvent(event)
+  if (!syncEvent) return false
+  return applyDirectoryEvent(state, syncEvent)
+}
 
 describe('applyDirectoryEvent', () => {
   it('does not duplicate overlapping delta text after a newer part.updated replaces an older one', () => {
@@ -8,7 +15,7 @@ describe('applyDirectoryEvent', () => {
     const messageID = 'msg-1'
     const partID = 'part-1'
 
-    applyDirectoryEvent(state, {
+    applyOpenCodeEvent(state, {
       type: 'message.part.updated',
       properties: {
         part: {
@@ -20,7 +27,7 @@ describe('applyDirectoryEvent', () => {
       },
     })
 
-    applyDirectoryEvent(state, {
+    applyOpenCodeEvent(state, {
       type: 'message.part.updated',
       properties: {
         part: {
@@ -32,7 +39,7 @@ describe('applyDirectoryEvent', () => {
       },
     })
 
-    applyDirectoryEvent(state, {
+    applyOpenCodeEvent(state, {
       type: 'message.part.delta',
       properties: {
         messageID,
@@ -53,7 +60,7 @@ describe('applyDirectoryEvent', () => {
     const messageID = 'msg-2'
     const partID = 'part-2'
 
-    applyDirectoryEvent(state, {
+    applyOpenCodeEvent(state, {
       type: 'message.part.updated',
       properties: {
         part: {
@@ -65,7 +72,7 @@ describe('applyDirectoryEvent', () => {
       },
     })
 
-    applyDirectoryEvent(state, {
+    applyOpenCodeEvent(state, {
       type: 'message.part.updated',
       properties: {
         part: {
@@ -77,7 +84,7 @@ describe('applyDirectoryEvent', () => {
       },
     })
 
-    applyDirectoryEvent(state, {
+    applyOpenCodeEvent(state, {
       type: 'message.part.delta',
       properties: {
         messageID,
@@ -97,7 +104,7 @@ describe('applyDirectoryEvent', () => {
     const messageID = 'msg-3'
     const partID = 'part-3'
 
-    applyDirectoryEvent(state, {
+    applyOpenCodeEvent(state, {
       type: 'message.part.updated',
       properties: {
         part: {
@@ -109,7 +116,7 @@ describe('applyDirectoryEvent', () => {
       },
     })
 
-    applyDirectoryEvent(state, {
+    applyOpenCodeEvent(state, {
       type: 'message.part.delta',
       properties: {
         messageID,
@@ -127,7 +134,7 @@ describe('applyDirectoryEvent', () => {
     const messageID = 'msg-4'
     const partID = 'part-4'
 
-    applyDirectoryEvent(state, {
+    applyOpenCodeEvent(state, {
       type: 'message.part.updated',
       properties: {
         part: {
@@ -139,7 +146,7 @@ describe('applyDirectoryEvent', () => {
       },
     })
 
-    applyDirectoryEvent(state, {
+    applyOpenCodeEvent(state, {
       type: 'message.part.delta',
       properties: {
         messageID,
@@ -157,7 +164,7 @@ describe('applyDirectoryEvent', () => {
     const messageID = 'msg-5'
     const partID = 'part-5'
 
-    applyDirectoryEvent(state, {
+    applyOpenCodeEvent(state, {
       type: 'message.part.updated',
       properties: {
         part: {
@@ -176,7 +183,7 @@ describe('applyDirectoryEvent', () => {
       },
     })
 
-    applyDirectoryEvent(state, {
+    applyOpenCodeEvent(state, {
       type: 'message.part.updated',
       properties: {
         part: {

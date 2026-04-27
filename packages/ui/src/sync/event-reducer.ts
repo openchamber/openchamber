@@ -1,6 +1,4 @@
 import type {
-  Event,
-  Message,
   Part,
   PermissionRequest,
   Project,
@@ -9,11 +7,13 @@ import type {
   SessionStatus,
   Todo,
 } from "@opencode-ai/sdk/v2/client"
+import type { ChatSyncEvent } from "@openchamber/harness-contracts"
 import { Binary } from "./binary"
 import type { FileDiff, GlobalState, State } from "./types"
 import { dropSessionCaches } from "./session-cache"
 import { stripSessionDiffSnapshots } from "./sanitize"
 import { syncDebug } from "./debug"
+import { toOpenCodeMessageCompat, toOpenCodePartCompat, toOpenCodeSessionCompat } from "./adapters/opencode"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 const DELTA_OVERLAP_FIELDS = ["text", "output"] as const
@@ -101,7 +101,12 @@ export type GlobalEventResult = {
   project: Project
 } | null
 
-export function reduceGlobalEvent(event: Event): GlobalEventResult {
+export type GlobalEvent = {
+  type: "global.disposed" | "server.connected" | "project.updated" | string
+  properties?: unknown
+}
+
+export function reduceGlobalEvent(event: GlobalEvent): GlobalEventResult {
   if (event.type === "global.disposed" || event.type === "server.connected") {
     return { type: "refresh" }
   }
@@ -110,6 +115,23 @@ export function reduceGlobalEvent(event: Event): GlobalEventResult {
   }
   return null
 }
+
+export type LegacyDirectoryEvent = {
+  type:
+    | "server.instance.disposed"
+    | "session.diff"
+    | "todo.updated"
+    | "vcs.branch.updated"
+    | "permission.asked"
+    | "permission.replied"
+    | "question.asked"
+    | "question.replied"
+    | "question.rejected"
+    | "lsp.updated"
+  properties?: unknown
+}
+
+export type DirectorySyncEvent = ChatSyncEvent | LegacyDirectoryEvent
 
 export function applyGlobalProject(state: GlobalState, project: Project): GlobalState {
   const projects = [...state.projects]
@@ -129,7 +151,7 @@ export function applyGlobalProject(state: GlobalState, project: Project): Global
 
 export function applyDirectoryEvent(
   draft: State,
-  event: Event,
+  event: DirectorySyncEvent,
   callbacks?: {
     onRefresh?: (directory: string) => void
     onLoadLsp?: () => void
@@ -142,8 +164,8 @@ export function applyDirectoryEvent(
       return false
     }
 
-    case "session.created": {
-      const info = stripSessionDiffSnapshots((event.properties as { info: Session }).info)
+    case "session.upserted": {
+      const info = stripSessionDiffSnapshots(toOpenCodeSessionCompat(event.session))
       const sessions = draft.session
       const result = Binary.search(sessions, info.id, (s) => s.id)
       if (result.found) {
@@ -156,29 +178,8 @@ export function applyDirectoryEvent(
       return true
     }
 
-    case "session.updated": {
-      const info = stripSessionDiffSnapshots((event.properties as { info: Session }).info)
-      const sessions = draft.session
-      const result = Binary.search(sessions, info.id, (s) => s.id)
-
-      if (info.time.archived) {
-        if (result.found) sessions.splice(result.index, 1)
-        cleanupSessionCaches(draft, info.id, callbacks?.onSetSessionTodo)
-        if (!info.parentID) draft.sessionTotal = Math.max(0, draft.sessionTotal - 1)
-        return true
-      }
-
-      if (result.found) {
-        sessions[result.index] = info
-      } else {
-        sessions.splice(result.index, 0, info)
-        trimSessions(draft)
-      }
-      return true
-    }
-
-    case "session.deleted": {
-      const info = (event.properties as { info: Session }).info
+    case "session.removed": {
+      const info = { id: event.sessionId } as Session
       const sessions = draft.session
       const result = Binary.search(sessions, info.id, (s) => s.id)
       if (result.found) sessions.splice(result.index, 1)
@@ -200,26 +201,14 @@ export function applyDirectoryEvent(
       return true
     }
 
-    case "session.status": {
-      const props = event.properties as { sessionID: string; status: SessionStatus }
-      draft.session_status[props.sessionID] = props.status
+    case "session.status.updated": {
+      const rawStatus = event.status.raw
+      draft.session_status[event.sessionId] = isObject(rawStatus) ? rawStatus as SessionStatus : { type: event.status.status === "running" ? "busy" : "idle" } as SessionStatus
       return true
     }
 
-    case "session.idle": {
-      const props = event.properties as { sessionID: string }
-      draft.session_status[props.sessionID] = { type: "idle" }
-      return true
-    }
-
-    case "session.error": {
-      const props = event.properties as { sessionID: string }
-      draft.session_status[props.sessionID] = { type: "idle" }
-      return true
-    }
-
-    case "message.updated": {
-      const info = (event.properties as { info: Message }).info
+    case "message.upserted": {
+      const info = toOpenCodeMessageCompat(event.message)
       const messages = draft.message[info.sessionID]
       if (!messages) {
         draft.message[info.sessionID] = [info]
@@ -248,22 +237,21 @@ export function applyDirectoryEvent(
     }
 
     case "message.removed": {
-      const props = event.properties as { sessionID: string; messageID: string }
-      const messages = draft.message[props.sessionID]
+      const messages = draft.message[event.sessionId]
       if (messages) {
         const next = [...messages]
-        const result = Binary.search(next, props.messageID, (m) => m.id)
+        const result = Binary.search(next, event.messageId, (m) => m.id)
         if (result.found) {
           next.splice(result.index, 1)
-          draft.message[props.sessionID] = next
+          draft.message[event.sessionId] = next
         }
       }
-      delete draft.part[props.messageID]
+      delete draft.part[event.messageId]
       return true
     }
 
-    case "message.part.updated": {
-      const part = (event.properties as { part: Part }).part
+    case "part.upserted": {
+      const part = toOpenCodePartCompat(event.part)
       if (SKIP_PARTS.has(part.type)) {
         syncDebug.reducer.partSkipped((part as { messageID: string }).messageID, part.id, part.type)
         return false
@@ -305,53 +293,46 @@ export function applyDirectoryEvent(
       return true
     }
 
-    case "message.part.removed": {
-      const props = event.properties as { messageID: string; partID: string }
-      const parts = draft.part[props.messageID]
+    case "part.removed": {
+      const parts = draft.part[event.messageId]
       if (!parts) return false
-      const result = Binary.search(parts, props.partID, (p) => p.id)
+      const result = Binary.search(parts, event.partId, (p) => p.id)
       if (result.found) {
         const next = [...parts]
         next.splice(result.index, 1)
         if (next.length === 0) {
-          delete draft.part[props.messageID]
+          delete draft.part[event.messageId]
         } else {
-          draft.part[props.messageID] = next
+          draft.part[event.messageId] = next
         }
         return true
       }
       return false
     }
 
-    case "message.part.delta": {
-      const props = event.properties as {
-        messageID: string
-        partID: string
-        field: string
-        delta: string
-      }
-      const parts = draft.part[props.messageID]
+    case "part.delta": {
+      const parts = draft.part[event.messageId]
       if (!parts) {
-        syncDebug.reducer.partDeltaNoParts(props.messageID, props.partID)
+        syncDebug.reducer.partDeltaNoParts(event.messageId, event.partId)
         return false
       }
-      const result = Binary.search(parts, props.partID, (p) => p.id)
+      const result = Binary.search(parts, event.partId, (p) => p.id)
       if (!result.found) {
-        syncDebug.reducer.partDeltaNotFound(props.messageID, props.partID)
+        syncDebug.reducer.partDeltaNotFound(event.messageId, event.partId)
         return false
       }
       const existing = parts[result.index] as Record<string, unknown>
-      const existingValue = existing[props.field] as string | undefined
+      const existingValue = existing[event.field] as string | undefined
       const dedupeFields = (existing as DedupeMetadata).__dedupeNextDeltaFields ?? []
-      const shouldDedupe = dedupeFields.includes(props.field)
+      const shouldDedupe = dedupeFields.includes(event.field)
       // Create new Part object + new array so React detects the change
       const next = [...parts]
       next[result.index] = {
         ...existing,
-        [props.field]: shouldDedupe ? appendNonOverlappingDelta(existingValue, props.delta) : (existingValue ?? "") + props.delta,
-        __dedupeNextDeltaFields: dedupeFields.filter((field) => field !== props.field),
+        [event.field]: shouldDedupe ? appendNonOverlappingDelta(existingValue, event.delta) : (existingValue ?? "") + event.delta,
+        __dedupeNextDeltaFields: dedupeFields.filter((field) => field !== event.field),
       } as unknown as Part
-      draft.part[props.messageID] = next
+      draft.part[event.messageId] = next
       return true
     }
 
@@ -451,4 +432,8 @@ function cleanupSessionCaches(
   if (!sessionID) return
   setSessionTodo?.(sessionID, undefined)
   dropSessionCaches(draft, [sessionID])
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
 }

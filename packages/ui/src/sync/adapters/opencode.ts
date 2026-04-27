@@ -5,6 +5,7 @@ import type {
   HarnessMessageAttribution,
   HarnessPart,
   HarnessProviderOptionSelection,
+  HarnessRuntimeEvent,
   HarnessRunConfig,
   HarnessSession,
 } from "@openchamber/harness-contracts"
@@ -242,36 +243,63 @@ export function fromOpenCodeRunConfig(input: {
 }
 
 export function fromOpenCodeEvent(event: Event): ChatSyncEvent | null {
+  const runtimeEvent = fromOpenCodeRuntimeEvent(event)
+  return runtimeEvent ? projectHarnessRuntimeEvent(runtimeEvent) : null
+}
+
+export function fromOpenCodeRuntimeEvent(event: Event): HarnessRuntimeEvent | null {
+  const eventId = getString(event, "id") ?? `${event.type}:${Date.now()}`
+  const sessionId = getSessionIdFromEvent(event)
+
   switch (event.type) {
     case "session.created":
     case "session.updated": {
       const info = getProperty<Session>(event, "info")
-      return info ? { type: "session.upserted", session: fromOpenCodeSession(info) } : null
+      if (info && event.type === "session.updated" && (info as { time?: { archived?: unknown } }).time?.archived) {
+        return createRuntimeEvent(event, eventId, info.id, "session.exited", { sessionId: info.id })
+      }
+      return info ? createRuntimeEvent(event, eventId, info.id, "thread.metadata.updated", fromOpenCodeSession(info)) : null
     }
     case "session.deleted": {
       const info = getProperty<Session>(event, "info")
-      return info ? { type: "session.removed", sessionId: info.id } : null
+      return info ? createRuntimeEvent(event, eventId, info.id, "session.exited", { sessionId: info.id }) : null
+    }
+    case "session.status": {
+      const props = getProperties(event)
+      const id = getString(props, "sessionID")
+      return id ? createRuntimeEvent(event, eventId, id, "session.state.changed", {
+        sessionId: id,
+        status: normalizeOpenCodeSessionStatus(props.status),
+        rawStatus: props.status,
+      }) : null
+    }
+    case "session.idle":
+    case "session.error": {
+      return sessionId ? createRuntimeEvent(event, eventId, sessionId, "session.state.changed", {
+        sessionId,
+        status: event.type === "session.error" ? "error" : "idle",
+      }) : null
     }
     case "message.updated": {
       const info = getProperty<Message>(event, "info")
-      return info ? { type: "message.upserted", message: fromOpenCodeMessage(info) } : null
+      return info ? createRuntimeEvent(event, eventId, (info as { sessionID?: string }).sessionID ?? "", "item.updated", fromOpenCodeMessage(info)) : null
     }
     case "message.removed": {
       const props = getProperties(event)
       const sessionId = getString(props, "sessionID")
       const messageId = getString(props, "messageID")
-      return sessionId && messageId ? { type: "message.removed", sessionId, messageId } : null
+      return sessionId && messageId ? createRuntimeEvent(event, eventId, sessionId, "item.completed", { removed: true, sessionId, messageId }) : null
     }
     case "message.part.updated": {
       const part = getProperty<Part>(event, "part")
-      return part ? { type: "part.upserted", part: fromOpenCodePart(part) } : null
+      return part ? createRuntimeEvent(event, eventId, (part as { sessionID?: string }).sessionID ?? "", "item.updated", fromOpenCodePart(part)) : null
     }
     case "message.part.removed": {
       const props = getProperties(event)
       const sessionId = getString(props, "sessionID") ?? ""
       const messageId = getString(props, "messageID")
       const partId = getString(props, "partID")
-      return messageId && partId ? { type: "part.removed", sessionId, messageId, partId } : null
+      return messageId && partId ? createRuntimeEvent(event, eventId, sessionId, "item.completed", { removed: true, sessionId, messageId, partId }) : null
     }
     case "message.part.delta": {
       const props = getProperties(event)
@@ -280,10 +308,83 @@ export function fromOpenCodeEvent(event: Event): ChatSyncEvent | null {
       const field = getString(props, "field")
       const delta = getString(props, "delta")
       if (!messageId || !partId || !field || delta === undefined) return null
-      return { type: "part.delta", sessionId: getString(props, "sessionID") ?? "", messageId, partId, field, delta }
+      return createRuntimeEvent(event, eventId, getString(props, "sessionID") ?? "", "content.delta", {
+        sessionId: getString(props, "sessionID") ?? "",
+        messageId,
+        partId,
+        field,
+        delta,
+      })
     }
     default:
       return null
+  }
+}
+
+export function projectHarnessRuntimeEvent(event: HarnessRuntimeEvent): ChatSyncEvent | null {
+  switch (event.type) {
+    case "thread.metadata.updated": {
+      return isHarnessSessionPayload(event.payload) ? { type: "session.upserted", session: event.payload } : null
+    }
+    case "session.exited": {
+      const sessionId = getString(event.payload, "sessionId")
+      return sessionId ? { type: "session.removed", sessionId } : null
+    }
+    case "session.state.changed": {
+      const sessionId = getString(event.payload, "sessionId") ?? event.sessionId
+      const status = getString(event.payload, "status")
+      const rawStatus = isObject(event.payload) ? event.payload.rawStatus : undefined
+      return sessionId && status
+        ? { type: "session.status.updated", sessionId, status: { sessionId, backendId: event.backendId, status: status === "error" ? "error" : status === "running" ? "running" : "idle", raw: rawStatus } }
+        : null
+    }
+    case "item.updated": {
+      if (isHarnessMessagePayload(event.payload)) return { type: "message.upserted", message: event.payload }
+      if (isHarnessPartPayload(event.payload)) return { type: "part.upserted", part: event.payload }
+      return null
+    }
+    case "item.completed": {
+      const sessionId = getString(event.payload, "sessionId") ?? event.sessionId
+      const messageId = getString(event.payload, "messageId")
+      const partId = getString(event.payload, "partId")
+      if (messageId && partId) return { type: "part.removed", sessionId, messageId, partId }
+      if (messageId) return { type: "message.removed", sessionId, messageId }
+      return null
+    }
+    case "content.delta": {
+      const sessionId = getString(event.payload, "sessionId") ?? event.sessionId
+      const messageId = getString(event.payload, "messageId")
+      const partId = getString(event.payload, "partId")
+      const field = getString(event.payload, "field")
+      const delta = getString(event.payload, "delta")
+      return messageId && partId && field && delta !== undefined
+        ? { type: "part.delta", sessionId, messageId, partId, field, delta }
+        : null
+    }
+    default:
+      return null
+  }
+}
+
+function createRuntimeEvent(
+  event: Event,
+  eventId: string,
+  sessionId: string,
+  type: HarnessRuntimeEvent["type"],
+  payload: unknown,
+): HarnessRuntimeEvent {
+  return {
+    eventId,
+    backendId: OPENCODE_BACKEND_ID,
+    sessionId,
+    createdAt: new Date().toISOString(),
+    type,
+    payload,
+    raw: {
+      source: OPENCODE_BACKEND_ID,
+      messageType: event.type,
+      payload: event,
+    },
   }
 }
 
@@ -302,6 +403,38 @@ function getMessageAttribution(message: OpenCodeMessageLike): HarnessMessageAttr
     modeId,
     effortId,
   }
+}
+
+function getSessionIdFromEvent(event: Event): string {
+  const props = getProperties(event)
+  const direct = getString(props, "sessionID")
+  if (direct) return direct
+  const info = props.info
+  if (isObject(info)) return getString(info, "id") ?? getString(info, "sessionID") ?? ""
+  const part = props.part
+  if (isObject(part)) return getString(part, "sessionID") ?? ""
+  return ""
+}
+
+function normalizeOpenCodeSessionStatus(status: unknown): string {
+  if (typeof status === "string") return status
+  if (!isObject(status)) return "idle"
+  const type = status.type
+  if (type === "busy" || type === "running") return "running"
+  if (type === "error") return "error"
+  return "idle"
+}
+
+function isHarnessSessionPayload(value: unknown): value is HarnessSession {
+  return isObject(value) && typeof value.id === "string" && typeof value.backendId === "string" && typeof value.title === "string"
+}
+
+function isHarnessMessagePayload(value: unknown): value is HarnessMessage {
+  return isObject(value) && typeof value.id === "string" && typeof value.sessionId === "string" && typeof value.role === "string"
+}
+
+function isHarnessPartPayload(value: unknown): value is HarnessPart {
+  return isObject(value) && typeof value.id === "string" && typeof value.messageId === "string" && typeof value.kind === "string"
 }
 
 function getMessageRole(role: unknown) {

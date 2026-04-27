@@ -181,4 +181,26 @@ describe("OpenCode sync adapter", () => {
       delta: "hi",
     })
   })
+
+  test("preserves raw OpenCode session status through projection", () => {
+    const status = { type: "busy" }
+    const event = {
+      type: "session.status",
+      properties: {
+        sessionID: "ses_1",
+        status,
+      },
+    } as Event
+
+    expect(fromOpenCodeEvent(event)).toEqual({
+      type: "session.status.updated",
+      sessionId: "ses_1",
+      status: {
+        sessionId: "ses_1",
+        backendId: "opencode",
+        status: "running",
+        raw: status,
+      },
+    })
+  })
 })
