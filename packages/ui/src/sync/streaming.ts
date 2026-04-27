@@ -7,7 +7,8 @@
  */
 
 import { create } from "zustand"
-import type { Message, SessionStatus } from "@opencode-ai/sdk/v2/client"
+import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
+import type { HarnessMessage } from "@openchamber/harness-contracts"
 import type { State } from "./types"
 
 export type StreamPhase = "streaming" | "cooldown" | "completed"
@@ -62,7 +63,7 @@ export function updateStreamingState(state: State) {
     if (!messages || messages.length === 0) continue
 
     // Find the last assistant message — that's the one streaming
-    let streamingMsg: Message | null = null
+    let streamingMsg: HarnessMessage | null = null
     for (let i = messages.length - 1; i >= 0; i--) {
       if (messages[i].role === "assistant") {
         streamingMsg = messages[i]

@@ -1,19 +1,18 @@
 import type {
-  Message,
-  Part,
   PermissionRequest,
   QuestionRequest,
   SessionStatus,
   Todo,
 } from "@opencode-ai/sdk/v2/client"
+import type { HarnessMessage, HarnessPart } from "@openchamber/harness-contracts"
 import type { FileDiff } from "./types"
 
 type SessionCache = {
   session_status: Record<string, SessionStatus | undefined>
   session_diff: Record<string, FileDiff[] | undefined>
   todo: Record<string, Todo[] | undefined>
-  message: Record<string, Message[] | undefined>
-  part: Record<string, Part[] | undefined>
+  message: Record<string, HarnessMessage[] | undefined>
+  part: Record<string, HarnessPart[] | undefined>
   permission: Record<string, PermissionRequest[] | undefined>
   question: Record<string, QuestionRequest[] | undefined>
 }
@@ -24,7 +23,7 @@ export function dropSessionCaches(store: SessionCache, sessionIDs: Iterable<stri
 
   for (const key of Object.keys(store.part ?? {})) {
     const parts = store.part[key]
-    if (!parts?.some((part) => stale.has((part as { sessionID?: string })?.sessionID ?? "")))
+    if (!parts?.some((part) => stale.has(part.sessionId)))
       continue
     delete store.part[key]
   }

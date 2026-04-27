@@ -2,18 +2,23 @@
 import React, { createContext, useContext, useEffect, useRef, useCallback, useMemo } from "react"
 import type { Event, Message, Part } from "@opencode-ai/sdk/v2/client"
 import type { Session } from "@opencode-ai/sdk/v2"
+import type { HarnessMessage, HarnessPart } from "@openchamber/harness-contracts"
 import type { StoreApi } from "zustand"
 import { useStore } from "zustand"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
 import { createEventPipeline } from "./event-pipeline"
 import { reduceGlobalEvent, applyGlobalProject, applyDirectoryEvent } from "./event-reducer"
 import type { DirectorySyncEvent } from "./event-reducer"
-import { fromOpenCodeEvent } from "./adapters/opencode"
+import { fromOpenCodeEvent, fromOpenCodeMessage, fromOpenCodePart, fromOpenCodeSession } from "./adapters/opencode"
 import {
   getOpenCodeCompatibleMessages,
   getOpenCodeCompatibleParts,
   getOpenCodeCompatibleSession,
   getOpenCodeCompatibleSessions,
+  getCompatibleSessionDirectory,
+  getCompatibleSessionParentId,
+  getCompatibleSessionProjectWorktree,
+  getCompatibleSessionShareUrl,
 } from "./compat"
 import { useGlobalSyncStore, type GlobalSyncStore } from "./global-sync-store"
 import { ChildStoreManager, type DirectoryStore } from "./child-store"
@@ -142,10 +147,10 @@ const requestSignature = (items: Array<{ id: string }> | undefined): string => {
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 
-const partRepairSignature = (part: Part): string => JSON.stringify(part)
+const partRepairSignature = (part: HarnessPart): string => JSON.stringify(part)
 const syncSnapshotSignature = (value: unknown): string => JSON.stringify(value)
 
-function haveEquivalentPartSnapshots(left: Part[] | undefined, right: Part[]): boolean {
+function haveEquivalentPartSnapshots(left: HarnessPart[] | undefined, right: HarnessPart[]): boolean {
   if (!left) {
     return right.length === 0
   }
@@ -171,7 +176,7 @@ function haveEquivalentPartSnapshots(left: Part[] | undefined, right: Part[]): b
   return true
 }
 
-function haveEquivalentMessageSnapshots(left: Message[] | undefined, right: Message[]): boolean {
+function haveEquivalentMessageSnapshots(left: HarnessMessage[] | undefined, right: HarnessMessage[]): boolean {
   if (!left) {
     return right.length === 0
   }
@@ -262,7 +267,8 @@ async function repairSessionParts(
       if (!messageId) continue
       const newParts = (record.parts ?? [])
         .filter((part: Part) => !!part?.id && !RECONNECT_SKIP_PARTS.has(part.type))
-        .sort((a: Part, b: Part) => cmp(a.id, b.id))
+        .map((part: Part) => fromOpenCodePart(part))
+        .sort((a, b) => cmp(a.id, b.id))
 
       const existing = nextPartState[messageId]
       // Repair when parts are missing, truncated, or stale-but-same-length.
@@ -463,7 +469,7 @@ const setIndexedSessionMessages = (
   routingIndex: EventRoutingIndex,
   sessionID: string,
   directory: string,
-  messages: Message[],
+  messages: Array<{ id: string }>,
 ) => {
   if (!sessionID) {
     return
@@ -776,10 +782,10 @@ async function resyncDirectoryAfterReconnect(
     const records = messageResponse?.data
     if (!session || !records) return
 
-    const nextSession = stripSessionDiffSnapshots(session)
+    const nextSession = fromOpenCodeSession(stripSessionDiffSnapshots(session))
     const nextMessages = records
       .filter((record) => !!record?.info?.id)
-      .map((record) => stripMessageDiffSnapshots(record.info))
+      .map((record) => fromOpenCodeMessage(stripMessageDiffSnapshots(record.info)))
       .sort((a, b) => cmp(a.id, b.id))
 
     store.setState((state: DirectoryStore) => {
@@ -798,7 +804,7 @@ async function resyncDirectoryAfterReconnect(
         sessions = [...state.session]
         sessions.push(nextSession)
         sessions.sort((a, b) => cmp(a.id, b.id))
-        if (!nextSession.parentID) sessionTotal += 1
+        if (!nextSession.parentId) sessionTotal += 1
         sessionChanged = true
       }
 
@@ -812,6 +818,7 @@ async function resyncDirectoryAfterReconnect(
         if (!messageId) continue
         const nextParts = (record.parts ?? [])
           .filter((part) => !!part?.id && !RECONNECT_SKIP_PARTS.has(part.type))
+          .map((part) => fromOpenCodePart(part))
           .sort((a, b) => cmp(a.id, b.id))
         if (!haveEquivalentPartSnapshots(state.part[messageId], nextParts)) {
           if (!partsChanged) {
@@ -1146,7 +1153,7 @@ function handleEvent(
     // Skip subtask sessions — only top-level sessions generate notifications
     const storeState = store.getState()
     const session = storeState.session.find((s) => s.id === sessionID)
-    if (session && (session as { parentID?: string }).parentID) {
+    if (session && getCompatibleSessionParentId(session)) {
       // subtask — skip notification
     } else if (sessionID) {
       appendNotification({
@@ -1170,9 +1177,7 @@ function handleEvent(
     if (idleSessionId && resolvedDirectory && resolvedDirectory !== "global") {
       const sessionState = store.getState()
       const idleSession = sessionState.session.find((s) => s.id === idleSessionId)
-      const parentID = idleSession
-        ? (idleSession as Session & { parentID?: string | null }).parentID
-        : null
+      const parentID = idleSession ? idleSession.parentId : null
       if (parentID) {
         enqueuePartsRepair(resolvedDirectory, parentID, childStores)
       }
@@ -1349,6 +1354,7 @@ export function SyncProvider(props: {
               }
               const sessions = (result.data ?? [])
                 .filter((s) => !!s?.id)
+                .map((session) => fromOpenCodeSession(stripSessionDiffSnapshots(session)))
                 .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
               // Race guard: if the list came back empty but event pipeline
               // already populated the store, don't clobber. OpenCode can
@@ -1614,10 +1620,10 @@ export function useSessions(directory?: string) {
 }
 
 const getSidebarSessionSignature = (session: Session, stableUpdatedAt: number): string => {
-  const directory = (session as Session & { directory?: string | null }).directory ?? ''
-  const parentID = (session as Session & { parentID?: string | null }).parentID ?? ''
-  const projectWorktree = (session as Session & { project?: { worktree?: string | null } | null }).project?.worktree ?? ''
-  const shared = session.share?.url ?? ''
+  const directory = getCompatibleSessionDirectory(session) ?? ''
+  const parentID = getCompatibleSessionParentId(session) ?? ''
+  const projectWorktree = getCompatibleSessionProjectWorktree(session) ?? ''
+  const shared = getCompatibleSessionShareUrl(session) ?? ''
   return [
     session.id,
     session.title ?? '',
@@ -1996,17 +2002,18 @@ export function useEnsureSessionMessages(sessionID: string, directory?: string) 
         if (records.length === 0) return
 
         const nextMessages = records
-          .map((record: { info: Message }) => stripMessageDiffSnapshots(record.info))
-          .filter((m: Message | null): m is Message => m !== null)
-          .sort((a: Message, b: Message) => cmp(a.id, b.id))
+          .map((record: { info: Message }) => fromOpenCodeMessage(stripMessageDiffSnapshots(record.info)))
+          .filter((m: HarnessMessage | null): m is HarnessMessage => m !== null)
+          .sort((a, b) => cmp(a.id, b.id))
 
-        const nextPartState: Record<string, Part[]> = {}
+        const nextPartState: Record<string, HarnessPart[]> = {}
         for (const record of records) {
           const messageId = record?.info?.id
           if (!messageId) continue
           nextPartState[messageId] = (record.parts ?? [])
             .filter((part: Part) => !!part?.id && !RECONNECT_SKIP_PARTS.has(part.type))
-            .sort((a: Part, b: Part) => cmp(a.id, b.id))
+            .map((part: Part) => fromOpenCodePart(part))
+            .sort((a, b) => cmp(a.id, b.id))
         }
 
         store.setState((state: DirectoryStore) => ({

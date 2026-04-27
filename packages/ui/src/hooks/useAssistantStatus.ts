@@ -1,9 +1,23 @@
 import React from 'react';
-import type { AssistantMessage, Message, Part, ReasoningPart, TextPart, ToolPart } from '@opencode-ai/sdk/v2';
+import type { AssistantMessage } from '@opencode-ai/sdk/v2';
 
 import type { MessageStreamPhase } from '@/stores/types/sessionTypes';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectorySync, useSessionPermissions, useSessionQuestions, useSessionStatus } from '@/sync/sync-context';
+import {
+    getCompatibleMessageCreatedAt,
+    getCompatibleMessageId,
+    getCompatibleMessageRole,
+    getCompatiblePartEndedAt,
+    getCompatiblePartKind,
+    getCompatiblePartText,
+    getCompatibleToolName,
+    getCompatibleToolStatus,
+    getOpenCodeCompatibleMessages,
+    getOpenCodeCompatibleParts,
+    type SyncMessageRecord,
+    type SyncPartRecord,
+} from '@/sync/compat';
 import { isFullySyntheticMessage } from '@/lib/messages/synthetic';
 import { useCurrentSessionActivity } from './useSessionActivity';
 
@@ -49,12 +63,12 @@ type AssistantMessageWithState = AssistantMessage & {
 
 interface AssistantSessionMessageRecord {
     info: AssistantMessageWithState;
-    parts: Part[];
+    parts: SyncPartRecord[];
 }
 
 type SessionMessageRecord = {
-    info: Message;
-    parts: Part[];
+    info: SyncMessageRecord;
+    parts: SyncPartRecord[];
 };
 
 const DEFAULT_WORKING: WorkingSummary = {
@@ -81,44 +95,7 @@ const DEFAULT_WORKING: WorkingSummary = {
 
 import { EMPTY_MESSAGES, EMPTY_PARTS, emptyArray } from '@/constants/empty';
 const EMPTY_SESSION_MESSAGES: SessionMessageRecord[] = emptyArray<SessionMessageRecord>() as SessionMessageRecord[];
-const isAssistantMessage = (message: Message): message is AssistantMessageWithState => message.role === 'assistant';
-
-const isReasoningPart = (part: Part): part is ReasoningPart => part.type === 'reasoning';
-
-const isTextPart = (part: Part): part is TextPart => part.type === 'text';
-
-const getLegacyTextContent = (part: Part): string | undefined => {
-    if (isTextPart(part)) {
-        return part.text;
-    }
-    const candidate = part as Partial<{ text?: unknown; content?: unknown; value?: unknown }>;
-    if (typeof candidate.text === 'string') {
-        return candidate.text;
-    }
-    if (typeof candidate.content === 'string') {
-        return candidate.content;
-    }
-    if (typeof candidate.value === 'string') {
-        return candidate.value;
-    }
-    return undefined;
-};
-
-const getPartTimeInfo = (part: Part): { end?: number } | undefined => {
-    if (isTextPart(part) || isReasoningPart(part)) {
-        return part.time;
-    }
-    const candidate = part as Partial<{ time?: { end?: number } }>;
-    return candidate.time;
-};
-
-const getToolDisplayName = (part: ToolPart): string => {
-    if (part.tool) {
-        return part.tool;
-    }
-    const candidate = part as ToolPart & Partial<{ name?: unknown }>;
-    return typeof candidate.name === 'string' ? candidate.name : 'tool';
-};
+const isAssistantMessage = (message: SyncMessageRecord): message is SyncMessageRecord & AssistantMessageWithState => getCompatibleMessageRole(message) === 'assistant';
 
 export function useAssistantStatus(): AssistantStatusSnapshot {
     const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
@@ -128,7 +105,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
             if (!currentSessionId) {
                 return EMPTY_MESSAGES;
             }
-            return state.message[currentSessionId] ?? EMPTY_MESSAGES;
+            return getOpenCodeCompatibleMessages(state, currentSessionId);
         }, [currentSessionId])
     );
 
@@ -136,7 +113,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
     // on every part delta for earlier messages.
     const lastAssistantId = React.useMemo(() => {
         for (let i = rawSessionMessages.length - 1; i >= 0; i--) {
-            if (rawSessionMessages[i].role === 'assistant') return rawSessionMessages[i].id;
+            if (getCompatibleMessageRole(rawSessionMessages[i]) === 'assistant') return getCompatibleMessageId(rawSessionMessages[i]);
         }
         return null;
     }, [rawSessionMessages]);
@@ -144,7 +121,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
     const lastAssistantParts = useDirectorySync(
         React.useCallback((state) => {
             if (!lastAssistantId) return EMPTY_PARTS;
-            return state.part[lastAssistantId] ?? EMPTY_PARTS;
+            return getOpenCodeCompatibleParts(state, lastAssistantId);
         }, [lastAssistantId])
     );
 
@@ -155,7 +132,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
             }
             return rawSessionMessages.map((msg) => ({
                 info: msg,
-                parts: msg.id === lastAssistantId ? lastAssistantParts : EMPTY_PARTS,
+                parts: getCompatibleMessageId(msg) === lastAssistantId ? lastAssistantParts : EMPTY_PARTS,
             }));
         },
         [lastAssistantParts, rawSessionMessages, lastAssistantId]
@@ -208,14 +185,14 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
         }
 
         const sortedAssistantMessages = [...assistantMessages].sort((a, b) => {
-            const aCreated = typeof a.info.time?.created === 'number' ? a.info.time.created : null;
-            const bCreated = typeof b.info.time?.created === 'number' ? b.info.time.created : null;
+            const aCreated = getCompatibleMessageCreatedAt(a.info);
+            const bCreated = getCompatibleMessageCreatedAt(b.info);
 
             if (aCreated !== null && bCreated !== null && aCreated !== bCreated) {
                 return aCreated - bCreated;
             }
 
-            return a.info.id.localeCompare(b.info.id);
+            return getCompatibleMessageId(a.info).localeCompare(getCompatibleMessageId(b.info));
         });
 
         const lastAssistant = sortedAssistantMessages[sortedAssistantMessages.length - 1];
@@ -229,19 +206,18 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
             const part = lastAssistant.parts?.[i];
             if (!part) continue;
 
-            switch (part.type) {
+            switch (getCompatiblePartKind(part)) {
                 case 'reasoning': {
-                    const time = part.time ?? getPartTimeInfo(part);
-                    const stillRunning = !time || typeof time.end === 'undefined';
+                    const stillRunning = typeof getCompatiblePartEndedAt(part) === 'undefined';
                     if (stillRunning && !activePartType) {
                         activePartType = 'reasoning';
                     }
                     break;
                 }
                 case 'tool': {
-                    const toolStatus = part.state?.status;
+                    const toolStatus = getCompatibleToolStatus(part);
                     if ((toolStatus === 'running' || toolStatus === 'pending') && !activePartType) {
-                        const toolName = getToolDisplayName(part);
+                        const toolName = getCompatibleToolName(part);
                         if (editingTools.has(toolName)) {
                             activePartType = 'editing';
                         } else {
@@ -252,10 +228,9 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
                     break;
                 }
                 case 'text': {
-                    const rawContent = getLegacyTextContent(part) ?? '';
+                    const rawContent = getCompatiblePartText(part) ?? '';
                     if (typeof rawContent === 'string' && rawContent.trim().length > 0) {
-                        const time = getPartTimeInfo(part);
-                        const streamingPart = !time || typeof time.end === 'undefined';
+                        const streamingPart = typeof getCompatiblePartEndedAt(part) === 'undefined';
                         if (streamingPart && !activePartType) {
                             activePartType = 'text';
                         }
@@ -411,8 +386,8 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
         let characterCount = 0;
 
         (lastAssistant.parts ?? []).forEach((part) => {
-            if (part.type !== 'text') return;
-            const rawContent = getLegacyTextContent(part) ?? '';
+            if (getCompatiblePartKind(part) !== 'text') return;
+            const rawContent = getCompatiblePartText(part) ?? '';
             if (typeof rawContent === 'string' && rawContent.trim().length > 0) {
                 characterCount += rawContent.length;
             }

@@ -1,19 +1,11 @@
-import type {
-  Part,
-  PermissionRequest,
-  Project,
-  QuestionRequest,
-  Session,
-  SessionStatus,
-  Todo,
-} from "@opencode-ai/sdk/v2/client"
-import type { ChatSyncEvent } from "@openchamber/harness-contracts"
+import type { PermissionRequest, Project, QuestionRequest, SessionStatus, Todo } from "@opencode-ai/sdk/v2/client"
+import type { ChatSyncEvent, HarnessMessage, HarnessPart, HarnessSession } from "@openchamber/harness-contracts"
 import { Binary } from "./binary"
 import type { FileDiff, GlobalState, State } from "./types"
 import { dropSessionCaches } from "./session-cache"
 import { stripSessionDiffSnapshots } from "./sanitize"
 import { syncDebug } from "./debug"
-import { toOpenCodeMessageCompat, toOpenCodePartCompat, toOpenCodeSessionCompat } from "./adapters/opencode"
+import { toOpenCodePartCompat } from "./adapters/opencode"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 const DELTA_OVERLAP_FIELDS = ["text", "output"] as const
@@ -37,7 +29,7 @@ function appendNonOverlappingDelta(existingValue: string | undefined, delta: str
   return existingValue + delta
 }
 
-function getUpdatedDeltaFields(previous: Part, next: Part) {
+function getUpdatedDeltaFields(previous: Record<string, unknown>, next: Record<string, unknown>) {
   const dedupeFields: string[] = []
   for (const field of DELTA_OVERLAP_FIELDS) {
     const previousValue = (previous as Record<string, unknown>)[field]
@@ -51,27 +43,33 @@ function getUpdatedDeltaFields(previous: Part, next: Part) {
   return dedupeFields
 }
 
-function getPartEndTime(part: Part): number | undefined {
+function getPartEndTime(part: HarnessPart): number | undefined {
+  if (part.kind === "tool" && typeof part.tool.endedAt === "number") {
+    return part.tool.endedAt
+  }
+
+  const raw = isObject(part.raw) ? part.raw : undefined
+  if (!raw) return undefined
   const stateEnd = (part as { state?: { time?: { end?: unknown } } }).state?.time?.end
+    ?? (raw as { state?: { time?: { end?: unknown } } }).state?.time?.end
   if (typeof stateEnd === "number") {
     return stateEnd
   }
 
-  const timeEnd = (part as { time?: { end?: unknown } }).time?.end
+  const timeEnd = (raw as { time?: { end?: unknown } }).time?.end
   return typeof timeEnd === "number" ? timeEnd : undefined
 }
 
-function getToolStatus(part: Part): string | undefined {
-  if (part.type !== "tool") {
+function getToolStatus(part: HarnessPart): string | undefined {
+  if (part.kind !== "tool") {
     return undefined
   }
 
-  const status = (part as { state?: { status?: unknown } }).state?.status
-  return typeof status === "string" ? status : undefined
+  return part.tool.status
 }
 
-function shouldPreserveExistingPart(previous: Part, next: Part): boolean {
-  if (previous.type !== "tool" || next.type !== "tool") {
+function shouldPreserveExistingPart(previous: HarnessPart, next: HarnessPart): boolean {
+  if (previous.kind !== "tool" || next.kind !== "tool") {
     return false
   }
 
@@ -165,7 +163,7 @@ export function applyDirectoryEvent(
     }
 
     case "session.upserted": {
-      const info = stripSessionDiffSnapshots(toOpenCodeSessionCompat(event.session))
+      const info = sanitizeHarnessSession(event.session)
       const sessions = draft.session
       const result = Binary.search(sessions, info.id, (s) => s.id)
       if (result.found) {
@@ -173,18 +171,18 @@ export function applyDirectoryEvent(
       } else {
         sessions.splice(result.index, 0, info)
         trimSessions(draft)
-        if (!info.parentID) draft.sessionTotal += 1
+        if (!info.parentId) draft.sessionTotal += 1
       }
       return true
     }
 
     case "session.removed": {
-      const info = { id: event.sessionId } as Session
       const sessions = draft.session
-      const result = Binary.search(sessions, info.id, (s) => s.id)
+      const result = Binary.search(sessions, event.sessionId, (s) => s.id)
+      const removed = result.found ? sessions[result.index] : undefined
       if (result.found) sessions.splice(result.index, 1)
-      cleanupSessionCaches(draft, info.id, callbacks?.onSetSessionTodo)
-      if (!info.parentID) draft.sessionTotal = Math.max(0, draft.sessionTotal - 1)
+      cleanupSessionCaches(draft, event.sessionId, callbacks?.onSetSessionTodo)
+      if (!removed?.parentId) draft.sessionTotal = Math.max(0, draft.sessionTotal - 1)
       return true
     }
 
@@ -208,10 +206,10 @@ export function applyDirectoryEvent(
     }
 
     case "message.upserted": {
-      const info = toOpenCodeMessageCompat(event.message)
-      const messages = draft.message[info.sessionID]
+      const info = sanitizeHarnessMessage(event.message)
+      const messages = draft.message[info.sessionId]
       if (!messages) {
-        draft.message[info.sessionID] = [info]
+        draft.message[info.sessionId] = [info]
         return true
       }
       const result = Binary.search(messages, info.id, (m) => m.id)
@@ -219,19 +217,19 @@ export function applyDirectoryEvent(
         // Skip message replacement if unchanged — preserves reference, avoids re-render
         const existing = messages[result.index]
         const unchanged = existing.role === info.role
-          && (existing as { finish?: unknown }).finish === (info as { finish?: unknown }).finish
-          && (existing.time as { completed?: number })?.completed === (info.time as { completed?: number })?.completed
+          && existing.finish === info.finish
+          && existing.time?.completed === info.time?.completed
         if (unchanged) {
-          syncDebug.reducer.messageUpdatedUnchanged(info.sessionID, info.id, info.role, (info as { finish?: unknown }).finish, (info.time as { completed?: number })?.completed)
+          syncDebug.reducer.messageUpdatedUnchanged(info.sessionId, info.id, info.role, info.finish, info.time?.completed)
           return false
         }
         const next = [...messages]
         next[result.index] = info
-        draft.message[info.sessionID] = next
+        draft.message[info.sessionId] = next
       } else {
         const next = [...messages]
         next.splice(result.index, 0, info)
-        draft.message[info.sessionID] = next
+        draft.message[info.sessionId] = next
       }
       return true
     }
@@ -251,15 +249,16 @@ export function applyDirectoryEvent(
     }
 
     case "part.upserted": {
-      const part = toOpenCodePartCompat(event.part)
-      if (SKIP_PARTS.has(part.type)) {
-        syncDebug.reducer.partSkipped((part as { messageID: string }).messageID, part.id, part.type)
+      const part = event.part
+      const rawType = getOpenCodePartType(part)
+      if (rawType && SKIP_PARTS.has(rawType)) {
+        syncDebug.reducer.partSkipped(part.messageId, part.id, rawType)
         return false
       }
-      const messageID = (part as { messageID: string }).messageID
+      const messageID = part.messageId
       const parts = draft.part[messageID]
       if (!parts) {
-        syncDebug.reducer.partUpdatedNoExistingParts(messageID, part.id, part.type)
+        syncDebug.reducer.partUpdatedNoExistingParts(messageID, part.id, rawType ?? part.kind)
         draft.part[messageID] = [part]
         return true
       }
@@ -270,18 +269,18 @@ export function applyDirectoryEvent(
         if (shouldPreserveExistingPart(previous, part)) {
           return false
         }
-        const dedupeFields = getUpdatedDeltaFields(previous, part)
+        const dedupeFields = getUpdatedDeltaFields(toOpenCodePartCompat(previous), toOpenCodePartCompat(part))
         next[result.index] = dedupeFields.length > 0
-          ? { ...part, __dedupeNextDeltaFields: dedupeFields } as unknown as Part
+          ? { ...part, __dedupeNextDeltaFields: dedupeFields } as unknown as HarnessPart
           : part
       } else {
         // Replace optimistic part (no sessionID) with server part of same type.
         // Gate: only scan if the first part lacks sessionID (optimistic parts are
         // always inserted first). Assistant messages never have optimistic parts,
         // so this check is effectively free during streaming.
-        const hasOptimistic = next.length > 0 && !(next[0] as { sessionID?: string }).sessionID
-        const optimisticIdx = hasOptimistic && (part.type === "text" || part.type === "file")
-          ? next.findIndex((p) => p.type === part.type && !(p as { sessionID?: string }).sessionID)
+        const hasOptimistic = next.length > 0 && !next[0].sessionId
+        const optimisticIdx = hasOptimistic && (part.kind === "text" || part.kind === "attachment")
+          ? next.findIndex((p) => p.kind === part.kind && !p.sessionId)
           : -1
         if (optimisticIdx >= 0) {
           next.splice(optimisticIdx, 1)
@@ -321,17 +320,19 @@ export function applyDirectoryEvent(
         syncDebug.reducer.partDeltaNotFound(event.messageId, event.partId)
         return false
       }
-      const existing = parts[result.index] as Record<string, unknown>
+      const existing = parts[result.index] as unknown as Record<string, unknown>
       const existingValue = existing[event.field] as string | undefined
       const dedupeFields = (existing as DedupeMetadata).__dedupeNextDeltaFields ?? []
       const shouldDedupe = dedupeFields.includes(event.field)
+      const nextValue = shouldDedupe ? appendNonOverlappingDelta(existingValue, event.delta) : (existingValue ?? "") + event.delta
       // Create new Part object + new array so React detects the change
       const next = [...parts]
-      next[result.index] = {
-        ...existing,
-        [event.field]: shouldDedupe ? appendNonOverlappingDelta(existingValue, event.delta) : (existingValue ?? "") + event.delta,
-        __dedupeNextDeltaFields: dedupeFields.filter((field) => field !== event.field),
-      } as unknown as Part
+      next[result.index] = applyHarnessPartDelta(
+        parts[result.index],
+        event.field,
+        nextValue,
+        dedupeFields.filter((field) => field !== event.field),
+      )
       draft.part[event.messageId] = next
       return true
     }
@@ -422,6 +423,47 @@ function trimSessions(draft: State) {
     if (hasPermission.has(candidate.id)) break
     draft.session.shift()
   }
+}
+
+function sanitizeHarnessSession(session: HarnessSession): HarnessSession {
+  const raw = session.raw
+  if (!isObject(raw)) return session
+  const stripped = stripSessionDiffSnapshots(raw)
+  return stripped === raw ? session : { ...session, raw: stripped }
+}
+
+function sanitizeHarnessMessage(message: HarnessMessage): HarnessMessage {
+  return message
+}
+
+function getOpenCodePartType(part: HarnessPart): string | undefined {
+  const raw = part.raw
+  if (isObject(raw)) {
+    const type = raw.type
+    if (typeof type === "string") return type
+  }
+  if (part.kind === "attachment") return "file"
+  return part.kind
+}
+
+function applyHarnessPartDelta(
+  part: HarnessPart,
+  field: string,
+  value: string,
+  dedupeFields: string[],
+): HarnessPart {
+  const raw = isObject(part.raw) ? { ...part.raw, [field]: value } : part.raw
+  const metadata = { __dedupeNextDeltaFields: dedupeFields }
+
+  if ((part.kind === "text" || part.kind === "reasoning") && field === "text") {
+    return { ...part, text: value, raw, ...metadata } as HarnessPart
+  }
+
+  if (part.kind === "tool" && field === "output") {
+    return { ...part, tool: { ...part.tool, output: value }, raw, ...metadata } as HarnessPart
+  }
+
+  return { ...part, raw, ...metadata } as HarnessPart
 }
 
 function cleanupSessionCaches(

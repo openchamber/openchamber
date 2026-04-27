@@ -3,7 +3,8 @@
  * Replaces the action methods from the old useSessionStore.
  */
 
-import type { OpencodeClient, Session, Message, Part } from "@opencode-ai/sdk/v2/client"
+import type { OpencodeClient, Session } from "@opencode-ai/sdk/v2/client"
+import type { HarnessMessage, HarnessPart, HarnessSession } from "@openchamber/harness-contracts"
 import { Binary } from "./binary"
 import { useSessionUIStore } from "./session-ui-store"
 import { useInputStore } from "./input-store"
@@ -15,13 +16,16 @@ import { useBackendsStore } from "@/stores/useBackendsStore"
 import { registerSessionDirectory } from "./sync-refs"
 import { useSelectionStore } from "./selection-store"
 import { isSyntheticPart } from "@/lib/messages/synthetic"
+import { fromOpenCodeSession } from "./adapters/opencode"
+import { toOpenCodeCompatiblePart } from "./compat"
+import type { OptimisticAddInput, OptimisticRemoveInput } from "./optimistic"
 
 // Reference set by SyncProvider — allows actions to access SDK and stores
 let _sdk: OpencodeClient | null = null
 let _childStores: ChildStoreManager | null = null
 let _getDirectory: () => string = () => ""
-let _optimisticAdd: ((input: { sessionID: string; message: Message; parts: Part[] }) => void) | null = null
-let _optimisticRemove: ((input: { sessionID: string; messageID: string }) => void) | null = null
+let _optimisticAdd: ((input: OptimisticAddInput) => void) | null = null
+let _optimisticRemove: ((input: OptimisticRemoveInput) => void) | null = null
 
 export function setActionRefs(
   sdk: OpencodeClient,
@@ -34,8 +38,8 @@ export function setActionRefs(
 }
 
 export function setOptimisticRefs(
-  add: (input: { sessionID: string; message: Message; parts: Part[] }) => void,
-  remove: (input: { sessionID: string; messageID: string }) => void,
+  add: (input: OptimisticAddInput) => void,
+  remove: (input: OptimisticRemoveInput) => void,
 ) {
   _optimisticAdd = add
   _optimisticRemove = remove
@@ -228,7 +232,7 @@ export async function createSession(
 }
 
 /** Optimistically remove a session from the child store list. Returns previous list for rollback. */
-function optimisticRemoveSession(sessionId: string, directory?: string): Session[] | null {
+function optimisticRemoveSession(sessionId: string, directory?: string): HarnessSession[] | null {
   const store = getDirectoryStore(directory)
   const current = store.getState()
   const sessions = [...current.session]
@@ -294,7 +298,7 @@ export async function deleteSessionInDirectory(sessionId: string, directory: str
   const current = store.getState()
   const sessions = [...current.session]
   const result = Binary.search(sessions, sessionId, (s) => s.id)
-  let snapshot: Session[] | null = null
+  let snapshot: HarnessSession[] | null = null
   if (result.found) {
     snapshot = current.session
     sessions.splice(result.index, 1)
@@ -428,28 +432,43 @@ export async function optimisticSend(input: {
   const messageID = ascendingId("msg")
   const textPartId = ascendingId("prt")
 
-  const optimisticParts: Part[] = [
-    { id: textPartId, type: "text", text: input.content } as Part,
+  const optimisticParts: HarnessPart[] = [
+    {
+      id: textPartId,
+      sessionId: input.sessionId,
+      messageId: messageID,
+      kind: "text",
+      text: input.content,
+    },
   ]
   if (input.files) {
     for (const f of input.files) {
-      optimisticParts.push({ id: ascendingId("prt"), type: "file", mime: f.mime, url: f.url, filename: f.filename } as Part)
+      optimisticParts.push({
+        id: ascendingId("prt"),
+        sessionId: input.sessionId,
+        messageId: messageID,
+        kind: "attachment",
+        attachment: {
+          mimeType: f.mime,
+          url: f.url,
+          name: f.filename,
+        },
+      })
     }
   }
 
-  const optimisticMessage = {
+  const optimisticMessage: HarnessMessage = {
     id: messageID,
     role: "user" as const,
-    sessionID: input.sessionId,
-    parentID: "",
-    modelID: input.modelID,
-    providerID: input.providerID,
-    system: "",
-    agent: input.agent ?? "",
-    model: `${input.providerID}/${input.modelID}`,
-    metadata: {} as Record<string, unknown>,
+    sessionId: input.sessionId,
     time: { created: Date.now(), completed: 0 },
-  } as unknown as Message
+    attribution: {
+      backendId: useBackendsStore.getState().defaultBackendId ?? "opencode",
+      providerId: input.providerID,
+      modelId: input.modelID,
+      modeId: input.agent,
+    },
+  }
 
   // Insert into store + register in shadow Map (for mergeOptimisticPage cleanup)
   _optimisticAdd({
@@ -620,7 +639,9 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   let messageText = ""
   if (targetMsg && targetMsg.role === "user") {
     const parts = state.part[messageId] ?? []
-    const textParts = parts.filter((p) => p.type === "text" && !isSyntheticPart(p))
+    const textParts = parts
+      .map((part) => toOpenCodeCompatiblePart(part))
+      .filter((p) => p.type === "text" && !isSyntheticPart(p))
     messageText = textParts
       .map((p: Record<string, unknown>) => (p as { text?: string }).text || (p as { content?: string }).content || "")
       .join("\n")
@@ -630,7 +651,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   // Optimistically remove reverted messages + set marker
   const prevRevert = (() => {
     const s = state.session.find((s) => s.id === sessionId)
-    return (s as Session & { revert?: unknown })?.revert
+    return (s as unknown as { revert?: unknown })?.revert
   })()
   const sessions = [...state.session]
   const sessionIdx = sessions.findIndex((s) => s.id === sessionId)
@@ -650,7 +671,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   }
 
   if (sessionIdx >= 0) {
-    sessions[sessionIdx] = { ...sessions[sessionIdx], revert: { messageID: messageId } } as Session
+    sessions[sessionIdx] = { ...sessions[sessionIdx], revert: { messageID: messageId } } as HarnessSession
     patch.session = sessions
   }
 
@@ -672,7 +693,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
       const updated = [...current.session]
       const idx = updated.findIndex((s) => s.id === sessionId)
       if (idx >= 0) {
-        updated[idx] = result.data
+        updated[idx] = fromOpenCodeSession(result.data)
         store.setState({ session: updated })
       }
     }
@@ -682,7 +703,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
     const rollback = [...current.session]
     const idx = rollback.findIndex((s) => s.id === sessionId)
     if (idx >= 0) {
-      rollback[idx] = { ...rollback[idx], revert: prevRevert } as Session
+      rollback[idx] = { ...rollback[idx], revert: prevRevert } as HarnessSession
     }
     store.setState({
       session: rollback,
@@ -717,7 +738,7 @@ export async function unrevertSession(sessionId: string): Promise<void> {
     const sessions = [...current.session]
     const idx = sessions.findIndex((s) => s.id === sessionId)
     if (idx >= 0) {
-      sessions[idx] = result.data
+      sessions[idx] = fromOpenCodeSession(result.data)
       store.setState({ session: sessions })
     }
   }
@@ -739,9 +760,11 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
   // the server adds file content as synthetic text parts that should not be restored)
   const parts = state.part[messageId] ?? []
   let messageText = ""
-  const textParts = parts.filter((p) => p.type === "text" && !isSyntheticPart(p))
+  const textParts = parts
+    .map((part) => toOpenCodeCompatiblePart(part))
+    .filter((p) => p.type === "text" && !isSyntheticPart(p))
   messageText = textParts
-    .map((p: Part) => ((p as Record<string, unknown>).text as string) || ((p as Record<string, unknown>).content as string) || "")
+    .map((p) => ((p as Record<string, unknown>).text as string) || ((p as Record<string, unknown>).content as string) || "")
     .join("\n")
     .trim()
 
@@ -760,7 +783,7 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
   const sessions = [...current.session]
   const searchResult = Binary.search(sessions, forkedSession.id, (s) => s.id)
   if (!searchResult.found) {
-    sessions.splice(searchResult.index, 0, forkedSession)
+    sessions.splice(searchResult.index, 0, fromOpenCodeSession(forkedSession))
     store.setState({ session: sessions })
   }
 

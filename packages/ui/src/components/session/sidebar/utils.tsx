@@ -1,5 +1,6 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
+import { getCompatibleSessionDirectory, getCompatibleSessionProjectWorktree } from '@/sync/compat';
 import type { SessionSummaryMeta } from './types';
 
 const formatDateLabel = (value: string | number) => {
@@ -168,8 +169,8 @@ export const dedupeSessionsById = (sessions: Session[]): Session[] => {
 export const getArchivedScopeKey = (projectRoot: string): string => `__archived__:${projectRoot}`;
 
 export const resolveArchivedFolderName = (session: Session, projectRoot: string | null): string => {
-  const sessionDirectory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
-  const projectWorktree = normalizePath((session as Session & { project?: { worktree?: string | null } | null }).project?.worktree ?? null);
+  const sessionDirectory = normalizePath(getCompatibleSessionDirectory(session));
+  const projectWorktree = normalizePath(getCompatibleSessionProjectWorktree(session));
   const resolved = sessionDirectory ?? projectWorktree;
   if (!resolved) {
     return 'unassigned';
@@ -189,8 +190,8 @@ export const isSessionRelatedToProject = (
   projectRoot: string,
   validDirectories?: Set<string>,
 ): boolean => {
-  const sessionDirectory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
-  const projectWorktree = normalizePath((session as Session & { project?: { worktree?: string | null } | null }).project?.worktree ?? null);
+  const sessionDirectory = normalizePath(getCompatibleSessionDirectory(session));
+  const projectWorktree = normalizePath(getCompatibleSessionProjectWorktree(session));
 
   if (isPathWithinScope(projectWorktree, projectRoot)) {
     return true;

@@ -26,6 +26,7 @@ import { useSessionWorktreeStore } from '@/sync/session-worktree-store';
 import { formatSessionWorktreeBadge } from '@/sync/session-worktree-contract';
 import { useAllLiveSessions, useSession, useSessionMessagesResolved } from '@/sync/sync-context';
 import { getAllSyncSessions } from '@/sync/sync-refs';
+import { getCompatibleSessionSlug, getCompatibleSessionSummary } from '@/sync/compat';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { useGitBranchLabel } from '@/stores/useGitStore';
@@ -1178,8 +1179,8 @@ export const Header: React.FC<HeaderProps> = ({
   }, [activeProjectLabel, currentSession?.title, currentSessionId]);
 
   const currentSessionDiffStats = React.useMemo(() => {
-    return resolveSessionDiffStats(currentSession?.summary as Parameters<typeof resolveSessionDiffStats>[0]);
-  }, [currentSession?.summary]);
+    return resolveSessionDiffStats(getCompatibleSessionSummary(currentSession ?? undefined) as Parameters<typeof resolveSessionDiffStats>[0]);
+  }, [currentSession]);
 
   const currentSessionChanges = React.useMemo(() => {
     if (currentSessionDiffStats) {
@@ -1240,7 +1241,7 @@ export const Header: React.FC<HeaderProps> = ({
 
     if (!currentSessionId) return;
 
-    const sessionKey = `${currentSessionId || 'none'}:${sessionDirectory || 'none'}:${currentSession?.time?.created || 0}:${currentSession?.slug || 'none'}`;
+    const sessionKey = `${currentSessionId || 'none'}:${sessionDirectory || 'none'}:${currentSession?.time?.created || 0}:${currentSession ? getCompatibleSessionSlug(currentSession) ?? 'none' : 'none'}`;
     if (lastPlanSessionKeyRef.current !== sessionKey) {
       lastPlanSessionKeyRef.current = sessionKey;
     }
@@ -1252,7 +1253,7 @@ export const Header: React.FC<HeaderProps> = ({
   }, [
     planModeEnabled,
     planTabAvailable,
-    currentSession?.slug,
+    currentSession,
     currentSession?.time?.created,
     currentSessionId,
     sessionDirectory,

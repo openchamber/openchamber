@@ -6,7 +6,8 @@
  * Conservative: only returns a session id when the match is unambiguous.
  */
 
-import type { Session, SessionStatus } from '@opencode-ai/sdk/v2/client';
+import type { SessionStatus } from '@opencode-ai/sdk/v2/client';
+import type { HarnessSession } from '@openchamber/harness-contracts';
 
 /**
  * Fallback is intentionally narrow: only sessions created shortly after the
@@ -32,7 +33,7 @@ export interface ResolveFallbackParams {
   /** True when the task tool is finalized (completed/error/etc.) */
   isTaskFinalized?: boolean;
   /** Sessions from the directory store */
-  sessions: Session[];
+  sessions: HarnessSession[];
   /** Session status map from the sync store */
   sessionStatusMap?: Record<string, SessionStatus>;
   /** True when a previous resolution attempt has already failed (enables wider window) */
@@ -67,9 +68,9 @@ export function resolveFallbackTaskSessionId(params: ResolveFallbackParams): str
   const windowMs = hasRetried ? TASK_SESSION_MATCH_WINDOW_WIDE_MS : TASK_SESSION_MATCH_WINDOW_MS;
   const latestAllowed = taskStartTime + windowMs;
 
-  // Filter candidate sessions: parentID matches and created shortly after task start.
+  // Filter candidate sessions: parentId matches and created shortly after task start.
   const candidates = sessions.filter((session) => {
-    if (!session?.id || session.parentID !== parentSessionId) {
+    if (!session?.id || session.parentId !== parentSessionId) {
       return false;
     }
     const created = session.time?.created;

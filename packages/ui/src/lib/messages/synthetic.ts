@@ -1,9 +1,12 @@
 import type { Part } from "@opencode-ai/sdk/v2";
+import type { HarnessPart } from "@openchamber/harness-contracts";
+
+type SyntheticPartRecord = Part | HarnessPart;
 
 const GITHUB_ISSUE_CONTEXT_PREFIX = 'GitHub issue context (JSON)';
 const GITHUB_PR_CONTEXT_PREFIX = 'GitHub pull request context (JSON)';
 
-export const isSyntheticPart = (part: Part | undefined): boolean => {
+export const isSyntheticPart = (part: SyntheticPartRecord | undefined): boolean => {
     if (!part || typeof part !== "object") {
         return false;
     }
@@ -14,7 +17,7 @@ export const isSyntheticPart = (part: Part | undefined): boolean => {
  * Checks if a message consists entirely of synthetic parts.
  * Used for status/completion logic (not display filtering).
  */
-export const isFullySyntheticMessage = (parts: Part[] | undefined): boolean => {
+export const isFullySyntheticMessage = (parts: SyntheticPartRecord[] | undefined): boolean => {
     if (!Array.isArray(parts) || parts.length === 0) {
         return false;
     }
@@ -35,7 +38,7 @@ export const filterSyntheticParts = (parts: Part[] | undefined): Part[] => {
     const hasNonSynthetic = parts.some((part) => !isSyntheticPart(part));
 
     const shouldKeepSyntheticPart = (part: Part): boolean => {
-        if (!isSyntheticPart(part) || part.type !== 'text') {
+        if (!isSyntheticPart(part) || getPartKind(part) !== 'text') {
             return false;
         }
 
@@ -62,3 +65,8 @@ export const filterSyntheticParts = (parts: Part[] | undefined): Part[] => {
     // If all parts are synthetic, return them all (so message is displayed)
     return parts;
 };
+
+function getPartKind(part: SyntheticPartRecord): string | undefined {
+    if ('kind' in part) return part.kind;
+    return part.type;
+}

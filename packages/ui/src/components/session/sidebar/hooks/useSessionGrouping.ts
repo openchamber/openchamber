@@ -12,6 +12,12 @@ import {
 } from '../utils';
 import { formatDirectoryName, formatPathForDisplay } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
+import {
+  getCompatibleSessionArchivedAt,
+  getCompatibleSessionDirectory,
+  getCompatibleSessionParentId,
+  getCompatibleSessionProjectWorktree,
+} from '@/sync/compat';
 
 type Args = {
   homeDirectory: string | null;
@@ -21,7 +27,7 @@ type Args = {
   isVSCode: boolean;
 };
 
-const isArchivedSession = (session: Session): boolean => Boolean(session.time?.archived);
+const isArchivedSession = (session: Session): boolean => Boolean(getCompatibleSessionArchivedAt(session));
 
 export const useSessionGrouping = (args: Args) => {
   const { t } = useI18n();
@@ -30,7 +36,7 @@ export const useSessionGrouping = (args: Args) => {
   }, []);
 
   const buildSessionSearchText = React.useCallback((session: Session): string => {
-    const sessionDirectory = normalizePath((session as Session & { directory?: string | null }).directory ?? null) ?? '';
+    const sessionDirectory = normalizePath(getCompatibleSessionDirectory(session)) ?? '';
     const sessionTitle = (session.title || t('sessions.sidebar.session.untitled')).trim();
     return `${sessionTitle} ${sessionDirectory}`.toLowerCase();
   }, [t]);
@@ -73,7 +79,7 @@ export const useSessionGrouping = (args: Args) => {
       const sessionMap = new Map(sortedProjectSessions.map((session) => [session.id, session]));
       const childrenMap = new Map<string, Session[]>();
       sortedProjectSessions.forEach((session) => {
-        const parentID = (session as Session & { parentID?: string | null }).parentID;
+        const parentID = getCompatibleSessionParentId(session);
         if (!parentID) return;
         const parentSession = sessionMap.get(parentID);
         if (!parentSession || isArchivedSession(parentSession) !== isArchivedSession(session)) {
@@ -95,7 +101,7 @@ export const useSessionGrouping = (args: Args) => {
       const normalizedWorktreePaths = [...worktreeByPath.keys()];
 
       const getSessionWorktree = (session: Session): WorktreeMetadata | null => {
-        const sessionDirectory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
+        const sessionDirectory = normalizePath(getCompatibleSessionDirectory(session));
         const sessionWorktreeMeta = args.worktreeMetadata.get(session.id) ?? null;
         if (sessionWorktreeMeta) return sessionWorktreeMeta;
         if (sessionDirectory) {
@@ -113,7 +119,7 @@ export const useSessionGrouping = (args: Args) => {
       };
 
       const roots = sortedProjectSessions.filter((session) => {
-        const parentID = (session as Session & { parentID?: string | null }).parentID;
+        const parentID = getCompatibleSessionParentId(session);
         if (!parentID) return true;
         const parentSession = sessionMap.get(parentID);
         if (!parentSession) return true;
@@ -124,11 +130,11 @@ export const useSessionGrouping = (args: Args) => {
       const archivedKey = '__archived__';
 
       const getGroupKey = (session: Session) => {
-        if (session.time?.archived) return archivedKey;
+        if (getCompatibleSessionArchivedAt(session)) return archivedKey;
         const metadataPath = normalizePath(args.worktreeMetadata.get(session.id)?.path ?? null);
-        const sessionDirectory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
+        const sessionDirectory = normalizePath(getCompatibleSessionDirectory(session));
         if (!metadataPath && !sessionDirectory) return archivedKey;
-        const fallbackDirectory = normalizePath((session as Session & { project?: { worktree?: string | null } | null }).project?.worktree ?? null);
+        const fallbackDirectory = normalizePath(getCompatibleSessionProjectWorktree(session));
         const normalizedDir = metadataPath ?? sessionDirectory ?? fallbackDirectory;
         if (!normalizedDir) return archivedKey;
 

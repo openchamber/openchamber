@@ -38,6 +38,7 @@ import {
 } from "./sync-refs"
 import { markSessionViewed } from "./notification-store"
 import { setActiveSession } from "./sync-context"
+import { getCompatibleSessionDirectory, getCompatibleSessionProjectWorktree } from "./compat"
 import {
   createSession as createSessionAction,
   deleteSession as deleteSessionAction,
@@ -304,12 +305,8 @@ const normalizePath = (value?: string | null): string | null => {
 }
 
 const resolveDirectoryKey = (session: Session): string | null => {
-  const sessionRecord = session as Session & {
-    directory?: string | null
-    project?: { worktree?: string | null } | null
-  }
-  return normalizePath(sessionRecord.directory ?? null)
-    ?? normalizePath(sessionRecord.project?.worktree ?? null)
+  return normalizePath(getCompatibleSessionDirectory(session))
+    ?? normalizePath(getCompatibleSessionProjectWorktree(session))
 }
 
 const safeStorage = getSafeStorage()
@@ -1101,7 +1098,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     let sourceSessionId: string | undefined
     let sourceMessage: Message | undefined
 
-    for (const [sid, msgs] of Object.entries(state.message ?? {})) {
+    for (const sid of Object.keys(state.message ?? {})) {
+      const msgs = getSyncMessages(sid)
       const found = msgs.find((m) => m.id === sourceMessageId)
       if (found) {
         sourceSessionId = sid

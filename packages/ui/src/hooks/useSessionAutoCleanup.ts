@@ -5,6 +5,7 @@ import { ensureGlobalSessionsLoaded, useGlobalSessionsStore, resolveGlobalSessio
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { getAllSyncSessions } from '@/sync/sync-refs';
 import { useUIStore } from '@/stores/useUIStore';
+import { getCompatibleSessionShareUrl } from '@/sync/compat';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const AUTO_DELETE_KEEP_RECENT = 5;
@@ -44,7 +45,7 @@ export const buildAutoDeleteCandidates = ({
       if (!session?.id) return false;
       if (protectedIds.has(session.id)) return false;
       if (session.id === currentSessionId) return false;
-      if (session.share) return false;
+      if (getCompatibleSessionShareUrl(session)) return false;
       const lastActivity = getSessionLastActivity(session);
       if (!lastActivity) return false;
       return lastActivity < cutoffTime;

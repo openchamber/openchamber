@@ -81,7 +81,10 @@ mock.module("./input-store", () => ({
 
 // Mock useGlobalSessionsStore (imported but not used in permission functions)
 mock.module("@/stores/useGlobalSessionsStore", () => ({
-  useGlobalSessionsStore: {},
+  useGlobalSessionsStore: {
+    getState: () => ({ activeSessions: [], archivedSessions: [] }),
+  },
+  resolveGlobalSessionDirectory: () => null,
 }))
 
 // Mock sync-refs (imported but not used in permission functions)

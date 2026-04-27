@@ -11,8 +11,6 @@
 // 2. Message loading — fetchMessages response
 // ---------------------------------------------------------------------------
 
-import type { Session, Message } from "@opencode-ai/sdk/v2/client"
-
 type DiffEntry = {
   file?: string
   status?: string
@@ -30,7 +28,7 @@ type SessionSummary = {
 }
 
 /** Strip oversized snapshot fields from summary.diffs on a session object */
-export function stripSessionDiffSnapshots(session: Session): Session {
+export function stripSessionDiffSnapshots<T extends object>(session: T): T {
   const summary = (session as { summary?: SessionSummary }).summary
   if (!summary?.diffs || !Array.isArray(summary.diffs)) return session
 
@@ -54,11 +52,11 @@ export function stripSessionDiffSnapshots(session: Session): Session {
   })
 
   if (!changed) return session
-  return { ...session, summary: { ...summary, diffs: stripped } } as Session
+  return { ...session, summary: { ...summary, diffs: stripped } }
 }
 
 /** Strip oversized snapshot fields from summary.diffs on a message object */
-export function stripMessageDiffSnapshots(message: Message): Message {
+export function stripMessageDiffSnapshots<T extends object>(message: T): T {
   const summary = (message as { summary?: SessionSummary }).summary
   if (!summary?.diffs || !Array.isArray(summary.diffs)) return message
 
@@ -82,5 +80,5 @@ export function stripMessageDiffSnapshots(message: Message): Message {
   })
 
   if (!changed) return message
-  return { ...message, summary: { ...summary, diffs: stripped } } as Message
+  return { ...message, summary: { ...summary, diffs: stripped } }
 }

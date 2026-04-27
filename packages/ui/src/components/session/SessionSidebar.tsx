@@ -33,6 +33,7 @@ import { useSidebarPersistence } from './sidebar/hooks/useSidebarPersistence';
 import { useProjectRepoStatus } from './sidebar/hooks/useProjectRepoStatus';
 import { useProjectSessionLists } from './sidebar/hooks/useProjectSessionLists';
 import { useSessionFolderCleanup } from './sidebar/hooks/useSessionFolderCleanup';
+import { getCompatibleSessionParentId } from '@/sync/compat';
 import { useStickyProjectHeaders } from './sidebar/hooks/useStickyProjectHeaders';
 import { getGitHubPrStatusKey, usePrVisualSummaryByKeys, useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
 import { ProjectEditDialog } from '@/components/layout/ProjectEditDialog';
@@ -591,7 +592,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const childrenMap = React.useMemo(() => {
     const map = new Map<string, Session[]>();
     sortedSessions.forEach((session) => {
-      const parentID = (session as Session & { parentID?: string | null }).parentID;
+      const parentID = getCompatibleSessionParentId(session);
       if (!parentID) {
         return;
       }
@@ -723,7 +724,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   React.useEffect(() => {
     if (!currentSessionId) return;
     const current = sessions.find((s) => s.id === currentSessionId);
-    const parentID = (current as Session & { parentID?: string | null })?.parentID;
+    const parentID = current ? getCompatibleSessionParentId(current) : null;
     if (!parentID) return;
     setExpandedParents((prev) => {
       if (prev.has(parentID)) return prev;

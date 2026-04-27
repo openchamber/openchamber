@@ -31,6 +31,7 @@ import { audioStreamService } from '@/lib/voice/audioStreamService';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
 import { getSyncMessages, getSyncParts } from '@/sync/sync-refs';
+import { getCompatibleMessageCreatedAt, getCompatibleMessageId, getCompatibleMessageRole, getCompatiblePartKind, getCompatiblePartText } from '@/sync/compat';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useServerTTS } from './useServerTTS';
 import { useSayTTS } from './useSayTTS';
@@ -401,19 +402,19 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
 
         const rawMessages = getSyncMessages(sessionId);
         const assistantMessages = rawMessages
-          .filter(m => m.role === 'assistant')
+          .filter(m => getCompatibleMessageRole(m) === 'assistant')
           .sort((a, b) => {
-            const aTime = (a as { time?: { created?: number } }).time?.created ?? 0;
-            const bTime = (b as { time?: { created?: number } }).time?.created ?? 0;
+            const aTime = getCompatibleMessageCreatedAt(a);
+            const bTime = getCompatibleMessageCreatedAt(b);
             return bTime - aTime;
           });
 
         if (assistantMessages.length > 0) {
           const latestMessage = assistantMessages[0];
-          const parts = getSyncParts(latestMessage.id);
+          const parts = getSyncParts(getCompatibleMessageId(latestMessage));
           const textParts = parts
-            .filter((p: { type: string; text?: string }) => p.type === 'text')
-            .map((p: { type: string; text?: string }) => p.text ?? '')
+            .filter((part) => getCompatiblePartKind(part) === 'text')
+            .map((part) => getCompatiblePartText(part) ?? '')
             .join(' ');
           
           if (textParts.trim()) {

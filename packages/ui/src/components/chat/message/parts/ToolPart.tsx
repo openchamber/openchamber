@@ -26,6 +26,8 @@ import type { ToolPopupContent } from '../types';
 import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import type { MessageRecord } from '@/lib/messageCompletion';
+import type { HarnessPart } from '@openchamber/harness-contracts';
+import { fromOpenCodeMessage, fromOpenCodePart } from '@/sync/adapters/opencode';
 
 import {
     formatEditOutput,
@@ -2207,12 +2209,12 @@ const ToolPart: React.FC<ToolPartProps> = ({
                     const childStores = getSyncChildStores();
                     childStores.update(currentDirectory, (prev) => {
                         const records = messages as SessionMessageWithParts[];
-                        const partPatch: Record<string, import('@opencode-ai/sdk/v2').Part[]> = { ...prev.part };
+                        const partPatch: Record<string, HarnessPart[]> = { ...prev.part };
                         for (const rec of records) {
-                            partPatch[rec.info.id] = rec.parts;
+                            partPatch[rec.info.id] = rec.parts.map((part) => fromOpenCodePart(part));
                         }
                         return {
-                            message: { ...prev.message, [capturedSessionId]: records.map((r) => r.info) as import('@opencode-ai/sdk/v2').Message[] },
+                            message: { ...prev.message, [capturedSessionId]: records.map((r) => fromOpenCodeMessage(r.info as import('@opencode-ai/sdk/v2').Message)) },
                             part: partPatch,
                         };
                     });
@@ -2354,12 +2356,12 @@ const ToolPart: React.FC<ToolPartProps> = ({
                 const childStores = getSyncChildStores();
                 childStores.update(currentDirectory, (prev) => {
                     const records = messages as SessionMessageWithParts[];
-                    const partPatch: Record<string, import('@opencode-ai/sdk/v2').Part[]> = { ...prev.part };
+                    const partPatch: Record<string, HarnessPart[]> = { ...prev.part };
                     for (const rec of records) {
-                        partPatch[rec.info.id] = rec.parts;
+                        partPatch[rec.info.id] = rec.parts.map((part) => fromOpenCodePart(part));
                     }
                     return {
-                        message: { ...prev.message, [taskSessionId]: records.map((r) => r.info) as import('@opencode-ai/sdk/v2').Message[] },
+                        message: { ...prev.message, [taskSessionId]: records.map((r) => fromOpenCodeMessage(r.info as import('@opencode-ai/sdk/v2').Message)) },
                         part: partPatch,
                     };
                 });

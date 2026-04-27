@@ -15,6 +15,7 @@ import { getAllSyncSessions, getSyncChildStores } from "@/sync/sync-refs";
 import { opencodeClient } from "@/lib/opencode/client";
 import { respondToPermission } from "@/sync/session-actions";
 import { useSessionUIStore } from "@/sync/session-ui-store";
+import { getCompatibleSessionDirectory, getCompatibleSessionParentId } from "@/sync/compat";
 
 interface PermissionState {
     autoAccept: PermissionAutoAcceptMap;
@@ -77,7 +78,8 @@ const resolveLineage = (sessionID: string, sessions: Session[]): string[] => {
     while (current && !seen.has(current)) {
         seen.add(current);
         result.push(current);
-        current = map.get(current)?.parentID;
+        const parentId = map.get(current)
+        current = parentId ? getCompatibleSessionParentId(parentId) ?? undefined : undefined;
     }
     return result;
 };
@@ -87,12 +89,13 @@ const resolveSessionScope = (sessionID: string, sessions: Session[]): Set<string
     const children = new Map<string, string[]>();
     for (const session of sessions) {
         map.set(session.id, session);
-        if (session.parentID) {
-            const list = children.get(session.parentID);
+        const parentId = getCompatibleSessionParentId(session);
+        if (parentId) {
+            const list = children.get(parentId);
             if (list) {
                 list.push(session.id);
             } else {
-                children.set(session.parentID, [session.id]);
+                children.set(parentId, [session.id]);
             }
         }
     }
@@ -128,7 +131,7 @@ const resolveSessionScope = (sessionID: string, sessions: Session[]): Set<string
 const resolveSessionDirectory = (sessionID: string, sessions: Session[]): string | null => {
     const targetSession = sessions.find((session) => session.id === sessionID);
     const mappedDirectory = useSessionUIStore.getState().getDirectoryForSession(sessionID);
-    return normalizeDirectory(mappedDirectory ?? (targetSession as Session & { directory?: string | null })?.directory ?? null);
+    return normalizeDirectory(mappedDirectory ?? (targetSession ? getCompatibleSessionDirectory(targetSession) : null));
 };
 
 const getPermissionLevelBySession = (

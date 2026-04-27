@@ -43,6 +43,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { buildExportFilename, downloadAsMarkdown, formatSessionAsMarkdown, getExportRevealLabelKey, revealExportedMarkdown, saveAsMarkdownDesktop } from '@/lib/exportSession';
 import type { ChildSessionExport } from '@/lib/exportSession';
 import { buildSessionMessageRecordsSnapshot, useDirectoryStore, useGlobalSessionStatus, useSession, useSessionPermissions } from '@/sync/sync-context';
+import { getCompatibleSessionParentId, getCompatibleSessionShareUrl, getCompatibleSessionSummary } from '@/sync/compat';
 import { useSync } from '@/sync/use-sync';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useViewportStore } from '@/sync/viewport-store';
@@ -367,10 +368,10 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const hasChildren = node.children.length > 0;
   const isPinnedSession = pinnedSessionIds.has(session.id);
   const isExpanded = hasSessionSearchQuery ? true : expandedParents.has(session.id);
-  const isSubtaskSession = Boolean((resolvedSession as Session & { parentID?: string | null }).parentID);
+  const isSubtaskSession = Boolean(getCompatibleSessionParentId(resolvedSession));
   const unseenCount = useSessionUnseenCount(session.id);
   const needsAttention = unseenCount > 0 && (!isSubtaskSession || notifyOnSubtasks);
-  const sessionSummary = resolvedSession.summary as SessionSummaryMeta | undefined;
+  const sessionSummary = getCompatibleSessionSummary(resolvedSession) as SessionSummaryMeta | undefined;
   const sessionDiffStats = resolveSessionDiffStats(sessionSummary);
   const sessionTimestamp = resolvedSession.time?.updated || resolvedSession.time?.created || Date.now();
   const sessionUpdatedLabel = formatSessionDateLabel(sessionTimestamp);
@@ -715,14 +716,14 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
         {isPinnedSession ? <RiUnpinLine className="mr-1 h-4 w-4" /> : <RiPushpinLine className="mr-1 h-4 w-4" />}
         {isPinnedSession ? t('sessions.sidebar.session.menu.unpin') : t('sessions.sidebar.session.menu.pin')}
       </DropdownMenuItem>
-      {!resolvedSession.share ? (
+      {!getCompatibleSessionShareUrl(resolvedSession) ? (
         <DropdownMenuItem onClick={() => handleShareSession(resolvedSession)} className="[&>svg]:mr-1">
           <RiShare2Line className="mr-1 h-4 w-4" />
           {t('sessions.sidebar.session.menu.share')}
         </DropdownMenuItem>
       ) : (
         <>
-          <DropdownMenuItem onClick={() => { if (resolvedSession.share?.url) handleCopyShareUrl(resolvedSession.share.url, session.id); }} className="[&>svg]:mr-1">
+          <DropdownMenuItem onClick={() => { const shareUrl = getCompatibleSessionShareUrl(resolvedSession); if (shareUrl) handleCopyShareUrl(shareUrl, session.id); }} className="[&>svg]:mr-1">
             {copiedSessionId === session.id
               ? <><RiCheckLine className="mr-1 h-4 w-4" style={{ color: 'var(--status-success)' }} />{t('sessions.sidebar.session.menu.copied')}</>
               : <><RiFileCopyLine className="mr-1 h-4 w-4" />{t('sessions.sidebar.session.menu.copyLink')}</>}

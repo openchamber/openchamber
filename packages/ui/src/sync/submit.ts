@@ -1,8 +1,10 @@
-import type { Message, Part } from "@opencode-ai/sdk/v2/client"
+import type { Part } from "@opencode-ai/sdk/v2/client"
+import type { HarnessMessage, HarnessPart } from "@openchamber/harness-contracts"
 import { useCallback } from "react"
 import { useSyncSDK } from "./sync-context"
 import { useDirectoryStore } from "./sync-context"
 import { useSync } from "./use-sync"
+import { fromOpenCodePart } from "./adapters/opencode"
 
 // ---------------------------------------------------------------------------
 // Ascending ID generator — monotonic timestamp + sequence counter
@@ -42,26 +44,33 @@ export function usePromptSubmit() {
       const messageID = ascending("message")
 
       // Build optimistic user message
-      const message: Message = {
+      const message: HarnessMessage = {
         id: messageID,
-        sessionID: input.sessionID,
+        sessionId: input.sessionID,
         role: "user",
         time: { created: Date.now() },
-        agent: input.agent,
-        model: input.model,
-        variant: input.variant,
-      } as Message
+        attribution: {
+          backendId: "opencode",
+          providerId: input.model.providerID,
+          modelId: input.model.modelID,
+          modeId: input.agent,
+          effortId: input.variant,
+        },
+      }
 
       // Build optimistic parts
-      const textPart: Part = {
+      const textPart: HarnessPart = {
         id: ascending("part"),
-        sessionID: input.sessionID,
-        messageID,
-        type: "text",
+        sessionId: input.sessionID,
+        messageId: messageID,
+        kind: "text",
         text: input.text,
-      } as Part
+      }
 
-      const optimisticParts: Part[] = [textPart, ...(input.parts ?? [])]
+      const optimisticParts: HarnessPart[] = [
+        textPart,
+        ...(input.parts ?? []).map((part) => fromOpenCodePart(part)),
+      ]
 
       // Set busy status optimistically
       store.setState((prev) => ({

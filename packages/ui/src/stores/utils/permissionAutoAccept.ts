@@ -1,4 +1,5 @@
 import type { Session } from "@opencode-ai/sdk/v2/client";
+import { getCompatibleSessionParentId } from "@/sync/compat";
 
 export type PermissionLevel = 'manual' | 'auto-accept' | 'full-access';
 
@@ -72,7 +73,8 @@ const resolveLineage = (sessionID: string, sessions: Session[]): string[] => {
   while (current && !seen.has(current)) {
     seen.add(current);
     result.push(current);
-    current = map.get(current)?.parentID;
+    const session = map.get(current);
+    current = session ? getCompatibleSessionParentId(session) ?? undefined : undefined;
   }
 
   return result;

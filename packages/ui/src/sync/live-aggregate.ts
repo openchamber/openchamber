@@ -1,6 +1,12 @@
 import type { SessionStatus } from '@opencode-ai/sdk/v2/client'
 import type { Session } from '@opencode-ai/sdk/v2'
 import type { State } from './types'
+import {
+  getCompatibleSessionDirectory,
+  getCompatibleSessionParentId,
+  getCompatibleSessionShareUrl,
+  toOpenCodeCompatibleSession,
+} from './compat'
 
 type LiveStateSlice = Pick<State, 'session' | 'session_status'>
 
@@ -15,8 +21,8 @@ const getSessionUpdatedAt = (session: Session): number => {
 }
 
 const getSessionSignature = (session: Session): string => {
-  const directory = (session as Session & { directory?: string | null }).directory ?? ''
-  const parentID = (session as Session & { parentID?: string | null }).parentID ?? ''
+  const directory = getCompatibleSessionDirectory(session) ?? ''
+  const parentID = getCompatibleSessionParentId(session) ?? ''
   return [
     session.id,
     session.title ?? '',
@@ -25,7 +31,7 @@ const getSessionSignature = (session: Session): string => {
     session.time?.archived ?? 0,
     directory,
     parentID,
-    session.share?.url ?? '',
+    getCompatibleSessionShareUrl(session) ?? '',
   ].join('|')
 }
 
@@ -61,7 +67,7 @@ const getStatusCandidate = (state: LiveStateSlice, sessionId: string): StatusCan
   const session = state.session.find((candidate) => candidate.id === sessionId)
   return {
     status,
-    sessionUpdatedAt: session ? getSessionUpdatedAt(session) : -1,
+    sessionUpdatedAt: session ? getSessionUpdatedAt(toOpenCodeCompatibleSession(session)) : -1,
   }
 }
 
@@ -133,9 +139,10 @@ export function aggregateLiveSessions(states: Iterable<LiveStateSlice>): Session
       if (!session?.id) {
         continue
       }
+      const compatible = toOpenCodeCompatibleSession(session)
       const current = sessionsById.get(session.id)
-      if (!current || getSessionUpdatedAt(session) >= getSessionUpdatedAt(current)) {
-        sessionsById.set(session.id, session)
+      if (!current || getSessionUpdatedAt(compatible) >= getSessionUpdatedAt(current)) {
+        sessionsById.set(session.id, compatible)
       }
     }
   }
@@ -181,8 +188,9 @@ export function findLiveSession(states: Iterable<LiveStateSlice>, sessionID?: st
     if (!session) {
       continue
     }
-    if (!match || getSessionUpdatedAt(session) >= getSessionUpdatedAt(match)) {
-      match = session
+    const compatible = toOpenCodeCompatibleSession(session)
+    if (!match || getSessionUpdatedAt(compatible) >= getSessionUpdatedAt(match)) {
+      match = compatible
     }
   }
 
