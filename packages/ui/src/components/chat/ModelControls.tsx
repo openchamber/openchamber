@@ -20,7 +20,7 @@ import {
     RiCheckLine,
     RiCheckboxCircleLine,
     RiCloseCircleLine,
-    RiDragMove2Line,
+    RiDraggable,
     RiFileImageLine,
     RiFileMusicLine,
     RiFilePdfLine,
@@ -2335,6 +2335,23 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 onMouseEnter={handlePointerActivity}
                 onMouseMove={handlePointerActivity}
             >
+                {dragHandleProps ? (
+                    <button
+                        type="button"
+                        ref={dragHandleProps.setActivatorNodeRef}
+                        {...dragHandleProps.attributes}
+                        {...dragHandleProps.listeners}
+                        onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                        }}
+                        className="model-favorite-drag-handle flex h-4 w-4 flex-shrink-0 items-center justify-center text-muted-foreground hover:text-foreground"
+                        aria-label={t('chat.modelControls.reorderFavoriteAria')}
+                        title={t('chat.modelControls.reorderFavoriteTitle')}
+                    >
+                        <RiDraggable className="h-3.5 w-3.5" />
+                    </button>
+                ) : null}
                 <div className="flex items-center gap-1.5 flex-1 min-w-0">
                     {showProviderLogo && (
                         <ProviderLogo providerId={providerID} className="h-3.5 w-3.5 flex-shrink-0" />
@@ -2374,23 +2391,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     {isSelected && (
                         <RiCheckLine className="h-4 w-4 text-primary" />
                     )}
-                    {dragHandleProps ? (
-                        <button
-                            type="button"
-                            ref={dragHandleProps.setActivatorNodeRef}
-                            {...dragHandleProps.attributes}
-                            {...dragHandleProps.listeners}
-                            onClick={(event) => {
-                                event.preventDefault();
-                                event.stopPropagation();
-                            }}
-                            className="model-favorite-drag-handle flex h-4 w-4 items-center justify-center text-muted-foreground hover:text-foreground"
-                            aria-label={t('chat.modelControls.reorderFavoriteAria')}
-                            title={t('chat.modelControls.reorderFavoriteTitle')}
-                        >
-                            <RiDragMove2Line className="h-3.5 w-3.5" />
-                        </button>
-                    ) : null}
                     <button
                         onClick={(e) => {
                             e.preventDefault();
