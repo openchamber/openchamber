@@ -371,10 +371,19 @@ class OpencodeService {
 
   // Session Management
   async listSessions(): Promise<Session[]> {
-    const response = await this.client.session.list(
-      this.currentDirectory ? { directory: this.currentDirectory } : undefined
-    );
-    return Array.isArray(response.data) ? response.data : [];
+    const base = this.baseUrl.replace(/\/+$/, '');
+    const url = new URL(`${base}/openchamber/harness/sessions`);
+    if (this.currentDirectory) {
+      url.searchParams.set('directory', this.currentDirectory);
+    }
+    const response = await fetch(url, { headers: { accept: 'application/json' } });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null) as { error?: unknown } | null;
+      const message = typeof payload?.error === 'string' ? payload.error : `Failed to list sessions (status ${response.status})`;
+      throw new Error(message);
+    }
+    const payload = await response.json().catch(() => null);
+    return Array.isArray(payload) ? payload as Session[] : [];
   }
 
   async createSession(params?: { parentID?: string; title?: string; backendId?: string }): Promise<Session> {
@@ -405,12 +414,20 @@ class OpencodeService {
   }
 
   async getSession(id: string): Promise<Session> {
-    const response = await this.client.session.get({
-      sessionID: id,
-      ...(this.currentDirectory ? { directory: this.currentDirectory } : {})
-    });
-    if (!response.data) throw new Error('Session not found');
-    return response.data;
+    const base = this.baseUrl.replace(/\/+$/, '');
+    const url = new URL(`${base}/openchamber/harness/session/${encodeURIComponent(id)}`);
+    if (this.currentDirectory) {
+      url.searchParams.set('directory', this.currentDirectory);
+    }
+    const response = await fetch(url, { headers: { accept: 'application/json' } });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null) as { error?: unknown } | null;
+      const message = typeof payload?.error === 'string' ? payload.error : `Failed to read session (status ${response.status})`;
+      throw new Error(message);
+    }
+    const payload = await response.json().catch(() => null);
+    if (!payload || typeof payload !== 'object') throw new Error('Session not found');
+    return payload as Session;
   }
 
   async deleteSession(id: string): Promise<boolean> {
@@ -468,12 +485,22 @@ class OpencodeService {
   }
 
   async getSessionMessages(id: string, limit?: number): Promise<{ info: Message; parts: Part[] }[]> {
-    const response = await this.client.session.messages({
-      sessionID: id,
-      ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
-      ...(typeof limit === 'number' ? { limit } : {}),
-    });
-    return response.data || [];
+    const base = this.baseUrl.replace(/\/+$/, '');
+    const url = new URL(`${base}/openchamber/harness/session/${encodeURIComponent(id)}/messages`);
+    if (this.currentDirectory) {
+      url.searchParams.set('directory', this.currentDirectory);
+    }
+    if (typeof limit === 'number') {
+      url.searchParams.set('limit', String(limit));
+    }
+    const response = await fetch(url, { headers: { accept: 'application/json' } });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null) as { error?: unknown } | null;
+      const message = typeof payload?.error === 'string' ? payload.error : `Failed to read session messages (status ${response.status})`;
+      throw new Error(message);
+    }
+    const payload = await response.json().catch(() => null);
+    return Array.isArray(payload) ? payload as { info: Message; parts: Part[] }[] : [];
   }
 
   async getSessionTodos(sessionId: string): Promise<Array<{ id: string; content: string; status: string; priority: string }>> {

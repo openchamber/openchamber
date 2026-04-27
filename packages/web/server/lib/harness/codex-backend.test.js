@@ -134,12 +134,14 @@ describe('Codex backend runtime baseline contract', () => {
     expect(surface).toMatchObject({
       backendId: 'codex',
       modelSelector: {
-        source: 'backend',
+        source: 'provider-snapshot',
         providerId: 'codex',
         defaultOptionId: 'gpt-5.5',
       },
       effortSelector: {
         label: 'Thinking',
+        source: 'provider-option',
+        optionId: 'effort',
         defaultOptionId: 'medium',
       },
     });

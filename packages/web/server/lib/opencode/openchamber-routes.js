@@ -356,6 +356,47 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
 
   const getBoundBackend = async (sessionId) => sessionBindingsRuntime.getEffectiveBinding(sessionId);
   const getBackendRuntime = (backendId) => backendRegistry.getRuntime(backendId);
+  const parsePositiveNumber = (value) => {
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+      return value;
+    }
+    if (typeof value === 'string' && value.trim().length > 0) {
+      const parsed = Number.parseInt(value, 10);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+    }
+    return undefined;
+  };
+  const parseDirectory = (req, fallback) => {
+    if (typeof req.body?.directory === 'string') return req.body.directory;
+    if (typeof req.query?.directory === 'string') return req.query.directory;
+    return fallback;
+  };
+  const toRuntimeModel = (runConfig) => {
+    const modelId = typeof runConfig?.model?.modelId === 'string' ? runConfig.model.modelId : '';
+    const slashIndex = modelId.indexOf('/');
+    if (slashIndex > 0) {
+      return { providerID: modelId.slice(0, slashIndex), modelID: modelId.slice(slashIndex + 1) };
+    }
+    if (modelId) {
+      return modelId;
+    }
+    return undefined;
+  };
+  const getRunConfigOption = (runConfig, optionId) => {
+    const options = Array.isArray(runConfig?.options) ? runConfig.options : [];
+    const option = options.find((entry) => entry?.id === optionId);
+    return typeof option?.value === 'string' ? option.value : undefined;
+  };
+  const getMessageId = (body) => {
+    if (typeof body?.messageId === 'string') return body.messageId;
+    if (typeof body?.messageID === 'string') return body.messageID;
+    return undefined;
+  };
+  const getParentSessionId = (body) => {
+    if (typeof body?.parentSessionId === 'string') return body.parentSessionId;
+    if (typeof body?.parentID === 'string') return body.parentID;
+    return undefined;
+  };
 
   app.get('/api/openchamber/harness/control-surface', async (req, res) => {
     try {
@@ -386,6 +427,100 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
     }
   });
 
+  app.get('/api/openchamber/harness/sessions', async (req, res) => {
+    try {
+      const requestedBackendId = typeof req.query?.backendId === 'string' ? req.query.backendId.trim() : '';
+      const directory = parseDirectory(req);
+      const limit = parsePositiveNumber(req.query?.limit);
+      const archived = req.query?.archived === 'true';
+      const roots = req.query?.roots === 'false' ? false : undefined;
+      const descriptors = requestedBackendId
+        ? [backendRegistry.getBackend(requestedBackendId)].filter(Boolean)
+        : backendRegistry.listBackends().filter((backend) => backend.available && backend.capabilities?.sessions);
+      const sessions = [];
+
+      for (const descriptor of descriptors) {
+        if (!backendRegistry.isBackendSelectable(descriptor.id)) {
+          continue;
+        }
+        const runtime = getBackendRuntime(descriptor.id);
+        if (!runtime?.listSessions) {
+          continue;
+        }
+        const backendSessions = await runtime.listSessions({ directory, limit, archived, roots });
+        if (Array.isArray(backendSessions)) {
+          sessions.push(...backendSessions.map((session) => sessionBindingsRuntime.annotateSession({ ...session, backendId: descriptor.id })));
+        }
+      }
+
+      sessions.sort((a, b) => (b?.time?.updated ?? b?.time?.created ?? 0) - (a?.time?.updated ?? a?.time?.created ?? 0));
+      return res.status(200).json(limit ? sessions.slice(0, limit) : sessions);
+    } catch (error) {
+      console.error('Failed to list harness sessions:', error);
+      const message = error?.body?.error || error?.message || 'Failed to list sessions';
+      return res.status(400).json({ error: message });
+    }
+  });
+
+  app.get('/api/openchamber/harness/session/:sessionId', async (req, res) => {
+    try {
+      const sessionId = typeof req.params?.sessionId === 'string' ? req.params.sessionId : '';
+      const binding = await getBoundBackend(sessionId);
+      if (!binding) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+      if (!backendRegistry.isBackendSelectable(binding.backendId)) {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+      const runtime = getBackendRuntime(binding.backendId);
+      if (!runtime?.getSession) {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+
+      const payload = await runtime.getSession({
+        sessionID: binding.backendSessionId,
+        directory: parseDirectory(req, binding.directory),
+      });
+      if (!payload) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+      return res.status(200).json(sessionBindingsRuntime.annotateSession(payload));
+    } catch (error) {
+      console.error('Failed to read harness session:', error);
+      const message = error?.body?.error || error?.message || 'Failed to read session';
+      return res.status(400).json({ error: message });
+    }
+  });
+
+  app.get('/api/openchamber/harness/session/:sessionId/messages', async (req, res) => {
+    try {
+      const sessionId = typeof req.params?.sessionId === 'string' ? req.params.sessionId : '';
+      const binding = await getBoundBackend(sessionId);
+      if (!binding) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+      if (!backendRegistry.isBackendSelectable(binding.backendId)) {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+      const runtime = getBackendRuntime(binding.backendId);
+      if (!runtime?.getMessages) {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+
+      const payload = await runtime.getMessages({
+        sessionID: binding.backendSessionId,
+        directory: parseDirectory(req, binding.directory),
+        limit: parsePositiveNumber(req.query?.limit),
+        before: typeof req.query?.before === 'string' ? req.query.before : undefined,
+      });
+      return res.status(200).json(Array.isArray(payload) ? payload : []);
+    } catch (error) {
+      console.error('Failed to read harness session messages:', error);
+      const message = error?.body?.error || error?.message || 'Failed to read session messages';
+      return res.status(400).json({ error: message });
+    }
+  });
+
   app.post('/api/openchamber/harness/session', async (req, res) => {
     try {
       const backendId = await getRequestedBackendId(req);
@@ -400,7 +535,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
       const payload = await runtime.createSession({
         directory: typeof req.body?.directory === 'string' ? req.body.directory : undefined,
         title: typeof req.body?.title === 'string' ? req.body.title : undefined,
-        parentID: typeof req.body?.parentID === 'string' ? req.body.parentID : undefined,
+        parentID: getParentSessionId(req.body),
       });
 
       if (payload?.id) {
@@ -438,10 +573,10 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
       await runtime.promptAsync({
         sessionID: binding.backendSessionId,
         directory: typeof req.body?.directory === 'string' ? req.body.directory : binding.directory,
-        messageID: typeof req.body?.messageID === 'string' ? req.body.messageID : undefined,
-        model: req.body?.model,
-        agent: typeof req.body?.agent === 'string' ? req.body.agent : undefined,
-        variant: typeof req.body?.variant === 'string' ? req.body.variant : undefined,
+        messageID: getMessageId(req.body),
+        model: req.body?.model ?? toRuntimeModel(req.body?.runConfig),
+        agent: typeof req.body?.agent === 'string' ? req.body.agent : req.body?.runConfig?.interactionMode,
+        variant: typeof req.body?.variant === 'string' ? req.body.variant : getRunConfigOption(req.body?.runConfig, 'variant') ?? getRunConfigOption(req.body?.runConfig, 'effort'),
         format: req.body?.format,
         parts: Array.isArray(req.body?.parts) ? req.body.parts : undefined,
         sandboxOverride: typeof req.body?.sandboxOverride === 'string' ? req.body.sandboxOverride : undefined,
@@ -473,10 +608,10 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
       const payload = await runtime.prompt({
         sessionID: binding.backendSessionId,
         directory: typeof req.body?.directory === 'string' ? req.body.directory : binding.directory,
-        messageID: typeof req.body?.messageID === 'string' ? req.body.messageID : undefined,
-        model: req.body?.model,
-        agent: typeof req.body?.agent === 'string' ? req.body.agent : undefined,
-        variant: typeof req.body?.variant === 'string' ? req.body.variant : undefined,
+        messageID: getMessageId(req.body),
+        model: req.body?.model ?? toRuntimeModel(req.body?.runConfig),
+        agent: typeof req.body?.agent === 'string' ? req.body.agent : req.body?.runConfig?.interactionMode,
+        variant: typeof req.body?.variant === 'string' ? req.body.variant : getRunConfigOption(req.body?.runConfig, 'variant') ?? getRunConfigOption(req.body?.runConfig, 'effort'),
         format: req.body?.format,
         parts: Array.isArray(req.body?.parts) ? req.body.parts : undefined,
       });
@@ -507,12 +642,12 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
       const payload = await runtime.command({
         sessionID: binding.backendSessionId,
         directory: typeof req.body?.directory === 'string' ? req.body.directory : binding.directory,
-        messageID: typeof req.body?.messageID === 'string' ? req.body.messageID : undefined,
-        model: typeof req.body?.model === 'string' ? req.body.model : undefined,
-        agent: typeof req.body?.agent === 'string' ? req.body.agent : undefined,
-        command: typeof req.body?.command === 'string' ? req.body.command : '',
+        messageID: getMessageId(req.body),
+        model: typeof req.body?.model === 'string' ? req.body.model : toRuntimeModel(req.body?.runConfig),
+        agent: typeof req.body?.agent === 'string' ? req.body.agent : req.body?.runConfig?.interactionMode,
+        command: typeof req.body?.command === 'string' ? req.body.command : (typeof req.body?.commandId === 'string' ? req.body.commandId : ''),
         arguments: typeof req.body?.arguments === 'string' ? req.body.arguments : '',
-        variant: typeof req.body?.variant === 'string' ? req.body.variant : undefined,
+        variant: typeof req.body?.variant === 'string' ? req.body.variant : getRunConfigOption(req.body?.runConfig, 'variant') ?? getRunConfigOption(req.body?.runConfig, 'effort'),
         parts: Array.isArray(req.body?.parts) ? req.body.parts : undefined,
       });
 
@@ -600,7 +735,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
       const payload = await runtime.forkSession({
         sessionID: binding.backendSessionId,
         directory: typeof req.body?.directory === 'string' ? req.body.directory : binding.directory,
-        messageID: typeof req.body?.messageID === 'string' ? req.body.messageID : undefined,
+        messageID: getMessageId(req.body),
       });
 
       if (payload?.id) {

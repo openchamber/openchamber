@@ -39,6 +39,57 @@ export const createOpenCodeBackendRuntime = (dependencies) => {
     return response.data;
   };
 
+  const listSessions = async (input = {}) => {
+    const directory = typeof input?.directory === 'string' && input.directory.trim().length > 0
+      ? input.directory.trim()
+      : undefined;
+    const client = createClient(directory);
+    const response = await client.session.list(directory ? { directory } : undefined, {
+      throwOnError: true,
+    });
+    return Array.isArray(response.data) ? response.data : [];
+  };
+
+  const getSession = async (input = {}) => {
+    const directory = typeof input?.directory === 'string' && input.directory.trim().length > 0
+      ? input.directory.trim()
+      : undefined;
+    const sessionID = typeof input?.sessionID === 'string' ? input.sessionID : '';
+    if (!sessionID) {
+      throw new Error('Session ID is required');
+    }
+
+    const client = createClient(directory);
+    const response = await client.session.get({
+      sessionID,
+      ...(directory ? { directory } : {}),
+    }, {
+      throwOnError: true,
+    });
+    return response.data ?? null;
+  };
+
+  const getMessages = async (input = {}) => {
+    const directory = typeof input?.directory === 'string' && input.directory.trim().length > 0
+      ? input.directory.trim()
+      : undefined;
+    const sessionID = typeof input?.sessionID === 'string' ? input.sessionID : '';
+    if (!sessionID) {
+      throw new Error('Session ID is required');
+    }
+
+    const client = createClient(directory);
+    const response = await client.session.messages({
+      sessionID,
+      ...(directory ? { directory } : {}),
+      ...(typeof input?.limit === 'number' ? { limit: input.limit } : {}),
+      ...(typeof input?.before === 'string' ? { before: input.before } : {}),
+    }, {
+      throwOnError: true,
+    });
+    return Array.isArray(response.data) ? response.data : [];
+  };
+
   const prompt = async (input = {}) => {
     const directory = typeof input?.directory === 'string' && input.directory.trim().length > 0
       ? input.directory.trim()
@@ -341,7 +392,10 @@ export const createOpenCodeBackendRuntime = (dependencies) => {
   };
 
   return {
+    listSessions,
     createSession,
+    getSession,
+    getMessages,
     prompt,
     promptAsync,
     command,
