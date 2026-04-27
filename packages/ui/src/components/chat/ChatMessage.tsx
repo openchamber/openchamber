@@ -112,6 +112,20 @@ const getMessageInfoProp = (info: unknown, key: string): unknown => {
     return undefined;
 };
 
+const getMessageModelProp = (info: unknown, key: 'providerID' | 'modelID'): unknown => {
+    const direct = getMessageInfoProp(info, key);
+    if (direct !== undefined && direct !== null) {
+        return direct;
+    }
+
+    const model = getMessageInfoProp(info, 'model');
+    if (typeof model === 'object' && model !== null) {
+        return (model as Record<string, unknown>)[key];
+    }
+
+    return undefined;
+};
+
 interface ChatMessageProps {
     message: {
         info: Message;
@@ -165,7 +179,19 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         streamPerfCount('ui.chat_message.render.streaming');
     }
 
-    const providers = useConfigStore.getState().providers;
+    const providers = useConfigStore(
+        useShallow((state) => {
+            if (!Array.isArray(state.virtualProviders) || state.virtualProviders.length === 0) {
+                return state.providers;
+            }
+
+            const virtualProviderIds = new Set(state.virtualProviders.map((provider) => provider.id));
+            return [
+                ...state.virtualProviders,
+                ...state.providers.filter((provider) => !virtualProviderIds.has(provider.id)),
+            ];
+        })
+    );
     const { showReasoningTraces, stickyUserHeader, chatRenderMode, showExpandedBashTools, showExpandedEditTools } = useUIStore(
         useShallow((state) => ({
             showReasoningTraces: state.showReasoningTraces,
@@ -237,8 +263,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
         const mode = getMessageInfoProp(previousMessage.info, 'mode');
         const agent = getMessageInfoProp(previousMessage.info, 'agent');
-        const providerID = getMessageInfoProp(previousMessage.info, 'providerID');
-        const modelID = getMessageInfoProp(previousMessage.info, 'modelID');
+        const providerID = getMessageModelProp(previousMessage.info, 'providerID');
+        const modelID = getMessageModelProp(previousMessage.info, 'modelID');
         const variant = getMessageInfoProp(previousMessage.info, 'variant');
         const resolvedAgent =
             typeof mode === 'string' && mode.trim().length > 0
@@ -312,8 +338,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         return savedSessionAgentSelection ?? undefined;
     }, [isUser, message.info, previousIsModeSwitchMessage, previousUserMetadata, sessionId, currentContextAgent, savedSessionAgentSelection]);
 
-    const messageProviderID = !isUser ? getMessageInfoProp(message.info, 'providerID') : null;
-    const messageModelID = !isUser ? getMessageInfoProp(message.info, 'modelID') : null;
+    const messageProviderID = !isUser ? getMessageModelProp(message.info, 'providerID') : null;
+    const messageModelID = !isUser ? getMessageModelProp(message.info, 'modelID') : null;
 
     const contextModelSelection = React.useMemo(() => {
         if (isUser || !sessionId) return null;
@@ -367,6 +393,10 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                 const name = modelObj?.name;
                 return typeof name === 'string' ? name : undefined;
             }
+        }
+
+        if (modelID) {
+            return modelID;
         }
 
         return undefined;
@@ -655,7 +685,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
     const headerVariantRaw = !isUser ? (turnGroupingContext?.userMessageVariant ?? previousUserMetadata?.variant) : undefined;
 
-    const headerVariant = !isUser && modelHasVariants ? (headerVariantRaw ?? 'Default') : undefined;
+    const headerVariant = !isUser ? (headerVariantRaw ?? (modelHasVariants ? 'Default' : undefined)) : undefined;
 
     // Summary body removed — flat rendering means text is always inline.
 
