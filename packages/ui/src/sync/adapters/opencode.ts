@@ -9,6 +9,7 @@ import type {
   HarnessRunConfig,
   HarnessSession,
 } from "@openchamber/harness-contracts"
+import { getToolCategory as resolveToolCategory } from "@/lib/toolHelpers"
 
 const OPENCODE_BACKEND_ID = "opencode"
 
@@ -38,6 +39,7 @@ type OpenCodePartLike = Part & {
     input?: unknown
     output?: unknown
     error?: unknown
+    metadata?: Record<string, unknown>
     time?: {
       start?: number
       end?: number
@@ -48,6 +50,7 @@ type OpenCodePartLike = Part & {
   url?: string
   mime?: string
   filename?: string
+  metadata?: Record<string, unknown>
 }
 
 export function fromOpenCodeSession(session: Session): HarnessSession {
@@ -155,6 +158,9 @@ export function fromOpenCodePart(part: Part): HarnessPart {
         input: source.state?.input,
         output: stringifyOutput(source.state?.output),
         error: stringifyOutput(source.state?.error),
+        files: getToolFiles(source.state?.metadata ?? source.metadata),
+        diff: stringifyOutput(source.state?.metadata?.diff ?? source.state?.metadata?.patch),
+        linkedSessionId: getLinkedSessionId(source.state?.metadata ?? source.metadata),
         startedAt: source.state?.time?.start,
         endedAt: source.state?.time?.end,
         raw: part,
@@ -443,13 +449,33 @@ function getMessageRole(role: unknown) {
 }
 
 function getToolCategory(name: string | undefined) {
-  if (!name) return "custom"
-  if (["bash", "shell", "cmd", "terminal"].includes(name)) return "shell"
-  if (["edit", "write", "apply_patch", "patch", "str_replace"].includes(name)) return "edit"
-  if (["grep", "glob", "search"].includes(name)) return "search"
-  if (["webfetch", "fetch"].includes(name)) return "fetch"
-  if (name === "task") return "task"
-  return "custom"
+  return resolveToolCategory(name ?? "")
+}
+
+function getToolFiles(metadata: Record<string, unknown> | undefined) {
+  const files = Array.isArray(metadata?.files) ? metadata.files : []
+  return files
+    .map((file) => {
+      if (!isObject(file)) return null
+      const path = typeof file.relativePath === "string"
+        ? file.relativePath
+        : (typeof file.filePath === "string" ? file.filePath : undefined)
+      if (!path) return null
+      return {
+        path,
+        additions: typeof file.additions === "number" ? file.additions : undefined,
+        deletions: typeof file.deletions === "number" ? file.deletions : undefined,
+      }
+    })
+    .filter((file): file is NonNullable<typeof file> => Boolean(file))
+}
+
+function getLinkedSessionId(metadata: Record<string, unknown> | undefined) {
+  if (typeof metadata?.linkedSessionId === "string") return metadata.linkedSessionId
+  if (typeof metadata?.taskSessionID === "string") return metadata.taskSessionID
+  if (typeof metadata?.taskSessionId === "string") return metadata.taskSessionId
+  if (typeof metadata?.sessionId === "string") return metadata.sessionId
+  return undefined
 }
 
 function getToolStatus(status: string | undefined) {

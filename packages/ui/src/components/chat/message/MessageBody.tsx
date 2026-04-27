@@ -18,6 +18,7 @@ import { RiCheckLine, RiFileCopyLine, RiChatNewLine, RiArrowGoBackLine, RiGitBra
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import type { ContentChangeReason } from '@/hooks/useChatScrollManager';
 import type { RenderablePart, RenderableToolPart } from './renderable';
+import { toRenderableToolActivity } from './renderable';
 
 import { SimpleMarkdownRenderer } from '../MarkdownRenderer';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -1562,6 +1563,7 @@ const AssistantMessageBody = React.memo(({
                             <ToolRevealOnMount animate={animatedToolIdsLookup.has(toolPart.id)} wipe>
                                 <ToolPart
                                     part={toolPart}
+                                    activity={toRenderableToolActivity(toolPart)}
                                     isExpanded={expandedTools.has(toolPart.id)}
                                     onToggle={onToggleTool}
                                     syntaxTheme={syntaxTheme}

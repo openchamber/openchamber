@@ -6,7 +6,6 @@ import { PatchDiff } from '@pierre/diffs/react';
 import { cn } from '@/lib/utils';
 import { SimpleMarkdownRenderer } from '../../MarkdownRenderer';
 import { getToolMetadata } from '@/lib/toolHelpers';
-import type { ToolPart as ToolPartType, ToolState as ToolStateUnion } from '@opencode-ai/sdk/v2';
 import { toolDisplayStyles } from '@/lib/typography';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
@@ -26,8 +25,9 @@ import type { ToolPopupContent } from '../types';
 import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import type { MessageRecord } from '@/lib/messageCompletion';
-import type { HarnessPart } from '@openchamber/harness-contracts';
+import type { HarnessPart, HarnessToolActivity } from '@openchamber/harness-contracts';
 import { fromOpenCodeMessage, fromOpenCodePart } from '@/sync/adapters/opencode';
+import type { RenderableToolPart, RenderableToolState } from '../renderable';
 
 import {
     formatEditOutput,
@@ -45,10 +45,11 @@ import { resolveFallbackTaskSessionId } from './resolveFallbackTaskSessionId';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
 import { useI18n } from '@/lib/i18n';
 
-type ToolStateWithMetadata = ToolStateUnion & { metadata?: Record<string, unknown>; input?: Record<string, unknown>; output?: string; error?: string; time?: { start: number; end?: number } };
+type ToolStateWithMetadata = RenderableToolState & { metadata?: Record<string, unknown>; input?: Record<string, unknown>; output?: string; error?: string; time?: { start: number; end?: number } };
 
 interface ToolPartProps {
-    part: ToolPartType;
+    part: RenderableToolPart;
+    activity: HarnessToolActivity;
     isExpanded: boolean;
     onToggle: (toolId: string) => void;
     syntaxTheme: { [key: string]: React.CSSProperties };
@@ -597,7 +598,7 @@ const parseQuestionOutput = (output: string): Array<{ question: string; answer: 
     return pairs.length > 0 ? pairs : null;
 };
 
-const getToolDescriptionPath = (part: ToolPartType, state: ToolStateUnion, currentDirectory: string): string | null => {
+const getToolDescriptionPath = (part: RenderableToolPart, state: RenderableToolState | undefined, currentDirectory: string): string | null => {
     const stateWithData = state as ToolStateWithMetadata;
     const metadata = stateWithData.metadata;
     const input = stateWithData.input;
@@ -637,7 +638,7 @@ const getToolDescriptionPath = (part: ToolPartType, state: ToolStateUnion, curre
     return null;
 };
 
-const getToolDescription = (part: ToolPartType, state: ToolStateUnion, currentDirectory: string): string => {
+const getToolDescription = (part: RenderableToolPart, state: RenderableToolState | undefined, currentDirectory: string): string => {
     const stateWithData = state as ToolStateWithMetadata;
     const metadata = stateWithData.metadata;
     const input = stateWithData.input;
@@ -670,7 +671,7 @@ const getToolDescription = (part: ToolPartType, state: ToolStateUnion, currentDi
         return input.description.substring(0, 80);
     }
 
-    const desc = input?.description || metadata?.description || ('title' in state && state.title) || '';
+    const desc = input?.description || metadata?.description || state?.title || '';
     return typeof desc === 'string' ? desc : '';
 };
 
@@ -708,7 +709,7 @@ const ToolScrollableSection: React.FC<ToolScrollableSectionProps> = ({
 
 const getToolOutputLanguage = (
     output: string,
-    part: ToolPartType,
+    part: RenderableToolPart,
     metadata: Record<string, unknown> | undefined,
     input: Record<string, unknown> | undefined,
 ): string => {
@@ -721,7 +722,7 @@ const getToolOutputLanguage = (
 
 const getToolOutputText = (
     output: string,
-    part: ToolPartType,
+    part: RenderableToolPart,
     metadata: Record<string, unknown> | undefined,
 ): string => {
     if (part.tool === 'bash') {
@@ -733,7 +734,7 @@ const getToolOutputText = (
 
 const ToolScrollableTextOutput: React.FC<{
     output: string;
-    part: ToolPartType;
+    part: RenderableToolPart;
     metadata: Record<string, unknown> | undefined;
     input: Record<string, unknown> | undefined;
     syntaxTheme: { [key: string]: React.CSSProperties };
@@ -1461,8 +1462,8 @@ const DiffPreview: React.FC<DiffPreviewProps> = React.memo(({ diff, pierreTheme,
 DiffPreview.displayName = 'DiffPreview';
 
 interface ToolExpandedContentProps {
-    part: ToolPartType;
-    state: ToolStateUnion;
+    part: RenderableToolPart;
+    state: RenderableToolState | undefined;
     syntaxTheme: { [key: string]: React.CSSProperties };
     currentDirectory: string;
     onShowPopup?: (content: ToolPopupContent) => void;
@@ -1596,7 +1597,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
 
         // Question tool: show parsed Q&A summary or question content from input
         if (part.tool === 'question') {
-            if (state.status === 'completed' && hasStringOutput) {
+            if (state?.status === 'completed' && hasStringOutput) {
                 const parsedQA = parseQuestionOutput(outputString);
                 if (parsedQA && parsedQA.length > 0) {
                     return renderScrollableBlock(
@@ -1613,7 +1614,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                 }
             }
 
-            if (state.status === 'error' && 'error' in state) {
+            if (state?.status === 'error' && 'error' in state) {
                 return (
                     <div>
                         <div className="typography-meta font-medium text-muted-foreground mb-1">{t('chat.toolPart.error')}</div>
@@ -1764,7 +1765,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                         </div>
                     ) : null}
 
-                    {state.status === 'completed' && 'output' in state && (
+                    {state?.status === 'completed' && 'output' in state && (
                         <div>
                             {(part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch' || part.tool === 'write') && diffContent ? (
                                 <div className="mb-1 flex items-center justify-end gap-2">
@@ -1779,7 +1780,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                         </div>
                     )}
 
-                    {state.status === 'error' && 'error' in state && (
+                    {state?.status === 'error' && 'error' in state && (
                         <div>
                             <div className="typography-meta font-medium text-muted-foreground/80 mb-1">{t('chat.toolPart.error')}</div>
                             <div className="typography-meta p-2 rounded-xl border" style={{
@@ -1801,6 +1802,7 @@ ToolExpandedContent.displayName = 'ToolExpandedContent';
 
 const ToolPart: React.FC<ToolPartProps> = ({
     part,
+    activity,
     isExpanded,
     onToggle,
     syntaxTheme,
@@ -1814,10 +1816,10 @@ const ToolPart: React.FC<ToolPartProps> = ({
     const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
 
-    const normalizedPartTool = normalizeToolName(part.tool);
+    const normalizedPartTool = normalizeToolName(activity.name || part.tool);
     const isTaskTool = normalizedPartTool === 'task';
 
-    const status = state?.status as string | undefined;
+    const status = String(state?.status ?? activity.status);
     const isFinalized = status === 'completed' || status === 'error' || status === 'aborted' || status === 'failed' || status === 'timeout' || status === 'cancelled';
     const isError = status === 'error' || status === 'failed';
 
@@ -1960,6 +1962,10 @@ const ToolPart: React.FC<ToolPartProps> = ({
             return undefined;
         }
 
+        if (activity.linkedSessionId) {
+            return activity.linkedSessionId;
+        }
+
         const metadataSessionId = readTaskSessionIdFromRecord(metadata);
         if (metadataSessionId) {
             return metadataSessionId;
@@ -1974,7 +1980,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
             return parsedTaskMetadata.sessionId;
         }
         return readTaskSessionIdFromOutput(taskOutputString);
-    }, [isTaskTool, metadata, parsedTaskMetadata.sessionId, partMetadata, taskOutputString]);
+    }, [activity.linkedSessionId, isTaskTool, metadata, parsedTaskMetadata.sessionId, partMetadata, taskOutputString]);
 
     const fallbackTaskSessionId = useDirectorySync(
         React.useCallback((storeState) => {
@@ -2214,7 +2220,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
                             partPatch[rec.info.id] = rec.parts.map((part) => fromOpenCodePart(part));
                         }
                         return {
-                            message: { ...prev.message, [capturedSessionId]: records.map((r) => fromOpenCodeMessage(r.info as import('@opencode-ai/sdk/v2').Message)) },
+                            message: { ...prev.message, [capturedSessionId]: records.map((r) => fromOpenCodeMessage(r.info as Parameters<typeof fromOpenCodeMessage>[0])) },
                             part: partPatch,
                         };
                     });
@@ -2361,7 +2367,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
                         partPatch[rec.info.id] = rec.parts.map((part) => fromOpenCodePart(part));
                     }
                     return {
-                        message: { ...prev.message, [taskSessionId]: records.map((r) => fromOpenCodeMessage(r.info as import('@opencode-ai/sdk/v2').Message)) },
+                        message: { ...prev.message, [taskSessionId]: records.map((r) => fromOpenCodeMessage(r.info as Parameters<typeof fromOpenCodeMessage>[0])) },
                         part: partPatch,
                     };
                 });
@@ -2408,7 +2414,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
     const diffStats = (normalizedPartTool === 'edit' || normalizedPartTool === 'multiedit' || normalizedPartTool === 'apply_patch') ? parseDiffStats(metadata) : null;
     const writeLineCount = normalizedPartTool === 'write' ? parseWriteLineCount(input) : null;
     const isMultiFileApplyPatch = normalizedPartTool === 'apply_patch' && Array.isArray(metadata?.files) && (metadata?.files as []).length > 1;
-    const normalizedPart = normalizedPartTool !== part.tool ? ({ ...part, tool: normalizedPartTool } as ToolPartType) : part;
+    const normalizedPart = normalizedPartTool !== part.tool ? ({ ...part, tool: normalizedPartTool } as RenderableToolPart) : part;
     const descriptionPath = getToolDescriptionPath(normalizedPart, state, currentDirectory);
     const description = getToolDescription(normalizedPart, state, currentDirectory);
     const displayName = getToolMetadata(normalizedPartTool || part.tool).displayName;
@@ -2527,7 +2533,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
                             )}
                             style={iconStyle}
                         >
-                            {getToolIcon(normalizedPartTool || part.tool)}
+                            {getToolIcon(normalizedPartTool || part.tool, activity.category)}
                         </div>
                         {}
                         <div

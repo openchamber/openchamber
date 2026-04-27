@@ -11,6 +11,19 @@ export interface ToolMetadata {
   category: 'file' | 'search' | 'code' | 'system' | 'ai' | 'web';
 }
 
+export type HarnessToolCategory = 'shell' | 'edit' | 'search' | 'fetch' | 'task' | 'custom';
+
+export function getToolCategory(toolName: string): HarnessToolCategory {
+  const trimmed = toolName.trim().toLowerCase().replace(/:\d+$/, '');
+  const normalized = trimmed.includes('.') ? trimmed.split('.').filter(Boolean).at(-1) ?? trimmed : trimmed;
+  if (normalized === 'bash' || normalized === 'shell' || normalized === 'cmd' || normalized === 'terminal') return 'shell';
+  if (normalized === 'edit' || normalized === 'multiedit' || normalized === 'apply_patch' || normalized === 'write' || normalized === 'create' || normalized === 'file_write' || normalized === 'str_replace' || normalized === 'str_replace_based_edit_tool') return 'edit';
+  if (normalized === 'grep' || normalized === 'glob' || normalized === 'search' || normalized === 'find' || normalized === 'ripgrep') return 'search';
+  if (normalized === 'webfetch' || normalized === 'fetch' || normalized === 'curl' || normalized === 'wget' || normalized === 'websearch' || normalized === 'codesearch') return 'fetch';
+  if (normalized === 'task') return 'task';
+  return 'custom';
+}
+
 export const TOOL_METADATA: Record<string, ToolMetadata> = {
 
   read: {

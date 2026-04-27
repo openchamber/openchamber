@@ -1,8 +1,25 @@
-import type { Message, Part, ToolPart } from '@opencode-ai/sdk/v2';
-import type { HarnessMessageRecord } from '@openchamber/harness-contracts';
+import type { Message, Part } from '@opencode-ai/sdk/v2';
+import type { HarnessMessageRecord, HarnessToolActivity } from '@openchamber/harness-contracts';
+import { getToolCategory } from '@/lib/toolHelpers';
 
 export type RenderablePart = Part;
-export type RenderableToolPart = ToolPart;
+export type RenderableToolStatus = 'pending' | 'running' | 'completed' | 'error' | 'aborted' | 'failed' | 'timeout' | 'cancelled' | string;
+export interface RenderableToolState {
+    status?: RenderableToolStatus;
+    title?: string;
+    metadata?: Record<string, unknown>;
+    input?: Record<string, unknown>;
+    output?: string;
+    error?: string;
+    time?: { start: number; end?: number };
+}
+export type RenderableToolPart = RenderablePart & {
+    type: 'tool';
+    id: string;
+    tool: string;
+    state?: RenderableToolState;
+    metadata?: unknown;
+};
 
 export type RenderableMessage = Message & {
     sessionId?: string;
@@ -135,5 +152,60 @@ export const resolveMessageAttribution = (message: RenderableMessage): Renderabl
         modelId: typeof modelID === 'string' && modelID.trim().length > 0 ? modelID : attribution?.modelId,
         modelName: attribution?.modelLabel,
         variant: attribution?.effortLabel ?? attribution?.effortId,
+    };
+};
+
+const normalizeToolStatus = (status: unknown): HarnessToolActivity['status'] => {
+    if (status === 'completed') return 'completed';
+    if (status === 'error' || status === 'failed' || status === 'timeout') return 'failed';
+    if (status === 'aborted' || status === 'cancelled') return 'cancelled';
+    if (status === 'running' || status === 'started') return 'running';
+    return 'pending';
+};
+
+export const toRenderableToolActivity = (part: RenderableToolPart): HarnessToolActivity => {
+    const state = part.state ?? {};
+    const rawMetadata = state.metadata;
+    const metadata = typeof rawMetadata === 'object' && rawMetadata !== null ? rawMetadata as Record<string, unknown> : undefined;
+    const files = Array.isArray(metadata?.files)
+        ? metadata.files
+            .map((file) => {
+                if (!isObject(file)) return null;
+                const path = typeof file.relativePath === 'string'
+                    ? file.relativePath
+                    : (typeof file.filePath === 'string' ? file.filePath : undefined);
+                if (!path) return null;
+                return {
+                    path,
+                    additions: typeof file.additions === 'number' ? file.additions : undefined,
+                    deletions: typeof file.deletions === 'number' ? file.deletions : undefined,
+                };
+            })
+            .filter((file): file is NonNullable<typeof file> => Boolean(file))
+        : undefined;
+    const linkedSessionId = typeof metadata?.linkedSessionId === 'string'
+        ? metadata.linkedSessionId
+        : (typeof metadata?.taskSessionID === 'string'
+            ? metadata.taskSessionID
+            : (typeof metadata?.taskSessionId === 'string'
+                ? metadata.taskSessionId
+                : (typeof metadata?.sessionId === 'string' ? metadata.sessionId : undefined)));
+
+    return {
+        id: part.id,
+        name: part.tool,
+        category: getToolCategory(part.tool),
+        status: normalizeToolStatus(state.status),
+        input: state.input,
+        output: state.output,
+        error: state.error,
+        files,
+        diff: typeof metadata?.diff === 'string'
+            ? metadata.diff
+            : (typeof metadata?.patch === 'string' ? metadata.patch : undefined),
+        linkedSessionId,
+        startedAt: state.time?.start,
+        endedAt: state.time?.end,
+        raw: part,
     };
 };

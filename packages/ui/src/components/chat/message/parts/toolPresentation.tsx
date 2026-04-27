@@ -19,9 +19,15 @@ import {
     RiToolsLine,
 } from '@remixicon/react';
 
-export const getToolIcon = (toolName: string) => {
+export const getToolIcon = (toolName: string, category?: string) => {
     const iconClass = 'h-3.5 w-3.5 flex-shrink-0';
     const tool = toolName.toLowerCase();
+
+    if (category === 'shell') return <RiTerminalBoxLine className={iconClass} />;
+    if (category === 'edit') return <RiPencilLine className={iconClass} />;
+    if (category === 'search') return <RiMenuSearchLine className={iconClass} />;
+    if (category === 'fetch') return <RiGlobalLine className={iconClass} />;
+    if (category === 'task') return <RiAiAgentLine className={iconClass} />;
 
     if (tool === 'edit' || tool === 'multiedit' || tool === 'apply_patch' || tool === 'str_replace' || tool === 'str_replace_based_edit_tool') {
         return <RiPencilLine className={iconClass} />;

@@ -70,7 +70,9 @@ export function resolveFallbackTaskSessionId(params: ResolveFallbackParams): str
 
   // Filter candidate sessions: parentId matches and created shortly after task start.
   const candidates = sessions.filter((session) => {
-    if (!session?.id || session.parentId !== parentSessionId) {
+    const legacyParentId = (session as { parentID?: unknown }).parentID;
+    const resolvedParentId = session.parentId ?? (typeof legacyParentId === 'string' ? legacyParentId : undefined);
+    if (!session?.id || resolvedParentId !== parentSessionId) {
       return false;
     }
     const created = session.time?.created;
