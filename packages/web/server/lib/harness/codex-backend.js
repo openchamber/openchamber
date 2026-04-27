@@ -5,7 +5,6 @@ import { Buffer } from 'buffer';
 import { createCodexAppServerAdapter } from './codex-appserver.js';
 
 const DEFAULT_MODE_ID = 'build';
-const DEFAULT_MODEL_ID = 'gpt-5.4';
 const DEFAULT_EFFORT_ID = 'medium';
 
 const MODE_DEFINITIONS = Object.freeze({
@@ -28,16 +27,6 @@ const MODE_DEFINITIONS = Object.freeze({
     },
   },
 });
-
-const MODEL_OPTIONS = Object.freeze([
-  { id: 'gpt-5.4', label: 'GPT-5.4' },
-  { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
-  { id: 'gpt-5.1-codex', label: 'GPT-5.1 Codex' },
-  { id: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' },
-  { id: 'gpt-5.3-codex-spark', label: 'GPT-5.3 Codex Spark' },
-  { id: 'gpt-5.2-codex', label: 'GPT-5.2 Codex' },
-  { id: 'gpt-5.2', label: 'GPT-5.2' },
-]);
 
 const EFFORT_OPTIONS = Object.freeze([
   { id: 'minimal', label: 'Minimal' },
@@ -209,7 +198,7 @@ const normalizeSessionEntry = (entry) => {
     : DEFAULT_MODE_ID;
   const modelId = typeof entry.modelId === 'string' && entry.modelId.trim().length > 0
     ? entry.modelId.trim()
-    : DEFAULT_MODEL_ID;
+    : null;
   const effort = typeof entry.effort === 'string' && entry.effort.trim().length > 0
     ? entry.effort.trim()
     : DEFAULT_EFFORT_ID;
@@ -323,6 +312,7 @@ export const createCodexBackendRuntime = (dependencies) => {
     crypto,
     fsPromises,
     sessionsFilePath,
+    publishEvent,
   } = dependencies;
 
   let loaded = false;
@@ -338,6 +328,11 @@ export const createCodexBackendRuntime = (dependencies) => {
       directory: normalizedDirectory,
       ...payload,
     };
+    publishEvent?.({
+      payload: eventPayload,
+      directory: normalizedDirectory,
+      eventId: eventPayload.id,
+    });
     const encoded = `data: ${JSON.stringify(eventPayload)}\n\n`;
 
     for (const client of eventClients) {
@@ -444,16 +439,16 @@ export const createCodexBackendRuntime = (dependencies) => {
     return entry;
   };
 
-  const buildSession = (input = {}) => {
+  const buildSession = async (input = {}) => {
     const sessionId = createId(crypto);
     const directory = normalizeDirectory(input.directory);
     const now = Date.now();
     const mode = typeof input.mode === 'string' && MODE_DEFINITIONS[input.mode]
       ? input.mode
       : DEFAULT_MODE_ID;
-    const modelId = typeof input.modelId === 'string' && input.modelId.trim().length > 0
-      ? input.modelId.trim()
-      : DEFAULT_MODEL_ID;
+  const modelId = typeof input.modelId === 'string' && input.modelId.trim().length > 0
+    ? input.modelId.trim()
+      : await resolveDefaultModelId();
     const effort = typeof input.effort === 'string' && input.effort.trim().length > 0
       ? input.effort.trim()
       : DEFAULT_EFFORT_ID;
@@ -732,6 +727,14 @@ export const createCodexBackendRuntime = (dependencies) => {
     },
   });
 
+  const resolveDefaultModelId = async () => {
+    const modelOptions = await appServer.listModels();
+    if (modelOptions.length === 0) {
+      throw new Error('Codex model list is empty. Ensure the Codex CLI is installed and authenticated.');
+    }
+    return modelOptions.find((option) => option.isDefault)?.id || modelOptions[0].id;
+  };
+
   const emitRecordEvents = (directory, record) => {
     emitEvent(directory, {
       type: 'message.updated',
@@ -820,7 +823,7 @@ export const createCodexBackendRuntime = (dependencies) => {
 
   const createSession = async (input = {}) => {
     await ensureLoaded();
-    const entry = buildSession(input);
+    const entry = await buildSession(input);
     await saveEntry(entry);
     emitSessionUpdate('session.created', entry.session);
     return { ...entry.session };
@@ -832,7 +835,7 @@ export const createCodexBackendRuntime = (dependencies) => {
       throw new Error('Session not found');
     }
 
-    const forkedEntry = buildSession({
+    const forkedEntry = await buildSession({
       directory: entry.session.directory,
       parentID: entry.session.id,
       mode: entry.mode,
@@ -880,7 +883,7 @@ export const createCodexBackendRuntime = (dependencies) => {
       : entry.mode;
     const modelId = typeof input.model?.modelID === 'string' && input.model.modelID.trim().length > 0
       ? input.model.modelID.trim()
-      : entry.modelId;
+      : entry.modelId || await resolveDefaultModelId();
     const effort = typeof input.variant === 'string' && input.variant.trim().length > 0
       ? input.variant.trim()
       : entry.effort;
@@ -953,7 +956,7 @@ export const createCodexBackendRuntime = (dependencies) => {
     try {
       // Get or create app-server process
       await appServer.getOrCreateProcess(entry.session.id, nextEntry.session.directory, {
-        model: modelId || DEFAULT_MODEL_ID,
+        model: modelId,
         approvalPolicy: effectiveApprovalPolicy,
         sandbox: effectiveSandbox,
         threadId: nextEntry.threadId,
@@ -1000,7 +1003,7 @@ export const createCodexBackendRuntime = (dependencies) => {
 
       // Start the turn — events will stream via the adapter's notification handler
       await appServer.startTurn(entry.session.id, turnInput, assistantRecord, {
-        model: modelId || DEFAULT_MODEL_ID,
+        model: modelId,
         effort: effort || DEFAULT_EFFORT_ID,
         mode,
       });
@@ -1176,6 +1179,11 @@ export const createCodexBackendRuntime = (dependencies) => {
 
   const getControlSurface = async () => {
     const customPromptCommands = await loadCustomPromptCommands();
+    const modelOptions = await appServer.listModels();
+    if (modelOptions.length === 0) {
+      throw new Error('Codex model list is empty. Ensure the Codex CLI is installed and authenticated.');
+    }
+    const defaultModelId = modelOptions.find((option) => option.isDefault)?.id || modelOptions[0].id;
 
     return {
       backendId: 'codex',
@@ -1192,8 +1200,12 @@ export const createCodexBackendRuntime = (dependencies) => {
         label: 'Model',
         source: 'backend',
         providerId: 'codex',
-        defaultOptionId: DEFAULT_MODEL_ID,
-        options: MODEL_OPTIONS.map((option) => ({ ...option })),
+        defaultOptionId: defaultModelId,
+        options: modelOptions.map((option) => ({
+          id: option.id,
+          label: option.label,
+          ...(option.description ? { description: option.description } : {}),
+        })),
       },
       effortSelector: {
         label: 'Thinking',

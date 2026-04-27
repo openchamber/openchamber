@@ -70,6 +70,7 @@ const CAPABILITIES = Object.freeze({
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 const INIT_TIMEOUT_MS = 30_000;
 const TURN_START_TIMEOUT_MS = 60_000;
+const MODEL_LIST_CACHE_TTL_MS = 5 * 60 * 1000;
 
 const APPROVAL_METHOD_MAP = Object.freeze({
   'item/commandExecution/requestApproval': 'command_execution',
@@ -139,6 +140,8 @@ const resolveCodexPath = () => {
  */
 export function createCodexAppServerAdapter({ crypto, emitEvent, onTurnCompleted, onTurnError }) {
   const codexPath = resolveCodexPath();
+  let modelListCache = null;
+  let modelListCacheExpiresAt = 0;
 
   /** @type {Map<string, SessionProcess>} */
   const pool = new Map();
@@ -295,13 +298,96 @@ export function createCodexAppServerAdapter({ crypto, emitEvent, onTurnCompleted
       // non-fatal
     }
 
-    try {
-      await proc.rpc.sendRequest('model/list', {}, { timeout: 10_000 });
-    } catch {
-      // non-fatal
-    }
+    void listModels().catch(() => {});
 
     proc.initialized = true;
+  }
+
+  const normalizeModelOption = (entry) => {
+    if (!entry || typeof entry !== 'object') {
+      return null;
+    }
+
+    const id = typeof entry.id === 'string' && entry.id.trim().length > 0
+      ? entry.id.trim()
+      : typeof entry.model === 'string' && entry.model.trim().length > 0
+        ? entry.model.trim()
+        : '';
+    if (!id || entry.hidden === true) {
+      return null;
+    }
+
+    const label = typeof entry.displayName === 'string' && entry.displayName.trim().length > 0
+      ? entry.displayName.trim()
+      : id;
+
+    return {
+      id,
+      label,
+      ...(typeof entry.description === 'string' && entry.description.trim().length > 0
+        ? { description: entry.description.trim() }
+        : {}),
+      ...(entry.isDefault === true ? { isDefault: true } : {}),
+    };
+  };
+
+  async function fetchModelList() {
+    if (!codexPath) {
+      return [];
+    }
+
+    const rpc = createJsonRpcSubprocess({
+      command: codexPath,
+      args: ['app-server'],
+      requestTimeout: INIT_TIMEOUT_MS,
+      onRequest: (id, method) => {
+        rpc.sendResponse(id, null, { code: -32601, message: `Method not found: ${method}` });
+      },
+      onNotification: () => {},
+      onError: (err) => {
+        const msg = err?.message || '';
+        if (msg.includes('state db missing rollout path')
+          || msg.includes('state db record_discrepancy')) {
+          return;
+        }
+        console.warn(`[codex-appserver:model-list] ${msg}`);
+      },
+    });
+
+    try {
+      await rpc.sendRequest('initialize', {
+        clientInfo: CLIENT_INFO,
+        capabilities: CAPABILITIES,
+      }, { timeout: INIT_TIMEOUT_MS });
+      rpc.sendNotification('initialized');
+
+      const payload = await rpc.sendRequest('model/list', {}, { timeout: 10_000 });
+      const rawModels = Array.isArray(payload?.data)
+        ? payload.data
+        : Array.isArray(payload?.models)
+          ? payload.models
+          : Array.isArray(payload)
+            ? payload
+            : [];
+
+      return rawModels
+        .map((entry) => normalizeModelOption(entry))
+        .filter(Boolean);
+    } finally {
+      rpc.kill();
+    }
+  }
+
+  async function listModels() {
+    const now = Date.now();
+    if (modelListCache && now < modelListCacheExpiresAt) {
+      return modelListCache.map((option) => ({ ...option }));
+    }
+
+    const models = await fetchModelList();
+    modelListCache = models;
+    modelListCacheExpiresAt = now + MODEL_LIST_CACHE_TTL_MS;
+    return models.map((option) => ({ ...option }));
   }
 
   /**
@@ -1335,6 +1421,13 @@ export function createCodexAppServerAdapter({ crypto, emitEvent, onTurnCompleted
      */
     isAvailable() {
       return Boolean(codexPath);
+    },
+
+    /**
+     * List Codex models advertised by the current CLI/app-server.
+     */
+    async listModels() {
+      return listModels();
     },
 
     /**

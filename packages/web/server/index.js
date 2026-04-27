@@ -569,10 +569,13 @@ const openCodeBackendRuntime = createOpenCodeBackendRuntime({
   getOpenCodeAuthHeaders,
 });
 
+let publishCodexEventToGlobalStream = null;
+
 const codexBackendRuntime = createCodexBackendRuntime({
   crypto,
   fsPromises,
   sessionsFilePath: CODEX_SESSIONS_FILE_PATH,
+  publishEvent: (event) => publishCodexEventToGlobalStream?.(event),
 });
 
 backendRegistry.registerRuntime('opencode', openCodeBackendRuntime);
@@ -687,6 +690,7 @@ const globalMessageStreamHub = createGlobalMessageStreamHub({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
 });
+publishCodexEventToGlobalStream = (event) => globalMessageStreamHub.publishLocalEvent(event);
 
 const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   waitForOpenCodePort: (...args) => waitForOpenCodePort(...args),
