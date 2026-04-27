@@ -775,6 +775,7 @@ export type GitHubPullRequestSummary = GitHubPullRequest & {
   updatedAt?: string;
   headLabel?: string;
   headRepo?: GitHubPullRequestHeadRepo | null;
+  sourceRepo?: { owner: string; repo: string; source: string } | null;
 };
 
 export type GitHubPullRequestFile = {
@@ -881,6 +882,7 @@ export type GitHubIssueSummary = {
   state: 'open' | 'closed';
   author?: GitHubUserSummary | null;
   labels?: GitHubIssueLabel[];
+  sourceRepo?: { owner: string; repo: string; source: string } | null;
 };
 
 export type GitHubIssue = GitHubIssueSummary & {
