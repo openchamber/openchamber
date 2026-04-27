@@ -41,6 +41,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { SyncProvider, useSessions } from '@/sync/sync-context';
+import { getAllSyncSessions } from '@/sync/sync-refs';
 import { useSync } from '@/sync/use-sync';
 import { setOptimisticRefs } from '@/sync/session-actions';
 import { useFontPreferences } from '@/hooks/useFontPreferences';
@@ -216,7 +217,6 @@ function App({ apis }: AppProps) {
   const lastUsedBackendId = useSelectionStore((state) => state.lastUsedBackendId);
   const sessionBackendSelections = useSelectionStore((state) => state.sessionBackendSelections);
   const defaultBackendId = useBackendsStore((state) => state.defaultBackendId);
-  const sessions = useSessions();
   const error = useSessionUIStore((s) => s.error);
   const clearError = useSessionUIStore((s) => s.clearError);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
@@ -248,11 +248,11 @@ function App({ apis }: AppProps) {
   const activeBackendId = React.useMemo(() => {
     if (currentSessionId) {
       const selectedBackendId = sessionBackendSelections.get(currentSessionId);
-      const liveSession = sessions.find((session) => session.id === currentSessionId) as { backendId?: string | null } | undefined;
+      const liveSession = getAllSyncSessions().find((session) => session.id === currentSessionId) as { backendId?: string | null } | undefined;
       return selectedBackendId || liveSession?.backendId?.trim() || defaultBackendId || 'opencode';
     }
     return draftBackendId || lastUsedBackendId || defaultBackendId || 'opencode';
-  }, [currentSessionId, defaultBackendId, draftBackendId, lastUsedBackendId, sessionBackendSelections, sessions]);
+  }, [currentSessionId, defaultBackendId, draftBackendId, lastUsedBackendId, sessionBackendSelections]);
   const requiresOpenCodeConfig = activeBackendId === 'opencode';
   const isMcpOAuthCallback = React.useMemo(() => isMcpOAuthCallbackPath(), []);
 
