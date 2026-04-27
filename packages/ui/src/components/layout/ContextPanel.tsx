@@ -192,6 +192,27 @@ type PreviewProxyState =
   | { status: 'ready'; proxyBasePath: string; expiresAt: number }
   | { status: 'error'; message: string };
 
+// Module-scoped, in-memory cache of registered proxy targets keyed by the
+// fully-qualified upstream URL. Survives PreviewPane unmount/remount and tab
+// switches, but intentionally does NOT survive a full page reload: the server
+// holds the target map in memory and the auth cookie is HttpOnly + scoped to
+// the proxy id, so a stale persisted entry would 404 after a server restart.
+// Entries are evicted on registration error (refetched) or when the upstream
+// returns 403 (cookie expired) / 404 (target unknown) at iframe load time.
+type CachedProxyTarget = { proxyBasePath: string; expiresAt: number };
+const previewProxyTargetCache = new Map<string, CachedProxyTarget>();
+const PREVIEW_PROXY_CACHE_SAFETY_MS = 30_000;
+
+const getCachedProxyTarget = (url: string): CachedProxyTarget | null => {
+  const entry = previewProxyTargetCache.get(url);
+  if (!entry) return null;
+  if (entry.expiresAt - Date.now() <= PREVIEW_PROXY_CACHE_SAFETY_MS) {
+    previewProxyTargetCache.delete(url);
+    return null;
+  }
+  return entry;
+};
+
 const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl }) => {
   const { t } = useI18n();
   const [reloadNonce, bumpReload] = React.useReducer((x: number) => x + 1, 0);
@@ -226,6 +247,12 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl }) => {
       return;
     }
 
+    const cached = getCachedProxyTarget(targetKey);
+    if (cached) {
+      setProxyState({ status: 'ready', proxyBasePath: cached.proxyBasePath, expiresAt: cached.expiresAt });
+      return;
+    }
+
     let cancelled = false;
     setProxyState({ status: 'loading' });
 
@@ -239,6 +266,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl }) => {
         });
 
         if (!response.ok) {
+          previewProxyTargetCache.delete(targetKey);
           const errorBody = await response.json().catch(() => ({}));
           const message = typeof errorBody?.error === 'string'
             ? errorBody.error
@@ -253,16 +281,19 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl }) => {
         const proxyBasePath = typeof body.proxyBasePath === 'string' ? body.proxyBasePath : '';
         const expiresAt = typeof body.expiresAt === 'number' ? body.expiresAt : 0;
         if (!proxyBasePath) {
+          previewProxyTargetCache.delete(targetKey);
           if (!cancelled) {
             setProxyState({ status: 'error', message: t('contextPanel.preview.proxyError') });
           }
           return;
         }
 
+        previewProxyTargetCache.set(targetKey, { proxyBasePath, expiresAt });
         if (!cancelled) {
           setProxyState({ status: 'ready', proxyBasePath, expiresAt });
         }
       } catch (error) {
+        previewProxyTargetCache.delete(targetKey);
         if (!cancelled) {
           const message = error instanceof Error ? error.message : String(error);
           setProxyState({ status: 'error', message });
