@@ -348,7 +348,7 @@ export function GitHubPrPickerDialog({
 
           {filtered.map((pr) => (
             <div
-              key={pr.number}
+              key={`${pr.sourceRepo?.owner ?? ''}-${pr.sourceRepo?.repo ?? ''}-${pr.number}`}
               className={cn(
                 'group flex items-center gap-2 py-1.5 hover:bg-interactive-hover/30 rounded transition-colors cursor-pointer',
                 loadingPrNumber === pr.number && 'bg-interactive-selection/30'
@@ -360,6 +360,11 @@ export function GitHubPrPickerDialog({
                   <span className="text-muted-foreground mr-1">#{pr.number}</span>
                   {pr.title}
                 </p>
+                {pr.sourceRepo?.source === 'upstream' ? (
+                  <span className="typography-micro text-muted-foreground">
+                    {pr.sourceRepo.owner}/{pr.sourceRepo.repo}
+                  </span>
+                ) : null}
                 <p className="typography-meta text-muted-foreground truncate">{pr.head} → {pr.base}</p>
               </div>
 

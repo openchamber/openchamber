@@ -560,7 +560,7 @@ export function GitHubIssuePickerDialog({
 
           {filtered.map((issue) => (
             <div
-              key={issue.number}
+              key={`${issue.sourceRepo?.owner ?? ''}-${issue.sourceRepo?.repo ?? ''}-${issue.number}`}
               className={cn(
                 'group flex items-center gap-2 py-1.5 hover:bg-interactive-hover/30 rounded transition-colors cursor-pointer',
                 startingIssueNumber === issue.number && 'bg-interactive-selection/30'
@@ -570,9 +570,16 @@ export function GitHubIssuePickerDialog({
               <span className="typography-meta text-muted-foreground w-12 text-right flex-shrink-0">
                 #{issue.number}
               </span>
-              <p className="flex-1 min-w-0 typography-small text-foreground truncate ml-0.5">
-                {issue.title}
-              </p>
+              <div className="flex-1 min-w-0 ml-0.5">
+                <p className="typography-small text-foreground truncate">
+                  {issue.title}
+                </p>
+                {issue.sourceRepo?.source === 'upstream' ? (
+                  <span className="typography-micro text-muted-foreground mt-0.5 block">
+                    {issue.sourceRepo.owner}/{issue.sourceRepo.repo}
+                  </span>
+                ) : null}
+              </div>
 
               <div className="flex-shrink-0 h-5 flex items-center mr-2">
                 {startingIssueNumber === issue.number ? (
