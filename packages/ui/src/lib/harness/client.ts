@@ -14,6 +14,7 @@ import { opencodeClient } from "@/lib/opencode/client"
 import { fromOpenCodeRunConfig, fromOpenCodeSession } from "@/sync/adapters/opencode"
 
 type OpenCodeRunConfigInput = {
+  backendId?: string
   providerID?: string
   modelID?: string
   agent?: string
@@ -174,7 +175,7 @@ function toHarnessSession(session: Session): HarnessSession {
 export function toOpenCodeHarnessRunConfig(input: OpenCodeRunConfigInput) {
   return {
     ...fromOpenCodeRunConfig({
-      backendId: "opencode",
+      backendId: input.backendId ?? "opencode",
       providerID: input.providerID,
       modelID: input.modelID,
       agent: input.agent,

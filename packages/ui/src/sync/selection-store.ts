@@ -4,11 +4,13 @@
  */
 
 import { create } from "zustand"
+import type { HarnessRunConfig } from "@openchamber/harness-contracts"
 
 export type SelectionState = {
   sessionModelSelections: Map<string, { providerId: string; modelId: string }>
   sessionAgentSelections: Map<string, string>
   sessionAgentModelSelections: Map<string, Map<string, { providerId: string; modelId: string }>>
+  sessionRunConfigs: Map<string, HarnessRunConfig>
   sessionBackendSelections: Map<string, string>
   lastUsedProvider: { providerID: string; modelID: string } | null
   draftBackendId: string | null
@@ -24,6 +26,8 @@ export type SelectionState = {
   getAgentModelVariantForSession: (sessionId: string, agentName: string, providerId: string, modelId: string) => string | undefined
   saveSessionBackendSelection: (sessionId: string, backendId: string) => void
   getSessionBackendSelection: (sessionId: string) => string | null
+  saveSessionRunConfig: (sessionId: string, runConfig: HarnessRunConfig) => void
+  getSessionRunConfig: (sessionId: string) => HarnessRunConfig | null
   setDraftBackendId: (backendId: string | null) => void
 }
 
@@ -34,6 +38,7 @@ export const useSelectionStore = create<SelectionState>()((set, get) => ({
   sessionModelSelections: new Map(),
   sessionAgentSelections: new Map(),
   sessionAgentModelSelections: new Map(),
+  sessionRunConfigs: new Map(),
   sessionBackendSelections: new Map(),
   lastUsedProvider: null,
   draftBackendId: null,
@@ -117,6 +122,17 @@ export const useSelectionStore = create<SelectionState>()((set, get) => ({
     }),
 
   getSessionBackendSelection: (sessionId) => get().sessionBackendSelections.get(sessionId) ?? null,
+
+  saveSessionRunConfig: (sessionId, runConfig) =>
+    set((s) => {
+      const existing = s.sessionRunConfigs.get(sessionId)
+      if (JSON.stringify(existing) === JSON.stringify(runConfig)) return s
+      const map = new Map(s.sessionRunConfigs)
+      map.set(sessionId, runConfig)
+      return { sessionRunConfigs: map }
+    }),
+
+  getSessionRunConfig: (sessionId) => get().sessionRunConfigs.get(sessionId) ?? null,
 
   setDraftBackendId: (backendId) =>
     set(() => ({

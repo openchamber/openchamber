@@ -4,7 +4,7 @@
  */
 
 import type { OpencodeClient, Session } from "@opencode-ai/sdk/v2/client"
-import type { HarnessMessage, HarnessPart, HarnessSession } from "@openchamber/harness-contracts"
+import type { HarnessMessage, HarnessPart, HarnessRunConfig, HarnessSession } from "@openchamber/harness-contracts"
 import { Binary } from "./binary"
 import { useSessionUIStore } from "./session-ui-store"
 import { useInputStore } from "./input-store"
@@ -409,9 +409,7 @@ function ascendingId(prefix: string): string {
 export async function optimisticSend(input: {
   sessionId: string
   content: string
-  providerID: string
-  modelID: string
-  agent?: string
+  runConfig: HarnessRunConfig
   files?: Array<{ type: "file"; mime: string; url: string; filename: string }>
   /** The actual API call — receives the optimistic messageID so the server can use the same ID */
   send: (messageID: string) => Promise<void>
@@ -457,10 +455,10 @@ export async function optimisticSend(input: {
     sessionId: input.sessionId,
     time: { created: Date.now(), completed: 0 },
     attribution: {
-      backendId: useBackendsStore.getState().defaultBackendId ?? "opencode",
-      providerId: input.providerID,
-      modelId: input.modelID,
-      modeId: input.agent,
+      backendId: input.runConfig.backendId ?? useBackendsStore.getState().defaultBackendId ?? "opencode",
+      providerId: input.runConfig.model?.backendId,
+      modelId: input.runConfig.model?.modelId,
+      modeId: input.runConfig.interactionMode,
     },
   }
 

@@ -1,4 +1,5 @@
 import type { Session, Message, Part } from "@opencode-ai/sdk/v2";
+import type { HarnessRunConfig } from "@openchamber/harness-contracts";
 import type { PermissionRequest, PermissionResponse } from "@/types/permission";
 import type { QuestionRequest } from "@/types/question";
 
@@ -245,7 +246,7 @@ export interface SessionStore {
     unshareSession: (id: string) => Promise<Session | null>;
     setCurrentSession: (id: string | null) => void;
     loadMessages: (sessionId: string, limit?: number) => Promise<void>;
-    sendMessage: (content: string, providerID: string, modelID: string, agent?: string, attachments?: AttachedFile[], agentMentionName?: string, additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }>, variant?: string, inputMode?: 'normal' | 'shell') => Promise<void>;
+    sendMessage: (content: string, runConfigOrProviderID: HarnessRunConfig | string, modelIDOrAttachments?: string | AttachedFile[], agentOrMentionName?: string, attachmentsOrAdditionalParts?: AttachedFile[] | Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }>, agentMentionNameOrInputMode?: string, additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }>, variant?: string, inputMode?: 'normal' | 'shell') => Promise<void>;
     abortCurrentOperation: (sessionIdOverride?: string) => Promise<void>;
     acknowledgeSessionAbort: (sessionId: string) => void;
     armAbortPrompt: (durationMs?: number) => number | null;

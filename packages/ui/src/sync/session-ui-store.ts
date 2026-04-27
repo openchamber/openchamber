@@ -14,6 +14,7 @@
 
 import { create } from "zustand"
 import type { Session, Part, Message, TextPart } from "@opencode-ai/sdk/v2/client"
+import type { HarnessRunConfig } from "@openchamber/harness-contracts"
 import type { AttachedFile, SessionContextUsage, SessionWorktreeAttachment } from "@/stores/types/sessionTypes"
 import type { WorktreeMetadata } from "@/types/worktree"
 import { opencodeClient } from "@/lib/opencode/client"
@@ -69,22 +70,40 @@ function resolveSandboxOverride(sessionId: string): string | undefined {
   return level === 'full-access' ? 'danger-full-access' : undefined
 }
 
+function getOpenCodeRunConfig(runConfig: HarnessRunConfig): { providerID: string; modelID: string; agent?: string; variant?: string } {
+  const raw = (runConfig as HarnessRunConfig & { raw?: { providerID?: string; modelID?: string; agent?: string; variant?: string } }).raw
+  const modelId = runConfig.model?.modelId
+  const slashIndex = typeof modelId === "string" ? modelId.indexOf("/") : -1
+  return {
+    providerID: raw?.providerID ?? (slashIndex > 0 && modelId ? modelId.slice(0, slashIndex) : ""),
+    modelID: raw?.modelID ?? (slashIndex > 0 && modelId ? modelId.slice(slashIndex + 1) : modelId ?? ""),
+    agent: runConfig.interactionMode ?? raw?.agent,
+    variant: runConfig.options?.find((option) => option.id === "variant" && typeof option.value === "string")?.value as string | undefined ?? raw?.variant,
+  }
+}
+
+function buildOpenCodeRunConfig(input: { backendId?: string; providerID: string; modelID: string; agent?: string; variant?: string }): HarnessRunConfig {
+  return toOpenCodeHarnessRunConfig(input)
+}
+
+function saveRunConfigForSession(sessionId: string, runConfig: HarnessRunConfig): void {
+  useSelectionStore.getState().saveSessionRunConfig(sessionId, runConfig)
+}
+
 // Send routing — shell mode, slash commands, or normal prompt
 // ---------------------------------------------------------------------------
 
 function routeMessage(params: {
   sessionId: string
   content: string
-  providerID: string
-  modelID: string
-  agent?: string
-  variant?: string
+  runConfig: HarnessRunConfig
   inputMode?: "normal" | "shell"
   files?: Array<{ type: "file"; mime: string; url: string; filename: string }>
   additionalParts?: Array<{ text: string; synthetic?: boolean; files?: Array<{ type: "file"; mime: string; url: string; filename: string }> }>
   sandboxOverride?: string
 }): Promise<void> {
   const sdk = opencodeClient.getSdkClient()
+  const openCodeConfig = getOpenCodeRunConfig(params.runConfig)
   const explicitBackendId = useSelectionStore.getState().getSessionBackendSelection(params.sessionId)
   const liveSession = getAllSyncSessions().find((session) => session.id === params.sessionId) as { backendId?: string | null } | undefined
   const sessionBackendId =
@@ -94,18 +113,19 @@ function routeMessage(params: {
     || (typeof liveSession?.backendId === 'string' && liveSession.backendId.trim().length > 0
       ? liveSession.backendId.trim()
       : '')
+    || params.runConfig.backendId
     || 'opencode'
 
   if (params.inputMode === "shell") {
-    if (sessionBackendId !== 'opencode') {
+    if (!useBackendsStore.getState().hasCapability(sessionBackendId, 'shell')) {
       return Promise.reject(new Error(`Shell mode is not supported for backend "${sessionBackendId}"`))
     }
     const dir = opencodeClient.getDirectory() || undefined
     return sdk.session.shell({
       sessionID: params.sessionId,
       directory: dir,
-      agent: params.agent,
-      model: { providerID: params.providerID, modelID: params.modelID },
+      agent: openCodeConfig.agent,
+      model: { providerID: openCodeConfig.providerID, modelID: openCodeConfig.modelID },
       command: params.content,
     }).then(() => {})
   }
@@ -127,20 +147,13 @@ function routeMessage(params: {
       return optimisticSend({
         sessionId: params.sessionId,
         content: params.content,
-        providerID: params.providerID,
-        modelID: params.modelID,
-        agent: params.agent,
+        runConfig: params.runConfig,
         files: params.files,
         send: (messageID) => harnessClient.sendCommand({
           sessionId: params.sessionId,
           commandId: cmdName,
           arguments: tail.join(" "),
-          runConfig: toOpenCodeHarnessRunConfig({
-            providerID: params.providerID,
-            modelID: params.modelID,
-            agent: params.agent,
-            variant: params.variant,
-          }),
+          runConfig: params.runConfig,
           files: params.files,
           messageId: messageID,
         }).then(() => {}),
@@ -152,19 +165,12 @@ function routeMessage(params: {
   return optimisticSend({
     sessionId: params.sessionId,
     content: params.content,
-    providerID: params.providerID,
-    modelID: params.modelID,
-    agent: params.agent,
+    runConfig: params.runConfig,
     files: params.files,
     send: (messageID) => harnessClient.sendMessage({
       sessionId: params.sessionId,
       text: params.content,
-      runConfig: toOpenCodeHarnessRunConfig({
-        providerID: params.providerID,
-        modelID: params.modelID,
-        agent: params.agent,
-        variant: params.variant,
-      }),
+      runConfig: params.runConfig,
       files: params.files,
       additionalParts: params.additionalParts,
       messageId: messageID,
@@ -262,11 +268,11 @@ export type SessionUIState = {
   // Actions — SDK-calling operations (read domain data from sync-refs)
   sendMessage: (
     content: string,
-    providerID: string,
-    modelID: string,
-    agent?: string,
-    attachments?: AttachedFile[],
-    agentMentionName?: string,
+    runConfigOrProviderID: HarnessRunConfig | string,
+    modelIDOrAttachments?: string | AttachedFile[],
+    agentOrMentionName?: string,
+    attachmentsOrAdditionalParts?: AttachedFile[] | Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }>,
+    agentMentionNameOrInputMode?: string,
     additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }>,
     variant?: string,
     inputMode?: "normal" | "shell",
@@ -720,15 +726,27 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // ---------------------------------------------------------------------------
   sendMessage: async (
     content: string,
-    providerID: string,
-    modelID: string,
-    agent?: string,
-    attachments?: AttachedFile[],
-    agentMentionName?: string,
+    runConfigOrProviderID: HarnessRunConfig | string,
+    modelIDOrAttachments?: string | AttachedFile[],
+    agentOrMentionName?: string,
+    attachmentsOrAdditionalParts?: AttachedFile[] | Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }>,
+    agentMentionNameOrInputMode?: string,
     additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }>,
     variant?: string,
     inputMode?: "normal" | "shell",
   ) => {
+    const usingRunConfig = typeof runConfigOrProviderID !== "string"
+    const openCodeConfig = usingRunConfig ? getOpenCodeRunConfig(runConfigOrProviderID) : undefined
+    const providerID = usingRunConfig ? openCodeConfig?.providerID ?? "" : runConfigOrProviderID
+    const modelID = usingRunConfig ? openCodeConfig?.modelID ?? "" : modelIDOrAttachments as string
+    const agent = usingRunConfig ? undefined : agentOrMentionName
+    const effectiveAttachments = usingRunConfig ? modelIDOrAttachments as AttachedFile[] | undefined : attachmentsOrAdditionalParts as AttachedFile[] | undefined
+    const effectiveAdditionalParts = usingRunConfig
+      ? attachmentsOrAdditionalParts as Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }> | undefined
+      : additionalParts
+    const effectiveVariant = usingRunConfig ? openCodeConfig?.variant : variant
+    const effectiveInputMode = usingRunConfig ? agentMentionNameOrInputMode as "normal" | "shell" | undefined : inputMode
+    const baseRunConfig = usingRunConfig ? runConfigOrProviderID : null
     // Clear non-Git changed-files bar on new user message for current session
     const sid = get().currentSessionId;
     if (sid) {
@@ -770,16 +788,18 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       const configState = useConfigStore.getState()
       const draftAgentName = configState.currentAgentName
       const effectiveDraftAgent = trimmedAgent ?? draftAgentName
+      const draftRunConfig = baseRunConfig ?? buildOpenCodeRunConfig({ backendId: draftBackendId, providerID, modelID, agent: effectiveDraftAgent, variant: effectiveVariant })
 
       if (configState.currentProviderId && configState.currentModelId) {
         useSelectionStore.getState().saveSessionModelSelection(created.id, configState.currentProviderId, configState.currentModelId)
       }
+      saveRunConfigForSession(created.id, draftRunConfig)
 
       if (effectiveDraftAgent) {
         useSelectionStore.getState().saveSessionAgentSelection(created.id, effectiveDraftAgent)
         if (configState.currentProviderId && configState.currentModelId) {
           useSelectionStore.getState().saveAgentModelForSession(created.id, effectiveDraftAgent, configState.currentProviderId, configState.currentModelId)
-          useSelectionStore.getState().saveAgentModelVariantForSession(created.id, effectiveDraftAgent, configState.currentProviderId, configState.currentModelId, variant)
+          useSelectionStore.getState().saveAgentModelVariantForSession(created.id, effectiveDraftAgent, configState.currentProviderId, configState.currentModelId, effectiveVariant)
         }
       }
 
@@ -798,8 +818,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       }
 
       const mergedAdditionalParts = draftSyntheticParts?.length
-        ? [...(additionalParts || []), ...draftSyntheticParts]
-        : additionalParts
+        ? [...(effectiveAdditionalParts || []), ...draftSyntheticParts]
+        : effectiveAdditionalParts
 
       if (createdDirectory) {
         await waitForWorktreeBootstrap(createdDirectory)
@@ -809,7 +829,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
       markPendingUserSendAnimation(created.id)
 
-      const files = attachments?.map((a) => ({
+      const files = effectiveAttachments?.map((a) => ({
         type: "file" as const,
         mime: a.mimeType,
         url: a.dataUrl,
@@ -819,11 +839,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       await routeMessage({
         sessionId: created.id,
         content,
-        providerID,
-        modelID,
-        agent: effectiveDraftAgent,
-        variant,
-        inputMode,
+        runConfig: draftRunConfig,
+        inputMode: effectiveInputMode,
         files,
         additionalParts: mergedAdditionalParts?.map((p) => ({
           text: p.text,
@@ -842,15 +859,26 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
     // ---- Existing session ----
     const currentSessionId = get().currentSessionId
+    const existingSelectionState = useSelectionStore.getState()
     const sessionAgentSelection = currentSessionId
-      ? useSelectionStore.getState().getSessionAgentSelection(currentSessionId)
+      ? existingSelectionState.getSessionAgentSelection(currentSessionId)
       : null
     const configAgentName = useConfigStore.getState().currentAgentName
     const effectiveAgent = trimmedAgent || sessionAgentSelection || configAgentName || undefined
+    const runConfig = baseRunConfig ?? buildOpenCodeRunConfig({
+      backendId: currentSessionId ? existingSelectionState.getSessionBackendSelection(currentSessionId) ?? undefined : undefined,
+      providerID,
+      modelID,
+      agent: effectiveAgent,
+      variant: effectiveVariant,
+    })
 
     if (currentSessionId && effectiveAgent) {
       useSelectionStore.getState().saveSessionAgentSelection(currentSessionId, effectiveAgent)
-      useSelectionStore.getState().saveAgentModelVariantForSession(currentSessionId, effectiveAgent, providerID, modelID, variant)
+      useSelectionStore.getState().saveAgentModelVariantForSession(currentSessionId, effectiveAgent, providerID, modelID, effectiveVariant)
+    }
+    if (currentSessionId) {
+      saveRunConfigForSession(currentSessionId, runConfig)
     }
 
     if (currentSessionId) {
@@ -884,7 +912,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       markPendingUserSendAnimation(currentSessionId)
     }
 
-    const files = attachments?.map((a) => ({
+    const files = effectiveAttachments?.map((a) => ({
       type: "file" as const,
       mime: a.mimeType,
       url: a.dataUrl,
@@ -894,13 +922,10 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     await routeMessage({
       sessionId: currentSessionId || "",
       content,
-      providerID,
-      modelID,
-      agent: effectiveAgent,
-      variant,
-      inputMode,
+      runConfig,
+      inputMode: effectiveInputMode,
       files,
-      additionalParts: additionalParts?.map((p) => ({
+      additionalParts: effectiveAdditionalParts?.map((p) => ({
         text: p.text,
         synthetic: p.synthetic,
         files: p.attachments?.map((a) => ({

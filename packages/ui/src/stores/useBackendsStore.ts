@@ -4,6 +4,7 @@ export interface BackendCapabilities {
   chat: boolean;
   sessions: boolean;
   models: boolean;
+  shell?: boolean;
   agents: boolean;
   providers: boolean;
   commands: boolean;

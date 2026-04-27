@@ -55,6 +55,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useIsVSCodeRuntime } from '@/hooks/useRuntimeAPIs';
 import { isDesktopShell } from '@/lib/desktop';
 import { opencodeClient } from '@/lib/opencode/client';
+import { toOpenCodeHarnessRunConfig } from '@/lib/harness/client';
 import { getAgentColor } from '@/lib/agentColors';
 import { useDeviceInfo } from '@/lib/device';
 import { getEditModeColors } from '@/lib/permissions/editModeColors';
@@ -388,6 +389,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const saveAgentModelVariantForSession = useSelectionStore((state) => state.saveAgentModelVariantForSession);
     const getAgentModelVariantForSession = useSelectionStore((state) => state.getAgentModelVariantForSession);
     const saveSessionBackendSelection = useSelectionStore((state) => state.saveSessionBackendSelection);
+    const saveSessionRunConfig = useSelectionStore((state) => state.saveSessionRunConfig);
     const draftBackendId = useSelectionStore((state) => state.draftBackendId);
     const lastUsedBackendId = useSelectionStore((state) => state.lastUsedBackendId);
     const setDraftBackendId = useSelectionStore((state) => state.setDraftBackendId);
@@ -1048,6 +1050,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
             if (currentSessionId) {
                 saveSessionModelSelection(currentSessionId, providerId, modelId);
+                saveSessionRunConfig(currentSessionId, toOpenCodeHarnessRunConfig({ backendId: currentBackendId || 'opencode', providerID: providerId, modelID: modelId, agent: agentName }));
                 if (agentName) {
                     saveAgentModelForSession(currentSessionId, agentName, providerId, modelId);
                 }
@@ -1055,7 +1058,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
             return 'applied';
         },
-        [effectiveProviders, currentProviderId, currentModelId, setProvider, setModel, currentSessionId, saveAgentModelForSession, saveSessionModelSelection],
+        [effectiveProviders, currentProviderId, currentModelId, setProvider, setModel, currentSessionId, currentBackendId, saveAgentModelForSession, saveSessionModelSelection, saveSessionRunConfig],
     );
 
     const getModelVariantOptions = React.useCallback((providerId: string, modelId: string) => {
@@ -1126,13 +1129,16 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         const effectiveAgentName = agentNameOverride ?? resolveLiveAgentName();
         if (currentSessionId && effectiveAgentName) {
             saveAgentModelVariantForSession(currentSessionId, effectiveAgentName, providerId, modelId, variant);
+            saveSessionRunConfig(currentSessionId, toOpenCodeHarnessRunConfig({ backendId: currentBackendId || 'opencode', providerID: providerId, modelID: modelId, agent: effectiveAgentName, variant }));
         }
     }, [
         addRecentEffort,
         currentSessionId,
+        currentBackendId,
         getModelVariantOptions,
         resolveLiveAgentName,
         saveAgentModelVariantForSession,
+        saveSessionRunConfig,
         setCurrentVariant,
     ]);
 
@@ -1195,6 +1201,13 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             );
         }
         saveSessionModelSelection(currentSessionId, latestLoadedUserChoice.providerID, latestLoadedUserChoice.modelID);
+        saveSessionRunConfig(currentSessionId, toOpenCodeHarnessRunConfig({
+            backendId: currentBackendId || 'opencode',
+            providerID: latestLoadedUserChoice.providerID,
+            modelID: latestLoadedUserChoice.modelID,
+            agent: latestLoadedUserChoice.agent || currentAgentName || undefined,
+            variant: latestLoadedUserChoice.variant,
+        }));
         latestLoadedUserChoiceRestoreRef.current = restoreKey;
 
     }, [
@@ -1209,6 +1222,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         saveSessionAgentSelection,
         saveAgentModelVariantForSession,
         saveSessionModelSelection,
+        saveSessionRunConfig,
+        currentBackendId,
     ]);
 
     React.useEffect(() => {

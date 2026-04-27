@@ -21,6 +21,7 @@ import { BrowserVoiceButton } from '@/components/voice';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueStore';
+import { toOpenCodeHarnessRunConfig } from '@/lib/harness/client';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useInputStore } from '@/sync/input-store';
@@ -1259,6 +1260,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 agent: currentAgentName ?? undefined,
                 variant: currentVariant ?? undefined,
             } : undefined,
+            runConfig: currentProviderId && currentModelId ? toOpenCodeHarnessRunConfig({
+                backendId: useSelectionStore.getState().getSessionBackendSelection(currentSessionId) ?? undefined,
+                providerID: currentProviderId,
+                modelID: currentModelId,
+                agent: currentAgentName ?? undefined,
+                variant: currentVariant ?? undefined,
+            }) : undefined,
         });
 
         // Clear input and attachments

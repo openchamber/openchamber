@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { devtools, persist, createJSONStorage } from 'zustand/middleware';
 import { getSafeStorage } from './utils/safeStorage';
 import type { AttachedFile } from './types/sessionTypes';
+import type { HarnessRunConfig } from '@openchamber/harness-contracts';
 import { updateDesktopSettings } from '@/lib/persistence';
 
 export interface QueuedMessage {
@@ -16,6 +17,7 @@ export interface QueuedMessage {
         agent?: string;
         variant?: string;
     };
+    runConfig?: HarnessRunConfig;
 }
 
 interface MessageQueueState {
@@ -50,6 +52,7 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                         attachments: message.attachments,
                         createdAt: Date.now(),
                         sendConfig: message.sendConfig,
+                        runConfig: message.runConfig,
                     };
 
                     set((state) => {
