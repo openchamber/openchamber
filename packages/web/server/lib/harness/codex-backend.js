@@ -1185,20 +1185,74 @@ export const createCodexBackendRuntime = (dependencies) => {
     }
     const defaultModelId = modelOptions.find((option) => option.isDefault)?.id || modelOptions[0].id;
 
+    const effortOptionDescriptor = {
+      id: 'effort',
+      label: 'Thinking',
+      type: 'select',
+      currentValue: DEFAULT_EFFORT_ID,
+      options: EFFORT_OPTIONS.map((option) => ({
+        id: option.id,
+        label: option.label,
+        isDefault: option.id === DEFAULT_EFFORT_ID,
+      })),
+    };
+    const interactionModes = Object.values(MODE_DEFINITIONS).map((mode) => ({
+      id: mode.id,
+      label: mode.label,
+      description: mode.description,
+      isDefault: mode.id === DEFAULT_MODE_ID,
+    }));
+    const commands = [
+      ...COMMAND_OPTIONS.map((command) => ({
+        id: command.name,
+        label: command.name,
+        ...(command.description ? { description: command.description } : {}),
+        raw: command,
+      })),
+      ...customPromptCommands.map((command) => ({
+        id: command.name,
+        label: command.name,
+        ...(command.description ? { description: command.description } : {}),
+        raw: command,
+      })),
+    ];
+
     return {
       backendId: 'codex',
+      providerSnapshot: {
+        backendId: 'codex',
+        label: 'Codex',
+        enabled: true,
+        auth: { status: 'unknown' },
+        capabilities: {
+          chat: true,
+          sessions: true,
+          models: true,
+          commands: true,
+          providers: false,
+          config: false,
+          skills: false,
+          shell: false,
+        },
+        models: modelOptions.map((option) => ({
+          id: option.id,
+          label: option.label,
+          ...(option.description ? { description: option.description } : {}),
+          default: option.id === defaultModelId,
+          optionDescriptors: [{ ...effortOptionDescriptor }],
+          raw: option,
+        })),
+        interactionModes,
+        commands,
+      },
       modeSelector: {
         kind: 'mode',
         label: 'Mode',
-        items: Object.values(MODE_DEFINITIONS).map((mode) => ({
-          id: mode.id,
-          label: mode.label,
-          description: mode.description,
-        })),
+        items: interactionModes,
       },
       modelSelector: {
         label: 'Model',
-        source: 'backend',
+        source: 'provider-snapshot',
         providerId: 'codex',
         defaultOptionId: defaultModelId,
         options: modelOptions.map((option) => ({
@@ -1209,7 +1263,8 @@ export const createCodexBackendRuntime = (dependencies) => {
       },
       effortSelector: {
         label: 'Thinking',
-        source: 'backend',
+        source: 'provider-option',
+        optionId: 'effort',
         defaultOptionId: DEFAULT_EFFORT_ID,
         options: EFFORT_OPTIONS.map((option) => ({ ...option })),
       },

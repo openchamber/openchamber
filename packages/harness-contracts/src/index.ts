@@ -518,7 +518,7 @@ export interface BackendModeSelectorSurface {
 
 export interface BackendModelSelectorSurface {
   label: string;
-  source: 'providers' | 'backend';
+  source: 'providers' | 'backend' | 'provider-snapshot';
   options?: BackendControlSurfaceOption[];
   providerId?: string;
   defaultOptionId?: string | null;
@@ -526,7 +526,8 @@ export interface BackendModelSelectorSurface {
 
 export interface BackendEffortSelectorSurface {
   label: string;
-  source: 'model-variants' | 'backend';
+  source: 'model-variants' | 'backend' | 'provider-option';
+  optionId?: string;
   options: BackendControlSurfaceOption[];
   defaultOptionId?: string | null;
 }

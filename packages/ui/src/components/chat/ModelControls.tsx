@@ -37,6 +37,7 @@ import {
 import type { EditPermissionMode } from '@/stores/types/sessionTypes';
 import type { ModelMetadata } from '@/types';
 import type { Provider } from '@opencode-ai/sdk/v2';
+import type { HarnessProviderModel, HarnessProviderOptionDescriptor } from '@openchamber/harness-contracts';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -363,7 +364,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const setProvider = useConfigStore((state) => state.setProvider);
     const setSelectedProvider = useConfigStore((state) => state.setSelectedProvider);
     const setModel = useConfigStore((state) => state.setModel);
-    const setVirtualProviders = useConfigStore((state) => state.setVirtualProviders);
     const setCurrentVariant = useConfigStore((state) => state.setCurrentVariant);
     const getCurrentModelVariants = useConfigStore((state) => state.getCurrentModelVariants);
     const setAgent = useConfigStore((state) => state.setAgent);
@@ -638,6 +638,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const backendModeSelector = backendControlSurface?.modeSelector ?? null;
     const backendModelSelector = backendControlSurface?.modelSelector ?? null;
     const backendEffortSelector = backendControlSurface?.effortSelector ?? null;
+    const providerSnapshot = backendControlSurface?.providerSnapshot ?? null;
     const primarySelectorKind = backendModeSelector?.kind ?? (currentBackendId === 'opencode' ? 'agent' : 'mode');
     const primarySelectorLabel = backendModeSelector?.label ?? (primarySelectorKind === 'agent' ? 'Agent' : 'Mode');
     const effortSelectorLabel = backendEffortSelector?.label ?? 'Thinking';
@@ -656,17 +657,45 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             ...(agent.color ? { color: agent.color } : {}),
         }));
     }, [backendModeSelector, primarySelectorKind, selectableDesktopAgents]);
+    const getSnapshotModelOptionDescriptor = React.useCallback((model: HarnessProviderModel): HarnessProviderOptionDescriptor | undefined => {
+        const descriptors = Array.isArray(model.optionDescriptors) ? model.optionDescriptors : [];
+        const selectorOptionId = backendEffortSelector?.optionId;
+        const descriptor = selectorOptionId
+            ? descriptors.find((entry) => entry.id === selectorOptionId)
+            : descriptors.find((entry) => entry.type === 'select');
+        return descriptor?.type === 'select' ? descriptor : undefined;
+    }, [backendEffortSelector?.optionId]);
+
     const backendModelOptions = React.useMemo<ProviderModel[]>(() => {
-        if (backendModelSelector?.source !== 'backend' || !backendModelSelector.options?.length) {
+        if (
+            backendModelSelector?.source !== 'backend'
+            && backendModelSelector?.source !== 'provider-snapshot'
+        ) {
             return [];
         }
 
-        const variants = backendEffortSelector?.options?.length
-            ? Object.fromEntries(backendEffortSelector.options.map((option) => [option.id, {}]))
-            : undefined;
+        const snapshotModels = backendModelSelector?.source === 'provider-snapshot'
+            ? (providerSnapshot?.models ?? [])
+            : [];
+        const selectorModels = backendModelSelector?.source === 'backend'
+            ? (backendModelSelector.options ?? [])
+            : [];
+        if (snapshotModels.length === 0 && selectorModels.length === 0) {
+            return [];
+        }
 
-        return backendModelSelector.options.map((option) => ({
-            id: option.id,
+        return (snapshotModels.length > 0 ? snapshotModels : selectorModels).map((option) => {
+            const snapshotModel = 'optionDescriptors' in option ? option as HarnessProviderModel : null;
+            const optionDescriptor = snapshotModel ? getSnapshotModelOptionDescriptor(snapshotModel) : undefined;
+            const optionChoices = optionDescriptor?.type === 'select'
+                ? optionDescriptor.options
+                : backendEffortSelector?.options;
+            const variants = optionChoices?.length
+                ? Object.fromEntries(optionChoices.map((choice) => [choice.id, {}]))
+                : undefined;
+
+            return {
+                id: option.id,
             providerID: backendModelProviderId,
             api: {
                 id: currentBackendId || 'backend',
@@ -713,9 +742,13 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             headers: {},
             release_date: '',
             ...(variants ? { variants } : {}),
-        }));
-    }, [backendEffortSelector, backendModelProviderId, backendModelSelector, currentBackendId]);
-    const usesBackendModelCatalog = backendModelSelector?.source === 'backend' && backendModelOptions.length > 0;
+            };
+        });
+    }, [backendEffortSelector?.options, backendModelProviderId, backendModelSelector, currentBackendId, getSnapshotModelOptionDescriptor, providerSnapshot?.models]);
+    const usesBackendModelCatalog = (
+        backendModelSelector?.source === 'backend'
+        || backendModelSelector?.source === 'provider-snapshot'
+    ) && backendModelOptions.length > 0;
     const effectiveProviders = React.useMemo(() => {
         if (!usesBackendModelCatalog) {
             return providers;
@@ -727,31 +760,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             models: backendModelOptions,
         }];
     }, [backendModelOptions, backendModelProviderId, currentBackend, currentBackendId, providers, usesBackendModelCatalog]);
-
-    React.useEffect(() => {
-        if (!usesBackendModelCatalog) {
-            setVirtualProviders([]);
-            return;
-        }
-
-        setVirtualProviders([
-            {
-                id: backendModelProviderId,
-                name: currentBackend?.label || currentBackendId || 'Backend',
-                source: 'api',
-                env: [],
-                options: {},
-                models: backendModelOptions,
-            },
-        ]);
-    }, [
-        backendModelOptions,
-        backendModelProviderId,
-        currentBackend,
-        currentBackendId,
-        setVirtualProviders,
-        usesBackendModelCatalog,
-    ]);
 
     const sortedAndFilteredAgents = React.useMemo(() => {
         const sorted = [...backendModeItems].sort((a, b) => a.label.localeCompare(b.label));
@@ -1062,11 +1070,11 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     );
 
     const getModelVariantOptions = React.useCallback((providerId: string, modelId: string) => {
-        const provider = providers.find((entry) => entry.id === providerId);
+        const provider = effectiveProviders.find((entry) => entry.id === providerId);
         const model = provider?.models.find((entry) => entry.id === modelId) as { variants?: Record<string, unknown> } | undefined;
         const variants = model?.variants;
         return variants ? Object.keys(variants) : [];
-    }, [providers]);
+    }, [effectiveProviders]);
 
     const resolveModelVariantSelection = React.useCallback((providerId: string, modelId: string) => {
         const variantOptions = getModelVariantOptions(providerId, modelId);

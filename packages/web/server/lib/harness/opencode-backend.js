@@ -236,8 +236,68 @@ export const createOpenCodeBackendRuntime = (dependencies) => {
       : [];
     const rawCommands = Array.isArray(commandsResponse.data) ? commandsResponse.data : [];
 
+    const modelOptions = Object.entries(providerModels).map(([id, modelEntry]) => {
+      const label = typeof modelEntry?.name === 'string' && modelEntry.name.trim().length > 0
+        ? modelEntry.name.trim()
+        : id;
+      const modelVariants = modelEntry?.variants && typeof modelEntry.variants === 'object'
+        ? Object.keys(modelEntry.variants)
+        : [];
+      return {
+        id,
+        label,
+        ...(modelVariants.length > 0
+          ? {
+              optionDescriptors: [{
+                id: 'variant',
+                label: 'Thinking',
+                type: 'select',
+                options: modelVariants.map((variant) => ({
+                  id: variant,
+                  label: variant.charAt(0).toUpperCase() + variant.slice(1),
+                })),
+              }],
+            }
+          : {}),
+        raw: modelEntry,
+      };
+    });
+
     return {
       backendId: 'opencode',
+      providerSnapshot: {
+        backendId: 'opencode',
+        label: 'OpenCode',
+        enabled: true,
+        auth: { status: 'unknown' },
+        capabilities: {
+          chat: true,
+          sessions: true,
+          models: true,
+          commands: true,
+          providers: true,
+          config: true,
+          skills: true,
+          shell: true,
+        },
+        models: modelOptions,
+        interactionModes: visibleAgents.map((agent) => ({
+          id: agent.id,
+          label: agent.label,
+          ...(agent.description ? { description: agent.description } : {}),
+        })),
+        commands: rawCommands
+          .filter((command) => command && typeof command.name === 'string' && command.name.trim().length > 0)
+          .map((command) => ({
+            id: command.name.trim(),
+            label: command.name.trim(),
+            ...(typeof command.description === 'string' && command.description.trim().length > 0
+              ? { description: command.description.trim() }
+              : {}),
+            raw: command,
+          })),
+        raw: providersPayload,
+      },
       modeSelector: {
         kind: 'agent',
         label: 'Agent',

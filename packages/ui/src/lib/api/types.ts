@@ -1,4 +1,8 @@
 import type { WorktreeMetadata } from '@/types/worktree';
+import type {
+  HarnessProviderSnapshot,
+  HarnessProviderOptionChoice,
+} from '@openchamber/harness-contracts';
 
 export type RuntimePlatform = 'web' | 'desktop' | 'vscode';
 
@@ -48,7 +52,7 @@ export interface BackendModeSelectorSurface {
 
 export interface BackendModelSelectorSurface {
   label: string;
-  source: 'providers' | 'backend';
+  source: 'providers' | 'backend' | 'provider-snapshot';
   options?: BackendControlSurfaceOption[];
   providerId?: string;
   defaultOptionId?: string | null;
@@ -56,7 +60,8 @@ export interface BackendModelSelectorSurface {
 
 export interface BackendEffortSelectorSurface {
   label: string;
-  source: 'model-variants' | 'backend';
+  source: 'model-variants' | 'backend' | 'provider-option';
+  optionId?: string;
   options: BackendControlSurfaceOption[];
   defaultOptionId?: string | null;
 }
@@ -77,11 +82,14 @@ export interface BackendCommandSelectorSurface {
 
 export interface BackendControlSurface {
   backendId: string;
+  providerSnapshot?: HarnessProviderSnapshot | null;
   modeSelector?: BackendModeSelectorSurface | null;
   modelSelector?: BackendModelSelectorSurface | null;
   effortSelector?: BackendEffortSelectorSurface | null;
   commandSelector?: BackendCommandSelectorSurface | null;
 }
+
+export type HarnessControlSurfaceOption = HarnessProviderOptionChoice;
 
 export interface ApiError {
   message: string;
