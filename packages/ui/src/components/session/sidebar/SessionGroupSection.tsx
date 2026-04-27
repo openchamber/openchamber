@@ -19,6 +19,7 @@ import type { SortableDragHandleProps } from './sortableItems';
 import type { GroupSearchData, SessionGroup, SessionNode } from './types';
 import { compareSessionsByPinnedAndTime, isBranchDifferentFromLabel, normalizePath, renderHighlightedText } from './utils';
 import type { SessionFolder } from '@/stores/useSessionFoldersStore';
+import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { openExternalUrl } from '@/lib/url';
 import { useI18n } from '@/lib/i18n';
@@ -42,7 +43,6 @@ type Props = {
   expandedSessionGroups: Set<string>;
   collapsedGroups: Set<string>;
   hideDirectoryControls: boolean;
-  getFoldersForScope: (scopeKey: string) => SessionFolder[];
   collapsedFolderIds: Set<string>;
   toggleFolderCollapse: (folderId: string) => void;
   renameFolder: (scopeKey: string, folderId: string, name: string) => void;
@@ -109,7 +109,6 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     expandedSessionGroups,
     collapsedGroups,
     hideDirectoryControls,
-    getFoldersForScope,
     collapsedFolderIds,
     toggleFolderCollapse,
     renameFolder,
@@ -153,6 +152,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
 
   const searchData = hasSessionSearchQuery ? groupSearchDataByGroup.get(group) : null;
   const displayMode = useSessionDisplayStore((state) => state.displayMode);
+  const foldersMap = useSessionFoldersStore((state) => state.foldersMap);
   const isMinimalMode = displayMode === 'minimal';
   const isExpanded = expandedSessionGroups.has(groupKey);
   const isCollapsed = hasSessionSearchQuery ? false : collapsedGroups.has(groupKey);
@@ -166,8 +166,8 @@ export function SessionGroupSection(props: Props): React.ReactNode {
   );
   const folderScopeKey = group.folderScopeKey ?? normalizePath(group.directory ?? null);
   const scopeFolders = React.useMemo(
-    () => folderScopeKey ? getFoldersForScope(folderScopeKey) : [],
-    [folderScopeKey, getFoldersForScope]
+    () => folderScopeKey ? (foldersMap[folderScopeKey] ?? []) : [],
+    [folderScopeKey, foldersMap]
   );
 
   const nodeBySessionId = React.useMemo(() => {

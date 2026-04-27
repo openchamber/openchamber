@@ -134,6 +134,7 @@ export type DesktopSettings = {
   mermaidRenderingMode?: 'svg' | 'ascii';
   userMessageRenderingMode?: 'markdown' | 'plain';
   stickyUserHeader?: boolean;
+  showSplitAssistantMessageActions?: boolean;
   fontSize?: number;
   terminalFontSize?: number;
   uiFont?: string;

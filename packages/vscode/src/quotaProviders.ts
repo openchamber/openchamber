@@ -114,6 +114,7 @@ export type ProviderResult = {
 const OPENCODE_CONFIG_DIR = path.join(os.homedir(), '.config', 'opencode');
 const OPENCODE_DATA_DIR = path.join(os.homedir(), '.local', 'share', 'opencode');
 const AUTH_FILE = path.join(OPENCODE_DATA_DIR, 'auth.json');
+const OLLAMA_CLOUD_COOKIE_PATH = path.join(os.homedir(), '.config', 'ollama-quota', 'cookie');
 
 
 const ANTIGRAVITY_ACCOUNTS_PATHS = [
@@ -205,6 +206,19 @@ const readJsonFile = (filePath: string): Record<string, unknown> | null => {
     return parsed as Record<string, unknown>;
   } catch (error) {
     console.warn(`Failed to read JSON file: ${filePath}`, error);
+    return null;
+  }
+};
+
+const readTextFile = (filePath: string): string | null => {
+  if (!fs.existsSync(filePath)) {
+    return null;
+  }
+  try {
+    const content = fs.readFileSync(filePath, 'utf8').trim();
+    return content || null;
+  } catch (error) {
+    console.warn(`Failed to read text file: ${filePath}`, error);
     return null;
   }
 };
@@ -395,6 +409,16 @@ export const listConfiguredQuotaProviders = () => {
     configured.add('kimi-for-coding');
   }
 
+  const minimaxAuth = normalizeAuthEntry(getAuthEntry(auth, ['minimax-coding-plan']));
+  if (minimaxAuth && ((minimaxAuth as Record<string, unknown>).key || (minimaxAuth as Record<string, unknown>).token)) {
+    configured.add('minimax-coding-plan');
+  }
+
+  const minimaxCnAuth = normalizeAuthEntry(getAuthEntry(auth, ['minimax-cn-coding-plan']));
+  if (minimaxCnAuth && ((minimaxCnAuth as Record<string, unknown>).key || (minimaxCnAuth as Record<string, unknown>).token)) {
+    configured.add('minimax-cn-coding-plan');
+  }
+
   const openrouterAuth = normalizeAuthEntry(getAuthEntry(auth, ['openrouter']));
   if (openrouterAuth && ((openrouterAuth as Record<string, unknown>).key || (openrouterAuth as Record<string, unknown>).token)) {
     configured.add('openrouter');
@@ -409,6 +433,10 @@ export const listConfiguredQuotaProviders = () => {
   if (copilotAuth && ((copilotAuth as Record<string, unknown>).access || (copilotAuth as Record<string, unknown>).token)) {
     configured.add('github-copilot');
     configured.add('github-copilot-addon');
+  }
+
+  if (readTextFile(OLLAMA_CLOUD_COOKIE_PATH)) {
+    configured.add('ollama-cloud');
   }
 
   return Array.from(configured);
@@ -1127,6 +1155,230 @@ export const fetchKimiQuota = async (): Promise<ProviderResult> => {
   }
 };
 
+const fetchMiniMaxQuota = async (data: {
+  providerId: 'minimax-coding-plan' | 'minimax-cn-coding-plan';
+  providerName: string;
+  endpoint: string;
+  usageFieldsAreRemaining: boolean;
+}): Promise<ProviderResult> => {
+  const auth = readAuthFile();
+  const entry = normalizeAuthEntry(getAuthEntry(auth, [data.providerId])) as Record<string, unknown> | null;
+  const apiKey = (entry?.key as string | undefined) ?? (entry?.token as string | undefined);
+
+  if (!apiKey) {
+    return buildResult({
+      providerId: data.providerId,
+      providerName: data.providerName,
+      ok: false,
+      configured: false,
+      error: 'Not configured',
+    });
+  }
+
+  try {
+    const response = await fetch(data.endpoint, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      return buildResult({
+        providerId: data.providerId,
+        providerName: data.providerName,
+        ok: false,
+        configured: true,
+        error: `API error: ${response.status}`,
+      });
+    }
+
+    const payload = await response.json() as Record<string, unknown>;
+    const baseResp = asObject(payload.base_resp);
+    const statusCode = toNumber(baseResp?.status_code);
+    if (baseResp && statusCode !== 0) {
+      return buildResult({
+        providerId: data.providerId,
+        providerName: data.providerName,
+        ok: false,
+        configured: true,
+        error: asNonEmptyString(baseResp.status_msg) ?? `API error: ${statusCode}`,
+      });
+    }
+
+    const modelRemains = Array.isArray(payload.model_remains) ? payload.model_remains : [];
+    const firstModel = asObject(modelRemains[0]);
+    if (!firstModel) {
+      return buildResult({
+        providerId: data.providerId,
+        providerName: data.providerName,
+        ok: false,
+        configured: true,
+        error: 'No model quota data available',
+      });
+    }
+
+    const intervalTotal = toNumber(firstModel.current_interval_total_count);
+    const intervalUsage = toNumber(firstModel.current_interval_usage_count);
+    const intervalStartAt = toTimestamp(firstModel.start_time);
+    const intervalResetAt = toTimestamp(firstModel.end_time);
+    const weeklyTotal = toNumber(firstModel.current_weekly_total_count);
+    const weeklyUsage = toNumber(firstModel.current_weekly_usage_count);
+    const weeklyStartAt = toTimestamp(firstModel.weekly_start_time);
+    const weeklyResetAt = toTimestamp(firstModel.weekly_end_time);
+
+    const intervalUsed = data.usageFieldsAreRemaining && intervalTotal !== null && intervalUsage !== null
+      ? intervalTotal - intervalUsage
+      : intervalUsage;
+    const weeklyUsed = data.usageFieldsAreRemaining && weeklyTotal !== null && weeklyUsage !== null
+      ? weeklyTotal - weeklyUsage
+      : weeklyUsage;
+
+    const intervalUsedPercent = intervalTotal !== null && intervalTotal > 0 && intervalUsed !== null
+      ? Math.max(0, Math.min(100, (intervalUsed / intervalTotal) * 100))
+      : null;
+    const intervalWindowSeconds = intervalStartAt && intervalResetAt && intervalResetAt > intervalStartAt
+      ? Math.floor((intervalResetAt - intervalStartAt) / 1000)
+      : null;
+    const weeklyUsedPercent = weeklyTotal !== null && weeklyTotal > 0 && weeklyUsed !== null
+      ? Math.max(0, Math.min(100, (weeklyUsed / weeklyTotal) * 100))
+      : null;
+    const weeklyWindowSeconds = weeklyStartAt && weeklyResetAt && weeklyResetAt > weeklyStartAt
+      ? Math.floor((weeklyResetAt - weeklyStartAt) / 1000)
+      : null;
+
+    return buildResult({
+      providerId: data.providerId,
+      providerName: data.providerName,
+      ok: true,
+      configured: true,
+      usage: {
+        windows: {
+          '5h': toUsageWindow({
+            usedPercent: intervalUsedPercent,
+            windowSeconds: intervalWindowSeconds,
+            resetAt: intervalResetAt,
+          }),
+          weekly: toUsageWindow({
+            usedPercent: weeklyUsedPercent,
+            windowSeconds: weeklyWindowSeconds,
+            resetAt: weeklyResetAt,
+          }),
+        },
+      },
+    });
+  } catch (error) {
+    return buildResult({
+      providerId: data.providerId,
+      providerName: data.providerName,
+      ok: false,
+      configured: true,
+      error: error instanceof Error ? error.message : 'Request failed',
+    });
+  }
+};
+
+export const fetchMiniMaxCodingPlanQuota = () => fetchMiniMaxQuota({
+  providerId: 'minimax-coding-plan',
+  providerName: 'MiniMax Coding Plan (minimax.io)',
+  endpoint: 'https://api.minimax.io/v1/api/openplatform/coding_plan/remains',
+  usageFieldsAreRemaining: false,
+});
+
+export const fetchMiniMaxCnCodingPlanQuota = () => fetchMiniMaxQuota({
+  providerId: 'minimax-cn-coding-plan',
+  providerName: 'MiniMax Coding Plan (minimaxi.com)',
+  endpoint: 'https://www.minimaxi.com/v1/api/openplatform/coding_plan/remains',
+  usageFieldsAreRemaining: true,
+});
+
+const parseOllamaSettingsHtml = (html: string) => {
+  const windows: Record<string, UsageWindow> = {};
+  const sessionMatch = html.match(/Session\s+usage[^0-9]*([0-9.]+)%/i);
+  if (sessionMatch) {
+    windows.session = toUsageWindow({
+      usedPercent: toNumber(sessionMatch[1]),
+      windowSeconds: null,
+      resetAt: null,
+    });
+  }
+
+  const weeklyMatch = html.match(/Weekly\s+usage[^0-9]*([0-9.]+)%/i);
+  if (weeklyMatch) {
+    windows.weekly = toUsageWindow({
+      usedPercent: toNumber(weeklyMatch[1]),
+      windowSeconds: null,
+      resetAt: null,
+    });
+  }
+
+  const premiumMatch = html.match(/Premium[^0-9]*([0-9]+)\s*\/\s*([0-9]+)/i);
+  if (premiumMatch) {
+    const used = toNumber(premiumMatch[1]);
+    const total = toNumber(premiumMatch[2]);
+    const usedPercent = total && used !== null ? Math.min(100, (used / total) * 100) : null;
+    windows.premium = toUsageWindow({
+      usedPercent,
+      windowSeconds: null,
+      resetAt: null,
+      valueLabel: `${used ?? 0} / ${total ?? 0}`,
+    });
+  }
+
+  return windows;
+};
+
+export const fetchOllamaCloudQuota = async (): Promise<ProviderResult> => {
+  const cookie = readTextFile(OLLAMA_CLOUD_COOKIE_PATH);
+
+  if (!cookie) {
+    return buildResult({
+      providerId: 'ollama-cloud',
+      providerName: 'Ollama Cloud',
+      ok: false,
+      configured: false,
+      error: 'Not configured',
+    });
+  }
+
+  try {
+    const response = await fetch('https://ollama.com/settings', {
+      method: 'GET',
+      headers: {
+        Cookie: cookie,
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+      },
+    });
+
+    if (!response.ok) {
+      return buildResult({
+        providerId: 'ollama-cloud',
+        providerName: 'Ollama Cloud',
+        ok: false,
+        configured: true,
+        error: `API error: ${response.status}`,
+      });
+    }
+
+    return buildResult({
+      providerId: 'ollama-cloud',
+      providerName: 'Ollama Cloud',
+      ok: true,
+      configured: true,
+      usage: { windows: parseOllamaSettingsHtml(await response.text()) },
+    });
+  } catch (error) {
+    return buildResult({
+      providerId: 'ollama-cloud',
+      providerName: 'Ollama Cloud',
+      ok: false,
+      configured: true,
+      error: error instanceof Error ? error.message : 'Request failed',
+    });
+  }
+};
+
 export const fetchOpenRouterQuota = async (): Promise<ProviderResult> => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['openrouter'])) as Record<string, unknown> | null;
@@ -1502,6 +1754,12 @@ export const fetchQuotaForProvider = async (providerId: string): Promise<Provide
       return fetchKimiQuota();
     case 'nano-gpt':
       return fetchNanoGptQuota();
+    case 'minimax-coding-plan':
+      return fetchMiniMaxCodingPlanQuota();
+    case 'minimax-cn-coding-plan':
+      return fetchMiniMaxCnCodingPlanQuota();
+    case 'ollama-cloud':
+      return fetchOllamaCloudQuota();
     case 'openrouter':
       return fetchOpenRouterQuota();
     case 'zai-coding-plan':

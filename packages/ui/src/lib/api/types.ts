@@ -642,6 +642,7 @@ export interface SettingsPayload {
   messageStreamTransport?: 'auto' | 'ws' | 'sse';
   activityRenderMode?: 'collapsed' | 'summary';
   mermaidRenderingMode?: 'svg' | 'ascii';
+  showSplitAssistantMessageActions?: boolean;
   fontSize?: number;
   terminalFontSize?: number;
   uiFont?: string;

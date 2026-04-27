@@ -119,18 +119,28 @@ function routeMessage(params: {
 
     const syncCommand = syncCommands.find((c) => c.name === cmdName)
     const storeCommand = storeCommands.find((c) => c.name === cmdName)
+    const isCommand = Boolean(syncCommand || storeCommand)
 
-    if ((syncCommand || storeCommand) && storeCommand?.executionMode !== 'prompt-text') {
-      return opencodeClient.sendCommand({
-        id: params.sessionId,
+    if (isCommand && storeCommand?.executionMode !== 'prompt-text') {
+      return optimisticSend({
+        sessionId: params.sessionId,
+        content: params.content,
         providerID: params.providerID,
         modelID: params.modelID,
-        command: cmdName,
-        arguments: tail.join(" "),
         agent: params.agent,
-        variant: params.variant,
         files: params.files,
-      }).then(() => {})
+        send: (messageID) => opencodeClient.sendCommand({
+          id: params.sessionId,
+          providerID: params.providerID,
+          modelID: params.modelID,
+          command: cmdName,
+          arguments: tail.join(" "),
+          agent: params.agent,
+          variant: params.variant,
+          files: params.files,
+          messageId: messageID,
+        }).then(() => {}),
+      })
     }
   }
 
@@ -155,6 +165,11 @@ function routeMessage(params: {
       sandboxOverride: params.sandboxOverride,
     }).then(() => {}),
   })
+}
+
+function notifyMessageSent(sessionId: string): void {
+  fetch(`/api/sessions/${sessionId}/message-sent`, { method: "POST" })
+    .catch(() => { /* ignore */ })
 }
 
 // ---------------------------------------------------------------------------
@@ -788,6 +803,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         await waitForWorktreeBootstrap(createdDirectory)
       }
 
+      notifyMessageSent(created.id)
+
       markPendingUserSendAnimation(created.id)
 
       const files = attachments?.map((a) => ({
@@ -858,8 +875,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     }
 
     if (currentSessionId) {
-      fetch(`/api/sessions/${currentSessionId}/message-sent`, { method: "POST" })
-        .catch(() => { /* ignore */ })
+      notifyMessageSent(currentSessionId)
     }
 
     if (currentSessionId) {

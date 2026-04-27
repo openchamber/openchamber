@@ -3,6 +3,7 @@ import type { Session } from '@opencode-ai/sdk/v2';
 import type { SessionGroup, SessionNode, GroupSearchData } from '../types';
 import { dedupeSessionsById, normalizePath } from '../utils';
 import type { WorktreeMetadata } from '@/types/worktree';
+import type { SessionFoldersMap } from '@/stores/useSessionFoldersStore';
 
 type ProjectItem = {
   id: string;
@@ -39,7 +40,7 @@ type Args = {
   normalizedSessionSearchQuery: string;
   filterSessionNodesForSearch: (nodes: SessionNode[], query: string) => SessionNode[];
   buildGroupSearchText: (group: SessionGroup) => string;
-  getFoldersForScope: (scopeKey: string) => Array<{ name: string }>;
+  foldersMap: SessionFoldersMap;
 };
 
 export const useSessionSidebarSections = (args: Args) => {
@@ -56,7 +57,7 @@ export const useSessionSidebarSections = (args: Args) => {
     normalizedSessionSearchQuery,
     filterSessionNodesForSearch,
     buildGroupSearchText,
-    getFoldersForScope,
+    foldersMap,
   } = args;
 
   const projectSections = React.useMemo<ProjectSection[]>(() => {
@@ -107,9 +108,8 @@ export const useSessionSidebarSections = (args: Args) => {
         const matchedSessionCount = countNodes(filteredNodes);
         const groupMatches = buildGroupSearchText(group).includes(normalizedSessionSearchQuery);
         const scopeKey = normalizePath(group.directory ?? null);
-        const folderNameMatchCount = scopeKey
-          ? getFoldersForScope(scopeKey).filter((folder) => folder.name.toLowerCase().includes(normalizedSessionSearchQuery)).length
-          : 0;
+        const scopeFolders = scopeKey ? (foldersMap[scopeKey] ?? []) : [];
+        const folderNameMatchCount = scopeFolders.filter((folder) => folder.name.toLowerCase().includes(normalizedSessionSearchQuery)).length;
 
         result.set(group, {
           filteredNodes,
@@ -128,7 +128,7 @@ export const useSessionSidebarSections = (args: Args) => {
     filterSessionNodesForSearch,
     normalizedSessionSearchQuery,
     buildGroupSearchText,
-    getFoldersForScope,
+    foldersMap,
   ]);
 
   const searchableProjectSections = React.useMemo(() => {

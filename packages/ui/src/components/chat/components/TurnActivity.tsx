@@ -28,6 +28,7 @@ interface TurnActivityProps {
     animateRows?: boolean;
     animatedToolIds?: Set<string>;
     diffStats?: DiffStats;
+    renderJustificationActions?: (activity: TurnActivityRecord) => React.ReactNode;
 }
 
 const TurnActivity: React.FC<TurnActivityProps> = (props) => {

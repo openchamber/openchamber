@@ -137,6 +137,9 @@ contextBridge.exposeInMainWorld('__TAURI__', {
   dialog: {
     open: (options) => ipcRenderer.invoke('openchamber:dialog:open', options || {}),
   },
+  shell: {
+    open: (url) => ipcRenderer.invoke('openchamber:invoke', 'desktop_open_external_url', { url }),
+  },
   event: {
     listen: async (event, handler) => addListener(event, handler),
   },

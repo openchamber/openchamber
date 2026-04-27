@@ -735,11 +735,14 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     const handleCopyMessage = React.useCallback(async () => {
         const result = await copyTextToClipboard(messageTextContent);
         if (!result.ok) {
-            return;
+            return false;
         }
-        setCopiedMessage(true);
-        setTimeout(() => setCopiedMessage(false), 2000);
-    }, [messageTextContent]);
+        if (isUser) {
+            setCopiedMessage(true);
+            setTimeout(() => setCopiedMessage(false), 2000);
+        }
+        return true;
+    }, [isUser, messageTextContent]);
 
     const handleRevert = React.useCallback(() => {
         if (!sessionId || !message.info.id) return;

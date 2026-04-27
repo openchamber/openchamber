@@ -4,7 +4,7 @@ import { RiLayoutLeftLine } from '@remixicon/react';
 import { toast } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
-import { isDesktopLocalOriginActive, isDesktopShell, isTauriShell } from '@/lib/desktop';
+import { isDesktopShell } from '@/lib/desktop';
 import { isDesktopWindowFullscreen as getDesktopWindowFullscreen, onDesktopWindowResized, startDesktopWindowDrag } from '@/lib/desktopNative';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { formatDirectoryName, cn } from '@/lib/utils';
@@ -248,12 +248,11 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const setDirectory = useDirectoryStore((state) => state.setDirectory);
 
   const {
-    projects, activeProjectId, addProject, removeProject,
+    projects, activeProjectId, removeProject,
     setActiveProjectIdOnly, updateProjectMeta, reorderProjects,
   } = useProjectsStore(useShallow((state) => ({
     projects: state.projects,
     activeProjectId: state.activeProjectId,
-    addProject: state.addProject,
     removeProject: state.removeProject,
     setActiveProjectIdOnly: state.setActiveProjectIdOnly,
     updateProjectMeta: state.updateProjectMeta,
@@ -435,7 +434,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [currentDirectory, syncSessionStructureSignature]);
+  }, [currentDirectory, syncSessionStructureSignature, projects]);
 
   React.useEffect(() => {
     let refreshTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -458,7 +457,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     };
   }, []);
 
-  const tauriIpcAvailable = React.useMemo(() => isTauriShell(), []);
   const isDesktopShellRuntime = React.useMemo(() => isDesktopShell(), []);
   const [isDesktopWindowFullscreen, setIsDesktopWindowFullscreen] = React.useState(false);
 
@@ -718,32 +716,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   }, [deleteFolderConfirm, deleteFolder]);
 
   const handleOpenDirectoryDialog = React.useCallback(() => {
-    if (!tauriIpcAvailable || !isDesktopLocalOriginActive()) {
-      sessionEvents.requestDirectoryDialog();
-      return;
-    }
-
-    import('@/lib/desktop')
-      .then(({ requestDirectoryAccess }) => requestDirectoryAccess(''))
-      .then((result) => {
-        if (result.success && result.path) {
-          const added = addProject(result.path, { id: result.projectId });
-          if (!added) {
-            toast.error(t('sessions.sidebar.directory.errorAddProjectTitle'), {
-              description: t('sessions.sidebar.directory.errorAddProjectDescription'),
-            });
-          }
-        } else if (result.error && result.error !== 'Directory selection cancelled') {
-          toast.error(t('sessions.sidebar.directory.errorSelectDirectoryTitle'), {
-            description: result.error,
-          });
-        }
-      })
-      .catch((error) => {
-        console.error('Desktop: Error selecting directory:', error);
-        toast.error(t('sessions.sidebar.directory.errorSelectDirectoryTitle'));
-      });
-  }, [addProject, t, tauriIpcAvailable]);
+    sessionEvents.requestDirectoryDialog();
+  }, []);
 
   // Auto-expand parent session when navigating to a subagent (child) session
   React.useEffect(() => {
@@ -950,7 +924,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     normalizedSessionSearchQuery,
     filterSessionNodesForSearch,
     buildGroupSearchText,
-    getFoldersForScope,
+    foldersMap,
   });
 
   const searchEmptyState = (
@@ -1395,7 +1369,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         expandedSessionGroups={expandedSessionGroups}
         collapsedGroups={collapsedGroups}
         hideDirectoryControls={hideDirectoryControls}
-        getFoldersForScope={getFoldersForScope}
         collapsedFolderIds={collapsedFolderIds}
         toggleFolderCollapse={toggleFolderCollapse}
         renameFolder={renameFolder}
@@ -1433,7 +1406,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       expandedSessionGroups,
       collapsedGroups,
       hideDirectoryControls,
-      getFoldersForScope,
       collapsedFolderIds,
       toggleFolderCollapse,
       renameFolder,

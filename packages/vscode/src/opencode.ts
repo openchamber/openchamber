@@ -7,6 +7,7 @@ import { execSync } from 'child_process';
 import { spawnSync } from 'child_process';
 import { spawn } from 'child_process';
 import { randomBytes } from 'crypto';
+import { normalizeWindowsDriveLetter } from './pathUtils';
 
 const READY_CHECK_TIMEOUT_MS = 30000;
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
@@ -626,11 +627,6 @@ export function createOpenCodeManager(_context: vscode.ExtensionContext): OpenCo
   let status: ConnectionStatus = 'disconnected';
   let lastError: string | undefined;
   const listeners = new Set<(status: ConnectionStatus, error?: string) => void>();
-  /** On Windows, VS Code's uri.fsPath returns a lowercase drive letter (e.g. d:\...)
-   *  while process.cwd() (used by OpenCode server) returns uppercase (D:\...).
-   *  Normalize to uppercase so session directory queries match. */
-  const normalizeWindowsDriveLetter = (p: string): string =>
-    p.replace(/^([a-z]):/, (_, letter: string) => letter.toUpperCase() + ':');
   const workspaceDirectory = (): string =>
     normalizeWindowsDriveLetter(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir());
   let workingDirectory: string = workspaceDirectory();

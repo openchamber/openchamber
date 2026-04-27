@@ -47,7 +47,11 @@ const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = emptyArray<{ inf
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
 const SESSION_RESELECTED_EVENT = 'openchamber:session-reselected';
 const DEFAULT_RETRY_MESSAGE = 'Quota limit reached. Retrying automatically.';
-const CHAT_SCROLL_STYLE = { overflowAnchor: 'none' } as const;
+const CHAT_SCROLL_STYLE = {
+    overflowAnchor: 'none',
+    overscrollBehavior: 'contain',
+    overscrollBehaviorY: 'contain',
+} as const;
 const CHAT_NAVIGATION_IGNORED_TARGET_SELECTOR = [
     'a[href]',
     'button',
@@ -812,7 +816,7 @@ export const ChatContainer: React.FC = () => {
                     )}
                     aria-hidden={isDesktopExpandedInput}
                 >
-                    <div className="absolute inset-0 overflow-y-auto overflow-x-hidden bg-background pt-6">
+                    <div className="absolute inset-0 overflow-y-auto overflow-x-hidden bg-background pt-6" style={CHAT_SCROLL_STYLE}>
                         <div className="space-y-4">
                             {HYDRATING_SKELETON_ITEMS.map((item) => (
                                 <div key={item.id} className="group w-full">
