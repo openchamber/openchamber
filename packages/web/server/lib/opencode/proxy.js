@@ -113,6 +113,7 @@ export const registerOpenCodeProxy = (app, deps) => {
     const closeUpstream = () => abortController.abort();
     let upstream = null;
     let reader = null;
+    let heartbeatTimer = null;
 
     req.on('close', closeUpstream);
 
@@ -162,7 +163,6 @@ export const registerOpenCodeProxy = (app, deps) => {
       }
 
       const SSE_HEARTBEAT_INTERVAL_MS = 20_000;
-      let heartbeatTimer = null;
 
       const scheduleHeartbeat = () => {
         heartbeatTimer = setTimeout(async () => {
@@ -192,11 +192,6 @@ export const registerOpenCodeProxy = (app, deps) => {
         }
       }
 
-      if (heartbeatTimer) {
-        clearTimeout(heartbeatTimer);
-        heartbeatTimer = null;
-      }
-
       res.end();
     } catch (error) {
       if (isAbortError(error)) {
@@ -209,6 +204,10 @@ export const registerOpenCodeProxy = (app, deps) => {
         res.end();
       }
     } finally {
+      if (heartbeatTimer) {
+        clearTimeout(heartbeatTimer);
+        heartbeatTimer = null;
+      }
       req.off('close', closeUpstream);
       try {
         if (reader) {
