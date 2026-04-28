@@ -509,13 +509,17 @@ export interface ListDirectoryOptions {
   respectGitignore?: boolean;
 }
 
+export interface FileReadOptions {
+  allowOutsideWorkspace?: boolean;
+}
+
 export interface FilesAPI {
   listDirectory(path: string, options?: ListDirectoryOptions): Promise<DirectoryListResult>;
   search(payload: FileSearchQuery): Promise<FileSearchResult[]>;
   createDirectory(path: string): Promise<{ success: boolean; path: string }>;
-  statFile?(path: string): Promise<{ path: string; isFile: boolean; size: number; mtimeMs?: number }>;
-  readFile?(path: string): Promise<{ content: string; path: string }>;
-  readFileBinary?(path: string): Promise<{ dataUrl: string; path: string }>;
+  statFile?(path: string, options?: FileReadOptions): Promise<{ path: string; isFile: boolean; size: number; mtimeMs?: number }>;
+  readFile?(path: string, options?: FileReadOptions): Promise<{ content: string; path: string }>;
+  readFileBinary?(path: string, options?: FileReadOptions): Promise<{ dataUrl: string; path: string }>;
   writeFile?(path: string, content: string): Promise<{ success: boolean; path: string }>;
   delete?(path: string): Promise<{ success: boolean }>;
   rename?(oldPath: string, newPath: string): Promise<{ success: boolean; path: string }>;
@@ -572,6 +576,7 @@ export interface SettingsPayload {
   messageStreamTransport?: 'auto' | 'ws' | 'sse';
   activityRenderMode?: 'collapsed' | 'summary';
   mermaidRenderingMode?: 'svg' | 'ascii';
+  showSplitAssistantMessageActions?: boolean;
   fontSize?: number;
   terminalFontSize?: number;
   uiFont?: string;

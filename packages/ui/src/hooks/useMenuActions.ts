@@ -2,12 +2,9 @@ import React from 'react';
 import { toast } from '@/components/ui';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUIStore } from '@/stores/useUIStore';
-import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { sessionEvents } from '@/lib/sessionEvents';
-import { isTauriShell } from '@/lib/desktop';
-import { useFileSystemAccess } from '@/hooks/useFileSystemAccess';
 import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
 import { showOpenCodeStatus } from '@/lib/openCodeStatus';
 
@@ -100,9 +97,7 @@ export const useMenuActions = (
   const setActiveMainTab = useUIStore((s) => s.setActiveMainTab);
   const setSettingsDialogOpen = useUIStore((s) => s.setSettingsDialogOpen);
   const setAboutDialogOpen = useUIStore((s) => s.setAboutDialogOpen);
-  const addProject = useProjectsStore((s) => s.addProject);
   const checkForUpdates = useUpdateStore((state) => state.checkForUpdates);
-  const { requestAccess, startAccessing } = useFileSystemAccess();
   const { setThemeMode } = useThemeSystem();
   const checkUpdatesInFlightRef = React.useRef(false);
 
@@ -132,41 +127,8 @@ export const useMenuActions = (
   }, [checkForUpdates]);
 
   const handleChangeWorkspace = React.useCallback(() => {
-    if (isTauriShell()) {
-      requestAccess('')
-        .then(async (result) => {
-          if (!result.success || !result.path) {
-            if (result.error && result.error !== 'Directory selection cancelled') {
-              toast.error('Failed to select directory', {
-                description: result.error,
-              });
-            }
-            return;
-          }
-
-          const accessResult = await startAccessing(result.path);
-          if (!accessResult.success) {
-            toast.error('Failed to open directory', {
-              description: accessResult.error || 'Desktop could not grant file access.',
-            });
-            return;
-          }
-
-          const added = addProject(result.path, { id: result.projectId });
-          if (!added) {
-            toast.error('Failed to add project', {
-              description: 'Please select a valid directory path.',
-            });
-          }
-        })
-        .catch((error) => {
-          console.error('Desktop: Error selecting directory:', error);
-          toast.error('Failed to select directory');
-        });
-    }
-
     sessionEvents.requestDirectoryDialog();
-  }, [addProject, requestAccess, startAccessing]);
+  }, []);
 
   const handleAction = React.useCallback(
     (action: MenuAction) => {

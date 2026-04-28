@@ -41,7 +41,7 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = ({ open, onOpenChan
           aria-describedby={descriptionId}
           className={cn(
             'fixed z-50 top-[50%] left-[50%] translate-x-[-50%] translate-y-[-50%]',
-            'w-[90vw] max-w-[960px] h-[85vh] max-h-[900px]',
+            'w-[90vw] max-w-[1200px] h-[85vh] max-h-[900px]',
             'rounded-xl border shadow-none overflow-hidden',
             'bg-background'
           )}

@@ -23,8 +23,6 @@ import * as sessionActions from '@/sync/session-actions';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { useFileSystemAccess } from '@/hooks/useFileSystemAccess';
-import { isDesktopLocalOriginActive, isTauriShell } from '@/lib/desktop';
 import { useDeviceInfo } from '@/lib/device';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { useI18n } from '@/lib/i18n';
@@ -76,9 +74,7 @@ export const SessionDialogs: React.FC = () => {
     const homeDirectory = useDirectoryStore((s) => s.homeDirectory);
     const isHomeReady = useDirectoryStore((s) => s.isHomeReady);
     const projects = useProjectsStore((s) => s.projects);
-    const addProject = useProjectsStore((s) => s.addProject);
     const activeProjectId = useProjectsStore((s) => s.activeProjectId);
-    const { requestAccess, startAccessing } = useFileSystemAccess();
     const { isMobile, isTablet, hasTouchInput } = useDeviceInfo();
     const useMobileOverlay = isMobile || isTablet || hasTouchInput;
 
@@ -126,49 +122,11 @@ export const SessionDialogs: React.FC = () => {
 
         setHasShownInitialDirectoryPrompt(true);
 
-        if (isTauriShell() && isDesktopLocalOriginActive()) {
-            requestAccess('')
-                .then(async (result) => {
-                    if (!result.success || !result.path) {
-                        if (result.error && result.error !== 'Directory selection cancelled') {
-                            toast.error(t('sessions.sidebar.sessionDialogs.directory.errorSelectTitle'), {
-                                description: result.error,
-                            });
-                        }
-                        return;
-                    }
-
-                    const accessResult = await startAccessing(result.path);
-                    if (!accessResult.success) {
-                        toast.error(t('sessions.sidebar.sessionDialogs.directory.errorOpenTitle'), {
-                            description: accessResult.error || t('sessions.sidebar.sessionDialogs.directory.errorOpenDescription'),
-                        });
-                        return;
-                    }
-
-                    const added = addProject(result.path, { id: result.projectId });
-                    if (!added) {
-                        toast.error(t('sessions.sidebar.sessionDialogs.directory.errorAddProjectTitle'), {
-                            description: t('sessions.sidebar.sessionDialogs.directory.errorAddProjectDescription'),
-                        });
-                    }
-                })
-                .catch((error) => {
-                    console.error('Desktop: Error selecting directory:', error);
-                    toast.error(t('sessions.sidebar.sessionDialogs.directory.errorSelectTitle'));
-                });
-            return;
-        }
-
         setIsDirectoryDialogOpen(true);
     }, [
-        addProject,
         hasShownInitialDirectoryPrompt,
         isHomeReady,
         projects.length,
-        requestAccess,
-        startAccessing,
-        t,
     ]);
 
     const openDeleteDialog = React.useCallback((payload: { sessions: Session[]; dateLabel?: string; mode?: 'session' | 'worktree'; worktree?: WorktreeMetadata | null }) => {

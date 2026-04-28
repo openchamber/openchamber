@@ -567,6 +567,7 @@ interface UIStore {
   mermaidRenderingMode: MermaidRenderingMode;
   userMessageRenderingMode: UserMessageRenderingMode;
   stickyUserHeader: boolean;
+  showSplitAssistantMessageActions: boolean;
   showMobileSessionStatusBar: boolean;
   isMobileSessionStatusBarCollapsed: boolean;
   isExpandedInput: boolean;
@@ -645,11 +646,18 @@ interface UIStore {
   applyPadding: () => void;
   updateProportionalSidebarWidths: () => void;
   toggleFavoriteModel: (providerID: string, modelID: string) => void;
+  reorderFavoriteModel: (
+    activeProviderID: string,
+    activeModelID: string,
+    overProviderID: string,
+    overModelID: string,
+  ) => void;
   toggleHiddenModel: (providerID: string, modelID: string) => void;
   isHiddenModel: (providerID: string, modelID: string) => boolean;
   hideAllModels: (providerID: string, modelIDs: string[]) => void;
   showAllModels: (providerID: string) => void;
   toggleModelProviderCollapsed: (providerID: string) => void;
+  setModelProvidersCollapsed: (providerIDs: string[], collapsed: boolean) => void;
   isFavoriteModel: (providerID: string, modelID: string) => boolean;
   addRecentModel: (providerID: string, modelID: string) => void;
   addRecentAgent: (agentName: string) => void;
@@ -684,6 +692,7 @@ interface UIStore {
   setMermaidRenderingMode: (value: MermaidRenderingMode) => void;
   setUserMessageRenderingMode: (value: UserMessageRenderingMode) => void;
   setStickyUserHeader: (value: boolean) => void;
+  setShowSplitAssistantMessageActions: (value: boolean) => void;
   setShowMobileSessionStatusBar: (value: boolean) => void;
   setIsMobileSessionStatusBarCollapsed: (value: boolean) => void;
   viewPagerPage: 'left' | 'center' | 'right';
@@ -805,6 +814,7 @@ export const useUIStore = create<UIStore>()(
         mermaidRenderingMode: 'svg',
         userMessageRenderingMode: 'markdown',
         stickyUserHeader: true,
+        showSplitAssistantMessageActions: false,
         showMobileSessionStatusBar: true,
         isMobileSessionStatusBarCollapsed: false,
         isExpandedInput: false,
@@ -1504,6 +1514,29 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
+        reorderFavoriteModel: (activeProviderID, activeModelID, overProviderID, overModelID) => {
+          set((state) => {
+            const oldIndex = state.favoriteModels.findIndex(
+              (fav) => fav.providerID === activeProviderID && fav.modelID === activeModelID
+            );
+            const newIndex = state.favoriteModels.findIndex(
+              (fav) => fav.providerID === overProviderID && fav.modelID === overModelID
+            );
+
+            if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) {
+              return state;
+            }
+
+            const nextFavorites = state.favoriteModels.slice();
+            const [moved] = nextFavorites.splice(oldIndex, 1);
+            if (!moved) {
+              return state;
+            }
+            nextFavorites.splice(newIndex, 0, moved);
+            return { favoriteModels: nextFavorites };
+          });
+        },
+
         toggleHiddenModel: (providerID, modelID) => {
           set((state) => {
             const exists = state.hiddenModels.some(
@@ -1563,6 +1596,30 @@ export const useUIStore = create<UIStore>()(
 
             return {
               collapsedModelProviders: [...state.collapsedModelProviders, normalizedProviderID],
+            };
+          });
+        },
+
+        setModelProvidersCollapsed: (providerIDs, collapsed) => {
+          const normalizedProviderIDs = Array.from(new Set(
+            providerIDs
+              .filter((providerID): providerID is string => typeof providerID === 'string')
+              .map((providerID) => providerID.trim())
+              .filter(Boolean)
+          ));
+
+          if (normalizedProviderIDs.length === 0) {
+            return;
+          }
+
+          set((state) => {
+            const scopedProviderIDs = new Set(normalizedProviderIDs);
+            const untouchedProviders = state.collapsedModelProviders.filter((providerID) => !scopedProviderIDs.has(providerID));
+
+            return {
+              collapsedModelProviders: collapsed
+                ? [...untouchedProviders, ...normalizedProviderIDs]
+                : untouchedProviders,
             };
           });
         },
@@ -1742,6 +1799,9 @@ export const useUIStore = create<UIStore>()(
         },
         setStickyUserHeader: (value) => {
           set({ stickyUserHeader: value });
+        },
+        setShowSplitAssistantMessageActions: (value) => {
+          set({ showSplitAssistantMessageActions: value });
         },
         setShowMobileSessionStatusBar: (value) => {
           set({ showMobileSessionStatusBar: value });
@@ -1943,6 +2003,7 @@ export const useUIStore = create<UIStore>()(
           mermaidRenderingMode: state.mermaidRenderingMode,
           userMessageRenderingMode: state.userMessageRenderingMode,
           stickyUserHeader: state.stickyUserHeader,
+          showSplitAssistantMessageActions: state.showSplitAssistantMessageActions,
           showMobileSessionStatusBar: state.showMobileSessionStatusBar,
           isMobileSessionStatusBarCollapsed: state.isMobileSessionStatusBarCollapsed,
           shortcutOverrides: state.shortcutOverrides,

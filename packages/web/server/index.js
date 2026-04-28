@@ -406,6 +406,7 @@ let openCodeApiPrefix = '';
 let openCodeApiPrefixDetected = true;
 let openCodeApiDetectionTimer = null;
 let lastOpenCodeError = null;
+let lastOpenCodeLaunchDiagnostics = null;
 let isOpenCodeReady = false;
 let openCodeNotReadySince = 0;
 let isExternalOpenCode = false;
@@ -836,6 +837,7 @@ Object.defineProperties(openCodeLifecycleState, {
   openCodeApiPrefixDetected: { get: () => openCodeApiPrefixDetected, set: (value) => { openCodeApiPrefixDetected = value; } },
   openCodeApiDetectionTimer: { get: () => openCodeApiDetectionTimer, set: (value) => { openCodeApiDetectionTimer = value; } },
   lastOpenCodeError: { get: () => lastOpenCodeError, set: (value) => { lastOpenCodeError = value; } },
+  lastOpenCodeLaunchDiagnostics: { get: () => lastOpenCodeLaunchDiagnostics, set: (value) => { lastOpenCodeLaunchDiagnostics = value; } },
   isOpenCodeReady: { get: () => isOpenCodeReady, set: (value) => { isOpenCodeReady = value; } },
   openCodeNotReadySince: { get: () => openCodeNotReadySince, set: (value) => { openCodeNotReadySince = value; } },
   isExternalOpenCode: { get: () => isExternalOpenCode, set: (value) => { isExternalOpenCode = value; } },
@@ -876,6 +878,7 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   clearResolvedOpenCodeBinary,
   buildAugmentedPath,
   buildManagedOpenCodePath,
+  getManagedOpenCodeShellEnvSnapshot: getLoginShellEnvSnapshot,
 });
 
 const restartOpenCode = (...args) => openCodeLifecycleRuntime.restartOpenCode(...args);
@@ -1065,6 +1068,7 @@ async function main(options = {}) {
         openCodeApiPrefixDetected: true,
         isOpenCodeReady,
         lastOpenCodeError,
+        lastOpenCodeLaunchDiagnostics,
         opencodeBinaryResolved: resolvedOpencodeBinary || null,
         opencodeBinarySource: resolvedOpencodeBinarySource || null,
         opencodeLaunchBinary: launchSpec?.binary || null,

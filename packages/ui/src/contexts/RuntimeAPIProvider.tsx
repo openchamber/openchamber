@@ -47,14 +47,14 @@ function withContentCache(files: FilesAPI): FilesAPI {
     return result;
   };
 
-  const readFreshFile = async (path: string): Promise<{ content: string; path: string }> => {
+  const readFreshFile = async (path: string, options?: Parameters<NonNullable<FilesAPI['readFile']>>[1]): Promise<{ content: string; path: string }> => {
     // stat → read → stat to avoid TOCTOU:
     // if the file changes between read and either stat, metadata won't match and we retry.
-    const statBefore = await files.statFile?.(path).catch(() => null);
+    const statBefore = await files.statFile?.(path, options).catch(() => null);
 
-    const result = await files.readFile!(path);
+    const result = await files.readFile!(path, options);
 
-    const statAfter = await files.statFile?.(path).catch(() => null);
+    const statAfter = await files.statFile?.(path, options).catch(() => null);
 
     // If both stats are available and agree, the read was atomic with respect to file changes.
     if (statBefore && statAfter && statBefore.isFile && statAfter.isFile) {
@@ -62,9 +62,9 @@ function withContentCache(files: FilesAPI): FilesAPI {
         return syncCacheEntry(path, result, statAfter);
       }
       // File changed during read — discard and re-read once.
-      const retryStatBefore = await files.statFile?.(path).catch(() => null);
-      const retry = await files.readFile!(path);
-      const retryStat = await files.statFile?.(path).catch(() => null);
+      const retryStatBefore = await files.statFile?.(path, options).catch(() => null);
+      const retry = await files.readFile!(path, options);
+      const retryStat = await files.statFile?.(path, options).catch(() => null);
       // Accept retry only if file was stable across the read.
       if (retryStatBefore && retryStat && retryStatBefore.isFile && retryStat.isFile
         && retryStatBefore.size === retryStat.size && retryStatBefore.mtimeMs === retryStat.mtimeMs) {
@@ -78,7 +78,10 @@ function withContentCache(files: FilesAPI): FilesAPI {
   };
 
   const cachedReadFile: FilesAPI['readFile'] = files.readFile
-    ? async (path: string) => {
+    ? async (path: string, options) => {
+        if (options?.allowOutsideWorkspace) {
+          return readFreshFile(path, options);
+        }
         const hit = cache.get(path);
         if (hit) {
           // Validate cached entry is still fresh

@@ -213,7 +213,26 @@ function optimisticRemoveSession(sessionId: string, directory?: string): Session
 export async function deleteSession(sessionId: string, _options?: Record<string, unknown>): Promise<boolean> {
   const sessionDirectory = getSessionDirectory(sessionId)
   // Remove from UI immediately, rollback on error
-  const snapshot = optimisticRemoveSession(sessionId, sessionDirectory)
+  let snapshot = optimisticRemoveSession(sessionId, sessionDirectory)
+  let removedFromDir: string | null = snapshot ? (sessionDirectory ?? null) : null
+
+  // If the session wasn't in the resolved directory (e.g. archived session
+  // whose original child store was disposed), search all child stores.
+  if (!snapshot && _childStores) {
+    for (const [dir, store] of _childStores.children.entries()) {
+      const current = store.getState()
+      const sessions = [...current.session]
+      const result = Binary.search(sessions, sessionId, (s) => s.id)
+      if (result.found) {
+        snapshot = current.session
+        sessions.splice(result.index, 1)
+        store.setState({ session: sessions })
+        removedFromDir = dir
+        break
+      }
+    }
+  }
+
   const ui = useSessionUIStore.getState()
   if (ui.currentSessionId === sessionId) {
     ui.setCurrentSession(null)
@@ -224,7 +243,13 @@ export async function deleteSession(sessionId: string, _options?: Record<string,
     return true
   } catch (error) {
     console.error("[session-actions] deleteSession failed", error)
-    if (snapshot) getDirectoryStore(sessionDirectory).setState({ session: snapshot })
+    if (snapshot && removedFromDir) {
+      try {
+        getDirectoryStore(removedFromDir).setState({ session: snapshot })
+      } catch {
+        // child store may have been disposed since — ignore rollback
+      }
+    }
     return false
   }
 }

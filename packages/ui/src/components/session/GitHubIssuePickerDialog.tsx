@@ -21,6 +21,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import * as sessionActions from '@/sync/session-actions';
@@ -86,8 +87,17 @@ export function GitHubIssuePickerDialog({
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const isMobile = useUIStore((state) => state.isMobile);
   const activeProject = useProjectsStore((state) => state.getActiveProject());
+  const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
 
-  const projectDirectory = activeProject?.path ?? null;
+  const projectDirectory = React.useMemo(() => {
+    const fromDirectoryStore = currentDirectory?.trim();
+    if (fromDirectoryStore) {
+      return fromDirectoryStore;
+    }
+
+    const fromActiveProject = activeProject?.path?.trim();
+    return fromActiveProject || null;
+  }, [activeProject?.path, currentDirectory]);
 
   const [query, setQuery] = React.useState('');
   const [createInWorktree, setCreateInWorktree] = React.useState(false);

@@ -208,6 +208,7 @@ const areEqual = (prev: Props, next: Props): boolean => {
   if ((prev.secondaryMeta?.branchLabel ?? null) !== (next.secondaryMeta?.branchLabel ?? null)) return false;
   if (prev.mobileVariant !== next.mobileVariant) return false;
   if ((prev.renderContext ?? 'project') !== (next.renderContext ?? 'project')) return false;
+  if (prev.renamingFolderId !== next.renamingFolderId) return false;
 
   return true;
 };

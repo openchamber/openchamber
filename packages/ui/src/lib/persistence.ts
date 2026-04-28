@@ -431,6 +431,12 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.stickyUserHeader === 'boolean' && settings.stickyUserHeader !== store.stickyUserHeader) {
     store.setStickyUserHeader(settings.stickyUserHeader);
   }
+  if (
+    typeof settings.showSplitAssistantMessageActions === 'boolean'
+    && settings.showSplitAssistantMessageActions !== store.showSplitAssistantMessageActions
+  ) {
+    store.setShowSplitAssistantMessageActions(settings.showSplitAssistantMessageActions);
+  }
   if (typeof settings.reportUsage === 'boolean' && settings.reportUsage !== store.reportUsage) {
     store.setReportUsage(settings.reportUsage);
   }
@@ -852,6 +858,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.stickyUserHeader === 'boolean') {
     result.stickyUserHeader = candidate.stickyUserHeader;
+  }
+  if (typeof candidate.showSplitAssistantMessageActions === 'boolean') {
+    result.showSplitAssistantMessageActions = candidate.showSplitAssistantMessageActions;
   }
   if (typeof candidate.fontSize === 'number' && Number.isFinite(candidate.fontSize)) {
     result.fontSize = candidate.fontSize;

@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import express from 'express';
 import path from 'path';
 
-import { registerOpenCodeProxy, writeSseChunkWithBackpressure } from './lib/opencode/proxy.js';
+import { createSseBoundaryTracker, registerOpenCodeProxy, writeSseChunkWithBackpressure } from './lib/opencode/proxy.js';
 
 const listen = (app, host = '127.0.0.1') => new Promise((resolve, reject) => {
   const server = app.listen(0, host, () => resolve(server));
@@ -101,6 +101,17 @@ describe('OpenCode proxy SSE forwarding', () => {
     res.emit('drain');
 
     await expect(write).resolves.toBe(true);
+  });
+
+  it('tracks whether a raw SSE stream is between event blocks', () => {
+    const tracker = createSseBoundaryTracker();
+
+    expect(tracker.isAtBoundary()).toBe(true);
+    expect(tracker.observe(Buffer.from('id: evt-1\n'))).toBe(false);
+    expect(tracker.observe(Buffer.from('data: {"ok"'))).toBe(false);
+    expect(tracker.observe(Buffer.from(':true}\n'))).toBe(false);
+    expect(tracker.observe(Buffer.from('\n'))).toBe(true);
+    expect(tracker.observe(Buffer.from('data: next\r\n\r\n'))).toBe(true);
   });
 
   it('routes generic API requests through external OpenCode base URL', async () => {

@@ -23,12 +23,14 @@ interface JustificationBlockProps {
     part: Part;
     messageId: string;
     onContentChange?: (reason?: ContentChangeReason) => void;
+    actions?: React.ReactNode;
 }
 
 const JustificationBlock: React.FC<JustificationBlockProps> = ({
     part,
     messageId,
     onContentChange,
+    actions,
 }) => {
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
     const partWithText = part as PartWithText;
@@ -49,6 +51,7 @@ const JustificationBlock: React.FC<JustificationBlockProps> = ({
             blockId={part.id || `${messageId}-justification`}
             time={time}
             showDuration={chatRenderMode !== 'sorted'}
+            actions={actions}
         />
     );
 };

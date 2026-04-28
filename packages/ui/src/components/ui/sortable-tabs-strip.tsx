@@ -366,6 +366,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
           const shouldShowLabel = !showInactiveIconOnly;
           const useIntrinsicActiveTab = inactiveTabsIconOnly && usesActivePillIndicator && isActive && !isScrollable && !useIntrinsicPillSizing;
           const closable = item.closable !== false && Boolean(onClose);
+          const closeReplacesIcon = closable && Boolean(item.icon);
           const wrapperClassName = (isScrollable || useIntrinsicPillSizing)
             ? undefined
             : usesActivePillIndicator
@@ -401,7 +402,6 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                     usesActivePillIndicator
                       ? 'animated-tabs__button pill-tabs__button relative z-10 flex flex-1 items-center justify-center rounded-[9px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] text-sm font-medium transition-colors duration-150 !min-h-0'
                       : 'flex h-full min-w-0 items-center typography-micro',
-                    usesActivePillIndicator && closable && '!flex-none',
                     usesActivePillIndicator && activePillLowercase ? 'lowercase' : null,
                     usesActivePillIndicator && (showInactiveIconOnly ? 'gap-0' : 'gap-1.5'),
                     usesActivePillIndicator
@@ -433,7 +433,29 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                 >
                   {usesActivePillIndicator ? (
                     <>
-                      {item.icon ? <span className="flex shrink-0 items-center justify-center">{item.icon}</span> : null}
+                      {item.icon ? (
+                        <span className="relative flex h-4 w-4 shrink-0 items-center justify-center">
+                          <span className={cn('flex items-center justify-center transition-opacity', closeReplacesIcon && 'group-hover:opacity-0')}>{item.icon}</span>
+                          {closeReplacesIcon ? (
+                            <span
+                              role="button"
+                              tabIndex={-1}
+                              className="absolute inset-0 z-20 flex items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
+                              onPointerDown={(event) => {
+                                event.stopPropagation();
+                              }}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onClose?.(item.id);
+                              }}
+                              aria-label={item.closeLabel ?? `Close ${item.label} tab`}
+                              title={item.closeLabel ?? `Close ${item.label} tab`}
+                            >
+                              <RiCloseLine className="h-3.5 w-3.5" />
+                            </span>
+                          ) : null}
+                        </span>
+                      ) : null}
                       {shouldShowLabel ? <span className="animated-tabs__label truncate">{item.label}</span> : null}
                     </>
                   ) : (
@@ -441,18 +463,36 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                       {item.icon ? (
                         <span
                           className={cn(
-                            'flex shrink-0 items-center justify-center transition-colors duration-200 ease-out',
+                            'relative flex h-4 w-4 shrink-0 items-center justify-center transition-colors duration-200 ease-out',
                             isActive ? 'text-[var(--primary-base)]' : 'text-muted-foreground'
                           )}
                         >
-                          {item.icon}
+                          <span className={cn('flex items-center justify-center transition-opacity', closeReplacesIcon && 'group-hover:opacity-0')}>{item.icon}</span>
+                          {closeReplacesIcon ? (
+                            <span
+                              role="button"
+                              tabIndex={-1}
+                              className="absolute inset-0 z-20 flex items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
+                              onPointerDown={(event) => {
+                                event.stopPropagation();
+                              }}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onClose?.(item.id);
+                              }}
+                              aria-label={item.closeLabel ?? `Close ${item.label} tab`}
+                              title={item.closeLabel ?? `Close ${item.label} tab`}
+                            >
+                              <RiCloseLine className="h-3.5 w-3.5" />
+                            </span>
+                          ) : null}
                         </span>
                       ) : null}
                       <span className="truncate leading-[1.2]">{item.label}</span>
                     </span>
                   )}
                 </button>
-                {closable ? (
+                {closable && !closeReplacesIcon ? (
                   <button
                     type="button"
                     onPointerDown={(event) => {

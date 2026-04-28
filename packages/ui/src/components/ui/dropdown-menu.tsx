@@ -93,6 +93,7 @@ type ContentProps = {
   align?: "start" | "center" | "end";
   side?: "top" | "right" | "bottom" | "left";
   alignOffset?: number;
+  portalToBody?: boolean;
   style?: React.CSSProperties;
   className?: string;
   children?: React.ReactNode;
@@ -105,6 +106,7 @@ function DropdownMenuContent({
   align,
   side,
   alignOffset,
+  portalToBody = false,
   style,
   children,
   onCloseAutoFocus,
@@ -114,7 +116,7 @@ function DropdownMenuContent({
   void onCloseAutoFocus
 
   return (
-    <BaseMenu.Portal container={portalContext?.portalContainer || undefined}>
+    <BaseMenu.Portal container={portalToBody ? undefined : portalContext?.portalContainer || undefined}>
       <BaseMenu.Positioner
         sideOffset={sideOffset}
         align={align}

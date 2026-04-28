@@ -18,6 +18,7 @@ type OpenChamberHealthSnapshot = {
   openCodeAuthSource?: unknown;
   isOpenCodeReady?: unknown;
   lastOpenCodeError?: unknown;
+  lastOpenCodeLaunchDiagnostics?: unknown;
   opencodeBinaryResolved?: unknown;
   opencodeBinarySource?: unknown;
   opencodeLaunchBinary?: unknown;
@@ -119,6 +120,29 @@ const normalizePort = (value: unknown): number | null => {
     }
   }
   return null;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === 'object' && !Array.isArray(value);
+
+const formatUnknown = (value: unknown, fallback = '(n/a)'): string => {
+  if (typeof value === 'string') return value.trim() || fallback;
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  return fallback;
+};
+
+const formatLaunchRuntime = (wrapperType: string, node: string, bun: string): string => {
+  if (wrapperType === 'node-shebang' || wrapperType === 'node-launcher') {
+    return node ? `node (${node})` : 'node';
+  }
+  if (wrapperType === 'bun-shebang') {
+    return bun ? `bun (${bun})` : 'bun';
+  }
+  if (wrapperType) {
+    return wrapperType;
+  }
+  return 'direct executable';
 };
 
 export const buildOpenCodeStatusReport = async (): Promise<string> => {
@@ -260,6 +284,12 @@ export const buildOpenCodeStatusReport = async (): Promise<string> => {
     lines.push('');
     lines.push('OpenCode CLI resolution:');
 
+    const launchDiagnostics = isRecord(openChamberHealth?.lastOpenCodeLaunchDiagnostics)
+      ? openChamberHealth.lastOpenCodeLaunchDiagnostics
+      : null;
+    const actualLaunchArgs = launchDiagnostics && Array.isArray(launchDiagnostics.args)
+      ? launchDiagnostics.args.filter((value): value is string => typeof value === 'string')
+      : [];
     const openChamberOpencodeResolution = openChamberOpencodeResolutionResult.data;
     const configured =
       openChamberOpencodeResolution && typeof openChamberOpencodeResolution.configured === 'string'
@@ -277,15 +307,15 @@ export const buildOpenCodeStatusReport = async (): Promise<string> => {
       openChamberOpencodeResolution && typeof openChamberOpencodeResolution.source === 'string'
         ? openChamberOpencodeResolution.source
         : (openChamberHealth && typeof openChamberHealth.opencodeBinarySource === 'string' ? openChamberHealth.opencodeBinarySource : '');
-    const launchBinary =
+    const configuredLaunchBinary =
       openChamberOpencodeResolution && typeof openChamberOpencodeResolution.launchBinary === 'string'
         ? openChamberOpencodeResolution.launchBinary
         : (openChamberHealth && typeof openChamberHealth.opencodeLaunchBinary === 'string' ? openChamberHealth.opencodeLaunchBinary : '');
-    const launchWrapperType =
+    const configuredLaunchWrapperType =
       openChamberOpencodeResolution && typeof openChamberOpencodeResolution.launchWrapperType === 'string'
         ? openChamberOpencodeResolution.launchWrapperType
         : (openChamberHealth && typeof openChamberHealth.opencodeLaunchWrapperType === 'string' ? openChamberHealth.opencodeLaunchWrapperType : '');
-    const launchArgs =
+    const configuredLaunchArgs =
       openChamberOpencodeResolution && Array.isArray(openChamberOpencodeResolution.launchArgs)
         ? openChamberOpencodeResolution.launchArgs.filter((value): value is string => typeof value === 'string')
         : (openChamberHealth && Array.isArray(openChamberHealth.opencodeLaunchArgs)
@@ -324,11 +354,20 @@ export const buildOpenCodeStatusReport = async (): Promise<string> => {
       lines.push(`- detected-now: ${detectedNow}`);
       lines.push(`- detected-source: ${detectedSourceNow || '(n/a)'}`);
     }
-    lines.push(`- launch-binary: ${launchBinary || '(n/a)'}`);
-    lines.push(`- launch-wrapper: ${launchWrapperType || '(n/a)'}`);
-    lines.push(`- launch-args: ${launchArgs.length ? launchArgs.join(' ') : '(none)'}`);
-    lines.push(`- node: ${node || '(n/a)'}`);
-    lines.push(`- bun: ${bun || '(n/a)'}`);
+    if (launchDiagnostics) {
+      lines.push(`- launched-at: ${formatUnknown(launchDiagnostics.launchedAt)}`);
+      lines.push(`- launch: ${formatUnknown(launchDiagnostics.binary)} ${actualLaunchArgs.join(' ')}`.trim());
+      lines.push(`- cwd: ${formatUnknown(launchDiagnostics.cwd)}`);
+      lines.push(`- wrapper: ${formatUnknown(launchDiagnostics.wrapperType)}`);
+      lines.push(`- runtime: ${formatLaunchRuntime(formatUnknown(launchDiagnostics.wrapperType, ''), node, bun)}`);
+      lines.push(`- PATH entries: ${formatUnknown(launchDiagnostics.pathEntryCount, '(unknown)')}`);
+      lines.push(`- shell env: ${formatUnknown(launchDiagnostics.hasShellEnv, '(unknown)')} (${formatUnknown(launchDiagnostics.shellEnvKeysCount, '?')} keys)`);
+    } else {
+      lines.push(`- launch-binary: ${configuredLaunchBinary || '(n/a)'}`);
+      lines.push(`- launch-wrapper: ${configuredLaunchWrapperType || '(n/a)'}`);
+      lines.push(`- launch-args: ${configuredLaunchArgs.length ? configuredLaunchArgs.join(' ') : '(none)'}`);
+      lines.push(`- runtime: ${formatLaunchRuntime(configuredLaunchWrapperType || '', node, bun)}`);
+    }
     if (!openChamberOpencodeResolution && openChamberOpencodeResolutionResult.error) {
       lines.push(`- resolution-endpoint: ${openChamberOpencodeResolutionResult.error}`);
     }

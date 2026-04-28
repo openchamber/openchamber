@@ -95,6 +95,27 @@ const resolveWorkspacePathFromContext = async ({ req, targetPath, resolveProject
   });
 };
 
+const resolveReadPathFromContext = async ({ req, targetPath, resolveProjectDirectory, path, os, normalizeDirectoryPath, openchamberUserConfigRoot }) => {
+  if (req.query?.allowOutsideWorkspace === 'true') {
+    const normalized = normalizeDirectoryPath(targetPath);
+    if (!normalized || typeof normalized !== 'string') {
+      return { ok: false, error: 'Path is required' };
+    }
+    const resolved = path.resolve(normalized);
+    return { ok: true, base: path.dirname(resolved), resolved };
+  }
+
+  return resolveWorkspacePathFromContext({
+    req,
+    targetPath,
+    resolveProjectDirectory,
+    path,
+    os,
+    normalizeDirectoryPath,
+    openchamberUserConfigRoot,
+  });
+};
+
 const runCommandInDirectory = ({ shell, shellFlag, command, resolvedCwd, spawn, buildAugmentedPath, commandTimeoutMs }) => {
   return new Promise((resolve) => {
     let stdout = '';
@@ -290,7 +311,7 @@ export const registerFsRoutes = (app, dependencies) => {
     }
 
     try {
-      const resolved = await resolveWorkspacePathFromContext({
+      const resolved = await resolveReadPathFromContext({
         req,
         targetPath: filePath,
         resolveProjectDirectory,
@@ -338,7 +359,7 @@ export const registerFsRoutes = (app, dependencies) => {
     }
 
     try {
-      const resolved = await resolveWorkspacePathFromContext({
+      const resolved = await resolveReadPathFromContext({
         req,
         targetPath: filePath,
         resolveProjectDirectory,
@@ -387,7 +408,7 @@ export const registerFsRoutes = (app, dependencies) => {
     }
 
     try {
-      const resolved = await resolveWorkspacePathFromContext({
+      const resolved = await resolveReadPathFromContext({
         req,
         targetPath: filePath,
         resolveProjectDirectory,

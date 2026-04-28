@@ -110,9 +110,13 @@ export const createWebFilesAPI = (): FilesAPI => ({
     };
   },
 
-  async statFile(path: string): Promise<{ path: string; isFile: boolean; size: number; mtimeMs?: number }> {
+  async statFile(path: string, options): Promise<{ path: string; isFile: boolean; size: number; mtimeMs?: number }> {
     const target = normalizePath(path);
-    const response = await fetch(`/api/fs/stat?path=${encodeURIComponent(target)}`);
+    const params = new URLSearchParams({ path: target });
+    if (options?.allowOutsideWorkspace) {
+      params.set('allowOutsideWorkspace', 'true');
+    }
+    const response = await fetch(`/api/fs/stat?${params.toString()}`);
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: response.statusText }));
@@ -128,9 +132,13 @@ export const createWebFilesAPI = (): FilesAPI => ({
     };
   },
 
-  async readFile(path: string): Promise<{ content: string; path: string }> {
+  async readFile(path: string, options): Promise<{ content: string; path: string }> {
     const target = normalizePath(path);
-    const response = await fetch(`/api/fs/read?path=${encodeURIComponent(target)}`);
+    const params = new URLSearchParams({ path: target });
+    if (options?.allowOutsideWorkspace) {
+      params.set('allowOutsideWorkspace', 'true');
+    }
+    const response = await fetch(`/api/fs/read?${params.toString()}`);
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: response.statusText }));
