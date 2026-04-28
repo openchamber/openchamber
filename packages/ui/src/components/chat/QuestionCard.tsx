@@ -4,7 +4,9 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Radio } from '@/components/ui/radio';
 
 import { cn } from '@/lib/utils';
+import { isIMECompositionEvent } from '@/lib/ime';
 import type { QuestionRequest } from '@/types/question';
+import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessions } from '@/sync/sync-context';
 import * as sessionActions from '@/sync/session-actions';
@@ -21,6 +23,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
   const { t } = useI18n();
   const respondToQuestion = sessionActions.respondToQuestion;
     const rejectQuestion = sessionActions.rejectQuestion;;
+  const isMobile = useUIStore((state) => state.isMobile);
   const sessions = useSessions();
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const isFromSubagent = React.useMemo(() => {
@@ -177,7 +180,9 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
 
   const handleKeyDown = React.useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
+      if (isIMECompositionEvent(e)) return;
+
+      if (e.key === 'Enter' && !e.shiftKey && (!isMobile || e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         if (requiredSatisfied) {
           handleConfirm();
@@ -186,7 +191,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
         }
       }
     },
-    [requiredSatisfied, handleConfirm, handleNextUnanswered]
+    [handleConfirm, handleNextUnanswered, isMobile, requiredSatisfied]
   );
 
   const handleDismiss = React.useCallback(async () => {
