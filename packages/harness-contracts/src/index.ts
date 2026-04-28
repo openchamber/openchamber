@@ -372,6 +372,20 @@ export interface ForkHarnessSessionInput {
   messageId?: HarnessMessageId;
 }
 
+export interface RevertHarnessSessionInput {
+  sessionId: HarnessSessionId;
+  backendId?: HarnessBackendId;
+  directory?: string | null;
+  messageId: HarnessMessageId;
+  partId?: HarnessPartId;
+}
+
+export interface UnrevertHarnessSessionInput {
+  sessionId: HarnessSessionId;
+  backendId?: HarnessBackendId;
+  directory?: string | null;
+}
+
 export interface RollbackHarnessThreadInput {
   sessionId: HarnessSessionId;
   backendId?: HarnessBackendId;
@@ -410,6 +424,8 @@ export interface HarnessAdapter {
   deleteSession?(input: DeleteHarnessSessionInput): Promise<boolean>;
   shareSession?(input: ShareHarnessSessionInput): Promise<HarnessSession>;
   unshareSession?(input: ShareHarnessSessionInput): Promise<HarnessSession>;
+  revertSession?(input: RevertHarnessSessionInput): Promise<HarnessSession>;
+  unrevertSession?(input: UnrevertHarnessSessionInput): Promise<HarnessSession>;
   forkSession?(input: ForkHarnessSessionInput): Promise<HarnessSession>;
   rollbackThread?(input: RollbackHarnessThreadInput): Promise<HarnessThreadSnapshot>;
   replyBlockingRequest?(input: ReplyBlockingRequestInput): Promise<void>;
@@ -429,6 +445,8 @@ export interface HarnessService {
   deleteSession(input: DeleteHarnessSessionInput): Promise<boolean>;
   shareSession(input: ShareHarnessSessionInput): Promise<HarnessSession>;
   unshareSession(input: ShareHarnessSessionInput): Promise<HarnessSession>;
+  revertSession(input: RevertHarnessSessionInput): Promise<HarnessSession>;
+  unrevertSession(input: UnrevertHarnessSessionInput): Promise<HarnessSession>;
   replyBlockingRequest(input: ReplyBlockingRequestInput): Promise<void>;
   streamEvents(input: SubscribeHarnessEventsInput): AsyncIterable<HarnessRuntimeEvent>;
 }

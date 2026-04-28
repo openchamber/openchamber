@@ -47,6 +47,8 @@ export type HarnessClient = {
   archiveSession(sessionId: string, archivedAt: number, directory?: string | null): Promise<HarnessSession>
   shareSession(sessionId: string, directory?: string | null): Promise<HarnessSession>
   unshareSession(sessionId: string, directory?: string | null): Promise<HarnessSession>
+  revertSession(input: { sessionId: string; messageId: string; partId?: string; directory?: string | null }): Promise<HarnessSession>
+  unrevertSession(input: { sessionId: string; directory?: string | null }): Promise<HarnessSession>
   replyToBlockingRequest(input: { sessionId: string; requestId: string; kind: "permission" | "question"; directory?: string | null; reply?: string; answers?: unknown }): Promise<void>
   rejectBlockingRequest(input: { sessionId: string; requestId: string; kind: "permission" | "question"; directory?: string | null }): Promise<void>
   forkSession(input: ForkHarnessSessionInput): Promise<HarnessSession>
@@ -145,7 +147,11 @@ class OpenChamberHarnessClient implements HarnessClient {
   }
 
   async abortSession(input: AbortHarnessSessionInput): Promise<void> {
-    await this.withDirectory(input.directory, () => opencodeClient.abortSession(input.sessionId))
+    await this.fetchJson(`/session/${encodeURIComponent(input.sessionId)}/abort`, {
+      method: "POST",
+      body: { directory: input.directory },
+      emptyOk: true,
+    })
   }
 
   async updateSession(input: { sessionId: string; directory?: string | null; title?: string; time?: { archived?: number } }): Promise<HarnessSession> {
@@ -176,6 +182,26 @@ class OpenChamberHarnessClient implements HarnessClient {
     const payload = await this.fetchJson(`/session/${encodeURIComponent(sessionId)}/unshare`, {
       method: "POST",
       body: { directory },
+    })
+    return payload as HarnessSession
+  }
+
+  async revertSession(input: { sessionId: string; messageId: string; partId?: string; directory?: string | null }): Promise<HarnessSession> {
+    const payload = await this.fetchJson(`/session/${encodeURIComponent(input.sessionId)}/revert`, {
+      method: "POST",
+      body: {
+        directory: input.directory,
+        messageId: input.messageId,
+        partId: input.partId,
+      },
+    })
+    return payload as HarnessSession
+  }
+
+  async unrevertSession(input: { sessionId: string; directory?: string | null }): Promise<HarnessSession> {
+    const payload = await this.fetchJson(`/session/${encodeURIComponent(input.sessionId)}/unrevert`, {
+      method: "POST",
+      body: { directory: input.directory },
     })
     return payload as HarnessSession
   }

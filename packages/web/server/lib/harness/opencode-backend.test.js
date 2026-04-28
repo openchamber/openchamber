@@ -30,6 +30,8 @@ const createMockClient = () => ({
     fork: vi.fn(),
     share: vi.fn(),
     unshare: vi.fn(),
+    revert: vi.fn(),
+    unrevert: vi.fn(),
   },
   app: {
     agents: vi.fn(),
@@ -91,7 +93,7 @@ describe('OpenCode backend runtime baseline contract', () => {
     });
   });
 
-  it('forwards prompt, command, abort, update, fork, and share calls using OpenCode payload names', async () => {
+  it('forwards prompt, command, abort, update, fork, share, and revert calls using OpenCode payload names', async () => {
     const { runtime, client } = createRuntime();
     client.session.promptAsync.mockResolvedValue({ data: { ok: true } });
     client.session.command.mockResolvedValue({ data: { ok: true } });
@@ -101,6 +103,8 @@ describe('OpenCode backend runtime baseline contract', () => {
     client.session.fork.mockResolvedValue({ data: { id: 'session-2', parentID: 'session-1' } });
     client.session.share.mockResolvedValue({ data: { id: 'session-1', share: { url: 'https://share.example/session-1' } } });
     client.session.unshare.mockResolvedValue({ data: { id: 'session-1', share: null } });
+    client.session.revert.mockResolvedValue({ data: { id: 'session-1', revert: { messageID: 'message-1' } } });
+    client.session.unrevert.mockResolvedValue({ data: { id: 'session-1' } });
 
     await runtime.promptAsync({
       directory: '/repo',
@@ -128,6 +132,8 @@ describe('OpenCode backend runtime baseline contract', () => {
     await runtime.forkSession({ sessionID: 'session-1', messageID: 'message-1' });
     await runtime.shareSession({ sessionID: 'session-1' });
     await runtime.unshareSession({ sessionID: 'session-1' });
+    await runtime.revertSession({ sessionID: 'session-1', messageID: 'message-1', partID: 'part-1' });
+    await runtime.unrevertSession({ sessionID: 'session-1' });
 
     expect(client.session.promptAsync).toHaveBeenCalledWith({
       sessionID: 'session-1',
@@ -160,6 +166,12 @@ describe('OpenCode backend runtime baseline contract', () => {
     }, { throwOnError: true });
     expect(client.session.share).toHaveBeenCalledWith({ sessionID: 'session-1' }, { throwOnError: true });
     expect(client.session.unshare).toHaveBeenCalledWith({ sessionID: 'session-1' }, { throwOnError: true });
+    expect(client.session.revert).toHaveBeenCalledWith({
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      partID: 'part-1',
+    }, { throwOnError: true });
+    expect(client.session.unrevert).toHaveBeenCalledWith({ sessionID: 'session-1' }, { throwOnError: true });
   });
 
   it('forwards blocking request replies through OpenCode payload names', async () => {

@@ -16,7 +16,6 @@ import { useBackendsStore } from "@/stores/useBackendsStore"
 import { registerSessionDirectory } from "./sync-refs"
 import { useSelectionStore } from "./selection-store"
 import { isSyntheticPart } from "@/lib/messages/synthetic"
-import { fromOpenCodeSession } from "./adapters/opencode"
 import { toOpenCodeCompatiblePart, toOpenCodeCompatibleSession } from "./compat"
 import type { OptimisticAddInput, OptimisticRemoveInput } from "./optimistic"
 
@@ -43,10 +42,6 @@ export function setOptimisticRefs(
 ) {
   _optimisticAdd = add
   _optimisticRemove = remove
-}
-
-function sdk() {
-  return harness().getSdkClient()
 }
 
 function harness() {
@@ -572,7 +567,7 @@ export async function rejectQuestion(
  * 1. Abort if session is busy
  * 2. Extract text from the target message for prompt restoration
  * 3. Optimistically set revert marker so messages hide immediately
- * 4. Call SDK session.revert() and merge returned session
+ * 4. Call harness session revert and merge returned session
  * 5. Set pendingInputText so the reverted message text appears in the input
  */
 export async function revertToMessage(sessionId: string, messageId: string): Promise<void> {
@@ -583,7 +578,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   const status = state.session_status[sessionId]
   if (status && status.type !== "idle") {
     try {
-      await sdk().session.abort({ sessionID: sessionId, directory: dir() })
+      await harness().abortSession({ sessionId, directory: dir() })
     } catch {
       // ignore abort errors
     }
@@ -642,17 +637,15 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
     })
   }
 
-  // Call SDK and merge authoritative result into store
+  // Call harness API and merge authoritative result into store
   try {
-    const result = await sdk().session.revert({ sessionID: sessionId, directory: dir(), messageID: messageId })
-    if (result.data) {
-      const current = store.getState()
-      const updated = [...current.session]
-      const idx = updated.findIndex((s) => s.id === sessionId)
-      if (idx >= 0) {
-        updated[idx] = fromOpenCodeSession(result.data)
-        store.setState({ session: updated })
-      }
+    const result = await harness().revertSession({ sessionId, directory: dir(), messageId })
+    const current = store.getState()
+    const updated = [...current.session]
+    const idx = updated.findIndex((s) => s.id === sessionId)
+    if (idx >= 0) {
+      updated[idx] = result
+      store.setState({ session: updated })
     }
   } catch (err) {
     // Rollback: restore removed messages + revert marker
@@ -683,21 +676,19 @@ export async function unrevertSession(sessionId: string): Promise<void> {
   const status = state.session_status[sessionId]
   if (status && status.type !== "idle") {
     try {
-      await sdk().session.abort({ sessionID: sessionId, directory: dir() })
+      await harness().abortSession({ sessionId, directory: dir() })
     } catch {
       // ignore
     }
   }
 
-  const result = await sdk().session.unrevert({ sessionID: sessionId, directory: dir() })
-  if (result.data) {
-    const current = store.getState()
-    const sessions = [...current.session]
-    const idx = sessions.findIndex((s) => s.id === sessionId)
-    if (idx >= 0) {
-      sessions[idx] = fromOpenCodeSession(result.data)
-      store.setState({ session: sessions })
-    }
+  const result = await harness().unrevertSession({ sessionId, directory: dir() })
+  const current = store.getState()
+  const sessions = [...current.session]
+  const idx = sessions.findIndex((s) => s.id === sessionId)
+  if (idx >= 0) {
+    sessions[idx] = result
+    store.setState({ session: sessions })
   }
 }
 

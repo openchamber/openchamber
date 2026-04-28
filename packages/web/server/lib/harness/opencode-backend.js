@@ -284,6 +284,50 @@ export const createOpenCodeBackendRuntime = (dependencies) => {
     return response.data;
   };
 
+  const revertSession = async (input = {}) => {
+    const directory = typeof input?.directory === 'string' && input.directory.trim().length > 0
+      ? input.directory.trim()
+      : undefined;
+    const sessionID = typeof input?.sessionID === 'string' ? input.sessionID : '';
+    const messageID = typeof input?.messageID === 'string' ? input.messageID : '';
+    if (!sessionID) {
+      throw new Error('Session ID is required');
+    }
+    if (!messageID) {
+      throw new Error('Message ID is required');
+    }
+
+    const client = createClient(directory);
+    const response = await client.session.revert({
+      sessionID,
+      messageID,
+      ...(typeof input?.partID === 'string' && input.partID.trim().length > 0 ? { partID: input.partID.trim() } : {}),
+    }, {
+      throwOnError: true,
+    });
+
+    return response.data;
+  };
+
+  const unrevertSession = async (input = {}) => {
+    const directory = typeof input?.directory === 'string' && input.directory.trim().length > 0
+      ? input.directory.trim()
+      : undefined;
+    const sessionID = typeof input?.sessionID === 'string' ? input.sessionID : '';
+    if (!sessionID) {
+      throw new Error('Session ID is required');
+    }
+
+    const client = createClient(directory);
+    const response = await client.session.unrevert({
+      sessionID,
+    }, {
+      throwOnError: true,
+    });
+
+    return response.data;
+  };
+
   const replyToPermission = async (requestId, reply, input = {}) => {
     const directory = typeof input?.directory === 'string' && input.directory.trim().length > 0
       ? input.directory.trim()
@@ -513,6 +557,8 @@ export const createOpenCodeBackendRuntime = (dependencies) => {
     forkSession,
     shareSession,
     unshareSession,
+    revertSession,
+    unrevertSession,
     replyToPermission,
     replyToQuestion,
     rejectQuestion,

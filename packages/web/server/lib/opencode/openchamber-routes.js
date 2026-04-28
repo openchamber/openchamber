@@ -728,6 +728,73 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
     }
   });
 
+  app.post('/api/openchamber/harness/session/:sessionId/revert', async (req, res) => {
+    try {
+      const sessionId = typeof req.params?.sessionId === 'string' ? req.params.sessionId : '';
+      const binding = await getBoundBackend(sessionId);
+      if (!binding) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+      if (!backendRegistry.isBackendSelectable(binding.backendId)) {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+      const runtime = getBackendRuntime(binding.backendId);
+      if (!runtime?.revertSession) {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+
+      const messageID = typeof req.body?.messageId === 'string'
+        ? req.body.messageId
+        : (typeof req.body?.messageID === 'string' ? req.body.messageID : '');
+      if (!messageID) {
+        return res.status(400).json({ error: 'Message ID is required' });
+      }
+
+      const payload = await runtime.revertSession({
+        sessionID: binding.backendSessionId,
+        directory: typeof req.body?.directory === 'string' ? req.body.directory : binding.directory,
+        messageID,
+        partID: typeof req.body?.partId === 'string'
+          ? req.body.partId
+          : (typeof req.body?.partID === 'string' ? req.body.partID : undefined),
+      });
+
+      return res.status(200).json(toHarnessSession(sessionBindingsRuntime.annotateSession(payload), binding.backendId));
+    } catch (error) {
+      console.error('Failed to revert harness session:', error);
+      const message = error?.body?.error || error?.message || 'Failed to revert session';
+      return res.status(400).json({ error: message });
+    }
+  });
+
+  app.post('/api/openchamber/harness/session/:sessionId/unrevert', async (req, res) => {
+    try {
+      const sessionId = typeof req.params?.sessionId === 'string' ? req.params.sessionId : '';
+      const binding = await getBoundBackend(sessionId);
+      if (!binding) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+      if (!backendRegistry.isBackendSelectable(binding.backendId)) {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+      const runtime = getBackendRuntime(binding.backendId);
+      if (!runtime?.unrevertSession) {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+
+      const payload = await runtime.unrevertSession({
+        sessionID: binding.backendSessionId,
+        directory: typeof req.body?.directory === 'string' ? req.body.directory : binding.directory,
+      });
+
+      return res.status(200).json(toHarnessSession(sessionBindingsRuntime.annotateSession(payload), binding.backendId));
+    } catch (error) {
+      console.error('Failed to unrevert harness session:', error);
+      const message = error?.body?.error || error?.message || 'Failed to unrevert session';
+      return res.status(400).json({ error: message });
+    }
+  });
+
   app.post('/api/openchamber/harness/session/:sessionId/update', async (req, res) => {
     try {
       const sessionId = typeof req.params?.sessionId === 'string' ? req.params.sessionId : '';

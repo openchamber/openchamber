@@ -45,6 +45,9 @@ const mockSdk = {
 const mockHarnessClient = {
   getSdkClient: () => mockSdk,
   getScopedSdkClient: () => mockScopedClient,
+  abortSession: mock(() => Promise.resolve()),
+  revertSession: mock((input: { sessionId: string; messageId: string }) => Promise.resolve({ id: input.sessionId, revert: { messageID: input.messageId } })),
+  unrevertSession: mock((input: { sessionId: string }) => Promise.resolve({ id: input.sessionId })),
   replyToBlockingRequest: mock((input: { kind: string; requestId: string; reply?: string; answers?: unknown; directory?: string | null }) => {
     replyCalls.push({
       method: input.kind === "permission" ? "permission.reply" : "question.reply",
