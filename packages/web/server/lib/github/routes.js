@@ -521,25 +521,28 @@ export function registerGitHubRoutes(app) {
 
       // For fork workflows: we need to determine the correct head reference
       let headRef = head;
+      let headRepo = null;
       
       if (sourceRemote) {
         // The branch is on a different remote than the target - this is a cross-repo PR
-        const { repo: headRepo } = await resolveGitHubRepoFromDirectory(directory, sourceRemote);
-        if (headRepo) {
-          // Always use owner:branch format for cross-repo PRs
-          // GitHub API requires this when head is from a different repo/fork
-          if (headRepo.owner !== repo.owner || headRepo.repo !== repo.repo) {
-            headRef = `${headRepo.owner}:${head}`;
-          }
+        const resolved = await resolveGitHubRepoFromDirectory(directory, sourceRemote);
+        headRepo = resolved.repo;
+        if (!headRepo) {
+          return res.status(400).json({
+            error: `Cannot resolve GitHub repo for remote "${sourceRemote}". Check that the remote URL is a valid GitHub repository.`,
+          });
+        }
+        // Always use owner:branch format for cross-repo PRs
+        // GitHub API requires this when head is from a different repo/fork
+        if (headRepo.owner !== repo.owner || headRepo.repo !== repo.repo) {
+          headRef = `${headRepo.owner}:${head}`;
         }
       }
 
       // For cross-repo PRs, verify the branch exists on the head repo first
       if (headRef.includes(':')) {
         const [headOwner] = headRef.split(':');
-        const headRepoName = sourceRemote 
-          ? (await resolveGitHubRepoFromDirectory(directory, sourceRemote)).repo?.repo 
-          : repo.repo;
+        const headRepoName = headRepo?.repo || repo.repo;
         
         if (headRepoName) {
           try {
@@ -800,18 +803,42 @@ export function registerGitHubRoutes(app) {
 
       const upstream = network.find((r) => r.source === 'upstream') || null;
       let defaultBranch = 'main';
+      let defaultBranchSha = null;
       if (upstream) {
         try {
           const metadata = await octokit.rest.repos.get({ owner: upstream.owner, repo: upstream.repo });
           defaultBranch = metadata?.data?.default_branch || 'main';
+          const ref = await octokit.rest.git.getRef({ owner: upstream.owner, repo: upstream.repo, ref: `heads/${defaultBranch}` });
+          defaultBranchSha = ref?.data?.object?.sha || null;
         } catch {
-          // Fall back to 'main' if metadata fetch fails
+          // Fall back if metadata/ref fetch fails
         }
       }
+
+      // Check if a configured git remote points to the upstream repo
+      let upstreamRemoteName = null;
+      if (upstream) {
+        try {
+          const { getRemotes } = await import('../git/index.js');
+          const remotes = await getRemotes(directory);
+          for (const r of remotes) {
+            if (r?.name) {
+              const resolved = await resolveGitHubRepoFromDirectory(directory, r.name).catch(() => ({ repo: null }));
+              if (resolved.repo && resolved.repo.owner === upstream.owner && resolved.repo.repo === upstream.repo) {
+                upstreamRemoteName = r.name;
+                break;
+              }
+            }
+          }
+        } catch {
+          // Ignore errors finding remote name
+        }
+      }
+
       return res.json({
         connected: true,
         isFork: Boolean(upstream),
-        upstream: upstream ? { owner: upstream.owner, repo: upstream.repo, url: upstream.url, defaultBranch } : null,
+        upstream: upstream ? { owner: upstream.owner, repo: upstream.repo, url: upstream.url, defaultBranch, defaultBranchSha, remoteName: upstreamRemoteName } : null,
       });
     } catch (error) {
       console.error('Failed to detect upstream repo:', error);

@@ -914,7 +914,7 @@ export type GitHubIssuesListResult = {
 export type GitHubRepoUpstreamResult = {
   connected: boolean;
   isFork: boolean;
-  upstream: { owner: string; repo: string; url: string; defaultBranch: string } | null;
+  upstream: { owner: string; repo: string; url: string; defaultBranch: string; defaultBranchSha: string | null; remoteName: string | null } | null;
 };
 
 export type GitHubIssueGetResult = {

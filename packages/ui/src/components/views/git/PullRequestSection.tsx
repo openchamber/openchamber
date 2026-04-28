@@ -374,8 +374,13 @@ export const PullRequestSection: React.FC<{
       unique.add(currentTarget);
     }
 
+    // When using detected upstream, ensure the upstream's default branch is available
+    if (useDetectedUpstream && detectedUpstream?.defaultBranch) {
+      unique.add(detectedUpstream.defaultBranch);
+    }
+
     return Array.from(unique).sort((a, b) => a.localeCompare(b));
-  }, [baseBranch, remoteBranches, selectedRemote?.name, targetBaseBranch, useDetectedUpstream]);
+  }, [baseBranch, detectedUpstream?.defaultBranch, remoteBranches, selectedRemote?.name, targetBaseBranch, useDetectedUpstream]);
 
   const hasMultipleRemotes = remotes.length > 1;
 
@@ -433,7 +438,7 @@ export const PullRequestSection: React.FC<{
   const autoRemoteProbeDoneRef = React.useRef<Set<string>>(new Set());
   const pendingActionRefreshTimersRef = React.useRef<number[]>([]);
 
-  const [detectedUpstream, setDetectedUpstream] = React.useState<{ owner: string; repo: string; url: string } | null>(null);
+  const [detectedUpstream, setDetectedUpstream] = React.useState<{ owner: string; repo: string; url: string; defaultBranch?: string; defaultBranchSha?: string | null; remoteName?: string | null } | null>(null);
   const upstreamDetectionAttemptedRef = React.useRef(false);
 
   React.useEffect(() => {
@@ -1158,8 +1163,14 @@ export const PullRequestSection: React.FC<{
     if (!directory) return;
     setIsGenerating(true);
     try {
+      // For cross-repo PRs, use the upstream's default branch SHA for the commit range.
+      // Using a bare branch name like "main" would resolve to the local ref, making
+      // "git log main..main" a no-op. The SHA points to the actual upstream commit.
+      const baseRef = (useDetectedUpstream && detectedUpstream?.defaultBranchSha)
+        ? detectedUpstream.defaultBranchSha
+        : targetBaseBranch;
       const payload: { base: string; head: string; context?: string; files?: string[] } = {
-        base: targetBaseBranch,
+        base: baseRef,
         head: branch,
       };
       if (additionalContext) {
@@ -1180,7 +1191,7 @@ export const PullRequestSection: React.FC<{
     } finally {
       setIsGenerating(false);
     }
-  }, [additionalContext, branch, directory, isGenerating, onGeneratedDescription, targetBaseBranch, t]);
+  }, [additionalContext, branch, detectedUpstream?.defaultBranchSha, directory, isGenerating, onGeneratedDescription, targetBaseBranch, t, useDetectedUpstream]);
 
   const createPr = React.useCallback(async () => {
     if (!github?.prCreate) {
@@ -1759,7 +1770,11 @@ export const PullRequestSection: React.FC<{
                       </SelectTrigger>
                       <SelectContent>
                         {availableBaseBranches.map((candidate) => (
-                          <SelectItem key={candidate} value={candidate}>{candidate}</SelectItem>
+                          <SelectItem key={candidate} value={candidate}>
+                            {useDetectedUpstream && detectedUpstream
+                              ? `${detectedUpstream.owner}/${detectedUpstream.repo} \u00B7 ${candidate}`
+                              : candidate}
+                          </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
