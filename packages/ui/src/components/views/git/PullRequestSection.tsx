@@ -432,7 +432,8 @@ export const PullRequestSection: React.FC<{
   const autoRemoteProbeDoneRef = React.useRef<Set<string>>(new Set());
   const pendingActionRefreshTimersRef = React.useRef<number[]>([]);
 
-  const canShow = Boolean(directory && branch && baseBranch && branch !== baseBranch);
+  const hasUpstreamRemote = remotes.some((r) => r.name === 'upstream');
+  const canShow = Boolean(directory && branch && baseBranch && (branch !== baseBranch || hasUpstreamRemote));
 
   const pr = status?.pr ?? null;
   const currentPrBodyHydrationKey = pr ? `${directory}#${pr.number}` : null;
