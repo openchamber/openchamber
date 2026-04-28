@@ -14,6 +14,7 @@ import type {
   GitHubPullRequestReadyResult,
   GitHubPullRequestUpdateInput,
   GitHubPullRequestStatus,
+  GitHubRepoUpstreamResult,
   GitHubDeviceFlowComplete,
   GitHubDeviceFlowStart,
   GitHubUserSummary,
@@ -155,6 +156,18 @@ export const createWebGitHubAPI = (): GitHubAPI => ({
     const body = await jsonOrNull<GitHubPullRequestReadyResult & { error?: string }>(response);
     if (!response.ok || !body) {
       throw new Error((body as { error?: string } | null)?.error || response.statusText || 'Failed to mark PR ready');
+    }
+    return body;
+  },
+
+  async repoUpstream(directory: string): Promise<GitHubRepoUpstreamResult> {
+    const response = await fetch(
+      `/api/github/repo/upstream?directory=${encodeURIComponent(directory)}`,
+      { method: 'GET', headers: { Accept: 'application/json' } }
+    );
+    const body = await jsonOrNull<GitHubRepoUpstreamResult & { error?: string }>(response);
+    if (!response.ok || !body) {
+      throw new Error(body?.error || response.statusText || 'Failed to detect upstream repo');
     }
     return body;
   },

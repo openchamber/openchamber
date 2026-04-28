@@ -426,6 +426,10 @@ export function registerGitHubRoutes(app) {
       const remote = typeof req.body?.remote === 'string' ? req.body.remote.trim() : 'origin';
       // headRemote = source repo (where head branch lives, e.g., 'origin' for forks)
       const headRemote = typeof req.body?.headRemote === 'string' ? req.body.headRemote.trim() : '';
+      // targetRepo = explicit target repo (alternative to remote, for auto-detected upstream)
+      const targetRepo = req.body?.targetRepo && typeof req.body.targetRepo.owner === 'string' && typeof req.body.targetRepo.repo === 'string'
+        ? { owner: req.body.targetRepo.owner.trim(), repo: req.body.targetRepo.repo.trim() }
+        : null;
       if (!directory || !title || !head || !requestedBase) {
         return res.status(400).json({ error: 'directory, title, head, base are required' });
       }
@@ -437,7 +441,13 @@ export function registerGitHubRoutes(app) {
       }
 
       const { resolveGitHubRepoFromDirectory } = await import('./index.js');
-      const { repo } = await resolveGitHubRepoFromDirectory(directory, remote);
+      let repo;
+      if (targetRepo) {
+        repo = targetRepo;
+      } else {
+        const resolved = await resolveGitHubRepoFromDirectory(directory, remote);
+        repo = resolved.repo;
+      }
       if (!repo) {
         return res.status(400).json({ error: 'Unable to resolve GitHub repo from git remote' });
       }
@@ -763,6 +773,40 @@ export function registerGitHubRoutes(app) {
     } catch (error) {
       console.error('Failed to mark PR ready:', error);
       return res.status(500).json({ error: error.message || 'Failed to mark PR ready' });
+    }
+  });
+
+  // ================= GitHub Repo APIs =================
+
+  app.get('/api/github/repo/upstream', async (req, res) => {
+    try {
+      const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
+      if (!directory) {
+        return res.status(400).json({ error: 'directory is required' });
+      }
+
+      const { getOctokitOrNull } = await getGitHubLibraries();
+      const octokit = getOctokitOrNull();
+      if (!octokit) {
+        return res.json({ connected: false, isFork: false, upstream: null });
+      }
+
+      const { resolveRepoNetwork } = await import('./repo/fork-detection.js');
+      const network = await resolveRepoNetwork(octokit, directory);
+
+      if (!network || network.length <= 1) {
+        return res.json({ connected: true, isFork: false, upstream: null });
+      }
+
+      const upstream = network.find((r) => r.source === 'upstream') || null;
+      return res.json({
+        connected: true,
+        isFork: Boolean(upstream),
+        upstream: upstream ? { owner: upstream.owner, repo: upstream.repo, url: upstream.url } : null,
+      });
+    } catch (error) {
+      console.error('Failed to detect upstream repo:', error);
+      return res.status(500).json({ error: error.message || 'Failed to detect upstream repo' });
     }
   });
 

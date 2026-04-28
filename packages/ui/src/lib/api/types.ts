@@ -841,6 +841,8 @@ export type GitHubPullRequestCreateInput = {
   remote?: string;
   /** Remote where the head branch lives (source repo, e.g., 'origin' for forks) */
   headRemote?: string;
+  /** Explicit target repo (alternative to remote, for auto-detected upstream) */
+  targetRepo?: { owner: string; repo: string };
 };
 
 export type GitHubPullRequestUpdateInput = {
@@ -909,6 +911,12 @@ export type GitHubIssuesListResult = {
   hasMore?: boolean;
 };
 
+export type GitHubRepoUpstreamResult = {
+  connected: boolean;
+  isFork: boolean;
+  upstream: { owner: string; repo: string; url: string } | null;
+};
+
 export type GitHubIssueGetResult = {
   connected: boolean;
   repo?: GitHubRepoRef | null;
@@ -973,6 +981,7 @@ export interface GitHubAPI {
   issuesList(directory: string, options?: { page?: number }): Promise<GitHubIssuesListResult>;
   issueGet(directory: string, number: number): Promise<GitHubIssueGetResult>;
   issueComments(directory: string, number: number): Promise<GitHubIssueCommentsResult>;
+  repoUpstream(directory: string): Promise<GitHubRepoUpstreamResult>;
 }
 
 export interface RuntimeAPIs {

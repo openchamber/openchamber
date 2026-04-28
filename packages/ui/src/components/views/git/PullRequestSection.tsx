@@ -339,6 +339,7 @@ export const PullRequestSection: React.FC<{
       trackingBranch,
     })
   );
+  const [useDetectedUpstream, setUseDetectedUpstream] = React.useState(false);
 
   const prStatusKey = React.useMemo(
     () => getGitHubPrStatusKey(directory, branch),
@@ -432,8 +433,37 @@ export const PullRequestSection: React.FC<{
   const autoRemoteProbeDoneRef = React.useRef<Set<string>>(new Set());
   const pendingActionRefreshTimersRef = React.useRef<number[]>([]);
 
+  const [detectedUpstream, setDetectedUpstream] = React.useState<{ owner: string; repo: string; url: string } | null>(null);
+  const upstreamDetectionAttemptedRef = React.useRef(false);
+
+  React.useEffect(() => {
+    if (!directory || !github?.repoUpstream || upstreamDetectionAttemptedRef.current) {
+      return;
+    }
+    upstreamDetectionAttemptedRef.current = true;
+
+    void (async () => {
+      try {
+        const result = await github.repoUpstream(directory);
+        if (result?.isFork && result.upstream) {
+          setDetectedUpstream(result.upstream);
+        }
+      } catch {
+        // Silently fail — upstream detection is best-effort
+      }
+    })();
+  }, [directory, github]);
+
   const hasUpstreamRemote = remotes.some((r) => r.name === 'upstream');
-  const canShow = Boolean(directory && branch && baseBranch && (branch !== baseBranch || hasUpstreamRemote));
+  const isFork = hasUpstreamRemote || detectedUpstream !== null;
+  const canShow = Boolean(directory && branch && baseBranch && (branch !== baseBranch || isFork));
+
+  // Auto-enable detected upstream when there's no explicit upstream remote
+  React.useEffect(() => {
+    if (detectedUpstream && !hasUpstreamRemote) {
+      setUseDetectedUpstream(true);
+    }
+  }, [detectedUpstream, hasUpstreamRemote]);
 
   const pr = status?.pr ?? null;
   const currentPrBodyHydrationKey = pr ? `${directory}#${pr.number}` : null;
@@ -1170,6 +1200,8 @@ export const PullRequestSection: React.FC<{
     try {
       const trackingRemoteName = getTrackingRemoteName(trackingBranch);
 
+      const usingDetectedUpstream = useDetectedUpstream && detectedUpstream;
+
       const pr = await github.prCreate({
         directory,
         title: trimmedTitle,
@@ -1177,10 +1209,14 @@ export const PullRequestSection: React.FC<{
         base: trimmedBase,
         ...(body.trim() ? { body } : {}),
         draft,
-        ...(selectedRemote ? { remote: selectedRemote.name } : {}),
-        ...(trackingRemoteName && trackingRemoteName !== selectedRemote?.name
-          ? { headRemote: trackingRemoteName }
-          : {}),
+        ...(usingDetectedUpstream
+          ? { targetRepo: { owner: detectedUpstream.owner, repo: detectedUpstream.repo }, headRemote: 'origin' }
+          : {
+              ...(selectedRemote ? { remote: selectedRemote.name } : {}),
+              ...(trackingRemoteName && trackingRemoteName !== selectedRemote?.name
+                ? { headRemote: trackingRemoteName }
+                : {}),
+            }),
       });
       toast.success(t('gitView.pr.toast.prCreated'));
       updatePrStatus(prStatusKey, (prev) => (prev ? { ...prev, pr } : prev));
@@ -1192,7 +1228,7 @@ export const PullRequestSection: React.FC<{
     } finally {
       setIsCreating(false);
     }
-  }, [body, branch, directory, draft, github, prStatusKey, refresh, scheduleActionRefresh, selectedRemote, targetBaseBranch, title, trackingBranch, updatePrStatus, t]);
+  }, [body, branch, detectedUpstream, directory, draft, github, prStatusKey, refresh, scheduleActionRefresh, selectedRemote, targetBaseBranch, title, trackingBranch, updatePrStatus, useDetectedUpstream, t]);
 
   const mergePr = React.useCallback(async (pr: GitHubPullRequest) => {
     if (!github?.prMerge) {
@@ -1346,11 +1382,15 @@ export const PullRequestSection: React.FC<{
                 {trackingBranch.split('/')[0]} → {selectedRemote.name}
               </span>
             ) : null}
-            {hasMultipleRemotes ? (
+            {hasMultipleRemotes || detectedUpstream ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" size="xs" className="gap-1">
-                    <span className="typography-micro">{selectedRemote?.name}</span>
+                    <span className="typography-micro">
+                      {useDetectedUpstream && detectedUpstream
+                        ? `upstream · ${detectedUpstream.owner}/${detectedUpstream.repo}`
+                        : selectedRemote?.name ?? 'target'}
+                    </span>
                     <RiArrowDownSLine className="size-3" />
                   </Button>
                 </DropdownMenuTrigger>
@@ -1358,12 +1398,15 @@ export const PullRequestSection: React.FC<{
                   {remotes.map((remote) => (
                     <DropdownMenuItem
                       key={remote.name}
-                      onSelect={() => handleRemoteChange(remote)}
+                      onSelect={() => {
+                        setUseDetectedUpstream(false);
+                        handleRemoteChange(remote);
+                      }}
                     >
                       <div className="flex flex-col">
                         <span className="typography-ui-label text-foreground">
                           {remote.name}
-                          {remote.name === selectedRemote?.name && (
+                          {!useDetectedUpstream && remote.name === selectedRemote?.name && (
                             <span className="ml-2 text-primary">✓</span>
                           )}
                         </span>
@@ -1373,6 +1416,24 @@ export const PullRequestSection: React.FC<{
                       </div>
                     </DropdownMenuItem>
                   ))}
+                  {detectedUpstream ? (
+                    <DropdownMenuItem
+                      key="detected-upstream"
+                      onSelect={() => setUseDetectedUpstream(true)}
+                    >
+                      <div className="flex flex-col">
+                        <span className="typography-ui-label text-foreground">
+                          upstream · {detectedUpstream.owner}/{detectedUpstream.repo}
+                          {useDetectedUpstream && (
+                            <span className="ml-2 text-primary">✓</span>
+                          )}
+                        </span>
+                        <span className="typography-meta text-muted-foreground truncate">
+                          {detectedUpstream.url}
+                        </span>
+                      </div>
+                    </DropdownMenuItem>
+                  ) : null}
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : null}
