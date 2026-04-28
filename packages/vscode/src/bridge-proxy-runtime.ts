@@ -18,6 +18,8 @@ type BackendDescriptor = {
     chat: boolean;
     sessions: boolean;
     models: boolean;
+    share?: boolean;
+    delete?: boolean;
     agents: boolean;
     providers: boolean;
     commands: boolean;
@@ -243,7 +245,7 @@ class HarnessRuntimeManager {
         label: 'OpenCode',
         enabled: true,
         auth: { status: 'unknown' },
-        capabilities: { chat: true, sessions: true, models: true, commands: true, providers: true, auth: true, config: true, skills: true, shell: true },
+        capabilities: { chat: true, sessions: true, models: true, commands: true, providers: true, auth: true, config: true, skills: true, shell: true, share: true, delete: true },
         models: modelOptions,
         interactionModes: visibleAgents,
         commands: commandItems,

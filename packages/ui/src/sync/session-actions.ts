@@ -3,7 +3,7 @@
  * Replaces the action methods from the old useSessionStore.
  */
 
-import type { OpencodeClient, Session } from "@opencode-ai/sdk/v2/client"
+import type { Session } from "@opencode-ai/sdk/v2/client"
 import type { HarnessMessage, HarnessPart, HarnessRunConfig, HarnessSession } from "@openchamber/harness-contracts"
 import { Binary } from "./binary"
 import { useSessionUIStore } from "./session-ui-store"
@@ -128,14 +128,6 @@ function getDirectoryStore(directory?: string) {
   return _childStores.ensureChild(resolvedDirectory)
 }
 
-function getSessionReplyClient(sessionId?: string): OpencodeClient {
-  const directory = sessionId ? getSessionDirectory(sessionId) : null
-  if (directory) {
-    return harness().getScopedSdkClient(directory)
-  }
-  return sdk()
-}
-
 function resolveDirectoryForBlockingRequest(
   type: "permission" | "question",
   sessionId: string,
@@ -175,18 +167,6 @@ function resolveDirectoryForBlockingRequest(
   }
 
   return null
-}
-
-function getRequestReplyClient(
-  type: "permission" | "question",
-  sessionId: string,
-  requestId: string,
-): OpencodeClient {
-  const requestDirectory = resolveDirectoryForBlockingRequest(type, sessionId, requestId)
-  if (requestDirectory) {
-    return harness().getScopedSdkClient(requestDirectory)
-  }
-  return getSessionReplyClient(sessionId)
 }
 
 // ---------------------------------------------------------------------------
@@ -275,7 +255,7 @@ export async function deleteSession(sessionId: string, _options?: Record<string,
     ui.setCurrentSession(null)
   }
   try {
-    await sdk().session.delete({ sessionID: sessionId, directory: sessionDirectory })
+    await harness().deleteSession({ sessionId, directory: sessionDirectory })
     useGlobalSessionsStore.getState().removeSessions([sessionId])
     return true
   } catch (error) {
@@ -307,7 +287,7 @@ export async function deleteSessionInDirectory(sessionId: string, directory: str
   const ui = useSessionUIStore.getState()
   if (ui.currentSessionId === sessionId) ui.setCurrentSession(null)
   try {
-    await sdk().session.delete({ sessionID: sessionId, directory })
+    await harness().deleteSession({ sessionId, directory })
     useGlobalSessionsStore.getState().removeSessions([sessionId])
     return true
   } catch (error) {
@@ -338,28 +318,24 @@ export async function archiveSession(sessionId: string): Promise<boolean> {
 
 export async function updateSessionTitle(sessionId: string, title: string): Promise<void> {
   const sessionDirectory = getSessionDirectory(sessionId)
-  const result = await sdk().session.update({ sessionID: sessionId, directory: sessionDirectory, title })
-  if (result.data) {
-    useGlobalSessionsStore.getState().upsertSession(result.data)
-  }
+  const session = await harness().updateSession({ sessionId, directory: sessionDirectory, title })
+  useGlobalSessionsStore.getState().upsertSession(toOpenCodeCompatibleSession(session))
 }
 
 export async function shareSession(sessionId: string): Promise<Session | null> {
   const sessionDirectory = getSessionDirectory(sessionId)
-  const result = await sdk().session.share({ sessionID: sessionId, directory: sessionDirectory })
-  if (result.data) {
-    useGlobalSessionsStore.getState().upsertSession(result.data)
-  }
-  return result.data ?? null
+  const session = await harness().shareSession(sessionId, sessionDirectory)
+  const compatible = toOpenCodeCompatibleSession(session)
+  useGlobalSessionsStore.getState().upsertSession(compatible)
+  return compatible
 }
 
 export async function unshareSession(sessionId: string): Promise<Session | null> {
   const sessionDirectory = getSessionDirectory(sessionId)
-  const result = await sdk().session.unshare({ sessionID: sessionId, directory: sessionDirectory })
-  if (result.data) {
-    useGlobalSessionsStore.getState().upsertSession(result.data)
-  }
-  return result.data ?? null
+  const session = await harness().unshareSession(sessionId, sessionDirectory)
+  const compatible = toOpenCodeCompatibleSession(session)
+  useGlobalSessionsStore.getState().upsertSession(compatible)
+  return compatible
 }
 
 // ---------------------------------------------------------------------------
@@ -523,14 +499,13 @@ export async function respondToPermission(
   const directory = resolveDirectoryForBlockingRequest("permission", sessionId, requestId)
     || getSessionDirectory(sessionId)
     || dir()
-  const result = await getRequestReplyClient("permission", sessionId, requestId).permission.reply({
-    requestID: requestId,
+  await harness().replyToBlockingRequest({
+    sessionId,
+    requestId,
+    kind: "permission",
     reply: response,
-    ...(directory ? { directory } : {}),
+    directory,
   })
-  if (!result.data) {
-    throw new Error("Permission reply failed")
-  }
 }
 
 export async function dismissPermission(
@@ -541,14 +516,12 @@ export async function dismissPermission(
   const directory = resolveDirectoryForBlockingRequest("permission", sessionId, requestId)
     || getSessionDirectory(sessionId)
     || dir()
-  const result = await getRequestReplyClient("permission", sessionId, requestId).permission.reply({
-    requestID: requestId,
-    reply: "reject",
-    ...(directory ? { directory } : {}),
+  await harness().rejectBlockingRequest({
+    sessionId,
+    requestId,
+    kind: "permission",
+    directory,
   })
-  if (!result.data) {
-    throw new Error("Permission dismissal failed")
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -564,14 +537,13 @@ export async function respondToQuestion(
   const directory = resolveDirectoryForBlockingRequest("question", sessionId, requestId)
     || getSessionDirectory(sessionId)
     || dir()
-  const result = await getRequestReplyClient("question", sessionId, requestId).question.reply({
-    requestID: requestId,
+  await harness().replyToBlockingRequest({
+    sessionId,
+    requestId,
+    kind: "question",
     answers: answers as Array<Array<string>>,
-    ...(directory ? { directory } : {}),
+    directory,
   })
-  if (!result.data) {
-    throw new Error("Question reply failed")
-  }
 }
 
 export async function rejectQuestion(
@@ -582,13 +554,12 @@ export async function rejectQuestion(
   const directory = resolveDirectoryForBlockingRequest("question", sessionId, requestId)
     || getSessionDirectory(sessionId)
     || dir()
-  const result = await getRequestReplyClient("question", sessionId, requestId).question.reject({
-    requestID: requestId,
-    ...(directory ? { directory } : {}),
+  await harness().rejectBlockingRequest({
+    sessionId,
+    requestId,
+    kind: "question",
+    directory,
   })
-  if (!result.data) {
-    throw new Error("Question rejection failed")
-  }
 }
 
 // ---------------------------------------------------------------------------

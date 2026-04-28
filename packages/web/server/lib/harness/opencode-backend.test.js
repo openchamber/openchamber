@@ -26,7 +26,10 @@ const createMockClient = () => ({
     command: vi.fn(),
     abort: vi.fn(),
     update: vi.fn(),
+    delete: vi.fn(),
     fork: vi.fn(),
+    share: vi.fn(),
+    unshare: vi.fn(),
   },
   app: {
     agents: vi.fn(),
@@ -36,6 +39,13 @@ const createMockClient = () => ({
   },
   command: {
     list: vi.fn(),
+  },
+  permission: {
+    reply: vi.fn(),
+  },
+  question: {
+    reply: vi.fn(),
+    reject: vi.fn(),
   },
 });
 
@@ -81,13 +91,16 @@ describe('OpenCode backend runtime baseline contract', () => {
     });
   });
 
-  it('forwards prompt, command, abort, update, and fork calls using OpenCode payload names', async () => {
+  it('forwards prompt, command, abort, update, fork, and share calls using OpenCode payload names', async () => {
     const { runtime, client } = createRuntime();
     client.session.promptAsync.mockResolvedValue({ data: { ok: true } });
     client.session.command.mockResolvedValue({ data: { ok: true } });
     client.session.abort.mockResolvedValue({ data: true });
     client.session.update.mockResolvedValue({ data: { id: 'session-1', title: 'Renamed' } });
+    client.session.delete.mockResolvedValue({ data: true });
     client.session.fork.mockResolvedValue({ data: { id: 'session-2', parentID: 'session-1' } });
+    client.session.share.mockResolvedValue({ data: { id: 'session-1', share: { url: 'https://share.example/session-1' } } });
+    client.session.unshare.mockResolvedValue({ data: { id: 'session-1', share: null } });
 
     await runtime.promptAsync({
       directory: '/repo',
@@ -111,7 +124,10 @@ describe('OpenCode backend runtime baseline contract', () => {
     });
     await runtime.abortSession({ sessionID: 'session-1' });
     await runtime.updateSession({ sessionID: 'session-1', title: 'Renamed', time: { archived: 123 } });
+    await runtime.deleteSession({ sessionID: 'session-1' });
     await runtime.forkSession({ sessionID: 'session-1', messageID: 'message-1' });
+    await runtime.shareSession({ sessionID: 'session-1' });
+    await runtime.unshareSession({ sessionID: 'session-1' });
 
     expect(client.session.promptAsync).toHaveBeenCalledWith({
       sessionID: 'session-1',
@@ -137,9 +153,38 @@ describe('OpenCode backend runtime baseline contract', () => {
       title: 'Renamed',
       time: { archived: 123 },
     }, { throwOnError: true });
+    expect(client.session.delete).toHaveBeenCalledWith({ sessionID: 'session-1' }, { throwOnError: true });
     expect(client.session.fork).toHaveBeenCalledWith({
       sessionID: 'session-1',
       messageID: 'message-1',
+    }, { throwOnError: true });
+    expect(client.session.share).toHaveBeenCalledWith({ sessionID: 'session-1' }, { throwOnError: true });
+    expect(client.session.unshare).toHaveBeenCalledWith({ sessionID: 'session-1' }, { throwOnError: true });
+  });
+
+  it('forwards blocking request replies through OpenCode payload names', async () => {
+    const { runtime, client } = createRuntime();
+    client.permission.reply.mockResolvedValue({ data: true });
+    client.question.reply.mockResolvedValue({ data: true });
+    client.question.reject.mockResolvedValue({ data: true });
+
+    await runtime.replyToPermission('perm-1', 'once', { directory: '/repo' });
+    await runtime.replyToQuestion('question-1', [['yes']], { directory: '/repo' });
+    await runtime.rejectQuestion('question-2', { directory: '/repo' });
+
+    expect(client.permission.reply).toHaveBeenCalledWith({
+      requestID: 'perm-1',
+      reply: 'once',
+      directory: '/repo',
+    }, { throwOnError: true });
+    expect(client.question.reply).toHaveBeenCalledWith({
+      requestID: 'question-1',
+      answers: [['yes']],
+      directory: '/repo',
+    }, { throwOnError: true });
+    expect(client.question.reject).toHaveBeenCalledWith({
+      requestID: 'question-2',
+      directory: '/repo',
     }, { throwOnError: true });
   });
 

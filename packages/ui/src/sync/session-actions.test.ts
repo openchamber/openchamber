@@ -45,6 +45,29 @@ const mockSdk = {
 const mockHarnessClient = {
   getSdkClient: () => mockSdk,
   getScopedSdkClient: () => mockScopedClient,
+  replyToBlockingRequest: mock((input: { kind: string; requestId: string; reply?: string; answers?: unknown; directory?: string | null }) => {
+    replyCalls.push({
+      method: input.kind === "permission" ? "permission.reply" : "question.reply",
+      params: {
+        requestID: input.requestId,
+        ...(input.reply ? { reply: input.reply } : {}),
+        ...(input.answers ? { answers: input.answers } : {}),
+        ...(input.directory ? { directory: input.directory } : {}),
+      },
+    })
+    return Promise.resolve()
+  }),
+  rejectBlockingRequest: mock((input: { kind: string; requestId: string; directory?: string | null }) => {
+    replyCalls.push({
+      method: input.kind === "permission" ? "permission.reply" : "question.reject",
+      params: {
+        requestID: input.requestId,
+        ...(input.kind === "permission" ? { reply: "reject" } : {}),
+        ...(input.directory ? { directory: input.directory } : {}),
+      },
+    })
+    return Promise.resolve()
+  }),
 }
 
 // Mock opencodeClient singleton

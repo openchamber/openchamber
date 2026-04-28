@@ -205,6 +205,25 @@ export const createOpenCodeBackendRuntime = (dependencies) => {
     return response.data;
   };
 
+  const deleteSession = async (input = {}) => {
+    const directory = typeof input?.directory === 'string' && input.directory.trim().length > 0
+      ? input.directory.trim()
+      : undefined;
+    const sessionID = typeof input?.sessionID === 'string' ? input.sessionID : '';
+    if (!sessionID) {
+      throw new Error('Session ID is required');
+    }
+
+    const client = createClient(directory);
+    const response = await client.session.delete({
+      sessionID,
+      ...(directory ? { directory } : {}),
+    }, {
+      throwOnError: true,
+    });
+    return response.data ?? true;
+  };
+
   const forkSession = async (input = {}) => {
     const directory = typeof input?.directory === 'string' && input.directory.trim().length > 0
       ? input.directory.trim()
@@ -224,6 +243,88 @@ export const createOpenCodeBackendRuntime = (dependencies) => {
       throwOnError: true,
     });
 
+    return response.data;
+  };
+
+  const shareSession = async (input = {}) => {
+    const directory = typeof input?.directory === 'string' && input.directory.trim().length > 0
+      ? input.directory.trim()
+      : undefined;
+    const sessionID = typeof input?.sessionID === 'string' ? input.sessionID : '';
+    if (!sessionID) {
+      throw new Error('Session ID is required');
+    }
+
+    const client = createClient(directory);
+    const response = await client.session.share({
+      sessionID,
+    }, {
+      throwOnError: true,
+    });
+
+    return response.data;
+  };
+
+  const unshareSession = async (input = {}) => {
+    const directory = typeof input?.directory === 'string' && input.directory.trim().length > 0
+      ? input.directory.trim()
+      : undefined;
+    const sessionID = typeof input?.sessionID === 'string' ? input.sessionID : '';
+    if (!sessionID) {
+      throw new Error('Session ID is required');
+    }
+
+    const client = createClient(directory);
+    const response = await client.session.unshare({
+      sessionID,
+    }, {
+      throwOnError: true,
+    });
+
+    return response.data;
+  };
+
+  const replyToPermission = async (requestId, reply, input = {}) => {
+    const directory = typeof input?.directory === 'string' && input.directory.trim().length > 0
+      ? input.directory.trim()
+      : undefined;
+    const client = createClient(directory);
+    const response = await client.permission.reply({
+      requestID: requestId,
+      reply,
+      ...(directory ? { directory } : {}),
+    }, {
+      throwOnError: true,
+    });
+    return response.data;
+  };
+
+  const replyToQuestion = async (requestId, answers, input = {}) => {
+    const directory = typeof input?.directory === 'string' && input.directory.trim().length > 0
+      ? input.directory.trim()
+      : undefined;
+    const client = createClient(directory);
+    const response = await client.question.reply({
+      requestID: requestId,
+      answers,
+      ...(directory ? { directory } : {}),
+    }, {
+      throwOnError: true,
+    });
+    return response.data;
+  };
+
+  const rejectQuestion = async (requestId, input = {}) => {
+    const directory = typeof input?.directory === 'string' && input.directory.trim().length > 0
+      ? input.directory.trim()
+      : undefined;
+    const client = createClient(directory);
+    const response = await client.question.reject({
+      requestID: requestId,
+      ...(directory ? { directory } : {}),
+    }, {
+      throwOnError: true,
+    });
     return response.data;
   };
 
@@ -408,7 +509,13 @@ export const createOpenCodeBackendRuntime = (dependencies) => {
     command,
     abortSession,
     updateSession,
+    deleteSession,
     forkSession,
+    shareSession,
+    unshareSession,
+    replyToPermission,
+    replyToQuestion,
+    rejectQuestion,
     getControlSurface,
   };
 };

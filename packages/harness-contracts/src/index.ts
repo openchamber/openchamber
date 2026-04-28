@@ -22,6 +22,8 @@ export interface HarnessBackendCapabilities {
   models: boolean;
   commands?: boolean;
   shell?: boolean;
+  share?: boolean;
+  delete?: boolean;
   auth?: boolean;
   approvals?: boolean;
   providers?: boolean;
@@ -351,6 +353,18 @@ export interface StopHarnessSessionInput {
   directory?: string | null;
 }
 
+export interface DeleteHarnessSessionInput {
+  sessionId: HarnessSessionId;
+  backendId?: HarnessBackendId;
+  directory?: string | null;
+}
+
+export interface ShareHarnessSessionInput {
+  sessionId: HarnessSessionId;
+  backendId?: HarnessBackendId;
+  directory?: string | null;
+}
+
 export interface ForkHarnessSessionInput {
   sessionId: HarnessSessionId;
   backendId?: HarnessBackendId;
@@ -393,6 +407,9 @@ export interface HarnessAdapter {
   sendCommand?(input: SendHarnessCommandInput): Promise<void>;
   abortSession(input: AbortHarnessSessionInput): Promise<void>;
   stopSession(input: StopHarnessSessionInput): Promise<void>;
+  deleteSession?(input: DeleteHarnessSessionInput): Promise<boolean>;
+  shareSession?(input: ShareHarnessSessionInput): Promise<HarnessSession>;
+  unshareSession?(input: ShareHarnessSessionInput): Promise<HarnessSession>;
   forkSession?(input: ForkHarnessSessionInput): Promise<HarnessSession>;
   rollbackThread?(input: RollbackHarnessThreadInput): Promise<HarnessThreadSnapshot>;
   replyBlockingRequest?(input: ReplyBlockingRequestInput): Promise<void>;
@@ -409,6 +426,9 @@ export interface HarnessService {
   sendCommand(input: SendHarnessCommandInput): Promise<void>;
   abortSession(input: AbortHarnessSessionInput): Promise<void>;
   stopSession(input: StopHarnessSessionInput): Promise<void>;
+  deleteSession(input: DeleteHarnessSessionInput): Promise<boolean>;
+  shareSession(input: ShareHarnessSessionInput): Promise<HarnessSession>;
+  unshareSession(input: ShareHarnessSessionInput): Promise<HarnessSession>;
   replyBlockingRequest(input: ReplyBlockingRequestInput): Promise<void>;
   streamEvents(input: SubscribeHarnessEventsInput): AsyncIterable<HarnessRuntimeEvent>;
 }

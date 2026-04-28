@@ -758,6 +758,35 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
     }
   });
 
+  app.delete('/api/openchamber/harness/session/:sessionId', async (req, res) => {
+    try {
+      const sessionId = typeof req.params?.sessionId === 'string' ? req.params.sessionId : '';
+      const binding = await getBoundBackend(sessionId);
+      if (!binding) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+      const descriptor = backendRegistry.getBackend(binding.backendId);
+      if (!descriptor?.capabilities?.delete || !backendRegistry.isBackendSelectable(binding.backendId)) {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+      const runtime = getBackendRuntime(binding.backendId);
+      if (!runtime?.deleteSession) {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+
+      const ok = await runtime.deleteSession({
+        sessionID: binding.backendSessionId,
+        directory: typeof req.body?.directory === 'string' ? req.body.directory : binding.directory,
+      });
+
+      return res.status(200).json({ ok: Boolean(ok) });
+    } catch (error) {
+      console.error('Failed to delete harness session:', error);
+      const message = error?.body?.error || error?.message || 'Failed to delete session';
+      return res.status(400).json({ error: message });
+    }
+  });
+
   app.post('/api/openchamber/harness/session/:sessionId/fork', async (req, res) => {
     try {
       const sessionId = typeof req.params?.sessionId === 'string' ? req.params.sessionId : '';
@@ -792,6 +821,134 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
     } catch (error) {
       console.error('Failed to fork harness session:', error);
       const message = error?.body?.error || error?.message || 'Failed to fork session';
+      return res.status(400).json({ error: message });
+    }
+  });
+
+  app.post('/api/openchamber/harness/session/:sessionId/share', async (req, res) => {
+    try {
+      const sessionId = typeof req.params?.sessionId === 'string' ? req.params.sessionId : '';
+      const binding = await getBoundBackend(sessionId);
+      if (!binding) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+      const descriptor = backendRegistry.getBackend(binding.backendId);
+      if (!descriptor?.capabilities?.share || !backendRegistry.isBackendSelectable(binding.backendId)) {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+      const runtime = getBackendRuntime(binding.backendId);
+      if (!runtime?.shareSession) {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+
+      const payload = await runtime.shareSession({
+        sessionID: binding.backendSessionId,
+        directory: typeof req.body?.directory === 'string' ? req.body.directory : binding.directory,
+      });
+
+      return res.status(200).json(toHarnessSession(sessionBindingsRuntime.annotateSession(payload), binding.backendId));
+    } catch (error) {
+      console.error('Failed to share harness session:', error);
+      const message = error?.body?.error || error?.message || 'Failed to share session';
+      return res.status(400).json({ error: message });
+    }
+  });
+
+  app.post('/api/openchamber/harness/session/:sessionId/unshare', async (req, res) => {
+    try {
+      const sessionId = typeof req.params?.sessionId === 'string' ? req.params.sessionId : '';
+      const binding = await getBoundBackend(sessionId);
+      if (!binding) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+      const descriptor = backendRegistry.getBackend(binding.backendId);
+      if (!descriptor?.capabilities?.share || !backendRegistry.isBackendSelectable(binding.backendId)) {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+      const runtime = getBackendRuntime(binding.backendId);
+      if (!runtime?.unshareSession) {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+
+      const payload = await runtime.unshareSession({
+        sessionID: binding.backendSessionId,
+        directory: typeof req.body?.directory === 'string' ? req.body.directory : binding.directory,
+      });
+
+      return res.status(200).json(toHarnessSession(sessionBindingsRuntime.annotateSession(payload), binding.backendId));
+    } catch (error) {
+      console.error('Failed to unshare harness session:', error);
+      const message = error?.body?.error || error?.message || 'Failed to unshare session';
+      return res.status(400).json({ error: message });
+    }
+  });
+
+  app.post('/api/openchamber/harness/session/:sessionId/blocking-request/:requestId/reply', async (req, res) => {
+    try {
+      const sessionId = typeof req.params?.sessionId === 'string' ? req.params.sessionId : '';
+      const requestId = typeof req.params?.requestId === 'string' ? req.params.requestId : '';
+      const binding = await getBoundBackend(sessionId);
+      if (!binding) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+      const descriptor = backendRegistry.getBackend(binding.backendId);
+      if (!descriptor?.capabilities?.approvals || !backendRegistry.isBackendSelectable(binding.backendId)) {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+      const runtime = getBackendRuntime(binding.backendId);
+      const kind = typeof req.body?.kind === 'string' ? req.body.kind : '';
+      const directory = typeof req.body?.directory === 'string' ? req.body.directory : binding.directory;
+
+      if (kind === 'permission') {
+        if (!runtime?.replyToPermission) return sendUnsupportedBackend(res, binding.backendId);
+        const reply = typeof req.body?.reply === 'string' ? req.body.reply : req.body?.response;
+        await runtime.replyToPermission(requestId, reply, { directory, sessionID: binding.backendSessionId });
+        return res.status(200).json({ ok: true });
+      }
+      if (kind === 'question') {
+        if (!runtime?.replyToQuestion) return sendUnsupportedBackend(res, binding.backendId);
+        const answers = Array.isArray(req.body?.answers) ? req.body.answers : req.body?.response;
+        await runtime.replyToQuestion(requestId, answers, { directory, sessionID: binding.backendSessionId });
+        return res.status(200).json({ ok: true });
+      }
+      return res.status(400).json({ error: 'Unsupported blocking request kind' });
+    } catch (error) {
+      console.error('Failed to reply to harness blocking request:', error);
+      const message = error?.body?.error || error?.message || 'Failed to reply to blocking request';
+      return res.status(400).json({ error: message });
+    }
+  });
+
+  app.post('/api/openchamber/harness/session/:sessionId/blocking-request/:requestId/reject', async (req, res) => {
+    try {
+      const sessionId = typeof req.params?.sessionId === 'string' ? req.params.sessionId : '';
+      const requestId = typeof req.params?.requestId === 'string' ? req.params.requestId : '';
+      const binding = await getBoundBackend(sessionId);
+      if (!binding) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+      const descriptor = backendRegistry.getBackend(binding.backendId);
+      if (!descriptor?.capabilities?.approvals || !backendRegistry.isBackendSelectable(binding.backendId)) {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+      const runtime = getBackendRuntime(binding.backendId);
+      const kind = typeof req.body?.kind === 'string' ? req.body.kind : '';
+      const directory = typeof req.body?.directory === 'string' ? req.body.directory : binding.directory;
+
+      if (kind === 'permission') {
+        if (!runtime?.replyToPermission) return sendUnsupportedBackend(res, binding.backendId);
+        await runtime.replyToPermission(requestId, 'reject', { directory, sessionID: binding.backendSessionId });
+        return res.status(200).json({ ok: true });
+      }
+      if (kind === 'question') {
+        if (!runtime?.rejectQuestion) return sendUnsupportedBackend(res, binding.backendId);
+        await runtime.rejectQuestion(requestId, { directory, sessionID: binding.backendSessionId });
+        return res.status(200).json({ ok: true });
+      }
+      return res.status(400).json({ error: 'Unsupported blocking request kind' });
+    } catch (error) {
+      console.error('Failed to reject harness blocking request:', error);
+      const message = error?.body?.error || error?.message || 'Failed to reject blocking request';
       return res.status(400).json({ error: message });
     }
   });

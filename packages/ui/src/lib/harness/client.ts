@@ -39,10 +39,16 @@ export type HarnessClient = {
   getSession(sessionId: string, directory?: string | null): Promise<HarnessSession>
   getMessages(input: { sessionId: string; directory?: string | null; limit?: number; before?: string }): Promise<Array<{ info: Message; parts: Part[] }>>
   createSession(input: CreateHarnessSessionInput): Promise<HarnessSession>
+  deleteSession(input: { sessionId: string; directory?: string | null }): Promise<boolean>
   sendMessage(input: HarnessSendMessageInput): Promise<void>
   sendCommand(input: HarnessSendCommandInput): Promise<void>
   abortSession(input: AbortHarnessSessionInput): Promise<void>
+  updateSession(input: { sessionId: string; directory?: string | null; title?: string; time?: { archived?: number } }): Promise<HarnessSession>
   archiveSession(sessionId: string, archivedAt: number, directory?: string | null): Promise<HarnessSession>
+  shareSession(sessionId: string, directory?: string | null): Promise<HarnessSession>
+  unshareSession(sessionId: string, directory?: string | null): Promise<HarnessSession>
+  replyToBlockingRequest(input: { sessionId: string; requestId: string; kind: "permission" | "question"; directory?: string | null; reply?: string; answers?: unknown }): Promise<void>
+  rejectBlockingRequest(input: { sessionId: string; requestId: string; kind: "permission" | "question"; directory?: string | null }): Promise<void>
   forkSession(input: ForkHarnessSessionInput): Promise<HarnessSession>
 }
 
@@ -100,6 +106,14 @@ class OpenChamberHarnessClient implements HarnessClient {
     })
   }
 
+  async deleteSession(input: { sessionId: string; directory?: string | null }): Promise<boolean> {
+    const payload = await this.fetchJson(`/session/${encodeURIComponent(input.sessionId)}`, {
+      method: "DELETE",
+      body: { directory: input.directory },
+    }) as { ok?: unknown } | null
+    return payload?.ok === true
+  }
+
   async sendMessage(input: HarnessSendMessageInput): Promise<void> {
     const parts = await this.buildMessageParts(input)
     await this.fetchJson(`/session/${encodeURIComponent(input.sessionId)}/message`, {
@@ -134,10 +148,57 @@ class OpenChamberHarnessClient implements HarnessClient {
     await this.withDirectory(input.directory, () => opencodeClient.abortSession(input.sessionId))
   }
 
+  async updateSession(input: { sessionId: string; directory?: string | null; title?: string; time?: { archived?: number } }): Promise<HarnessSession> {
+    const payload = await this.fetchJson(`/session/${encodeURIComponent(input.sessionId)}/update`, {
+      method: "POST",
+      body: {
+        directory: input.directory,
+        title: input.title,
+        time: input.time,
+      },
+    })
+    return payload as HarnessSession
+  }
+
   async archiveSession(sessionId: string, archivedAt: number, directory?: string | null): Promise<HarnessSession> {
-    return this.withDirectory(directory, async () => {
-      const session = await opencodeClient.archiveSession(sessionId, archivedAt)
-      return toHarnessSession(session as Session)
+    return this.updateSession({ sessionId, directory, time: { archived: archivedAt } })
+  }
+
+  async shareSession(sessionId: string, directory?: string | null): Promise<HarnessSession> {
+    const payload = await this.fetchJson(`/session/${encodeURIComponent(sessionId)}/share`, {
+      method: "POST",
+      body: { directory },
+    })
+    return payload as HarnessSession
+  }
+
+  async unshareSession(sessionId: string, directory?: string | null): Promise<HarnessSession> {
+    const payload = await this.fetchJson(`/session/${encodeURIComponent(sessionId)}/unshare`, {
+      method: "POST",
+      body: { directory },
+    })
+    return payload as HarnessSession
+  }
+
+  async replyToBlockingRequest(input: { sessionId: string; requestId: string; kind: "permission" | "question"; directory?: string | null; reply?: string; answers?: unknown }): Promise<void> {
+    await this.fetchJson(`/session/${encodeURIComponent(input.sessionId)}/blocking-request/${encodeURIComponent(input.requestId)}/reply`, {
+      method: "POST",
+      body: {
+        kind: input.kind,
+        directory: input.directory,
+        reply: input.reply,
+        answers: input.answers,
+      },
+    })
+  }
+
+  async rejectBlockingRequest(input: { sessionId: string; requestId: string; kind: "permission" | "question"; directory?: string | null }): Promise<void> {
+    await this.fetchJson(`/session/${encodeURIComponent(input.sessionId)}/blocking-request/${encodeURIComponent(input.requestId)}/reject`, {
+      method: "POST",
+      body: {
+        kind: input.kind,
+        directory: input.directory,
+      },
     })
   }
 
