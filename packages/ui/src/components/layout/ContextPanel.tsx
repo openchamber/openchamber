@@ -1,5 +1,5 @@
 import React from 'react';
-import { RiArrowLeftRightLine, RiChat4Line, RiCloseLine, RiDonutChartFill, RiFileTextLine, RiFullscreenExitLine, RiFullscreenLine, RiGlobalLine, RiRefreshLine, RiExternalLinkLine } from '@remixicon/react';
+import { RiArrowLeftRightLine, RiChat4Line, RiCloseLine, RiDonutChartFill, RiFileTextLine, RiFullscreenExitLine, RiFullscreenLine, RiGlobalLine, RiRefreshLine, RiExternalLinkLine, RiPlayLine } from '@remixicon/react';
 
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Button } from '@/components/ui/button';
@@ -12,6 +12,10 @@ import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { getProjectActionsState } from '@/lib/openchamberConfig';
+import { readPackageJsonScripts, detectDevServerCommand } from '@/lib/detectDevServer';
+import { useTerminalStore } from '@/stores/useTerminalStore';
+import { connectTerminalStream, createTerminalSession, sendTerminalInput } from '@/lib/terminalApi';
 import { ContextPanelContent } from './ContextSidebarTab';
 
 const CONTEXT_PANEL_MIN_WIDTH = 360;
@@ -37,6 +41,43 @@ const normalizeDirectoryKey = (value: string): string => {
   }
 
   return normalized;
+};
+
+const TERMINAL_LOG_TAIL_CHARS = 800;
+
+const collectTerminalTail = (
+  tab: { bufferChunks: { data: string }[] } | undefined,
+): string => {
+  if (!tab?.bufferChunks?.length) return '';
+  let combined = '';
+  for (let i = tab.bufferChunks.length - 1; i >= 0; i -= 1) {
+    combined = tab.bufferChunks[i].data + combined;
+    if (combined.length >= TERMINAL_LOG_TAIL_CHARS) break;
+  }
+  // Strip ANSI escape sequences so the error message stays readable.
+  // eslint-disable-next-line no-control-regex
+  const stripped = combined.replace(/\x1B\[[0-9;?]*[ -/]*[@-~]/g, '');
+  const trimmed = stripped.trim();
+  if (trimmed.length <= TERMINAL_LOG_TAIL_CHARS) return trimmed;
+  return trimmed.slice(trimmed.length - TERMINAL_LOG_TAIL_CHARS);
+};
+
+const formatExitError = (
+  tab: { bufferChunks: { data: string }[] } | undefined,
+  t: TranslateFn,
+): string => {
+  const log = collectTerminalTail(tab);
+  if (!log) return t('contextPanel.preview.serverExited');
+  return t('contextPanel.preview.serverExitedWithLog', { log });
+};
+
+const formatNoUrlError = (
+  tab: { bufferChunks: { data: string }[] } | undefined,
+  t: TranslateFn,
+): string => {
+  const log = collectTerminalTail(tab);
+  if (!log) return t('contextPanel.preview.noUrlDetected');
+  return t('contextPanel.preview.noUrlDetectedWithLog', { log });
 };
 
 const clampWidth = (width: number): number => {
@@ -329,16 +370,25 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl }) => {
   // so when the proxy returns a 502 (upstream dev server is offline) the iframe
   // would just render the raw JSON error body. Probe the proxy URL with a HEAD
   // request and surface a friendly overlay when the upstream is unreachable.
-  type UpstreamState = 'unknown' | 'reachable' | 'unreachable';
+  type UpstreamState = 'unknown' | 'starting' | 'reachable' | 'unreachable';
   const [upstreamState, setUpstreamState] = React.useState<UpstreamState>('unknown');
+  const upstreamProbeStartedAtRef = React.useRef<number>(0);
+  const upstreamProbeAttemptRef = React.useRef<number>(0);
+  const PREVIEW_STARTUP_GRACE_MS = 15_000;
 
   React.useEffect(() => {
     if (!proxySrc) {
       setUpstreamState('unknown');
+      upstreamProbeStartedAtRef.current = 0;
+      upstreamProbeAttemptRef.current = 0;
       return;
     }
 
     let cancelled = false;
+    if (!upstreamProbeStartedAtRef.current) {
+      upstreamProbeStartedAtRef.current = Date.now();
+      upstreamProbeAttemptRef.current = 0;
+    }
     setUpstreamState('unknown');
 
     void (async () => {
@@ -371,13 +421,39 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl }) => {
 
       // The proxy emits 502 when the upstream is unreachable. Anything else
       // (including 4xx from the upstream) means the upstream answered.
-      setUpstreamState(response.status === 502 ? 'unreachable' : 'reachable');
+      if (response.status !== 502) {
+        setUpstreamState('reachable');
+        return;
+      }
+
+      const startedAt = upstreamProbeStartedAtRef.current || Date.now();
+      const elapsed = Date.now() - startedAt;
+      if (elapsed < PREVIEW_STARTUP_GRACE_MS) {
+        // Dev servers can take a moment to bind. During the grace window,
+        // keep retrying and show a softer "starting" state.
+        setUpstreamState('starting');
+        upstreamProbeAttemptRef.current += 1;
+        const attempt = upstreamProbeAttemptRef.current;
+        const delay = Math.min(2000, 250 * Math.pow(2, Math.min(4, attempt)));
+        setTimeout(() => {
+          if (!cancelled) {
+            bumpReload();
+          }
+        }, delay).unref?.();
+        return;
+      }
+
+      setUpstreamState('unreachable');
     })();
 
     return () => {
       cancelled = true;
     };
   }, [proxySrc, reloadNonce]);
+
+  const showUpstreamStarting = isLoopback
+    && proxyState.status === 'ready'
+    && upstreamState === 'starting';
 
   const showUpstreamUnreachable = isLoopback
     && proxyState.status === 'ready'
@@ -418,7 +494,12 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl }) => {
         </Button>
       </div>
       <div className="min-h-0 flex-1 bg-background">
-        {showUpstreamUnreachable ? (
+        {showUpstreamStarting ? (
+          <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-sm text-muted-foreground">
+            <div>{t('contextPanel.preview.startingServer')}</div>
+            <div className="text-xs opacity-70">{t('contextPanel.preview.startingServerHint')}</div>
+          </div>
+        ) : showUpstreamUnreachable ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-sm text-muted-foreground">
             <div>{t('contextPanel.preview.upstreamUnreachable')}</div>
             <div className="text-xs opacity-70">{t('contextPanel.preview.upstreamUnreachableHint')}</div>
@@ -476,6 +557,7 @@ export const ContextPanel: React.FC = () => {
   const reorderContextPanelTabs = useUIStore((state) => state.reorderContextPanelTabs);
   const setPendingDiffFile = useUIStore((state) => state.setPendingDiffFile);
   const setSelectedFilePath = useFilesViewTabsStore((state) => state.setSelectedPath);
+  const openContextPreview = useUIStore((state) => state.openContextPreview);
   const { themeMode, lightThemeId, darkThemeId, currentTheme } = useThemeSystem();
 
   const tabs = React.useMemo(() => panelState?.tabs ?? [], [panelState?.tabs]);
@@ -483,6 +565,19 @@ export const ContextPanel: React.FC = () => {
   const isOpen = Boolean(panelState?.isOpen && activeTab);
   const isExpanded = Boolean(isOpen && panelState?.expanded);
   const width = clampWidth(panelState?.width ?? CONTEXT_PANEL_DEFAULT_WIDTH);
+
+  // Check if there's a running preview
+  const hasRunningPreview = tabs.some(tab => tab.mode === 'preview' && tab.targetPath);
+
+  // Start Preview feature state
+  const [isStartingPreview, setIsStartingPreview] = React.useState(false);
+  const [previewError, setPreviewError] = React.useState<string | null>(null);
+  const ensureDirectory = useTerminalStore((state) => state.ensureDirectory);
+  const createTab = useTerminalStore((state) => state.createTab);
+  const setTabLabel = useTerminalStore((state) => state.setTabLabel);
+  const setTabSessionId = useTerminalStore((state) => state.setTabSessionId);
+  const setTabLifecycle = useTerminalStore((state) => state.setTabLifecycle);
+  const setConnecting = useTerminalStore((state) => state.setConnecting);
 
   const [isResizing, setIsResizing] = React.useState(false);
   const startXRef = React.useRef(0);
@@ -581,6 +676,142 @@ export const ContextPanel: React.FC = () => {
     }
     closeContextPanel(directoryKey);
   }, [closeContextPanel, directoryKey]);
+
+  const handleStartPreview = React.useCallback(async () => {
+    if (!effectiveDirectory || !directoryKey) return;
+    
+    setIsStartingPreview(true);
+    setPreviewError(null);
+    
+    try {
+      // Load project actions and package.json scripts
+      const [actionsState, scripts] = await Promise.all([
+        getProjectActionsState({ id: '', path: effectiveDirectory }),
+        readPackageJsonScripts(effectiveDirectory),
+      ]);
+      
+      // Detect the dev server command
+      const devServer = await detectDevServerCommand(effectiveDirectory, actionsState.actions, scripts);
+      
+      if (!devServer) {
+        setPreviewError(t('contextPanel.preview.noDevServer'));
+        setIsStartingPreview(false);
+        return;
+      }
+      
+      // Ensure terminal directory exists
+      ensureDirectory(effectiveDirectory);
+      
+      // Create a new terminal tab for the dev server
+      const tabId = createTab(effectiveDirectory);
+      setTabLabel(effectiveDirectory, tabId, `Preview: ${devServer.label}`);
+      
+      // Start the terminal session with the dev command
+      const session = await createTerminalSession({
+        cwd: effectiveDirectory,
+      });
+      
+      setTabSessionId(effectiveDirectory, tabId, session.sessionId);
+      setTabLifecycle(effectiveDirectory, tabId, 'running');
+
+      // Ensure output is captured even if the terminal view isn't visible.
+      // Without this, preview URL detection won't run and the context tab
+      // won't open.
+      setConnecting(effectiveDirectory, tabId, true);
+      const disconnectStream = connectTerminalStream(
+        session.sessionId,
+        (event) => {
+          if (event.type === 'data' && typeof event.data === 'string' && event.data.length > 0) {
+            useTerminalStore.getState().appendToBuffer(effectiveDirectory, tabId, event.data);
+          }
+          if (event.type === 'exit') {
+            setTabLifecycle(effectiveDirectory, tabId, 'exited');
+          }
+        },
+        () => {
+          // stream errors are handled by the poll timeout + lifecycle updates
+        },
+        { maxRetries: 60, initialRetryDelay: 250, maxRetryDelay: 2000, connectionTimeout: 5000 },
+      );
+
+      // Actually run the dev server command. Connect the stream first so we
+      // don't miss early startup output containing the preview URL.
+      await sendTerminalInput(session.sessionId, `${devServer.command}\n`);
+
+      // Probe the hint URL directly so commands that don't print a recognizable
+      // URL (or print it slowly) still get a preview tab once the upstream is
+      // actually listening. We deliberately do NOT open the tab from the hint
+      // alone: opening optimistically when the dev server hasn't bound (e.g.
+      // python3 missing, port in use) produces a confusing 502 loop instead of
+      // a clear error.
+      const probeHintReachable = async (): Promise<boolean> => {
+        if (!devServer.previewUrlHint) return false;
+        try {
+          const response = await fetch(devServer.previewUrlHint, {
+            method: 'GET',
+            cache: 'no-store',
+            redirect: 'follow',
+            mode: 'no-cors',
+          });
+          // `no-cors` returns an opaque response with status 0 on success;
+          // any non-network failure indicates the upstream answered.
+          return response.type === 'opaque' || response.status > 0;
+        } catch {
+          return false;
+        }
+      };
+
+      const checkForPreviewUrl = async (): Promise<boolean> => {
+        const state = useTerminalStore.getState().getDirectoryState(effectiveDirectory);
+        const tab = state?.tabs.find(t => t.id === tabId);
+
+        if (tab?.previewUrl) {
+          openContextPreview(directoryKey, tab.previewUrl);
+          setConnecting(effectiveDirectory, tabId, false);
+          disconnectStream();
+          return true;
+        }
+
+        if (await probeHintReachable() && devServer.previewUrlHint) {
+          openContextPreview(directoryKey, devServer.previewUrlHint);
+          setConnecting(effectiveDirectory, tabId, false);
+          disconnectStream();
+          return true;
+        }
+
+        if (tab?.lifecycle === 'exited') {
+          setPreviewError(formatExitError(tab, t));
+          setConnecting(effectiveDirectory, tabId, false);
+          disconnectStream();
+          return true;
+        }
+
+        return false;
+      };
+
+      // Poll for up to 30 seconds
+      for (let i = 0; i < 60; i++) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        if (await checkForPreviewUrl()) break;
+      }
+
+      // If we timed out without detecting a URL or an exit, show a clear error
+      // including a tail of terminal output so the user can see why.
+      const finalState = useTerminalStore.getState().getDirectoryState(effectiveDirectory);
+      const finalTab = finalState?.tabs.find(t => t.id === tabId);
+      if (!finalTab?.previewUrl && finalTab?.lifecycle !== 'exited') {
+        setPreviewError(formatNoUrlError(finalTab, t));
+      }
+
+      setConnecting(effectiveDirectory, tabId, false);
+      disconnectStream();
+      
+    } catch (error) {
+      setPreviewError(error instanceof Error ? error.message : t('contextPanel.preview.startFailed'));
+    } finally {
+      setIsStartingPreview(false);
+    }
+  }, [effectiveDirectory, directoryKey, ensureDirectory, createTab, setTabLabel, setTabSessionId, setTabLifecycle, setConnecting, openContextPreview, t]);
 
   const handleToggleExpanded = React.useCallback(() => {
     if (!directoryKey) {
@@ -715,15 +946,66 @@ export const ContextPanel: React.FC = () => {
     };
   }), [effectiveDirectory, t, tabs]);
 
+  const showStartPreview = !hasRunningPreview && !isStartingPreview && !previewError;
+  
   const activeNonChatContent = activeTab?.mode === 'diff'
     ? <DiffView hideStackedFileSidebar stackedDefaultCollapsedAll hideFileSelector pinSelectedFileHeaderToTopOnNavigate showOpenInEditorAction />
     : activeTab?.mode === 'context'
         ? <ContextPanelContent />
         : activeTab?.mode === 'plan'
-          ? <PlanView targetPath={activeTab.targetPath} />
-          : activeTab?.mode === 'preview'
-            ? <PreviewPane rawUrl={activeTab.targetPath ?? ''} />
-            : null;
+            ? <PlanView targetPath={activeTab.targetPath} />
+            : activeTab?.mode === 'preview'
+                ? <PreviewPane rawUrl={activeTab.targetPath ?? ''} />
+                : showStartPreview
+                    ? (
+                        <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
+                            <RiGlobalLine className="h-12 w-12 text-muted-foreground/50" />
+                            <div className="space-y-2">
+                                <div className="typography-ui-header text-foreground">
+                                    {t('contextPanel.preview.title')}
+                                </div>
+                                <div className="typography-micro text-muted-foreground">
+                                    {t('contextPanel.preview.description')}
+                                </div>
+                            </div>
+                            {previewError ? (
+                                <div className="typography-micro text-destructive">
+                                    {previewError}
+                                </div>
+                            ) : null}
+                            <Button
+                                type="button"
+                                variant="default"
+                                size="sm"
+                                onClick={handleStartPreview}
+                                disabled={isStartingPreview || !effectiveDirectory}
+                                className="gap-2"
+                            >
+                                <RiPlayLine className="h-3.5 w-3.5" />
+                                {isStartingPreview ? t('contextPanel.preview.starting') : t('contextPanel.preview.startPreview')}
+                            </Button>
+                        </div>
+                    )
+                    : previewError
+                        ? (
+                            <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
+                                <div className="typography-micro text-destructive">
+                                    {previewError}
+                                </div>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={handleStartPreview}
+                                    disabled={isStartingPreview || !effectiveDirectory}
+                                    className="gap-2"
+                                >
+                                    <RiPlayLine className="h-3.5 w-3.5" />
+                                    {t('contextPanel.preview.startPreview')}
+                                </Button>
+                            </div>
+                        )
+                        : null;
 
   const chatTabs = React.useMemo(
     () => tabs.filter((tab) => tab.mode === 'chat'),
@@ -763,6 +1045,21 @@ export const ContextPanel: React.FC = () => {
         variant="default"
       />
       <div className="flex items-center gap-1 px-1.5">
+        {!hasRunningPreview && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={handleStartPreview}
+            className="h-7 px-2 gap-1"
+            title={t('contextPanel.preview.startPreview')}
+            aria-label={t('contextPanel.preview.startPreview')}
+            disabled={isStartingPreview || !effectiveDirectory}
+          >
+            <RiPlayLine className="h-3.5 w-3.5" />
+            {isStartingPreview ? t('contextPanel.preview.starting') : t('contextPanel.preview.startPreview')}
+          </Button>
+        )}
         <Button
           type="button"
           variant="ghost"

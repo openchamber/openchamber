@@ -71,7 +71,9 @@ const normalizeLoopbackUrl = (rawUrl) => {
     return { ok: false, error: 'Invalid port' };
   }
 
-  if (hostname === '0.0.0.0') {
+  // Normalize common loopback hostnames to IPv4 to avoid environments where
+  // `localhost` resolves to ::1 but the dev server only binds IPv4.
+  if (hostname === '0.0.0.0' || hostname === 'localhost' || hostname === '::1' || hostname === '[::1]') {
     url.hostname = '127.0.0.1';
   }
 
@@ -268,6 +270,21 @@ export const createPreviewProxyRuntime = ({
       target: 'http://127.0.0.1',
       changeOrigin: true,
       ws: true,
+      // Restrict the proxy (especially its auto-attached `upgrade` listener,
+      // which is registered globally on the underlying HTTP server when
+      // `ws: true`) to preview paths. Without this, every WebSocket upgrade
+      // on the server (e.g. `/api/terminal/ws`) gets proxied to
+      // `http://127.0.0.1` and tears the socket down with ECONNREFUSED.
+      //
+      // We use a function so the same filter handles both cases:
+      //   - HTTP requests through Express, where `req.url` has been stripped
+      //     of the `/api/preview/proxy` mount-point, so we check `originalUrl`.
+      //   - Raw upgrade events from the HTTP server, where `req.url` still
+      //     contains the full path.
+      pathFilter: (pathname, req) => {
+        const target = req?.originalUrl || pathname || req?.url || '';
+        return target.startsWith('/api/preview/proxy/');
+      },
       router: (req) => {
         const resolved = resolveTargetFromRequest(req);
         if (!resolved.ok) {
@@ -303,9 +320,34 @@ export const createPreviewProxyRuntime = ({
           stripFrameBustingHeaders(proxyRes.headers);
         },
         error: (err, _req, res) => {
-          console.error('[preview-proxy] proxy error:', err.message);
+          const isDev = typeof process !== 'undefined'
+            && process
+            && process.env
+            && process.env.NODE_ENV !== 'production';
+
+          const message = err && typeof err === 'object' && typeof err.message === 'string'
+            ? err.message
+            : 'Unknown proxy error';
+
+          console.error('[preview-proxy] proxy error:', message);
+
           if (res && !res.headersSent && typeof res.status === 'function') {
-            res.status(502).json({ error: 'Preview proxy error' });
+            const payload = { error: 'Preview proxy error' };
+
+            if (isDev) {
+              try {
+                const resolved = resolveTargetFromRequest(_req);
+                payload.details = {
+                  message,
+                  code: err && typeof err === 'object' ? err.code : undefined,
+                  targetOrigin: resolved?.ok ? resolved.entry.origin : undefined,
+                };
+              } catch {
+                payload.details = { message };
+              }
+            }
+
+            res.status(502).json(payload);
           }
         },
       },

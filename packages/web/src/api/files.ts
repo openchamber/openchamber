@@ -134,7 +134,7 @@ export const createWebFilesAPI = (): FilesAPI => ({
 
   async readFile(path: string, options): Promise<{ content: string; path: string }> {
     const target = normalizePath(path);
-    const params = new URLSearchParams({ path: target });
+    const params = new URLSearchParams({ path: target, optional: 'true' });
     if (options?.allowOutsideWorkspace) {
       params.set('allowOutsideWorkspace', 'true');
     }

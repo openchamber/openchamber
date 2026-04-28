@@ -104,16 +104,63 @@ const createEmptyTab = (id: string, label: string): TerminalTab => ({
 
 // eslint-disable-next-line no-control-regex
 const ANSI_ESCAPE_PATTERN = /\x1b\[[0-9;]*m/g;
-const URL_PATTERN = /(https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d{2,5})?(?:\/[\w\-./~%!$&'()*+,;=:@?#[\]]*)?)/i;
+// Many dev servers print loopback as 0.0.0.0, localhost, or IPv6 ([::]/[::1]).
+const URL_PATTERN = /(https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[(?:::1|::)\])(?::\d{2,5})?(?:\/[\w\-./~%!$&'()*+,;=:@?#[\]]*)?)/i;
+
+// Dev server logs frequently wrap URLs in punctuation, e.g.
+//   "Local: http://localhost:5173/ (press h to show help)"
+//   "Serving on (http://127.0.0.1:50028/)."
+// The URL_PATTERN above intentionally allows sub-delim characters like `()`
+// in the path (RFC 3986), which means greedy capture can swallow trailing
+// closing brackets that were really part of the surrounding sentence.
+// Peel off any trailing closer that has no matching opener inside the URL,
+// plus common trailing sentence punctuation.
+const TRAILING_PUNCT = new Set(['.', ',', ';', ':', '!', '?']);
+const trimUrlTrailingPunctuation = (url: string): string => {
+  let result = url;
+  while (result.length > 0) {
+    const last = result[result.length - 1];
+    if (last === ')' || last === ']' || last === '}' || last === '>') {
+      const opener = last === ')' ? '(' : last === ']' ? '[' : last === '}' ? '{' : '<';
+      // Count matched pairs in the rest of the URL; if there's no unmatched
+      // opener, the closer is from surrounding text — strip it.
+      const head = result.slice(0, -1);
+      const opens = (head.match(new RegExp(`\\${opener}`, 'g')) || []).length;
+      const closes = (head.match(new RegExp(`\\${last}`, 'g')) || []).length;
+      if (opens > closes) break;
+      result = head;
+      continue;
+    }
+    if (TRAILING_PUNCT.has(last)) {
+      result = result.slice(0, -1);
+      continue;
+    }
+    break;
+  }
+  return result;
+};
 
 const extractPreviewUrl = (chunk: string): string | null => {
   if (!chunk) return null;
   const cleaned = chunk.replace(ANSI_ESCAPE_PATTERN, '');
   const match = cleaned.match(URL_PATTERN);
   if (!match?.[1]) return null;
-  const url = match[1];
-  // Normalize 0.0.0.0 -> 127.0.0.1 so iframe can load.
-  return url.includes('0.0.0.0') ? url.replace('0.0.0.0', '127.0.0.1') : url;
+  let url = trimUrlTrailingPunctuation(match[1]);
+  // Normalize common loopback hostnames to a stable value so the iframe can load.
+  url = url.replace('0.0.0.0', '127.0.0.1');
+  url = url.replace('[::1]', '127.0.0.1');
+  url = url.replace('[::]', '127.0.0.1');
+  return url;
+};
+
+const extractPythonHttpServerUrl = (chunk: string): string | null => {
+  if (!chunk) return null;
+  const cleaned = chunk.replace(ANSI_ESCAPE_PATTERN, '');
+  const match = cleaned.match(/Serving HTTP on .*? port (\d{2,5})/i);
+  if (!match?.[1]) return null;
+  const port = Number.parseInt(match[1], 10);
+  if (!Number.isFinite(port) || port <= 0 || port > 65535) return null;
+  return `http://127.0.0.1:${port}/`;
 };
 
 const createEmptyDirectoryState = (firstTab: TerminalTab): DirectoryTerminalState => ({
@@ -416,7 +463,7 @@ export const useTerminalStore = create<TerminalStore>()(
               bufferLength -= removed.data.length;
             }
 
-            const maybePreviewUrl = extractPreviewUrl(chunk);
+            const maybePreviewUrl = extractPreviewUrl(chunk) ?? extractPythonHttpServerUrl(chunk);
             const shouldUpdatePreview = Boolean(maybePreviewUrl && maybePreviewUrl !== tab.previewUrl);
 
             const nextTabs = [...existing.tabs];

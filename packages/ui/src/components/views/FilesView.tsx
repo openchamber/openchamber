@@ -1229,11 +1229,14 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       return result.content ?? '';
     }
 
-    const params = new URLSearchParams({ path });
+    const params = new URLSearchParams({ path, optional: 'true' });
     if (options?.allowOutsideWorkspace) {
       params.set('allowOutsideWorkspace', 'true');
     }
-    const response = await fetch(`/api/fs/read?${params.toString()}`);
+    const response = await fetch(`/api/fs/read?${params.toString()}`, {
+      // Avoid conditional requests (304 + empty body).
+      cache: 'no-store',
+    });
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: response.statusText }));
       throw new Error((error as { error?: string }).error || t('filesView.error.readFileFailed'));
