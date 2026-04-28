@@ -1380,9 +1380,8 @@ export const GitView: React.FC = () => {
   const canShowIntegrateCommitsSection = Boolean(
     worktreeMetadata && repoRootForIntegrate && sourceBranchForIntegrate && shouldShowIntegrateCommits
   );
-  const hasUpstreamRemote = remotes.some((r) => r.name === 'upstream');
   const canShowPullRequestSection = Boolean(
-    currentDirectory && currentBranch && status?.tracking && (currentBranch !== baseBranch || hasUpstreamRemote)
+    currentDirectory && currentBranch
   );
   const canShowBranchWorkflows = Boolean(currentBranch);
   const integrateCommitsProps =
