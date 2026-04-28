@@ -16,6 +16,7 @@ import {
   RiGitPullRequestLine,
   RiInformationLine,
   RiLoader4Line,
+  RiRefreshLine,
 } from '@remixicon/react';
 import { toast } from '@/components/ui';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -1403,6 +1404,20 @@ export const PullRequestSection: React.FC<{
           </div>
           <div className="flex items-center gap-2">
             {isLoading ? <RiLoader4Line className="size-4 animate-spin text-muted-foreground" /> : null}
+            <Tooltip delayDuration={300}>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  className="inline-flex size-5 items-center justify-center rounded hover:bg-interactive-hover/60 disabled:opacity-40"
+                  disabled={isLoading}
+                  onClick={() => void refresh({ force: true })}
+                  aria-label={t('gitView.pr.actions.refreshAria')}
+                >
+                  <RiRefreshLine className="size-3.5 text-muted-foreground" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent><p>{t('gitView.pr.actions.refresh')}</p></TooltipContent>
+            </Tooltip>
             {checks ? (
               <span className="inline-flex items-center gap-2 typography-micro text-muted-foreground">
                 <span className={`h-2 w-2 rounded-full ${statusColor(checks.state)}`} />

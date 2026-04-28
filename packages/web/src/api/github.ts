@@ -91,11 +91,12 @@ export const createWebGitHubAPI = (): GitHubAPI => ({
     return payload;
   },
 
-  async prStatus(directory: string, branch: string, remote?: string): Promise<GitHubPullRequestStatus> {
+  async prStatus(directory: string, branch: string, remote?: string, options?: { force?: boolean }): Promise<GitHubPullRequestStatus> {
     const params = new URLSearchParams({
       directory,
       branch,
       ...(remote ? { remote } : {}),
+      ...(options?.force ? { force: 'true' } : {}),
     });
     const response = await fetch(
       `/api/github/pr/status?${params.toString()}`,

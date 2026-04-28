@@ -568,6 +568,8 @@ export const dict: Record<I18nKey, string> = {
   'gitView.pr.actions.shareComments': 'Share 댓글',
   'gitView.pr.actions.shareCommentsAria': '보내기 PR 댓글로 에이전트',
   'gitView.pr.actions.toggleDraftAria': '토글 draft state',
+  'gitView.pr.actions.refresh': 'PR 상태 새로고침',
+  'gitView.pr.actions.refreshAria': '풀 리퀘스트 상태 새로고침',
   'gitView.pr.additionalContext.added': '추가됨',
   'gitView.pr.additionalContext.hint': '더 나은 리뷰를 위해 추가 컨텍스트를 넣으세요.',
   'gitView.pr.additionalContext.optional': '선택 사항',

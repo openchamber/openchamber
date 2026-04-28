@@ -568,6 +568,8 @@ export const dict: Record<I18nKey, string> = {
   "gitView.pr.actions.shareComments": "Compartir comentarios",
   "gitView.pr.actions.shareCommentsAria": "Enviar comentarios de la PR al agente",
   "gitView.pr.actions.toggleDraftAria": "Alternar estado de borrador",
+  "gitView.pr.actions.refresh": "Actualizar estado de la PR",
+  "gitView.pr.actions.refreshAria": "Actualizar estado del pull request",
   "gitView.pr.additionalContext.added": "Añadido",
   "gitView.pr.additionalContext.hint": "Añade contexto adicional para una revisión más efectiva.",
   "gitView.pr.additionalContext.optional": "Opcional",

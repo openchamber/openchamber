@@ -1,3 +1,6 @@
+const PR_STATUS_CACHE_TTL_MS = 90_000;
+const prStatusCache = new Map();
+
 export function registerGitHubRoutes(app) {
   let githubLibraries = null;
   const getGitHubLibraries = async () => {
@@ -249,9 +252,27 @@ export function registerGitHubRoutes(app) {
       const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
       const branch = typeof req.query?.branch === 'string' ? req.query.branch.trim() : '';
       const remote = typeof req.query?.remote === 'string' ? req.query.remote.trim() : 'origin';
+      const force = req.query?.force === 'true' || req.query?.force === '1';
       if (!directory || !branch) {
         return res.status(400).json({ error: 'directory and branch are required' });
       }
+
+      // Check cache (skip when force=true to allow manual refresh bypass)
+      const cacheKey = `${directory}::${branch}::${remote}`;
+      const cached = prStatusCache.get(cacheKey);
+      if (!force && cached && Date.now() - cached.fetchedAt < PR_STATUS_CACHE_TTL_MS) {
+        return res.json(cached.data);
+      }
+
+      // Intercept res.json to cache successful responses before sending
+      // Only caches responses with connected:true — error/edge-case responses are not cached
+      const originalJson = res.json.bind(res);
+      res.json = (data) => {
+        if (data && data.connected === true) {
+          prStatusCache.set(cacheKey, { data, fetchedAt: Date.now() });
+        }
+        return originalJson(data);
+      };
 
       const { getOctokitOrNull, getGitHubAuth } = await getGitHubLibraries();
       const octokit = getOctokitOrNull();

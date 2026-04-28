@@ -87,17 +87,10 @@ export function GitHubIssuePickerDialog({
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const isMobile = useUIStore((state) => state.isMobile);
   const activeProject = useProjectsStore((state) => state.getActiveProject());
-  const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
 
   const projectDirectory = React.useMemo(() => {
-    const fromDirectoryStore = currentDirectory?.trim();
-    if (fromDirectoryStore) {
-      return fromDirectoryStore;
-    }
-
-    const fromActiveProject = activeProject?.path?.trim();
-    return fromActiveProject || null;
-  }, [activeProject?.path, currentDirectory]);
+    return activeProject?.path?.trim() || useDirectoryStore.getState().currentDirectory || null;
+  }, [activeProject?.path]);
 
   const [query, setQuery] = React.useState('');
   const [createInWorktree, setCreateInWorktree] = React.useState(false);
