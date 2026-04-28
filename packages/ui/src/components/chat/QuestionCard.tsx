@@ -175,6 +175,20 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
     }
   }, [buildAnswersPayload, question.id, question.sessionID, requiredSatisfied, respondToQuestion]);
 
+  const handleKeyDown = React.useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        if (requiredSatisfied) {
+          handleConfirm();
+        } else {
+          handleNextUnanswered();
+        }
+      }
+    },
+    [requiredSatisfied, handleConfirm, handleNextUnanswered]
+  );
+
   const handleDismiss = React.useCallback(async () => {
     setIsResponding(true);
     try {
@@ -385,6 +399,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
                         placeholder={t('chat.questionCard.yourAnswer')}
                         disabled={isResponding}
                         rows={2}
+                        onKeyDown={handleKeyDown}
                         className="w-full bg-transparent border border-border/30 focus:border-primary rounded px-2 py-1 outline-none typography-meta text-foreground placeholder:text-muted-foreground/50 transition-colors resize-none overflow-hidden"
                         autoFocus
                       />
