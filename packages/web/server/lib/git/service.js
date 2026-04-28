@@ -2084,23 +2084,27 @@ export async function getBranches(directory) {
 
 async function filterActiveRemoteBranches(git, remoteBranches) {
   try {
-
-    const lsRemoteResult = await git.raw(['ls-remote', '--heads', 'origin']);
+    const remotes = await git.getRemotes();
     const actualRemoteBranches = new Set();
 
-    const lines = lsRemoteResult.trim().split('\n');
-    for (const line of lines) {
-      if (line.includes('\trefs/heads/')) {
-        const branchName = line.split('\t')[1].replace('refs/heads/', '');
-        actualRemoteBranches.add(branchName);
+    for (const remote of remotes) {
+      try {
+        const lsRemoteResult = await git.raw(['ls-remote', '--heads', remote.name]);
+        const lines = lsRemoteResult.trim().split('\n');
+        for (const line of lines) {
+          if (line.includes('\trefs/heads/')) {
+            const branchName = line.split('\t')[1].replace('refs/heads/', '');
+            actualRemoteBranches.add(branchName);
+          }
+        }
+      } catch {
+        // Skip remotes that fail (e.g., unreachable)
       }
     }
 
     return remoteBranches.filter(remoteBranch => {
-
       const match = remoteBranch.match(/^remotes\/[^\/]+\/(.+)$/);
       if (!match) return false;
-
       const branchName = match[1];
       return actualRemoteBranches.has(branchName);
     });

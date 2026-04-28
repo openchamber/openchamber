@@ -353,7 +353,7 @@ export const PullRequestSection: React.FC<{
   const isInitialStatusResolved = statusEntry?.isInitialStatusResolved ?? false;
 
   const availableBaseBranches = React.useMemo(() => {
-    const selectedRemoteName = selectedRemote?.name?.trim() || null;
+    const selectedRemoteName = useDetectedUpstream ? null : (selectedRemote?.name?.trim() || null);
     const unique = new Set<string>();
 
     for (const remoteBranch of remoteBranches) {
@@ -375,7 +375,7 @@ export const PullRequestSection: React.FC<{
     }
 
     return Array.from(unique).sort((a, b) => a.localeCompare(b));
-  }, [baseBranch, remoteBranches, selectedRemote?.name, targetBaseBranch]);
+  }, [baseBranch, remoteBranches, selectedRemote?.name, targetBaseBranch, useDetectedUpstream]);
 
   const hasMultipleRemotes = remotes.length > 1;
 
@@ -464,6 +464,13 @@ export const PullRequestSection: React.FC<{
       setUseDetectedUpstream(true);
     }
   }, [detectedUpstream, hasUpstreamRemote]);
+
+  // Set target base branch to upstream's default branch when using detected upstream
+  React.useEffect(() => {
+    if (useDetectedUpstream && detectedUpstream?.defaultBranch) {
+      setTargetBaseBranch(detectedUpstream.defaultBranch);
+    }
+  }, [useDetectedUpstream, detectedUpstream?.defaultBranch]);
 
   const pr = status?.pr ?? null;
   const currentPrBodyHydrationKey = pr ? `${directory}#${pr.number}` : null;
@@ -1191,7 +1198,7 @@ export const PullRequestSection: React.FC<{
       toast.error(t('gitView.pr.toast.baseBranchRequired'));
       return;
     }
-    if (trimmedBase === branch) {
+    if (!useDetectedUpstream && trimmedBase === branch) {
       toast.error(t('gitView.pr.toast.baseMustDifferFromHead'));
       return;
     }
@@ -1892,7 +1899,7 @@ export const PullRequestSection: React.FC<{
                     size="sm"
                     className="min-w-[7.5rem] justify-center gap-2"
                     onClick={createPr}
-                    disabled={isCreating || !isConnected || !targetBaseBranch.trim() || targetBaseBranch.trim() === branch}
+                    disabled={isCreating || !isConnected || !targetBaseBranch.trim() || (!useDetectedUpstream && targetBaseBranch.trim() === branch)}
                   >
                     <span className="inline-flex size-4 items-center justify-center">
                       {isCreating ? <RiLoader4Line className="size-4 animate-spin" /> : <RiGitPullRequestLine className="size-4" />}

@@ -522,7 +522,7 @@ export function registerGitHubRoutes(app) {
       // For fork workflows: we need to determine the correct head reference
       let headRef = head;
       
-      if (sourceRemote && sourceRemote !== remote) {
+      if (sourceRemote) {
         // The branch is on a different remote than the target - this is a cross-repo PR
         const { repo: headRepo } = await resolveGitHubRepoFromDirectory(directory, sourceRemote);
         if (headRepo) {
@@ -799,10 +799,19 @@ export function registerGitHubRoutes(app) {
       }
 
       const upstream = network.find((r) => r.source === 'upstream') || null;
+      let defaultBranch = 'main';
+      if (upstream) {
+        try {
+          const metadata = await octokit.rest.repos.get({ owner: upstream.owner, repo: upstream.repo });
+          defaultBranch = metadata?.data?.default_branch || 'main';
+        } catch {
+          // Fall back to 'main' if metadata fetch fails
+        }
+      }
       return res.json({
         connected: true,
         isFork: Boolean(upstream),
-        upstream: upstream ? { owner: upstream.owner, repo: upstream.repo, url: upstream.url } : null,
+        upstream: upstream ? { owner: upstream.owner, repo: upstream.repo, url: upstream.url, defaultBranch } : null,
       });
     } catch (error) {
       console.error('Failed to detect upstream repo:', error);
