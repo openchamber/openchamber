@@ -39,6 +39,7 @@ interface DirectoryTreeProps {
   isRootReady?: boolean;
   /** Always show action icons (add, pin) instead of only on hover */
   alwaysShowActions?: boolean;
+  disabledPaths?: Iterable<string>;
 }
 
 export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
@@ -53,6 +54,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
   rootDirectory = null,
   isRootReady,
   alwaysShowActions = false,
+  disabledPaths,
 }) => {
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
@@ -84,6 +86,20 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
     }
     return trimmed.length === 0 ? '/' : trimmed;
   }, []);
+
+  const normalizedDisabledPaths = React.useMemo(() => {
+    const normalized = new Set<string>();
+    for (const path of disabledPaths ?? []) {
+      const value = stripTrailingSlashes(path.replace(/\\/g, '/'));
+      if (value) normalized.add(value.toLowerCase());
+    }
+    return normalized;
+  }, [disabledPaths, stripTrailingSlashes]);
+
+  const isPathDisabled = React.useCallback((path: string) => {
+    const normalized = stripTrailingSlashes(path.replace(/\\/g, '/'));
+    return normalized ? normalizedDisabledPaths.has(normalized.toLowerCase()) : false;
+  }, [normalizedDisabledPaths, stripTrailingSlashes]);
 
   const normalizedHomeDirectory = React.useMemo(() => {
     if (!homeDirectory) {
@@ -665,6 +681,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
     const isPinned = pinnedPaths.has(item.path);
     const isSelected = currentPath === item.path;
     const isInlineVariant = variant === 'inline';
+    const isDisabled = isPathDisabled(item.path);
 
     const rowContent = (
       <>
@@ -688,6 +705,9 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
         <button
           onClick={(e) => {
             e.stopPropagation();
+            if (isDisabled) {
+              return;
+            }
             handleDirectorySelect(item.path);
             if (variant === 'dropdown' && selectionBehavior === 'immediate') {
               setIsOpen(false);
@@ -695,13 +715,15 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
           }}
           onDoubleClick={(e) => {
             e.stopPropagation();
-            if (onDoubleClickPath) {
+            if (!isDisabled && onDoubleClickPath) {
               onDoubleClickPath(item.path);
             }
           }}
+          disabled={isDisabled}
           className={cn(
             'flex items-center flex-1 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60 rounded',
             isMobile ? 'gap-1.5' : 'gap-1.5',
+            isDisabled && 'cursor-not-allowed opacity-45',
             isInlineVariant ? (isSelected ? 'text-primary' : 'text-foreground') : 'text-foreground'
           )}
         >
@@ -709,6 +731,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
             className={cn(
               'text-muted-foreground flex-shrink-0',
               isMobile ? 'h-4 w-4' : 'h-3.5 w-3.5',
+              isDisabled && 'text-muted-foreground',
               isInlineVariant && isSelected && 'text-primary'
             )}
           />
@@ -716,6 +739,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
             className={cn(
               'font-medium truncate',
               isMobile ? 'typography-ui-label' : 'typography-ui-label',
+              isDisabled && 'text-muted-foreground',
               isInlineVariant && isSelected ? 'text-primary' : 'text-foreground'
             )}
           >
@@ -768,7 +792,9 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
               isMobile ? 'px-1.5 py-1' : 'px-2 py-1.5',
               isSelected 
                 ? 'bg-primary/10 text-primary' 
-                : 'hover:bg-interactive-hover/50 text-foreground'
+                : isDisabled
+                  ? 'text-muted-foreground'
+                  : 'hover:bg-interactive-hover/50 text-foreground'
             )}
             style={{ paddingLeft: `${level * (isMobile ? 12 : 14) + (isMobile ? 4 : 6)}px` }}
           >

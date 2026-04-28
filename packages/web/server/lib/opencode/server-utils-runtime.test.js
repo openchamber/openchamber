@@ -32,7 +32,7 @@ const createRuntime = (loginShellPath) => createServerUtilsRuntime({
 });
 
 describe('server utils runtime', () => {
-  it('keeps managed OpenCode PATH literal when process PATH is user-configured', () => {
+  it('prefers shell PATH for managed OpenCode before appending process-only entries', () => {
     const home = os.homedir();
     const currentPath = [
       path.join(home, '.opencode', 'bin'),
@@ -51,7 +51,14 @@ describe('server utils runtime', () => {
       path.join(home, '.cargo', 'bin'),
     ].join(path.delimiter));
 
-    expect(runtime.buildManagedOpenCodePath()).toBe(currentPath);
+    expect(runtime.buildManagedOpenCodePath()).toBe([
+      path.join(home, '.opencode', 'bin'),
+      path.join(home, '.bun', 'bin'),
+      '/opt/homebrew/bin',
+      '/usr/bin',
+      path.join(home, '.cargo', 'bin'),
+      path.join(home, 'Library', 'pnpm'),
+    ].join(path.delimiter));
   });
 
   it('uses login shell PATH for managed OpenCode when process PATH is minimal', () => {

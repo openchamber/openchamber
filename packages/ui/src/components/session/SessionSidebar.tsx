@@ -4,7 +4,7 @@ import { RiLayoutLeftLine } from '@remixicon/react';
 import { toast } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
-import { isDesktopLocalOriginActive, isDesktopShell, isTauriShell } from '@/lib/desktop';
+import { isDesktopShell } from '@/lib/desktop';
 import { isDesktopWindowFullscreen as getDesktopWindowFullscreen, onDesktopWindowResized, startDesktopWindowDrag } from '@/lib/desktopNative';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { formatDirectoryName, cn } from '@/lib/utils';
@@ -249,7 +249,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   const projects = useProjectsStore((state) => state.projects);
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
-  const addProject = useProjectsStore((state) => state.addProject);
   const removeProject = useProjectsStore((state) => state.removeProject);
   const setActiveProjectIdOnly = useProjectsStore((state) => state.setActiveProjectIdOnly);
   const updateProjectMeta = useProjectsStore((state) => state.updateProjectMeta);
@@ -430,7 +429,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     };
   }, []);
 
-  const tauriIpcAvailable = React.useMemo(() => isTauriShell(), []);
   const isDesktopShellRuntime = React.useMemo(() => isDesktopShell(), []);
   const [isDesktopWindowFullscreen, setIsDesktopWindowFullscreen] = React.useState(false);
 
@@ -690,32 +688,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   }, [deleteFolderConfirm, deleteFolder]);
 
   const handleOpenDirectoryDialog = React.useCallback(() => {
-    if (!tauriIpcAvailable || !isDesktopLocalOriginActive()) {
-      sessionEvents.requestDirectoryDialog();
-      return;
-    }
-
-    import('@/lib/desktop')
-      .then(({ requestDirectoryAccess }) => requestDirectoryAccess(''))
-      .then((result) => {
-        if (result.success && result.path) {
-          const added = addProject(result.path, { id: result.projectId });
-          if (!added) {
-            toast.error(t('sessions.sidebar.directory.errorAddProjectTitle'), {
-              description: t('sessions.sidebar.directory.errorAddProjectDescription'),
-            });
-          }
-        } else if (result.error && result.error !== 'Directory selection cancelled') {
-          toast.error(t('sessions.sidebar.directory.errorSelectDirectoryTitle'), {
-            description: result.error,
-          });
-        }
-      })
-      .catch((error) => {
-        console.error('Desktop: Error selecting directory:', error);
-        toast.error(t('sessions.sidebar.directory.errorSelectDirectoryTitle'));
-      });
-  }, [addProject, t, tauriIpcAvailable]);
+    sessionEvents.requestDirectoryDialog();
+  }, []);
 
   // Auto-expand parent session when navigating to a subagent (child) session
   React.useEffect(() => {

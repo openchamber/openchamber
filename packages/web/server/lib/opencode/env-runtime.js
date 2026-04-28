@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { pathLooksUserConfigured, mergePathValues } from './path-utils.js';
+import { mergePathValues } from './path-utils.js';
 
 export const createOpenCodeEnvRuntime = (deps) => {
   const {
@@ -183,10 +183,11 @@ export const createOpenCodeEnvRuntime = (deps) => {
 
     const currentPath = process.env.PATH || '';
     const shellPath = snapshot.PATH || '';
-    const home = os.homedir();
-    if (!pathLooksUserConfigured(currentPath, home, path.delimiter) && shellPath) {
-      process.env.PATH = mergePathValues(shellPath, currentPath, path.delimiter);
+    if (!shellPath) {
+      return;
     }
+
+    process.env.PATH = mergePathValues(shellPath, currentPath, path.delimiter);
   };
 
   const isWslExecutableValue = (value) => {

@@ -7,52 +7,24 @@ import { SettingsSidebarItem } from '@/components/sections/shared/SettingsSideba
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
 import { cn } from '@/lib/utils';
 import { RiAddLine, RiFolderLine } from '@remixicon/react';
-import { isDesktopLocalOriginActive, isTauriShell, isVSCodeRuntime, requestDirectoryAccess } from '@/lib/desktop';
+import { isVSCodeRuntime } from '@/lib/desktop';
 import { sessionEvents } from '@/lib/sessionEvents';
-import { toast } from '@/components/ui';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
 
 export const ProjectsSidebar: React.FC<{ onItemSelect?: () => void }> = ({ onItemSelect }) => {
   const { t } = useI18n();
   const projects = useProjectsStore((state) => state.projects);
-  const addProject = useProjectsStore((state) => state.addProject);
   const selectedId = useUIStore((state) => state.settingsProjectsSelectedId);
   const setSelectedId = useUIStore((state) => state.setSettingsProjectsSelectedId);
   const { currentTheme } = useThemeSystem();
   const [brokenIconIds, setBrokenIconIds] = React.useState<Set<string>>(new Set());
 
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
-  const tauriIpcAvailable = React.useMemo(() => isTauriShell(), []);
 
   const handleAddProject = React.useCallback(() => {
-    if (!tauriIpcAvailable || !isDesktopLocalOriginActive()) {
-      sessionEvents.requestDirectoryDialog();
-      return;
-    }
-
-    requestDirectoryAccess('')
-      .then((result) => {
-        if (result.success && result.path) {
-          const added = addProject(result.path, { id: result.projectId });
-          if (!added) {
-            toast.error(t('sessions.sidebar.directory.errorAddProjectTitle'), {
-              description: t('sessions.sidebar.directory.errorAddProjectDescription'),
-            });
-            return;
-          }
-          setSelectedId(added.id);
-        } else if (result.error && result.error !== 'Directory selection cancelled') {
-          toast.error(t('sessions.sidebar.directory.errorSelectDirectoryTitle'), {
-            description: result.error,
-          });
-        }
-      })
-      .catch((error) => {
-        console.error('Failed to select directory:', error);
-        toast.error(t('sessions.sidebar.directory.errorSelectDirectoryTitle'));
-      });
-  }, [addProject, setSelectedId, tauriIpcAvailable, t]);
+    sessionEvents.requestDirectoryDialog();
+  }, []);
 
   React.useEffect(() => {
     if (projects.length === 0) {

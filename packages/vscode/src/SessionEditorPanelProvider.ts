@@ -6,6 +6,7 @@ import { getWebviewShikiThemes } from './shikiThemes';
 import { getWebviewHtml } from './webviewHtml';
 import { openSseProxy } from './sseProxy';
 import { resolveWebviewDevServerUrl } from './webviewDevServer';
+import { normalizeWindowsDriveLetter } from './pathUtils';
 
 type SessionPanelState = {
   panel: vscode.WebviewPanel;
@@ -257,7 +258,9 @@ export class SessionEditorPanelProvider {
   }
 
   private _getHtmlForWebview(webview: vscode.Webview, sessionId: string | null) {
-    const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+    const workspaceFolder = normalizeWindowsDriveLetter(
+      vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || ''
+    );
     const initialStatus = this._cachedStatus;
     const cliAvailable = this._openCodeManager?.isCliAvailable() ?? false;
 
