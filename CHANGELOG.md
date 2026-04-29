@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.9.10] - 2026-04-28
+
+- UI/Localization: added Korean interface translations and default new installs back to English when no language has been chosen (thanks to @An-jinu).
+- Chat/Models: unified the model picker across desktop and mobile with a cleaner, more consistent selection flow (thanks to @daveotero).
+- Projects: improved the project directory picker with expandable pinned folders and better file/path handling for faster project selection.
+- Chat/UI: improved split-response action placement, error-message alignment, tab close affordances, and overscroll behavior for a more polished conversation view.
+- Sessions/Sidebar: fixed stale session, folder, project, and worktree state after mutations, and polished pinned-session indicators so navigation stays accurate (thanks to @corrm, @Yabuku-xD).
+- VSCode/Windows: normalized Windows drive-letter paths in extension webviews and added MiniMax/Ollama quota support, improving file handling and usage visibility in the extension (thanks to @sdunfeng).
+- Reliability/Startup: hardened managed OpenCode startup, preserved shell PATH more reliably, ignored stale downgrade update prompts, and improved stream/proxy recovery with heartbeat support.
+
 ## [1.9.9] - 2026-04-26
 
 - UI/Localization: added a localization foundation with translated interface strings for Spanish, Brazilian Portuguese, Ukrainian, and Simplified Chinese.
