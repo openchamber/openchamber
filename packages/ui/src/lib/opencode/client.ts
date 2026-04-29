@@ -741,7 +741,7 @@ class OpencodeService {
 
     trackSessionStarted(params.id, params.providerID);
 
-    let response: Response;
+    let response!: Response;
 
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
