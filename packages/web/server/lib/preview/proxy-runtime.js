@@ -128,6 +128,68 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
       || isStyleRuntimeNoise;
   };
 
+  const installViteHmrProxyPatch = () => {
+    if (window.__openchamberViteHmrProxyPatched || typeof window.WebSocket !== 'function') return;
+    window.__openchamberViteHmrProxyPatched = true;
+    const NativeWebSocket = window.WebSocket;
+    const proxyMatch = window.location.pathname.match(/^(\/api\/preview\/proxy\/[a-f0-9]{16,64})(?:\/|$)/i);
+    if (!proxyMatch) return;
+    const proxyBase = proxyMatch[1] + '/';
+    let reloadTimer = 0;
+
+    const schedulePreviewReload = () => {
+      if (reloadTimer) return;
+      reloadTimer = window.setTimeout(() => {
+        reloadTimer = 0;
+        try {
+          window.location.reload();
+        } catch {}
+      }, 80);
+    };
+
+    const rewriteUrl = (url, protocols) => {
+      const protocolList = Array.isArray(protocols) ? protocols : [protocols];
+      const isViteSocket = protocolList.indexOf('vite-hmr') >= 0 || protocolList.indexOf('vite-ping') >= 0;
+      if (!isViteSocket) return url;
+      try {
+        const parsed = new URL(String(url), window.location.href);
+        if (parsed.host !== window.location.host) return url;
+        if (parsed.pathname.indexOf(proxyBase) === 0) return url;
+        parsed.pathname = proxyBase;
+        return parsed.toString();
+      } catch {
+        return url;
+      }
+    };
+
+    function OpenChamberPreviewWebSocket(url, protocols) {
+      const protocolList = Array.isArray(protocols) ? protocols : [protocols];
+      const isViteSocket = protocolList.indexOf('vite-hmr') >= 0;
+      const nextUrl = rewriteUrl(url, protocols);
+      const socket = arguments.length === 1
+        ? new NativeWebSocket(nextUrl)
+        : new NativeWebSocket(nextUrl, protocols);
+
+      if (isViteSocket) {
+        socket.addEventListener('message', (event) => {
+          try {
+            const payload = JSON.parse(String(event.data || ''));
+            if (payload && (payload.type === 'update' || payload.type === 'full-reload')) {
+              schedulePreviewReload();
+            }
+          } catch {}
+        });
+      }
+
+      return socket;
+    }
+
+    OpenChamberPreviewWebSocket.prototype = NativeWebSocket.prototype;
+    Object.setPrototypeOf(OpenChamberPreviewWebSocket, NativeWebSocket);
+    Object.defineProperty(OpenChamberPreviewWebSocket, 'name', { value: 'WebSocket' });
+    window.WebSocket = OpenChamberPreviewWebSocket;
+  };
+
   const selectorPart = (element) => {
     const tag = element.tagName.toLowerCase();
     if (element.id && /^[A-Za-z][\w:.-]*$/.test(element.id)) return tag + '#' + CSS.escape(element.id);
@@ -244,6 +306,8 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
       return original.apply(console, args);
     };
   }
+
+  installViteHmrProxyPatch();
 
   window.addEventListener('error', (event) => {
     const target = event.target;
@@ -596,13 +660,32 @@ export const createPreviewProxyRuntime = ({
       }
 
       const script = `<script id="${PREVIEW_BRIDGE_SCRIPT_ID}">${PREVIEW_BRIDGE_SCRIPT}</script>`;
-      if (bodyText.includes('</head>')) {
-        return bodyText.replace('</head>', `${script}</head>`);
+      if (/<head(?:\s[^>]*)?>/i.test(bodyText)) {
+        return bodyText.replace(/<head(\s[^>]*)?>/i, (match) => `${match}${script}`);
       }
       if (bodyText.includes('</body>')) {
         return bodyText.replace('</body>', `${script}</body>`);
       }
       return `${bodyText}${script}`;
+    };
+
+    const rewriteViteClientHmr = (bodyText, proxyBasePath) => {
+      if (typeof bodyText !== 'string' || !bodyText.includes('vite-hmr')) {
+        return bodyText;
+      }
+
+      const base = proxyBasePath.endsWith('/') ? proxyBasePath : `${proxyBasePath}/`;
+      const escapedBase = JSON.stringify(base).slice(1, -1);
+      return bodyText
+        .replace(/const base\$1 = [^;]+;/, () => `const base$1 = ${JSON.stringify(base)};`)
+        .replace(/const base = [^;]+;/, () => `const base = ${JSON.stringify(base)};`)
+        .replace(/const hmrPort = [^;]+;/, () => 'const hmrPort = importMetaUrl.port;')
+        .replace(/const socketHost = [^;]+;/, () => `const socketHost = \`\${importMetaUrl.hostname}\${importMetaUrl.port ? ':' + importMetaUrl.port : ''}${escapedBase}\`;`)
+        .replace(/const directSocketHost = [^;]+;/, () => 'const directSocketHost = socketHost;')
+        .replace(
+          /const socketHost = `\$\{[^;]+?;\nconst directSocketHost = [^;]+;/s,
+          () => `const socketHost = \`\${importMetaUrl.hostname}\${importMetaUrl.port ? ':' + importMetaUrl.port : ''}${escapedBase}\`;\nconst directSocketHost = socketHost;`,
+        );
     };
 
     app.post('/api/preview/targets', express.json(), async (req, res) => {
@@ -705,17 +788,33 @@ export const createPreviewProxyRuntime = ({
           stripFrameBustingHeaders(proxyRes.headers);
 
           const contentType = String(proxyRes.headers?.['content-type'] || '').toLowerCase();
-          if (!contentType.includes('text/html') && !contentType.includes('text/css')) {
+          const isHtml = contentType.includes('text/html');
+          const isCss = contentType.includes('text/css');
+          const isJavaScript = contentType.includes('javascript') || contentType.includes('ecmascript');
+          if (!isHtml && !isCss && !isJavaScript) {
             return responseBuffer;
           }
+
+          proxyRes.headers['cache-control'] = 'no-store, no-cache, must-revalidate, proxy-revalidate';
+          proxyRes.headers.pragma = 'no-cache';
+          proxyRes.headers.expires = '0';
+          delete proxyRes.headers.etag;
+          delete proxyRes.headers['last-modified'];
 
           const resolved = resolveTargetFromRequest(req);
           if (!resolved.ok) {
             return responseBuffer;
           }
 
-          const rewrittenBody = rewritePreviewBody(responseBuffer.toString('utf8'), `/api/preview/proxy/${resolved.id}`);
-          return contentType.includes('text/html') ? injectPreviewBridge(rewrittenBody) : rewrittenBody;
+          const proxyBasePath = `/api/preview/proxy/${resolved.id}`;
+          const parsed = new URL(req.originalUrl || req.url || '', 'http://localhost');
+          const upstreamPath = stripProxyPrefix(parsed.pathname, resolved.id);
+          if (isJavaScript && upstreamPath === '/@vite/client') {
+            return rewriteViteClientHmr(responseBuffer.toString('utf8'), proxyBasePath);
+          }
+
+          const rewrittenBody = rewritePreviewBody(responseBuffer.toString('utf8'), proxyBasePath);
+          return isHtml ? injectPreviewBridge(rewrittenBody) : rewrittenBody;
         }),
         error: (err, _req, res) => {
           const isDev = typeof process !== 'undefined'
@@ -787,7 +886,6 @@ export const createPreviewProxyRuntime = ({
           const nextPath = stripProxyPrefix(parsed.pathname, resolved.id);
           const search = parsed.searchParams.toString();
           req.url = `${nextPath}${search ? `?${search}` : ''}`;
-
           proxy.upgrade(req, socket, head);
         } catch {
           rejectWebSocketUpgrade(socket, 500, 'Upgrade failed');

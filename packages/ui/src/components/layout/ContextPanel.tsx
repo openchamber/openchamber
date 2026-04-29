@@ -184,7 +184,8 @@ const renderPreviewScreenshot = async (
       const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.82));
       if (!blob) return null;
       return new File([blob], `preview-annotation-${Date.now()}.jpg`, { type: 'image/jpeg' });
-    } catch {
+    } catch (error) {
+      console.warn('[preview] failed to capture annotation screenshot:', error);
       return null;
     }
   }
@@ -536,9 +537,11 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
   const proxySrc = isLoopback && proxyState.status === 'ready' && normalizedUrl
     ? (() => {
       const path = normalizedUrl.pathname || '/';
-      const search = normalizedUrl.search || '';
+      const searchParams = new URLSearchParams(normalizedUrl.search);
+      searchParams.set('ocPreview', String(reloadNonce));
+      const search = searchParams.toString();
       const hash = normalizedUrl.hash || '';
-      return `${proxyState.proxyBasePath}${path}${search}${hash}`;
+      return `${proxyState.proxyBasePath}${path}${search ? `?${search}` : ''}${hash}`;
     })()
     : '';
 
@@ -819,10 +822,10 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
     setUpstreamState('unknown');
 
     void (async () => {
-      const probe = async (method: 'HEAD' | 'GET'): Promise<Response | null> => {
+      const probe = async (): Promise<Response | null> => {
         try {
           return await fetch(proxySrc, {
-            method,
+            method: 'GET',
             credentials: 'include',
             cache: 'no-store',
             redirect: 'manual',
@@ -832,11 +835,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
         }
       };
 
-      let response = await probe('HEAD');
-      // Some dev servers reject HEAD with 404/405; fall back to a single GET.
-      if (response && (response.status === 404 || response.status === 405)) {
-        response = await probe('GET');
-      }
+      const response = await probe();
 
       if (cancelled) return;
 
