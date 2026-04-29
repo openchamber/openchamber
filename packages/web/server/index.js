@@ -75,7 +75,7 @@ import { createNotificationTemplateRuntime } from './lib/notifications/template-
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
 import { createProjectConfigRuntime } from './lib/projects/project-config.js';
 import { createPreviewProxyRuntime } from './lib/preview/proxy-runtime.js';
-import { createProxyMiddleware } from 'http-proxy-middleware';
+import { createProxyMiddleware, responseInterceptor } from 'http-proxy-middleware';
 import webPush from 'web-push';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -1161,6 +1161,7 @@ async function main(options = {}) {
     crypto,
     URL,
     createProxyMiddleware,
+    responseInterceptor,
   });
   previewProxyRuntime.attach(app, {
     server,

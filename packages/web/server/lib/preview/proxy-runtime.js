@@ -85,6 +85,7 @@ export const createPreviewProxyRuntime = ({
   crypto,
   URL,
   createProxyMiddleware,
+  responseInterceptor,
 }) => {
   const targets = new Map();
   let sweepTimer = null;
@@ -219,6 +220,46 @@ export const createPreviewProxyRuntime = ({
   }) => {
     ensureSweeper();
 
+    const rewritePreviewBody = (bodyText, proxyBasePath) => {
+      if (typeof bodyText !== 'string' || bodyText.length === 0) {
+        return bodyText;
+      }
+
+      const prefix = proxyBasePath.endsWith('/') ? proxyBasePath.slice(0, -1) : proxyBasePath;
+      const rewriteRootPath = (value) => {
+        if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//')) {
+          return value;
+        }
+        if (value.startsWith('/api/preview/proxy/')) {
+          return value;
+        }
+        return `${prefix}${value}`;
+      };
+
+      return bodyText
+        .replace(/\b(src|href|action)=(["'])\/(?!\/)([^"']*)\2/gi, (_match, attr, quote, path) => {
+          return `${attr}=${quote}${rewriteRootPath(`/${path}`)}${quote}`;
+        })
+        .replace(/\bsrcset=(["'])([^"']*)\1/gi, (_match, quote, value) => {
+          const rewritten = String(value).split(',').map((part) => {
+            const trimmed = part.trim();
+            if (!trimmed) return trimmed;
+            const segments = trimmed.split(/\s+/);
+            const url = segments[0] || '';
+            segments[0] = rewriteRootPath(url);
+            return segments.join(' ');
+          }).join(', ');
+          return `srcset=${quote}${rewritten}${quote}`;
+        })
+        .replace(/url\((['"]?)\/(?!\/)([^)'"]*)\1\)/gi, (_match, quote, path) => {
+          const q = quote || '';
+          return `url(${q}${rewriteRootPath(`/${path}`)}${q})`;
+        })
+        .replace(/@import\s+(["'])\/(?!\/)([^"']*)\1/gi, (_match, quote, path) => {
+          return `@import ${quote}${rewriteRootPath(`/${path}`)}${quote}`;
+        });
+    };
+
     app.post('/api/preview/targets', express.json(), async (req, res) => {
       try {
         if (uiAuthController?.enabled) {
@@ -270,6 +311,7 @@ export const createPreviewProxyRuntime = ({
       target: 'http://127.0.0.1',
       changeOrigin: true,
       ws: true,
+      selfHandleResponse: true,
       // Restrict the proxy (especially its auto-attached `upgrade` listener,
       // which is registered globally on the underlying HTTP server when
       // `ws: true`) to preview paths. Without this, every WebSocket upgrade
@@ -313,12 +355,24 @@ export const createPreviewProxyRuntime = ({
           proxyReq.removeHeader('x-openchamber-ui-session');
           proxyReq.setHeader('accept-encoding', 'identity');
         },
-        proxyRes: (proxyRes) => {
+        proxyRes: responseInterceptor(async (responseBuffer, proxyRes, req) => {
           // Allow the dev server response to be framed inside OpenChamber even
           // if it normally sets X-Frame-Options or a CSP frame-ancestors rule.
           // The proxy is same-origin so embedding is otherwise safe.
           stripFrameBustingHeaders(proxyRes.headers);
-        },
+
+          const contentType = String(proxyRes.headers?.['content-type'] || '').toLowerCase();
+          if (!contentType.includes('text/html') && !contentType.includes('text/css')) {
+            return responseBuffer;
+          }
+
+          const resolved = resolveTargetFromRequest(req);
+          if (!resolved.ok) {
+            return responseBuffer;
+          }
+
+          return rewritePreviewBody(responseBuffer.toString('utf8'), `/api/preview/proxy/${resolved.id}`);
+        }),
         error: (err, _req, res) => {
           const isDev = typeof process !== 'undefined'
             && process

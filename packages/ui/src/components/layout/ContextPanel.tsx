@@ -453,7 +453,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl }) => {
 
   const showUpstreamStarting = isLoopback
     && proxyState.status === 'ready'
-    && upstreamState === 'starting';
+    && (upstreamState === 'unknown' || upstreamState === 'starting');
 
   const showUpstreamUnreachable = isLoopback
     && proxyState.status === 'ready'
@@ -541,7 +541,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl }) => {
               {t('contextPanel.preview.actions.retry')}
             </Button>
           </div>
-        ) : effectiveSrc ? (
+        ) : effectiveSrc && (!isLoopback || upstreamState === 'reachable') ? (
           <iframe
             key={`${effectiveSrc}:${reloadNonce}`}
             src={effectiveSrc}
