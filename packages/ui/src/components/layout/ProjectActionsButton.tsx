@@ -36,15 +36,6 @@ import {
   toProjectActionRunKey,
 } from '@/lib/projectActions';
 
-type RunningEntry = {
-  key: string;
-  directory: string;
-  actionId: string;
-  tabId: string;
-  sessionId: string;
-  status: 'running' | 'stopping';
-};
-
 type UrlWatchEntry = {
   lastSeenChunkId: number | null;
   openedUrl: boolean;
@@ -194,6 +185,7 @@ export const ProjectActionsButton = ({
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSettingsProjectsSelectedId = useUIStore((state) => state.setSettingsProjectsSelectedId);
+  const openContextPreview = useUIStore((state) => state.openContextPreview);
 
   const terminalSessions = useTerminalStore((state) => state.sessions);
   const ensureDirectory = useTerminalStore((state) => state.ensureDirectory);
@@ -201,11 +193,15 @@ export const ProjectActionsButton = ({
   const setActiveTab = useTerminalStore((state) => state.setActiveTab);
   const setConnecting = useTerminalStore((state) => state.setConnecting);
   const setTabSessionId = useTerminalStore((state) => state.setTabSessionId);
+  const setTabPreviewUrl = useTerminalStore((state) => state.setTabPreviewUrl);
+  const projectActionRuns = useTerminalStore((state) => state.projectActionRuns);
+  const setProjectActionRun = useTerminalStore((state) => state.setProjectActionRun);
+  const updateProjectActionRunStatus = useTerminalStore((state) => state.updateProjectActionRunStatus);
+  const removeProjectActionRun = useTerminalStore((state) => state.removeProjectActionRun);
 
   const [actions, setActions] = React.useState<OpenChamberProjectAction[]>([]);
   const [selectedActionId, setSelectedActionId] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState(false);
-  const [runningByKey, setRunningByKey] = React.useState<Record<string, RunningEntry>>({});
   const tabByKeyRef = React.useRef<Record<string, string>>({});
   const urlWatchByRunKeyRef = React.useRef<Record<string, UrlWatchEntry>>({});
   const loadRequestIdRef = React.useRef(0);
@@ -304,26 +300,17 @@ export const ProjectActionsButton = ({
   }, [actions, selectedActionId]);
 
   React.useEffect(() => {
-    setRunningByKey((prev) => {
-      let changed = false;
-      const next: Record<string, RunningEntry> = {};
-
-      for (const [key, entry] of Object.entries(prev)) {
-        const directoryState = terminalSessions.get(entry.directory);
-        const tab = directoryState?.tabs.find((item) => item.id === entry.tabId);
-        if (!tab || tab.terminalSessionId !== entry.sessionId) {
-          changed = true;
-          continue;
-        }
-        next[key] = entry;
+    for (const [key, entry] of Object.entries(projectActionRuns)) {
+      const directoryState = terminalSessions.get(entry.directory);
+      const tab = directoryState?.tabs.find((item) => item.id === entry.tabId);
+      if (!tab || tab.terminalSessionId !== entry.sessionId) {
+        removeProjectActionRun(key);
       }
-
-      return changed ? next : prev;
-    });
-  }, [terminalSessions]);
+    }
+  }, [projectActionRuns, removeProjectActionRun, terminalSessions]);
 
   React.useEffect(() => {
-    for (const [runKey, entry] of Object.entries(runningByKey)) {
+    for (const [runKey, entry] of Object.entries(projectActionRuns)) {
       const watch = urlWatchByRunKeyRef.current[runKey] ?? { lastSeenChunkId: null, openedUrl: false, tail: '' };
       urlWatchByRunKeyRef.current[runKey] = watch;
       const action = actions.find((item) => item.id === entry.actionId);
@@ -365,12 +352,12 @@ export const ProjectActionsButton = ({
     }
 
     for (const runKey of Object.keys(urlWatchByRunKeyRef.current)) {
-      if (!runningByKey[runKey]) {
+      if (!projectActionRuns[runKey]) {
         delete urlWatchByRunKeyRef.current[runKey];
       }
     }
 
-  }, [actions, openExternal, runningByKey, t, terminalSessions]);
+  }, [actions, openExternal, projectActionRuns, t, terminalSessions]);
 
   const normalizedDirectory = React.useMemo(() => {
     return normalizeProjectActionDirectory(directory || stableProjectRef?.path || '');
@@ -383,7 +370,7 @@ export const ProjectActionsButton = ({
     return actions.find((entry) => entry.id === selectedActionId) ?? actions[0] ?? null;
   }, [actions, selectedActionId]);
 
-  const getOrCreateActionTab = React.useCallback(async (action: OpenChamberProjectAction) => {
+  const getOrCreateActionTab = React.useCallback(async (action: OpenChamberProjectAction, options: { revealTerminal?: boolean } = {}) => {
     if (!normalizedDirectory) {
       throw new Error(t('projectActions.error.noActiveDirectory'));
     }
@@ -405,10 +392,11 @@ export const ProjectActionsButton = ({
     }
 
     setTabLabel(normalizedDirectory, tabId, `Action: ${action.name}`);
-    setActiveTab(normalizedDirectory, tabId);
-
-    setBottomTerminalOpen(true);
-    setActiveMainTab('terminal');
+    if (options.revealTerminal !== false) {
+      setActiveTab(normalizedDirectory, tabId);
+      setBottomTerminalOpen(true);
+      setActiveMainTab('terminal');
+    }
 
     const stateAfterTab = useTerminalStore.getState().getDirectoryState(normalizedDirectory);
     const tab = stateAfterTab?.tabs.find((entry) => entry.id === tabId);
@@ -438,13 +426,14 @@ export const ProjectActionsButton = ({
     }
 
     const runKey = toProjectActionRunKey(normalizedDirectory, action.id);
-    const existingRun = runningByKey[runKey];
+    const existingRun = projectActionRuns[runKey];
     if (existingRun && existingRun.status === 'running') {
       return;
     }
 
     try {
-      const { key, tabId, sessionId } = await getOrCreateActionTab(action);
+      const hasCustomOpenUrl = action.autoOpenUrl === true && (action.openUrl || '').trim().length > 0;
+      const { key, tabId, sessionId } = await getOrCreateActionTab(action, { revealTerminal: !hasCustomOpenUrl });
       let activeSessionId = sessionId;
       let createdSession = false;
 
@@ -468,19 +457,15 @@ export const ProjectActionsButton = ({
         await sleep(350);
       }
 
-      setRunningByKey((prev) => ({
-        ...prev,
-        [key]: {
-          key,
-          directory: normalizedDirectory,
-          actionId: action.id,
-          tabId,
-          sessionId: activeSessionId,
-          status: 'running',
-        },
-      }));
+      setProjectActionRun({
+        key,
+        directory: normalizedDirectory,
+        actionId: action.id,
+        tabId,
+        sessionId: activeSessionId,
+        status: 'running',
+      });
 
-      const hasCustomOpenUrl = action.autoOpenUrl === true && (action.openUrl || '').trim().length > 0;
       const hasDesktopForwardSelection = action.autoOpenUrl === true
         && isDesktopShellApp
         && (action.desktopOpenSshForward || '').trim().length > 0;
@@ -490,15 +475,21 @@ export const ProjectActionsButton = ({
         : null;
 
       if (desktopForwardUrl) {
+        setTabPreviewUrl(normalizedDirectory, tabId, null, { locked: true });
         void openExternal(desktopForwardUrl);
         toast.success(t('projectActions.toast.openedForwardedUrl'));
       } else if (manualOpenUrl) {
-        void openExternal(manualOpenUrl);
+        setTabPreviewUrl(normalizedDirectory, tabId, manualOpenUrl, { locked: true, autoOpened: true });
+        openContextPreview(normalizedDirectory, manualOpenUrl);
         toast.success(t('projectActions.toast.openedActionUrl'));
       } else if (hasCustomOpenUrl) {
+        setTabPreviewUrl(normalizedDirectory, tabId, null, { locked: true });
         toast.error(t('projectActions.error.invalidCustomUrlFormat'));
       } else if (hasDesktopForwardSelection) {
+        setTabPreviewUrl(normalizedDirectory, tabId, null, { locked: true });
         toast.error(t('projectActions.error.selectedDesktopSshForwardUnavailable'));
+      } else {
+        setTabPreviewUrl(normalizedDirectory, tabId, null, { locked: false, autoOpened: false });
       }
 
       urlWatchByRunKeyRef.current[key] = {
@@ -510,11 +501,7 @@ export const ProjectActionsButton = ({
       const normalizedCommand = stripControlChars(action.command.trim().replace(/\r\n|\r/g, '\n'));
       await terminal.sendInput(activeSessionId, `${normalizedCommand}\r`);
     } catch (error) {
-      setRunningByKey((prev) => {
-        const next = { ...prev };
-        delete next[runKey];
-        return next;
-      });
+      removeProjectActionRun(runKey);
       delete urlWatchByRunKeyRef.current[runKey];
       toast.error(error instanceof Error ? error.message : t('projectActions.error.failedToRunAction'));
     }
@@ -526,9 +513,13 @@ export const ProjectActionsButton = ({
     isDesktopShellApp,
     normalizedDirectory,
     openExternal,
-    runningByKey,
+    openContextPreview,
+    projectActionRuns,
     runtime.isVSCode,
+    removeProjectActionRun,
     setConnecting,
+    setProjectActionRun,
+    setTabPreviewUrl,
     setTabSessionId,
     t,
     terminal,
@@ -536,18 +527,12 @@ export const ProjectActionsButton = ({
 
   const stopAction = React.useCallback(async (action: OpenChamberProjectAction) => {
     const runKey = toProjectActionRunKey(normalizedDirectory, action.id);
-    const activeRun = runningByKey[runKey];
+    const activeRun = projectActionRuns[runKey];
     if (!activeRun) {
       return;
     }
 
-    setRunningByKey((prev) => ({
-      ...prev,
-      [runKey]: {
-        ...activeRun,
-        status: 'stopping',
-      },
-    }));
+    updateProjectActionRunStatus(runKey, 'stopping');
 
     try {
       await terminal.sendInput(activeRun.sessionId, '\x03');
@@ -581,20 +566,16 @@ export const ProjectActionsButton = ({
       setTabSessionId(activeRun.directory, activeRun.tabId, null);
     }
 
-    setRunningByKey((prev) => {
-      const next = { ...prev };
-      delete next[runKey];
-      return next;
-    });
+    removeProjectActionRun(runKey);
     delete urlWatchByRunKeyRef.current[runKey];
-  }, [normalizedDirectory, runningByKey, setTabSessionId, terminal]);
+  }, [normalizedDirectory, projectActionRuns, removeProjectActionRun, setTabSessionId, terminal, updateProjectActionRunStatus]);
 
   const handlePrimaryClick = React.useCallback(() => {
     if (!selectedAction) {
       return;
     }
     const runKey = toProjectActionRunKey(normalizedDirectory, selectedAction.id);
-    const runningEntry = runningByKey[runKey];
+    const runningEntry = projectActionRuns[runKey];
     if (runningEntry?.status === 'stopping') {
       return;
     }
@@ -603,7 +584,7 @@ export const ProjectActionsButton = ({
       return;
     }
     void runAction(selectedAction);
-  }, [normalizedDirectory, runAction, runningByKey, selectedAction, stopAction]);
+  }, [normalizedDirectory, runAction, projectActionRuns, selectedAction, stopAction]);
 
   const handleSelectAction = React.useCallback((action: OpenChamberProjectAction, toggleStopIfRunning = false) => {
     setSelectedActionId(action.id);
@@ -614,7 +595,7 @@ export const ProjectActionsButton = ({
     }
 
     const runKey = toProjectActionRunKey(normalizedDirectory, action.id);
-    const runningEntry = runningByKey[runKey];
+    const runningEntry = projectActionRuns[runKey];
     if (runningEntry?.status === 'stopping') {
       return;
     }
@@ -623,7 +604,7 @@ export const ProjectActionsButton = ({
       return;
     }
     void runAction(action);
-  }, [normalizedDirectory, runAction, runningByKey, stopAction]);
+  }, [normalizedDirectory, runAction, projectActionRuns, stopAction]);
 
   const openProjectActionsSettings = React.useCallback(() => {
     if (!stableProjectRef?.id) {
@@ -687,7 +668,7 @@ export const ProjectActionsButton = ({
     t('projectActions.label.fallbackAction'),
   );
   const selectedRunKey = toProjectActionRunKey(normalizedDirectory, resolvedSelected.id);
-  const selectedRunning = runningByKey[selectedRunKey];
+  const selectedRunning = projectActionRuns[selectedRunKey];
   const isStoppingSelected = selectedRunning?.status === 'stopping';
 
   if (compact) {
@@ -725,7 +706,7 @@ export const ProjectActionsButton = ({
             const iconKey = (entry.icon || 'play') as keyof typeof PROJECT_ACTION_ICON_MAP;
             const Icon = PROJECT_ACTION_ICON_MAP[iconKey] || RiPlayLine;
             const runKey = toProjectActionRunKey(normalizedDirectory, entry.id);
-            const runState = runningByKey[runKey];
+            const runState = projectActionRuns[runKey];
             const isRunning = Boolean(runState);
             const isStopping = runState?.status === 'stopping';
 
@@ -809,7 +790,7 @@ export const ProjectActionsButton = ({
             const iconKey = (entry.icon || 'play') as keyof typeof PROJECT_ACTION_ICON_MAP;
             const Icon = PROJECT_ACTION_ICON_MAP[iconKey] || RiPlayLine;
             const runKey = toProjectActionRunKey(normalizedDirectory, entry.id);
-            const runState = runningByKey[runKey];
+            const runState = projectActionRuns[runKey];
             const isRunning = Boolean(runState);
             const isStopping = runState?.status === 'stopping';
 

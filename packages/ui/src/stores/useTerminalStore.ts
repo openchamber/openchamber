@@ -22,6 +22,7 @@ export type TerminalTab = {
   createdAt: number;
   previewUrl: string | null;
   previewAutoOpened: boolean;
+  previewUrlLocked: boolean;
 };
 
 export type DirectoryTerminalState = {
@@ -29,8 +30,18 @@ export type DirectoryTerminalState = {
   activeTabId: string | null;
 };
 
+export type TerminalProjectActionRun = {
+  key: string;
+  directory: string;
+  actionId: string;
+  tabId: string;
+  sessionId: string;
+  status: 'running' | 'stopping';
+};
+
 interface TerminalStore {
   sessions: Map<string, DirectoryTerminalState>;
+  projectActionRuns: Record<string, TerminalProjectActionRun>;
   nextChunkId: number;
   nextTabId: number;
   hasHydrated: boolean;
@@ -49,7 +60,11 @@ interface TerminalStore {
   setConnecting: (directory: string, tabId: string, isConnecting: boolean) => void;
   appendToBuffer: (directory: string, tabId: string, chunk: string) => void;
   clearBuffer: (directory: string, tabId: string) => void;
+  setTabPreviewUrl: (directory: string, tabId: string, url: string | null, options?: { locked?: boolean; autoOpened?: boolean }) => void;
   markPreviewAutoOpened: (directory: string, tabId: string) => void;
+  setProjectActionRun: (run: TerminalProjectActionRun) => void;
+  updateProjectActionRunStatus: (runKey: string, status: TerminalProjectActionRun['status']) => void;
+  removeProjectActionRun: (runKey: string) => void;
 
   removeDirectory: (directory: string) => void;
   clearAll: () => void;
@@ -100,6 +115,7 @@ const createEmptyTab = (id: string, label: string): TerminalTab => ({
   createdAt: Date.now(),
   previewUrl: null,
   previewAutoOpened: false,
+  previewUrlLocked: false,
 });
 
 // eslint-disable-next-line no-control-regex
@@ -176,6 +192,7 @@ export const useTerminalStore = create<TerminalStore>()(
     persist(
       (set, get) => ({
         sessions: new Map(),
+        projectActionRuns: {},
         nextChunkId: 1,
         nextTabId: 1,
         hasHydrated: typeof window === 'undefined',
@@ -328,12 +345,20 @@ export const useTerminalStore = create<TerminalStore>()(
             }
 
             const nextTabs = existing.tabs.filter((t) => t.id !== tabId);
+            const nextRuns = Object.fromEntries(
+              Object.entries(state.projectActionRuns).filter(([, run]) => !(run.directory === key && run.tabId === tabId))
+            );
+            const runsChanged = Object.keys(nextRuns).length !== Object.keys(state.projectActionRuns).length;
 
             if (nextTabs.length === 0) {
               const newTabId = `tab-${state.nextTabId}`;
               const newTab = createEmptyTab(newTabId, 'Terminal');
               newSessions.set(key, createEmptyDirectoryState(newTab));
-              return { sessions: newSessions, nextTabId: state.nextTabId + 1 };
+              return {
+                sessions: newSessions,
+                nextTabId: state.nextTabId + 1,
+                ...(runsChanged ? { projectActionRuns: nextRuns } : {}),
+              };
             }
 
             let nextActive = existing.activeTabId;
@@ -348,7 +373,10 @@ export const useTerminalStore = create<TerminalStore>()(
               activeTabId: nextActive,
             });
 
-            return { sessions: newSessions };
+            return {
+              sessions: newSessions,
+              ...(runsChanged ? { projectActionRuns: nextRuns } : {}),
+            };
           });
         },
 
@@ -463,7 +491,7 @@ export const useTerminalStore = create<TerminalStore>()(
               bufferLength -= removed.data.length;
             }
 
-            const maybePreviewUrl = extractPreviewUrl(chunk) ?? extractPythonHttpServerUrl(chunk);
+            const maybePreviewUrl = tab.previewUrlLocked ? null : extractPreviewUrl(chunk) ?? extractPythonHttpServerUrl(chunk);
             const shouldUpdatePreview = Boolean(maybePreviewUrl && maybePreviewUrl !== tab.previewUrl);
 
             const nextTabs = [...existing.tabs];
@@ -478,6 +506,39 @@ export const useTerminalStore = create<TerminalStore>()(
             newSessions.set(key, { ...existing, tabs: nextTabs });
 
             return { sessions: newSessions, nextChunkId: chunkId + 1 };
+          });
+        },
+
+        setTabPreviewUrl: (directory: string, tabId: string, url: string | null, options = {}) => {
+          const key = normalizeDirectory(directory);
+          set((state) => {
+            const newSessions = new Map(state.sessions);
+            const existing = newSessions.get(key);
+            if (!existing) {
+              return state;
+            }
+
+            const idx = findTabIndex(existing, tabId);
+            if (idx < 0) {
+              return state;
+            }
+
+            const tab = existing.tabs[idx];
+            const nextPreviewAutoOpened = options.autoOpened ?? tab.previewAutoOpened;
+            const nextPreviewUrlLocked = options.locked ?? tab.previewUrlLocked;
+            if (tab.previewUrl === url && tab.previewAutoOpened === nextPreviewAutoOpened && tab.previewUrlLocked === nextPreviewUrlLocked) {
+              return state;
+            }
+
+            const nextTabs = [...existing.tabs];
+            nextTabs[idx] = {
+              ...tab,
+              previewUrl: url,
+              previewAutoOpened: nextPreviewAutoOpened,
+              previewUrlLocked: nextPreviewUrlLocked,
+            };
+            newSessions.set(key, { ...existing, tabs: nextTabs });
+            return { sessions: newSessions };
           });
         },
 
@@ -504,6 +565,47 @@ export const useTerminalStore = create<TerminalStore>()(
             nextTabs[idx] = { ...tab, previewAutoOpened: true };
             newSessions.set(key, { ...existing, tabs: nextTabs });
             return { sessions: newSessions };
+          });
+        },
+
+        setProjectActionRun: (run: TerminalProjectActionRun) => {
+          set((state) => {
+            const existing = state.projectActionRuns[run.key];
+            if (existing
+              && existing.directory === run.directory
+              && existing.actionId === run.actionId
+              && existing.tabId === run.tabId
+              && existing.sessionId === run.sessionId
+              && existing.status === run.status) {
+              return state;
+            }
+            return { projectActionRuns: { ...state.projectActionRuns, [run.key]: run } };
+          });
+        },
+
+        updateProjectActionRunStatus: (runKey: string, status: TerminalProjectActionRun['status']) => {
+          set((state) => {
+            const existing = state.projectActionRuns[runKey];
+            if (!existing || existing.status === status) {
+              return state;
+            }
+            return {
+              projectActionRuns: {
+                ...state.projectActionRuns,
+                [runKey]: { ...existing, status },
+              },
+            };
+          });
+        },
+
+        removeProjectActionRun: (runKey: string) => {
+          set((state) => {
+            if (!state.projectActionRuns[runKey]) {
+              return state;
+            }
+            const next = { ...state.projectActionRuns };
+            delete next[runKey];
+            return { projectActionRuns: next };
           });
         },
 
@@ -537,12 +639,15 @@ export const useTerminalStore = create<TerminalStore>()(
           set((state) => {
             const newSessions = new Map(state.sessions);
             newSessions.delete(key);
-            return { sessions: newSessions };
+            const nextRuns = Object.fromEntries(
+              Object.entries(state.projectActionRuns).filter(([, run]) => run.directory !== key)
+            );
+            return { sessions: newSessions, projectActionRuns: nextRuns };
           });
         },
 
         clearAll: () => {
-          set({ sessions: new Map(), nextChunkId: 1, nextTabId: 1 });
+          set({ sessions: new Map(), projectActionRuns: {}, nextChunkId: 1, nextTabId: 1 });
         },
       }),
       {
@@ -625,6 +730,7 @@ export const useTerminalStore = create<TerminalStore>()(
                 isConnecting: false,
                 previewUrl: null,
                 previewAutoOpened: false,
+                previewUrlLocked: false,
               });
             }
 
