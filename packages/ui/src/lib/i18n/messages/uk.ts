@@ -2144,6 +2144,7 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.preview.inspect.attached": "Анотацію перегляду додано до чату",
   "contextPanel.preview.inspect.attachNoSession": "Відкрийте чат-сесію перед додаванням анотацій перегляду",
   "contextPanel.preview.inspect.attachAnnotation": "Це вибраний DOM-елемент із вбудованого перегляду.",
+  "contextPanel.preview.inspect.attachAnnotationWithScreenshot": "Це вибраний DOM-елемент із вбудованого перегляду. Скріншот видимої області перегляду з підсвіченим елементом додано як вкладення.",
   "contextPanel.preview.console.filter.all": "Усі",
   "contextPanel.preview.console.filter.errors": "Помилки",
   "contextPanel.preview.console.filter.warnings": "Попередження",

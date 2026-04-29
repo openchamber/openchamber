@@ -742,6 +742,7 @@ export const dict = {
   'contextPanel.preview.inspect.attached': 'Preview annotation attached to chat',
   'contextPanel.preview.inspect.attachNoSession': 'Open a chat session before attaching preview annotations',
   'contextPanel.preview.inspect.attachAnnotation': 'This is a selected DOM element from the in-app preview.',
+  'contextPanel.preview.inspect.attachAnnotationWithScreenshot': 'This is a selected DOM element from the in-app preview. A screenshot of the visible preview area with the selected element highlighted is attached.',
   'contextPanel.preview.console.filter.all': 'All',
   'contextPanel.preview.console.filter.errors': 'Errors',
   'contextPanel.preview.console.filter.warnings': 'Warnings',

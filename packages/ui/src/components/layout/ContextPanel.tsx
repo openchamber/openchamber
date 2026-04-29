@@ -18,6 +18,7 @@ import { readPackageJsonScripts, detectDevServerCommand } from '@/lib/detectDevS
 import { useTerminalStore } from '@/stores/useTerminalStore';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useInputStore } from '@/sync/input-store';
 import { connectTerminalStream, createTerminalSession, sendTerminalInput } from '@/lib/terminalApi';
 import { ContextPanelContent } from './ContextSidebarTab';
 import { toast } from '@/components/ui';
@@ -91,6 +92,103 @@ const isPreviewElementMetadata = (value: unknown): value is PreviewElementMetada
     && typeof bounds?.y === 'number'
     && typeof bounds?.width === 'number'
     && typeof bounds?.height === 'number';
+};
+
+const formatPreviewAnnotationMarkdown = ({
+  pageUrl,
+  viewport,
+  devicePixelRatio,
+  target,
+  screenshotAttached,
+  intro,
+}: {
+  pageUrl: string;
+  viewport: { width: number; height: number };
+  devicePixelRatio: number;
+  target: PreviewElementMetadata;
+  screenshotAttached: boolean;
+  intro: string;
+}): string => {
+  const text = target.text.trim();
+  const attributes = Object.entries(target.attributes)
+    .map(([key, value]) => `${key}="${value}"`)
+    .join(' ');
+  const styles = target.computedStyle;
+  const bounds = target.bounds;
+  const center = target.center;
+  const introLabel = intro.replace(/[.:]+$/g, '');
+  const ancestry = target.ancestry
+    .map((entry) => entry.selectorPart)
+    .join(' > ');
+
+  return [
+    `${introLabel}:`,
+    `Page: ${pageUrl || 'preview'}`,
+    `Viewport: ${viewport.width}x${viewport.height}, DPR ${devicePixelRatio}`,
+    `Screenshot: ${screenshotAttached ? 'attached' : 'not attached'}`,
+    `Element: ${target.tag}`,
+    text ? `Text: ${text}` : null,
+    `- Selector: ${target.selector}`,
+    `- Path: ${target.path}`,
+    ancestry ? `- Ancestry: ${ancestry}` : null,
+    attributes ? `- Attributes: ${attributes}` : null,
+    `- Bounds: x=${Math.round(bounds.x)}, y=${Math.round(bounds.y)}, width=${Math.round(bounds.width)}, height=${Math.round(bounds.height)}`,
+    `- Center: x=${Math.round(center.x)}, y=${Math.round(center.y)}`,
+    `Styles: display=${styles.display}; position=${styles.position}; font=${styles.fontWeight} ${styles.fontSize} / ${styles.lineHeight} ${styles.fontFamily}; color=${styles.color}; background=${styles.backgroundColor}; z-index=${styles.zIndex}`,
+  ].filter((line): line is string => typeof line === 'string').join('\n');
+};
+
+const renderPreviewScreenshot = async (
+  iframe: HTMLIFrameElement,
+  target: PreviewElementMetadata,
+): Promise<File | null> => {
+  const tauri = typeof window !== 'undefined'
+    ? (window as unknown as { __TAURI__?: { core?: { invoke?: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T> } } }).__TAURI__
+    : undefined;
+  if (typeof tauri?.core?.invoke === 'function') {
+    try {
+      const rect = iframe.getBoundingClientRect();
+      const capture = await tauri.core.invoke<{ mime: string; base64: string; width: number; height: number }>('desktop_capture_page_rect', {
+        x: rect.left,
+        y: rect.top,
+        width: rect.width,
+        height: rect.height,
+      });
+      const image = new Image();
+      await new Promise<void>((resolve, reject) => {
+        image.onload = () => resolve();
+        image.onerror = () => reject(new Error('Failed to load desktop preview screenshot'));
+        image.src = `data:${capture.mime};base64,${capture.base64}`;
+      });
+
+      const width = Math.max(1, image.naturalWidth || capture.width || Math.floor(rect.width));
+      const height = Math.max(1, image.naturalHeight || capture.height || Math.floor(rect.height));
+      const maxOutputWidth = 1200;
+      const outputScale = Math.min(1, maxOutputWidth / width);
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.floor(width * outputScale);
+      canvas.height = Math.floor(height * outputScale);
+      const context = canvas.getContext('2d');
+      if (!context) return null;
+
+      context.scale(outputScale, outputScale);
+      context.drawImage(image, 0, 0, width, height);
+      const xScale = width / Math.max(1, rect.width);
+      const yScale = height / Math.max(1, rect.height);
+      context.fillStyle = 'rgba(37, 99, 235, 0.28)';
+      context.strokeStyle = 'rgb(37, 99, 235)';
+      context.lineWidth = Math.max(2, 2 * xScale);
+      context.fillRect(target.bounds.x * xScale, target.bounds.y * yScale, target.bounds.width * xScale, target.bounds.height * yScale);
+      context.strokeRect(target.bounds.x * xScale, target.bounds.y * yScale, target.bounds.width * xScale, target.bounds.height * yScale);
+
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.82));
+      if (!blob) return null;
+      return new File([blob], `preview-annotation-${Date.now()}.jpg`, { type: 'image/jpeg' });
+    } catch {
+      return null;
+    }
+  }
+  return null;
 };
 
 const normalizeDirectoryKey = (value: string): string => {
@@ -340,6 +438,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const newSessionDraftOpen = useSessionUIStore((state) => state.newSessionDraft?.open);
   const addInlineCommentDraft = useInlineCommentDraftStore((state) => state.addDraft);
+  const addAttachedFile = useInputStore((state) => state.addAttachedFile);
 
   let parsedUrl: URL | null = null;
   try {
@@ -456,29 +555,44 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
     }
 
     const pageUrl = rawUrl || effectiveSrc || '';
-    const metadata = {
-      page: {
-        url: pageUrl,
-        viewport: typeof window !== 'undefined'
-          ? { width: window.innerWidth, height: window.innerHeight }
-          : { width: 0, height: 0 },
-        devicePixelRatio: typeof window !== 'undefined' ? window.devicePixelRatio : 1,
-      },
-      target,
-    };
+    const viewport = typeof window !== 'undefined'
+      ? { width: window.innerWidth, height: window.innerHeight }
+      : { width: 0, height: 0 };
+    const devicePixelRatio = typeof window !== 'undefined' ? window.devicePixelRatio : 1;
 
-    addInlineCommentDraft({
-      sessionKey,
-      source: 'preview-annotation',
-      fileLabel: pageUrl || 'preview',
-      startLine: 1,
-      endLine: 1,
-      code: JSON.stringify(metadata, null, 2),
-      language: 'json',
-      text: t('contextPanel.preview.inspect.attachAnnotation'),
-    });
-    toast.success(t('contextPanel.preview.inspect.attached'));
-  }, [addInlineCommentDraft, currentSessionId, effectiveSrc, newSessionDraftOpen, rawUrl, t]);
+    void (async () => {
+      let attachedScreenshot = false;
+      try {
+        const iframe = iframeRef.current;
+        const screenshot = iframe ? await renderPreviewScreenshot(iframe, target) : null;
+        if (screenshot) {
+          await addAttachedFile(screenshot);
+          attachedScreenshot = true;
+        }
+      } catch {
+        attachedScreenshot = false;
+      }
+
+      addInlineCommentDraft({
+        sessionKey,
+        source: 'preview-annotation',
+        fileLabel: pageUrl || 'preview',
+        startLine: 1,
+        endLine: 1,
+        code: formatPreviewAnnotationMarkdown({
+          pageUrl,
+          viewport,
+          devicePixelRatio,
+          target,
+          screenshotAttached: attachedScreenshot,
+          intro: t('contextPanel.preview.inspect.attachAnnotation'),
+        }),
+        language: 'markdown',
+        text: '',
+      });
+      toast.success(t('contextPanel.preview.inspect.attached'));
+    })();
+  }, [addAttachedFile, addInlineCommentDraft, currentSessionId, effectiveSrc, newSessionDraftOpen, rawUrl, t]);
 
   React.useEffect(() => {
     setBridgeReady(false);

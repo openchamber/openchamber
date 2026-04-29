@@ -2144,6 +2144,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.preview.inspect.attached': '预览注释已附加到聊天',
   'contextPanel.preview.inspect.attachNoSession': '请先打开聊天会话，再附加预览注释',
   'contextPanel.preview.inspect.attachAnnotation': '这是内置预览中选中的 DOM 元素。',
+  'contextPanel.preview.inspect.attachAnnotationWithScreenshot': '这是内置预览中选中的 DOM 元素。已附加带有高亮选中元素的可见预览区域截图。',
   'contextPanel.preview.console.filter.all': '全部',
   'contextPanel.preview.console.filter.errors': '错误',
   'contextPanel.preview.console.filter.warnings': '警告',

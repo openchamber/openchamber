@@ -104,6 +104,7 @@ const MIN_WINDOW_WIDTH = 800;
 const MIN_WINDOW_HEIGHT = 520;
 const MIN_RESTORE_WINDOW_WIDTH = 900;
 const MIN_RESTORE_WINDOW_HEIGHT = 560;
+const MAX_CAPTURE_PAGE_RECT_AREA = 4_000_000;
 const LOCAL_HOST_ID = 'local';
 const ENV_OVERRIDE_HOST_ID = '__env';
 const CHANGELOG_URL = 'https://raw.githubusercontent.com/btriapitsyn/openchamber/main/CHANGELOG.md';
@@ -1648,6 +1649,38 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     case 'desktop_get_app_version':
       return APP_VERSION;
 
+    case 'desktop_capture_page_rect': {
+      if (!browserWindow || browserWindow.isDestroyed()) {
+        throw new Error('Window is not available');
+      }
+
+      const bounds = browserWindow.getContentBounds();
+      const x = Number.isFinite(args.x) ? Math.max(0, Math.floor(args.x)) : 0;
+      const y = Number.isFinite(args.y) ? Math.max(0, Math.floor(args.y)) : 0;
+      const width = Number.isFinite(args.width) ? Math.max(1, Math.floor(args.width)) : 1;
+      const height = Number.isFinite(args.height) ? Math.max(1, Math.floor(args.height)) : 1;
+      const clampedX = Math.min(x, Math.max(0, bounds.width - 1));
+      const clampedY = Math.min(y, Math.max(0, bounds.height - 1));
+      const rect = {
+        x: clampedX,
+        y: clampedY,
+        width: Math.min(width, Math.max(1, bounds.width - clampedX)),
+        height: Math.min(height, Math.max(1, bounds.height - clampedY)),
+      };
+      if (rect.width * rect.height > MAX_CAPTURE_PAGE_RECT_AREA) {
+        throw new Error('Capture area is too large');
+      }
+
+      const image = await browserWindow.webContents.capturePage(rect);
+      const buffer = image.toJPEG(82);
+      return {
+        mime: 'image/jpeg',
+        base64: buffer.toString('base64'),
+        width: image.getSize().width,
+        height: image.getSize().height,
+      };
+    }
+
     case 'desktop_save_markdown_file': {
       const defaultPath = typeof args.defaultFileName === 'string' ? args.defaultFileName.trim() : '';
       if (!defaultPath) {
@@ -2247,6 +2280,7 @@ const COMMANDS_SAFE_FOR_REMOTE = new Set([
   'desktop_start_window_drag',
   'desktop_get_app_version',
   'desktop_get_lan_address',
+  'desktop_capture_page_rect',
 ]);
 
 ipcMain.handle('openchamber:invoke', async (event, command, args) => {

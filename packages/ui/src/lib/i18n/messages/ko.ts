@@ -737,6 +737,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.preview.inspect.attached': '미리보기 주석이 채팅에 첨부되었습니다',
   'contextPanel.preview.inspect.attachNoSession': '미리보기 주석을 첨부하기 전에 채팅 세션을 여세요',
   'contextPanel.preview.inspect.attachAnnotation': '인앱 미리보기에서 선택한 DOM 요소입니다.',
+  'contextPanel.preview.inspect.attachAnnotationWithScreenshot': '인앱 미리보기에서 선택한 DOM 요소입니다. 선택한 요소가 강조된 보이는 미리보기 영역 스크린샷이 첨부되었습니다.',
   'contextPanel.preview.console.filter.all': '전체',
   'contextPanel.preview.console.filter.errors': '오류',
   'contextPanel.preview.console.filter.warnings': '경고',

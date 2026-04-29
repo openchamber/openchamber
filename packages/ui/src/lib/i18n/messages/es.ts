@@ -2144,6 +2144,7 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.preview.inspect.attached": "Anotación de vista previa adjuntada al chat",
   "contextPanel.preview.inspect.attachNoSession": "Abre una sesión de chat antes de adjuntar anotaciones de vista previa",
   "contextPanel.preview.inspect.attachAnnotation": "Este es un elemento DOM seleccionado de la vista previa integrada.",
+  "contextPanel.preview.inspect.attachAnnotationWithScreenshot": "Este es un elemento DOM seleccionado de la vista previa integrada. Se adjunta una captura del área visible de la vista previa con el elemento resaltado.",
   "contextPanel.preview.console.filter.all": "Todo",
   "contextPanel.preview.console.filter.errors": "Errores",
   "contextPanel.preview.console.filter.warnings": "Advertencias",
