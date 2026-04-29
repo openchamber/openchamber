@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, session, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, powerMonitor, session, shell } from 'electron';
 import contextMenu from 'electron-context-menu';
 import log from 'electron-log/main.js';
 import dgram from 'node:dgram';
@@ -2366,6 +2366,12 @@ app.whenReady().then(async () => {
   const { initialUrl, localOrigin, bootOutcome } = await resolveInitialUrl();
   await activateMainWindow(initialUrl, localOrigin, bootOutcome);
   startQuitRiskPoller();
+
+  // Notify renderer on OS wake-from-sleep so the SSE event pipeline can
+  // reconnect immediately instead of waiting for the heartbeat watchdog.
+  powerMonitor.on('resume', () => {
+    emitToAllWindows('openchamber:system-resume', { timestamp: Date.now() });
+  });
 }).catch((error) => {
   log.error('[electron] startup failed:', error);
   app.exit(1);

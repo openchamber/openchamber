@@ -152,6 +152,8 @@ type AttemptAbortReason =
   | "pipeline_stopped"
   | "ws_heartbeat_timeout"
   | "sse_heartbeat_timeout"
+  | "ws_system_resume"
+  | "sse_system_resume"
   | null
 
 export function createEventPipeline(input: EventPipelineInput) {
@@ -616,15 +618,30 @@ export function createEventPipeline(input: EventPipelineInput) {
     attempt?.abort()
   }
 
+  // OS wake-from-sleep (Electron powerMonitor.resume). The SSE connection
+  // is almost certainly dead after sleep — abort immediately so the
+  // reconnect loop fires on the next tick with retryDelayMs = 0.
+  const onSystemResume = () => {
+    attemptAbortReason = `${activeTransport}_system_resume`
+    attempt?.abort()
+  }
+
   if (typeof document !== "undefined") {
     document.addEventListener("visibilitychange", onVisibility)
     window.addEventListener("pageshow", onPageShow)
+  }
+
+  if (typeof window !== "undefined") {
+    window.addEventListener("openchamber:system-resume", onSystemResume)
   }
 
   const cleanup = () => {
     if (typeof document !== "undefined") {
       document.removeEventListener("visibilitychange", onVisibility)
       window.removeEventListener("pageshow", onPageShow)
+    }
+    if (typeof window !== "undefined") {
+      window.removeEventListener("openchamber:system-resume", onSystemResume)
     }
     abort.abort()
     flushAll()
