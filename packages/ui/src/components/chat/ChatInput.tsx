@@ -1026,13 +1026,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             (state) => {
                 const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : '');
                 const drafts = sessionKey ? (state.drafts[sessionKey] ?? []) : [];
-                let preview = 0;
+                let previewConsole = 0;
+                let previewAnnotation = 0;
                 let review = 0;
                 for (const draft of drafts) {
-                    if (draft.source === 'preview') preview += 1;
+                    if (draft.source === 'preview-console') previewConsole += 1;
+                    else if (draft.source === 'preview-annotation') previewAnnotation += 1;
                     else review += 1;
                 }
-                return `${preview}:${review}`;
+                return `${previewConsole}:${previewAnnotation}:${review}`;
             },
             [currentSessionId, newSessionDraftOpen]
         )
@@ -1040,19 +1042,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const consumeDrafts = useInlineCommentDraftStore((state) => state.consumeDrafts);
     const removeInlineCommentDraft = useInlineCommentDraftStore((state) => state.removeDraft);
     const hasDrafts = draftCount > 0;
-    const onlyPreviewDrafts = !draftSourceKey.startsWith('0:') && draftSourceKey.endsWith(':0');
-    const draftLabel = draftSourceKey.startsWith('0:')
-        ? t('chat.chatInput.reviewComments')
-        : onlyPreviewDrafts
-        ? t('chat.chatInput.devServerLogs')
-        : t('chat.chatInput.reviewComments');
-
-    const removePreviewDrafts = React.useCallback(() => {
+    const [previewConsoleCount, previewAnnotationCount, reviewCount] = draftSourceKey.split(':').map((entry) => Number(entry) || 0);
+    const removePreviewDrafts = React.useCallback((source: 'preview-console' | 'preview-annotation') => {
         const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : '');
         if (!sessionKey) return;
         const drafts = useInlineCommentDraftStore.getState().drafts[sessionKey] ?? [];
         for (const draft of drafts) {
-            if (draft.source === 'preview') {
+            if (draft.source === source) {
                 removeInlineCommentDraft(sessionKey, draft.id);
             }
         }
@@ -3304,30 +3300,61 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     onEditMessage={handleQueuedMessageEdit}
                 />
                 {hasDrafts && (
-                    <div className="pb-2">
-                        <div
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl border"
-                            style={{
-                                backgroundColor: currentTheme?.colors?.surface?.elevated,
-                                borderColor: currentTheme?.colors?.interactive?.border,
-                            }}
-                        >
-                            <span className="text-xs font-medium text-muted-foreground">{draftLabel}</span>
-                            <span className="text-xs font-semibold" style={{ color: currentTheme?.colors?.status?.info }}>
-                                {draftCount}
-                            </span>
-                            {onlyPreviewDrafts ? (
+                    <div className="flex flex-wrap items-center gap-2 pb-2">
+                        {reviewCount > 0 ? (
+                            <div
+                                className="inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1"
+                                style={{
+                                    backgroundColor: currentTheme?.colors?.surface?.elevated,
+                                    borderColor: currentTheme?.colors?.interactive?.border,
+                                }}
+                            >
+                                <span className="text-xs font-medium text-muted-foreground">{t('chat.chatInput.reviewComments')}</span>
+                                <span className="text-xs font-semibold" style={{ color: currentTheme?.colors?.status?.info }}>{reviewCount}</span>
+                            </div>
+                        ) : null}
+                        {previewConsoleCount > 0 ? (
+                            <div
+                                className="inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1"
+                                style={{
+                                    backgroundColor: currentTheme?.colors?.surface?.elevated,
+                                    borderColor: currentTheme?.colors?.interactive?.border,
+                                }}
+                            >
+                                <span className="text-xs font-medium text-muted-foreground">{t('chat.chatInput.devServerLogs')}</span>
+                                <span className="text-xs font-semibold" style={{ color: currentTheme?.colors?.status?.info }}>{previewConsoleCount}</span>
                                 <button
                                     type="button"
                                     className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
-                                    onClick={removePreviewDrafts}
+                                    onClick={() => removePreviewDrafts('preview-console')}
                                     aria-label={t('chat.chatInput.devServerLogsRemove')}
                                     title={t('chat.chatInput.devServerLogsRemove')}
                                 >
                                     <RiCloseLine className="h-3 w-3" />
                                 </button>
-                            ) : null}
-                        </div>
+                            </div>
+                        ) : null}
+                        {previewAnnotationCount > 0 ? (
+                            <div
+                                className="inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1"
+                                style={{
+                                    backgroundColor: currentTheme?.colors?.surface?.elevated,
+                                    borderColor: currentTheme?.colors?.interactive?.border,
+                                }}
+                            >
+                                <span className="text-xs font-medium text-muted-foreground">{t('chat.chatInput.previewAnnotations')}</span>
+                                <span className="text-xs font-semibold" style={{ color: currentTheme?.colors?.status?.info }}>{previewAnnotationCount}</span>
+                                <button
+                                    type="button"
+                                    className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+                                    onClick={() => removePreviewDrafts('preview-annotation')}
+                                    aria-label={t('chat.chatInput.previewContextRemove')}
+                                    title={t('chat.chatInput.previewContextRemove')}
+                                >
+                                    <RiCloseLine className="h-3 w-3" />
+                                </button>
+                            </div>
+                        ) : null}
                     </div>
                 )}
 

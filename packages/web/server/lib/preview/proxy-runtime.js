@@ -19,15 +19,21 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
   const VERSION = 1;
   const MAX_TEXT = 500;
   const MAX_ARG = 1000;
+  let inspectMode = false;
+  let lastHoverKey = '';
+  let pendingHover = null;
 
   const post = (payload) => {
     try {
-      window.parent?.postMessage({ source: SOURCE, version: VERSION, ...payload }, window.location.origin);
+      if (window.parent && typeof window.parent.postMessage === 'function') {
+        const message = Object.assign({ source: SOURCE, version: VERSION }, payload || {});
+        window.parent.postMessage(message, window.location.origin);
+      }
     } catch {}
   };
 
   const clip = (value, max = MAX_TEXT) => {
-    const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+    const text = String(value == null ? '' : value).replace(/\s+/g, ' ').trim();
     return text.length > max ? text.slice(0, max) + '...' : text;
   };
 
@@ -55,16 +61,71 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
     }
   };
 
+  const upstreamPathAndSearchForUrl = (value) => {
+    try {
+      const parsed = new URL(value, window.location.href);
+      const match = parsed.pathname.match(/^\/api\/preview\/proxy\/[a-f0-9]{16,64}(\/.*)?$/i);
+      const path = match ? (match[1] || '/') : parsed.pathname;
+      return path + parsed.search;
+    } catch {
+      return String(value || '');
+    }
+  };
+
   const isInternalDevToolResource = (element, value) => {
-    const tag = element?.tagName?.toLowerCase?.() || '';
+    const tag = element && element.tagName && typeof element.tagName.toLowerCase === 'function' ? element.tagName.toLowerCase() : '';
     if (tag !== 'script' && tag !== 'link') return false;
     const path = upstreamPathForUrl(value);
+    const pathAndSearch = upstreamPathAndSearchForUrl(value);
     return path === '/@vite/client'
       || path === '/@react-refresh'
+      || path.indexOf('/@id/astro:') === 0
       || path.startsWith('/@id/__x00__vite/')
       || path.includes('/node_modules/.vite/')
       || path.includes('/vite/dist/client/')
-      || path.includes('/astro/dist/runtime/client/dev-toolbar/');
+      || path.includes('/astro/dist/runtime/client/dev-toolbar/')
+      || (pathAndSearch.indexOf('/node_modules/') >= 0 && pathAndSearch.indexOf('.astro?') >= 0 && pathAndSearch.indexOf('type=script') >= 0);
+  };
+
+  const toLoopbackHttpUrl = (value) => {
+    try {
+      const parsed = new URL(value, window.location.href);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+      const host = parsed.hostname;
+      if (host !== 'localhost' && host !== '127.0.0.1' && host !== '0.0.0.0' && host !== '::1' && host !== '[::1]') {
+        return null;
+      }
+      return parsed.toString();
+    } catch {
+      return null;
+    }
+  };
+
+  const shouldParentHandleNavigation = (url) => {
+    if (!url) return false;
+    try {
+      const parsed = new URL(url);
+      const current = new URL(window.location.href);
+      if (parsed.origin !== current.origin) return true;
+      return !parsed.pathname.startsWith('/api/preview/proxy/');
+    } catch {
+      return false;
+    }
+  };
+
+  const isInternalDevToolRuntimeError = (filename) => {
+    const path = upstreamPathForUrl(filename || '');
+    const pathAndSearch = upstreamPathAndSearchForUrl(filename || '');
+    const lowerPathAndSearch = pathAndSearch.toLowerCase();
+    const isStyleRuntimeNoise = lowerPathAndSearch.endsWith('.css')
+      || lowerPathAndSearch.indexOf('.css?') >= 0
+      || lowerPathAndSearch.indexOf('type=style') >= 0
+      || lowerPathAndSearch.indexOf('lang.css') >= 0;
+    return path === '/@vite/client'
+      || path === '/@react-refresh'
+      || path.indexOf('/astro/dist/runtime/client/dev-toolbar/') >= 0
+      || path.indexOf('/node_modules/.vite/') >= 0
+      || isStyleRuntimeNoise;
   };
 
   const selectorPart = (element) => {
@@ -101,7 +162,7 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
     const style = window.getComputedStyle(element);
     const attributes = {};
     for (const name of ['id', 'class', 'role', 'aria-label', 'href', 'src', 'data-testid', 'data-test', 'data-cy']) {
-      const value = element.getAttribute?.(name);
+      const value = typeof element.getAttribute === 'function' ? element.getAttribute(name) : null;
       if (value) attributes[name] = clip(value, 300);
     }
     const ancestry = [];
@@ -139,9 +200,46 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
     };
   };
 
+  const hoverKeyForTarget = (target) => {
+    if (!target) return '';
+    const bounds = target.bounds || {};
+    return [target.selector, Math.round(bounds.x), Math.round(bounds.y), Math.round(bounds.width), Math.round(bounds.height)].join('|');
+  };
+
+  const sendHover = (event) => {
+    if (!inspectMode) return;
+    pendingHover = event;
+    if (window.__openchamberPreviewHoverFrame) return;
+    window.__openchamberPreviewHoverFrame = window.requestAnimationFrame(() => {
+      window.__openchamberPreviewHoverFrame = 0;
+      const currentEvent = pendingHover;
+      pendingHover = null;
+      if (!currentEvent || !inspectMode) return;
+      const element = document.elementFromPoint(currentEvent.clientX, currentEvent.clientY);
+      const target = metadataForElement(element);
+      const key = hoverKeyForTarget(target);
+      if (key === lastHoverKey) return;
+      lastHoverKey = key;
+      post({ type: 'hover', target, pointer: { x: currentEvent.clientX, y: currentEvent.clientY }, ts: Date.now() });
+    });
+  };
+
+  const setInspectMode = (enabled) => {
+    inspectMode = Boolean(enabled);
+    lastHoverKey = '';
+    document.documentElement.style.cursor = inspectMode ? 'crosshair' : '';
+    if (!inspectMode) {
+      post({ type: 'hover', target: null, pointer: { x: 0, y: 0 }, ts: Date.now() });
+    }
+  };
+
   for (const level of ['log', 'info', 'warn', 'error', 'debug']) {
     const original = console[level];
-    console[level] = (...args) => {
+    console[level] = function() {
+      const args = Array.prototype.slice.call(arguments);
+      if (level === 'debug' && typeof args[0] === 'string' && args[0].indexOf('[vite]') === 0) {
+        return original.apply(console, args);
+      }
       post({ type: 'console', level, args: args.map(stringifyArg), ts: Date.now() });
       return original.apply(console, args);
     };
@@ -163,10 +261,13 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
       });
       return;
     }
+    if (isInternalDevToolRuntimeError(event.filename)) {
+      return;
+    }
     post({
       type: 'runtime-error',
       message: clip(event.message || 'Unknown error', 1000),
-      stack: clip(event.error?.stack || '', 2000) || undefined,
+      stack: clip(event.error && event.error.stack ? event.error.stack : '', 2000) || undefined,
       filename: event.filename,
       line: event.lineno,
       column: event.colno,
@@ -177,11 +278,48 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
   window.addEventListener('unhandledrejection', (event) => {
     post({
       type: 'runtime-error',
-      message: clip(event.reason?.message || event.reason || 'Unhandled promise rejection', 1000),
-      stack: clip(event.reason?.stack || '', 2000) || undefined,
+      message: clip(event.reason && event.reason.message ? event.reason.message : event.reason || 'Unhandled promise rejection', 1000),
+      stack: clip(event.reason && event.reason.stack ? event.reason.stack : '', 2000) || undefined,
       ts: Date.now(),
     });
   });
+
+  window.addEventListener('message', (event) => {
+    if (event.source !== window.parent) return;
+    const data = event.data;
+    if (!data || data.source !== 'openchamber-preview-parent' || data.version !== VERSION) return;
+    if (data.type === 'set-inspect-mode') {
+      setInspectMode(data.enabled === true);
+    }
+  });
+
+  window.addEventListener('mousemove', sendHover, true);
+  window.addEventListener('mouseleave', () => {
+    if (!inspectMode) return;
+    lastHoverKey = '';
+    post({ type: 'hover', target: null, pointer: { x: 0, y: 0 }, ts: Date.now() });
+  }, true);
+  window.addEventListener('click', (event) => {
+    const anchor = event.target && typeof event.target.closest === 'function' ? event.target.closest('a[href]') : null;
+    if (anchor && !inspectMode) {
+      const nextUrl = toLoopbackHttpUrl(anchor.href);
+      if (shouldParentHandleNavigation(nextUrl)) {
+        event.preventDefault();
+        event.stopPropagation();
+        post({ type: 'navigate-preview', url: nextUrl, ts: Date.now() });
+        return;
+      }
+    }
+
+    if (!inspectMode) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const element = document.elementFromPoint(event.clientX, event.clientY);
+    const target = metadataForElement(element);
+    if (target) {
+      post({ type: 'select', target, pointer: { x: event.clientX, y: event.clientY }, ts: Date.now() });
+    }
+  }, true);
 
   window.addEventListener('DOMContentLoaded', () => {
     post({ type: 'ready', url: window.location.href, title: document.title || '' });
@@ -338,6 +476,18 @@ export const createPreviewProxyRuntime = ({
     }
     const rest = pathname.slice(prefix.length);
     return rest.length === 0 ? '/' : rest;
+  };
+
+  const removeRawQueryParam = (search, paramName) => {
+    if (typeof search !== 'string' || search.length <= 1) {
+      return '';
+    }
+    const query = search.startsWith('?') ? search.slice(1) : search;
+    const parts = query.split('&').filter((part) => {
+      const name = part.split('=', 1)[0] || '';
+      return decodeURIComponent(name.replace(/\+/g, ' ')) !== paramName;
+    });
+    return parts.length > 0 ? `?${parts.join('&')}` : '';
   };
 
   // Strip the `frame-ancestors` directive from a CSP header value while
@@ -537,10 +687,8 @@ export const createPreviewProxyRuntime = ({
 
         const parsed = new URL(req.originalUrl || req.url || '', 'http://localhost');
         // Never forward our auth cookie token to the dev server.
-        parsed.searchParams.delete('ocPreview');
         const strippedPath = stripProxyPrefix(parsed.pathname, resolved.id);
-        const search = parsed.searchParams.toString();
-        return `${strippedPath}${search ? `?${search}` : ''}`;
+        return `${strippedPath}${removeRawQueryParam(parsed.search, 'ocPreview')}`;
       },
       on: {
         proxyReq: (proxyReq) => {

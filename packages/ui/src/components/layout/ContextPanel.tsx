@@ -1,5 +1,5 @@
 import React from 'react';
-import { RiArrowLeftRightLine, RiChat4Line, RiCloseLine, RiDonutChartFill, RiFileTextLine, RiFullscreenExitLine, RiFullscreenLine, RiGlobalLine, RiRefreshLine, RiExternalLinkLine, RiPlayLine, RiTerminalBoxLine } from '@remixicon/react';
+import { RiArrowLeftRightLine, RiChat4Line, RiCloseLine, RiDonutChartFill, RiFileTextLine, RiFullscreenExitLine, RiFullscreenLine, RiGlobalLine, RiRefreshLine, RiExternalLinkLine, RiPlayLine, RiTerminalBoxLine, RiCursorLine } from '@remixicon/react';
 
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Button } from '@/components/ui/button';
@@ -46,11 +46,28 @@ type PreviewBridgeMessage = {
   args?: unknown[];
   message?: unknown;
   stack?: unknown;
+  filename?: unknown;
+  line?: unknown;
+  column?: unknown;
   tag?: unknown;
   url?: unknown;
   outerHTML?: unknown;
   title?: unknown;
   ts?: unknown;
+  target?: unknown;
+};
+
+type PreviewElementMetadata = {
+  frame: 'top';
+  tag: string;
+  text: string;
+  selector: string;
+  path: string;
+  bounds: { x: number; y: number; width: number; height: number };
+  center: { x: number; y: number };
+  attributes: Record<string, string>;
+  computedStyle: Record<string, string>;
+  ancestry: Array<{ tag: string; id?: string; className?: string; selectorPart: string }>;
 };
 
 const PREVIEW_CONSOLE_EVENT_LIMIT = 200;
@@ -60,6 +77,20 @@ const getPreviewConsoleFilterMatch = (event: PreviewConsoleEvent, filter: Previe
   if (filter === 'errors') return event.level === 'error' || event.level === 'runtime' || event.level === 'resource';
   if (filter === 'warnings') return event.level === 'warn';
   return event.level === 'log' || event.level === 'info' || event.level === 'debug';
+};
+
+const isPreviewElementMetadata = (value: unknown): value is PreviewElementMetadata => {
+  if (!value || typeof value !== 'object') return false;
+  const record = value as Partial<PreviewElementMetadata>;
+  const bounds = record.bounds;
+  return typeof record.tag === 'string'
+    && typeof record.selector === 'string'
+    && typeof record.path === 'string'
+    && Boolean(bounds)
+    && typeof bounds?.x === 'number'
+    && typeof bounds?.y === 'number'
+    && typeof bounds?.width === 'number'
+    && typeof bounds?.height === 'number';
 };
 
 const normalizeDirectoryKey = (value: string): string => {
@@ -263,6 +294,7 @@ const truncateTabLabel = (value: string, maxChars: number): string => {
 
 type PreviewPaneProps = {
   rawUrl: string;
+  onNavigate: (url: string) => void;
 };
 
 type PreviewProxyState =
@@ -292,7 +324,7 @@ const getCachedProxyTarget = (url: string): CachedProxyTarget | null => {
   return entry;
 };
 
-const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl }) => {
+const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
   const { t } = useI18n();
   const [reloadNonce, bumpReload] = React.useReducer((x: number) => x + 1, 0);
   const [proxyRegistrationNonce, bumpProxyRegistration] = React.useReducer((x: number) => x + 1, 0);
@@ -303,6 +335,8 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl }) => {
   const [consoleOpen, setConsoleOpen] = React.useState(false);
   const [consoleFilter, setConsoleFilter] = React.useState<PreviewConsoleFilter>('all');
   const [consoleEvents, setConsoleEvents] = React.useState<PreviewConsoleEvent[]>([]);
+  const [inspectMode, setInspectMode] = React.useState(false);
+  const [hoverTarget, setHoverTarget] = React.useState<PreviewElementMetadata | null>(null);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const newSessionDraftOpen = useSessionUIStore((state) => state.newSessionDraft?.open);
   const addInlineCommentDraft = useInlineCommentDraftStore((state) => state.addDraft);
@@ -414,13 +448,73 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl }) => {
   const showLoading = isLoopback && (proxyState.status === 'loading' || proxyState.status === 'idle');
   const showError = isLoopback && proxyState.status === 'error';
 
+  const attachPreviewAnnotation = React.useCallback((target: PreviewElementMetadata) => {
+    const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : null);
+    if (!sessionKey) {
+      toast.error(t('contextPanel.preview.inspect.attachNoSession'));
+      return;
+    }
+
+    const pageUrl = rawUrl || effectiveSrc || '';
+    const metadata = {
+      page: {
+        url: pageUrl,
+        viewport: typeof window !== 'undefined'
+          ? { width: window.innerWidth, height: window.innerHeight }
+          : { width: 0, height: 0 },
+        devicePixelRatio: typeof window !== 'undefined' ? window.devicePixelRatio : 1,
+      },
+      target,
+    };
+
+    addInlineCommentDraft({
+      sessionKey,
+      source: 'preview-annotation',
+      fileLabel: pageUrl || 'preview',
+      startLine: 1,
+      endLine: 1,
+      code: JSON.stringify(metadata, null, 2),
+      language: 'json',
+      text: t('contextPanel.preview.inspect.attachAnnotation'),
+    });
+    toast.success(t('contextPanel.preview.inspect.attached'));
+  }, [addInlineCommentDraft, currentSessionId, effectiveSrc, newSessionDraftOpen, rawUrl, t]);
+
   React.useEffect(() => {
     setBridgeReady(false);
     setConsoleEvents([]);
     setConsoleOpen(false);
     setConsoleFilter('all');
+    setInspectMode(false);
+    setHoverTarget(null);
     nextConsoleEventIdRef.current = 1;
   }, [effectiveSrc]);
+
+  React.useEffect(() => {
+    const frameWindow = iframeRef.current?.contentWindow;
+    if (!bridgeReady || !frameWindow) {
+      return;
+    }
+    frameWindow.postMessage({
+      source: 'openchamber-preview-parent',
+      version: 1,
+      type: 'set-inspect-mode',
+      enabled: inspectMode,
+    }, window.location.origin);
+  }, [bridgeReady, inspectMode]);
+
+  React.useEffect(() => {
+    if (!inspectMode || typeof window === 'undefined') return;
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        setInspectMode(false);
+      }
+    };
+    window.addEventListener('keydown', handler, true);
+    return () => window.removeEventListener('keydown', handler, true);
+  }, [inspectMode]);
 
   React.useEffect(() => {
     if (!isLoopback || typeof window === 'undefined') {
@@ -476,10 +570,17 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl }) => {
       }
 
       if (data.type === 'runtime-error') {
+        const filename = stringify(data.filename);
+        const line = typeof data.line === 'number' ? data.line : null;
+        const column = typeof data.column === 'number' ? data.column : null;
+        const location = filename
+          ? `${filename}${line !== null ? `:${line}${column !== null ? `:${column}` : ''}` : ''}`
+          : '';
+        const stack = stringify(data.stack);
         pushConsoleEvent({
           level: 'runtime',
           message: stringify(data.message) || t('contextPanel.preview.console.runtimeError'),
-          details: stringify(data.stack),
+          details: [location, stack].filter(Boolean).join('\n'),
           ts: typeof data.ts === 'number' ? data.ts : Date.now(),
         });
         return;
@@ -494,6 +595,26 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl }) => {
           details: stringify(data.outerHTML),
           ts: typeof data.ts === 'number' ? data.ts : Date.now(),
         });
+        return;
+      }
+
+      if (data.type === 'hover') {
+        setHoverTarget(isPreviewElementMetadata(data.target) ? data.target : null);
+        return;
+      }
+
+      if (data.type === 'select' && isPreviewElementMetadata(data.target)) {
+        setHoverTarget(data.target);
+        setInspectMode(false);
+        attachPreviewAnnotation(data.target);
+        return;
+      }
+
+      if (data.type === 'navigate-preview') {
+        const nextUrl = typeof data.url === 'string' ? data.url : '';
+        if (nextUrl) {
+          onNavigate(nextUrl);
+        }
       }
     };
 
@@ -501,7 +622,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl }) => {
     return () => {
       window.removeEventListener('message', handler);
     };
-  }, [isLoopback, t]);
+  }, [attachPreviewAnnotation, isLoopback, onNavigate, t]);
 
   const consoleErrorCount = consoleEvents.filter((event) => event.level === 'error' || event.level === 'runtime' || event.level === 'resource').length;
   const filteredConsoleEvents = consoleEvents.filter((event) => getPreviewConsoleFilterMatch(event, consoleFilter));
@@ -547,7 +668,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl }) => {
 
     addInlineCommentDraft({
       sessionKey,
-      source: 'preview',
+      source: 'preview-console',
       fileLabel: rawUrl || effectiveSrc || 'preview',
       startLine: 1,
       endLine: Math.max(1, consoleEvents.length),
@@ -724,6 +845,20 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl }) => {
           <Button
             type="button"
             size="sm"
+            variant={inspectMode ? 'secondary' : 'ghost'}
+            className="h-7 gap-1 px-2"
+            onClick={() => setInspectMode((value) => !value)}
+            title={t('contextPanel.preview.inspect.toggle')}
+            aria-label={t('contextPanel.preview.inspect.toggle')}
+            disabled={!bridgeReady}
+          >
+            <RiCursorLine className="h-3.5 w-3.5" />
+          </Button>
+        ) : null}
+        {isLoopback ? (
+          <Button
+            type="button"
+            size="sm"
             variant={consoleOpen ? 'secondary' : 'ghost'}
             className="h-7 gap-1 px-2"
             onClick={() => setConsoleOpen((value) => !value)}
@@ -758,17 +893,34 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl }) => {
             </Button>
           </div>
         ) : effectiveSrc && (!isLoopback || upstreamState === 'reachable') ? (
-          <iframe
-            ref={iframeRef}
-            key={`${effectiveSrc}:${reloadNonce}`}
-            src={effectiveSrc}
-            title={t('contextPanel.preview.iframeTitle')}
-            className="h-full w-full border-0"
-            onLoad={handlePreviewFrameLoad}
-            sandbox={isLoopback
-              ? 'allow-scripts allow-same-origin allow-forms allow-popups allow-downloads'
-              : 'allow-scripts allow-forms'}
-          />
+          <div className="relative h-full w-full">
+            <iframe
+              ref={iframeRef}
+              key={`${effectiveSrc}:${reloadNonce}`}
+              src={effectiveSrc}
+              title={t('contextPanel.preview.iframeTitle')}
+              className="h-full w-full border-0"
+              onLoad={handlePreviewFrameLoad}
+              sandbox={isLoopback
+                ? 'allow-scripts allow-same-origin allow-forms allow-popups allow-downloads'
+                : 'allow-scripts allow-forms'}
+            />
+            {inspectMode && hoverTarget ? (
+              <div
+                className="pointer-events-none absolute rounded-sm border-2 border-[var(--interactive-focus-ring)] bg-[var(--interactive-focus-ring)]/35"
+                style={{
+                  left: hoverTarget.bounds.x,
+                  top: hoverTarget.bounds.y,
+                  width: hoverTarget.bounds.width,
+                  height: hoverTarget.bounds.height,
+                }}
+              >
+                <div className="absolute -top-6 left-0 max-w-64 truncate rounded bg-[var(--surface-elevated)] px-2 py-0.5 typography-micro text-foreground shadow">
+                  {hoverTarget.tag}{hoverTarget.text ? ` · ${hoverTarget.text}` : ''}
+                </div>
+              </div>
+            ) : null}
+          </div>
         ) : showLoading ? (
           <div className="flex h-full items-center justify-center px-6 text-sm text-muted-foreground">
             {t('contextPanel.preview.loading')}
@@ -1280,7 +1432,7 @@ export const ContextPanel: React.FC = () => {
         : activeTab?.mode === 'plan'
             ? <PlanView targetPath={activeTab.targetPath} />
             : activeTab?.mode === 'preview'
-                ? <PreviewPane rawUrl={activeTab.targetPath ?? ''} />
+                ? <PreviewPane rawUrl={activeTab.targetPath ?? ''} onNavigate={(url) => openContextPreview(effectiveDirectory, url)} />
                 : showStartPreview
                     ? (
                         <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">

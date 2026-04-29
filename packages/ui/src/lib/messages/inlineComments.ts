@@ -12,7 +12,7 @@ export function formatInlineCommentDraft(draft: InlineCommentDraft): string {
     return `Comment on \`${fileLabel}\` lines ${startLine}-${endLine} (${side}):\n\`\`\`${language}\n${code}\n\`\`\`\n\n${text}`;
   }
 
-  if (draft.source === 'preview') {
+  if (draft.source === 'preview-console' || draft.source === 'preview-annotation') {
     return `Attached preview context from \`${fileLabel}\`:\n\`\`\`${language}\n${code}\n\`\`\`\n\n${text}`;
   }
   
