@@ -1540,36 +1540,46 @@ export const Header: React.FC<HeaderProps> = ({
     setIsDesktopServicesOpen(false);
 
     const previewUrls: string[] = [];
+    let shutdownRequested = false;
     try {
-      for (const [, dirState] of useTerminalStore.getState().sessions.entries()) {
-        for (const tab of dirState.tabs) {
-          if (tab.previewUrl) {
-            previewUrls.push(tab.previewUrl);
+      try {
+        for (const [, dirState] of useTerminalStore.getState().sessions.entries()) {
+          for (const tab of dirState.tabs) {
+            if (tab.previewUrl) {
+              previewUrls.push(tab.previewUrl);
+            }
           }
         }
+      } catch {
+        // ignore
       }
-    } catch {
-      // ignore
-    }
 
-    try {
-      // Ensure preview/dev terminals don't linger.
-      await forceKillTerminal({});
-    } catch {
-      // ignore
-    }
-
-    try {
-      const devRes = await fetch('/api/system/dev-shutdown', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ previewUrls }),
-      });
-      if (!devRes.ok) {
-        await fetch('/api/system/shutdown', { method: 'POST' });
+      try {
+        // Ensure preview/dev terminals don't linger.
+        await forceKillTerminal({});
+      } catch {
+        // ignore
       }
-    } catch {
-      // ignore
+
+      try {
+        const devRes = await fetch('/api/system/dev-shutdown', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ previewUrls }),
+        });
+        if (devRes.ok) {
+          shutdownRequested = true;
+        } else {
+          const shutdownRes = await fetch('/api/system/shutdown', { method: 'POST' });
+          shutdownRequested = shutdownRes.ok;
+        }
+      } catch {
+        // ignore
+      }
+    } finally {
+      if (!shutdownRequested) {
+        setIsDevShutdownInFlight(false);
+      }
     }
   }, [isDevShutdownInFlight, setIsDesktopServicesOpen]);
 

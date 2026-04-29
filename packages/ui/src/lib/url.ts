@@ -28,11 +28,11 @@ export const isExternalHttpUrl = (url: string): boolean => {
   return parsed.protocol === 'http:' || parsed.protocol === 'https:';
 };
 
-const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '0.0.0.0']);
+const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1']);
 
 /**
  * Returns true when the URL is an http(s) URL pointing at a loopback host
- * (localhost, 127.0.0.1, 0.0.0.0). Used to decide whether to offer an in-app
+ * (localhost, 127.0.0.1, 0.0.0.0, ::1). Used to decide whether to offer an in-app
  * preview pane instead of opening the system browser.
  */
 export const isLoopbackHttpUrl = (url: string): boolean => {
@@ -48,7 +48,7 @@ export const isLoopbackHttpUrl = (url: string): boolean => {
 
 const LOOPBACK_URL_PATTERN
   // eslint-disable-next-line no-control-regex
-  = /\bhttps?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d{2,5})?(?:\/[^\s<>"'`\u0000-\u001f]*)?/gi;
+  = /\bhttps?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::\d{2,5})?(?:\/[^\s<>"'`\u0000-\u001f]*)?/gi;
 
 /**
  * Extracts loopback http(s) URLs from a free-text string. Returns unique URLs

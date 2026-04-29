@@ -226,8 +226,8 @@ export const registerServerStatusRoutes = (app, dependencies) => {
     });
   });
 
-  // Allocates a free TCP port on 127.0.0.1.
-  // Used by the UI for launching local preview servers deterministically.
+  // Allocates a best-effort free TCP port hint on 127.0.0.1.
+  // Another process can still claim it before the preview server binds.
   app.get('/api/system/free-port', async (_req, res) => {
     try {
       const port = await allocateLoopbackPort();

@@ -43,6 +43,7 @@ import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useSessions } from '@/sync/sync-context';
 import { useI18n } from '@/lib/i18n';
+import { extractLoopbackUrls } from '@/lib/url';
 
 const CONTAIN_LAYOUT_STYLE = { contain: 'layout' as const, transform: 'translateZ(0)' };
 const MESSAGE_FOOTER_CONTAINER_STYLE = { containerType: 'inline-size' as const, containerName: 'message-footer' };
@@ -963,15 +964,12 @@ const AssistantMessageBody = React.memo(({
     const openContextPreview = useUIStore((state) => state.openContextPreview);
 
     const messagePreviewUrl = React.useMemo(() => {
-        // Match how terminal tabs detect preview URLs.
-        const urlPattern = /(https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d{2,5})?(?:\/[\w\-./~%!$&'()*+,;=:@?#[\]]*)?)/i;
         for (const part of assistantTextParts) {
             const text = (part as { text?: unknown }).text;
             if (typeof text !== 'string' || text.length === 0) {
                 continue;
             }
-            const match = text.match(urlPattern);
-            const url = match?.[1];
+            const url = extractLoopbackUrls(text)[0];
             if (!url) {
                 continue;
             }
@@ -984,8 +982,7 @@ const AssistantMessageBody = React.memo(({
                 continue;
             }
             // eslint-disable-next-line no-control-regex
-            const match = output.replace(/\x1b\[[0-9;]*m/g, '').match(urlPattern);
-            const url = match?.[1];
+            const url = extractLoopbackUrls(output.replace(/\x1b\[[0-9;]*m/g, ''))[0];
             if (!url) {
                 continue;
             }
