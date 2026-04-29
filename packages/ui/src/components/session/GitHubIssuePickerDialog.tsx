@@ -31,6 +31,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
+import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { createWorktreeSessionForNewBranch } from '@/lib/worktreeSessionCreator';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
 import type { GitHubIssue, GitHubIssueComment, GitHubIssuesListResult, GitHubIssueSummary, GitHubRepoSelector } from '@/lib/api/types';
@@ -234,14 +235,11 @@ export function GitHubIssuePickerDialog({
       return null;
     }
 
-    const parts = settingsDefaultModel.split('/');
-    if (parts.length !== 2) {
+    const parsed = parseModelIdentifier(settingsDefaultModel);
+    if (!parsed) {
       return null;
     }
-    const [providerID, modelID] = parts;
-    if (!providerID || !modelID) {
-      return null;
-    }
+    const { providerId: providerID, modelId: modelID } = parsed;
 
     const modelMetadata = configState.getModelMetadata(providerID, modelID);
     if (!modelMetadata) {
