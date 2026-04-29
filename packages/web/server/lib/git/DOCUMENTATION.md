@@ -94,6 +94,7 @@ The following functions are internal helpers used by exported functions:
 - `tracking`: Upstream branch (e.g., 'origin/main').
 - `ahead`: Number of commits ahead of upstream.
 - `behind`: Number of commits behind upstream.
+- `upstreamComparison`: Optional comparison against `upstream/<current-branch>`, with `{ remote, branch, ahead, behind }`.
 - `files`: Array of file objects with `path`, `index`, `working_dir` status codes.
 - `isClean`: Boolean indicating if working tree is clean.
 - `diffStats`: Object mapping file paths to `{ insertions, deletions }`.

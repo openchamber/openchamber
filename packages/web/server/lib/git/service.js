@@ -563,6 +563,49 @@ const parseGitErrorText = (error) => {
     .trim();
 };
 
+const parseAheadBehindCounts = (value) => {
+  const [aheadRaw, behindRaw] = String(value || '').trim().split(/\s+/);
+  const ahead = parseInt(aheadRaw, 10);
+  const behind = parseInt(behindRaw, 10);
+  if (!Number.isFinite(ahead) || !Number.isFinite(behind)) {
+    return null;
+  }
+  return { ahead, behind };
+};
+
+const getRemoteBranchComparison = async (git, remoteName, branchName) => {
+  const remote = String(remoteName || '').trim();
+  const branch = String(branchName || '').trim();
+  if (!remote || !branch) {
+    return null;
+  }
+
+  const remoteRef = `refs/remotes/${remote}/${branch}`;
+  const exists = await git
+    .raw(['rev-parse', '--verify', remoteRef])
+    .then((value) => String(value || '').trim())
+    .catch(() => '');
+  if (!exists) {
+    return null;
+  }
+
+  const countsRaw = await git
+    .raw(['rev-list', '--left-right', '--count', `HEAD...${remoteRef}`])
+    .then((value) => String(value || '').trim())
+    .catch(() => '');
+  const counts = parseAheadBehindCounts(countsRaw);
+  if (!counts) {
+    return null;
+  }
+
+  return {
+    remote,
+    branch,
+    ahead: counts.ahead,
+    behind: counts.behind,
+  };
+};
+
 const isNotGitRepositoryError = (error) => {
   const text = parseGitErrorText(error);
   return /not a git repository/i.test(text);
@@ -1356,6 +1399,7 @@ export async function getStatus(directory, options = {}) {
     let tracking = status.tracking || null;
     let ahead = status.ahead;
     let behind = status.behind;
+    let upstreamComparison;
 
     // When no upstream is configured (common for new worktree branches), Git doesn't report ahead/behind.
     // We still want to show the number of unpublished commits to the user.
@@ -1373,6 +1417,10 @@ export async function getStatus(directory, options = {}) {
           behind = 0;
         }
       }
+    }
+
+    if (!lightMode && status.current && (!tracking || !tracking.startsWith('upstream/'))) {
+      upstreamComparison = await getRemoteBranchComparison(git, 'upstream', status.current);
     }
 
     // Check for in-progress operations
@@ -1432,6 +1480,7 @@ export async function getStatus(directory, options = {}) {
       tracking,
       ahead,
       behind,
+      upstreamComparison,
       files: status.files.map((f) => ({
         path: f.path,
         index: f.index,
@@ -1796,9 +1845,20 @@ export async function pull(directory, options = {}) {
   const git = await createGit(directory);
 
   try {
+    const remote = String(options.remote || '').trim();
+    const requestedBranch = String(options.branch || '').trim();
+    let branch = requestedBranch;
+
+    if (remote && !branch) {
+      // simple-git only includes the remote when both remote and branch are provided.
+      // Resolve the current branch so selecting a remote in the UI really runs `git pull <remote> <branch>`.
+      const status = await git.status();
+      branch = String(status.current || '').trim();
+    }
+
     const result = await git.pull(
-      options.remote || 'origin',
-      options.branch,
+      remote || 'origin',
+      branch || undefined,
       options.options || {}
     );
 
@@ -1975,11 +2035,19 @@ export async function fetch(directory, options = {}) {
   const git = await createGit(directory);
 
   try {
-    await git.fetch(
-      options.remote || 'origin',
-      options.branch,
-      options.options || {}
-    );
+    const remote = String(options.remote || '').trim();
+    const branch = String(options.branch || '').trim();
+
+    if (remote && !branch) {
+      // simple-git drops the remote when branch is omitted, so use raw to preserve `git fetch <remote>`.
+      await git.raw(['fetch', remote]);
+    } else {
+      await git.fetch(
+        remote || 'origin',
+        branch || undefined,
+        options.options || {}
+      );
+    }
 
     return { success: true };
   } catch (error) {

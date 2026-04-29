@@ -118,11 +118,19 @@ export interface GitRebaseInProgress {
   onto: string;
 }
 
+export interface GitRemoteComparison {
+  remote: string;
+  branch: string;
+  ahead: number;
+  behind: number;
+}
+
 export interface GitStatus {
   current: string;
   tracking: string | null;
   ahead: number;
   behind: number;
+  upstreamComparison?: GitRemoteComparison | null;
   files: GitStatusFile[];
   isClean: boolean;
   diffStats?: Record<string, { insertions: number; deletions: number }>;
