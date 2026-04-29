@@ -427,7 +427,7 @@ export async function resolveGitHubPrStatus({ octokit, directory, branch, remote
     trackingRemoteName,
   );
 
-  const resolvedRemoteTargets = await resolveRemoteCandidates(directory, rankedRemoteNames.slice(0, 3));
+  const resolvedRemoteTargets = await resolveRemoteCandidates(directory, rankedRemoteNames);
   const resolvedTargets = await expandRepoNetwork(
     octokit,
     resolvedRemoteTargets.map((target, index) => ({ ...target, priority: index })),
