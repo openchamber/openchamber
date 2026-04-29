@@ -503,6 +503,7 @@ export type McpRemoteConfig = {
   type: 'remote';
   url?: string;
   environment?: Record<string, string>;
+  headers?: Record<string, string>;
   enabled?: boolean;
 };
 
@@ -515,6 +516,7 @@ export type McpConfigEntry = {
   command?: string[];
   url?: string;
   environment?: Record<string, string>;
+  headers?: Record<string, string>;
   enabled: boolean;
 };
 
@@ -550,8 +552,22 @@ const buildMcpEntry = (data: Record<string, unknown>): Omit<McpConfigEntry, 'nam
     if (Array.isArray(data.command) && data.command.length > 0) {
       entry.command = data.command.map((value) => String(value));
     }
-  } else if (typeof data.url === 'string' && data.url.trim()) {
-    entry.url = data.url.trim();
+  } else {
+    if (typeof data.url === 'string' && data.url.trim()) {
+      entry.url = data.url.trim();
+    }
+
+    if (isPlainObject(data.headers)) {
+      const cleanedHeaders: Record<string, string> = {};
+      for (const [key, value] of Object.entries(data.headers)) {
+        if (key && value != null) {
+          cleanedHeaders[key] = String(value);
+        }
+      }
+      if (Object.keys(cleanedHeaders).length > 0) {
+        entry.headers = cleanedHeaders;
+      }
+    }
   }
 
   if (isPlainObject(data.environment)) {
