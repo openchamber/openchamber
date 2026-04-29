@@ -59,7 +59,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     placeholder
 }) => {
     const { t } = useI18n();
-    const { isReady } = useOpenCodeReadiness();
+    const { isReady, isUnavailable } = useOpenCodeReadiness();
     const providers = useConfigStore((state) => state.providers);
     const modelsMetadata = useConfigStore((state) => state.modelsMetadata);
     const isMobile = useUIStore(state => state.isMobile);
@@ -509,7 +509,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                         {!isReady ? (
                             <>
                                 <RiLoader4Line className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-                                <span className="typography-meta text-muted-foreground">{t('common.loading')}</span>
+                                <span className="typography-meta text-muted-foreground">{isUnavailable ? t('common.unavailable') : t('common.loading')}</span>
                             </>
                         ) : providerId ? (
                             <ProviderLogo
@@ -538,7 +538,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                                 <>
                                     <RiLoader4Line className="h-3.5 w-3.5 animate-spin text-muted-foreground flex-shrink-0" />
                                     <span className="typography-ui-label font-normal whitespace-nowrap text-muted-foreground">
-                                        {t('common.loading')}
+                                        {isUnavailable ? t('common.unavailable') : t('common.loading')}
                                     </span>
                                 </>
                             ) : (

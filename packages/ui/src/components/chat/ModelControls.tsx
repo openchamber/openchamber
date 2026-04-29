@@ -343,7 +343,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     onMobilePanelChange,
 }) => {
     const { t } = useI18n();
-    const { isReady } = useOpenCodeReadiness();
+    const { isReady, isUnavailable } = useOpenCodeReadiness();
+    const readinessLabel = isUnavailable ? t('common.unavailable') : t('common.loading');
     const providers = useConfigStore((state) => state.providers);
     const currentProviderId = useConfigStore((state) => state.currentProviderId);
     const currentModelId = useConfigStore((state) => state.currentModelId);
@@ -2672,7 +2673,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                                 controlTextSize,
                                                 'font-medium whitespace-nowrap text-muted-foreground min-w-0'
                                             )}>
-                                                {t('common.loading')}
+                                                {readinessLabel}
                                             </span>
                                         </>
                                     ) : currentProviderId ? (
@@ -2922,7 +2923,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                             <>
                                 <RiLoader4Line className={cn(controlIconSize, 'animate-spin text-muted-foreground flex-shrink-0')} />
                                 <span className="typography-micro font-medium text-muted-foreground min-w-0">
-                                    {t('common.loading')}
+                                    {readinessLabel}
                                 </span>
                             </>
                         ) : (
@@ -3084,7 +3085,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     };
 
     const renderVariantSelector = () => {
-        if (!hasVariants) {
+        if (!isReady || !hasVariants) {
             return null;
         }
 
@@ -3204,7 +3205,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                                         'font-medium min-w-0 truncate text-muted-foreground'
                                                     )}
                                                 >
-                                                    {t('common.loading')}
+                                                    {readinessLabel}
                                                 </span>
                                             </>
                                         ) : (
@@ -3333,7 +3334,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 'font-medium truncate min-w-0 text-muted-foreground'
                             )}
                         >
-                            {t('common.loading')}
+                            {readinessLabel}
                         </span>
                     </>
                 ) : (

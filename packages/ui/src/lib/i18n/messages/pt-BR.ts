@@ -4,6 +4,7 @@ import { settingsDict } from './pt-BR.settings';
 export const dict: Record<I18nKey, string> = {
  ...settingsDict,
   "common.loading": "Carregando...",
+  "common.unavailable": "Indisponível",
   "common.language.english": "Inglês",
   "common.language.simplifiedChinese": "Chinês (simplificado)",
   "common.language.ukrainian": "Ucraniano",

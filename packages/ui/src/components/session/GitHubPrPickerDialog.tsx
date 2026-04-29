@@ -23,7 +23,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
-import type { GitHubPullRequestContextResult, GitHubPullRequestSummary, GitHubPullRequestsListResult } from '@/lib/api/types';
+import type { GitHubPullRequestContextResult, GitHubPullRequestSummary, GitHubPullRequestsListResult, GitHubRepoSelector } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 
 const parsePrNumber = (value: string): number | null => {
@@ -195,7 +195,7 @@ export function GitHubPrPickerDialog({
 
   const directNumber = React.useMemo(() => parsePrNumber(query), [query]);
 
-  const attachPr = React.useCallback(async (prNumber: number) => {
+  const attachPr = React.useCallback(async (prNumber: number, sourceRepo?: GitHubRepoSelector | null) => {
     if (!projectDirectory) {
       toast.error(t('session.githubPrPicker.error.noActiveProject'));
       return;
@@ -211,6 +211,7 @@ export function GitHubPrPickerDialog({
       const context = await github.prContext(projectDirectory, prNumber, {
         includeDiff,
         includeCheckDetails: false,
+        sourceRepo,
       });
 
       if (context.connected === false) {
@@ -353,7 +354,7 @@ export function GitHubPrPickerDialog({
                 'group flex items-center gap-2 py-1.5 hover:bg-interactive-hover/30 rounded transition-colors cursor-pointer',
                 loadingPrNumber === pr.number && 'bg-interactive-selection/30'
               )}
-              onClick={() => void attachPr(pr.number)}
+              onClick={() => void attachPr(pr.number, pr.sourceRepo)}
             >
               <div className="flex-1 min-w-0 ml-0.5">
                 <p className="typography-small text-foreground truncate">

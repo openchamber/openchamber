@@ -779,7 +779,7 @@ export type GitHubPullRequestSummary = GitHubPullRequest & {
   updatedAt?: string;
   headLabel?: string;
   headRepo?: GitHubPullRequestHeadRepo | null;
-  sourceRepo?: { owner: string; repo: string; source: string } | null;
+  sourceRepo?: (GitHubRepoSelector & { source: string }) | null;
 };
 
 export type GitHubPullRequestFile = {
@@ -881,6 +881,11 @@ export type GitHubIssueLabel = {
   color?: string;
 };
 
+export type GitHubRepoSelector = {
+  owner: string;
+  repo: string;
+};
+
 export type GitHubIssueSummary = {
   number: number;
   title: string;
@@ -888,7 +893,7 @@ export type GitHubIssueSummary = {
   state: 'open' | 'closed';
   author?: GitHubUserSummary | null;
   labels?: GitHubIssueLabel[];
-  sourceRepo?: { owner: string; repo: string; source: string } | null;
+  sourceRepo?: (GitHubRepoSelector & { source: string }) | null;
 };
 
 export type GitHubIssue = GitHubIssueSummary & {
@@ -979,12 +984,12 @@ export interface GitHubAPI {
   prContext(
     directory: string,
     number: number,
-    options?: { includeDiff?: boolean; includeCheckDetails?: boolean }
+    options?: { includeDiff?: boolean; includeCheckDetails?: boolean; sourceRepo?: GitHubRepoSelector | null }
   ): Promise<GitHubPullRequestContextResult>;
 
   issuesList(directory: string, options?: { page?: number }): Promise<GitHubIssuesListResult>;
-  issueGet(directory: string, number: number): Promise<GitHubIssueGetResult>;
-  issueComments(directory: string, number: number): Promise<GitHubIssueCommentsResult>;
+  issueGet(directory: string, number: number, options?: { sourceRepo?: GitHubRepoSelector | null }): Promise<GitHubIssueGetResult>;
+  issueComments(directory: string, number: number, options?: { sourceRepo?: GitHubRepoSelector | null }): Promise<GitHubIssueCommentsResult>;
   repoUpstream(directory: string): Promise<GitHubRepoUpstreamResult>;
   repoBranches(owner: string, repo: string): Promise<string[]>;
 }

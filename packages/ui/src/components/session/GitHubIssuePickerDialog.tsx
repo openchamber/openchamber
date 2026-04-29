@@ -33,7 +33,7 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { createWorktreeSessionForNewBranch } from '@/lib/worktreeSessionCreator';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
-import type { GitHubIssue, GitHubIssueComment, GitHubIssuesListResult, GitHubIssueSummary } from '@/lib/api/types';
+import type { GitHubIssue, GitHubIssueComment, GitHubIssuesListResult, GitHubIssueSummary, GitHubRepoSelector } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 
 const parseIssueNumber = (value: string): number | null => {
@@ -272,7 +272,7 @@ export function GitHubIssuePickerDialog({
     return settingsDefaultVariant;
   }, []);
 
-  const startSession = React.useCallback(async (issueNumber: number) => {
+  const startSession = React.useCallback(async (issueNumber: number, sourceRepo?: GitHubRepoSelector | null) => {
     if (mode === 'select') {
       // In select mode, fetch full issue details and return via onSelect
       if (!projectDirectory) {
@@ -286,7 +286,7 @@ export function GitHubIssuePickerDialog({
       if (startingIssueNumber) return;
       setStartingIssueNumber(issueNumber);
       try {
-        const issueRes = await github.issueGet(projectDirectory, issueNumber);
+        const issueRes = await github.issueGet(projectDirectory, issueNumber, { sourceRepo });
         if (issueRes.connected === false) {
           toast.error(t('session.githubIssuePicker.error.notConnected'));
           return;
@@ -303,7 +303,7 @@ export function GitHubIssuePickerDialog({
           return;
         }
 
-        const commentsRes = await github.issueComments(projectDirectory, issueNumber);
+        const commentsRes = await github.issueComments(projectDirectory, issueNumber, { sourceRepo });
         if (commentsRes.connected === false) {
           toast.error(t('session.githubIssuePicker.error.notConnected'));
           return;
@@ -346,7 +346,7 @@ export function GitHubIssuePickerDialog({
     if (startingIssueNumber) return;
     setStartingIssueNumber(issueNumber);
     try {
-      const issueRes = await github.issueGet(projectDirectory, issueNumber);
+      const issueRes = await github.issueGet(projectDirectory, issueNumber, { sourceRepo });
       if (issueRes.connected === false) {
         toast.error(t('session.githubIssuePicker.error.notConnected'));
         return;
@@ -363,7 +363,7 @@ export function GitHubIssuePickerDialog({
         return;
       }
 
-      const commentsRes = await github.issueComments(projectDirectory, issueNumber);
+      const commentsRes = await github.issueComments(projectDirectory, issueNumber, { sourceRepo });
       if (commentsRes.connected === false) {
         toast.error(t('session.githubIssuePicker.error.notConnected'));
         return;
@@ -569,7 +569,7 @@ export function GitHubIssuePickerDialog({
                 'group flex items-center gap-2 py-1.5 hover:bg-interactive-hover/30 rounded transition-colors cursor-pointer',
                 startingIssueNumber === issue.number && 'bg-interactive-selection/30'
               )}
-              onClick={() => void startSession(issue.number)}
+              onClick={() => void startSession(issue.number, issue.sourceRepo)}
             >
               <span className="typography-meta text-muted-foreground w-12 text-right flex-shrink-0">
                 #{issue.number}

@@ -2,6 +2,30 @@ const PR_STATUS_CACHE_TTL_MS = 90_000;
 const PR_STATUS_CACHE_MAX_ENTRIES = 200;
 const prStatusCache = new Map();
 
+function getRequestedRepo(req) {
+  const owner = typeof req.query?.owner === 'string' ? req.query.owner.trim() : '';
+  const repo = typeof req.query?.repo === 'string' ? req.query.repo.trim() : '';
+  return owner && repo ? { owner, repo } : null;
+}
+
+async function resolveRepoForRequest(octokit, directory, requestedRepo) {
+  const { resolveGitHubRepoFromDirectory } = await import('./index.js');
+  const { repo } = await resolveGitHubRepoFromDirectory(directory);
+  if (!requestedRepo) {
+    return repo;
+  }
+  if (repo?.owner === requestedRepo.owner && repo?.repo === requestedRepo.repo) {
+    return requestedRepo;
+  }
+
+  const { resolveRepoNetwork } = await import('./repo/fork-detection.js');
+  const network = await resolveRepoNetwork(octokit, directory).catch(() => null);
+  const allowed = Array.isArray(network)
+    ? network.some((item) => item?.owner === requestedRepo.owner && item?.repo === requestedRepo.repo)
+    : false;
+  return allowed ? requestedRepo : null;
+}
+
 function setPrStatusCache(key, data, fetchedAt) {
   // Evict oldest entry when cache exceeds max size
   if (prStatusCache.size >= PR_STATUS_CACHE_MAX_ENTRIES && !prStatusCache.has(key)) {
@@ -1008,8 +1032,8 @@ export function registerGitHubRoutes(app) {
         return res.json({ connected: false });
       }
 
-      const { resolveGitHubRepoFromDirectory } = await import('./index.js');
-      const { repo } = await resolveGitHubRepoFromDirectory(directory);
+      const requestedRepo = getRequestedRepo(req);
+      const repo = await resolveRepoForRequest(octokit, directory, requestedRepo);
       if (!repo) {
         return res.json({ connected: true, repo: null, issue: null });
       }
@@ -1069,8 +1093,8 @@ export function registerGitHubRoutes(app) {
         return res.json({ connected: false });
       }
 
-      const { resolveGitHubRepoFromDirectory } = await import('./index.js');
-      const { repo } = await resolveGitHubRepoFromDirectory(directory);
+      const requestedRepo = getRequestedRepo(req);
+      const repo = await resolveRepoForRequest(octokit, directory, requestedRepo);
       if (!repo) {
         return res.json({ connected: true, repo: null, comments: [] });
       }
@@ -1206,8 +1230,8 @@ export function registerGitHubRoutes(app) {
         return res.json({ connected: false });
       }
 
-      const { resolveGitHubRepoFromDirectory } = await import('./index.js');
-      const { repo } = await resolveGitHubRepoFromDirectory(directory);
+      const requestedRepo = getRequestedRepo(req);
+      const repo = await resolveRepoForRequest(octokit, directory, requestedRepo);
       if (!repo) {
         return res.json({ connected: true, repo: null, pr: null });
       }

@@ -347,20 +347,32 @@ export const PullRequestSection: React.FC<{
   const upstreamDetectionAttemptedRef = React.useRef<string | null>(null);
 
   React.useEffect(() => {
+    setDetectedUpstream(null);
+    setUpstreamBranches([]);
+    setUseDetectedUpstream(false);
+  }, [directory]);
+
+  React.useEffect(() => {
     if (!directory || !github?.repoUpstream || upstreamDetectionAttemptedRef.current === directory) {
       return;
     }
     upstreamDetectionAttemptedRef.current = directory;
 
+    let cancelled = false;
     void (async () => {
       try {
         const result = await github.repoUpstream(directory);
+        if (cancelled) {
+          return;
+        }
         if (result?.isFork && result.upstream) {
           setDetectedUpstream(result.upstream);
           if (github.repoBranches) {
             try {
               const branches = await github.repoBranches(result.upstream.owner, result.upstream.repo);
-              setUpstreamBranches(branches);
+              if (!cancelled) {
+                setUpstreamBranches(branches);
+              }
             } catch {
               // Silently fail — branch list is best-effort
             }
@@ -370,6 +382,10 @@ export const PullRequestSection: React.FC<{
         // Silently fail — upstream detection is best-effort
       }
     })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [directory, github]);
 
   const hasUpstreamRemote = remotes.some((r) => r.name === 'upstream');

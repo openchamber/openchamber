@@ -30,7 +30,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
     filter,
 }) => {
     const { t } = useI18n();
-    const { isReady } = useOpenCodeReadiness();
+    const { isReady, isUnavailable } = useOpenCodeReadiness();
     const configAgents = useConfigStore((state) => state.agents);
     const agentsStoreAgents = useAgentsStore((state) => state.agents);
     const loadAgentsStore = useAgentsStore((state) => state.loadAgents);
@@ -139,7 +139,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                         {!isReady ? (
                             <>
                                 <RiLoader4Line className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-                                <span className="typography-meta text-muted-foreground">{t('common.loading')}</span>
+                                <span className="typography-meta text-muted-foreground">{isUnavailable ? t('common.unavailable') : t('common.loading')}</span>
                             </>
                         ) : (
                             <>
@@ -159,7 +159,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                 )}>
                     <RiLoader4Line className="h-3 w-3 animate-spin text-muted-foreground flex-shrink-0" />
                     <span className="typography-micro font-medium whitespace-nowrap text-muted-foreground">
-                        {t('common.loading')}
+                        {isUnavailable ? t('common.unavailable') : t('common.loading')}
                     </span>
                 </div>
             ) : (

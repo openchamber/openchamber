@@ -4,6 +4,7 @@ import { settingsDict } from './uk.settings';
 export const dict: Record<I18nKey, string> = {
   ...settingsDict,
   "common.loading": "Завантаження...",
+  "common.unavailable": "Недоступно",
   "common.language.english": "англійська",
   "common.language.simplifiedChinese": "Китайська (спрощена)",
   "common.language.ukrainian": "Українська",
