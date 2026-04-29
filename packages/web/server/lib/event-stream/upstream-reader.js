@@ -1,6 +1,7 @@
 import { parseSseEventEnvelope } from './protocol.js';
 
 export const DEFAULT_UPSTREAM_STALL_TIMEOUT_MS = 20_000;
+export const UPSTREAM_STALL_TIMEOUT_CONCURRENT_MS = DEFAULT_UPSTREAM_STALL_TIMEOUT_MS * 3;
 export const DEFAULT_UPSTREAM_RECONNECT_DELAY_MS = 250;
 
 function waitForReconnectDelay(ms, signal) {

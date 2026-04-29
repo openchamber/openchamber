@@ -15,11 +15,25 @@ import type {
 import type { PermissionRequest } from "@/types/permission";
 import type { QuestionRequest } from "@/types/question";
 import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap";
+import {
+  trackSessionStarted,
+  recordProviderSuccess,
+  recordProviderError,
+  shouldRetry,
+  getRetryDelayMs,
+  cleanupSession,
+} from "./provider-tracker";
 
 // Use relative path by default (works with both dev and nginx proxy server)
 // Can be overridden with VITE_OPENCODE_URL for absolute URLs in special deployments
 const DEFAULT_BASE_URL = import.meta.env.VITE_OPENCODE_URL || "/api";
 const ABSOLUTE_URL_PATTERN = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//;
+
+const isRetryableFetchError = (error: unknown): boolean => {
+  if (error instanceof DOMException && error.name === 'AbortError') return true;
+  if (error instanceof TypeError) return true;
+  return false;
+};
 
 const ensureAbsoluteBaseUrl = (candidate: string): string => {
   const normalized = typeof candidate === "string" && candidate.trim().length > 0 ? candidate.trim() : "/api";
@@ -725,39 +739,58 @@ class OpencodeService {
       });
     }
 
-    let response: Response;
-    try {
-      response = await fetch(url.toString(), {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          accept: 'application/json',
-        },
-        body: JSON.stringify({
-          model: {
-            providerID: params.providerID,
-            modelID: params.modelID,
-          },
-          agent: params.agent,
-          variant: params.variant,
-          ...(params.messageId ? { messageID: params.messageId } : {}),
-          ...(params.format ? { format: params.format } : {}),
-          parts,
-        }),
-      });
-    } catch (error) {
-      console.error('[git-generation][browser] prompt_async request failed before response', {
-        sessionId: params.id,
-        url: url.toString(),
-        directory: this.currentDirectory,
-        hasFormat: Boolean(params.format),
-        message: error instanceof Error ? error.message : String(error),
-        error,
-      });
-      throw error;
-    }
+    trackSessionStarted(params.id, params.providerID);
 
-    if (!response.ok) {
+    let response: Response;
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        response = await fetch(url.toString(), {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            accept: 'application/json',
+          },
+          body: JSON.stringify({
+            model: {
+              providerID: params.providerID,
+              modelID: params.modelID,
+            },
+            agent: params.agent,
+            variant: params.variant,
+            ...(params.messageId ? { messageID: params.messageId } : {}),
+            ...(params.format ? { format: params.format } : {}),
+            parts,
+          }),
+        });
+      } catch (error) {
+        if (attempt < 2 && isRetryableFetchError(error)) {
+          const delay = getRetryDelayMs(attempt);
+          console.warn(
+            `[prompt] fetch failed for ${params.providerID}/${params.modelID} (attempt ${attempt + 1}/3), retrying in ${delay}ms`,
+            (error as Error)?.message
+          );
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          continue;
+        }
+        recordProviderError(params.providerID);
+        throw error;
+      }
+
+      if (response.ok) {
+        recordProviderSuccess(params.providerID);
+        return tempMessageId;
+      }
+
+      if (shouldRetry(params.providerID, response.status, attempt)) {
+        const delay = getRetryDelayMs(attempt);
+        console.warn(
+          `[prompt] ${response.status} for ${params.providerID}/${params.modelID} (attempt ${attempt + 1}/3), retrying in ${delay}ms`
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
+
       let detail = '';
       try {
         detail = await response.text();
@@ -765,12 +798,21 @@ class OpencodeService {
         // ignore
       }
       const suffix = detail && detail.trim().length > 0 ? `: ${detail.trim()}` : '';
-      throw new Error(`Failed to send message (${response.status})${suffix}`);
+      const error = new Error(`Failed to send message (${response.status})${suffix}`);
+      recordProviderError(params.providerID, response.status);
+      throw error;
     }
 
-    // Return temporary ID for optimistic UI
-    // Real messageID will come from server via SSE events
-    return tempMessageId;
+    let detail = '';
+    try {
+      detail = await (response as Response).text();
+    } catch {
+      // ignore
+    }
+    const suffix = detail && detail.trim().length > 0 ? `: ${detail.trim()}` : '';
+    const error = new Error(`Failed to send message after retries (${(response as Response).status})${suffix}`);
+    recordProviderError(params.providerID, (response as Response).status);
+    throw error;
   }
 
   async sendCommand(params: {
@@ -841,6 +883,7 @@ class OpencodeService {
       },
       { throwOnError: true }
     );
+    cleanupSession(id);
     return Boolean(response.data);
   }
 
