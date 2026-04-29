@@ -1,5 +1,4 @@
 import React from 'react';
-import { RiCloseLine, RiFullscreenExitLine, RiFullscreenLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
@@ -20,13 +19,11 @@ export const BottomTerminalDock: React.FC<BottomTerminalDockProps> = ({ isOpen, 
   const isFullscreen = useUIStore((state) => state.isBottomTerminalExpanded);
   const setBottomTerminalHeight = useUIStore((state) => state.setBottomTerminalHeight);
   const setBottomTerminalOpen = useUIStore((state) => state.setBottomTerminalOpen);
-  const setBottomTerminalExpanded = useUIStore((state) => state.setBottomTerminalExpanded);
   const [fullscreenHeight, setFullscreenHeight] = React.useState<number | null>(null);
   const [isResizing, setIsResizing] = React.useState(false);
   const dockRef = React.useRef<HTMLElement | null>(null);
   const startYRef = React.useRef(0);
   const startHeightRef = React.useRef(bottomTerminalHeight || 300);
-  const previousHeightRef = React.useRef(bottomTerminalHeight || 300);
 
   const standardHeight = React.useMemo(
     () => Math.min(BOTTOM_DOCK_MAX_HEIGHT, Math.max(BOTTOM_DOCK_MIN_HEIGHT, bottomTerminalHeight || 300)),
@@ -116,20 +113,6 @@ export const BottomTerminalDock: React.FC<BottomTerminalDockProps> = ({ isOpen, 
     event.preventDefault();
   };
 
-  const toggleFullscreen = () => {
-    if (!isOpen) return;
-
-    if (isFullscreen) {
-      setBottomTerminalExpanded(false);
-      const restoreHeight = Math.min(BOTTOM_DOCK_MAX_HEIGHT, Math.max(BOTTOM_DOCK_MIN_HEIGHT, previousHeightRef.current));
-      setBottomTerminalHeight(restoreHeight);
-      return;
-    }
-
-    previousHeightRef.current = standardHeight;
-    setBottomTerminalExpanded(true);
-  };
-
   return (
     <section
       ref={dockRef}
@@ -159,29 +142,6 @@ export const BottomTerminalDock: React.FC<BottomTerminalDockProps> = ({ isOpen, 
           aria-orientation="horizontal"
           aria-label={t('terminalView.bottomDock.resizeAria')}
         />
-      )}
-
-      {isOpen && (
-        <div className="absolute right-2 top-2 z-30 inline-flex items-center gap-1">
-          <button
-            type="button"
-            onClick={toggleFullscreen}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[var(--surface-muted-foreground)] transition-colors hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-            title={isFullscreen ? t('terminalView.bottomDock.restoreTitle') : t('terminalView.bottomDock.expandTitle')}
-            aria-label={isFullscreen ? t('terminalView.bottomDock.restoreAria') : t('terminalView.bottomDock.expandAria')}
-          >
-            {isFullscreen ? <RiFullscreenExitLine className="h-5 w-5" /> : <RiFullscreenLine className="h-5 w-5" />}
-          </button>
-          <button
-            type="button"
-            onClick={() => setBottomTerminalOpen(false)}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[var(--surface-muted-foreground)] transition-colors hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-            title={t('terminalView.bottomDock.closeTitle')}
-            aria-label={t('terminalView.bottomDock.closeAria')}
-          >
-            <RiCloseLine className="h-6 w-6" />
-          </button>
-        </div>
       )}
 
       <div

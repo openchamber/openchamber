@@ -965,6 +965,18 @@ const AssistantMessageBody = React.memo(({
     const messagePreviewUrl = React.useMemo(() => {
         // Match how terminal tabs detect preview URLs.
         const urlPattern = /(https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d{2,5})?(?:\/[\w\-./~%!$&'()*+,;=:@?#[\]]*)?)/i;
+        for (const part of assistantTextParts) {
+            const text = (part as { text?: unknown }).text;
+            if (typeof text !== 'string' || text.length === 0) {
+                continue;
+            }
+            const match = text.match(urlPattern);
+            const url = match?.[1];
+            if (!url) {
+                continue;
+            }
+            return url.includes('0.0.0.0') ? url.replace('0.0.0.0', '127.0.0.1') : url;
+        }
         for (const part of toolParts) {
             const state = (part as unknown as { state?: unknown }).state as Record<string, unknown> | undefined;
             const output = state && typeof state.output === 'string' ? state.output : null;
@@ -980,7 +992,7 @@ const AssistantMessageBody = React.memo(({
             return url.includes('0.0.0.0') ? url.replace('0.0.0.0', '127.0.0.1') : url;
         }
         return null;
-    }, [toolParts]);
+    }, [assistantTextParts, toolParts]);
 
     const createSessionFromAssistantMessage = useSessionUIStore((state) => state.createSessionFromAssistantMessage);
     const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
@@ -1680,10 +1692,11 @@ const AssistantMessageBody = React.memo(({
     }, [messageCompletedAt, messageCreatedAt]);
 
     const footerTimestampClassName = 'text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1';
+    const canOpenMessagePreview = !isMobile && !isVSCodeRuntime();
 
     const finalTurnActionButtons = (
         <>
-            {messagePreviewUrl ? (
+            {canOpenMessagePreview && messagePreviewUrl ? (
                 <Tooltip delayDuration={1000}>
                     <TooltipTrigger asChild>
                         <Button

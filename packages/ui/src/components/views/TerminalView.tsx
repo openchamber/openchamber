@@ -1,5 +1,5 @@
 import React from 'react';
-import { RiAddLine, RiArrowDownLine, RiArrowGoBackLine, RiArrowLeftLine, RiArrowRightLine, RiArrowUpLine, RiCloseLine, RiCommandLine, RiGlobalLine } from '@remixicon/react';
+import { RiAddLine, RiArrowDownLine, RiArrowGoBackLine, RiArrowLeftLine, RiArrowRightLine, RiArrowUpLine, RiCloseLine, RiCommandLine, RiFullscreenExitLine, RiFullscreenLine, RiGlobalLine, RiTerminalLine } from '@remixicon/react';
 
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useTerminalStore } from '@/stores/useTerminalStore';
@@ -13,10 +13,12 @@ import { TerminalViewport, type TerminalController } from '@/components/terminal
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { Button } from '@/components/ui/button';
+import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { useDeviceInfo } from '@/lib/device';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { primeTerminalInputTransport } from '@/lib/terminalApi';
 import { useI18n } from '@/lib/i18n';
+import { PROJECT_ACTION_ICON_MAP, type ProjectActionIconKey } from '@/lib/projectActions';
 
 type Modifier = 'ctrl' | 'cmd';
 type MobileKey =
@@ -110,7 +112,6 @@ export const TerminalView: React.FC = () => {
     const setTabLifecycle = useTerminalStore((s) => s.setTabLifecycle);
     const setConnecting = useTerminalStore((s) => s.setConnecting);
     const appendToBuffer = useTerminalStore((s) => s.appendToBuffer);
-    const markPreviewAutoOpened = useTerminalStore((s) => s.markPreviewAutoOpened);
 
     const openContextPreview = useUIStore((state) => state.openContextPreview);
 
@@ -136,12 +137,24 @@ export const TerminalView: React.FC = () => {
         );
     }, [directoryTerminalState, activeTabId]);
 
+    const terminalTabItems = React.useMemo(() => {
+        return (directoryTerminalState?.tabs ?? []).map((tab) => ({
+            icon: (() => {
+                const Icon = tab.iconKey ? PROJECT_ACTION_ICON_MAP[tab.iconKey as ProjectActionIconKey] ?? RiTerminalLine : RiTerminalLine;
+                return <Icon className="h-4 w-4" />;
+            })(),
+            id: tab.id,
+            label: tab.label,
+            title: tab.label,
+            closeLabel: t('terminalView.tabs.closeTabTitle'),
+        }));
+    }, [directoryTerminalState?.tabs, t]);
+
     const terminalSessionId = activeTab?.terminalSessionId ?? null;
     const terminalLifecycle = activeTab?.lifecycle ?? 'idle';
     const bufferChunks = activeTab?.bufferChunks ?? [];
     const isConnecting = activeTab?.isConnecting ?? false;
     const previewUrl = activeTab?.previewUrl ?? null;
-    const previewAutoOpened = activeTab?.previewAutoOpened ?? false;
 
     const [connectionError, setConnectionError] = React.useState<string | null>(null);
     const [isFatalError, setIsFatalError] = React.useState(false);
@@ -192,6 +205,8 @@ export const TerminalView: React.FC = () => {
 
     const activeMainTab = useUIStore((state) => state.activeMainTab);
     const isBottomTerminalOpen = useUIStore((state) => state.isBottomTerminalOpen);
+    const setBottomTerminalOpen = useUIStore((state) => state.setBottomTerminalOpen);
+    const setBottomTerminalExpanded = useUIStore((state) => state.setBottomTerminalExpanded);
     const isTerminalActive = activeMainTab === 'terminal';
     const isTerminalVisible = isTerminalActive || isBottomTerminalOpen;
     const [hasOpenedTerminalViewport, setHasOpenedTerminalViewport] = React.useState(isTerminalVisible);
@@ -209,20 +224,6 @@ export const TerminalView: React.FC = () => {
             setHasOpenedTerminalViewport(true);
         }
     }, [isTerminalVisible]);
-
-    // Auto-open preview pane once when we detect a local dev server URL.
-    React.useEffect(() => {
-        if (!effectiveDirectory || !activeTabId || !previewUrl) {
-            return;
-        }
-
-        if (previewAutoOpened) {
-            return;
-        }
-
-        openContextPreview(effectiveDirectory, previewUrl);
-        markPreviewAutoOpened(effectiveDirectory, activeTabId);
-    }, [activeTabId, effectiveDirectory, markPreviewAutoOpened, openContextPreview, previewAutoOpened, previewUrl]);
 
     React.useEffect(() => {
         isTerminalVisibleRef.current = isTerminalVisible;
@@ -924,6 +925,7 @@ export const TerminalView: React.FC = () => {
 
     const quickKeysDisabled = !terminalSessionId || isConnecting || isRestarting || isReconnectPending;
     const shouldRenderViewport = isMobile ? isTerminalVisible : hasOpenedTerminalViewport;
+    const showBottomDockControls = !isMobile && isBottomTerminalOpen && !isTerminalActive;
     const quickKeysControls = (
         <>
             <Button
@@ -1031,87 +1033,82 @@ export const TerminalView: React.FC = () => {
 
     return (
         <div className="flex h-full flex-col overflow-hidden bg-[var(--surface-background)]">
-            <div className={cn('app-region-no-drag sticky top-0 z-20 shrink-0 bg-[var(--surface-background)] text-xs', isMobile ? 'px-4 py-1.5' : runtime.platform === 'desktop' ? 'pl-5 pr-20 py-2' : 'px-5 py-2')}>
+            <div className={cn('app-region-no-drag sticky top-0 z-20 shrink-0 bg-[var(--surface-background)] text-xs', isMobile ? 'pl-3 pr-1.5 py-1' : 'pl-3 pr-1.5 py-1')}>
                 {enableTabs && directoryTerminalState ? (
-                    <div className={cn('pl-1 pr-1 flex items-center gap-2', isMobile ? 'mt-1' : 'mt-2')}>
-                        <div className={cn('min-w-0 flex-1 overflow-x-auto', isMobile ? 'pb-0.5' : 'pb-1')}>
-                            <div className={cn('flex w-max items-center pr-1', isMobile ? 'gap-1' : 'gap-1')}>
-                                {directoryTerminalState.tabs.map((tab) => {
-                                    const isActive = tab.id === activeTabId;
-                                    return (
-                                        <div
-                                            key={tab.id}
-                                            className={cn(
-                                                'group flex items-center rounded-md border whitespace-nowrap',
-                                                isMobile ? 'h-8 gap-0.5 pl-2 pr-1.5 text-sm leading-none' : 'gap-1 pl-2 pr-1 py-1 text-xs',
-                                                isActive
-                                                    ? 'bg-[var(--interactive-selection)] border-[var(--primary-muted)] text-[var(--interactive-selection-foreground)]'
-                                                    : 'bg-transparent border-[var(--interactive-border)] text-[var(--surface-muted-foreground)] hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]'
-                                            )}
-                                        >
-                                            <button
-                                                type="button"
-                                                onClick={() => handleSelectTab(tab.id)}
-                                                className={cn(
-                                                    'truncate text-left',
-                                                    isMobile ? '!min-h-0 !min-w-0 max-w-[9.5rem]' : 'max-w-[10rem]'
-                                                )}
-                                                title={tab.label}
-                                            >
-                                                {tab.label}
-                                            </button>
-                                            <button
-                                                type="button"
-                                                className={cn(
-                                                    'flex items-center justify-center rounded-sm text-[var(--surface-muted-foreground)] hover:text-[var(--surface-foreground)]',
-                                                    isMobile ? '!min-h-0 !min-w-0 h-3.5 w-3.5 p-0 leading-none' : 'h-4 w-4 p-0 leading-none',
-                                                    !isMobile && !isActive && 'opacity-0 group-hover:opacity-100'
-                                                )}
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    handleCloseTab(tab.id);
-                                                }}
-                                                title={t('terminalView.tabs.closeTabTitle')}
-                                            >
-                                                {isMobile ? <span aria-hidden>×</span> : <RiCloseLine size={12} />}
-                                            </button>
-                                        </div>
-                                    );
-                                })}
-
-                                <button
-                                    type="button"
-                                    onClick={handleCreateTab}
-                                    className={cn(
-                                        'ml-1 flex items-center justify-center rounded-md border border-[var(--interactive-border)] bg-transparent text-[var(--surface-muted-foreground)] hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]',
-                                        isMobile ? '!min-h-0 !min-w-0 h-8 w-8' : 'h-6.5 w-6.5'
-                                    )}
-                                    title={t('terminalView.tabs.newTabTitle')}
-                                >
-                                    <RiAddLine size={isMobile ? 18 : 16} />
-                                </button>
-                            </div>
+                    <div className="flex items-center gap-2 pl-1 pr-1">
+                        <div className={cn('min-w-0 flex-1', isMobile ? 'h-8' : 'h-7')}>
+                            <SortableTabsStrip
+                                items={terminalTabItems}
+                                activeId={activeTabId}
+                                onSelect={handleSelectTab}
+                                onClose={handleCloseTab}
+                                layoutMode="scrollable"
+                                variant="default"
+                                className="h-full bg-transparent"
+                            />
                         </div>
 
-                        <div className="flex min-w-0 items-center gap-1 overflow-x-auto">
+                        <Button
+                            type="button"
+                            size="xs"
+                            variant="ghost"
+                            className={cn('shrink-0', isMobile ? 'h-8 w-8 p-0' : 'h-7 w-7 p-0')}
+                            onClick={handleCreateTab}
+                            title={t('terminalView.tabs.newTabTitle')}
+                        >
+                            <RiAddLine size={isMobile ? 18 : 16} />
+                        </Button>
+
+                        <div className="flex shrink-0 items-center gap-1 overflow-visible">
                             {previewUrl ? (
                                 <Button
                                     type="button"
                                     size="xs"
                                     variant="outline"
-                                    className="h-6"
+                                    className="h-6 shrink-0 gap-1 px-2"
                                     onClick={() => {
                                         if (!effectiveDirectory) return;
                                         openContextPreview(effectiveDirectory, previewUrl);
                                     }}
                                     title={t('terminalView.preview.openTitle')}
                                 >
-                                    <RiGlobalLine className="h-3.5 w-3.5" />
-                                    {t('terminalView.preview.open')}
+                                    <RiGlobalLine className="h-3.5 w-3.5 shrink-0" />
+                                    <span className="whitespace-nowrap">{t('terminalView.preview.open')}</span>
                                 </Button>
                             ) : null}
-                            {!isMobile && showQuickKeys ? quickKeysControls : null}
+                            {showBottomDockControls ? (
+                                <>
+                                    <Button
+                                        type="button"
+                                        size="xs"
+                                        variant="ghost"
+                                        onClick={() => setBottomTerminalExpanded(!isBottomTerminalExpanded)}
+                                        className={cn('shrink-0 p-0', isMobile ? 'h-8 w-8' : 'h-7 w-7')}
+                                        title={isBottomTerminalExpanded ? t('terminalView.bottomDock.restoreTitle') : t('terminalView.bottomDock.expandTitle')}
+                                        aria-label={isBottomTerminalExpanded ? t('terminalView.bottomDock.restoreAria') : t('terminalView.bottomDock.expandAria')}
+                                    >
+                                        {isBottomTerminalExpanded ? <RiFullscreenExitLine className="h-4 w-4" /> : <RiFullscreenLine className="h-4 w-4" />}
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        size="xs"
+                                        variant="ghost"
+                                        onClick={() => setBottomTerminalOpen(false)}
+                                        className={cn('shrink-0 p-0', isMobile ? 'h-8 w-8' : 'h-7 w-7')}
+                                        title={t('terminalView.bottomDock.closeTitle')}
+                                        aria-label={t('terminalView.bottomDock.closeAria')}
+                                    >
+                                        <RiCloseLine className="h-4 w-4" />
+                                    </Button>
+                                </>
+                            ) : null}
                         </div>
+                    </div>
+                ) : null}
+
+                {!isMobile && showQuickKeys && enableTabs && directoryTerminalState ? (
+                    <div className="mt-2 flex flex-wrap items-center gap-1 pl-1 pr-1">
+                        {quickKeysControls}
                     </div>
                 ) : null}
 
@@ -1126,7 +1123,7 @@ export const TerminalView: React.FC = () => {
                 className="relative flex-1 overflow-hidden"
                 style={{ backgroundColor: xtermTheme.background }}
             >
-                <div className="h-full w-full box-border pl-7 pr-5 pt-3 pb-4">
+                <div className="h-full w-full box-border pl-4 pr-1.5 pt-3 pb-4">
                     {shouldRenderViewport ? (
                         <TerminalViewport
                             key={viewportSessionKey}

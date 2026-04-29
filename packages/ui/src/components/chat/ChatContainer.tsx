@@ -21,17 +21,10 @@ import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
 import type { PermissionRequest } from '@/types/permission';
 import type { QuestionRequest } from '@/types/question';
 import { cn } from '@/lib/utils';
-import { extractLoopbackUrls } from '@/lib/url';
 import {
     collectVisibleSessionIdsForBlockingRequests,
     flattenBlockingRequests,
 } from './lib/blockingRequests';
-
-// Module-level dedupe: tracks (sessionId, url) pairs that have already
-// triggered an automatic preview-pane open. Lives outside React so it
-// persists across re-renders and is never inflated into a shared store
-// (per the perf rules around store fanout boundaries).
-const AUTO_PREVIEW_OPENED = new Set<string>();
 
 // New sync system imports
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -500,56 +493,6 @@ export const ChatContainer: React.FC = () => {
     const draftOpen = Boolean(newSessionDraft?.open);
     const isDesktopExpandedInput = isExpandedInput && !isMobile;
     const messageListRef = React.useRef<MessageListHandle | null>(null);
-
-    // Auto-open preview pane when an assistant message references a loopback
-    // dev-server URL (e.g. http://localhost:3000). Each (session, url) pair is
-    // only auto-opened once per app lifetime so re-renders or repeated mentions
-    // don't keep stealing focus. The fallback inline Preview button in the
-    // markdown renderer covers any case the user dismissed and wants back.
-    const openContextPreview = useUIStore((state) => state.openContextPreview);
-    const currentSessionDirectory = React.useMemo(() => {
-        if (!currentSessionId) return null;
-        const current = sessions.find((session) => session.id === currentSessionId);
-        const directory = (current as Session & { directory?: string | null } | undefined)?.directory;
-        return typeof directory === 'string' && directory.trim().length > 0 ? directory : null;
-    }, [currentSessionId, sessions]);
-    React.useEffect(() => {
-        if (!currentSessionId || !currentSessionDirectory || sessionMessages.length === 0) {
-            return;
-        }
-        // Cheap gate: only inspect the latest message. Streaming/new content
-        // always lands at the tail, so older messages don't need re-scanning
-        // on every part delta.
-        const latest = sessionMessages[sessionMessages.length - 1];
-        if (!latest || latest.info.role !== 'assistant') {
-            return;
-        }
-        let combinedText = '';
-        for (const part of latest.parts) {
-            if (part.type !== 'text') continue;
-            const text = (part as { text?: unknown }).text;
-            if (typeof text === 'string' && text.length > 0) {
-                combinedText += `\n${text}`;
-            }
-        }
-        if (combinedText.length === 0) {
-            return;
-        }
-        const urls = extractLoopbackUrls(combinedText);
-        if (urls.length === 0) {
-            return;
-        }
-        for (const url of urls) {
-            const key = `${currentSessionId}::${url}`;
-            if (AUTO_PREVIEW_OPENED.has(key)) continue;
-            AUTO_PREVIEW_OPENED.add(key);
-            openContextPreview(currentSessionDirectory, url);
-            // Only auto-open the first new URL per pass; if the assistant
-            // produces several, the rest stay reachable via the inline
-            // Preview button without thrashing the panel.
-            break;
-        }
-    }, [currentSessionId, currentSessionDirectory, sessionMessages, openContextPreview]);
 
     const parentSession = React.useMemo(() => {
         if (!currentSessionId) return null;

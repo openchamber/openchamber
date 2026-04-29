@@ -1,5 +1,5 @@
 import React from 'react';
-import { RiArrowLeftRightLine, RiChat4Line, RiCloseLine, RiDonutChartFill, RiFileTextLine, RiFullscreenExitLine, RiFullscreenLine, RiGlobalLine, RiRefreshLine, RiExternalLinkLine, RiPlayLine, RiTerminalBoxLine, RiCursorLine } from '@remixicon/react';
+import { RiArrowLeftRightLine, RiChat4Line, RiCloseLine, RiDonutChartFill, RiFileTextLine, RiFullscreenExitLine, RiFullscreenLine, RiGlobalLine, RiRefreshLine, RiExternalLinkLine, RiTerminalBoxLine, RiCursorLine } from '@remixicon/react';
 
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Button } from '@/components/ui/button';
@@ -13,13 +13,9 @@ import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { getProjectActionsState } from '@/lib/openchamberConfig';
-import { readPackageJsonScripts, detectDevServerCommand } from '@/lib/detectDevServer';
-import { useTerminalStore } from '@/stores/useTerminalStore';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
-import { connectTerminalStream, createTerminalSession, sendTerminalInput } from '@/lib/terminalApi';
 import { ContextPanelContent } from './ContextSidebarTab';
 import { toast } from '@/components/ui';
 
@@ -211,43 +207,6 @@ const normalizeDirectoryKey = (value: string): string => {
   return normalized;
 };
 
-const TERMINAL_LOG_TAIL_CHARS = 800;
-
-const collectTerminalTail = (
-  tab: { bufferChunks: { data: string }[] } | undefined,
-): string => {
-  if (!tab?.bufferChunks?.length) return '';
-  let combined = '';
-  for (let i = tab.bufferChunks.length - 1; i >= 0; i -= 1) {
-    combined = tab.bufferChunks[i].data + combined;
-    if (combined.length >= TERMINAL_LOG_TAIL_CHARS) break;
-  }
-  // Strip ANSI escape sequences so the error message stays readable.
-  // eslint-disable-next-line no-control-regex
-  const stripped = combined.replace(/\x1B\[[0-9;?]*[ -/]*[@-~]/g, '');
-  const trimmed = stripped.trim();
-  if (trimmed.length <= TERMINAL_LOG_TAIL_CHARS) return trimmed;
-  return trimmed.slice(trimmed.length - TERMINAL_LOG_TAIL_CHARS);
-};
-
-const formatExitError = (
-  tab: { bufferChunks: { data: string }[] } | undefined,
-  t: TranslateFn,
-): string => {
-  const log = collectTerminalTail(tab);
-  if (!log) return t('contextPanel.preview.serverExited');
-  return t('contextPanel.preview.serverExitedWithLog', { log });
-};
-
-const formatNoUrlError = (
-  tab: { bufferChunks: { data: string }[] } | undefined,
-  t: TranslateFn,
-): string => {
-  const log = collectTerminalTail(tab);
-  if (!log) return t('contextPanel.preview.noUrlDetected');
-  return t('contextPanel.preview.noUrlDetectedWithLog', { log });
-};
-
 const clampWidth = (width: number): number => {
   if (!Number.isFinite(width)) {
     return CONTEXT_PANEL_DEFAULT_WIDTH;
@@ -350,7 +309,7 @@ const getTabIcon = (tab: { mode: 'diff' | 'file' | 'context' | 'plan' | 'chat' |
   }
 
   if (tab.mode === 'preview') {
-    return <RiGlobalLine className="h-3.5 w-3.5" />;
+    return <RiGlobalLine className="h-3.5 w-3.5 text-[var(--status-info)]" />;
   }
 
   return undefined;
@@ -1156,19 +1115,6 @@ export const ContextPanel: React.FC = () => {
   const isExpanded = Boolean(isOpen && panelState?.expanded);
   const width = clampWidth(panelState?.width ?? CONTEXT_PANEL_DEFAULT_WIDTH);
 
-  // Check if there's a running preview
-  const hasRunningPreview = tabs.some(tab => tab.mode === 'preview' && tab.targetPath);
-
-  // Start Preview feature state
-  const [isStartingPreview, setIsStartingPreview] = React.useState(false);
-  const [previewError, setPreviewError] = React.useState<string | null>(null);
-  const ensureDirectory = useTerminalStore((state) => state.ensureDirectory);
-  const createTab = useTerminalStore((state) => state.createTab);
-  const setTabLabel = useTerminalStore((state) => state.setTabLabel);
-  const setTabSessionId = useTerminalStore((state) => state.setTabSessionId);
-  const setTabLifecycle = useTerminalStore((state) => state.setTabLifecycle);
-  const setConnecting = useTerminalStore((state) => state.setConnecting);
-
   const [isResizing, setIsResizing] = React.useState(false);
   const startXRef = React.useRef(0);
   const startWidthRef = React.useRef(width);
@@ -1266,142 +1212,6 @@ export const ContextPanel: React.FC = () => {
     }
     closeContextPanel(directoryKey);
   }, [closeContextPanel, directoryKey]);
-
-  const handleStartPreview = React.useCallback(async () => {
-    if (!effectiveDirectory || !directoryKey) return;
-    
-    setIsStartingPreview(true);
-    setPreviewError(null);
-    
-    try {
-      // Load project actions and package.json scripts
-      const [actionsState, scripts] = await Promise.all([
-        getProjectActionsState({ id: '', path: effectiveDirectory }),
-        readPackageJsonScripts(effectiveDirectory),
-      ]);
-      
-      // Detect the dev server command
-      const devServer = await detectDevServerCommand(effectiveDirectory, actionsState.actions, scripts);
-      
-      if (!devServer) {
-        setPreviewError(t('contextPanel.preview.noDevServer'));
-        setIsStartingPreview(false);
-        return;
-      }
-      
-      // Ensure terminal directory exists
-      ensureDirectory(effectiveDirectory);
-      
-      // Create a new terminal tab for the dev server
-      const tabId = createTab(effectiveDirectory);
-      setTabLabel(effectiveDirectory, tabId, `Preview: ${devServer.label}`);
-      
-      // Start the terminal session with the dev command
-      const session = await createTerminalSession({
-        cwd: effectiveDirectory,
-      });
-      
-      setTabSessionId(effectiveDirectory, tabId, session.sessionId);
-      setTabLifecycle(effectiveDirectory, tabId, 'running');
-
-      // Ensure output is captured even if the terminal view isn't visible.
-      // Without this, preview URL detection won't run and the context tab
-      // won't open.
-      setConnecting(effectiveDirectory, tabId, true);
-      const disconnectStream = connectTerminalStream(
-        session.sessionId,
-        (event) => {
-          if (event.type === 'data' && typeof event.data === 'string' && event.data.length > 0) {
-            useTerminalStore.getState().appendToBuffer(effectiveDirectory, tabId, event.data);
-          }
-          if (event.type === 'exit') {
-            setTabLifecycle(effectiveDirectory, tabId, 'exited');
-          }
-        },
-        () => {
-          // stream errors are handled by the poll timeout + lifecycle updates
-        },
-        { maxRetries: 60, initialRetryDelay: 250, maxRetryDelay: 2000, connectionTimeout: 5000 },
-      );
-
-      // Actually run the dev server command. Connect the stream first so we
-      // don't miss early startup output containing the preview URL.
-      await sendTerminalInput(session.sessionId, `${devServer.command}\n`);
-
-      // Probe the hint URL directly so commands that don't print a recognizable
-      // URL (or print it slowly) still get a preview tab once the upstream is
-      // actually listening. We deliberately do NOT open the tab from the hint
-      // alone: opening optimistically when the dev server hasn't bound (e.g.
-      // python3 missing, port in use) produces a confusing 502 loop instead of
-      // a clear error.
-      const probeHintReachable = async (): Promise<boolean> => {
-        if (!devServer.previewUrlHint) return false;
-        try {
-          const response = await fetch(devServer.previewUrlHint, {
-            method: 'GET',
-            cache: 'no-store',
-            redirect: 'follow',
-            mode: 'no-cors',
-          });
-          // `no-cors` returns an opaque response with status 0 on success;
-          // any non-network failure indicates the upstream answered.
-          return response.type === 'opaque' || response.status > 0;
-        } catch {
-          return false;
-        }
-      };
-
-      const checkForPreviewUrl = async (): Promise<boolean> => {
-        const state = useTerminalStore.getState().getDirectoryState(effectiveDirectory);
-        const tab = state?.tabs.find(t => t.id === tabId);
-
-        if (tab?.previewUrl) {
-          openContextPreview(directoryKey, tab.previewUrl);
-          setConnecting(effectiveDirectory, tabId, false);
-          disconnectStream();
-          return true;
-        }
-
-        if (await probeHintReachable() && devServer.previewUrlHint) {
-          openContextPreview(directoryKey, devServer.previewUrlHint);
-          setConnecting(effectiveDirectory, tabId, false);
-          disconnectStream();
-          return true;
-        }
-
-        if (tab?.lifecycle === 'exited') {
-          setPreviewError(formatExitError(tab, t));
-          setConnecting(effectiveDirectory, tabId, false);
-          disconnectStream();
-          return true;
-        }
-
-        return false;
-      };
-
-      // Poll for up to 30 seconds
-      for (let i = 0; i < 60; i++) {
-        await new Promise(resolve => setTimeout(resolve, 500));
-        if (await checkForPreviewUrl()) break;
-      }
-
-      // If we timed out without detecting a URL or an exit, show a clear error
-      // including a tail of terminal output so the user can see why.
-      const finalState = useTerminalStore.getState().getDirectoryState(effectiveDirectory);
-      const finalTab = finalState?.tabs.find(t => t.id === tabId);
-      if (!finalTab?.previewUrl && finalTab?.lifecycle !== 'exited') {
-        setPreviewError(formatNoUrlError(finalTab, t));
-      }
-
-      setConnecting(effectiveDirectory, tabId, false);
-      disconnectStream();
-      
-    } catch (error) {
-      setPreviewError(error instanceof Error ? error.message : t('contextPanel.preview.startFailed'));
-    } finally {
-      setIsStartingPreview(false);
-    }
-  }, [effectiveDirectory, directoryKey, ensureDirectory, createTab, setTabLabel, setTabSessionId, setTabLifecycle, setConnecting, openContextPreview, t]);
 
   const handleToggleExpanded = React.useCallback(() => {
     if (!directoryKey) {
@@ -1536,8 +1346,6 @@ export const ContextPanel: React.FC = () => {
     };
   }), [effectiveDirectory, t, tabs]);
 
-  const showStartPreview = !hasRunningPreview && !isStartingPreview && !previewError;
-  
   const activeNonChatContent = activeTab?.mode === 'diff'
     ? <DiffView hideStackedFileSidebar stackedDefaultCollapsedAll hideFileSelector pinSelectedFileHeaderToTopOnNavigate showOpenInEditorAction />
     : activeTab?.mode === 'context'
@@ -1546,56 +1354,13 @@ export const ContextPanel: React.FC = () => {
             ? <PlanView targetPath={activeTab.targetPath} />
             : activeTab?.mode === 'preview'
                 ? <PreviewPane rawUrl={activeTab.targetPath ?? ''} onNavigate={(url) => openContextPreview(effectiveDirectory, url)} />
-                : showStartPreview
-                    ? (
-                        <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
-                            <RiGlobalLine className="h-12 w-12 text-muted-foreground/50" />
-                            <div className="space-y-2">
-                                <div className="typography-ui-header text-foreground">
-                                    {t('contextPanel.preview.title')}
-                                </div>
-                                <div className="typography-micro text-muted-foreground">
-                                    {t('contextPanel.preview.description')}
-                                </div>
-                            </div>
-                            {previewError ? (
-                                <div className="typography-micro text-destructive">
-                                    {previewError}
-                                </div>
-                            ) : null}
-                            <Button
-                                type="button"
-                                variant="default"
-                                size="sm"
-                                onClick={handleStartPreview}
-                                disabled={isStartingPreview || !effectiveDirectory}
-                                className="gap-2"
-                            >
-                                <RiPlayLine className="h-3.5 w-3.5" />
-                                {isStartingPreview ? t('contextPanel.preview.starting') : t('contextPanel.preview.startPreview')}
-                            </Button>
-                        </div>
-                    )
-                    : previewError
-                        ? (
-                            <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
-                                <div className="typography-micro text-destructive">
-                                    {previewError}
-                                </div>
-                                <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={handleStartPreview}
-                                    disabled={isStartingPreview || !effectiveDirectory}
-                                    className="gap-2"
-                                >
-                                    <RiPlayLine className="h-3.5 w-3.5" />
-                                    {t('contextPanel.preview.startPreview')}
-                                </Button>
-                            </div>
-                        )
-                        : null;
+                : (
+                  <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+                    <RiGlobalLine className="h-12 w-12 text-muted-foreground/50" />
+                    <div className="typography-ui-header text-foreground">{t('contextPanel.preview.title')}</div>
+                    <div className="max-w-sm typography-micro text-muted-foreground">{t('contextPanel.preview.description')}</div>
+                  </div>
+                );
 
   const chatTabs = React.useMemo(
     () => tabs.filter((tab) => tab.mode === 'chat'),
@@ -1635,21 +1400,6 @@ export const ContextPanel: React.FC = () => {
         variant="default"
       />
       <div className="flex items-center gap-1 px-1.5">
-        {!hasRunningPreview && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={handleStartPreview}
-            className="h-7 px-2 gap-1"
-            title={t('contextPanel.preview.startPreview')}
-            aria-label={t('contextPanel.preview.startPreview')}
-            disabled={isStartingPreview || !effectiveDirectory}
-          >
-            <RiPlayLine className="h-3.5 w-3.5" />
-            {isStartingPreview ? t('contextPanel.preview.starting') : t('contextPanel.preview.startPreview')}
-          </Button>
-        )}
         <Button
           type="button"
           variant="ghost"

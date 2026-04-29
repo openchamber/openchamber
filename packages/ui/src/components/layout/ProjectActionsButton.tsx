@@ -2,8 +2,10 @@ import React from 'react';
 import {
   RiAddLine,
   RiArrowDownSLine,
+  RiGlobalLine,
   RiLoader4Line,
   RiPlayLine,
+  RiSearchLine,
   RiStopLine,
 } from '@remixicon/react';
 import {
@@ -13,6 +15,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -35,11 +38,14 @@ import {
   resolveProjectActionDesktopForwardUrl,
   toProjectActionRunKey,
 } from '@/lib/projectActions';
+import { detectDevServerCommand, readPackageJsonScripts } from '@/lib/detectDevServer';
+import { connectTerminalStream } from '@/lib/terminalApi';
 
 type UrlWatchEntry = {
   lastSeenChunkId: number | null;
   openedUrl: boolean;
   tail: string;
+  openInPreview: boolean;
 };
 
 const sleep = (ms: number): Promise<void> => {
@@ -59,6 +65,7 @@ interface ProjectActionsButtonProps {
 const ANSI_ESCAPE_PREFIX = String.fromCharCode(27);
 const ANSI_ESCAPE_PATTERN = new RegExp(`${ANSI_ESCAPE_PREFIX}\\[[0-9;?]*[ -/]*[@-~]`, 'g');
 const URL_GLOBAL_PATTERN = /https?:\/\/[^\s<>'"`]+/gi;
+const AUTO_DISCOVER_ACTION_ID = '__openchamber_auto_discover_preview__';
 
 const stripControlChars = (value: string): string => {
   let next = '';
@@ -190,6 +197,7 @@ export const ProjectActionsButton = ({
   const terminalSessions = useTerminalStore((state) => state.sessions);
   const ensureDirectory = useTerminalStore((state) => state.ensureDirectory);
   const setTabLabel = useTerminalStore((state) => state.setTabLabel);
+  const setTabIconKey = useTerminalStore((state) => state.setTabIconKey);
   const setActiveTab = useTerminalStore((state) => state.setActiveTab);
   const setConnecting = useTerminalStore((state) => state.setConnecting);
   const setTabSessionId = useTerminalStore((state) => state.setTabSessionId);
@@ -204,6 +212,7 @@ export const ProjectActionsButton = ({
   const [isLoading, setIsLoading] = React.useState(false);
   const tabByKeyRef = React.useRef<Record<string, string>>({});
   const urlWatchByRunKeyRef = React.useRef<Record<string, UrlWatchEntry>>({});
+  const streamCleanupByRunKeyRef = React.useRef<Record<string, () => void>>({});
   const loadRequestIdRef = React.useRef(0);
 
   const projectId = projectRef?.id ?? null;
@@ -244,13 +253,13 @@ export const ProjectActionsButton = ({
       const filtered = state.actions;
       setActions(filtered);
       setSelectedActionId((current) => {
-        if (filtered.length === 0) {
-          return null;
+        if (current === AUTO_DISCOVER_ACTION_ID) {
+          return current;
         }
         if (current && filtered.some((entry) => entry.id === current)) {
           return current;
         }
-        return filtered[0]?.id ?? null;
+        return null;
       });
     } catch {
       if (loadRequestIdRef.current !== requestId) {
@@ -263,6 +272,31 @@ export const ProjectActionsButton = ({
       }
     }
   }, [stableProjectRef]);
+
+  const normalizedDirectory = React.useMemo(() => {
+    return normalizeProjectActionDirectory(directory || stableProjectRef?.path || '');
+  }, [directory, stableProjectRef?.path]);
+
+  const selectedAction = React.useMemo(() => {
+    if (!selectedActionId) {
+      return null;
+    }
+    return actions.find((entry) => entry.id === selectedActionId) ?? null;
+  }, [actions, selectedActionId]);
+
+  const autoDiscoverAction = React.useMemo<OpenChamberProjectAction>(() => ({
+    id: AUTO_DISCOVER_ACTION_ID,
+    name: t('projectActions.actions.autoDiscover'),
+    command: '',
+    icon: 'search',
+    autoOpenUrl: true,
+  }), [t]);
+
+  const canUseAutoDiscover = !isMobile;
+  const displayActions = React.useMemo(
+    () => canUseAutoDiscover ? [autoDiscoverAction, ...actions] : actions,
+    [actions, autoDiscoverAction, canUseAutoDiscover]
+  );
 
   React.useEffect(() => {
     void loadActions();
@@ -294,10 +328,13 @@ export const ProjectActionsButton = ({
     if (!selectedActionId) {
       return;
     }
-    if (!actions.some((entry) => entry.id === selectedActionId)) {
-      setSelectedActionId(actions[0]?.id ?? null);
+    if (selectedActionId === AUTO_DISCOVER_ACTION_ID && canUseAutoDiscover) {
+      return;
     }
-  }, [actions, selectedActionId]);
+    if (!actions.some((entry) => entry.id === selectedActionId)) {
+      setSelectedActionId(null);
+    }
+  }, [actions, canUseAutoDiscover, selectedActionId]);
 
   React.useEffect(() => {
     for (const [key, entry] of Object.entries(projectActionRuns)) {
@@ -311,9 +348,9 @@ export const ProjectActionsButton = ({
 
   React.useEffect(() => {
     for (const [runKey, entry] of Object.entries(projectActionRuns)) {
-      const watch = urlWatchByRunKeyRef.current[runKey] ?? { lastSeenChunkId: null, openedUrl: false, tail: '' };
+      const watch = urlWatchByRunKeyRef.current[runKey] ?? { lastSeenChunkId: null, openedUrl: false, tail: '', openInPreview: false };
       urlWatchByRunKeyRef.current[runKey] = watch;
-      const action = actions.find((item) => item.id === entry.actionId);
+      const action = displayActions.find((item) => item.id === entry.actionId);
       if (!action) {
         continue;
       }
@@ -345,8 +382,16 @@ export const ProjectActionsButton = ({
 
       if (maybeUrl) {
         watch.openedUrl = true;
-        void openExternal(maybeUrl);
-        toast.success(t('projectActions.toast.openedUrlFromOutput'));
+        if (watch.openInPreview) {
+          const run = projectActionRuns[runKey];
+          if (run) {
+            setTabPreviewUrl(run.directory, run.tabId, maybeUrl, { locked: false, autoOpened: false });
+            openContextPreview(run.directory, maybeUrl);
+          }
+        } else {
+          void openExternal(maybeUrl);
+          toast.success(t('projectActions.toast.openedUrlFromOutput'));
+        }
       }
       urlWatchByRunKeyRef.current[runKey] = watch;
     }
@@ -357,18 +402,7 @@ export const ProjectActionsButton = ({
       }
     }
 
-  }, [actions, openExternal, projectActionRuns, t, terminalSessions]);
-
-  const normalizedDirectory = React.useMemo(() => {
-    return normalizeProjectActionDirectory(directory || stableProjectRef?.path || '');
-  }, [directory, stableProjectRef?.path]);
-
-  const selectedAction = React.useMemo(() => {
-    if (!selectedActionId) {
-      return actions[0] ?? null;
-    }
-    return actions.find((entry) => entry.id === selectedActionId) ?? actions[0] ?? null;
-  }, [actions, selectedActionId]);
+  }, [displayActions, openContextPreview, openExternal, projectActionRuns, setTabPreviewUrl, t, terminalSessions]);
 
   const getOrCreateActionTab = React.useCallback(async (action: OpenChamberProjectAction, options: { revealTerminal?: boolean } = {}) => {
     if (!normalizedDirectory) {
@@ -392,6 +426,7 @@ export const ProjectActionsButton = ({
     }
 
     setTabLabel(normalizedDirectory, tabId, `Action: ${action.name}`);
+    setTabIconKey(normalizedDirectory, tabId, action.icon || 'play');
     if (options.revealTerminal !== false) {
       setActiveTab(normalizedDirectory, tabId);
       setBottomTerminalOpen(true);
@@ -411,6 +446,7 @@ export const ProjectActionsButton = ({
     setActiveMainTab,
     setActiveTab,
     setBottomTerminalOpen,
+    setTabIconKey,
     setTabLabel,
     t,
   ]);
@@ -432,8 +468,29 @@ export const ProjectActionsButton = ({
     }
 
     try {
-      const hasCustomOpenUrl = action.autoOpenUrl === true && (action.openUrl || '').trim().length > 0;
-      const { key, tabId, sessionId } = await getOrCreateActionTab(action, { revealTerminal: !hasCustomOpenUrl });
+      const discovered = action.id === AUTO_DISCOVER_ACTION_ID
+        ? await (async (): Promise<OpenChamberProjectAction> => {
+          const [actionsState, scripts] = await Promise.all([
+            getProjectActionsState({ id: stableProjectRef?.id ?? '', path: normalizedDirectory }),
+            readPackageJsonScripts(normalizedDirectory),
+          ]);
+          const devServer = await detectDevServerCommand(normalizedDirectory, actionsState.actions, scripts);
+          if (!devServer) {
+            throw new Error(t('contextPanel.preview.noDevServer'));
+          }
+          return {
+            id: AUTO_DISCOVER_ACTION_ID,
+            name: t('projectActions.actions.autoDiscover'),
+            command: devServer.command,
+            icon: 'search',
+            autoOpenUrl: true,
+            openUrl: devServer.previewUrlHint || '',
+          };
+        })()
+        : action;
+
+      const hasCustomOpenUrl = discovered.autoOpenUrl === true && (discovered.openUrl || '').trim().length > 0;
+      const { key, tabId, sessionId } = await getOrCreateActionTab(discovered, { revealTerminal: !hasCustomOpenUrl && action.id !== AUTO_DISCOVER_ACTION_ID });
       let activeSessionId = sessionId;
       let createdSession = false;
 
@@ -457,21 +514,46 @@ export const ProjectActionsButton = ({
         await sleep(350);
       }
 
+      if (discovered.id === AUTO_DISCOVER_ACTION_ID) {
+        streamCleanupByRunKeyRef.current[key]?.();
+        setConnecting(normalizedDirectory, tabId, true);
+        streamCleanupByRunKeyRef.current[key] = connectTerminalStream(
+          activeSessionId,
+          (event) => {
+            if (event.type === 'data' && typeof event.data === 'string' && event.data.length > 0) {
+              useTerminalStore.getState().appendToBuffer(normalizedDirectory, tabId, event.data);
+            }
+            if (event.type === 'exit') {
+              useTerminalStore.getState().setTabLifecycle(normalizedDirectory, tabId, 'exited');
+              useTerminalStore.getState().setConnecting(normalizedDirectory, tabId, false);
+              useTerminalStore.getState().removeProjectActionRun(key);
+              delete urlWatchByRunKeyRef.current[key];
+              streamCleanupByRunKeyRef.current[key]?.();
+              delete streamCleanupByRunKeyRef.current[key];
+            }
+          },
+          () => {
+            useTerminalStore.getState().setConnecting(normalizedDirectory, tabId, false);
+          },
+          { maxRetries: 60, initialRetryDelay: 250, maxRetryDelay: 2000, connectionTimeout: 5000 },
+        );
+      }
+
       setProjectActionRun({
         key,
         directory: normalizedDirectory,
-        actionId: action.id,
+        actionId: discovered.id,
         tabId,
         sessionId: activeSessionId,
         status: 'running',
       });
 
-      const hasDesktopForwardSelection = action.autoOpenUrl === true
+      const hasDesktopForwardSelection = discovered.autoOpenUrl === true
         && isDesktopShellApp
-        && (action.desktopOpenSshForward || '').trim().length > 0;
-      const manualOpenUrl = action.autoOpenUrl ? normalizeManualOpenUrl(action.openUrl) : null;
-      const desktopForwardUrl = action.autoOpenUrl && isDesktopShellApp
-        ? resolveProjectActionDesktopForwardUrl(action.desktopOpenSshForward, desktopSshInstances)
+        && (discovered.desktopOpenSshForward || '').trim().length > 0;
+      const manualOpenUrl = discovered.autoOpenUrl ? normalizeManualOpenUrl(discovered.openUrl) : null;
+      const desktopForwardUrl = discovered.autoOpenUrl && isDesktopShellApp
+        ? resolveProjectActionDesktopForwardUrl(discovered.desktopOpenSshForward, desktopSshInstances)
         : null;
 
       if (desktopForwardUrl) {
@@ -496,13 +578,16 @@ export const ProjectActionsButton = ({
         lastSeenChunkId: null,
         openedUrl: Boolean(desktopForwardUrl) || Boolean(manualOpenUrl) || hasCustomOpenUrl,
         tail: '',
+        openInPreview: discovered.id === AUTO_DISCOVER_ACTION_ID,
       };
 
-      const normalizedCommand = stripControlChars(action.command.trim().replace(/\r\n|\r/g, '\n'));
+      const normalizedCommand = stripControlChars(discovered.command.trim().replace(/\r\n|\r/g, '\n'));
       await terminal.sendInput(activeSessionId, `${normalizedCommand}\r`);
     } catch (error) {
       removeProjectActionRun(runKey);
       delete urlWatchByRunKeyRef.current[runKey];
+      streamCleanupByRunKeyRef.current[runKey]?.();
+      delete streamCleanupByRunKeyRef.current[runKey];
       toast.error(error instanceof Error ? error.message : t('projectActions.error.failedToRunAction'));
     }
   }, [
@@ -521,6 +606,7 @@ export const ProjectActionsButton = ({
     setProjectActionRun,
     setTabPreviewUrl,
     setTabSessionId,
+    stableProjectRef?.id,
     t,
     terminal,
   ]);
@@ -568,23 +654,26 @@ export const ProjectActionsButton = ({
 
     removeProjectActionRun(runKey);
     delete urlWatchByRunKeyRef.current[runKey];
+    streamCleanupByRunKeyRef.current[runKey]?.();
+    delete streamCleanupByRunKeyRef.current[runKey];
   }, [normalizedDirectory, projectActionRuns, removeProjectActionRun, setTabSessionId, terminal, updateProjectActionRunStatus]);
 
   const handlePrimaryClick = React.useCallback(() => {
-    if (!selectedAction) {
+    const action = selectedAction ?? displayActions[0];
+    if (!action) {
       return;
     }
-    const runKey = toProjectActionRunKey(normalizedDirectory, selectedAction.id);
+    const runKey = toProjectActionRunKey(normalizedDirectory, action.id);
     const runningEntry = projectActionRuns[runKey];
     if (runningEntry?.status === 'stopping') {
       return;
     }
     if (runningEntry) {
-      void stopAction(selectedAction);
+      void stopAction(action);
       return;
     }
-    void runAction(selectedAction);
-  }, [normalizedDirectory, runAction, projectActionRuns, selectedAction, stopAction]);
+    void runAction(action);
+  }, [displayActions, normalizedDirectory, runAction, projectActionRuns, selectedAction, stopAction]);
 
   const handleSelectAction = React.useCallback((action: OpenChamberProjectAction, toggleStopIfRunning = false) => {
     setSelectedActionId(action.id);
@@ -619,50 +708,15 @@ export const ProjectActionsButton = ({
     return null;
   }
 
-  if (actions.length === 0) {
-    if (compact) {
-      return (
-        <button
-          type="button"
-          className={cn(
-            'app-region-no-drag inline-flex h-9 w-9 items-center justify-center rounded-[10px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] p-2',
-            'typography-ui-label font-medium text-muted-foreground hover:bg-interactive-hover hover:text-foreground transition-colors',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-            className
-          )}
-          aria-label={t('projectActions.actions.addActionAria')}
-          onClick={openProjectActionsSettings}
-        >
-          <RiAddLine className="h-5 w-5" />
-        </button>
-      );
-    }
-
-    return (
-      <button
-        type="button"
-        className={cn(
-          'app-region-no-drag inline-flex h-7 shrink-0 items-center gap-2 self-center rounded-[9px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px]',
-          'bg-[var(--surface-elevated)] px-3 typography-ui-label font-medium text-foreground hover:bg-interactive-hover transition-colors',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-          'border border-border/60',
-          className
-        )}
-        onClick={openProjectActionsSettings}
-      >
-        <RiAddLine className="h-4 w-4 text-muted-foreground" />
-        <span className="header-open-label whitespace-nowrap">{t('projectActions.actions.addAction')}</span>
-      </button>
-    );
-  }
-
-  const resolvedSelected = selectedAction ?? actions[0] ?? null;
+  const resolvedSelected = selectedAction ?? displayActions[0] ?? null;
   if (!resolvedSelected) {
     return null;
   }
 
   const selectedIconKey = (resolvedSelected.icon || 'play') as keyof typeof PROJECT_ACTION_ICON_MAP;
-  const SelectedIcon = PROJECT_ACTION_ICON_MAP[selectedIconKey] || RiPlayLine;
+  const SelectedIcon = resolvedSelected.id === AUTO_DISCOVER_ACTION_ID
+    ? RiSearchLine
+    : PROJECT_ACTION_ICON_MAP[selectedIconKey] || RiPlayLine;
   const selectedButtonLabel = formatActionButtonLabel(
     resolvedSelected.name,
     t('projectActions.label.fallbackAction'),
@@ -670,66 +724,103 @@ export const ProjectActionsButton = ({
   const selectedRunKey = toProjectActionRunKey(normalizedDirectory, resolvedSelected.id);
   const selectedRunning = projectActionRuns[selectedRunKey];
   const isStoppingSelected = selectedRunning?.status === 'stopping';
+  const selectedRunPreviewUrl = selectedRunning
+    ? terminalSessions.get(selectedRunning.directory)?.tabs.find((tab) => tab.id === selectedRunning.tabId)?.previewUrl ?? null
+    : null;
+  const showSelectedPreviewButton = Boolean(selectedRunning && selectedRunPreviewUrl);
+  const handleOpenSelectedPreview = () => {
+    if (!selectedRunning || !selectedRunPreviewUrl) {
+      return;
+    }
+    openContextPreview(selectedRunning.directory, selectedRunPreviewUrl);
+  };
 
   if (compact) {
     return (
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            disabled={isLoading || isStoppingSelected}
-            className={cn(
-              'app-region-no-drag inline-flex h-9 w-9 items-center justify-center rounded-[10px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] p-2',
-              'typography-ui-label font-medium text-muted-foreground hover:bg-interactive-hover hover:text-foreground transition-colors',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-              'disabled:cursor-not-allowed',
-              className
-            )}
-            aria-label={selectedRunning
-              ? t('projectActions.actions.stopNamedAria', { name: resolvedSelected.name })
-              : t('projectActions.actions.runNamedAria', { name: resolvedSelected.name })}
-          >
-            {isStoppingSelected
-              ? <RiLoader4Line className="h-5 w-5 animate-spin text-[var(--status-warning)]" />
-              : selectedRunning
-                ? <RiStopLine className="h-5 w-5 text-[var(--status-warning)]" />
-                : <SelectedIcon className="h-5 w-5" />}
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-52 max-h-[70vh] overflow-y-auto">
-          <DropdownMenuItem className="flex items-center gap-2" onClick={openProjectActionsSettings}>
-            <RiAddLine className="h-4 w-4" />
-            <span className="typography-ui-label text-foreground">{t('projectActions.actions.addNewAction')}</span>
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          {actions.map((entry) => {
-            const iconKey = (entry.icon || 'play') as keyof typeof PROJECT_ACTION_ICON_MAP;
-            const Icon = PROJECT_ACTION_ICON_MAP[iconKey] || RiPlayLine;
-            const runKey = toProjectActionRunKey(normalizedDirectory, entry.id);
-            const runState = projectActionRuns[runKey];
-            const isRunning = Boolean(runState);
-            const isStopping = runState?.status === 'stopping';
-
-            return (
-              <DropdownMenuItem
-                key={entry.id}
-                className="flex items-center gap-2"
-                onClick={() => {
-                  handleSelectAction(entry, true);
-                }}
+      <div className="inline-flex items-center">
+        <button
+          type="button"
+          disabled={isLoading || isStoppingSelected}
+          className={cn(
+            'app-region-no-drag inline-flex h-9 w-9 items-center justify-center rounded-[10px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] p-2',
+            'typography-ui-label font-medium text-muted-foreground hover:bg-interactive-hover hover:text-foreground transition-colors',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+            'disabled:cursor-not-allowed',
+            className
+          )}
+          onClick={handlePrimaryClick}
+          aria-label={selectedRunning
+            ? t('projectActions.actions.stopNamedAria', { name: resolvedSelected.name })
+            : t('projectActions.actions.runNamedAria', { name: resolvedSelected.name })}
+        >
+          {isStoppingSelected
+            ? <RiLoader4Line className="h-5 w-5 animate-spin text-[var(--status-warning)]" />
+            : selectedRunning
+              ? <RiStopLine className="h-5 w-5 text-[var(--status-warning)]" />
+              : <SelectedIcon className="h-5 w-5" />}
+        </button>
+        {showSelectedPreviewButton ? (
+          <Tooltip delayDuration={1000}>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className="app-region-no-drag -ml-1 inline-flex h-9 w-7 items-center justify-center rounded-[10px] text-muted-foreground hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                aria-label={t('projectActions.actions.openPreview')}
+                onClick={handleOpenSelectedPreview}
               >
-                <Icon className="h-4 w-4" />
-                <span className="typography-ui-label text-foreground truncate">{entry.name}</span>
-                {isStopping
-                  ? <RiLoader4Line className="ml-auto h-4 w-4 animate-spin text-[var(--status-warning)]" />
-                  : isRunning
-                    ? <RiStopLine className="ml-auto h-4 w-4 text-[var(--status-warning)]" />
-                    : null}
-              </DropdownMenuItem>
-            );
-          })}
-        </DropdownMenuContent>
-      </DropdownMenu>
+                <RiGlobalLine className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent sideOffset={6}>{t('projectActions.actions.openPreview')}</TooltipContent>
+          </Tooltip>
+        ) : null}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="app-region-no-drag -ml-1 inline-flex h-9 w-5 items-center justify-center rounded-[10px] text-muted-foreground hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              aria-label={t('projectActions.actions.chooseActionAria')}
+            >
+              <RiArrowDownSLine className="h-3.5 w-3.5" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-52 max-h-[70vh] overflow-y-auto">
+            <DropdownMenuItem className="flex items-center gap-2" onClick={openProjectActionsSettings}>
+              <RiAddLine className="h-4 w-4" />
+              <span className="typography-ui-label text-foreground">{t('projectActions.actions.addNewAction')}</span>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            {displayActions.map((entry) => {
+              const iconKey = (entry.icon || 'play') as keyof typeof PROJECT_ACTION_ICON_MAP;
+              const Icon = entry.id === AUTO_DISCOVER_ACTION_ID
+                ? RiSearchLine
+                : PROJECT_ACTION_ICON_MAP[iconKey] || RiPlayLine;
+              const runKey = toProjectActionRunKey(normalizedDirectory, entry.id);
+              const runState = projectActionRuns[runKey];
+              const isRunning = Boolean(runState);
+              const isStopping = runState?.status === 'stopping';
+
+              return (
+                <DropdownMenuItem
+                  key={entry.id}
+                  className="flex items-center gap-2"
+                  onClick={() => {
+                    handleSelectAction(entry, true);
+                  }}
+                >
+                  <Icon className="h-4 w-4" />
+                  <span className="typography-ui-label text-foreground truncate">{entry.name}</span>
+                  {isStopping
+                    ? <RiLoader4Line className="ml-auto h-4 w-4 animate-spin text-[var(--status-warning)]" />
+                    : isRunning
+                      ? <RiStopLine className="ml-auto h-4 w-4 text-[var(--status-warning)]" />
+                      : null}
+                </DropdownMenuItem>
+              );
+            })}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
     );
   }
 
@@ -766,6 +857,26 @@ export const ProjectActionsButton = ({
         {!compact ? <span className="header-open-label whitespace-nowrap">{selectedButtonLabel}</span> : null}
       </button>
 
+      {showSelectedPreviewButton ? (
+        <Tooltip delayDuration={1000}>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={handleOpenSelectedPreview}
+              className={cn(
+                compact ? 'inline-flex h-full w-8 items-center justify-center' : 'inline-flex h-full w-7 items-center justify-center',
+                'border-l border-[var(--interactive-border)] text-foreground',
+                'hover:bg-interactive-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
+              )}
+              aria-label={t('projectActions.actions.openPreview')}
+            >
+              <RiGlobalLine className="h-4 w-4" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent sideOffset={6}>{t('projectActions.actions.openPreview')}</TooltipContent>
+        </Tooltip>
+      ) : null}
+
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button
@@ -786,9 +897,11 @@ export const ProjectActionsButton = ({
             <span className="typography-ui-label text-foreground">{t('projectActions.actions.addNewAction')}</span>
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          {actions.map((entry) => {
+          {displayActions.map((entry) => {
             const iconKey = (entry.icon || 'play') as keyof typeof PROJECT_ACTION_ICON_MAP;
-            const Icon = PROJECT_ACTION_ICON_MAP[iconKey] || RiPlayLine;
+            const Icon = entry.id === AUTO_DISCOVER_ACTION_ID
+              ? RiSearchLine
+              : PROJECT_ACTION_ICON_MAP[iconKey] || RiPlayLine;
             const runKey = toProjectActionRunKey(normalizedDirectory, entry.id);
             const runState = projectActionRuns[runKey];
             const isRunning = Boolean(runState);
