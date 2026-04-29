@@ -16,12 +16,10 @@ import type { PermissionRequest } from "@/types/permission";
 import type { QuestionRequest } from "@/types/question";
 import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap";
 import {
-  trackSessionStarted,
   recordProviderSuccess,
   recordProviderError,
   shouldRetry,
   getRetryDelayMs,
-  cleanupSession,
 } from "./provider-tracker";
 
 // Use relative path by default (works with both dev and nginx proxy server)
@@ -739,8 +737,6 @@ class OpencodeService {
       });
     }
 
-    trackSessionStarted(params.id, params.providerID);
-
     let response!: Response;
 
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -774,7 +770,6 @@ class OpencodeService {
           continue;
         }
         recordProviderError(params.providerID);
-        cleanupSession(params.id);
         throw error;
       }
 
@@ -801,9 +796,10 @@ class OpencodeService {
       const suffix = detail && detail.trim().length > 0 ? `: ${detail.trim()}` : '';
       const error = new Error(`Failed to send message (${response.status})${suffix}`);
       recordProviderError(params.providerID, response.status);
-      cleanupSession(params.id);
       throw error;
     }
+    // Defensive fallback — all loop paths return/throw, but TypeScript
+    // control flow analysis cannot prove exhaustiveness without this.
     throw new Error('Failed to send message after retries');
   }
 
@@ -875,7 +871,6 @@ class OpencodeService {
       },
       { throwOnError: true }
     );
-    cleanupSession(id);
     return Boolean(response.data);
   }
 

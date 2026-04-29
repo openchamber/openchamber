@@ -1,10 +1,9 @@
 /**
- * Provider Concurrency Tracker
+ * Provider Circuit-Breaker & Retry Tracker
  *
- * Tracks per-provider session activity to enable:
- * - Admission control (warn when hitting provider concurrency limits)
+ * Tracks per-provider error state to enable:
+ * - Transparent retry with exponential backoff for transient errors
  * - Circuit breaking (pause requests to a provider during error storms)
- * - Health-check awareness (skip OpenCode restart when provider is busy)
  *
  * Inspired by HiveMind (arXiv:2604.17111) OS-inspired scheduling primitives.
  */
@@ -20,7 +19,6 @@ const PROVIDER_EVICTION_INTERVAL_MS = 10 * 60 * 1000
 const RETRYABLE_STATUS_CODES = new Set([429, 502, 503, 504])
 
 type ProviderState = {
-  activeSessions: Set<string>
   consecutiveErrors: number
   lastErrorAt: number
   circuitOpen: boolean
@@ -34,7 +32,6 @@ function evictStaleProviders(): void {
   const now = Date.now()
   for (const [providerID, state] of providers) {
     if (
-      state.activeSessions.size === 0 &&
       state.consecutiveErrors === 0 &&
       now - state.lastErrorAt > PROVIDER_EVICTION_TTL_MS
     ) {
@@ -51,7 +48,6 @@ function getOrCreateProvider(providerID: string): ProviderState {
   let state = providers.get(providerID)
   if (!state) {
     state = {
-      activeSessions: new Set(),
       consecutiveErrors: 0,
       lastErrorAt: 0,
       circuitOpen: false,
@@ -61,42 +57,6 @@ function getOrCreateProvider(providerID: string): ProviderState {
     providers.set(providerID, state)
   }
   return state
-}
-
-export function trackSessionStarted(sessionID: string, providerID: string): void {
-  if (!sessionID || !providerID) return
-  const state = getOrCreateProvider(providerID)
-  state.activeSessions.add(sessionID)
-}
-
-export function trackSessionEnded(sessionID: string, providerID: string): void {
-  if (!sessionID || !providerID) return
-  const state = providers.get(providerID)
-  if (!state) return
-  state.activeSessions.delete(sessionID)
-}
-
-export function getActiveSessionCountForProvider(providerID: string): number {
-  const state = providers.get(providerID)
-  return state?.activeSessions.size ?? 0
-}
-
-export function getTotalActiveSessionCount(): number {
-  let count = 0
-  for (const state of providers.values()) {
-    count += state.activeSessions.size
-  }
-  return count
-}
-
-export function getProviderConcurrencySnapshot(): Record<string, number> {
-  const result: Record<string, number> = {}
-  for (const [providerID, state] of providers) {
-    if (state.activeSessions.size > 0) {
-      result[providerID] = state.activeSessions.size
-    }
-  }
-  return result
 }
 
 export function recordProviderSuccess(providerID: string): void {
@@ -165,10 +125,4 @@ export function resetCircuit(providerID: string): void {
   state.consecutiveErrors = 0
   state.circuitOpen = false
   state.circuitCooldownMs = DEFAULT_CIRCUIT_COOLDOWN_MS
-}
-
-export function cleanupSession(sessionID: string): void {
-  for (const state of providers.values()) {
-    state.activeSessions.delete(sessionID)
-  }
 }
