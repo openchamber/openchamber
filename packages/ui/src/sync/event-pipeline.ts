@@ -631,8 +631,10 @@ export function createEventPipeline(input: EventPipelineInput) {
     window.addEventListener("pageshow", onPageShow)
   }
 
-  if (typeof window !== "undefined") {
-    window.addEventListener("openchamber:system-resume", onSystemResume)
+  // Use globalThis (not window) for the system-resume listener so that
+  // test environments can replace globalThis.window with a stub.
+  if (typeof globalThis.window !== "undefined") {
+    globalThis.window.addEventListener("openchamber:system-resume", onSystemResume)
   }
 
   const cleanup = () => {
@@ -640,8 +642,8 @@ export function createEventPipeline(input: EventPipelineInput) {
       document.removeEventListener("visibilitychange", onVisibility)
       window.removeEventListener("pageshow", onPageShow)
     }
-    if (typeof window !== "undefined") {
-      window.removeEventListener("openchamber:system-resume", onSystemResume)
+    if (typeof globalThis.window !== "undefined") {
+      globalThis.window.removeEventListener("openchamber:system-resume", onSystemResume)
     }
     abort.abort()
     flushAll()
