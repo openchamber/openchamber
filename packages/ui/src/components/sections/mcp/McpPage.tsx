@@ -669,6 +669,75 @@ export const McpPage: React.FC = () => {
   const [showImportDialog, setShowImportDialog] = React.useState(false);
   const [importJsonText, setImportJsonText] = React.useState('');
   const [importError, setImportError] = React.useState<string | null>(null);
+
+  // MeteorDroid quick setup (used in empty state)
+  const [meteorMode, setMeteorMode] = React.useState<'ephemeral' | 'persistent' | 'cdp'>('ephemeral');
+  const [meteorProfileDir, setMeteorProfileDir] = React.useState('$HOME/.minicomet/profile');
+  const [meteorCdpUrl, setMeteorCdpUrl] = React.useState('http://localhost:9222');
+  const [isAddingMeteorDroid, setIsAddingMeteorDroid] = React.useState(false);
+
+  const handleAddMeteorDroid = React.useCallback(async () => {
+    if (isAddingMeteorDroid) return;
+
+    const baseName = 'meteordroid';
+    let nextName = baseName;
+    let counter = 1;
+    while (mcpServers.some((server) => server.name === nextName)) {
+      nextName = `${baseName}-${counter}`;
+      counter += 1;
+    }
+
+    const env: Array<{ key: string; value: string }> = [
+      { key: 'MINI_COMET_MODE', value: meteorMode },
+      // Prefer visible Chromium by default.
+      { key: 'MINI_COMET_HEADLESS', value: '0' },
+    ];
+    if (meteorMode === 'cdp') {
+      env.push({ key: 'MINI_COMET_CDP_URL', value: meteorCdpUrl.trim() || 'http://localhost:9222' });
+    } else if (meteorMode === 'persistent') {
+      env.push({ key: 'MINI_COMET_PROFILE_DIR', value: meteorProfileDir.trim() || '$HOME/.minicomet/profile' });
+    }
+
+    const draft: McpDraft = {
+      name: nextName,
+      scope: 'user',
+      type: 'local',
+      command: ['npx', '-y', 'meteordroid'],
+      url: '',
+      environment: env,
+      headers: [],
+      oauthEnabled: true,
+      oauthClientId: '',
+      oauthClientSecret: '',
+      oauthScope: '',
+      oauthRedirectUri: '',
+      timeout: '',
+      enabled: true,
+    };
+
+    setIsAddingMeteorDroid(true);
+    try {
+      const result = await createMcp(draft);
+      if (!result.ok) {
+        toast.error(t('settings.mcp.page.toast.saveFailed'));
+        return;
+      }
+      if (result.reloadFailed) {
+        toast.warning(result.message || t('settings.mcp.page.toast.serverCreatedReloadFailed'), {
+          description: result.warning || t('settings.mcp.page.toast.retryRefreshHint'),
+        });
+      } else {
+        toast.success(result.message || t('settings.mcp.page.toast.serverCreatedReloading'));
+      }
+
+      setMcpDraft(null);
+      setSelectedMcp(nextName);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('settings.mcp.page.toast.unexpectedError'));
+    } finally {
+      setIsAddingMeteorDroid(false);
+    }
+  }, [createMcp, isAddingMeteorDroid, mcpServers, meteorCdpUrl, meteorMode, meteorProfileDir, setMcpDraft, setSelectedMcp, t]);
   const runtimeActionKey = React.useMemo(
     () => buildMcpRuntimeActionKey(selectedMcpName, currentDirectory),
     [currentDirectory, selectedMcpName],
@@ -1298,10 +1367,76 @@ export const McpPage: React.FC = () => {
   if (!selectedMcpName) {
     return (
       <div className="flex h-full items-center justify-center">
-        <div className="text-center text-muted-foreground">
+        <div className="mx-auto max-w-md text-center text-muted-foreground px-6">
           <RiPlugLine className="mx-auto mb-3 h-12 w-12 opacity-50" />
           <p className="typography-body">{t('settings.mcp.page.empty.selectServer')}</p>
           <p className="typography-meta mt-1 opacity-75">{t('settings.mcp.page.empty.addNewOne')}</p>
+
+          <div className="mt-5 rounded-lg border border-border bg-[var(--surface-elevated)] p-4 text-left">
+            <div className="typography-ui-label text-foreground">{t('settings.mcp.page.meteordroid.title')}</div>
+            <div className="typography-meta mt-1 text-muted-foreground/80">{t('settings.mcp.page.meteordroid.description')}</div>
+
+            <div className="mt-4 space-y-2">
+              <div className="flex items-center gap-3">
+                <div className="typography-ui-label text-foreground w-32 shrink-0">{t('settings.mcp.page.meteordroid.field.mode')}</div>
+                <Select value={meteorMode} onValueChange={(v) => setMeteorMode(v as 'ephemeral' | 'persistent' | 'cdp')}>
+                  <SelectTrigger className="h-7">
+                    <span className="typography-ui-label font-normal">{t(`settings.mcp.page.meteordroid.mode.${meteorMode}`)}</span>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ephemeral">{t('settings.mcp.page.meteordroid.mode.ephemeral')}</SelectItem>
+                    <SelectItem value="persistent">{t('settings.mcp.page.meteordroid.mode.persistent')}</SelectItem>
+                    <SelectItem value="cdp">{t('settings.mcp.page.meteordroid.mode.cdp')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {meteorMode === 'cdp' ? (
+                <div className="flex items-center gap-3">
+                  <div className="typography-ui-label text-foreground w-32 shrink-0">{t('settings.mcp.page.meteordroid.field.cdpUrl')}</div>
+                  <Input
+                    className="h-7"
+                    value={meteorCdpUrl}
+                    onChange={(e) => setMeteorCdpUrl(e.target.value)}
+                    placeholder={t('settings.mcp.page.meteordroid.field.cdpUrlPlaceholder')}
+                  />
+                </div>
+              ) : meteorMode === 'persistent' ? (
+                <div className="flex items-center gap-3">
+                  <div className="typography-ui-label text-foreground w-32 shrink-0">{t('settings.mcp.page.meteordroid.field.profileDir')}</div>
+                  <Input
+                    className="h-7"
+                    value={meteorProfileDir}
+                    onChange={(e) => setMeteorProfileDir(e.target.value)}
+                    placeholder={t('settings.mcp.page.meteordroid.field.profileDirPlaceholder')}
+                  />
+                </div>
+              ) : null}
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="default"
+                onClick={() => void handleAddMeteorDroid()}
+                disabled={isAddingMeteorDroid}
+              >
+                {t('settings.mcp.page.meteordroid.actions.add')}
+              </Button>
+            </div>
+
+            {meteorMode === 'cdp' ? (
+              <>
+                <div className="typography-micro mt-3 text-muted-foreground/80">
+                  {t('settings.mcp.page.meteordroid.cdpHint')}
+                </div>
+                <pre className="mt-2 overflow-x-auto rounded-md border border-[var(--interactive-border)] bg-[var(--surface-background)] px-3 py-2 typography-micro text-foreground font-mono">
+                  {t('settings.mcp.page.meteordroid.cdpCommand')}
+                </pre>
+              </>
+            ) : null}
+          </div>
         </div>
       </div>
     );
