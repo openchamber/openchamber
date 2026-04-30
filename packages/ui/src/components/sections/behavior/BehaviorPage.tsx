@@ -4,9 +4,28 @@ import { Textarea } from '@/components/ui/textarea';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
-import { updateDesktopSettings } from '@/lib/persistence';
 
 const AGENTS_MD_PATH = '~/.config/opencode/AGENTS.md';
+
+const readApiError = async (response: Response, fallback: string) => {
+  const data = await response.json().catch(() => null) as { error?: unknown } | null;
+  return typeof data?.error === 'string' && data.error.trim() ? data.error : fallback;
+};
+
+const saveBehaviorSetting = async (globalBehaviorPrompt: string, fallbackError: string) => {
+  const response = await fetch('/api/config/settings', {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({ globalBehaviorPrompt }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response, fallbackError));
+  }
+};
 
 export const BehaviorPage: React.FC = () => {
   const { t } = useI18n();
@@ -78,11 +97,10 @@ export const BehaviorPage: React.FC = () => {
       });
 
       if (!response.ok) {
-        const detail = await response.text().catch(() => '');
-        throw new Error(detail || 'Failed to sync to AGENTS.md');
+        throw new Error(await readApiError(response, t('settings.behavior.page.toast.saveFailed')));
       }
 
-      await updateDesktopSettings({ globalBehaviorPrompt: prompt });
+      await saveBehaviorSetting(prompt, t('settings.behavior.page.toast.saveFailed'));
 
       setInitialPrompt(prompt);
       toast.success(t('settings.behavior.page.toast.saved'));
