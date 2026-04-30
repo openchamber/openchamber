@@ -1,0 +1,39 @@
+{
+  "name": "@openchamber/android-twa",
+  "version": "1.9.10",
+  "description": "Android TWA (Trusted Web Activity) builder for OpenChamber PWA",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "node scripts/guard-android-sdk.mjs",
+    "build:debug": "node scripts/guard-android-sdk.mjs assembleDebug",
+    "build:aab": "node scripts/guard-android-sdk.mjs bundleRelease",
+    "init:bw": "node scripts/init-twa.mjs",
+    "build:bw": "node scripts/build-with-check.mjs",
+    "build:aab:bw": "node scripts/build-with-check.mjs --generateAppBundle",
+    "assetlinks": "node scripts/generate-assetlinks.mjs",
+    "fingerprint": "node scripts/fingerprint.mjs",
+    "validate": "node scripts/init-twa.mjs --validate-only",
+    "check-prerequisites": "node scripts/check-prerequisites.mjs",
+    "clean": "cd configurable-wrapper && ./gradlew clean && cd ../ && rm -rf output/ android-project/",
+    "clean:bw": "rm -rf output/ android-project/",
+    "test": "bun test"
+    },
+  "devDependencies": {
+    "@bubblewrap/cli": "^1.24.1",
+    "@clack/prompts": "^0.10.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "keywords": [
+    "android",
+    "twa",
+    "trusted-web-activity",
+    "pwa",
+    "opencode",
+    "openchamber"
+  ],
+  "author": "OpenChamber Contributors",
+  "license": "MIT"
+}

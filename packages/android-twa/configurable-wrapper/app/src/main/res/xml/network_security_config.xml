@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext HTTP is intentionally permitted for all domains.
+
+  This app connects to user-hosted OpenChamber instances, which may be
+  accessed over HTTP on trusted networks (Tailscale, LAN, VPN).
+  A hardcoded domain allowlist cannot cover the arbitrary hostnames and
+  private IPs used in these scenarios.
+
+  Security is enforced at the UI layer instead: SettingsActivity shows a
+  warning dialog for non-localhost HTTP URLs, requiring explicit user
+  confirmation before connecting.
+-->
+<network-security-config>
+  <base-config cleartextTrafficPermitted="true">
+    <trust-anchors>
+      <certificates src="system" />
+    </trust-anchors>
+  </base-config>
+</network-security-config>

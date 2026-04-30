@@ -57,3 +57,7 @@ Thumbs.db
 data/
 workspaces/
 *.pid
+
+# Android TWA build artifacts
+packages/android-twa/configurable-wrapper/app/build/
+packages/android-twa/configurable-wrapper/local.properties

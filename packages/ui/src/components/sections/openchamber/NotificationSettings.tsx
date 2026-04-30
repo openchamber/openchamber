@@ -84,6 +84,7 @@ export const NotificationSettings: React.FC = () => {
   const [pushSupported, setPushSupported] = React.useState(false);
   const [pushSubscribed, setPushSubscribed] = React.useState(false);
   const [pushBusy, setPushBusy] = React.useState(false);
+  const [, setBridgeInstalled] = React.useState(false);
   const [fetchedZenModels, setFetchedZenModels] = React.useState<Array<{ id: string; name: string }>>([]);
 
   React.useEffect(() => {
@@ -156,11 +157,9 @@ export const NotificationSettings: React.FC = () => {
     [setSettingsZenModel]
   );
 
-  React.useEffect(() => {
-    if (!isBrowser) {
-      setPushSupported(false);
-      setPushSubscribed(false);
-      return;
+  const evaluateNotificationState = React.useCallback((bridgeEvent = false) => {
+    if (bridgeEvent) {
+      setBridgeInstalled(true);
     }
 
     if (typeof Notification !== 'undefined') {
@@ -173,27 +172,44 @@ export const NotificationSettings: React.FC = () => {
       && 'Notification' in window;
     setPushSupported(supported);
 
-    const refresh = async () => {
-      if (!supported) {
-        setPushSubscribed(false);
-        return;
-      }
+    if (!supported) {
+      setPushSubscribed(false);
+      return;
+    }
 
-      try {
-        const registration = await navigator.serviceWorker.getRegistration();
+    navigator.serviceWorker.getRegistration()
+      .then((registration) => {
         if (!registration) {
           setPushSubscribed(false);
           return;
         }
-        const subscription = await registration.pushManager.getSubscription();
+        return registration.pushManager.getSubscription();
+      })
+      .then((subscription) => {
         setPushSubscribed(Boolean(subscription));
-      } catch {
+      })
+      .catch(() => {
         setPushSubscribed(false);
-      }
-    };
+      });
+  }, []);
 
-    void refresh();
-  }, [isBrowser]);
+  React.useEffect(() => {
+    if (!isBrowser) {
+      setPushSupported(false);
+      setPushSubscribed(false);
+      return;
+    }
+
+    evaluateNotificationState();
+
+    const onBridgeInstalled = () => {
+      evaluateNotificationState(true);
+    };
+    window.addEventListener('notificationbridgeinstalled', onBridgeInstalled);
+    return () => {
+      window.removeEventListener('notificationbridgeinstalled', onBridgeInstalled);
+    };
+  }, [isBrowser, evaluateNotificationState]);
 
   const handleToggleChange = async (checked: boolean) => {
     if (isDesktop) {
@@ -205,7 +221,15 @@ export const NotificationSettings: React.FC = () => {
       setNativeNotificationsEnabled(checked);
       return;
     }
-    if (checked && typeof Notification !== 'undefined' && Notification.permission === 'default') {
+
+    if (typeof Notification === 'undefined') {
+      toast.error('Notifications not available', {
+        description: 'The notification bridge has not loaded yet. Please reload the page.',
+      });
+      return;
+    }
+
+    if (checked && Notification.permission === 'default') {
       try {
         const permission = await Notification.requestPermission();
         setNotificationPermission(permission);
@@ -228,6 +252,8 @@ export const NotificationSettings: React.FC = () => {
   };
 
   const canShowNotifications = isDesktop || isVSCode || (isBrowser && typeof Notification !== 'undefined' && Notification.permission === 'granted');
+
+  const canRequestNotificationPermission = isDesktop || isVSCode || (isBrowser && typeof Notification !== 'undefined');
 
   const updateTemplate = (
     event: 'completion' | 'error' | 'question' | 'subtask',
@@ -527,10 +553,16 @@ export const NotificationSettings: React.FC = () => {
       await subscription.unsubscribe();
       await apis.push.unsubscribe({ endpoint });
       setPushSubscribed(false);
-      toast.success(t('settings.notifications.page.toast.backgroundDisabled'));
-    } finally {
-      setPushBusy(false);
-    }
+ toast.success(t('settings.notifications.page.toast.backgroundDisabled'));
+ } catch (error) {
+ console.error('[Push] Disable failed:', error);
+ const formatted = formatUnknownError(error);
+ toast.error('Failed to disable background notifications', {
+ description: formatted.summary,
+ });
+ } finally {
+ setPushBusy(false);
+ }
   };
 
   return (
@@ -549,14 +581,17 @@ export const NotificationSettings: React.FC = () => {
               className="group flex cursor-pointer items-center gap-2 py-1.5"
               role="button"
               tabIndex={0}
-              aria-pressed={nativeNotificationsEnabled && canShowNotifications}
+              aria-pressed={nativeNotificationsEnabled}
+              aria-disabled={!canRequestNotificationPermission && isBrowser}
               onClick={() => {
-                void handleToggleChange(!(nativeNotificationsEnabled && canShowNotifications));
+                if (isBrowser && !canRequestNotificationPermission) return;
+                void handleToggleChange(!nativeNotificationsEnabled);
               }}
               onKeyDown={(event) => {
                 if (event.key === ' ' || event.key === 'Enter') {
                   event.preventDefault();
-                  void handleToggleChange(!(nativeNotificationsEnabled && canShowNotifications));
+                  if (isBrowser && !canRequestNotificationPermission) return;
+                  void handleToggleChange(!nativeNotificationsEnabled);
                 }
               }}
             >

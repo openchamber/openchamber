@@ -78,7 +78,68 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  build-android-twa:
+    needs: create-release
+    runs-on: ubuntu-latest
+    env:
+      KEYSTORE_PASSWORD: "${{ secrets.KEYSTORE_PASSWORD || 'ci-temp-' }}"
+      KEY_PASSWORD: "${{ secrets.KEY_PASSWORD || 'ci-temp-' }}"
+      TWA_HOST_NAME: "${{ secrets.TWA_HOST || 'openchamber.app' }}"
+      TWA_DEFAULT_URL: "${{ secrets.TWA_DEFAULT_URL || 'https://openchamber.app' }}"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Generate signing key
+        run: |
+          if [ ! -f packages/android-twa/android.keystore ]; then
+            # Ensure password meets keytool's 6-char minimum
+            if [ ${#KEYSTORE_PASSWORD} -lt 6 ]; then
+              KEYSTORE_PASSWORD="ci-temp-$(openssl rand -hex 6)"
+              KEY_PASSWORD="$KEYSTORE_PASSWORD"
+              echo "KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+              echo "KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
+            fi
+            keytool -genkeypair -alias openchamber \
+              -keyalg RSA -keysize 2048 \
+              -validity 10000 \
+              -keystore packages/android-twa/android.keystore \
+              -storepass "$KEYSTORE_PASSWORD" \
+              -dname "CN=OpenChamber, OU=Mobile, O=OpenChamber, L=Remote, ST=Remote, C=US"
+          fi
+
+      - name: Build APK
+        run: bun run android:build
+
+      - name: Rename APK to include version
+        run: |
+          VERSION="${{ needs.create-release.outputs.version }}"
+          mv "packages/android-twa/configurable-wrapper/app/build/outputs/apk/release/app-release.apk" \
+            "packages/android-twa/configurable-wrapper/app/build/outputs/apk/release/openchamber-${VERSION}.apk"
+
+      - name: Upload APK to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.create-release.outputs.version }}
+          files: packages/android-twa/configurable-wrapper/app/build/outputs/apk/release/openchamber-${{ needs.create-release.outputs.version }}.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   build-desktop-macos:
+    if: github.repository == 'openchamber/openchamber'
     needs: create-release
     runs-on: macos-26
     strategy:
@@ -372,6 +433,7 @@ jobs:
           retention-days: 1
 
   publish-npm:
+    if: github.repository == 'openchamber/openchamber'
     needs: create-release
     runs-on: ubuntu-latest
     steps:
@@ -412,6 +474,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   combine-manifests:
+    if: github.repository == 'openchamber/openchamber'
     needs: [create-release, build-desktop-macos]
     runs-on: ubuntu-latest
     steps:
@@ -495,6 +558,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-desktop-electron-macos:
+    if: github.repository == 'openchamber/openchamber'
     needs: create-release
     runs-on: macos-26
     strategy:
@@ -625,6 +689,7 @@ jobs:
           retention-days: 1
 
   combine-electron-manifests:
+    if: github.repository == 'openchamber/openchamber'
     needs: [create-release, build-desktop-electron-macos]
     runs-on: ubuntu-latest
     steps:
@@ -657,7 +722,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   finalize-release:
-    needs: [create-release, build-desktop-macos, build-desktop-electron-macos, publish-npm, combine-manifests, combine-electron-manifests]
+    needs: [create-release, build-desktop-macos, build-desktop-electron-macos, publish-npm, combine-manifests, combine-electron-manifests, build-android-twa]
+    if: always()
     runs-on: ubuntu-latest
     env:
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}

@@ -35,6 +35,7 @@ import {
 import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
+import { useIsAndroidTwa } from '@/hooks/useIsAndroidTwa';
 import { SETTINGS_PAGE_METADATA, SETTINGS_GROUP_LABELS, type SettingsRuntimeContext } from '@/lib/settings/metadata';
 import { getSettingsNavIcon } from '@/components/views/SettingsView';
 import { useI18n } from '@/lib/i18n';
@@ -123,10 +124,11 @@ export const CommandPalette: React.FC = () => {
     setThemeMode(mode);
   });
 
+  const isAndroidTwa = useIsAndroidTwa();
   const settingsRuntimeCtx = React.useMemo<SettingsRuntimeContext>(() => {
     const isDesktop = isDesktopShell();
-    return { isVSCode: isVSCodeRuntime(), isWeb: !isDesktop && isWebRuntime(), isDesktop };
-  }, []);
+    return { isVSCode: isVSCodeRuntime(), isWeb: !isDesktop && isWebRuntime(), isDesktop, isAndroidTwa };
+  }, [isAndroidTwa]);
 
   const settingsItems = React.useMemo(() => {
     const groupLabel = (g: string) => (SETTINGS_GROUP_LABELS as Record<string, string>)[g] ?? g;

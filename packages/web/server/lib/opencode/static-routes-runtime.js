@@ -1,3 +1,4 @@
+import { registerAssetlinksRoute } from './assetlinks-routes.js';
 import { registerPwaManifestRoute } from './pwa-manifest-routes.js';
 
 export const createStaticRoutesRuntime = (dependencies) => {
@@ -25,6 +26,9 @@ export const createStaticRoutesRuntime = (dependencies) => {
 
   const registerStaticRoutes = (app) => {
     const distPath = resolveDistPath();
+
+    // Register assetlinks route outside the dist-path check so it works in dev mode too
+    registerAssetlinksRoute(app, { process });
 
     if (fs.existsSync(distPath)) {
       console.log(`Serving static files from ${distPath}`);

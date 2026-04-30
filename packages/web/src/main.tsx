@@ -57,17 +57,33 @@ const runWhenDocumentCanRegisterServiceWorker = (task: () => void): void => {
 };
 
 const registerPwaServiceWorker = (): void => {
-  runWhenDocumentCanRegisterServiceWorker(() => {
-    try {
-      registerSW({
-        onRegisterError(error: unknown) {
-          console.warn('[PWA] service worker registration skipped:', error);
-        },
-      });
-    } catch (error) {
-      console.warn('[PWA] service worker registration skipped:', error);
-    }
-  });
+ runWhenDocumentCanRegisterServiceWorker(() => {
+ try {
+ registerSW({
+ onRegisterError(error: unknown) {
+ console.warn('[PWA] service worker registration skipped:', error);
+ },
+ });
+ } catch (error) {
+ console.warn('[PWA] service worker registration skipped:', error);
+ }
+
+ // Notify the service worker about TWA context so it can activate
+ // Workbox caching routes only when running inside an Android TWA.
+ if (typeof window.AndroidNotificationBridge?.getServerUrl === 'function') {
+ const notifySw = () => {
+ const controller = navigator.serviceWorker.controller;
+ if (controller) {
+ controller.postMessage({ type: 'TWA_CONTEXT' });
+ }
+ };
+ if (navigator.serviceWorker.controller) {
+ notifySw();
+ } else {
+ navigator.serviceWorker.addEventListener('controllerchange', notifySw, { once: true });
+ }
+ }
+ });
 };
 
 const unregisterDevelopmentServiceWorkers = (): void => {
