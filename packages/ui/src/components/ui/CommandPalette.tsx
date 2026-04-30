@@ -44,7 +44,7 @@ import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/short
 import { isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
 import { SETTINGS_PAGE_METADATA, type SettingsRuntimeContext } from '@/lib/settings/metadata';
 import { getSettingsNavIcon } from '@/components/views/SettingsView';
-import { rankByFuzzyQuery, scoreByFuzzyQuery } from '@/lib/search/fuzzySearch';
+import { scoreByFuzzyQuery } from '@/lib/search/fuzzySearch';
 import { truncatePathMiddle } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 

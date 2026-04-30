@@ -14,7 +14,6 @@ import {
   RiBrainAi3Line,
   RiCloseCircleLine,
   RiCommandLine,
-  RiFileLine,
   RiGitBranchLine,
   RiLayoutLeftLine,
   RiLayoutRightLine,
