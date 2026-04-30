@@ -12,6 +12,10 @@ const readApiError = async (response: Response, fallback: string) => {
   return typeof data?.error === 'string' && data.error.trim() ? data.error : fallback;
 };
 
+const normalizeAgentsMdContent = (content: string) => {
+  return content.length > 0 && !content.endsWith('\n') ? `${content}\n` : content;
+};
+
 const saveBehaviorSetting = async (globalBehaviorPrompt: string, fallbackError: string) => {
   const response = await fetch('/api/config/settings', {
     method: 'PUT',
@@ -87,22 +91,24 @@ export const BehaviorPage: React.FC = () => {
   const handleSave = async () => {
     setIsSaving(true);
     try {
+      const content = normalizeAgentsMdContent(prompt);
       const response = await fetch('/api/behavior/agents-md', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
           Accept: 'application/json',
         },
-        body: JSON.stringify({ content: prompt }),
+        body: JSON.stringify({ content }),
       });
 
       if (!response.ok) {
         throw new Error(await readApiError(response, t('settings.behavior.page.toast.saveFailed')));
       }
 
-      await saveBehaviorSetting(prompt, t('settings.behavior.page.toast.saveFailed'));
+      await saveBehaviorSetting(content, t('settings.behavior.page.toast.saveFailed'));
 
-      setInitialPrompt(prompt);
+      setPrompt(content);
+      setInitialPrompt(content);
       toast.success(t('settings.behavior.page.toast.saved'));
     } catch (error) {
       console.error('Failed to save behavior:', error);
