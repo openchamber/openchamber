@@ -161,6 +161,9 @@ export type DesktopSettings = {
 
   // Global behavior prompt — synced to ~/.config/opencode/AGENTS.md
   globalBehaviorPrompt?: string;
+  responseStyleEnabled?: boolean;
+  responseStylePreset?: 'concise' | 'detailed' | 'mentor' | 'pushback' | 'noFiller' | 'matchEnergy' | 'warmPeer' | 'custom';
+  responseStyleCustomInstructions?: string;
 };
 
 type TauriGlobal = {

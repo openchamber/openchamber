@@ -72,6 +72,8 @@ import { buildSessionTargetOptions } from '@/sync/session-worktree-contract';
 import { usePermissionStore } from '@/stores/permissionStore';
 import { extractGitChangedFiles } from './changedFiles';
 import { useI18n } from '@/lib/i18n';
+import { fetchResponseStyleInstruction } from '@/lib/responseStyle';
+import { getSyncMessages } from '@/sync/sync-refs';
 
 const MAX_VISIBLE_TEXTAREA_LINES = 8;
 const EMPTY_QUEUE: QueuedMessage[] = [];
@@ -85,6 +87,10 @@ const VS_CODE_DROP_DATA_TYPES = [
     'text/uri-list',
     'text/plain',
 ];
+
+const hasUserMessages = (sessionId: string, directory?: string) => {
+    return getSyncMessages(sessionId, directory).some((message) => message.role === 'user');
+};
 
 const FILE_URI_PREFIX = 'file://';
 
@@ -1544,6 +1550,20 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.reviewFailed'));
                 }
                 return;
+            }
+        }
+
+        const currentSessionDirectory = currentSessionId
+            ? useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || currentDirectory
+            : currentDirectory;
+        const shouldAddResponseStyle = newSessionDraftOpen || (currentSessionId ? !hasUserMessages(currentSessionId, currentSessionDirectory) : false);
+        if (shouldAddResponseStyle) {
+            const responseStyleInstruction = await fetchResponseStyleInstruction().catch(() => null);
+            if (responseStyleInstruction) {
+                additionalParts.push({
+                    text: responseStyleInstruction,
+                    synthetic: true,
+                });
             }
         }
 

@@ -563,6 +563,24 @@ export const createSettingsHelpers = (dependencies) => {
       }
     }
 
+    if (typeof candidate.responseStyleEnabled === 'boolean') {
+      result.responseStyleEnabled = candidate.responseStyleEnabled;
+    }
+
+    if (
+      typeof candidate.responseStylePreset === 'string' &&
+      ['concise', 'detailed', 'mentor', 'pushback', 'noFiller', 'matchEnergy', 'warmPeer', 'custom'].includes(candidate.responseStylePreset)
+    ) {
+      result.responseStylePreset = candidate.responseStylePreset;
+    }
+
+    if (typeof candidate.responseStyleCustomInstructions === 'string') {
+      const value = candidate.responseStyleCustomInstructions;
+      if (value.length <= 50_000) {
+        result.responseStyleCustomInstructions = value;
+      }
+    }
+
     return result;
   };
 
