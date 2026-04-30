@@ -154,7 +154,8 @@ export const BehaviorPage: React.FC = () => {
               placeholder={t('settings.behavior.page.field.systemPromptPlaceholder')}
               rows={12}
               disabled={isLoading}
-              className="w-full font-mono typography-meta min-h-[160px] max-h-[70vh] bg-transparent resize-y"
+              outerClassName="min-h-[160px] max-h-[70vh]"
+              className="w-full font-mono typography-meta bg-transparent"
             />
           </section>
         </div>
