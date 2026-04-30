@@ -51,6 +51,7 @@ import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
 import { opencodeClient } from '@/lib/opencode/client';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
+import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { rankBranchesForQuery } from '@/lib/worktrees/branchSearch';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useGitBranches, useGitStore, useGitLoadingBranches } from '@/stores/useGitStore';
@@ -428,10 +429,9 @@ export function NewWorktreeDialog({
     const settingsDefaultModel = configState.settingsDefaultModel;
     if (!settingsDefaultModel) return null;
 
-    const parts = settingsDefaultModel.split('/');
-    if (parts.length !== 2) return null;
-    const [providerID, modelID] = parts;
-    if (!providerID || !modelID) return null;
+    const parsed = parseModelIdentifier(settingsDefaultModel);
+    if (!parsed) return null;
+    const { providerId: providerID, modelId: modelID } = parsed;
 
     const modelMetadata = configState.getModelMetadata(providerID, modelID);
     if (!modelMetadata) return null;
