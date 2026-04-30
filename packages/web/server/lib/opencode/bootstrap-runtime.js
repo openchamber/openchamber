@@ -51,6 +51,7 @@ export const createBootstrapRuntime = (dependencies) => {
     } = options;
 
     registerServerStatusRoutes(app, {
+      express,
       process,
       openchamberVersion,
       runtimeName,

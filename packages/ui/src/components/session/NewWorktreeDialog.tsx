@@ -657,46 +657,39 @@ export function NewWorktreeDialog({
     void loadDefaultSourceBranch();
   }, [branches, projectDirectory, newBranchState.sourceBranch]);
 
-  // Reset state when dialog opens/closes
+  // Reset state on each open. Resetting on close would empty the form during
+  // the close animation, causing visible flicker.
   React.useEffect(() => {
-    if (!open) {
-      setMode('new-branch');
-      setNewBranchState({
-        branchName: '',
-        worktreeName: '',
-        isSyncingWorktreeName: true,
-        sourceBranch: '',
-        linkedIssue: null,
-        linkedPr: null,
-        includePrDiff: false,
-      });
-      setExistingBranchState({
-        selectedBranch: '',
-        worktreeName: '',
-      });
-      setExistingBranchDropdownOpen(false);
-      setSourceBranchDropdownOpen(false);
-      setExistingBranchPickerOpen(false);
-      setSourceBranchPickerOpen(false);
-      setExistingBranchQuery('');
-      setSourceBranchQuery('');
-      setValidation({
-        isValidating: false,
-        branchError: null,
-        worktreeError: null,
-        touched: false,
-      });
-      return;
-    }
-    
-    // Generate unique slug when dialog opens
+    if (!open) return;
+
+    setMode('new-branch');
+    setExistingBranchState({
+      selectedBranch: '',
+      worktreeName: '',
+    });
+    setExistingBranchDropdownOpen(false);
+    setSourceBranchDropdownOpen(false);
+    setExistingBranchPickerOpen(false);
+    setSourceBranchPickerOpen(false);
+    setExistingBranchQuery('');
+    setSourceBranchQuery('');
+    setValidation({
+      isValidating: false,
+      branchError: null,
+      worktreeError: null,
+      touched: false,
+    });
+
     const uniqueSlug = generateUniqueSlug();
-    setNewBranchState(prev => ({
-      ...prev,
+    setNewBranchState({
       branchName: uniqueSlug,
       worktreeName: uniqueSlug,
       isSyncingWorktreeName: true,
-    }));
+      sourceBranch: '',
+      linkedIssue: null,
+      linkedPr: null,
+      includePrDiff: false,
+    });
   }, [open, generateUniqueSlug]);
 
   // Sync worktree name with branch name for new-branch mode

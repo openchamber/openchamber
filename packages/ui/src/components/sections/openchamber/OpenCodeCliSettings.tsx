@@ -93,7 +93,7 @@ export const OpenCodeCliSettings: React.FC = () => {
           <h3 className="typography-ui-header font-medium text-foreground">
             {t('settings.openchamber.opencodeCli.title')}
           </h3>
-          <Tooltip delayDuration={1000}>
+          <Tooltip>
             <TooltipTrigger asChild>
               <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
             </TooltipTrigger>

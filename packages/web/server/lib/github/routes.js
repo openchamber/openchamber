@@ -1,3 +1,42 @@
+const PR_STATUS_CACHE_TTL_MS = 90_000;
+const PR_STATUS_CACHE_MAX_ENTRIES = 200;
+const prStatusCache = new Map();
+
+function getRequestedRepo(req) {
+  const owner = typeof req.query?.owner === 'string' ? req.query.owner.trim() : '';
+  const repo = typeof req.query?.repo === 'string' ? req.query.repo.trim() : '';
+  return owner && repo ? { owner, repo } : null;
+}
+
+async function resolveRepoForRequest(octokit, directory, requestedRepo) {
+  const { resolveGitHubRepoFromDirectory } = await import('./index.js');
+  const { repo } = await resolveGitHubRepoFromDirectory(directory);
+  if (!requestedRepo) {
+    return repo;
+  }
+  if (repo?.owner === requestedRepo.owner && repo?.repo === requestedRepo.repo) {
+    return requestedRepo;
+  }
+
+  const { resolveRepoNetwork } = await import('./repo/fork-detection.js');
+  const network = await resolveRepoNetwork(octokit, directory).catch(() => null);
+  const allowed = Array.isArray(network)
+    ? network.some((item) => item?.owner === requestedRepo.owner && item?.repo === requestedRepo.repo)
+    : false;
+  return allowed ? requestedRepo : null;
+}
+
+function setPrStatusCache(key, data, fetchedAt) {
+  // Evict oldest entry when cache exceeds max size
+  if (prStatusCache.size >= PR_STATUS_CACHE_MAX_ENTRIES && !prStatusCache.has(key)) {
+    const oldest = prStatusCache.entries().next().value;
+    if (oldest) {
+      prStatusCache.delete(oldest[0]);
+    }
+  }
+  prStatusCache.set(key, { data, fetchedAt });
+}
+
 export function registerGitHubRoutes(app) {
   let githubLibraries = null;
   const getGitHubLibraries = async () => {
@@ -249,9 +288,27 @@ export function registerGitHubRoutes(app) {
       const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
       const branch = typeof req.query?.branch === 'string' ? req.query.branch.trim() : '';
       const remote = typeof req.query?.remote === 'string' ? req.query.remote.trim() : 'origin';
+      const force = req.query?.force === 'true' || req.query?.force === '1';
       if (!directory || !branch) {
         return res.status(400).json({ error: 'directory and branch are required' });
       }
+
+      // Check cache (skip when force=true to allow manual refresh bypass)
+      const cacheKey = `${directory}::${branch}::${remote}`;
+      const cached = prStatusCache.get(cacheKey);
+      if (!force && cached && Date.now() - cached.fetchedAt < PR_STATUS_CACHE_TTL_MS) {
+        return res.json(cached.data);
+      }
+
+      // Intercept res.json to cache successful responses before sending
+      // Only caches responses with connected:true — error/edge-case responses are not cached
+      const originalJson = res.json.bind(res);
+      res.json = (data) => {
+        if (data && data.connected === true) {
+          setPrStatusCache(cacheKey, data, Date.now());
+        }
+        return originalJson(data);
+      };
 
       const { getOctokitOrNull, getGitHubAuth } = await getGitHubLibraries();
       const octokit = getOctokitOrNull();
@@ -426,6 +483,10 @@ export function registerGitHubRoutes(app) {
       const remote = typeof req.body?.remote === 'string' ? req.body.remote.trim() : 'origin';
       // headRemote = source repo (where head branch lives, e.g., 'origin' for forks)
       const headRemote = typeof req.body?.headRemote === 'string' ? req.body.headRemote.trim() : '';
+      // targetRepo = explicit target repo (alternative to remote, for auto-detected upstream)
+      const targetRepo = req.body?.targetRepo && typeof req.body.targetRepo.owner === 'string' && typeof req.body.targetRepo.repo === 'string'
+        ? { owner: req.body.targetRepo.owner.trim(), repo: req.body.targetRepo.repo.trim() }
+        : null;
       if (!directory || !title || !head || !requestedBase) {
         return res.status(400).json({ error: 'directory, title, head, base are required' });
       }
@@ -437,7 +498,13 @@ export function registerGitHubRoutes(app) {
       }
 
       const { resolveGitHubRepoFromDirectory } = await import('./index.js');
-      const { repo } = await resolveGitHubRepoFromDirectory(directory, remote);
+      let repo;
+      if (targetRepo) {
+        repo = targetRepo;
+      } else {
+        const resolved = await resolveGitHubRepoFromDirectory(directory, remote);
+        repo = resolved.repo;
+      }
       if (!repo) {
         return res.status(400).json({ error: 'Unable to resolve GitHub repo from git remote' });
       }
@@ -511,25 +578,28 @@ export function registerGitHubRoutes(app) {
 
       // For fork workflows: we need to determine the correct head reference
       let headRef = head;
+      let headRepo = null;
       
-      if (sourceRemote && sourceRemote !== remote) {
+      if (sourceRemote) {
         // The branch is on a different remote than the target - this is a cross-repo PR
-        const { repo: headRepo } = await resolveGitHubRepoFromDirectory(directory, sourceRemote);
-        if (headRepo) {
-          // Always use owner:branch format for cross-repo PRs
-          // GitHub API requires this when head is from a different repo/fork
-          if (headRepo.owner !== repo.owner || headRepo.repo !== repo.repo) {
-            headRef = `${headRepo.owner}:${head}`;
-          }
+        const resolved = await resolveGitHubRepoFromDirectory(directory, sourceRemote);
+        headRepo = resolved.repo;
+        if (!headRepo) {
+          return res.status(400).json({
+            error: `Cannot resolve GitHub repo for remote "${sourceRemote}". Check that the remote URL is a valid GitHub repository.`,
+          });
+        }
+        // Always use owner:branch format for cross-repo PRs
+        // GitHub API requires this when head is from a different repo/fork
+        if (headRepo.owner !== repo.owner || headRepo.repo !== repo.repo) {
+          headRef = `${headRepo.owner}:${head}`;
         }
       }
 
       // For cross-repo PRs, verify the branch exists on the head repo first
       if (headRef.includes(':')) {
         const [headOwner] = headRef.split(':');
-        const headRepoName = sourceRemote 
-          ? (await resolveGitHubRepoFromDirectory(directory, sourceRemote)).repo?.repo 
-          : repo.repo;
+        const headRepoName = headRepo?.repo || repo.repo;
         
         if (headRepoName) {
           try {
@@ -563,6 +633,11 @@ export function registerGitHubRoutes(app) {
       if (!pr) {
         return res.status(500).json({ error: 'Failed to create PR' });
       }
+
+      // Invalidate PR status cache so subsequent prStatus calls fetch fresh data
+      const headBranch = head.includes(':') ? head.split(':')[1] || head : head;
+      const createCacheKey = `${directory}::${headBranch}::${remote}`;
+      prStatusCache.delete(createCacheKey);
 
       return res.json({
         number: pr.number,
@@ -766,6 +841,106 @@ export function registerGitHubRoutes(app) {
     }
   });
 
+  // ================= GitHub Repo APIs =================
+
+  app.get('/api/github/repo/upstream', async (req, res) => {
+    try {
+      const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
+      if (!directory) {
+        return res.status(400).json({ error: 'directory is required' });
+      }
+
+      const { getOctokitOrNull } = await getGitHubLibraries();
+      const octokit = getOctokitOrNull();
+      if (!octokit) {
+        return res.json({ connected: false, isFork: false, upstream: null });
+      }
+
+      const { resolveRepoNetwork } = await import('./repo/fork-detection.js');
+      const network = await resolveRepoNetwork(octokit, directory);
+
+      if (!network || network.length <= 1) {
+        return res.json({ connected: true, isFork: false, upstream: null });
+      }
+
+      const upstream = network.find((r) => r.source === 'upstream') || null;
+      let defaultBranch = 'main';
+      let defaultBranchSha = null;
+      if (upstream) {
+        try {
+          const metadata = await octokit.rest.repos.get({ owner: upstream.owner, repo: upstream.repo });
+          defaultBranch = metadata?.data?.default_branch || 'main';
+          const ref = await octokit.rest.git.getRef({ owner: upstream.owner, repo: upstream.repo, ref: `heads/${defaultBranch}` });
+          defaultBranchSha = ref?.data?.object?.sha || null;
+        } catch {
+          // Fall back if metadata/ref fetch fails
+        }
+      }
+
+      // Check if a configured git remote points to the upstream repo
+      let upstreamRemoteName = null;
+      if (upstream) {
+        try {
+          const { getRemotes } = await import('../git/index.js');
+          const remotes = await getRemotes(directory);
+          for (const r of remotes) {
+            if (r?.name) {
+              const resolved = await resolveGitHubRepoFromDirectory(directory, r.name).catch(() => ({ repo: null }));
+              if (resolved.repo && resolved.repo.owner === upstream.owner && resolved.repo.repo === upstream.repo) {
+                upstreamRemoteName = r.name;
+                break;
+              }
+            }
+          }
+        } catch {
+          // Ignore errors finding remote name
+        }
+      }
+
+      return res.json({
+        connected: true,
+        isFork: Boolean(upstream),
+        upstream: upstream ? { owner: upstream.owner, repo: upstream.repo, url: upstream.url, defaultBranch, defaultBranchSha, remoteName: upstreamRemoteName } : null,
+      });
+    } catch (error) {
+      console.error('Failed to detect upstream repo:', error);
+      return res.status(500).json({ error: error.message || 'Failed to detect upstream repo' });
+    }
+  });
+
+  app.get('/api/github/repo/branches', async (req, res) => {
+    try {
+      const owner = typeof req.query?.owner === 'string' ? req.query.owner.trim() : '';
+      const repo = typeof req.query?.repo === 'string' ? req.query.repo.trim() : '';
+      if (!owner || !repo) {
+        return res.status(400).json({ error: 'owner and repo are required' });
+      }
+
+      const { getOctokitOrNull } = await getGitHubLibraries();
+      const octokit = getOctokitOrNull();
+      if (!octokit) {
+        return res.json({ branches: [] });
+      }
+
+      const branches = [];
+      let page = 1;
+      while (true) {
+        const response = await octokit.rest.repos.listBranches({ owner, repo, per_page: 100, page });
+        if (!response.data || response.data.length === 0) break;
+        for (const branch of response.data) {
+          branches.push(branch.name);
+        }
+        if (response.data.length < 100) break;
+        page++;
+      }
+
+      return res.json({ branches });
+    } catch (error) {
+      console.error('Failed to fetch repo branches:', error);
+      return res.status(500).json({ error: error.message || 'Failed to fetch repo branches' });
+    }
+  });
+
   // ================= GitHub Issue APIs =================
 
   app.get('/api/github/issues/list', async (req, res) => {
@@ -783,41 +958,60 @@ export function registerGitHubRoutes(app) {
       }
 
       const { resolveGitHubRepoFromDirectory } = await import('./index.js');
+      const { resolveRepoNetwork } = await import('./repo/fork-detection.js');
+
+      const repoNetwork = await resolveRepoNetwork(octokit, directory);
       const { repo } = await resolveGitHubRepoFromDirectory(directory);
       if (!repo) {
         return res.json({ connected: true, repo: null, issues: [] });
       }
 
-      const list = await octokit.rest.issues.listForRepo({
-        owner: repo.owner,
-        repo: repo.repo,
-        state: 'open',
-        per_page: 50,
-        page: Number.isFinite(page) && page > 0 ? page : 1,
-      });
-      const link = typeof list?.headers?.link === 'string' ? list.headers.link : '';
-      const hasMore = /rel="next"/.test(link);
-      const issues = (Array.isArray(list?.data) ? list.data : [])
-        .filter((item) => !item?.pull_request)
-        .map((item) => ({
-          number: item.number,
-          title: item.title,
-          url: item.html_url,
-          state: item.state === 'closed' ? 'closed' : 'open',
-          author: item.user ? { login: item.user.login, id: item.user.id, avatarUrl: item.user.avatar_url } : null,
-          labels: Array.isArray(item.labels)
-            ? item.labels
-                .map((label) => {
-                  if (typeof label === 'string') return null;
-                  const name = typeof label?.name === 'string' ? label.name : '';
-                  if (!name) return null;
-                  return { name, color: typeof label?.color === 'string' ? label.color : undefined };
-                })
-                .filter(Boolean)
-            : [],
-        }));
+      const effectivePage = Number.isFinite(page) && page > 0 ? page : 1;
+      const reposToQuery = repoNetwork || [{ ...repo, source: 'origin' }];
 
-      return res.json({ connected: true, repo, issues, page: Number.isFinite(page) && page > 0 ? page : 1, hasMore });
+      const queryRepo = async (repoRef) => {
+        try {
+          const list = await octokit.rest.issues.listForRepo({
+            owner: repoRef.owner,
+            repo: repoRef.repo,
+            state: 'open',
+            per_page: 50,
+            page: effectivePage,
+          });
+          const link = typeof list?.headers?.link === 'string' ? list.headers.link : '';
+          const hasMore = /rel="next"/.test(link);
+          const issues = (Array.isArray(list?.data) ? list.data : [])
+            .filter((item) => !item?.pull_request)
+            .map((item) => ({
+              number: item.number,
+              title: item.title,
+              url: item.html_url,
+              state: item.state === 'closed' ? 'closed' : 'open',
+              author: item.user ? { login: item.user.login, id: item.user.id, avatarUrl: item.user.avatar_url } : null,
+              labels: Array.isArray(item.labels)
+                ? item.labels
+                    .map((label) => {
+                      if (typeof label === 'string') return null;
+                      const name = typeof label?.name === 'string' ? label.name : '';
+                      if (!name) return null;
+                      return { name, color: typeof label?.color === 'string' ? label.color : undefined };
+                    })
+                    .filter(Boolean)
+                : [],
+              sourceRepo: { owner: repoRef.owner, repo: repoRef.repo, source: repoRef.source },
+            }));
+          return { issues, hasMore };
+        } catch (error) {
+          console.warn(`Failed to list issues for ${repoRef.owner}/${repoRef.repo}:`, error?.message || error);
+          return { issues: [], hasMore: false };
+        }
+      };
+
+      const results = await Promise.all(reposToQuery.map(queryRepo));
+      const allIssues = results.flatMap((r) => r.issues);
+      const anyHasMore = results.some((r) => r.hasMore);
+
+      return res.json({ connected: true, repo, issues: allIssues, page: effectivePage, hasMore: anyHasMore });
     } catch (error) {
       console.error('Failed to list GitHub issues:', error);
       return res.status(500).json({ error: error.message || 'Failed to list GitHub issues' });
@@ -838,8 +1032,8 @@ export function registerGitHubRoutes(app) {
         return res.json({ connected: false });
       }
 
-      const { resolveGitHubRepoFromDirectory } = await import('./index.js');
-      const { repo } = await resolveGitHubRepoFromDirectory(directory);
+      const requestedRepo = getRequestedRepo(req);
+      const repo = await resolveRepoForRequest(octokit, directory, requestedRepo);
       if (!repo) {
         return res.json({ connected: true, repo: null, issue: null });
       }
@@ -899,8 +1093,8 @@ export function registerGitHubRoutes(app) {
         return res.json({ connected: false });
       }
 
-      const { resolveGitHubRepoFromDirectory } = await import('./index.js');
-      const { repo } = await resolveGitHubRepoFromDirectory(directory);
+      const requestedRepo = getRequestedRepo(req);
+      const repo = await resolveRepoForRequest(octokit, directory, requestedRepo);
       if (!repo) {
         return res.json({ connected: true, repo: null, comments: [] });
       }
@@ -945,61 +1139,78 @@ export function registerGitHubRoutes(app) {
       }
 
       const { resolveGitHubRepoFromDirectory } = await import('./index.js');
+      const { resolveRepoNetwork } = await import('./repo/fork-detection.js');
+
+      const repoNetwork = await resolveRepoNetwork(octokit, directory);
       const { repo } = await resolveGitHubRepoFromDirectory(directory);
       if (!repo) {
         return res.json({ connected: true, repo: null, prs: [] });
       }
 
-      const list = await octokit.rest.pulls.list({
-        owner: repo.owner,
-        repo: repo.repo,
-        state: 'open',
-        per_page: 50,
-        page: Number.isFinite(page) && page > 0 ? page : 1,
-      });
+      const effectivePage = Number.isFinite(page) && page > 0 ? page : 1;
+      const reposToQuery = repoNetwork || [{ ...repo, source: 'origin' }];
 
-      const link = typeof list?.headers?.link === 'string' ? list.headers.link : '';
-      const hasMore = /rel="next"/.test(link);
+      const queryRepo = async (repoRef) => {
+        try {
+          const list = await octokit.rest.pulls.list({
+            owner: repoRef.owner,
+            repo: repoRef.repo,
+            state: 'open',
+            per_page: 50,
+            page: effectivePage,
+          });
+          const link = typeof list?.headers?.link === 'string' ? list.headers.link : '';
+          const hasMore = /rel="next"/.test(link);
+          const prs = (Array.isArray(list?.data) ? list.data : []).map((pr) => {
+            const mergedState = pr.merged_at ? 'merged' : (pr.state === 'closed' ? 'closed' : 'open');
+            const headRepo = pr.head?.repo
+              ? {
+                  owner: pr.head.repo.owner?.login,
+                  repo: pr.head.repo.name,
+                  url: pr.head.repo.html_url,
+                  cloneUrl: pr.head.repo.clone_url,
+                  sshUrl: pr.head.repo.ssh_url,
+                }
+              : null;
+            return {
+              number: pr.number,
+              title: pr.title,
+              url: pr.html_url,
+              state: mergedState,
+              draft: Boolean(pr.draft),
+              base: pr.base?.ref,
+              head: pr.head?.ref,
+              headSha: pr.head?.sha,
+              mergeable: pr.mergeable,
+              mergeableState: pr.mergeable_state,
+              author: pr.user ? { login: pr.user.login, id: pr.user.id, avatarUrl: pr.user.avatar_url } : null,
+              headLabel: pr.head?.label,
+              headRepo: headRepo && headRepo.owner && headRepo.repo && headRepo.url
+                ? headRepo
+                : null,
+              sourceRepo: { owner: repoRef.owner, repo: repoRef.repo, source: repoRef.source },
+            };
+          });
+          return { prs, hasMore };
+        } catch (error) {
+          console.warn(`Failed to list PRs for ${repoRef.owner}/${repoRef.repo}:`, error?.message || error);
+          return { prs: [], hasMore: false };
+        }
+      };
 
-      const prs = (Array.isArray(list?.data) ? list.data : []).map((pr) => {
-        const mergedState = pr.merged_at ? 'merged' : (pr.state === 'closed' ? 'closed' : 'open');
-        const headRepo = pr.head?.repo
-          ? {
-              owner: pr.head.repo.owner?.login,
-              repo: pr.head.repo.name,
-              url: pr.head.repo.html_url,
-              cloneUrl: pr.head.repo.clone_url,
-              sshUrl: pr.head.repo.ssh_url,
-            }
-          : null;
-        return {
-          number: pr.number,
-          title: pr.title,
-          url: pr.html_url,
-          state: mergedState,
-          draft: Boolean(pr.draft),
-          base: pr.base?.ref,
-          head: pr.head?.ref,
-          headSha: pr.head?.sha,
-          mergeable: pr.mergeable,
-          mergeableState: pr.mergeable_state,
-          author: pr.user ? { login: pr.user.login, id: pr.user.id, avatarUrl: pr.user.avatar_url } : null,
-          headLabel: pr.head?.label,
-          headRepo: headRepo && headRepo.owner && headRepo.repo && headRepo.url
-            ? headRepo
-            : null,
-        };
-      });
+      const results = await Promise.all(reposToQuery.map(queryRepo));
+      const allPrs = results.flatMap((r) => r.prs);
+      const anyHasMore = results.some((r) => r.hasMore);
 
-      return res.json({ connected: true, repo, prs, page: Number.isFinite(page) && page > 0 ? page : 1, hasMore });
+      return res.json({ connected: true, repo, prs: allPrs, page: effectivePage, hasMore: anyHasMore });
     } catch (error) {
       if (error?.status === 401) {
         const { clearGitHubAuth } = await getGitHubLibraries();
         clearGitHubAuth();
         return res.json({ connected: false });
       }
-      console.error('Failed to list GitHub PRs:', error);
-      return res.status(500).json({ error: error.message || 'Failed to list GitHub PRs' });
+      console.error('Failed to list GitHub pull requests:', error);
+      return res.status(500).json({ error: error.message || 'Failed to list GitHub pull requests' });
     }
   });
 
@@ -1019,8 +1230,8 @@ export function registerGitHubRoutes(app) {
         return res.json({ connected: false });
       }
 
-      const { resolveGitHubRepoFromDirectory } = await import('./index.js');
-      const { repo } = await resolveGitHubRepoFromDirectory(directory);
+      const requestedRepo = getRequestedRepo(req);
+      const repo = await resolveRepoForRequest(octokit, directory, requestedRepo);
       if (!repo) {
         return res.json({ connected: true, repo: null, pr: null });
       }

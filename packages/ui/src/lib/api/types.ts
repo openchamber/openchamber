@@ -511,6 +511,7 @@ export interface ListDirectoryOptions {
 
 export interface FileReadOptions {
   allowOutsideWorkspace?: boolean;
+  optional?: boolean;
 }
 
 export interface FilesAPI {
@@ -779,6 +780,7 @@ export type GitHubPullRequestSummary = GitHubPullRequest & {
   updatedAt?: string;
   headLabel?: string;
   headRepo?: GitHubPullRequestHeadRepo | null;
+  sourceRepo?: (GitHubRepoSelector & { source: string }) | null;
 };
 
 export type GitHubPullRequestFile = {
@@ -844,6 +846,8 @@ export type GitHubPullRequestCreateInput = {
   remote?: string;
   /** Remote where the head branch lives (source repo, e.g., 'origin' for forks) */
   headRemote?: string;
+  /** Explicit target repo (alternative to remote, for auto-detected upstream) */
+  targetRepo?: { owner: string; repo: string };
 };
 
 export type GitHubPullRequestUpdateInput = {
@@ -878,6 +882,11 @@ export type GitHubIssueLabel = {
   color?: string;
 };
 
+export type GitHubRepoSelector = {
+  owner: string;
+  repo: string;
+};
+
 export type GitHubIssueSummary = {
   number: number;
   title: string;
@@ -885,6 +894,7 @@ export type GitHubIssueSummary = {
   state: 'open' | 'closed';
   author?: GitHubUserSummary | null;
   labels?: GitHubIssueLabel[];
+  sourceRepo?: (GitHubRepoSelector & { source: string }) | null;
 };
 
 export type GitHubIssue = GitHubIssueSummary & {
@@ -909,6 +919,12 @@ export type GitHubIssuesListResult = {
   issues?: GitHubIssueSummary[];
   page?: number;
   hasMore?: boolean;
+};
+
+export type GitHubRepoUpstreamResult = {
+  connected: boolean;
+  isFork: boolean;
+  upstream: { owner: string; repo: string; url: string; defaultBranch: string; defaultBranchSha: string | null; remoteName: string | null } | null;
 };
 
 export type GitHubIssueGetResult = {
@@ -959,7 +975,7 @@ export interface GitHubAPI {
   authActivate(accountId: string): Promise<GitHubAuthStatus>;
   me?(): Promise<GitHubUserSummary>;
 
-  prStatus(directory: string, branch: string, remote?: string): Promise<GitHubPullRequestStatus>;
+  prStatus(directory: string, branch: string, remote?: string, options?: { force?: boolean }): Promise<GitHubPullRequestStatus>;
   prCreate(payload: GitHubPullRequestCreateInput): Promise<GitHubPullRequest>;
   prUpdate(payload: GitHubPullRequestUpdateInput): Promise<GitHubPullRequest>;
   prMerge(payload: GitHubPullRequestMergeInput): Promise<GitHubPullRequestMergeResult>;
@@ -969,12 +985,14 @@ export interface GitHubAPI {
   prContext(
     directory: string,
     number: number,
-    options?: { includeDiff?: boolean; includeCheckDetails?: boolean }
+    options?: { includeDiff?: boolean; includeCheckDetails?: boolean; sourceRepo?: GitHubRepoSelector | null }
   ): Promise<GitHubPullRequestContextResult>;
 
   issuesList(directory: string, options?: { page?: number }): Promise<GitHubIssuesListResult>;
-  issueGet(directory: string, number: number): Promise<GitHubIssueGetResult>;
-  issueComments(directory: string, number: number): Promise<GitHubIssueCommentsResult>;
+  issueGet(directory: string, number: number, options?: { sourceRepo?: GitHubRepoSelector | null }): Promise<GitHubIssueGetResult>;
+  issueComments(directory: string, number: number, options?: { sourceRepo?: GitHubRepoSelector | null }): Promise<GitHubIssueCommentsResult>;
+  repoUpstream(directory: string): Promise<GitHubRepoUpstreamResult>;
+  repoBranches(owner: string, repo: string): Promise<string[]>;
 }
 
 export interface RuntimeAPIs {

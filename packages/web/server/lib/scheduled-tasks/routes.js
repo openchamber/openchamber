@@ -156,6 +156,10 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
 
   app.get('/api/openchamber/scheduled-tasks/status', async (_req, res) => {
     try {
+      if (typeof scheduledTasksRuntime.getStatus === 'function') {
+        return res.json(scheduledTasksRuntime.getStatus());
+      }
+
       const settings = await readSettingsFromDiskMigrated();
       const projects = sanitizeProjects(settings?.projects || []);
 

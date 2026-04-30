@@ -550,6 +550,7 @@ interface ConfigStore {
 
     loadProviders: (options?: { directory?: string | null }) => Promise<void>;
     loadAgents: (options?: { directory?: string | null }) => Promise<boolean>;
+    invalidateModelMetadataCache: () => void;
     setProvider: (providerId: string) => void;
     setModel: (modelId: string) => void;
     setCurrentVariant: (variant: string | undefined) => void;
@@ -1548,6 +1549,11 @@ export const useConfigStore = create<ConfigStore>()(
 
                     _inFlightAgents.set(directoryKey, promise);
                     return promise;
+                },
+
+                invalidateModelMetadataCache: () => {
+                    modelsMetadataInFlight = null;
+                    set({ modelsMetadata: new Map<string, ModelMetadata>() });
                 },
 
                 setAgent: (agentName: string | undefined) => {

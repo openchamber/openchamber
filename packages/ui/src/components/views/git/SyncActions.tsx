@@ -29,7 +29,6 @@ interface SyncActionsProps {
   disabled: boolean;
   removingRemoteName?: string | null;
   iconOnly?: boolean;
-  tooltipDelayMs?: number;
   aheadCount?: number;
   behindCount?: number;
 }
@@ -44,7 +43,6 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
   disabled,
   removingRemoteName = null,
   iconOnly = false,
-  tooltipDelayMs = 1000,
   aheadCount = 0,
   behindCount = 0,
 }) => {
@@ -108,7 +106,7 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
     );
 
     return (
-      <Tooltip delayDuration={tooltipDelayMs}>
+      <Tooltip>
         <TooltipTrigger asChild>{button}</TooltipTrigger>
         <TooltipContent sideOffset={8}>{tooltipText}</TooltipContent>
       </Tooltip>
@@ -126,7 +124,7 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
   ) => {
     return (
       <DropdownMenu>
-        <Tooltip delayDuration={tooltipDelayMs}>
+        <Tooltip>
           <TooltipTrigger asChild>
             <DropdownMenuTrigger asChild>
               <Button
@@ -152,7 +150,7 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
           </TooltipTrigger>
           <TooltipContent sideOffset={8}>{tooltipText}</TooltipContent>
         </Tooltip>
-        <DropdownMenuContent align="start" className="min-w-[200px]">
+        <DropdownMenuContent align="start" alignOffset={-40} className="w-[min(360px,calc(100vw-2rem))] max-h-[320px] overflow-y-auto">
           {remotes.map((remote) => (
             <DropdownMenuItem
               key={remote.name}

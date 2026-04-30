@@ -563,7 +563,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
               if (!Icon) return null;
 
               return (
-                <Tooltip key={page.slug} delayDuration={600}>
+                <Tooltip key={page.slug}>
                   <TooltipTrigger asChild>
                     <button
                       type="button"
@@ -596,7 +596,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         <div className="overflow-hidden transition-opacity duration-150 opacity-100">
           <div className="border-t border-border bg-sidebar px-2 py-1 space-y-0.5">
             {!runtimeCtx.isVSCode && (
-              <Tooltip delayDuration={300}>
+              <Tooltip>
                 <TooltipTrigger asChild>
                   <button
                     type="button"
@@ -678,20 +678,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
           <div className={cn('w-[264px] min-w-[264px] border-r', runtimeCtx.isVSCode ? 'bg-background' : 'bg-sidebar')} style={{ borderColor: 'var(--interactive-border)' }}>
             <ErrorBoundary>{renderPageSidebar(settingsSlug, {})}</ErrorBoundary>
           </div>
-          <div className="flex-1 overflow-auto scrollbar-none bg-background">
-            <div className="mx-auto w-full max-w-3xl">
-              <ErrorBoundary>{renderPageContent(settingsSlug)}</ErrorBoundary>
-            </div>
+          <div className="flex-1 min-h-0 overflow-hidden bg-background">
+            <ErrorBoundary>{renderPageContent(settingsSlug)}</ErrorBoundary>
           </div>
         </div>
       );
     }
 
     return (
-      <div className="h-full overflow-auto scrollbar-none bg-background">
-        <div className="mx-auto w-full max-w-3xl">
-          <ErrorBoundary>{renderPageContent(settingsSlug)}</ErrorBoundary>
-        </div>
+      <div className="h-full min-h-0 overflow-hidden bg-background">
+        <ErrorBoundary>{renderPageContent(settingsSlug)}</ErrorBoundary>
       </div>
     );
   };

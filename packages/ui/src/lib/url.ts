@@ -28,6 +28,57 @@ export const isExternalHttpUrl = (url: string): boolean => {
   return parsed.protocol === 'http:' || parsed.protocol === 'https:';
 };
 
+const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1']);
+
+/**
+ * Returns true when the URL is an http(s) URL pointing at a loopback host
+ * (localhost, 127.0.0.1, 0.0.0.0, ::1). Used to decide whether to offer an in-app
+ * preview pane instead of opening the system browser.
+ */
+export const isLoopbackHttpUrl = (url: string): boolean => {
+  const parsed = parseUrlSafely(url.trim());
+  if (!parsed) {
+    return false;
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return false;
+  }
+  return LOOPBACK_HOSTNAMES.has(parsed.hostname.toLowerCase());
+};
+
+const LOOPBACK_URL_PATTERN
+  // eslint-disable-next-line no-control-regex
+  = /\bhttps?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::\d{2,5})?(?:\/[^\s<>"'`\u0000-\u001f]*)?/gi;
+
+/**
+ * Extracts loopback http(s) URLs from a free-text string. Returns unique URLs
+ * in order of first appearance. Trailing punctuation that is unlikely to be
+ * part of a real URL is stripped.
+ */
+export const extractLoopbackUrls = (text: string): string[] => {
+  if (!text) {
+    return [];
+  }
+  const matches = text.match(LOOPBACK_URL_PATTERN);
+  if (!matches || matches.length === 0) {
+    return [];
+  }
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of matches) {
+    const cleaned = raw.replace(/[),.;:!?'"`]+$/g, '');
+    if (!cleaned || !isLoopbackHttpUrl(cleaned)) {
+      continue;
+    }
+    if (seen.has(cleaned)) {
+      continue;
+    }
+    seen.add(cleaned);
+    out.push(cleaned);
+  }
+  return out;
+};
+
 /**
  * Opens an external URL in the system browser.
  * In Tauri desktop runtime, uses tauri.shell.open() for proper handling.

@@ -1381,7 +1381,7 @@ export const GitView: React.FC = () => {
     worktreeMetadata && repoRootForIntegrate && sourceBranchForIntegrate && shouldShowIntegrateCommits
   );
   const canShowPullRequestSection = Boolean(
-    currentDirectory && currentBranch && status?.tracking && currentBranch !== baseBranch
+    currentDirectory && currentBranch
   );
   const canShowBranchWorkflows = Boolean(currentBranch);
   const integrateCommitsProps =

@@ -701,7 +701,7 @@ export const AgentsPage: React.FC = () => {
               <div className="flex min-w-0 flex-col gap-1.5">
                 <div className="flex items-center gap-1.5">
                   <span className="typography-ui-label text-foreground">{t('settings.agents.page.field.mode')}</span>
-                  <Tooltip delayDuration={1000}>
+                  <Tooltip>
                     <TooltipTrigger asChild>
                       <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                     </TooltipTrigger>
@@ -778,7 +778,7 @@ export const AgentsPage: React.FC = () => {
               <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "sm:w-56 shrink-0")}>
                 <div className="flex items-center gap-1.5">
                   <span className="typography-ui-label text-foreground">{t('settings.agents.page.field.temperature')}</span>
-                  <Tooltip delayDuration={1000}>
+                  <Tooltip>
                     <TooltipTrigger asChild>
                       <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                     </TooltipTrigger>
@@ -822,7 +822,7 @@ export const AgentsPage: React.FC = () => {
               <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "sm:w-56 shrink-0")}>
                 <div className="flex items-center gap-1.5">
                   <span className="typography-ui-label text-foreground">{t('settings.agents.page.field.topP')}</span>
-                  <Tooltip delayDuration={1000}>
+                  <Tooltip>
                     <TooltipTrigger asChild>
                       <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                     </TooltipTrigger>

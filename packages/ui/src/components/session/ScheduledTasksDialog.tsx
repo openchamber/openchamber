@@ -192,7 +192,9 @@ export function ScheduledTasksDialog() {
 
   const [selectedProjectID, setSelectedProjectID] = React.useState<string>('');
   const [tasks, setTasks] = React.useState<ScheduledTask[]>([]);
-  const [loading, setLoading] = React.useState(false);
+  // Start in loading state so the first frame after open shows the spinner,
+  // not an empty/select-project flash before the fetch effect runs.
+  const [loading, setLoading] = React.useState(true);
   const [editorOpen, setEditorOpen] = React.useState(false);
   const [editorTask, setEditorTask] = React.useState<ScheduledTask | null>(null);
   const [mutatingTaskID, setMutatingTaskID] = React.useState<string | null>(null);
@@ -276,6 +278,7 @@ export function ScheduledTasksDialog() {
       void reloadTasks(preferredProjectID);
     } else {
       setTasks([]);
+      setLoading(false);
     }
   }, [open, activeProject, projects, reloadTasks]);
 
@@ -427,6 +430,7 @@ export function ScheduledTasksDialog() {
         projectSelector
       )}
 
+      <div className="min-h-[280px]">
       {loading ? (
         <div className="flex items-center gap-2 typography-meta text-muted-foreground">
           <RiLoader4Line className="h-4 w-4 animate-spin" /> {t('sessions.scheduledTasks.dialog.loading')}
@@ -579,6 +583,7 @@ export function ScheduledTasksDialog() {
           })}
         </div>
       )}
+      </div>
     </div>
   );
 

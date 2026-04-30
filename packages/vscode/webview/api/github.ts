@@ -16,6 +16,7 @@ import type {
   GitHubPullRequestStatus,
   GitHubDeviceFlowComplete,
   GitHubDeviceFlowStart,
+  GitHubRepoUpstreamResult,
   GitHubUserSummary,
 } from '@openchamber/ui/lib/api/types';
 
@@ -44,18 +45,24 @@ export const createVSCodeGitHubAPI = (): GitHubAPI => ({
 
   issuesList: async (directory: string, options?: { page?: number }) =>
     sendBridgeMessage<GitHubIssuesListResult>('api:github/issues:list', { directory, page: options?.page ?? 1 }),
-  issueGet: async (directory: string, number: number) =>
-    sendBridgeMessage<GitHubIssueGetResult>('api:github/issues:get', { directory, number }),
-  issueComments: async (directory: string, number: number) =>
-    sendBridgeMessage<GitHubIssueCommentsResult>('api:github/issues:comments', { directory, number }),
+  issueGet: async (directory: string, number: number, options?: { sourceRepo?: { owner: string; repo: string } | null }) =>
+    sendBridgeMessage<GitHubIssueGetResult>('api:github/issues:get', { directory, number, sourceRepo: options?.sourceRepo ?? null }),
+  issueComments: async (directory: string, number: number, options?: { sourceRepo?: { owner: string; repo: string } | null }) =>
+    sendBridgeMessage<GitHubIssueCommentsResult>('api:github/issues:comments', { directory, number, sourceRepo: options?.sourceRepo ?? null }),
 
   prsList: async (directory: string, options?: { page?: number }) =>
     sendBridgeMessage<GitHubPullRequestsListResult>('api:github/pulls:list', { directory, page: options?.page ?? 1 }),
-  prContext: async (directory: string, number: number, options?: { includeDiff?: boolean; includeCheckDetails?: boolean }) =>
+  prContext: async (directory: string, number: number, options?: { includeDiff?: boolean; includeCheckDetails?: boolean; sourceRepo?: { owner: string; repo: string } | null }) =>
     sendBridgeMessage<GitHubPullRequestContextResult>('api:github/pulls:context', {
       directory,
       number,
       includeDiff: Boolean(options?.includeDiff),
       includeCheckDetails: Boolean(options?.includeCheckDetails),
+      sourceRepo: options?.sourceRepo ?? null,
     }),
+
+  repoUpstream: async (directory: string) =>
+    sendBridgeMessage<GitHubRepoUpstreamResult>('api:github/repo:upstream', { directory }),
+  repoBranches: async (owner: string, repo: string) =>
+    sendBridgeMessage<string[]>('api:github/repo:branches', { owner, repo }),
 });

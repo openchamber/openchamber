@@ -11,6 +11,14 @@ export function formatInlineCommentDraft(draft: InlineCommentDraft): string {
   if (draft.source === 'diff' && side) {
     return `Comment on \`${fileLabel}\` lines ${startLine}-${endLine} (${side}):\n\`\`\`${language}\n${code}\n\`\`\`\n\n${text}`;
   }
+
+  if (draft.source === 'preview-console') {
+    return `Attached preview context from \`${fileLabel}\`:\n\`\`\`${language}\n${code}\n\`\`\`\n\n${text}`;
+  }
+
+  if (draft.source === 'preview-annotation') {
+    return text ? `${code}\n\n${text}` : code;
+  }
   
   // Plan and file format (no side)
   return `Comment on \`${fileLabel}\` lines ${startLine}-${endLine}:\n\`\`\`${language}\n${code}\n\`\`\`\n\n${text}`;
@@ -22,7 +30,11 @@ export function formatInlineCommentDraft(draft: InlineCommentDraft): string {
  */
 export function formatInlineCommentDrafts(drafts: InlineCommentDraft[]): string {
   if (drafts.length === 0) return '';
-  
+
+  if (drafts.every((draft) => draft.source === 'preview-annotation')) {
+    return drafts.map(formatInlineCommentDraft).join('\n\n---\n\n');
+  }
+   
   return drafts.map(formatInlineCommentDraft).join('\n\n');
 }
 

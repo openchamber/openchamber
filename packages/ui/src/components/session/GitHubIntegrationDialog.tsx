@@ -347,7 +347,7 @@ export function GitHubIntegrationDialog({
                   {filteredIssues.length > 0 ? (
                     filteredIssues.map(issue => (
                       <button
-                        key={issue.number}
+                        key={`${issue.sourceRepo?.owner ?? ''}-${issue.sourceRepo?.repo ?? ''}-${issue.number}`}
                         onClick={() => handleSelectIssue(issue)}
                         className={cn(
                           'w-full text-left px-2 py-1.5 rounded transition-colors',
@@ -358,7 +358,14 @@ export function GitHubIntegrationDialog({
                       >
                         <div className="flex items-start gap-2">
                           <span className="text-muted-foreground shrink-0 typography-micro">#{issue.number}</span>
-                          <span className="typography-small line-clamp-2">{issue.title}</span>
+                          <div className="min-w-0 flex-1">
+                            <span className="typography-small line-clamp-2">{issue.title}</span>
+                            {issue.sourceRepo?.source === 'upstream' ? (
+                              <span className="typography-micro px-1 py-0.5 rounded bg-status-info/10 text-status-info mt-0.5 inline-block">
+                                {issue.sourceRepo.owner}/{issue.sourceRepo.repo}
+                              </span>
+                            ) : null}
+                          </div>
                         </div>
                       </button>
                     ))
@@ -398,7 +405,7 @@ export function GitHubIntegrationDialog({
                       
                       return (
                         <button
-                          key={pr.number}
+                          key={`${pr.sourceRepo?.owner ?? ''}-${pr.sourceRepo?.repo ?? ''}-${pr.number}`}
                           onClick={() => !blocked && handleSelectPr(pr)}
                           disabled={blocked}
                           className={cn(
@@ -418,6 +425,11 @@ export function GitHubIntegrationDialog({
                                 <span className="typography-micro text-muted-foreground">
                                   {pr.head} → {pr.base}
                                 </span>
+                                {pr.sourceRepo?.source === 'upstream' ? (
+                                  <span className="typography-micro px-1 py-0.5 rounded bg-status-info/10 text-status-info">
+                                    {pr.sourceRepo.owner}/{pr.sourceRepo.repo}
+                                  </span>
+                                ) : null}
                                 {blocked && validation?.error && (
                                   <span className="typography-micro text-destructive">
                                     {validation.error}

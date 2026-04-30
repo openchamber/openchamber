@@ -210,17 +210,31 @@ const fetchFreeZenModels = async (): Promise<Array<{ id: string; owned_by?: stri
     return cachedZenModels.models;
   }
 
-  const response = await fetch(ZEN_MODELS_URL, {
-    headers: { Accept: 'application/json' },
-    signal: AbortSignal.timeout(8_000),
-  });
+  const signal = AbortSignal.timeout(8_000);
+  const [response, metadataResponse] = await Promise.all([
+    fetch(ZEN_MODELS_URL, {
+      headers: { Accept: 'application/json' },
+      signal,
+    }),
+    fetch('https://models.dev/api.json', {
+      headers: { Accept: 'application/json' },
+      signal,
+    }),
+  ]);
 
   if (!response.ok) {
     throw new Error(`zen models request failed (${response.status})`);
   }
+  if (!metadataResponse.ok) {
+    throw new Error(`models.dev request failed (${metadataResponse.status})`);
+  }
 
   const rawPayload = await response.json().catch(() => null);
+  const rawMetadata = await metadataResponse.json().catch(() => null);
   const payload = asObject(rawPayload);
+  const metadata = asObject(rawMetadata);
+  const metadataProvider = asObject(metadata?.opencode);
+  const metadataModels = asObject(metadataProvider?.models);
   const rows = Array.isArray(payload?.data) ? payload.data : [];
   const models = rows
     .map((entry) => {
@@ -230,7 +244,9 @@ const fetchFreeZenModels = async (): Promise<Array<{ id: string; owned_by?: stri
       const ownedBy = typeof (entry as { owned_by?: unknown })?.owned_by === 'string'
         ? (entry as { owned_by: string }).owned_by
         : undefined;
-      if (!id || !id.endsWith('-free')) return null;
+      const metadataModel = asObject(metadataModels?.[id]);
+      const cost = asObject(metadataModel?.cost);
+      if (!id || cost?.input !== 0 || cost?.output !== 0) return null;
       return ownedBy ? { id, owned_by: ownedBy } : { id };
     })
     .filter((entry): entry is { id: string; owned_by?: string } => entry !== null);

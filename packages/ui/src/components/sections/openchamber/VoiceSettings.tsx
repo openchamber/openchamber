@@ -443,7 +443,7 @@ export const VoiceSettings: React.FC = () => {
                                 <div className="flex min-w-0 flex-col gap-1.5">
                                     <div className="flex items-center gap-1.5">
                                         <span className="typography-ui-label text-foreground">{t('settings.voice.page.field.provider')}</span>
-                                        <Tooltip delayDuration={1000}>
+                                        <Tooltip>
                                             <TooltipTrigger asChild>
                                                 <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                                             </TooltipTrigger>
@@ -732,7 +732,7 @@ export const VoiceSettings: React.FC = () => {
                             <div className="flex min-w-0 flex-col gap-1.5">
                                 <div className="flex items-center gap-1.5">
                                     <span className="typography-ui-label text-foreground">{t('settings.voice.page.field.provider')}</span>
-                                    <Tooltip delayDuration={1000}>
+                                    <Tooltip>
                                         <TooltipTrigger asChild>
                                             <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                                         </TooltipTrigger>

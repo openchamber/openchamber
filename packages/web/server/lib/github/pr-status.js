@@ -27,6 +27,18 @@ const parseTrackingRemoteName = (trackingBranch) => {
   return normalized.slice(0, slashIndex).trim();
 };
 
+const parseTrackingBranchName = (trackingBranch) => {
+  const normalized = normalizeText(trackingBranch);
+  if (!normalized) {
+    return '';
+  }
+  const slashIndex = normalized.indexOf('/');
+  if (slashIndex <= 0 || slashIndex >= normalized.length - 1) {
+    return '';
+  }
+  return normalized.slice(slashIndex + 1).trim();
+};
+
 const pushUnique = (collection, value, keyFn = normalizeLower) => {
   const normalizedValue = normalizeText(value);
   if (!normalizedValue) {
@@ -421,13 +433,17 @@ export async function resolveGitHubPrStatus({ octokit, directory, branch, remote
   ]);
 
   const trackingRemoteName = parseTrackingRemoteName(status?.tracking);
+  const trackingBranchName = parseTrackingBranchName(status?.tracking);
+  const branchCandidates = [];
+  pushUnique(branchCandidates, normalizedBranch);
+  pushUnique(branchCandidates, trackingBranchName);
   const rankedRemoteNames = rankRemoteNames(
     Array.isArray(remotes) ? remotes.map((remote) => remote?.name).filter(Boolean) : [],
     normalizedRemoteName,
     trackingRemoteName,
   );
 
-  const resolvedRemoteTargets = await resolveRemoteCandidates(directory, rankedRemoteNames.slice(0, 3));
+  const resolvedRemoteTargets = await resolveRemoteCandidates(directory, rankedRemoteNames);
   const resolvedTargets = await expandRepoNetwork(
     octokit,
     resolvedRemoteTargets.map((target, index) => ({ ...target, priority: index })),
@@ -454,38 +470,44 @@ export async function resolveGitHubPrStatus({ octokit, directory, branch, remote
       fallbackRemoteName = target.remoteName;
       fallbackDefaultBranch = defaultBranch;
     }
-    if (defaultBranch && defaultBranch === normalizedBranch) {
-      continue;
-    }
 
-    const pr = await findFirstMatchingPr({
-      octokit,
-      target,
-      branch: normalizedBranch,
-      sourceCandidates,
-    });
-    if (pr) {
-      return {
-        repo: target.repo,
-        pr,
-        defaultBranch,
-        resolvedRemoteName: target.remoteName,
-      };
+    const hasCrossRepoSource = sourceCandidates.some((candidate) => normalizeRepoKey(candidate.repo?.owner, candidate.repo?.repo) !== normalizeRepoKey(target.repo?.owner, target.repo?.repo));
+    for (const candidateBranch of branchCandidates) {
+      if (defaultBranch && defaultBranch === candidateBranch && !hasCrossRepoSource) {
+        continue;
+      }
+
+      const pr = await findFirstMatchingPr({
+        octokit,
+        target,
+        branch: candidateBranch,
+        sourceCandidates,
+      });
+      if (pr) {
+        return {
+          repo: target.repo,
+          pr,
+          defaultBranch,
+          resolvedRemoteName: target.remoteName,
+        };
+      }
     }
   }
 
-  const fallbackSearch = await searchFallbackPr({
-    octokit,
-    branch: normalizedBranch,
-    repoNames: resolvedTargets.map((target) => target.repo.repo),
-  });
-  if (fallbackSearch) {
-    return {
-      repo: fallbackSearch.repo,
-      pr: fallbackSearch.pr,
-      defaultBranch: await getRepoDefaultBranch(octokit, fallbackSearch.repo),
-      resolvedRemoteName: null,
-    };
+  for (const candidateBranch of branchCandidates) {
+    const fallbackSearch = await searchFallbackPr({
+      octokit,
+      branch: candidateBranch,
+      repoNames: resolvedTargets.map((target) => target.repo.repo),
+    });
+    if (fallbackSearch) {
+      return {
+        repo: fallbackSearch.repo,
+        pr: fallbackSearch.pr,
+        defaultBranch: await getRepoDefaultBranch(octokit, fallbackSearch.repo),
+        resolvedRemoteName: null,
+      };
+    }
   }
 
   return {
