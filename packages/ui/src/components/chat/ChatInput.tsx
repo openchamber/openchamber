@@ -1253,11 +1253,19 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     // Add message to queue instead of sending
     const handleQueueMessage = React.useCallback(() => {
-        if (!hasContent || !currentSessionId) return;
+        // Read the textarea value directly from the DOM ref to avoid capturing a
+        // stale `message` state from a pending React render.  When the user types
+        // quickly and clicks the Queue button before React commits the latest
+        // render, the `message` closure may still hold a previous (often the first
+        // character) value.  Falling back to the React state handles the case where
+        // the textarea ref is unavailable (e.g., during SSR or after unmount).
+        const currentMessage = textareaRef.current?.value ?? message;
+        const currentHasContent = currentMessage.trim().length > 0 || sendableAttachedFiles.length > 0 || hasDrafts;
+        if (!currentHasContent || !currentSessionId) return;
 
         const drafts = consumeDrafts(currentSessionId);
 
-        let messageToQueue = message.replace(/^\n+|\n+$/g, '');
+        let messageToQueue = currentMessage.replace(/^\n+|\n+$/g, '');
         if (drafts.length > 0) {
             messageToQueue = appendInlineComments(messageToQueue, drafts);
         }
@@ -1286,7 +1294,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (!isMobile) {
             textareaRef.current?.focus();
         }
-    }, [hasContent, currentSessionId, message, sendableAttachedFiles, sanitizeAttachmentsForSend, addToQueue, clearAttachedFiles, isMobile, consumeDrafts, currentProviderId, currentModelId, currentAgentName, currentVariant]);
+    }, [hasContent, hasDrafts, currentSessionId, message, sendableAttachedFiles, sanitizeAttachmentsForSend, addToQueue, clearAttachedFiles, isMobile, consumeDrafts, currentProviderId, currentModelId, currentAgentName, currentVariant]);
 
     const handleQueuedMessageEdit = React.useCallback((content: string) => {
         setMessage(content);
