@@ -166,7 +166,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
             style={{ backgroundColor: isDesktopShell && isStuck ? 'transparent' : undefined }}
           >
             <div className="relative flex items-center gap-1 px-0.5 py-0.5" {...attributes}>
-              <Tooltip delayDuration={1500}>
+              <Tooltip>
                 <TooltipTrigger asChild>
                     <button
                       type="button"

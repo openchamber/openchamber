@@ -1223,7 +1223,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     };
   }, [currentDirectory, debouncedSearchQuery, searchFiles, showHidden, showGitignored]);
 
-  const readFile = React.useCallback(async (path: string, options?: { allowOutsideWorkspace?: boolean }): Promise<string> => {
+  const readFile = React.useCallback(async (path: string, options?: { allowOutsideWorkspace?: boolean; optional?: boolean }): Promise<string> => {
     if (files.readFile) {
       const result = await files.readFile(path, options);
       return result.content ?? '';
@@ -1233,7 +1233,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     if (options?.allowOutsideWorkspace) {
       params.set('allowOutsideWorkspace', 'true');
     }
-    const response = await fetch(`/api/fs/read?${params.toString()}`);
+    if (options?.optional) {
+      params.set('optional', 'true');
+    }
+    const response = await fetch(`/api/fs/read?${params.toString()}`, {
+      // Avoid conditional requests (304 + empty body).
+      cache: options?.optional ? 'no-store' : 'default',
+    });
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: response.statusText }));
       throw new Error((error as { error?: string }).error || t('filesView.error.readFileFailed'));

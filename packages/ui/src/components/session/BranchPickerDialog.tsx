@@ -435,7 +435,7 @@ export function BranchPickerDialog({ open, onOpenChange, project }: BranchPicker
 
                     {!isEditing && !isConfirming ? (
                       <div className="flex items-center gap-1 flex-shrink-0">
-                        <Tooltip delayDuration={700}>
+                        <Tooltip>
                           <TooltipTrigger asChild>
                             <button
                               type="button"
@@ -456,7 +456,7 @@ export function BranchPickerDialog({ open, onOpenChange, project }: BranchPicker
                           </TooltipContent>
                         </Tooltip>
 
-                        <Tooltip delayDuration={700}>
+                        <Tooltip>
                           <TooltipTrigger asChild>
                             <button
                               type="button"
@@ -473,7 +473,7 @@ export function BranchPickerDialog({ open, onOpenChange, project }: BranchPicker
                           </TooltipContent>
                         </Tooltip>
 
-                        <Tooltip delayDuration={700}>
+                        <Tooltip>
                           <TooltipTrigger asChild>
                             <button
                               type="button"

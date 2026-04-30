@@ -1,3 +1,8 @@
+## [Unreleased]
+
+- Chat/UI: added a wide layout option for roomier review sessions and softened aborted-turn wording for less alarming interrupted responses.
+- Settings/UI: centered empty states more consistently so settings and management pages feel cleaner in the editor panel (thanks to @Yabuku-xD).
+
 ## [1.9.10] - 2026-04-28
 
 - UI/Localization: added Korean interface translations and default new installs back to English when no language has been chosen (thanks to @An-jinu).

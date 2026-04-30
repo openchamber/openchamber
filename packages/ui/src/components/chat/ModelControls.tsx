@@ -2654,7 +2654,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         let currentFlatIndex = 0;
 
         return (
-            <Tooltip delayDuration={1000}>
+            <Tooltip delayDuration={600}>
                 {!isCompact ? (
                     <DropdownMenu open={isReady && agentMenuOpen} onOpenChange={isReady ? handleModelMenuOpenChange : undefined}>
                         <TooltipTrigger asChild>
@@ -3119,7 +3119,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         }
 
         return (
-            <Tooltip delayDuration={800}>
+            <Tooltip delayDuration={600}>
                 <DropdownMenu>
                     <TooltipTrigger asChild>
                         <DropdownMenuTrigger asChild>
@@ -3182,7 +3182,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         if (!isCompact) {
             return (
                 <div className="flex items-center gap-2 min-w-0">
-                    <Tooltip delayDuration={1000}>
+                    <Tooltip delayDuration={600}>
                         <DropdownMenu open={isReady && isAgentSelectorOpen} onOpenChange={isReady ? setIsAgentSelectorOpen : undefined}>
                             <TooltipTrigger asChild>
                                 <DropdownMenuTrigger asChild>

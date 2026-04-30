@@ -659,7 +659,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
     // Summary body removed — flat rendering means text is always inline.
 
-    const assistantErrorText = React.useMemo(() => {
+    const assistantError = React.useMemo(() => {
         if (isUser) {
             return undefined;
         }
@@ -677,13 +677,31 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             return undefined;
         }
         if (errorName === 'SessionRetry') {
-            return `Opencode failed to send a message. Retry attempt info: \n\`${detail}\``;
+            return {
+                text: `Opencode failed to send a message. Retry attempt info: \n\`${detail}\``,
+                variant: 'info' as const,
+            };
         }
         if (isLikelyProviderAuthFailure(detail)) {
-            return PROVIDER_AUTH_FAILURE_MESSAGE;
+            return {
+                text: PROVIDER_AUTH_FAILURE_MESSAGE,
+                variant: 'error' as const,
+            };
         }
-        return `Opencode failed to send message with error:\n\`${detail}\``;
+        if (detail.trim().toLowerCase() === 'aborted') {
+            return {
+                text: 'The running turn was stopped before OpenCode could send the next message.',
+                variant: 'info' as const,
+            };
+        }
+        return {
+            text: `Opencode failed to send message with error:\n\`${detail}\``,
+            variant: 'error' as const,
+        };
     }, [isUser, message.info]);
+
+    const assistantErrorText = assistantError?.text;
+    const assistantErrorVariant = assistantError?.variant;
 
     const messageTextContent = React.useMemo(() => {
         if (isUser) {
@@ -1031,6 +1049,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                                 onRevert={handleRevert}
                                                 onFork={isUser ? handleFork : undefined}
                                                 errorMessage={assistantErrorText}
+                                                errorVariant={assistantErrorVariant}
                                                 userActionsMode={useExternalUserActionsRow ? 'external-content' : 'inline'}
                                                 stickyUserHeaderEnabled={stickyUserHeader}
                                             />
@@ -1063,6 +1082,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                                 onRevert={handleRevert}
                                                 onFork={isUser ? handleFork : undefined}
                                                 errorMessage={assistantErrorText}
+                                                errorVariant={assistantErrorVariant}
                                                 userActionsMode="external-actions"
                                                 stickyUserHeaderEnabled={stickyUserHeader}
                                             />
@@ -1113,6 +1133,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                 agentMention={agentMention}
                                 turnGroupingContext={turnGroupingContext}
                                 errorMessage={assistantErrorText}
+                                errorVariant={assistantErrorVariant}
                             />
 
                         </div>

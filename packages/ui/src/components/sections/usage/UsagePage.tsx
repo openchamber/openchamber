@@ -192,7 +192,7 @@ export const UsagePage: React.FC = () => {
               />
               <div className="flex min-w-0 items-center gap-1.5">
               <span className="typography-ui-label text-foreground">{t('settings.usage.page.options.showInHeader')}</span>
-              <Tooltip delayDuration={1000}>
+              <Tooltip>
                 <TooltipTrigger asChild>
                   <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                 </TooltipTrigger>

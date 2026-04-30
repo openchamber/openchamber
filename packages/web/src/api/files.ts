@@ -138,7 +138,12 @@ export const createWebFilesAPI = (): FilesAPI => ({
     if (options?.allowOutsideWorkspace) {
       params.set('allowOutsideWorkspace', 'true');
     }
-    const response = await fetch(`/api/fs/read?${params.toString()}`);
+    if (options?.optional) {
+      params.set('optional', 'true');
+    }
+    const response = await fetch(`/api/fs/read?${params.toString()}`, {
+      cache: options?.optional ? 'no-store' : 'default',
+    });
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: response.statusText }));

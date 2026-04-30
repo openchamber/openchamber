@@ -74,6 +74,8 @@ import { createPushRuntime } from './lib/notifications/push-runtime.js';
 import { createNotificationTemplateRuntime } from './lib/notifications/template-runtime.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
 import { createProjectConfigRuntime } from './lib/projects/project-config.js';
+import { createPreviewProxyRuntime } from './lib/preview/proxy-runtime.js';
+import { createProxyMiddleware, responseInterceptor } from 'http-proxy-middleware';
 import webPush from 'web-push';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -1155,6 +1157,20 @@ async function main(options = {}) {
     writeSseEvent,
   });
 
+  const previewProxyRuntime = createPreviewProxyRuntime({
+    crypto,
+    URL,
+    createProxyMiddleware,
+    responseInterceptor,
+  });
+  previewProxyRuntime.attach(app, {
+    server,
+    express,
+    uiAuthController,
+    isRequestOriginAllowed,
+    rejectWebSocketUpgrade,
+  });
+
   const startupPipelineResult = await startupPipelineRuntime.run({
     app,
     server,
@@ -1217,6 +1233,12 @@ async function main(options = {}) {
     getPort: () => tunnelRuntimeContext.getActivePort(),
     getOpenCodePort: () => openCodePort,
     getTunnelUrl: () => tunnelService.getPublicUrl(),
+    getQuitRiskStatus: () => ({
+      tunnel: {
+        active: Boolean(tunnelService.getPublicUrl()),
+      },
+      scheduledTasks: scheduledTasksRuntime.getStatus(),
+    }),
     isReady: () => isOpenCodeReady,
     restartOpenCode: () => restartOpenCode(),
     stop: (shutdownOptions = {}) =>

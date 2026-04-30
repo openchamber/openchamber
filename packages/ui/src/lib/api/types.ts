@@ -511,6 +511,7 @@ export interface ListDirectoryOptions {
 
 export interface FileReadOptions {
   allowOutsideWorkspace?: boolean;
+  optional?: boolean;
 }
 
 export interface FilesAPI {

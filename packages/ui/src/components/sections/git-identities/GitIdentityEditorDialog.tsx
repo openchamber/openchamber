@@ -296,7 +296,7 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
                 <div className="flex items-center gap-1.5 mb-1.5">
                   <label className="typography-ui-label text-foreground">{t('settings.gitIdentities.editor.field.userName')}</label>
                   {!isGlobalProfile && <span className="text-[var(--status-error)] text-xs">*</span>}
-                  <Tooltip delayDuration={1000}>
+                  <Tooltip>
                     <TooltipTrigger asChild>
                       <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                     </TooltipTrigger>
@@ -320,7 +320,7 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
                 <div className="flex items-center gap-1.5 mb-1.5">
                   <label className="typography-ui-label text-foreground">{t('settings.gitIdentities.editor.field.emailAddress')}</label>
                   {!isGlobalProfile && <span className="text-[var(--status-error)] text-xs">*</span>}
-                  <Tooltip delayDuration={1000}>
+                  <Tooltip>
                     <TooltipTrigger asChild>
                       <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                     </TooltipTrigger>
@@ -373,7 +373,7 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
                     <div>
                       <div className="flex items-center gap-1.5 mb-1.5">
                         <label className="typography-ui-label text-foreground">{t('settings.gitIdentities.editor.field.sshKeyPath')}</label>
-                        <Tooltip delayDuration={1000}>
+                        <Tooltip>
                           <TooltipTrigger asChild>
                             <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                           </TooltipTrigger>
@@ -396,7 +396,7 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
                       <div className="flex items-center gap-1.5 mb-1.5">
                         <label className="typography-ui-label text-foreground">{t('settings.gitIdentities.editor.field.host')}</label>
                         <span className="text-[var(--status-error)] text-xs">*</span>
-                        <Tooltip delayDuration={1000}>
+                        <Tooltip>
                           <TooltipTrigger asChild>
                             <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                           </TooltipTrigger>

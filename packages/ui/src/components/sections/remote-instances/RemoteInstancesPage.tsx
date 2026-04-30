@@ -150,7 +150,7 @@ const HintLabel: React.FC<{ label: string; hint: React.ReactNode }> = ({ label, 
   return (
     <span className="inline-flex items-center gap-1 typography-meta text-muted-foreground">
       <span>{label}</span>
-      <Tooltip delayDuration={700}>
+      <Tooltip>
         <TooltipTrigger asChild>
           <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
         </TooltipTrigger>
