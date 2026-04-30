@@ -1,6 +1,8 @@
 import { createUpstreamSseReader } from './upstream-reader.js';
 
-export const MESSAGE_STREAM_GLOBAL_REPLAY_LIMIT = 512;
+// Raised from 512 → 2048 to improve recovery after brief disconnects during
+// long-running agent sessions where many events accumulate quickly.
+export const MESSAGE_STREAM_GLOBAL_REPLAY_LIMIT = 2048;
 
 export function createGlobalMessageStreamHub({
   buildOpenCodeUrl,
