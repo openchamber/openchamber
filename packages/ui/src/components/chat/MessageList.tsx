@@ -16,7 +16,7 @@ import { hasPendingUserSendAnimation, consumePendingUserSendAnimation } from '@/
 import { streamPerfCount, streamPerfMeasure } from '@/stores/utils/streamDebug';
 import type { StreamPhase } from './message/types';
 
-const MESSAGE_LIST_VIRTUALIZE_THRESHOLD = 15;
+const MESSAGE_LIST_VIRTUALIZE_THRESHOLD = Number.POSITIVE_INFINITY;
 const MESSAGE_LIST_OVERSCAN = 6;
 
 const estimateHistoryEntryHeight = (entry: RenderEntry | undefined): number => {

@@ -1394,6 +1394,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.showReasoningTraces': 'Reasoning Trace 표시',
   'settings.openchamber.visual.field.stickyUserHeaderAria': '고정 사용자 헤더',
   'settings.openchamber.visual.field.stickyUserHeader': '고정 사용자 헤더',
+  'settings.openchamber.visual.field.wideChatLayoutAria': '넓은 채팅 레이아웃',
+  'settings.openchamber.visual.field.wideChatLayout': '넓은 채팅 레이아웃',
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsAria': '인라인 어시스턴트 작업',
   'settings.openchamber.visual.field.showSplitAssistantMessageActions': '인라인 어시스턴트 작업',
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsTooltip': '같은 응답에서 이후 도구 호출 앞에 나타나는 어시스턴트 텍스트 블록에 답변 복사, 이미지로 저장, 소리 내어 읽기 작업을 표시합니다.',

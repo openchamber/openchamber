@@ -1394,6 +1394,8 @@ export const settingsDict = {
   "settings.openchamber.visual.field.showReasoningTraces": "Mostrar rastros de raciocínio",
   "settings.openchamber.visual.field.stickyUserHeaderAria": "Cabeçalho do usuário fixo",
   "settings.openchamber.visual.field.stickyUserHeader": "Cabeçalho do usuário fixo",
+  "settings.openchamber.visual.field.wideChatLayoutAria": "Layout de chat amplo",
+  "settings.openchamber.visual.field.wideChatLayout": "Layout de chat amplo",
   "settings.openchamber.visual.field.showSplitAssistantMessageActionsAria": "Ações inline do assistente",
   "settings.openchamber.visual.field.showSplitAssistantMessageActions": "Ações inline do assistente",
   "settings.openchamber.visual.field.showSplitAssistantMessageActionsTooltip": "Mostra Copiar resposta, Salvar como imagem e Ler em voz alta em blocos de texto do assistente que aparecem antes de chamadas de ferramenta posteriores na mesma resposta.",

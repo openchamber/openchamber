@@ -1,6 +1,6 @@
 import React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { RiArrowDownSLine, RiArrowRightSLine, RiCheckboxBlankLine, RiCheckboxLine, RiSubtractLine } from '@remixicon/react';
+import { RiFolder3Fill, RiFolderOpenFill } from '@remixicon/react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import {
@@ -384,38 +384,34 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
         className={cn('group flex items-center gap-2 py-1.5 hover:bg-sidebar/40', rowPaddingClassName)}
         style={{ paddingLeft: `${row.depth * TREE_INDENT_PX}px` }}
       >
+        <div className="flex size-5 shrink-0 items-center justify-center">
+          <Checkbox
+            size="sm"
+            checked={selectionState === 'all'}
+            indeterminate={selectionState === 'partial'}
+            onChange={() => toggleDirectorySelection(directory)}
+            ariaLabel={t('gitView.changes.toggleDirectorySelectionAria', { path: directory.path })}
+          />
+        </div>
+
         <button
           type="button"
           onClick={() => toggleDirectoryExpanded(directory.path)}
-          className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          className="flex min-w-0 flex-1 items-center gap-2 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           aria-label={isExpanded
             ? t('gitView.changes.collapseDirectoryAria', { path: directory.path })
             : t('gitView.changes.expandDirectoryAria', { path: directory.path })}
         >
-          {isExpanded ? <RiArrowDownSLine className="size-4" /> : <RiArrowRightSLine className="size-4" />}
-        </button>
-
-        <button
-          type="button"
-          role="checkbox"
-          aria-checked={selectionState === 'partial' ? 'mixed' : selectionState === 'all'}
-          aria-label={t('gitView.changes.toggleDirectorySelectionAria', { path: directory.path })}
-          onClick={() => toggleDirectorySelection(directory)}
-          className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-        >
-          {selectionState === 'all' ? (
-            <RiCheckboxLine className="size-4 text-primary" />
-          ) : selectionState === 'partial' ? (
-            <RiSubtractLine className="size-4 text-primary" />
+          {isExpanded ? (
+            <RiFolderOpenFill className="h-4 w-4 flex-shrink-0 text-primary/60" />
           ) : (
-            <RiCheckboxBlankLine className="size-4" />
+            <RiFolder3Fill className="h-4 w-4 flex-shrink-0 text-primary/60" />
           )}
+          <span className="min-w-0 flex-1 truncate typography-ui-label text-foreground" title={directory.path}>
+            {directory.name}
+          </span>
+          <span className="ml-auto shrink-0 typography-micro text-muted-foreground">{directory.files.length}</span>
         </button>
-
-        <span className="min-w-0 truncate typography-ui-label text-foreground" title={directory.path}>
-          {directory.name}
-        </span>
-        <span className="ml-auto shrink-0 typography-micro text-muted-foreground">{directory.files.length}</span>
       </div>
     );
   }, [

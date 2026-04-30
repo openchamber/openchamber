@@ -1021,8 +1021,38 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             [currentSessionId, newSessionDraftOpen]
         )
     );
+    const draftSourceKey = useInlineCommentDraftStore(
+        React.useCallback(
+            (state) => {
+                const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : '');
+                const drafts = sessionKey ? (state.drafts[sessionKey] ?? []) : [];
+                let previewConsole = 0;
+                let previewAnnotation = 0;
+                let review = 0;
+                for (const draft of drafts) {
+                    if (draft.source === 'preview-console') previewConsole += 1;
+                    else if (draft.source === 'preview-annotation') previewAnnotation += 1;
+                    else review += 1;
+                }
+                return `${previewConsole}:${previewAnnotation}:${review}`;
+            },
+            [currentSessionId, newSessionDraftOpen]
+        )
+    );
     const consumeDrafts = useInlineCommentDraftStore((state) => state.consumeDrafts);
+    const removeInlineCommentDraft = useInlineCommentDraftStore((state) => state.removeDraft);
     const hasDrafts = draftCount > 0;
+    const [previewConsoleCount, previewAnnotationCount, reviewCount] = draftSourceKey.split(':').map((entry) => Number(entry) || 0);
+    const removePreviewDrafts = React.useCallback((source: 'preview-console' | 'preview-annotation') => {
+        const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : '');
+        if (!sessionKey) return;
+        const drafts = useInlineCommentDraftStore.getState().drafts[sessionKey] ?? [];
+        for (const draft of drafts) {
+            if (draft.source === source) {
+                removeInlineCommentDraft(sessionKey, draft.id);
+            }
+        }
+    }, [currentSessionId, newSessionDraftOpen, removeInlineCommentDraft]);
 
     // User message history for up/down arrow navigation.
     // Keep this on a narrow hook instead of full session message records.
@@ -3270,19 +3300,61 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     onEditMessage={handleQueuedMessageEdit}
                 />
                 {hasDrafts && (
-                    <div className="pb-2">
-                        <div
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl border"
-                            style={{
-                                backgroundColor: currentTheme?.colors?.surface?.elevated,
-                                borderColor: currentTheme?.colors?.interactive?.border,
-                            }}
-                        >
-                            <span className="text-xs font-medium text-muted-foreground">{t('chat.chatInput.reviewComments')}</span>
-                            <span className="text-xs font-semibold" style={{ color: currentTheme?.colors?.status?.info }}>
-                                {draftCount}
-                            </span>
-                        </div>
+                    <div className="flex flex-wrap items-center gap-2 pb-2">
+                        {reviewCount > 0 ? (
+                            <div
+                                className="inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1"
+                                style={{
+                                    backgroundColor: currentTheme?.colors?.surface?.elevated,
+                                    borderColor: currentTheme?.colors?.interactive?.border,
+                                }}
+                            >
+                                <span className="text-xs font-medium text-muted-foreground">{t('chat.chatInput.reviewComments')}</span>
+                                <span className="text-xs font-semibold" style={{ color: currentTheme?.colors?.status?.info }}>{reviewCount}</span>
+                            </div>
+                        ) : null}
+                        {previewConsoleCount > 0 ? (
+                            <div
+                                className="inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1"
+                                style={{
+                                    backgroundColor: currentTheme?.colors?.surface?.elevated,
+                                    borderColor: currentTheme?.colors?.interactive?.border,
+                                }}
+                            >
+                                <span className="text-xs font-medium text-muted-foreground">{t('chat.chatInput.devServerLogs')}</span>
+                                <span className="text-xs font-semibold" style={{ color: currentTheme?.colors?.status?.info }}>{previewConsoleCount}</span>
+                                <button
+                                    type="button"
+                                    className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+                                    onClick={() => removePreviewDrafts('preview-console')}
+                                    aria-label={t('chat.chatInput.devServerLogsRemove')}
+                                    title={t('chat.chatInput.devServerLogsRemove')}
+                                >
+                                    <RiCloseLine className="h-3 w-3" />
+                                </button>
+                            </div>
+                        ) : null}
+                        {previewAnnotationCount > 0 ? (
+                            <div
+                                className="inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1"
+                                style={{
+                                    backgroundColor: currentTheme?.colors?.surface?.elevated,
+                                    borderColor: currentTheme?.colors?.interactive?.border,
+                                }}
+                            >
+                                <span className="text-xs font-medium text-muted-foreground">{t('chat.chatInput.previewAnnotations')}</span>
+                                <span className="text-xs font-semibold" style={{ color: currentTheme?.colors?.status?.info }}>{previewAnnotationCount}</span>
+                                <button
+                                    type="button"
+                                    className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+                                    onClick={() => removePreviewDrafts('preview-annotation')}
+                                    aria-label={t('chat.chatInput.previewContextRemove')}
+                                    title={t('chat.chatInput.previewContextRemove')}
+                                >
+                                    <RiCloseLine className="h-3 w-3" />
+                                </button>
+                            </div>
+                        ) : null}
                     </div>
                 )}
 

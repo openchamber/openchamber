@@ -26,11 +26,15 @@ const classifyReadError = (error: unknown): ContextFileOpenFailureReason => {
 
 const readFileContent = async (files: FilesAPI, path: string): Promise<string> => {
   if (files.readFile) {
-    const result = await files.readFile(path);
+    const result = await files.readFile(path, { allowOutsideWorkspace: true, optional: true });
     return result.content ?? '';
   }
 
-  const response = await fetch(`/api/fs/read?path=${encodeURIComponent(path)}`);
+  const params = new URLSearchParams({ path, allowOutsideWorkspace: 'true', optional: 'true' });
+  const response = await fetch(`/api/fs/read?${params.toString()}`, {
+    // Avoid conditional requests (304 + empty body).
+    cache: 'no-store',
+  });
   if (!response.ok) {
     const errorPayload = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error((errorPayload as { error?: string }).error || 'Failed to read file');

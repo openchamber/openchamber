@@ -52,12 +52,33 @@ export const createOpenCodeEnvRuntime = (deps) => {
   };
 
   const searchPathFor = (binaryName) => {
+    const trimmed = typeof binaryName === 'string' ? binaryName.trim() : '';
+    if (!trimmed) {
+      return null;
+    }
+
     const current = process.env.PATH || '';
     const parts = current.split(path.delimiter).filter(Boolean);
+    const candidateNames = [trimmed];
+
+    if (process.platform === 'win32' && !path.extname(trimmed)) {
+      const pathExt = process.env.PATHEXT || process.env.PathExt || '.COM;.EXE;.BAT;.CMD';
+      for (const ext of pathExt.split(';')) {
+        const normalizedExt = ext.trim();
+        if (!normalizedExt) continue;
+        const candidateName = `${trimmed}${normalizedExt.startsWith('.') ? normalizedExt : `.${normalizedExt}`}`;
+        if (!candidateNames.some((existing) => existing.toLowerCase() === candidateName.toLowerCase())) {
+          candidateNames.push(candidateName);
+        }
+      }
+    }
+
     for (const dir of parts) {
-      const candidate = path.join(dir, binaryName);
-      if (isExecutable(candidate)) {
-        return candidate;
+      for (const candidateName of candidateNames) {
+        const candidate = path.join(dir, candidateName);
+        if (isExecutable(candidate)) {
+          return candidate;
+        }
       }
     }
     return null;

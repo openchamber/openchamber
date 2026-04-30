@@ -1,6 +1,6 @@
 {
   "name": "openchamber-monorepo",
-  "version": "1.9.9",
+  "version": "1.9.10",
   "description": "OpenChamber monorepo workspace for web, ui, and desktop runtimes",
   "private": true,
   "type": "module",
@@ -21,7 +21,7 @@
   "author": "Bohdan Triapitsyn",
   "license": "MIT",
   "scripts": {
-    "dev": "concurrently -n \"server,web,ui\" -c \"cyan,magenta,yellow\" \"bun run --cwd packages/web dev:server:watch\" \"bun run --cwd packages/web build:watch\" \"bun run --cwd packages/ui dev\"",
+    "dev": "OPENCHAMBER_DEV_SHUTDOWN=true concurrently -n \"server,web,ui\" -c \"cyan,magenta,yellow\" \"bun run --cwd packages/web dev:server:watch\" \"bun run --cwd packages/web build:watch\" \"bun run --cwd packages/ui dev\"",
     "build": "bun run --filter '*' build",
     "build:web": "bun run --cwd packages/web build",
     "build:ui": "bun run --cwd packages/ui build",

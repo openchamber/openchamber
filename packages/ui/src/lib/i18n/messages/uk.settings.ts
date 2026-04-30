@@ -1394,6 +1394,8 @@ export const settingsDict = {
   "settings.openchamber.visual.field.showReasoningTraces": "Показати сліди міркувань",
   "settings.openchamber.visual.field.stickyUserHeaderAria": "Закріплений заголовок користувача",
   "settings.openchamber.visual.field.stickyUserHeader": "Закріплений заголовок користувача",
+  "settings.openchamber.visual.field.wideChatLayoutAria": "Широкий макет чату",
+  "settings.openchamber.visual.field.wideChatLayout": "Широкий макет чату",
   "settings.openchamber.visual.field.showSplitAssistantMessageActionsAria": "Вбудовані дії асистента",
   "settings.openchamber.visual.field.showSplitAssistantMessageActions": "Вбудовані дії асистента",
   "settings.openchamber.visual.field.showSplitAssistantMessageActionsTooltip": "Показує «Скопіювати відповідь», «Зберегти як зображення» та озвучення для текстових блоків асистента, які з’являються перед пізнішими викликами інструментів у тій самій відповіді.",

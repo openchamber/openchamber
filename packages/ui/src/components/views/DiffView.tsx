@@ -362,7 +362,7 @@ const FileList = React.memo<FileListProps>(({
                                 </span>
                                 <span
                                     className="min-w-0 flex-1 truncate typography-meta"
-                                    style={{ direction: 'rtl', textAlign: 'left' }}
+                                    style={{ direction: 'rtl', textAlign: 'left', unicodeBidi: 'plaintext' }}
                                     title={file.path}
                                 >
                                     {file.path}
@@ -813,7 +813,7 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                                         return (
                                             <span
                                                 className="block min-w-0 truncate typography-ui-label text-foreground"
-                                                style={{ direction: 'rtl', textAlign: 'left' }}
+                                                style={{ direction: 'rtl', textAlign: 'left', unicodeBidi: 'plaintext' }}
                                             >
                                                 {file.path}
                                             </span>
@@ -827,7 +827,7 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                                         <span className="flex min-w-0 items-baseline overflow-hidden">
                                             <span
                                                 className="min-w-0 truncate typography-ui-label text-muted-foreground"
-                                                style={{ direction: 'rtl', textAlign: 'left' }}
+                                                style={{ direction: 'rtl', textAlign: 'left', unicodeBidi: 'plaintext' }}
                                             >
                                                 {dir}
                                             </span>

@@ -1,3 +1,13 @@
+## [1.9.10] - 2026-04-28
+
+- UI/Localization: added Korean interface translations and default new installs back to English when no language has been chosen (thanks to @An-jinu).
+- Chat/Models: unified the model picker with a cleaner, more consistent selection flow (thanks to @daveotero).
+- Chat/UI: improved split-response action placement, error-message alignment, tab close affordances, and overscroll behavior for a more polished conversation view.
+- Sessions/Sidebar: fixed stale session, folder, project, and worktree state after mutations, and polished pinned-session indicators so navigation stays accurate (thanks to @corrm, @Yabuku-xD).
+- Windows: normalized drive-letter paths in extension webviews so file links and workspace paths resolve more reliably (thanks to @sdunfeng).
+- Usage: added MiniMax and Ollama quota support for broader usage visibility in the extension.
+- Reliability/Startup: hardened managed OpenCode startup, preserved shell PATH more reliably, and improved stream/proxy recovery with heartbeat support (thanks to @An-jinu).
+
 ## [1.9.9] - 2026-04-26
 
 - UI/Localization: added translated interface strings for Spanish, Brazilian Portuguese, Ukrainian, and Simplified Chinese, with language selection available in extension settings.

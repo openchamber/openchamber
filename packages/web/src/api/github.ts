@@ -14,6 +14,7 @@ import type {
   GitHubPullRequestReadyResult,
   GitHubPullRequestUpdateInput,
   GitHubPullRequestStatus,
+  GitHubRepoUpstreamResult,
   GitHubDeviceFlowComplete,
   GitHubDeviceFlowStart,
   GitHubUserSummary,
@@ -90,11 +91,12 @@ export const createWebGitHubAPI = (): GitHubAPI => ({
     return payload;
   },
 
-  async prStatus(directory: string, branch: string, remote?: string): Promise<GitHubPullRequestStatus> {
+  async prStatus(directory: string, branch: string, remote?: string, options?: { force?: boolean }): Promise<GitHubPullRequestStatus> {
     const params = new URLSearchParams({
       directory,
       branch,
       ...(remote ? { remote } : {}),
+      ...(options?.force ? { force: 'true' } : {}),
     });
     const response = await fetch(
       `/api/github/pr/status?${params.toString()}`,
@@ -159,6 +161,30 @@ export const createWebGitHubAPI = (): GitHubAPI => ({
     return body;
   },
 
+  async repoUpstream(directory: string): Promise<GitHubRepoUpstreamResult> {
+    const response = await fetch(
+      `/api/github/repo/upstream?directory=${encodeURIComponent(directory)}`,
+      { method: 'GET', headers: { Accept: 'application/json' } }
+    );
+    const body = await jsonOrNull<GitHubRepoUpstreamResult & { error?: string }>(response);
+    if (!response.ok || !body) {
+      throw new Error(body?.error || response.statusText || 'Failed to detect upstream repo');
+    }
+    return body;
+  },
+
+  async repoBranches(owner: string, repo: string): Promise<string[]> {
+    const response = await fetch(
+      `/api/github/repo/branches?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`,
+      { method: 'GET', headers: { Accept: 'application/json' } }
+    );
+    const body = await jsonOrNull<{ branches?: string[]; error?: string }>(response);
+    if (!response.ok || !body) {
+      throw new Error(body?.error || response.statusText || 'Failed to fetch repo branches');
+    }
+    return body.branches ?? [];
+  },
+
   async prsList(directory: string, options?: { page?: number }): Promise<GitHubPullRequestsListResult> {
     const page = options?.page ?? 1;
     const response = await fetch(
@@ -175,7 +201,7 @@ export const createWebGitHubAPI = (): GitHubAPI => ({
   async prContext(
     directory: string,
     number: number,
-    options?: { includeDiff?: boolean; includeCheckDetails?: boolean }
+    options?: { includeDiff?: boolean; includeCheckDetails?: boolean; sourceRepo?: { owner: string; repo: string } | null }
   ): Promise<GitHubPullRequestContextResult> {
     const url = new URL('/api/github/pulls/context', window.location.origin);
     url.searchParams.set('directory', directory);
@@ -185,6 +211,10 @@ export const createWebGitHubAPI = (): GitHubAPI => ({
     }
     if (options?.includeCheckDetails) {
       url.searchParams.set('checkDetails', '1');
+    }
+    if (options?.sourceRepo?.owner && options.sourceRepo.repo) {
+      url.searchParams.set('owner', options.sourceRepo.owner);
+      url.searchParams.set('repo', options.sourceRepo.repo);
     }
     const response = await fetch(url.toString(), { method: 'GET', headers: { Accept: 'application/json' } });
     const body = await jsonOrNull<GitHubPullRequestContextResult & { error?: string }>(response);
@@ -207,11 +237,15 @@ export const createWebGitHubAPI = (): GitHubAPI => ({
     return payload;
   },
 
-  async issueGet(directory: string, number: number): Promise<GitHubIssueGetResult> {
-    const response = await fetch(
-      `/api/github/issues/get?directory=${encodeURIComponent(directory)}&number=${encodeURIComponent(String(number))}`,
-      { method: 'GET', headers: { Accept: 'application/json' } }
-    );
+  async issueGet(directory: string, number: number, options?: { sourceRepo?: { owner: string; repo: string } | null }): Promise<GitHubIssueGetResult> {
+    const url = new URL('/api/github/issues/get', window.location.origin);
+    url.searchParams.set('directory', directory);
+    url.searchParams.set('number', String(number));
+    if (options?.sourceRepo?.owner && options.sourceRepo.repo) {
+      url.searchParams.set('owner', options.sourceRepo.owner);
+      url.searchParams.set('repo', options.sourceRepo.repo);
+    }
+    const response = await fetch(url.toString(), { method: 'GET', headers: { Accept: 'application/json' } });
     const payload = await jsonOrNull<GitHubIssueGetResult & { error?: string }>(response);
     if (!response.ok || !payload) {
       throw new Error(payload?.error || response.statusText || 'Failed to load issue');
@@ -219,11 +253,15 @@ export const createWebGitHubAPI = (): GitHubAPI => ({
     return payload;
   },
 
-  async issueComments(directory: string, number: number): Promise<GitHubIssueCommentsResult> {
-    const response = await fetch(
-      `/api/github/issues/comments?directory=${encodeURIComponent(directory)}&number=${encodeURIComponent(String(number))}`,
-      { method: 'GET', headers: { Accept: 'application/json' } }
-    );
+  async issueComments(directory: string, number: number, options?: { sourceRepo?: { owner: string; repo: string } | null }): Promise<GitHubIssueCommentsResult> {
+    const url = new URL('/api/github/issues/comments', window.location.origin);
+    url.searchParams.set('directory', directory);
+    url.searchParams.set('number', String(number));
+    if (options?.sourceRepo?.owner && options.sourceRepo.repo) {
+      url.searchParams.set('owner', options.sourceRepo.owner);
+      url.searchParams.set('repo', options.sourceRepo.repo);
+    }
+    const response = await fetch(url.toString(), { method: 'GET', headers: { Accept: 'application/json' } });
     const payload = await jsonOrNull<GitHubIssueCommentsResult & { error?: string }>(response);
     if (!response.ok || !payload) {
       throw new Error(payload?.error || response.statusText || 'Failed to load issue comments');

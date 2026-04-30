@@ -486,7 +486,7 @@ export const useGitHubPrStatusStore = create<GitHubPrStatusStore>()(
             activeRequestCount: prev.activeRequestCount + 1,
             totalRequestCount: prev.totalRequestCount + 1,
           }));
-          const next = await params.github.prStatus(params.directory, params.branch, params.remoteName ?? undefined);
+          const next = await params.github.prStatus(params.directory, params.branch, params.remoteName ?? undefined, { force: options?.force });
           set((prev) => {
             const nextEntries = { ...prev.entries };
             signatureKeys.forEach((signatureKey) => {

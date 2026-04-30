@@ -271,6 +271,7 @@ const renderReadFilePath = (displayPath: string) => {
                     color: 'var(--tools-description)',
                     direction: 'rtl',
                     textAlign: 'left',
+                    unicodeBidi: 'plaintext',
                 }}
             >
                 {displayDir}

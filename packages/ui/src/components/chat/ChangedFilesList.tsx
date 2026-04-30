@@ -37,7 +37,7 @@ export const ChangedFilesList: React.FC<ChangedFilesListProps> = ({ files, curre
                                     <>
                                         <span
                                             className="min-w-0 truncate text-muted-foreground"
-                                            style={{ direction: 'rtl', textAlign: 'left' }}
+                                            style={{ direction: 'rtl', textAlign: 'left', unicodeBidi: 'plaintext' }}
                                         >
                                             {dirPart}
                                         </span>

@@ -1394,6 +1394,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.showReasoningTraces': 'Show Reasoning Traces',
   'settings.openchamber.visual.field.stickyUserHeaderAria': 'Sticky user header',
   'settings.openchamber.visual.field.stickyUserHeader': 'Sticky User Header',
+  'settings.openchamber.visual.field.wideChatLayoutAria': 'Wide chat layout',
+  'settings.openchamber.visual.field.wideChatLayout': 'Wide Chat Layout',
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsAria': 'Inline assistant actions',
   'settings.openchamber.visual.field.showSplitAssistantMessageActions': 'Inline Assistant Actions',
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsTooltip': 'Show Copy Answer, Save as image, and Read aloud on assistant text blocks that appear before later tool calls in the same response.',

@@ -78,34 +78,10 @@ export function writeStoredLocale(locale: Locale): void {
   }
 }
 
-function getRuntimeLanguage(): string | undefined {
-  if (typeof window === 'undefined') {
-    return undefined;
-  }
-
-  return (window as unknown as { __OPENCHAMBER_RUNTIME_APIS__?: { runtime?: { language?: string } } })
-    .__OPENCHAMBER_RUNTIME_APIS__?.runtime?.language;
-}
-
 export function detectInitialLocale(): Locale {
   const stored = readStoredLocale();
   if (stored) {
     return stored;
-  }
-
-  const runtimeLanguage = getRuntimeLanguage();
-  if (runtimeLanguage) {
-    return normalizeLocale(runtimeLanguage);
-  }
-
-  if (typeof navigator !== 'undefined') {
-    const languages = navigator.languages?.length ? navigator.languages : [navigator.language];
-    for (const language of languages) {
-      const locale = normalizeLocale(language);
-      if (locale !== DEFAULT_LOCALE) {
-        return locale;
-      }
-    }
   }
 
   return DEFAULT_LOCALE;

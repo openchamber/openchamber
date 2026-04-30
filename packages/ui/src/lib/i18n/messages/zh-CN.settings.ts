@@ -1394,6 +1394,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.showReasoningTraces': '显示推理轨迹',
   'settings.openchamber.visual.field.stickyUserHeaderAria': '固定用户消息头',
   'settings.openchamber.visual.field.stickyUserHeader': '固定用户消息头',
+  'settings.openchamber.visual.field.wideChatLayoutAria': '宽聊天布局',
+  'settings.openchamber.visual.field.wideChatLayout': '宽聊天布局',
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsAria': '内联助手操作',
   'settings.openchamber.visual.field.showSplitAssistantMessageActions': '内联助手操作',
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsTooltip': '在同一条回复中，如果助手文本块后面还有工具调用，则显示“复制回答”“保存为图片”和“朗读”操作。',

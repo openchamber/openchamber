@@ -222,6 +222,7 @@ function App({ apis }: AppProps) {
   const [initRetryExhausted, setInitRetryExhausted] = React.useState(false);
   const [initRetryEpoch, setInitRetryEpoch] = React.useState(0);
   const [manualInitRetrying, setManualInitRetrying] = React.useState(false);
+  const wideChatLayoutEnabled = useUIStore((state) => state.wideChatLayoutEnabled);
   const isDesktopRuntime = React.useMemo(() => isDesktopShell(), []);
   const setPlanModeEnabled = useFeatureFlagsStore((state) => state.setPlanModeEnabled);
   const [bootInjectionStatus, setBootInjectionStatus] = React.useState<BootInjectionStatus>(() => {
@@ -249,6 +250,13 @@ function App({ apis }: AppProps) {
   React.useEffect(() => {
     setIsVSCodeRuntime(apis.runtime.isVSCode);
   }, [apis.runtime.isVSCode]);
+
+  React.useEffect(() => {
+    document.documentElement.classList.toggle('wide-chat-layout', wideChatLayoutEnabled);
+    return () => {
+      document.documentElement.classList.remove('wide-chat-layout');
+    };
+  }, [wideChatLayoutEnabled]);
 
   React.useEffect(() => {
     registerRuntimeAPIs(apis);
