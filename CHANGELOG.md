@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.9.10-TWA] - 2026-04-30
+
+- Android: synced APK version with upstream OpenChamber v1.9.10 (versionCode 10910, versionName 1.9.10)
+- Android: built with guard-android-sdk — local.properties generated from env vars at build time, no plaintext secrets on disk
+- Android: merged 18 upstream commits including embedded dev-server preview pane, fork-aware GitHub listing, wide layout, SSE wake-from-sleep reconnect, Korean localization polish, and multiple chat/UI/terminal improvements
+- Upstream v1.9.10 changes: Korean interface translations, unified model picker, improved project directory picker, chat polish, session sidebar fixes, VSCode Windows path normalization, hardened managed OpenCode startup
+
 - Preview: added an embedded dev-server Preview pane for loopback apps, with authenticated proxying, Vite/HMR support, same-origin API request handling, and safer local dev-server shutdown so apps can run inside OpenChamber more like they do in the browser (thanks to @wpbiggs).
 - Preview: added preview console capture, DOM element inspection, annotation context, and Electron screenshot attachments so UI feedback can be sent to the assistant with richer context.
 - Projects/Terminal: added Auto-discover for local dev servers, background terminal startup, action-linked Preview reopen controls, and cleaner terminal tab styling for a smoother Project Actions workflow (thanks to @wpbiggs).
