@@ -843,6 +843,18 @@ const handleLocalApiRequest = async (url: URL, init?: RequestInit) => {
     return new Response(JSON.stringify(updated), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
 
+  if (normalizedPathname === '/api/behavior/agents-md') {
+    if (method === 'GET') {
+      const data = await sendBridgeMessage('api:behavior/agents-md:get');
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (method === 'PUT') {
+      const body = init?.body ? JSON.parse(init.body as string) : {};
+      const data = await sendBridgeMessage('api:behavior/agents-md:save', body);
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
   if (pathname === '/api/magic-prompts') {
     if (method === 'GET') {
       const data = await sendBridgeMessage('api:magic-prompts:get');
