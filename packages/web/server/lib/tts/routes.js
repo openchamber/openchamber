@@ -1,6 +1,6 @@
 import express from 'express';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
-import { summarizeText, sanitizeForTTS, sanitizeForNote } from '../text/summarization.js';
+import { summarizeText, sanitizeForTTS, sanitizeForNote, sanitizeForNotification } from '../text/summarization.js';
 
 export function registerTtsRoutes(app, { resolveZenModel, sayTTSCapability }) {
   let ttsModulePromise = null;
@@ -124,13 +124,34 @@ export function registerTtsRoutes(app, { resolveZenModel, sayTTSCapability }) {
       }
 
       const sumZenModel = await resolveZenModel(typeof req.body?.zenModel === 'string' ? req.body.zenModel : undefined);
-      const result = await summarizeText({
+      let result = await summarizeText({
         text,
         threshold,
         maxLength,
         zenModel: sumZenModel,
         mode: typeof mode === 'string' ? mode : 'tts',
       });
+
+      if (mode === 'note' && !result.summarized) {
+        const notificationResult = await summarizeText({
+          text,
+          threshold,
+          maxLength,
+          zenModel: sumZenModel,
+          mode: 'notification',
+        });
+        if (notificationResult.summarized && notificationResult.summary) {
+          result = {
+            ...notificationResult,
+            summary: sanitizeForNote(sanitizeForNotification(notificationResult.summary)),
+          };
+        } else {
+          return res.status(502).json({
+            error: 'Note summarization failed',
+            reason: notificationResult.reason || result.reason || 'No distilled result from model',
+          });
+        }
+      }
 
       return res.json(result);
     } catch (error) {

@@ -1692,7 +1692,8 @@ const AssistantMessageBody = React.memo(({
     }, [messageCompletedAt, messageCreatedAt]);
 
     const footerTimestampClassName = 'text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1';
-    const canOpenMessagePreview = !isMobile && !isVSCodeRuntime();
+    const isVSCode = isVSCodeRuntime();
+    const canOpenMessagePreview = !isMobile && !isVSCode;
 
     const finalTurnActionButtons = (
         <>
@@ -1721,7 +1722,7 @@ const AssistantMessageBody = React.memo(({
                     <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.openPreview')}</TooltipContent>
                 </Tooltip>
             ) : null}
-            {!isVSCodeRuntime() ? (
+            {!isVSCode ? (
                 <Tooltip delayDuration={1000}>
                     <TooltipTrigger asChild>
                         <Button
@@ -1757,21 +1758,23 @@ const AssistantMessageBody = React.memo(({
                 </TooltipTrigger>
                 <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.startNewSession')}</TooltipContent>
             </Tooltip>
-            <Tooltip delayDuration={1000}>
-                <TooltipTrigger asChild>
-                    <Button
-                        type="button"
-                        size="icon"
-                        variant="ghost"
-                        className="h-8 w-8 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50"
-                        onPointerDown={(event) => event.stopPropagation()}
-                        onClick={handleForkMultiRunClick}
-                    >
-                        <ArrowsMerge className="h-4 w-4" />
-                    </Button>
-                </TooltipTrigger>
-                <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.startNewMultiRun')}</TooltipContent>
-            </Tooltip>
+            {!isVSCode ? (
+                <Tooltip delayDuration={1000}>
+                    <TooltipTrigger asChild>
+                        <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50"
+                            onPointerDown={(event) => event.stopPropagation()}
+                            onClick={handleForkMultiRunClick}
+                        >
+                            <ArrowsMerge className="h-4 w-4" />
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.startNewMultiRun')}</TooltipContent>
+                </Tooltip>
+            ) : null}
         </>
     );
  

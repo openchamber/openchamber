@@ -1332,6 +1332,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.textSelection.toast.noProject': '未找到此会话对应的项目',
   'chat.textSelection.toast.addToNotesFailed': '添加到笔记失败',
   'chat.textSelection.toast.addToNotesSuccess': '已将洞察添加到笔记',
+  'chat.textSelection.toast.addToNotesSummaryFailed': '无法总结所选内容，已将所选文本添加到笔记',
   'chat.textSelection.actions.addToChat': '添加到聊天',
   'chat.textSelection.actions.newSession': '新建会话',
   'chat.textSelection.actions.copy': '复制',

@@ -1714,7 +1714,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                     syntaxTheme={syntaxTheme}
                 />,
                 {
-                    className: 'p-1',
+                    className: part.tool === 'bash' ? 'p-1 rounded-none' : 'p-1',
                     maxHeightClass: part.tool === 'bash' ? 'max-h-[46vh]' : undefined,
                 }
             );
@@ -1757,7 +1757,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                                 ),
                                 {
                                     maxHeightClass: 'max-h-60',
-                                    className: part.tool === 'bash' ? 'tool-input-surface p-0' : 'tool-input-surface',
+                                    className: part.tool === 'bash' ? 'tool-input-surface p-0 rounded-none' : 'tool-input-surface',
                                 }
                             )}
                         </div>

@@ -1366,6 +1366,7 @@ export const dict = {
   'chat.textSelection.toast.noProject': 'No project found for this session',
   'chat.textSelection.toast.addToNotesFailed': 'Failed to add to notes',
   'chat.textSelection.toast.addToNotesSuccess': 'Added distilled insight to notes',
+  'chat.textSelection.toast.addToNotesSummaryFailed': 'Could not summarize selection, added selected text to notes',
   'chat.textSelection.actions.addToChat': 'Add to chat',
   'chat.textSelection.actions.newSession': 'New session',
   'chat.textSelection.actions.copy': 'Copy',

@@ -42,7 +42,6 @@ const TEMPLATE_EVENT_LABEL_KEYS = {
   question: 'settings.notifications.page.template.event.question',
 } as const satisfies Record<NotificationTemplateEvent, string>;
 
-const UTILITY_PROVIDER_ID = 'zen';
 const UTILITY_PREFERRED_MODEL_ID = 'big-pickle';
 const UTILITY_NOT_SELECTED_VALUE = '__not_selected__';
 
@@ -78,7 +77,6 @@ export const NotificationSettings: React.FC = () => {
   const setSummaryLength = useUIStore(state => state.setSummaryLength);
   const maxLastMessageLength = useUIStore(state => state.maxLastMessageLength);
   const setMaxLastMessageLength = useUIStore(state => state.setMaxLastMessageLength);
-  const providers = useConfigStore((state) => state.providers);
   const settingsZenModel = useConfigStore((state) => state.settingsZenModel);
   const setSettingsZenModel = useConfigStore((state) => state.setSettingsZenModel);
 
@@ -89,27 +87,7 @@ export const NotificationSettings: React.FC = () => {
   const [, setBridgeInstalled] = React.useState(false);
   const [fetchedZenModels, setFetchedZenModels] = React.useState<Array<{ id: string; name: string }>>([]);
 
-  const providerZenModels = React.useMemo(() => {
-    const zenProvider = providers.find((provider) => provider.id === UTILITY_PROVIDER_ID);
-    const models = Array.isArray(zenProvider?.models) ? zenProvider.models : [];
-    return models
-      .map((model: Record<string, unknown>) => {
-        const id = typeof model.id === 'string' ? model.id.trim() : '';
-        if (!id) {
-          return null;
-        }
-        const name = typeof model.name === 'string' && model.name.trim().length > 0 ? model.name.trim() : id;
-        return { id, name };
-      })
-      .filter((model): model is { id: string; name: string } => model !== null);
-  }, [providers]);
-
   React.useEffect(() => {
-    if (providerZenModels.length > 0) {
-      setFetchedZenModels([]);
-      return;
-    }
-
     const controller = new AbortController();
     void fetch('/api/zen/models', {
       method: 'GET',
@@ -146,11 +124,11 @@ export const NotificationSettings: React.FC = () => {
     return () => {
       controller.abort();
     };
-  }, [providerZenModels]);
+  }, []);
 
   const utilityModelOptions = React.useMemo(() => {
-    return providerZenModels.length > 0 ? providerZenModels : fetchedZenModels;
-  }, [fetchedZenModels, providerZenModels]);
+    return fetchedZenModels;
+  }, [fetchedZenModels]);
 
   const utilitySelectedModelId = React.useMemo(() => {
     if (settingsZenModel && utilityModelOptions.some((model) => model.id === settingsZenModel)) {

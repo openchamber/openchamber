@@ -1332,6 +1332,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.textSelection.toast.noProject": "Для цієї сесії не знайдено жодного проєкту",
   "chat.textSelection.toast.addToNotesFailed": "Не вдалося додати до нотаток",
   "chat.textSelection.toast.addToNotesSuccess": "Інсайт додано до нотаток",
+  "chat.textSelection.toast.addToNotesSummaryFailed": "Не вдалося підсумувати виділення, виділений текст додано до нотаток",
   "chat.textSelection.actions.addToChat": "Додати в чат",
   "chat.textSelection.actions.newSession": "Нова сесія",
   "chat.textSelection.actions.copy": "Копіювати",

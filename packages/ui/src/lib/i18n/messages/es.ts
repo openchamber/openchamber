@@ -1332,6 +1332,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.textSelection.toast.noProject": "No se encontró proyecto para esta sesión",
   "chat.textSelection.toast.addToNotesFailed": "No se pudo añadir a las notas",
   "chat.textSelection.toast.addToNotesSuccess": "Se añadió la información destilada a notas",
+  "chat.textSelection.toast.addToNotesSummaryFailed": "No se pudo resumir la selección; se añadió el texto seleccionado a las notas",
   "chat.textSelection.actions.addToChat": "Añadir al chat",
   "chat.textSelection.actions.newSession": "Nueva sesión",
   "chat.textSelection.actions.copy": "Copiar",

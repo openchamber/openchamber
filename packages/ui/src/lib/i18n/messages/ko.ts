@@ -1368,6 +1368,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.textSelection.toast.noProject': '이 세션의 프로젝트를 찾을 수 없음',
   'chat.textSelection.toast.addToNotesFailed': '메모 추가 실패',
   'chat.textSelection.toast.addToNotesSuccess': '정리된 인사이트를 메모에 추가함',
+  'chat.textSelection.toast.addToNotesSummaryFailed': '선택 영역을 요약할 수 없어 선택한 텍스트를 메모에 추가함',
   'chat.textSelection.actions.addToChat': '채팅에 추가',
   'chat.textSelection.actions.newSession': '새 세션',
   'chat.textSelection.actions.copy': '복사',

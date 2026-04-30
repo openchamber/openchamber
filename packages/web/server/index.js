@@ -1233,6 +1233,12 @@ async function main(options = {}) {
     getPort: () => tunnelRuntimeContext.getActivePort(),
     getOpenCodePort: () => openCodePort,
     getTunnelUrl: () => tunnelService.getPublicUrl(),
+    getQuitRiskStatus: () => ({
+      tunnel: {
+        active: Boolean(tunnelService.getPublicUrl()),
+      },
+      scheduledTasks: scheduledTasksRuntime.getStatus(),
+    }),
     isReady: () => isOpenCodeReady,
     restartOpenCode: () => restartOpenCode(),
     stop: (shutdownOptions = {}) =>
