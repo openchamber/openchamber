@@ -4,6 +4,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { RiInformationLine } from '@remixicon/react';
 
 const AGENTS_MD_PATH = '~/.config/opencode/AGENTS.md';
 
@@ -126,25 +128,30 @@ export const BehaviorPage: React.FC = () => {
           <h2 className="typography-ui-header font-semibold text-foreground">
             {t('settings.behavior.page.title')}
           </h2>
-          <p className="typography-meta text-muted-foreground">
-            {t('settings.behavior.page.description')}
-          </p>
-        </div>
-
-        <div className="rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-background)] px-4 py-3">
-          <p className="typography-ui-label font-medium text-[var(--status-warning)]">
-            {t('settings.behavior.page.warning.title')}
-          </p>
-          <p className="typography-meta text-[var(--status-warning)]/80 mt-1">
-            {t('settings.behavior.page.warning.description', { path: AGENTS_MD_PATH })}
-          </p>
         </div>
 
         <div>
           <div className="mb-1 px-1">
-            <h3 className="typography-ui-header font-medium text-foreground">
-              {t('settings.behavior.page.section.systemPrompt')}
-            </h3>
+            <div className="flex items-center gap-1.5">
+              <h3 className="typography-ui-header font-medium text-foreground">
+                {t('settings.behavior.page.section.systemPrompt')}
+              </h3>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                </TooltipTrigger>
+                <TooltipContent sideOffset={8} className="max-w-xs">
+                  <div className="space-y-1">
+                    <p className="font-medium text-foreground">
+                      {t('settings.behavior.page.warning.title')}
+                    </p>
+                    <p>
+                      {t('settings.behavior.page.warning.description', { path: AGENTS_MD_PATH })}
+                    </p>
+                  </div>
+                </TooltipContent>
+              </Tooltip>
+            </div>
           </div>
 
           <section className="px-2 pb-2 pt-0">
