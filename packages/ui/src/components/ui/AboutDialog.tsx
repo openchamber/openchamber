@@ -9,6 +9,7 @@ import { debugUtils } from '@/lib/debug';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
+import { getDesktopAppVersion } from '@/lib/desktopNative';
 
 interface AboutDialogProps {
   open: boolean;
@@ -58,33 +59,24 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
   React.useEffect(() => {
     if (!open) return;
 
-    const isDesktop = typeof window !== 'undefined' && Boolean((window as unknown as { __TAURI__?: unknown }).__TAURI__);
-
-    if (isDesktop) {
-      const fetchVersion = async () => {
-        try {
-          const { getVersion } = await import('@tauri-apps/api/app');
-          const v = await getVersion();
-          setVersion(v);
-        } catch {
-          setVersion(null);
-        }
-      };
-      fetchVersion();
-    } else {
-      const fetchVersion = async () => {
-        try {
-          const response = await fetch('/api/system/info');
-          if (response.ok) {
-            const data = await response.json();
-            setVersion(data.openchamberVersion || null);
+    const fetchVersion = async () => {
+      try {
+        const response = await fetch('/api/system/info');
+        if (response.ok) {
+          const data = await response.json();
+          if (typeof data.openchamberVersion === 'string' && data.openchamberVersion.trim()) {
+            setVersion(data.openchamberVersion);
+            return;
           }
-        } catch {
-          // Ignored — fallback to null version is fine
         }
-      };
-      fetchVersion();
-    }
+      } catch {
+        // Fall back to the native shell version when the web server is unavailable.
+      }
+
+      setVersion(await getDesktopAppVersion());
+    };
+
+    void fetchVersion();
   }, [open]);
 
   React.useEffect(() => {
