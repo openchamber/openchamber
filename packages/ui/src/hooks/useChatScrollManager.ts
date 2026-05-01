@@ -557,7 +557,7 @@ export const useChatScrollManager = ({
             }
         }
 
-        if (hasNonBottomPosition) {
+        if (hasNonBottomPosition && !sessionIsWorking) {
             setFollowMode('none');
             updatePinnedState(false);
         } else {
