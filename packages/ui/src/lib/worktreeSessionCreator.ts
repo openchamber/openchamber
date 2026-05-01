@@ -12,6 +12,7 @@ import { useContextStore } from '@/stores/contextStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { checkIsGitRepository, previewGitWorktree } from '@/lib/gitApi';
 import { generateBranchName } from '@/lib/git/branchNameGenerator';
+import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { getWorktreeSetupCommands } from '@/lib/openchamberConfig';
 import {
@@ -87,12 +88,12 @@ const applyDefaultAgentAndModelSelection = (sessionId: string, configState = use
       return;
     }
 
-    const parts = settingsDefaultModel.split('/');
-    if (parts.length !== 2) {
+    const parsed = parseModelIdentifier(settingsDefaultModel);
+    if (!parsed) {
       return;
     }
 
-    const [providerId, modelId] = parts;
+    const { providerId, modelId } = parsed;
     const modelMetadata = configState.getModelMetadata(providerId, modelId);
     if (!modelMetadata) {
       return;

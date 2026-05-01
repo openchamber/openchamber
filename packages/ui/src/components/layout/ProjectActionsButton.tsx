@@ -784,7 +784,7 @@ export const ProjectActionsButton = ({
               : <SelectedIcon className="h-5 w-5" />}
         </button>
         {showSelectedPreviewButton ? (
-          <Tooltip delayDuration={1000}>
+          <Tooltip>
             <TooltipTrigger asChild>
               <button
                 type="button"
@@ -882,7 +882,7 @@ export const ProjectActionsButton = ({
       </button>
 
       {showSelectedPreviewButton ? (
-        <Tooltip delayDuration={1000}>
+        <Tooltip>
           <TooltipTrigger asChild>
             <button
               type="button"

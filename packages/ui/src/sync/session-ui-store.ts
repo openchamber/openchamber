@@ -819,10 +819,11 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       if (!memState || !memState.lastUserMessageAt) {
         const newMemState = new Map(viewportState.sessionMemoryState)
         newMemState.set(currentSessionId, {
-          viewportAnchor: memState?.viewportAnchor ?? 0,
-          isStreaming: memState?.isStreaming ?? false,
+          viewportAnchor: 0,
+          isStreaming: false,
           lastAccessedAt: Date.now(),
-          backgroundMessageCount: memState?.backgroundMessageCount ?? 0,
+          backgroundMessageCount: 0,
+          ...memState,
           lastUserMessageAt: Date.now(),
         })
         useViewportStore.setState({ sessionMemoryState: newMemState })

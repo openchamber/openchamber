@@ -307,7 +307,7 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
           </div>
 
           <div className="flex gap-2 border-t border-[var(--interactive-border)] pt-2">
-            <Tooltip delayDuration={1000}>
+            <Tooltip>
               <TooltipTrigger asChild>
                 <Button
                   size="sm"

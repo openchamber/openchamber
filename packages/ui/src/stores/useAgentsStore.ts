@@ -612,6 +612,10 @@ async function performConfigRefresh(options: {
       useConfigStore.setState({ directoryScoped: {} });
     }
 
+    if (refreshProviders) {
+      useConfigStore.getState().invalidateModelMetadataCache();
+    }
+
     const sdkRefreshTasks: Promise<void>[] = [];
     for (const directory of directoriesToRefresh) {
       if (refreshProviders) {

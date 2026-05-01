@@ -109,7 +109,6 @@ interface IdentityDropdownProps {
   identities: GitIdentityProfile[];
   onSelect: (profile: GitIdentityProfile) => void;
   isApplying: boolean;
-  tooltipDelayMs?: number;
   iconOnly?: boolean;
 }
 
@@ -118,7 +117,6 @@ const IdentityDropdown: React.FC<IdentityDropdownProps> = ({
   identities,
   onSelect,
   isApplying,
-  tooltipDelayMs = 1000,
   iconOnly = false,
 }) => {
   const { t } = useI18n();
@@ -126,7 +124,7 @@ const IdentityDropdown: React.FC<IdentityDropdownProps> = ({
 
   return (
     <DropdownMenu>
-      <Tooltip delayDuration={tooltipDelayMs}>
+      <Tooltip>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
             <Button
@@ -261,18 +259,14 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
   onOpenHistory,
 }) => {
   const { t } = useI18n();
-  const isMobile = useUIStore((state) => state.isMobile);
-
   if (!status) {
     return null;
   }
 
-  const useTwoRowHeader = isMobile;
-
   const managementButtons = (
     <div className="flex items-center gap-1 shrink-0">
       {onOpenHistory ? (
-        <Tooltip delayDuration={useTwoRowHeader ? 300 : 1000}>
+        <Tooltip>
           <TooltipTrigger asChild>
             <Button
               variant="ghost"
@@ -300,7 +294,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
       removingRemoteName={removingRemoteName}
       disabled={!status}
       iconOnly={true}
-      tooltipDelayMs={useTwoRowHeader ? 300 : 1000}
+
       aheadCount={status.ahead}
       behindCount={status.behind}
     />
@@ -320,7 +314,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
       identities={availableIdentities}
       onSelect={onSelectIdentity}
       isApplying={isApplyingIdentity}
-      tooltipDelayMs={useTwoRowHeader ? 300 : 1000}
+
       iconOnly={false}
     />
   );
@@ -343,7 +337,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
               onCheckout={onCheckoutBranch}
               onCreate={onCreateBranch}
               remotes={remotes}
-              tooltipDelayMs={useTwoRowHeader ? 300 : 1000}
+
             />
           )}
         </div>

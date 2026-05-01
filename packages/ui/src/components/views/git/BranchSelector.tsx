@@ -40,7 +40,6 @@ interface BranchSelectorProps {
   onCreate: (name: string, remote?: GitRemote) => Promise<void>;
   remotes?: GitRemote[];
   disabled?: boolean;
-  tooltipDelayMs?: number;
 }
 
 const sanitizeBranchNameInput = (value: string): string => {
@@ -65,7 +64,6 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
   onCreate,
   remotes = [],
   disabled = false,
-  tooltipDelayMs = 1000,
 }) => {
   const { t } = useI18n();
   const [isOpen, setIsOpen] = React.useState(false);
@@ -170,7 +168,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
 
   return (
     <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
-      <Tooltip delayDuration={tooltipDelayMs}>
+      <Tooltip>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
             <Button

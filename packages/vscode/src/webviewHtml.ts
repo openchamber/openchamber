@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as os from 'os';
 import { getThemeKindName } from './theme';
 import type { ConnectionStatus } from './opencode';
 
@@ -14,6 +15,7 @@ export interface WebviewHtmlOptions {
   initialSessionId?: string;
   viewMode?: 'sidebar' | 'editor';
   devServerUrl?: string | null;
+  extensionVersion?: string;
 }
 
 const asCspToken = (value: string | null | undefined): string | null => {
@@ -50,6 +52,7 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
     initialSessionId,
     viewMode = 'sidebar',
     devServerUrl,
+    extensionVersion = '',
   } = options;
 
   const scriptPath = vscode.Uri.joinPath(extensionUri, 'dist', 'webview', 'assets', 'index.js');
@@ -166,6 +169,9 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
       theme: "${themeKind}",
       connectionStatus: "${initialStatus}",
       cliAvailable: ${cliAvailable},
+      extensionVersion: "${extensionVersion.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}",
+      platform: "${os.platform()}",
+      arch: "${os.arch()}",
       panelType: "${panelType}",
       viewMode: "${viewMode}",
       initialSessionId: ${initialSessionId ? `"${initialSessionId.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : 'null'},

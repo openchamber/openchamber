@@ -26,6 +26,13 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Buttons should never look selectable. */
+button,
+[role="button"] {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 :root.oc-theme-switching *,
 :root.oc-theme-switching *::before,
 :root.oc-theme-switching *::after {
@@ -60,6 +67,12 @@ textarea[data-chat-input="true"]:focus-visible {
 
 :where(button, [role="button"]):disabled {
   cursor: not-allowed;
+}
+
+:root.light .message-content-text::selection,
+:root.light .message-content-text ::selection {
+  background: color-mix(in srgb, var(--interactive-border-focus) 18%, transparent);
+  color: var(--surface-foreground);
 }
 
 .oc-cm-selected-line {
@@ -1432,4 +1445,9 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   }
 
 
+}
+
+/* Settings dialog: hide the overlay scrollbar; wheel/keyboard scroll still works. */
+[data-settings-view="true"] .overlay-scrollbar {
+  display: none;
 }

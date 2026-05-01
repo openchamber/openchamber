@@ -267,7 +267,7 @@ export const MagicPromptsPage: React.FC = () => {
           <div className="space-y-1">
             <div className="flex items-center gap-2">
               <h2 className="typography-ui-header font-semibold text-foreground">{tUnsafe(pageConfig.titleKey)}</h2>
-              <Tooltip delayDuration={700}>
+              <Tooltip>
                 <TooltipTrigger asChild>
                   <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                 </TooltipTrigger>
@@ -304,7 +304,7 @@ export const MagicPromptsPage: React.FC = () => {
               <div className="space-y-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <h3 className="typography-ui-label text-foreground">{tUnsafe(block.titleKey)}</h3>
-                  <Tooltip delayDuration={700}>
+                  <Tooltip>
                     <TooltipTrigger asChild>
                       <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                     </TooltipTrigger>

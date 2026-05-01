@@ -87,7 +87,7 @@ const TodoItemRow: React.FC<TodoItemRowProps> = ({ todo }) => {
 
   return (
     <div className="flex items-center min-w-0 py-0.5 gap-2">
-      <Tooltip delayDuration={200}>
+      <Tooltip>
         <TooltipTrigger asChild>
           <span className="flex-shrink-0">{statusIcon}</span>
         </TooltipTrigger>
@@ -103,7 +103,7 @@ const TodoItemRow: React.FC<TodoItemRowProps> = ({ todo }) => {
       >
         {todo.content}
       </span>
-      <Tooltip delayDuration={200}>
+      <Tooltip>
         <TooltipTrigger asChild>
           <span
             className={cn(

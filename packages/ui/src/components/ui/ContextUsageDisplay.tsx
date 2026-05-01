@@ -158,7 +158,7 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
   }
 
   return (
-    <Tooltip delayDuration={1000}>
+    <Tooltip>
       <TooltipTrigger asChild>{contextElement}</TooltipTrigger>
       <TooltipContent>
         <div className="space-y-0.5">

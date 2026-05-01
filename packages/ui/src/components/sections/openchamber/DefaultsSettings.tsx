@@ -9,15 +9,14 @@ import { useUIStore } from '@/stores/useUIStore';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
+import { parseModelIdentifier } from '@/lib/modelIdentifier';
 
 const getDisplayModel = (
   storedModel: string | undefined
 ): { providerId: string; modelId: string } => {
-  if (storedModel) {
-    const parts = storedModel.split('/');
-    if (parts.length === 2 && parts[0] && parts[1]) {
-      return { providerId: parts[0], modelId: parts[1] };
-    }
+  const parsed = parseModelIdentifier(storedModel);
+  if (parsed) {
+    return parsed;
   }
 
   return { providerId: '', modelId: '' };

@@ -20,6 +20,8 @@ export type QueuedEvent = {
 export type FlushHandler = (events: QueuedEvent[]) => void
 
 const FLUSH_FRAME_MS = 33
+const BACKPRESSURE_FLUSH_FRAME_MS = 200
+const BACKPRESSURE_MODE_MS = 10_000
 const STREAM_YIELD_MS = 8
 const DEFAULT_RECONNECT_DELAY_MS = 250
 const DEFAULT_HEARTBEAT_TIMEOUT_MS = 30_000
@@ -44,7 +46,7 @@ export type EventPipelineInput = {
 }
 
 type MessageStreamWsFrame = {
-  type: "ready" | "event" | "error"
+  type: "ready" | "event" | "error" | "backpressure"
   payload?: unknown
   eventId?: string
   directory?: string
@@ -254,7 +256,8 @@ export function createEventPipeline(input: EventPipelineInput) {
     const d = getOrCreateDir(directory)
     if (d.timer) return
     const elapsed = Date.now() - d.last
-    d.timer = setTimeout(() => flushDir(directory), Math.max(0, FLUSH_FRAME_MS - elapsed))
+    const flushFrameMs = Date.now() < backpressureUntil ? BACKPRESSURE_FLUSH_FRAME_MS : FLUSH_FRAME_MS
+    d.timer = setTimeout(() => flushDir(directory), Math.max(0, flushFrameMs - elapsed))
   }
 
   const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
@@ -269,6 +272,7 @@ export function createEventPipeline(input: EventPipelineInput) {
   let activeTransport: "ws" | "sse" = transport === "ws" ? "ws" : "sse"
   let attemptAbortReason: AttemptAbortReason = null
   let consecutiveFailures = 0
+  let backpressureUntil = 0
 
   const notifyDisconnected = (reason: string) => {
     if (disconnected) {
@@ -486,6 +490,11 @@ export function createEventPipeline(input: EventPipelineInput) {
           } catch {
             // ignore
           }
+          return
+        }
+
+        if (frame.type === "backpressure") {
+          backpressureUntil = Date.now() + BACKPRESSURE_MODE_MS
           return
         }
 

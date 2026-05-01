@@ -26,7 +26,7 @@ export const AIHighlightsBox: React.FC<AIHighlightsBoxProps> = ({
     <div className="space-y-2 rounded-xl border border-border/60 bg-transparent px-3 py-2">
       <div className="flex items-center justify-between gap-2">
         <p className="typography-micro text-muted-foreground">{t('gitView.commit.aiHighlights.title')}</p>
-        <Tooltip delayDuration={1000}>
+        <Tooltip>
           <TooltipTrigger asChild>
             <Button
               variant="ghost"

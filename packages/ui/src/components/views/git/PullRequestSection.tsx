@@ -1408,7 +1408,7 @@ export const PullRequestSection: React.FC<{
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
             {pr ? (
-              <Tooltip delayDuration={300}>
+              <Tooltip>
                 <TooltipTrigger asChild>
                   <button
                     type="button"
@@ -1431,7 +1431,7 @@ export const PullRequestSection: React.FC<{
           </div>
           <div className="flex items-center gap-2">
             {isLoading ? <RiLoader4Line className="size-4 animate-spin text-muted-foreground" /> : null}
-            <Tooltip delayDuration={300}>
+            <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   type="button"
@@ -1612,7 +1612,7 @@ export const PullRequestSection: React.FC<{
                       {pr.state === 'open' ? (
                         isEditingPr ? (
                           <>
-                            <Tooltip delayDuration={300}>
+                            <Tooltip>
                               <TooltipTrigger asChild>
                                 <Button
                                   variant="outline"
@@ -1631,7 +1631,7 @@ export const PullRequestSection: React.FC<{
                               </TooltipTrigger>
                               <TooltipContent><p>{t('gitView.pr.actions.cancelEditing')}</p></TooltipContent>
                             </Tooltip>
-                            <Tooltip delayDuration={300}>
+                            <Tooltip>
                               <TooltipTrigger asChild>
                                 <Button
                                   size="sm"
@@ -1647,7 +1647,7 @@ export const PullRequestSection: React.FC<{
                             </Tooltip>
                           </>
                         ) : (
-                          <Tooltip delayDuration={300}>
+                          <Tooltip>
                             <TooltipTrigger asChild>
                               <Button
                                 variant="outline"
@@ -1665,7 +1665,7 @@ export const PullRequestSection: React.FC<{
                       ) : null}
 
                       {checks ? (
-                        <Tooltip delayDuration={300}>
+                        <Tooltip>
                           <TooltipTrigger asChild>
                             <Button
                               variant="outline"
@@ -1683,7 +1683,7 @@ export const PullRequestSection: React.FC<{
                       ) : null}
 
                       {checks?.failure ? (
-                        <Tooltip delayDuration={300}>
+                        <Tooltip>
                           <TooltipTrigger asChild>
                             <Button
                               variant="outline"
@@ -1699,7 +1699,7 @@ export const PullRequestSection: React.FC<{
                         </Tooltip>
                       ) : null}
 
-                      <Tooltip delayDuration={300}>
+                      <Tooltip>
                         <TooltipTrigger asChild>
                           <Button
                             variant="outline"
@@ -1714,7 +1714,7 @@ export const PullRequestSection: React.FC<{
                         <TooltipContent><p>{t('gitView.pr.actions.openComments')}</p></TooltipContent>
                       </Tooltip>
 
-                      <Tooltip delayDuration={300}>
+                      <Tooltip>
                         <TooltipTrigger asChild>
                           <Button
                             variant="outline"
@@ -1730,7 +1730,7 @@ export const PullRequestSection: React.FC<{
                       </Tooltip>
 
                       {canMerge && pr.draft && pr.state === 'open' ? (
-                        <Tooltip delayDuration={300}>
+                        <Tooltip>
                           <TooltipTrigger asChild>
                             <Button
                               variant="outline"
@@ -1765,7 +1765,7 @@ export const PullRequestSection: React.FC<{
                               <SelectItem value="rebase">{t('gitView.pr.mergeMethod.rebase')}</SelectItem>
                             </SelectContent>
                           </Select>
-                          <Tooltip delayDuration={300}>
+                          <Tooltip>
                             <TooltipTrigger asChild>
                               <Button
                                 size="sm"
@@ -2064,7 +2064,7 @@ export const PullRequestSection: React.FC<{
                                   {comment.authorLogin && comment.authorLogin !== comment.authorName ? ` · @${comment.authorLogin}` : ''}
                                 </span>
                                 {comment.createdAt ? <span className="whitespace-nowrap">{formatTimestamp(comment.createdAt)}</span> : null}
-                                <Tooltip delayDuration={300}>
+                                <Tooltip>
                                   <TooltipTrigger asChild>
                                     <Button
                                       variant="ghost"

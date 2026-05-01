@@ -98,7 +98,7 @@ const HeaderIconActionButton = React.memo(function HeaderIconActionButton({
   }
 
   return (
-    <Tooltip delayDuration={500}>
+    <Tooltip>
       <TooltipTrigger asChild>
         <button
           type="button"
@@ -308,7 +308,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
         }
       }}
     >
-      <Tooltip delayDuration={500}>
+      <Tooltip>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
             <button
@@ -1726,7 +1726,7 @@ export const Header: React.FC<HeaderProps> = ({
   const desktopSidebarActions = (
     <>
       {showPlanTab && (
-        <Tooltip delayDuration={500}>
+        <Tooltip>
           <TooltipTrigger asChild>
               <button
                 type="button"
@@ -1820,7 +1820,7 @@ export const Header: React.FC<HeaderProps> = ({
 
       <div className={cn('flex min-w-0 flex-1 items-center', !isSidebarOpen && 'pl-3')}>
         {!isLeftSidebarOpen ? (
-          <Tooltip delayDuration={500}>
+          <Tooltip>
             <TooltipTrigger asChild>
               <button
                 type="button"
@@ -1970,7 +1970,7 @@ export const Header: React.FC<HeaderProps> = ({
                     const isDiffTab = tab.icon === 'diff';
                     const Icon = isDiffTab ? null : (tab.icon as RemixiconComponentType);
                     return (
-                      <Tooltip key={tab.id} delayDuration={500}>
+                      <Tooltip key={tab.id}>
                         <TooltipTrigger asChild>
                           <button
                             type="button"
@@ -2039,7 +2039,7 @@ export const Header: React.FC<HeaderProps> = ({
                 }
               }}
             >
-              <Tooltip delayDuration={500}>
+              <Tooltip>
                 <TooltipTrigger asChild>
                   <DropdownMenuTrigger asChild>
                     <button
@@ -2293,7 +2293,7 @@ export const Header: React.FC<HeaderProps> = ({
             </DropdownMenu>
 
             {onToggleRightDrawer ? (
-              <Tooltip delayDuration={500}>
+              <Tooltip>
                 <TooltipTrigger asChild>
                   <button
                     type="button"

@@ -739,11 +739,31 @@ export const createScheduledTasksRuntime = (deps) => {
     queue.length = 0;
   };
 
+  const getStatus = () => {
+    let enabledCount = 0;
+    for (const taskMap of tasksByProject.values()) {
+      for (const task of taskMap.values()) {
+        if (task?.enabled) {
+          enabledCount += 1;
+        }
+      }
+    }
+
+    const runningCount = runningTaskKeys.size;
+    return {
+      hasEnabledScheduledTasks: enabledCount > 0,
+      hasRunningScheduledTasks: runningCount > 0,
+      enabledScheduledTasksCount: enabledCount,
+      runningScheduledTasksCount: runningCount,
+    };
+  };
+
   return {
     start,
     stop,
     syncAllProjects,
     syncProject,
     runNow,
+    getStatus,
   };
 };

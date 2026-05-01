@@ -25,7 +25,6 @@ const STATUS_CHECK_ENDPOINT = '/auth/session';
 const TRUST_DEVICE_STORAGE_KEY = 'openchamber.uiAuth.trustDevice';
 
 const fetchSessionStatus = async (): Promise<Response> => {
-  console.log('[Frontend Auth] Checking session status...');
   const response = await fetch(STATUS_CHECK_ENDPOINT, {
     method: 'GET',
     credentials: 'include',
@@ -33,7 +32,6 @@ const fetchSessionStatus = async (): Promise<Response> => {
       Accept: 'application/json',
     },
   });
-  console.log('[Frontend Auth] Session status response:', response.status, response.statusText);
   return response;
 };
 
@@ -45,7 +43,6 @@ const readStoredTrustDevice = (): boolean => {
 };
 
 const submitPassword = async (password: string, trustDevice: boolean): Promise<Response> => {
-  console.log('[Frontend Auth] Submitting password...');
   const response = await fetch(STATUS_CHECK_ENDPOINT, {
     method: 'POST',
     credentials: 'include',
@@ -55,7 +52,6 @@ const submitPassword = async (password: string, trustDevice: boolean): Promise<R
     },
     body: JSON.stringify({ password, trustDevice }),
   });
-  console.log('[Frontend Auth] Password submit response:', response.status, response.statusText);
   return response;
 };
 
@@ -202,7 +198,6 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
 
   const checkStatus = React.useCallback(async () => {
     if (skipAuth) {
-      console.log('[Frontend Auth] VSCode runtime, skipping auth');
       setState('authenticated');
       return;
     }
@@ -214,10 +209,8 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
         refreshPasskeyStatus(),
       ]);
       const responseText = await response.text();
-      console.log('[Frontend Auth] Raw response:', response.status, responseText);
       
         if (response.ok) {
-          console.log('[Frontend Auth] Session is authenticated');
           setState('authenticated');
           setIsTunnelLocked(false);
           setErrorMessage('');
@@ -230,10 +223,6 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
             data = JSON.parse(responseText);
           } catch {
             data = {};
-          }
-        console.warn('[Frontend Auth] Session is locked (401)', data);
-          if (data.debug) {
-            console.warn('[Frontend Auth] Debug info:', data.debug);
           }
           setIsTunnelLocked(data.tunnelLocked === true);
           setPasskeyStatus(latestPasskeyStatus);
@@ -253,7 +242,6 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
         setState('rate-limited');
         return;
       }
-      console.error('[Frontend Auth] Unexpected response status:', response.status);
       setState('error');
       setIsTunnelLocked(false);
     } catch (error) {
@@ -338,7 +326,6 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
     try {
       const response = await submitPassword(password, trustDevice);
       if (response.ok) {
-        console.log('[Frontend Auth] Login successful');
         setPassword('');
         setIsTunnelLocked(false);
         if (enrollPasskey && supportsPasskeys) {
@@ -363,7 +350,6 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
       }
 
       if (response.status === 401) {
-        console.warn('[Frontend Auth] Login failed: Invalid password');
         setErrorMessage(t('sessionAuth.error.incorrectPassword'));
         setIsTunnelLocked(false);
         setState('locked');
@@ -371,7 +357,6 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
       }
 
       if (response.status === 429) {
-        console.warn('[Frontend Auth] Login failed: Rate limited');
         const data = await response.json().catch(() => ({}));
         setRetryAfter(data.retryAfter);
         setIsTunnelLocked(false);
@@ -379,7 +364,6 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
         return;
       }
 
-      console.error('[Frontend Auth] Login failed: Unexpected response', response.status);
       setErrorMessage(t('sessionAuth.error.unexpectedResponse'));
       setIsTunnelLocked(false);
       setState('error');
