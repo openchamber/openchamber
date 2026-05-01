@@ -386,6 +386,12 @@ const getActiveSessionCount = () => {
   return Object.values(snapshot).filter((entry) => entry.type === 'busy').length;
 };
 
+const getUpstreamStallTimeoutMs = () => (
+  getActiveSessionCount() > 1
+    ? UPSTREAM_STALL_TIMEOUT_CONCURRENT_MS
+    : DEFAULT_UPSTREAM_STALL_TIMEOUT_MS
+);
+
 const projectConfigRuntime = createProjectConfigRuntime({
   fsPromises,
   path,
@@ -660,6 +666,7 @@ const setAutoAcceptSession = (...args) => notificationTriggerRuntime.setAutoAcce
 const globalMessageStreamHub = createGlobalMessageStreamHub({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
+  upstreamStallTimeoutMs: getUpstreamStallTimeoutMs,
 });
 
 const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
@@ -1180,10 +1187,7 @@ async function main(options = {}) {
     globalEventHub: globalMessageStreamHub,
     processForwardedEventPayload,
     messageStreamWsClients: uiNotificationWsClients,
-    upstreamStallTimeoutMs:
-      getActiveSessionCount() > 1
-        ? UPSTREAM_STALL_TIMEOUT_CONCURRENT_MS
-        : DEFAULT_UPSTREAM_STALL_TIMEOUT_MS,
+    upstreamStallTimeoutMs: getUpstreamStallTimeoutMs,
     terminalHeartbeatIntervalMs: TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS,
     terminalRebindWindowMs: TERMINAL_INPUT_WS_REBIND_WINDOW_MS,
     terminalMaxRebindsPerWindow: TERMINAL_INPUT_WS_MAX_REBINDS_PER_WINDOW,

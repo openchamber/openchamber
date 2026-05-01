@@ -16,6 +16,7 @@ import type { PermissionRequest } from "@/types/permission";
 import type { QuestionRequest } from "@/types/question";
 import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap";
 import {
+  assertProviderCircuitClosed,
   recordProviderSuccess,
   recordProviderError,
   shouldRetry,
@@ -736,6 +737,8 @@ class OpencodeService {
         formatType: params.format.type,
       });
     }
+
+    assertProviderCircuitClosed(params.providerID);
 
     let response!: Response;
 

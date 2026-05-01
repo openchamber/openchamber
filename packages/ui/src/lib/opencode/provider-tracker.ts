@@ -114,6 +114,11 @@ export function shouldRetry(providerID: string, status: number, attempt: number)
   return true
 }
 
+export function assertProviderCircuitClosed(providerID: string): void {
+  if (!providerID || !isCircuitOpen(providerID)) return
+  throw new Error(`Provider ${providerID} is temporarily unavailable after repeated errors. Please retry shortly.`)
+}
+
 export function getRetryDelayMs(attempt: number): number {
   const delay = DEFAULT_RETRY_BASE_DELAY_MS * 2 ** attempt
   return Math.min(delay, DEFAULT_RETRY_MAX_DELAY_MS)
