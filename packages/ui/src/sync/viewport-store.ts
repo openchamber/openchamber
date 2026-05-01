@@ -7,6 +7,12 @@ import { create } from "zustand"
 
 export type SessionMemoryState = {
   viewportAnchor: number
+  /** Last known scrollbar pixel state — saved on every scroll event. */
+  scrollPosition?: {
+    scrollTop: number
+    scrollHeight: number
+    clientHeight: number
+  }
   isStreaming: boolean
   streamStartTime?: number
   lastAccessedAt: number
@@ -27,14 +33,14 @@ export type ViewportState = {
   sessionMemoryState: Map<string, SessionMemoryState>
   isSyncing: boolean
 
-  updateViewportAnchor: (sessionId: string, anchor: number) => void
+  updateViewportAnchor: (sessionId: string, anchor: number, scrollPosition?: SessionMemoryState['scrollPosition']) => void
 }
 
 export const useViewportStore = create<ViewportState>()((set) => ({
   sessionMemoryState: new Map(),
   isSyncing: false,
 
-  updateViewportAnchor: (sessionId, anchor) =>
+  updateViewportAnchor: (sessionId, anchor, scrollPosition) =>
     set((s) => {
       const map = new Map(s.sessionMemoryState)
       const existing = map.get(sessionId) ?? {
@@ -43,7 +49,12 @@ export const useViewportStore = create<ViewportState>()((set) => ({
         lastAccessedAt: Date.now(),
         backgroundMessageCount: 0,
       }
-      map.set(sessionId, { ...existing, viewportAnchor: anchor, lastAccessedAt: Date.now() })
+      map.set(sessionId, {
+        ...existing,
+        viewportAnchor: anchor,
+        ...(scrollPosition ? { scrollPosition } : {}),
+        lastAccessedAt: Date.now(),
+      })
       return { sessionMemoryState: map }
     }),
 }))

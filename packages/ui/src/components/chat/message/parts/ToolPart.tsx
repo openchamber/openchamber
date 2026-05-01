@@ -1299,7 +1299,7 @@ const renderPathLikeGitChanges = (path: string, grow = true) => {
         return (
             <span
                 className={cn('min-w-0 truncate typography-ui-label text-foreground', grow && 'flex-1')}
-                style={{ direction: 'rtl', textAlign: 'left' }}
+                style={{ direction: 'rtl', textAlign: 'left', unicodeBidi: 'plaintext' }}
                 title={path}
             >
                 {path}
@@ -1315,7 +1315,7 @@ const renderPathLikeGitChanges = (path: string, grow = true) => {
     return (
         <span className={cn('min-w-0 flex items-baseline overflow-hidden typography-ui-label', grow && 'flex-1')} title={path}>
             {hasAbsoluteRoot ? <span className="flex-shrink-0 text-muted-foreground">/</span> : null}
-            <span className="min-w-0 truncate text-muted-foreground" style={{ direction: 'rtl', textAlign: 'left' }}>
+            <span className="min-w-0 truncate text-muted-foreground" style={{ direction: 'rtl', textAlign: 'left', unicodeBidi: 'plaintext' }}>
                 {displayDir}
             </span>
             <span className="flex-shrink-0">
@@ -1360,6 +1360,7 @@ const renderAnimatedPathWithIcon = (path: string, _animate = true, grow = true, 
                         color: 'var(--tools-description)',
                         direction: 'rtl',
                         textAlign: 'left',
+                        unicodeBidi: 'plaintext',
                     }}
                 >
                     {displayDir}
@@ -1713,7 +1714,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                     syntaxTheme={syntaxTheme}
                 />,
                 {
-                    className: 'p-1',
+                    className: part.tool === 'bash' ? 'p-1 rounded-none' : 'p-1',
                     maxHeightClass: part.tool === 'bash' ? 'max-h-[46vh]' : undefined,
                 }
             );
@@ -1756,7 +1757,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                                 ),
                                 {
                                     maxHeightClass: 'max-h-60',
-                                    className: part.tool === 'bash' ? 'tool-input-surface p-0' : 'tool-input-surface',
+                                    className: part.tool === 'bash' ? 'tool-input-surface p-0 rounded-none' : 'tool-input-surface',
                                 }
                             )}
                         </div>

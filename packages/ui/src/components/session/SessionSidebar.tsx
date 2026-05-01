@@ -137,6 +137,8 @@ const isKnownActiveSessionDirectory = (session: Session, knownDirectories: Set<s
   return knownDirectories.has(directory);
 };
 
+const SIDEBAR_PR_NO_PR_RETRY_MS = 5 * 60_000;
+
 interface SessionSidebarProps {
   mobileVariant?: boolean;
   onSessionSelected?: (sessionId: string) => void;
@@ -157,6 +159,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const [sessionSearchQuery, setSessionSearchQuery] = React.useState('');
   const sessionSearchContainerRef = React.useRef<HTMLDivElement | null>(null);
   const sessionSearchInputRef = React.useRef<HTMLInputElement | null>(null);
+  const retriedNoPrStatusKeysRef = React.useRef<Set<string>>(new Set());
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [editTitle, setEditTitle] = React.useState('');
   const [editingProjectDialogId, setEditingProjectDialogId] = React.useState<string | null>(null);
@@ -994,8 +997,9 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   }, [projectSections, homeDirectory]);
 
   const activeNowSessions = React.useMemo(
-    () => deriveActiveNowSessions(activeNowEntries, new Map(sessions.map((session) => [session.id, session]))),
-    [activeNowEntries, sessions],
+    () => deriveActiveNowSessions(activeNowEntries, new Map(sessions.map((session) => [session.id, session])))
+      .sort((a, b) => compareSessionsByPinnedAndTime(a, b, pinnedSessionIds)),
+    [activeNowEntries, pinnedSessionIds, sessions],
   );
 
   const liveActiveSessions = React.useMemo(
@@ -1122,6 +1126,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     }
 
     const missingTargets: Array<{ directory: string; branch: string; remoteName?: string | null }> = [];
+    const now = Date.now();
 
     sectionsForSidebarRender.forEach((section) => {
       if (collapsedProjects.has(section.project.id)) {
@@ -1136,7 +1141,22 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         }
         const key = getGitHubPrStatusKey(directory, branch);
         const entry = useGitHubPrStatusStore.getState().entries[key];
-        if (!entry || !entry.isInitialStatusResolved) {
+        const hasPr = Boolean(entry?.status?.pr);
+        const retryKey = `${directory}::${branch}`;
+        const noPrLastCheckedAt = Math.max(entry?.lastRefreshAt ?? 0, entry?.lastDiscoveryPollAt ?? 0);
+        const shouldRetryNoPr = Boolean(
+          entry?.isInitialStatusResolved
+          && !hasPr
+          && (
+            !retriedNoPrStatusKeysRef.current.has(retryKey)
+            || now - noPrLastCheckedAt >= SIDEBAR_PR_NO_PR_RETRY_MS
+          ),
+        );
+
+        if (!entry || !entry.isInitialStatusResolved || shouldRetryNoPr) {
+          if (shouldRetryNoPr) {
+            retriedNoPrStatusKeysRef.current.add(retryKey);
+          }
           missingTargets.push({ directory, branch });
         }
       });

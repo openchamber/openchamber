@@ -30,11 +30,13 @@ import {
   RiRestartLine,
   RiServerLine,
   RiSlashCommands2,
+  RiBrainLine,
 } from '@remixicon/react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { AgentsSidebar } from '@/components/sections/agents/AgentsSidebar';
 import { AgentsPage } from '@/components/sections/agents/AgentsPage';
+import { BehaviorPage } from '@/components/sections/behavior/BehaviorPage';
 import { CommandsSidebar } from '@/components/sections/commands/CommandsSidebar';
 import { CommandsPage } from '@/components/sections/commands/CommandsPage';
 import { McpSidebar } from '@/components/sections/mcp/McpSidebar';
@@ -71,7 +73,6 @@ import {
 // Same constraints as main sidebar
 const SETTINGS_NAV_MIN_WIDTH = 176;
 const SETTINGS_NAV_MAX_WIDTH = 280;
-const SETTINGS_NAV_RAIL_WIDTH = 48;
 
 type MobileStage = 'nav' | 'page-sidebar' | 'page-content';
 
@@ -94,6 +95,7 @@ const pageOrder: SettingsPageSlug[] = [
   'projects',
   'remote-instances',
   'agents',
+  'behavior',
   'commands',
   'mcp',
   'providers',
@@ -141,6 +143,8 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): React.ComponentType<
       return RiCloudLine;
     case 'agents':
       return RiAiAgentLine;
+    case 'behavior':
+      return RiBrainLine;
     case 'commands':
       return RiSlashCommands2;
     case 'mcp':
@@ -372,8 +376,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     return getSettingsPageMeta(settingsSlug);
   }, [settingsSlug]);
 
-  // Collapse main nav to icon rail when active page has its own sidebar
-  const isNavCollapsed = !isMobile && activePageMeta?.kind === 'split';
+  // Nav is always open (collapsed state removed)
 
   const openChamberSectionBySlug: Partial<Record<SettingsPageSlug, OpenChamberSection>> = React.useMemo(() => ({
     appearance: 'visual',
@@ -397,6 +400,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return t('settings.page.usage.title');
       case 'agents':
         return t('settings.page.agents.title');
+      case 'behavior':
+        return t('settings.page.behavior.title');
       case 'commands':
         return t('settings.page.commands.title');
       case 'mcp':
@@ -480,6 +485,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <RemoteInstancesPage />;
       case 'agents':
         return <AgentsPage />;
+      case 'behavior':
+        return <BehaviorPage />;
       case 'commands':
         return <CommandsPage />;
       case 'mcp':
@@ -544,7 +551,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     setMobileStage('page-sidebar');
   }, []);
 
-  const renderSettingsNav = (collapsed: boolean) => {
+  const renderSettingsNav = () => {
     return (
       <div className="flex h-full flex-col overflow-hidden">
         {/* Scrollable nav items */}
@@ -556,7 +563,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
               if (!Icon) return null;
 
               return (
-                <Tooltip key={page.slug} delayDuration={collapsed ? 100 : 600}>
+                <Tooltip key={page.slug}>
                   <TooltipTrigger asChild>
                     <button
                       type="button"
@@ -569,12 +576,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                       )}
                     >
                       <Icon className="h-4 w-4 shrink-0" />
-                      <span
-                        className={cn(
-                          'flex items-center gap-1.5 whitespace-nowrap overflow-hidden transition-opacity duration-150',
-                          collapsed ? 'opacity-0' : 'opacity-100'
-                        )}
-                      >
+                      <span className="flex items-center gap-1.5 whitespace-nowrap overflow-hidden transition-opacity duration-150 opacity-100">
                         <span className="typography-ui-label font-normal truncate">{getPageTitle(page.slug)}</span>
                         {(page.slug === 'voice' || page.slug === 'tunnel') && (
                           <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-[var(--status-warning)] bg-[var(--status-warning)]/10">
@@ -584,27 +586,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                       </span>
                     </button>
                   </TooltipTrigger>
-                  {collapsed && (
-                    <TooltipContent side="right" sideOffset={8}>
-                      {getPageTitle(page.slug)}
-                    </TooltipContent>
-                  )}
                 </Tooltip>
               );
             })}
           </div>
         </div>
 
-        {/* Footer — hidden when collapsed via overflow on parent */}
-        <div
-          className={cn(
-            'overflow-hidden transition-opacity duration-150',
-            collapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'
-          )}
-        >
+        {/* Footer */}
+        <div className="overflow-hidden transition-opacity duration-150 opacity-100">
           <div className="border-t border-border bg-sidebar px-2 py-1 space-y-0.5">
             {!runtimeCtx.isVSCode && (
-              <Tooltip delayDuration={300}>
+              <Tooltip>
                 <TooltipTrigger asChild>
                   <button
                     type="button"
@@ -636,7 +628,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       return (
         <div className={cn('flex-1 min-h-0 overflow-hidden', runtimeCtx.isVSCode ? 'bg-background' : 'bg-sidebar')}>
           <div className="flex h-full min-h-0 flex-col">
-            <ErrorBoundary>{renderSettingsNav(false)}</ErrorBoundary>
+            <ErrorBoundary>{renderSettingsNav()}</ErrorBoundary>
           </div>
         </div>
       );
@@ -686,7 +678,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
           <div className={cn('w-[264px] min-w-[264px] border-r', runtimeCtx.isVSCode ? 'bg-background' : 'bg-sidebar')} style={{ borderColor: 'var(--interactive-border)' }}>
             <ErrorBoundary>{renderPageSidebar(settingsSlug, {})}</ErrorBoundary>
           </div>
-          <div className="flex-1 overflow-hidden bg-background">
+          <div className="flex-1 min-h-0 overflow-hidden bg-background">
             <ErrorBoundary>{renderPageContent(settingsSlug)}</ErrorBoundary>
           </div>
         </div>
@@ -694,7 +686,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     }
 
     return (
-      <div className="h-full overflow-hidden bg-background">
+      <div className="h-full min-h-0 overflow-hidden bg-background">
         <ErrorBoundary>{renderPageContent(settingsSlug)}</ErrorBoundary>
       </div>
     );
@@ -792,28 +784,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                   : runtimeCtx.isVSCode
                     ? 'bg-background'
                     : 'bg-sidebar',
-                isResizing && !isNavCollapsed ? '' : 'transition-[width,min-width] duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)]'
+                isResizing ? '' : 'transition-[width,min-width] duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)]'
               )}
               style={{
-                width: isNavCollapsed ? `${SETTINGS_NAV_RAIL_WIDTH}px` : `${navWidth}px`,
-                minWidth: isNavCollapsed ? `${SETTINGS_NAV_RAIL_WIDTH}px` : `${navWidth}px`,
+                width: `${navWidth}px`,
+                minWidth: `${navWidth}px`,
                 borderColor: 'var(--interactive-border)',
               }}
             >
-              {!isNavCollapsed && (
-                <div
-                  className={cn(
-                    'absolute right-0 top-0 z-20 h-full w-[6px] -mr-[3px] cursor-col-resize',
-                    isResizing ? 'bg-primary/30' : 'bg-transparent hover:bg-primary/20'
-                  )}
-                  onPointerDown={handlePointerDown}
-                  role="separator"
-                  aria-orientation="vertical"
-                  aria-label={t('settings.view.actions.resizeNavigation')}
-                />
-              )}
+              <div
+                className={cn(
+                  'absolute right-0 top-0 z-20 h-full w-[6px] -mr-[3px] cursor-col-resize',
+                  isResizing ? 'bg-primary/30' : 'bg-transparent hover:bg-primary/20'
+                )}
+                onPointerDown={handlePointerDown}
+                role="separator"
+                aria-orientation="vertical"
+                aria-label={t('settings.view.actions.resizeNavigation')}
+              />
               <ErrorBoundary>
-                {renderSettingsNav(isNavCollapsed)}
+                {renderSettingsNav()}
               </ErrorBoundary>
             </div>
 

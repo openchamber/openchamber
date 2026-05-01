@@ -31,6 +31,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitStore } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { EditorView } from '@codemirror/view';
 import { copyTextToClipboard } from '@/lib/clipboard';
@@ -365,7 +366,16 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
         return result?.content ?? '';
       }
 
-      const response = await fetch(`/api/fs/read?path=${encodeURIComponent(path)}`);
+      const runtimeFiles = getRegisteredRuntimeAPIs()?.files;
+      if (runtimeFiles?.readFile) {
+        const result = await runtimeFiles.readFile(path, { optional: true });
+        return result?.content ?? '';
+      }
+
+      const response = await fetch(`/api/fs/read?path=${encodeURIComponent(path)}&optional=true`, {
+        // Avoid conditional requests (304 + empty body).
+        cache: 'no-store',
+      });
       if (!response.ok) {
         throw new Error(`Failed to read plan file (${response.status})`);
       }
@@ -618,7 +628,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
         {resolvedPath ? (
           <div className="flex items-center gap-1">
             <DropdownMenu>
-              <Tooltip delayDuration={500}>
+              <Tooltip>
                 <TooltipTrigger asChild>
                   <DropdownMenuTrigger asChild>
                     <Button
@@ -647,7 +657,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
               </DropdownMenuContent>
             </DropdownMenu>
             <DropdownMenu>
-              <Tooltip delayDuration={500}>
+              <Tooltip>
                 <TooltipTrigger asChild>
                   <DropdownMenuTrigger asChild>
                     <Button

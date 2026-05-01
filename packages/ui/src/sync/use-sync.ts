@@ -222,10 +222,10 @@ export function useSync() {
         }
 
         const current = store.getState()
-        const cached = options?.mode === "prepend" ? (current.message[sessionID] ?? []) : []
+        const cached = current.message[sessionID] ?? []
         const messages = options?.mode === "prepend"
           ? mergeMessages(cached, merged.session)
-          : merged.session
+          : (cached.length > 0 ? mergeMessages(cached, merged.session) : merged.session)
 
         // Build part updates — preserve existing references on prepend to avoid flicker
         const isPrepend = options?.mode === "prepend"

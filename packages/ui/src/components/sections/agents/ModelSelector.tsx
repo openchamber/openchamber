@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDeviceInfo } from '@/lib/device';
-import { RiArrowDownSLine, RiArrowRightSLine, RiCheckLine, RiCloseLine, RiPencilAiLine, RiSearchLine, RiStarFill, RiStarLine, RiTimeLine } from '@remixicon/react';
+import { RiArrowDownSLine, RiArrowRightSLine, RiCheckLine, RiCloseLine, RiLoader4Line, RiPencilAiLine, RiSearchLine, RiStarFill, RiStarLine, RiTimeLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
@@ -19,6 +19,7 @@ import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useModelLists } from '@/hooks/useModelLists';
 import type { ModelMetadata } from '@/types';
 import { useI18n } from '@/lib/i18n';
+import { useOpenCodeReadiness } from '@/hooks/useOpenCodeReadiness';
 
 type ProviderModel = Record<string, unknown> & { id?: string; name?: string };
 
@@ -58,6 +59,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     placeholder
 }) => {
     const { t } = useI18n();
+    const { isReady, isUnavailable } = useOpenCodeReadiness();
     const providers = useConfigStore((state) => state.providers);
     const modelsMetadata = useConfigStore((state) => state.modelsMetadata);
     const isMobile = useUIStore(state => state.isMobile);
@@ -495,14 +497,21 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             {isActuallyMobile ? (
                 <button
                     type="button"
-                    onClick={() => setIsMobilePanelOpen(true)}
+                    onClick={isReady ? () => setIsMobilePanelOpen(true) : undefined}
+                    disabled={!isReady}
                     className={cn(
                         'flex w-full items-center justify-between gap-2 rounded-lg border border-border/40 bg-[var(--surface-elevated)] px-2 py-1.5 text-left',
+                        !isReady && 'opacity-60 cursor-not-allowed',
                         className
                     )}
                 >
                     <div className="flex items-center gap-2">
-                        {providerId ? (
+                        {!isReady ? (
+                            <>
+                                <RiLoader4Line className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                                <span className="typography-meta text-muted-foreground">{isUnavailable ? t('common.unavailable') : t('common.loading')}</span>
+                            </>
+                        ) : providerId ? (
                             <ProviderLogo
                                 providerId={providerId}
                                 className="h-3.5 w-3.5"
@@ -510,33 +519,46 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                         ) : (
                             <RiPencilAiLine className="h-3 w-3 text-muted-foreground" />
                         )}
-                        <span className="typography-meta font-medium text-foreground">
-                            {providerId && modelId ? `${providerId}/${modelId}` : (placeholder || t('settings.agents.modelSelector.selectPlaceholder'))}
-                        </span>
+                        {isReady && (
+                            <span className="typography-meta font-medium text-foreground">
+                                {providerId && modelId ? `${providerId}/${modelId}` : (placeholder || t('settings.agents.modelSelector.selectPlaceholder'))}
+                            </span>
+                        )}
                     </div>
                     <RiArrowDownSLine className="h-3 w-3 text-muted-foreground" />
                 </button>
             ) : (
-                <DropdownMenu open={isDropdownOpen} onOpenChange={setIsDropdownOpen}>
+                <DropdownMenu open={isReady && isDropdownOpen} onOpenChange={isReady ? setIsDropdownOpen : undefined}>
                     <DropdownMenuTrigger asChild>
                         <div className={cn(
                             'border-input data-[placeholder]:text-muted-foreground flex items-center justify-between gap-2 rounded-lg border bg-transparent px-2 py-2 typography-ui-label whitespace-nowrap shadow-none outline-none hover:bg-interactive-hover data-[popup-open]:bg-interactive-active h-6 w-fit',
                             className
                         )}>
-                            {providerId ? (
+                            {!isReady ? (
                                 <>
-                                    <ProviderLogo
-                                        providerId={providerId}
-                                        className="h-3.5 w-3.5 flex-shrink-0"
-                                    />
-                                    <RiPencilAiLine className="h-3 w-3 text-primary/60 hidden" />
+                                    <RiLoader4Line className="h-3.5 w-3.5 animate-spin text-muted-foreground flex-shrink-0" />
+                                    <span className="typography-ui-label font-normal whitespace-nowrap text-muted-foreground">
+                                        {isUnavailable ? t('common.unavailable') : t('common.loading')}
+                                    </span>
                                 </>
                             ) : (
-                                <RiPencilAiLine className="h-3.5 w-3.5 text-muted-foreground" />
+                                <>
+                                    {providerId ? (
+                                        <>
+                                            <ProviderLogo
+                                                providerId={providerId}
+                                                className="h-3.5 w-3.5 flex-shrink-0"
+                                            />
+                                            <RiPencilAiLine className="h-3 w-3 text-primary/60 hidden" />
+                                        </>
+                                    ) : (
+                                        <RiPencilAiLine className="h-3.5 w-3.5 text-muted-foreground" />
+                                    )}
+                                    <span className="typography-ui-label font-normal whitespace-nowrap text-foreground">
+                                        {providerId && modelId ? `${providerId}/${modelId}` : (placeholder || t('settings.agents.modelSelector.notSelected'))}
+                                    </span>
+                                </>
                             )}
-                            <span className="typography-ui-label font-normal whitespace-nowrap text-foreground">
-                                {providerId && modelId ? `${providerId}/${modelId}` : (placeholder || t('settings.agents.modelSelector.notSelected'))}
-                            </span>
                             <RiArrowDownSLine className="h-4 w-4 flex-shrink-0 text-muted-foreground/50" />
                         </div>
                     </DropdownMenuTrigger>

@@ -152,7 +152,7 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
             >
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 min-w-0">
-                  <Tooltip delayDuration={300}>
+                  <Tooltip>
                     <TooltipTrigger asChild>
                       <span
                         className={cn(
@@ -305,7 +305,7 @@ export const McpDropdown: React.FC<McpDropdownProps> = ({ headerIconButtonClass 
                     aria-label={tooltip}
                   />
                 ) : (
-                  <Tooltip delayDuration={300}>
+                  <Tooltip>
                     <TooltipTrigger asChild>
                       <span
                         className={cn(
@@ -427,7 +427,7 @@ export const McpDropdown: React.FC<McpDropdownProps> = ({ headerIconButtonClass 
   // Desktop: use DropdownMenu
   return (
     <DropdownMenu open={open} onOpenChange={handleDropdownOpenChange}>
-      <Tooltip delayDuration={1000} open={open ? false : tooltipOpen} onOpenChange={handleTooltipOpenChange}>
+      <Tooltip open={open ? false : tooltipOpen} onOpenChange={handleTooltipOpenChange}>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
             {triggerButton}

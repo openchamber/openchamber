@@ -928,7 +928,7 @@ export function DesktopHostSwitcherDialog({
                         )
                       )}
 
-                      <Tooltip delayDuration={700}>
+                      <Tooltip>
                         <TooltipTrigger asChild>
                           <button
                             type="button"
@@ -950,7 +950,7 @@ export function DesktopHostSwitcherDialog({
                         </TooltipContent>
                       </Tooltip>
 
-                      <Tooltip delayDuration={700}>
+                      <Tooltip>
                         <TooltipTrigger asChild>
                           <button
                             type="button"
@@ -1328,7 +1328,7 @@ export function DesktopHostSwitcherButton({ headerIconButtonClass }: DesktopHost
 
   return (
     <>
-      <Tooltip delayDuration={500}>
+      <Tooltip>
         <TooltipTrigger asChild>
           <button
             type="button"

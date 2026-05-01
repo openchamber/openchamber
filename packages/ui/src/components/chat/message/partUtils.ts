@@ -2,6 +2,14 @@ import type { Part } from '@opencode-ai/sdk/v2';
 
 type PartWithText = Part & { text?: string; content?: string; value?: string };
 
+export const isValidPart = (part: unknown): part is Part => {
+    return Boolean(part && typeof part === 'object' && typeof (part as { type?: unknown }).type === 'string');
+};
+
+export const normalizeParts = (parts: Part[]): Part[] => {
+    return parts.filter(isValidPart);
+};
+
 export const extractTextContent = (part: Part): string => {
     const partWithText = part as PartWithText;
     const rawText = partWithText.text;
@@ -27,14 +35,15 @@ interface VisibleFilterOptions {
 
 export const filterVisibleParts = (parts: Part[], options: VisibleFilterOptions = {}): Part[] => {
     const { includeReasoning = true } = options;
+    const validParts = normalizeParts(parts);
 
     // Check if there are any non-synthetic parts
-    const hasNonSynthetic = parts.some((part) => {
+    const hasNonSynthetic = validParts.some((part) => {
         const partWithSynthetic = part as PartWithSynthetic;
         return !partWithSynthetic.synthetic;
     });
 
-    return parts.filter((part) => {
+    return validParts.filter((part) => {
         const partWithSynthetic = part as PartWithSynthetic;
         const isSynthetic = Boolean(partWithSynthetic.synthetic);
 

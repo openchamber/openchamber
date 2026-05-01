@@ -535,6 +535,7 @@ export const GitView: React.FC = () => {
     return isActionTab(stored) ? stored : 'commit';
   });
   const [remotes, setRemotes] = React.useState<GitRemote[]>([]);
+  const [removingRemoteName, setRemovingRemoteName] = React.useState<string | null>(null);
   const [branchOperation, setBranchOperation] = React.useState<BranchOperation>(null);
   const [operationLogs, setOperationLogs] = React.useState<OperationLogEntry[]>([]);
   const [conflictDialogOpen, setConflictDialogOpen] = React.useState(false);
@@ -990,6 +991,39 @@ export const GitView: React.FC = () => {
     }
   };
 
+  const handleRemoveRemote = React.useCallback(async (remote: GitRemote) => {
+    if (!currentDirectory) return;
+
+    const remoteName = remote.name.trim();
+    if (!remoteName) {
+      toast.error(t('gitView.toast.remoteNameRequired'));
+      return;
+    }
+    if (remoteName === 'origin') {
+      toast.error(t('gitView.toast.cannotRemoveOriginRemote'));
+      return;
+    }
+
+    setRemovingRemoteName(remoteName);
+    try {
+      await git.removeRemote(currentDirectory, { remote: remoteName });
+      toast.success(t('gitView.toast.removedRemote', { name: remoteName }));
+      await Promise.all([
+        refreshStatusAndBranches(false),
+        refreshRemotes(),
+      ]);
+    } catch (error) {
+      const message = error instanceof Error
+        ? error.message
+        : t('gitView.toast.syncActionFailed', {
+            action: t('gitView.header.removeRemoteTitle', { name: remoteName }),
+          });
+      toast.error(message);
+    } finally {
+      setRemovingRemoteName(null);
+    }
+  }, [currentDirectory, git, refreshRemotes, refreshStatusAndBranches, t]);
+
   const handleCommit = async (options: { pushAfter?: boolean } = {}) => {
     if (!currentDirectory) return;
     if (!commitMessage.trim()) {
@@ -1402,7 +1436,7 @@ export const GitView: React.FC = () => {
     worktreeMetadata && repoRootForIntegrate && sourceBranchForIntegrate && shouldShowIntegrateCommits
   );
   const canShowPullRequestSection = Boolean(
-    currentDirectory && currentBranch && status?.tracking && currentBranch !== baseBranch
+    currentDirectory && currentBranch
   );
   const canShowBranchWorkflows = Boolean(currentBranch);
   const integrateCommitsProps =
@@ -2048,6 +2082,8 @@ export const GitView: React.FC = () => {
         onFetch={(remote) => handleSyncAction('fetch', remote)}
         onPull={(remote) => handleSyncAction('pull', remote)}
         onPush={() => handleSyncAction('push')}
+        onRemoveRemote={handleRemoveRemote}
+        removingRemoteName={removingRemoteName}
         onFetchUpstream={handleUpstreamFetch}
         onSyncUpstream={handleUpstreamSync}
         onCheckoutBranch={handleCheckoutBranch}

@@ -8,7 +8,7 @@ import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, type MonoFontOption, type UiFontOpt
 
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files';
 export type RightSidebarTab = 'git' | 'files' | 'context';
-export type ContextPanelMode = 'diff' | 'file' | 'context' | 'plan' | 'chat';
+export type ContextPanelMode = 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview';
 export type MermaidRenderingMode = 'svg' | 'ascii';
 export type UserMessageRenderingMode = 'markdown' | 'plain';
 export type ChatRenderMode = 'sorted' | 'live';
@@ -161,6 +161,10 @@ const buildDefaultContextPanelTabDedupeKey = (mode: ContextPanelMode, targetPath
     return targetPath || mode;
   }
 
+  if (mode === 'preview') {
+    return targetPath || mode;
+  }
+
   return mode;
 };
 
@@ -237,7 +241,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       touchedAt?: unknown;
     };
 
-    if (candidate.mode !== 'diff' && candidate.mode !== 'file' && candidate.mode !== 'context' && candidate.mode !== 'plan' && candidate.mode !== 'chat') {
+    if (candidate.mode !== 'diff' && candidate.mode !== 'file' && candidate.mode !== 'context' && candidate.mode !== 'plan' && candidate.mode !== 'chat' && candidate.mode !== 'preview') {
       continue;
     }
 
@@ -483,7 +487,6 @@ interface UIStore {
   pendingFileNavigation: PendingFileNavigation | null;
   pendingFileFocusPath: string | null;
   isMobile: boolean;
-  isQuickOpenOpen: boolean;
   isCommandPaletteOpen: boolean;
   isHelpDialogOpen: boolean;
   isAboutDialogOpen: boolean;
@@ -559,6 +562,7 @@ interface UIStore {
   showTerminalQuickKeysOnDesktop: boolean;
   persistChatDraft: boolean;
   inputSpellcheckEnabled: boolean;
+  wideChatLayoutEnabled: boolean;
   showToolFileIcons: boolean;
   showExpandedBashTools: boolean;
   showExpandedEditTools: boolean;
@@ -588,6 +592,7 @@ interface UIStore {
   openContextFileAtLine: (directory: string, filePath: string, line: number, column?: number) => void;
   openContextOverview: (directory: string) => void;
   openContextPlan: (directory: string) => void;
+  openContextPreview: (directory: string, url: string) => void;
   setActiveContextPanelTab: (directory: string, tabID: string) => void;
   reorderContextPanelTabs: (directory: string, activeTabID: string, overTabID: string) => void;
   closeContextPanelTab: (directory: string, tabID: string) => void;
@@ -607,8 +612,6 @@ interface UIStore {
   navigateToDiff: (filePath: string) => void;
   consumePendingDiffFile: () => string | null;
   setIsMobile: (isMobile: boolean) => void;
-  setQuickOpenOpen: (open: boolean) => void;
-  toggleQuickOpen: () => void;
   toggleCommandPalette: () => void;
   setCommandPaletteOpen: (open: boolean) => void;
   toggleHelpDialog: () => void;
@@ -684,6 +687,7 @@ interface UIStore {
   setMaxLastMessageLength: (value: number) => void;
   setPersistChatDraft: (value: boolean) => void;
   setInputSpellcheckEnabled: (value: boolean) => void;
+  setWideChatLayoutEnabled: (value: boolean) => void;
   setShowToolFileIcons: (value: boolean) => void;
   setShowExpandedBashTools: (value: boolean) => void;
   setShowExpandedEditTools: (value: boolean) => void;
@@ -736,7 +740,6 @@ export const useUIStore = create<UIStore>()(
         pendingFileNavigation: null,
         pendingFileFocusPath: null,
         isMobile: false,
-        isQuickOpenOpen: false,
         isCommandPaletteOpen: false,
         isHelpDialogOpen: false,
         isAboutDialogOpen: false,
@@ -806,6 +809,7 @@ export const useUIStore = create<UIStore>()(
         showTerminalQuickKeysOnDesktop: false,
         persistChatDraft: true,
         inputSpellcheckEnabled: false,
+        wideChatLayoutEnabled: false,
         showToolFileIcons: true,
         showExpandedBashTools: false,
         showExpandedEditTools: false,
@@ -989,6 +993,31 @@ export const useUIStore = create<UIStore>()(
           }
 
           get().openContextPanelTab(normalizedDirectory, { mode: 'plan' });
+        },
+
+        openContextPreview: (directory, url) => {
+          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          const normalizedUrl = (url || '').trim();
+          if (!normalizedDirectory || !normalizedUrl) {
+            return;
+          }
+
+          let label: string | null = null;
+          try {
+            const parsed = new URL(normalizedUrl);
+            if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+              label = parsed.host || parsed.hostname || 'Preview';
+            }
+          } catch {
+            // ignore invalid URL
+          }
+
+          get().openContextPanelTab(normalizedDirectory, {
+            mode: 'preview',
+            targetPath: normalizedUrl,
+            dedupeKey: normalizedUrl,
+            label,
+          });
         },
 
         setActiveContextPanelTab: (directory, tabID) => {
@@ -1251,14 +1280,6 @@ export const useUIStore = create<UIStore>()(
 
         setIsMobile: (isMobile) => {
           set({ isMobile });
-        },
-
-        setQuickOpenOpen: (open) => {
-          set({ isQuickOpenOpen: open });
-        },
-
-        toggleQuickOpen: () => {
-          set((state) => ({ isQuickOpenOpen: !state.isQuickOpenOpen }));
         },
 
         toggleCommandPalette: () => {
@@ -1774,6 +1795,9 @@ export const useUIStore = create<UIStore>()(
         setInputSpellcheckEnabled: (value) => {
           set({ inputSpellcheckEnabled: value });
         },
+        setWideChatLayoutEnabled: (value) => {
+          set({ wideChatLayoutEnabled: value });
+        },
         setShowToolFileIcons: (value) => {
           set({ showToolFileIcons: value });
         },
@@ -1995,6 +2019,7 @@ export const useUIStore = create<UIStore>()(
           maxLastMessageLength: state.maxLastMessageLength,
           persistChatDraft: state.persistChatDraft,
           inputSpellcheckEnabled: state.inputSpellcheckEnabled,
+          wideChatLayoutEnabled: state.wideChatLayoutEnabled,
           showToolFileIcons: state.showToolFileIcons,
           showExpandedBashTools: state.showExpandedBashTools,
           showExpandedEditTools: state.showExpandedEditTools,

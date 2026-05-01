@@ -431,6 +431,9 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.stickyUserHeader === 'boolean' && settings.stickyUserHeader !== store.stickyUserHeader) {
     store.setStickyUserHeader(settings.stickyUserHeader);
   }
+  if (typeof settings.wideChatLayoutEnabled === 'boolean' && settings.wideChatLayoutEnabled !== store.wideChatLayoutEnabled) {
+    store.setWideChatLayoutEnabled(settings.wideChatLayoutEnabled);
+  }
   if (
     typeof settings.showSplitAssistantMessageActions === 'boolean'
     && settings.showSplitAssistantMessageActions !== store.showSplitAssistantMessageActions
@@ -859,6 +862,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.stickyUserHeader === 'boolean') {
     result.stickyUserHeader = candidate.stickyUserHeader;
   }
+  if (typeof candidate.wideChatLayoutEnabled === 'boolean') {
+    result.wideChatLayoutEnabled = candidate.wideChatLayoutEnabled;
+  }
   if (typeof candidate.showSplitAssistantMessageActions === 'boolean') {
     result.showSplitAssistantMessageActions = candidate.showSplitAssistantMessageActions;
   }
@@ -934,6 +940,29 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
 
   if (typeof candidate.reportUsage === 'boolean') {
     result.reportUsage = candidate.reportUsage;
+  }
+
+  if (typeof candidate.globalBehaviorPrompt === 'string') {
+    result.globalBehaviorPrompt = candidate.globalBehaviorPrompt;
+  }
+  if (typeof candidate.responseStyleEnabled === 'boolean') {
+    result.responseStyleEnabled = candidate.responseStyleEnabled;
+  }
+  if (
+    typeof candidate.responseStylePreset === 'string'
+    && (candidate.responseStylePreset === 'concise'
+      || candidate.responseStylePreset === 'detailed'
+      || candidate.responseStylePreset === 'mentor'
+      || candidate.responseStylePreset === 'pushback'
+      || candidate.responseStylePreset === 'noFiller'
+      || candidate.responseStylePreset === 'matchEnergy'
+      || candidate.responseStylePreset === 'warmPeer'
+      || candidate.responseStylePreset === 'custom')
+  ) {
+    result.responseStylePreset = candidate.responseStylePreset;
+  }
+  if (typeof candidate.responseStyleCustomInstructions === 'string') {
+    result.responseStyleCustomInstructions = candidate.responseStyleCustomInstructions;
   }
 
   return result;

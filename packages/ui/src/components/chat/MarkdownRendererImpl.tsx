@@ -11,13 +11,13 @@ import remend from 'remend';
 import { FadeInOnReveal } from './message/FadeInOnReveal';
 import type { Part } from '@opencode-ai/sdk/v2';
 import { cn } from '@/lib/utils';
-import { RiFileCopyLine, RiCheckLine, RiDownloadLine } from '@remixicon/react';
+import { RiFileCopyLine, RiCheckLine, RiDownloadLine, RiEyeLine, RiCodeLine } from '@remixicon/react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
 
-import { isExternalHttpUrl, openExternalUrl } from '@/lib/url';
+import { isExternalHttpUrl, isLoopbackHttpUrl, openExternalUrl } from '@/lib/url';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import { generateSyntaxTheme } from '@/lib/theme/syntaxThemeGenerator';
@@ -694,6 +694,26 @@ const CODE_SHARED_STYLE: React.CSSProperties = {
   lineHeight: 'var(--markdown-code-block-line-height)',
 };
 
+const downloadTextFile = (content: string, filename: string, mimeType: string) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch {
+    // Best-effort; callers can optionally toast.
+  }
+};
+
 const MarkdownCodeBlock: React.FC<{
   code: string;
   language: string;
@@ -701,8 +721,17 @@ const MarkdownCodeBlock: React.FC<{
 }> = ({ code, language, syntaxTheme }) => {
   const [copied, setCopied] = React.useState(false);
   const [highlight, setHighlight] = React.useState(true);
+  const [viewMode, setViewMode] = React.useState<'code' | 'preview'>('code');
   const prevCodeRef = React.useRef<string>(code);
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const canPreview = language === 'html' || language === 'htm';
+
+  React.useEffect(() => {
+    if (!canPreview && viewMode !== 'code') {
+      setViewMode('code');
+    }
+  }, [canPreview, viewMode]);
 
   // Defer Prism highlighting while code is actively streaming.
   // Initial mount renders highlighted immediately (plays nice with finalized blocks).
@@ -732,46 +761,96 @@ const MarkdownCodeBlock: React.FC<{
     window.setTimeout(() => setCopied(false), 2000);
   }, [code]);
 
+  const handleDownload = React.useCallback(() => {
+    if (!canPreview) {
+      return;
+    }
+
+    const safeSuffix = Date.now().toString(36);
+    downloadTextFile(code, `preview-${safeSuffix}.html`, 'text/html;charset=utf-8');
+  }, [canPreview, code]);
+
   return (
     <div data-component="markdown-code" className="my-4 group overflow-hidden rounded-2xl border border-border/80 bg-[var(--surface-elevated)]">
       <div className="flex items-center justify-between border-b border-border/70 px-3 py-1.5">
         <span className="font-mono text-[13px] text-muted-foreground">{language}</span>
-        <div className="opacity-0 transition-opacity group-hover:opacity-100">
+        <div className="flex items-center gap-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">
+          {canPreview ? (
+            <button
+              type="button"
+              onClick={() => setViewMode((mode) => (mode === 'preview' ? 'code' : 'preview'))}
+              className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
+              title={viewMode === 'preview' ? 'Show code' : 'Preview'}
+              aria-pressed={viewMode === 'preview'}
+              aria-label={viewMode === 'preview' ? 'Show code' : 'Preview HTML'}
+            >
+              {viewMode === 'preview' ? <RiCodeLine className="size-3.5" /> : <RiEyeLine className="size-3.5" />}
+            </button>
+          ) : null}
+          {canPreview ? (
+            <button
+              type="button"
+              onClick={handleDownload}
+              className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
+              title="Download HTML"
+              aria-label="Download HTML"
+            >
+              <RiDownloadLine className="size-3.5" />
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => { void handleCopy(); }}
             className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
             title={copied ? 'Copied' : 'Copy code'}
+            aria-label={copied ? 'Copied' : 'Copy code'}
           >
             {copied ? <RiCheckLine className="size-3.5" /> : <RiFileCopyLine className="size-3.5" />}
           </button>
         </div>
       </div>
-      <div className="px-3 py-2.5">
-        {highlight ? (
-          <SyntaxHighlighter
-            language={language}
-            style={syntaxTheme}
-            customStyle={CODE_SHARED_STYLE}
-            codeTagProps={{ style: CODE_SHARED_STYLE }}
-            PreTag="pre"
-          >
-            {code}
-          </SyntaxHighlighter>
-        ) : (
-          <pre style={CODE_SHARED_STYLE}>
-            <code style={CODE_SHARED_STYLE}>{code}</code>
-          </pre>
-        )}
-      </div>
+      {canPreview && viewMode === 'preview' ? (
+        <div className="h-[320px] md:h-[420px] bg-background">
+          <iframe
+            srcDoc={code}
+            title="HTML preview"
+            className="h-full w-full border-0"
+            sandbox="allow-scripts allow-forms"
+          />
+        </div>
+      ) : (
+        <div className="px-3 py-2.5">
+          {highlight ? (
+            <SyntaxHighlighter
+              language={language}
+              style={syntaxTheme}
+              customStyle={CODE_SHARED_STYLE}
+              codeTagProps={{ style: CODE_SHARED_STYLE }}
+              PreTag="pre"
+            >
+              {code}
+            </SyntaxHighlighter>
+          ) : (
+            <pre style={CODE_SHARED_STYLE}>
+              <code style={CODE_SHARED_STYLE}>{code}</code>
+            </pre>
+          )}
+        </div>
+      )}
     </div>
   );
 };
 
 const buildMarkdownComponents = ({
   syntaxTheme,
+  onPreviewLoopback,
+  previewLabel,
+  previewTitle,
 }: {
   syntaxTheme: { [key: string]: React.CSSProperties };
+  onPreviewLoopback?: (url: string) => void;
+  previewLabel?: string;
+  previewTitle?: string;
 }): Components => ({
   table({ children, ...props }) {
     return <TableWrapper className={props.className}>{children}</TableWrapper>;
@@ -846,15 +925,36 @@ const buildMarkdownComponents = ({
     );
   },
   a({ href, children, ...props }) {
+    const targetHref = href ?? '';
+    const isLoopback = onPreviewLoopback ? isLoopbackHttpUrl(targetHref) : false;
     return (
-      <a
-        {...props}
-        href={href}
-        target={isExternalHttpUrl(href ?? '') ? '_blank' : undefined}
-        rel={isExternalHttpUrl(href ?? '') ? 'noopener noreferrer' : undefined}
-      >
-        {children}
-      </a>
+      <>
+        <a
+          {...props}
+          href={href}
+          target={isExternalHttpUrl(targetHref) ? '_blank' : undefined}
+          rel={isExternalHttpUrl(targetHref) ? 'noopener noreferrer' : undefined}
+        >
+          {children}
+        </a>
+        {isLoopback && onPreviewLoopback ? (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onPreviewLoopback(targetHref);
+            }}
+            className="ml-1 inline-flex h-5 items-center gap-0.5 rounded border border-[var(--border)] bg-[var(--surface-background)] px-1.5 align-middle text-[11px] leading-none text-[var(--muted-foreground)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--foreground)]"
+            aria-label={previewTitle ?? previewLabel ?? 'Open preview pane'}
+            title={previewTitle ?? previewLabel ?? 'Open preview pane'}
+            data-loopback-preview-trigger="true"
+          >
+            <RiEyeLine className="size-3" aria-hidden="true" />
+            <span className="font-medium">{previewLabel ?? 'Preview'}</span>
+          </button>
+        ) : null}
+      </>
     );
   },
 });
@@ -1436,8 +1536,24 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
     preferRuntimeEditor: runtime.isVSCode,
   });
   useExternalLinkInteractions({ containerRef });
+  const openContextPreview = useUIStore((state) => state.openContextPreview);
+  const { t } = useI18n();
+  const handlePreviewLoopback = React.useCallback((url: string) => {
+    if (!effectiveDirectory) return;
+    openContextPreview(effectiveDirectory, url);
+  }, [effectiveDirectory, openContextPreview]);
+  const previewLabel = t('terminalView.preview.open');
+  const previewTitle = t('terminalView.preview.openTitle');
   const syntaxTheme = React.useMemo(() => generateSyntaxTheme(currentTheme), [currentTheme]);
-  const markdownComponents = React.useMemo(() => buildMarkdownComponents({ syntaxTheme }), [syntaxTheme]);
+  const markdownComponents = React.useMemo(
+    () => buildMarkdownComponents({
+      syntaxTheme,
+      onPreviewLoopback: effectiveDirectory ? handlePreviewLoopback : undefined,
+      previewLabel,
+      previewTitle,
+    }),
+    [syntaxTheme, effectiveDirectory, handlePreviewLoopback, previewLabel, previewTitle],
+  );
   const componentKey = `markdown-${part?.id ? `part-${part.id}` : `message-${messageId}`}`;
   const markdownBlocks = useStableMarkdownBlocks(content, isStreaming && !disableStreamAnimation, componentKey);
 

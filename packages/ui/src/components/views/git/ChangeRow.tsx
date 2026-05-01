@@ -101,7 +101,7 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
       onKeyDown={handleKeyDown}
       style={indentPx > 0 ? { paddingLeft: `${indentPx}px` } : undefined}
     >
-        <div onClick={(e) => { e.stopPropagation(); }}>
+        <div className="flex size-5 shrink-0 items-center justify-center" onClick={(e) => { e.stopPropagation(); }}>
           <Checkbox
             size="sm"
             checked={checked}
@@ -124,7 +124,7 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
             return (
               <span
                 className="flex-1 min-w-0 truncate typography-ui-label text-foreground"
-                style={{ direction: 'rtl', textAlign: 'left' }}
+                style={{ direction: 'rtl', textAlign: 'left', unicodeBidi: 'plaintext' }}
                 title={file.path}
               >
                 {file.path}
@@ -137,7 +137,7 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
             <span className="flex-1 min-w-0 flex items-baseline overflow-hidden" title={file.path}>
               <span
                 className="min-w-0 truncate typography-ui-label text-muted-foreground"
-                style={{ direction: 'rtl', textAlign: 'left' }}
+                  style={{ direction: 'rtl', textAlign: 'left', unicodeBidi: 'plaintext' }}
               >
                 {dir}
               </span>
@@ -150,7 +150,7 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
           <span className="text-muted-foreground mx-0.5">/</span>
           <span style={{ color: 'var(--status-error)' }}>-{deletions}</span>
         </span>
-        <Tooltip delayDuration={200}>
+        <Tooltip>
           <TooltipTrigger asChild>
             <button
               type="button"

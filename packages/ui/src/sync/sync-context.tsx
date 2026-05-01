@@ -36,6 +36,7 @@ import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
 import type { PermissionRequest } from "@/types/permission"
 import type { QuestionRequest } from "@/types/question"
 import * as sessionActions from "./session-actions"
+import { mergeMessages } from "./optimistic"
 
 // ---------------------------------------------------------------------------
 // Context
@@ -155,32 +156,6 @@ function haveEquivalentPartSnapshots(left: Part[] | undefined, right: Part[]): b
       return false
     }
     if (partRepairSignature(leftPart) !== partRepairSignature(rightPart)) {
-      return false
-    }
-  }
-
-  return true
-}
-
-function haveEquivalentMessageSnapshots(left: Message[] | undefined, right: Message[]): boolean {
-  if (!left) {
-    return right.length === 0
-  }
-
-  if (left.length !== right.length) {
-    return false
-  }
-
-  for (let index = 0; index < left.length; index += 1) {
-    const leftMessage = left[index]
-    const rightMessage = right[index]
-    if (!leftMessage || !rightMessage) {
-      return false
-    }
-    if (leftMessage.id !== rightMessage.id) {
-      return false
-    }
-    if (syncSnapshotSignature(leftMessage) !== syncSnapshotSignature(rightMessage)) {
       return false
     }
   }
@@ -813,14 +788,15 @@ async function resyncDirectoryAfterReconnect(
         }
       }
 
-      const messagesChanged = !haveEquivalentMessageSnapshots(state.message[sessionId], nextMessages)
+      const mergedMessages = mergeMessages(state.message[sessionId] ?? [], nextMessages)
+      const messagesChanged = mergedMessages !== (state.message[sessionId] ?? [])
       if (!sessionChanged && !messagesChanged && !partsChanged) {
         return state
       }
 
       return {
         ...(sessionChanged ? { session: sessions, sessionTotal } : {}),
-        ...(messagesChanged ? { message: { ...state.message, [sessionId]: nextMessages } } : {}),
+        ...(messagesChanged ? { message: { ...state.message, [sessionId]: mergedMessages } } : {}),
         ...(partsChanged ? { part: nextPartState } : {}),
       }
     })
@@ -2001,10 +1977,14 @@ export function useEnsureSessionMessages(sessionID: string, directory?: string) 
             .sort((a: Part, b: Part) => cmp(a.id, b.id))
         }
 
-        store.setState((state: DirectoryStore) => ({
-          message: { ...state.message, [sessionID]: nextMessages },
-          part: { ...state.part, ...nextPartState },
-        }))
+        store.setState((state: DirectoryStore) => {
+          const currentMessages = state.message[sessionID] ?? []
+          const mergedMessages = mergeMessages(currentMessages, nextMessages)
+          return {
+            message: mergedMessages !== currentMessages ? { ...state.message, [sessionID]: mergedMessages } : state.message,
+            part: { ...state.part, ...nextPartState },
+          }
+        })
       } catch {
         // Transient failure — next navigation or reconnect will retry
       } finally {

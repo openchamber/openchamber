@@ -38,36 +38,47 @@ export const MultiRunWindow: React.FC<MultiRunWindowProps> = ({
       }}
     >
       <Dialog.Portal>
-        <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/50 dark:bg-black/75" />
-        <Dialog.Popup
-          aria-describedby={descriptionId}
+        <Dialog.Backdrop
           className={cn(
-            'fixed z-50 top-[50%] left-[50%] translate-x-[-50%] translate-y-[-50%]',
-            'w-[90vw] max-w-[720px] h-[680px] max-h-[85vh]',
-            'flex flex-col rounded-xl border shadow-none overflow-hidden',
-            'bg-background'
+            'fixed inset-0 z-50 bg-black/50 dark:bg-black/75',
+            'transition-opacity duration-150 ease-out',
+            'data-[starting-style]:opacity-0 data-[ending-style]:opacity-0',
           )}
-        >
-          <div className="absolute right-0.5 top-0.5 z-50">
-            <button
-              type="button"
-              onClick={() => onOpenChange(false)}
-              aria-label={t('multiRun.window.actions.closeAria')}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-md p-0.5 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            >
-              <RiCloseLine className="h-5 w-5" />
-            </button>
-          </div>
-          <Dialog.Description id={descriptionId} className="sr-only">
-            {t('multiRun.window.description')}
-          </Dialog.Description>
-          <MultiRunLauncher
-            initialPrompt={initialPrompt}
-            onCreated={() => onOpenChange(false)}
-            onCancel={() => onOpenChange(false)}
-            isWindowed
-          />
-        </Dialog.Popup>
+        />
+        <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+          <Dialog.Popup
+            aria-describedby={descriptionId}
+            className={cn(
+              'relative pointer-events-auto',
+              'w-[90vw] max-w-[720px] h-[680px] max-h-[85vh]',
+              'flex flex-col rounded-xl border shadow-none overflow-hidden origin-center',
+              'bg-background',
+              'transition-all duration-150 ease-out',
+              'data-[starting-style]:opacity-0 data-[starting-style]:scale-[0.98]',
+              'data-[ending-style]:opacity-0 data-[ending-style]:scale-[0.98]',
+            )}
+          >
+            <div className="absolute right-0.5 top-0.5 z-50">
+              <button
+                type="button"
+                onClick={() => onOpenChange(false)}
+                aria-label={t('multiRun.window.actions.closeAria')}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md p-0.5 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              >
+                <RiCloseLine className="h-5 w-5" />
+              </button>
+            </div>
+            <Dialog.Description id={descriptionId} className="sr-only">
+              {t('multiRun.window.description')}
+            </Dialog.Description>
+            <MultiRunLauncher
+              initialPrompt={initialPrompt}
+              onCreated={() => onOpenChange(false)}
+              onCancel={() => onOpenChange(false)}
+              isWindowed
+            />
+          </Dialog.Popup>
+        </div>
       </Dialog.Portal>
     </Dialog.Root>
   );

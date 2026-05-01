@@ -51,6 +51,7 @@ import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
 import { opencodeClient } from '@/lib/opencode/client';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
+import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { rankBranchesForQuery } from '@/lib/worktrees/branchSearch';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useGitBranches, useGitStore, useGitLoadingBranches } from '@/stores/useGitStore';
@@ -428,10 +429,9 @@ export function NewWorktreeDialog({
     const settingsDefaultModel = configState.settingsDefaultModel;
     if (!settingsDefaultModel) return null;
 
-    const parts = settingsDefaultModel.split('/');
-    if (parts.length !== 2) return null;
-    const [providerID, modelID] = parts;
-    if (!providerID || !modelID) return null;
+    const parsed = parseModelIdentifier(settingsDefaultModel);
+    if (!parsed) return null;
+    const { providerId: providerID, modelId: modelID } = parsed;
 
     const modelMetadata = configState.getModelMetadata(providerID, modelID);
     if (!modelMetadata) return null;
@@ -657,46 +657,39 @@ export function NewWorktreeDialog({
     void loadDefaultSourceBranch();
   }, [branches, projectDirectory, newBranchState.sourceBranch]);
 
-  // Reset state when dialog opens/closes
+  // Reset state on each open. Resetting on close would empty the form during
+  // the close animation, causing visible flicker.
   React.useEffect(() => {
-    if (!open) {
-      setMode('new-branch');
-      setNewBranchState({
-        branchName: '',
-        worktreeName: '',
-        isSyncingWorktreeName: true,
-        sourceBranch: '',
-        linkedIssue: null,
-        linkedPr: null,
-        includePrDiff: false,
-      });
-      setExistingBranchState({
-        selectedBranch: '',
-        worktreeName: '',
-      });
-      setExistingBranchDropdownOpen(false);
-      setSourceBranchDropdownOpen(false);
-      setExistingBranchPickerOpen(false);
-      setSourceBranchPickerOpen(false);
-      setExistingBranchQuery('');
-      setSourceBranchQuery('');
-      setValidation({
-        isValidating: false,
-        branchError: null,
-        worktreeError: null,
-        touched: false,
-      });
-      return;
-    }
-    
-    // Generate unique slug when dialog opens
+    if (!open) return;
+
+    setMode('new-branch');
+    setExistingBranchState({
+      selectedBranch: '',
+      worktreeName: '',
+    });
+    setExistingBranchDropdownOpen(false);
+    setSourceBranchDropdownOpen(false);
+    setExistingBranchPickerOpen(false);
+    setSourceBranchPickerOpen(false);
+    setExistingBranchQuery('');
+    setSourceBranchQuery('');
+    setValidation({
+      isValidating: false,
+      branchError: null,
+      worktreeError: null,
+      touched: false,
+    });
+
     const uniqueSlug = generateUniqueSlug();
-    setNewBranchState(prev => ({
-      ...prev,
+    setNewBranchState({
       branchName: uniqueSlug,
       worktreeName: uniqueSlug,
       isSyncingWorktreeName: true,
-    }));
+      sourceBranch: '',
+      linkedIssue: null,
+      linkedPr: null,
+      includePrDiff: false,
+    });
   }, [open, generateUniqueSlug]);
 
   // Sync worktree name with branch name for new-branch mode
@@ -1593,7 +1586,7 @@ export function NewWorktreeDialog({
                           <RiArrowDownSLine className="h-4 w-4 shrink-0 text-muted-foreground" />
                         </Button>
                       </DropdownMenuTrigger>
-                      <DropdownMenuContent align="start" sideOffset={6} className="w-[320px] p-0 max-h-[min(var(--available-height),24rem)] flex flex-col overflow-hidden" ref={existingBranchDropdownContentRef}>
+                      <DropdownMenuContent align="start" sideOffset={6} portalToBody className="w-[min(42rem,calc(100vw-2rem))] p-0 max-h-[min(var(--available-height),24rem)] flex flex-col overflow-hidden" ref={existingBranchDropdownContentRef}>
                         <Command shouldFilter={false}>
                         <CommandInput
                           placeholder={t('session.newWorktree.searchBranches')}
@@ -1833,7 +1826,7 @@ export function NewWorktreeDialog({
                         <RiArrowDownSLine className="h-4 w-4 shrink-0 text-muted-foreground" />
                       </Button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start" className="w-[320px] p-0" ref={sourceBranchDropdownContentRef}>
+                    <DropdownMenuContent align="start" portalToBody className="w-[min(42rem,calc(100vw-2rem))] p-0 max-h-[min(var(--available-height),24rem)] flex flex-col overflow-hidden" ref={sourceBranchDropdownContentRef}>
                       <Command shouldFilter={false}>
                         <CommandInput
                           placeholder={t('session.newWorktree.searchBranches')}

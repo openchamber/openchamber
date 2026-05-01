@@ -597,6 +597,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const openFiles = React.useMemo(() => openPaths.map(toFileNode), [openPaths, toFileNode]);
   const effectiveSelectedPath = React.useMemo(() => selectedPath ?? openPaths[0] ?? null, [openPaths, selectedPath]);
   const selectedFile = React.useMemo(() => (effectiveSelectedPath ? toFileNode(effectiveSelectedPath) : null), [effectiveSelectedPath, toFileNode]);
+  const selectedFilePath = selectedFile?.path ?? '';
+  const selectedFileIsOutsideWorkspace = Boolean(root && selectedFilePath && !isPathWithinRoot(selectedFilePath, root));
+  const selectedFileReadOptions = React.useMemo(
+    () => ({ allowOutsideWorkspace: mode === 'editor-only' && selectedFileIsOutsideWorkspace }),
+    [mode, selectedFileIsOutsideWorkspace],
+  );
 
   // Editor tabs horizontal scroll fades
   const editorTabsScrollRef = React.useRef<HTMLDivElement>(null);
@@ -1217,13 +1223,23 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     };
   }, [currentDirectory, debouncedSearchQuery, searchFiles, showHidden, showGitignored]);
 
-  const readFile = React.useCallback(async (path: string): Promise<string> => {
+  const readFile = React.useCallback(async (path: string, options?: { allowOutsideWorkspace?: boolean; optional?: boolean }): Promise<string> => {
     if (files.readFile) {
-      const result = await files.readFile(path);
+      const result = await files.readFile(path, options);
       return result.content ?? '';
     }
 
-    const response = await fetch(`/api/fs/read?path=${encodeURIComponent(path)}`);
+    const params = new URLSearchParams({ path });
+    if (options?.allowOutsideWorkspace) {
+      params.set('allowOutsideWorkspace', 'true');
+    }
+    if (options?.optional) {
+      params.set('optional', 'true');
+    }
+    const response = await fetch(`/api/fs/read?${params.toString()}`, {
+      // Avoid conditional requests (304 + empty body).
+      cache: options?.optional ? 'no-store' : 'default',
+    });
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: response.statusText }));
       throw new Error((error as { error?: string }).error || t('filesView.error.readFileFailed'));
@@ -1231,9 +1247,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     return response.text();
   }, [files, t]);
 
-  const readFileStat = React.useCallback(async (path: string): Promise<FileStatSnapshot | null> => {
+  const readFileStat = React.useCallback(async (path: string, options?: { allowOutsideWorkspace?: boolean }): Promise<FileStatSnapshot | null> => {
     if (files.statFile) {
-      const result = await files.statFile(path);
+      const result = await files.statFile(path, options);
       return {
         path: result.path,
         size: result.size,
@@ -1402,14 +1418,16 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
     setFileLoading(true);
 
-    await readFile(node.path)
+    const readOptions = { allowOutsideWorkspace: mode === 'editor-only' && Boolean(root) && !isPathWithinRoot(node.path, root) };
+
+    await readFile(node.path, readOptions)
       .then((content) => {
         setFileContent(content);
         setDraftContent(content.length > MAX_VIEW_CHARS
           ? `${content.slice(0, MAX_VIEW_CHARS)}\n\n… truncated …`
           : content);
         setLoadedFilePath(node.path);
-        void readFileStat(node.path)
+        void readFileStat(node.path, readOptions)
           .then((stat) => {
             if (stat) {
               lastLoadedFileStatRef.current = stat;
@@ -1455,7 +1473,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       .finally(() => {
         setFileLoading(false);
       });
-  }, [expandPaths, isMobile, loadDirectory, readFile, readFileStat, root, runtime.isDesktop, searchQuery, setSelectedPath, t]);
+  }, [expandPaths, isMobile, loadDirectory, mode, readFile, readFileStat, root, runtime.isDesktop, searchQuery, setSelectedPath, t]);
 
   const ensurePathVisible = React.useCallback(async (targetPath: string, includeTarget: boolean) => {
     if (!root) {
@@ -1549,7 +1567,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         return;
       }
 
-      void readFileStat(selectedFile.path)
+      void readFileStat(selectedFile.path, selectedFileReadOptions)
         .then((latestStat) => {
           if (cancelled || !latestStat) {
             return;
@@ -1585,7 +1603,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [loadedFilePath, readFileStat, selectedFile?.path]);
+  }, [loadedFilePath, readFileStat, selectedFile?.path, selectedFileReadOptions]);
 
   const discardAndContinue = React.useCallback(() => {
     const nextFile = pendingSelectFileRef.current;
@@ -1820,7 +1838,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
   const isSelectedImage = Boolean(selectedFile?.path && isImageFile(selectedFile.path));
   const isSelectedSvg = Boolean(selectedFile?.path && selectedFile.path.toLowerCase().endsWith('.svg'));
-  const selectedFilePath = selectedFile?.path ?? '';
   const pendingNavigationTargetPath = React.useMemo(
     () => normalizePath(pendingFileNavigation?.path ?? ''),
     [pendingFileNavigation?.path],
@@ -1841,7 +1858,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
   const canCopy = Boolean(selectedFile && (!isSelectedImage || isSelectedSvg) && fileContent.length > 0);
   const canCopyPath = Boolean(selectedFile && displaySelectedPath.length > 0);
-  const canEdit = Boolean(selectedFile && !isSelectedImage && files.writeFile && fileContent.length <= MAX_VIEW_CHARS);
+  const canEdit = Boolean(selectedFile && !selectedFileIsOutsideWorkspace && !isSelectedImage && files.writeFile && fileContent.length <= MAX_VIEW_CHARS);
   const isMarkdown = Boolean(selectedFile?.path && isMarkdownFile(selectedFile.path));
   const isJson = Boolean(selectedFile?.path && isJsonFile(selectedFile.path));
   const isHtml = Boolean(selectedFile?.path && isHtmlFile(selectedFile.path));
@@ -2301,7 +2318,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         : desktopImageSrc)
       : (isSelectedSvg
         ? `data:${getImageMimeType(selectedFile.path)};utf8,${encodeURIComponent(fileContent)}`
-        : `/api/fs/raw?path=${encodeURIComponent(selectedFile.path)}`))
+        : `/api/fs/raw?${new URLSearchParams({
+          path: selectedFile.path,
+          ...(selectedFileReadOptions.allowOutsideWorkspace ? { allowOutsideWorkspace: 'true' } : {}),
+        }).toString()}`))
     : '';
 
 
@@ -2319,7 +2339,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       setFileError(null);
 
       const srcPromise = files.readFileBinary
-        ? files.readFileBinary(selectedFile.path).then((result) => result.dataUrl)
+        ? files.readFileBinary(selectedFile.path, selectedFileReadOptions).then((result) => result.dataUrl)
         : Promise.resolve(convertFileSrc(selectedFile.path, 'asset'));
 
       await srcPromise
@@ -2348,7 +2368,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     return () => {
       cancelled = true;
     };
-  }, [files, isSelectedImage, isSelectedSvg, runtime.isDesktop, selectedFile?.path, t]);
+  }, [files, isSelectedImage, isSelectedSvg, runtime.isDesktop, selectedFile?.path, selectedFileReadOptions, t]);
 
   const renderDialogs = () => (
     <Dialog open={!!activeDialog} onOpenChange={(open) => !open && setActiveDialog(null)}>
@@ -3004,6 +3024,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                 <CodeMirrorEditor
                   value={draftContent}
                   onChange={setDraftContent}
+                  readOnly={!canEdit}
                   extensions={editorExtensions}
                   className="h-full"
                   blockWidgets={blockWidgets}
@@ -3268,6 +3289,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
               <CodeMirrorEditor
                 value={draftContent}
                 onChange={setDraftContent}
+                readOnly={!canEdit}
                 extensions={editorExtensions}
                 className="h-full"
                 onViewReady={(view) => {

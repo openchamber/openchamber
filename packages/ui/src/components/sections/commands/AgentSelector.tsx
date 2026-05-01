@@ -10,10 +10,11 @@ import { useAgentsStore, filterVisibleAgents } from '@/stores/useAgentsStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDeviceInfo } from '@/lib/device';
-import { RiArrowDownSLine, RiRobot2Line } from '@remixicon/react';
+import { RiArrowDownSLine, RiLoader4Line, RiRobot2Line } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { useI18n } from '@/lib/i18n';
+import { useOpenCodeReadiness } from '@/hooks/useOpenCodeReadiness';
 
 interface AgentSelectorProps {
     agentName: string;
@@ -29,6 +30,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
     filter,
 }) => {
     const { t } = useI18n();
+    const { isReady, isUnavailable } = useOpenCodeReadiness();
     const configAgents = useConfigStore((state) => state.agents);
     const agentsStoreAgents = useAgentsStore((state) => state.agents);
     const loadAgentsStore = useAgentsStore((state) => state.loadAgents);
@@ -125,20 +127,41 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
             {isActuallyMobile ? (
                 <button
                     type="button"
-                    onClick={() => setIsMobilePanelOpen(true)}
+                    onClick={isReady ? () => setIsMobilePanelOpen(true) : undefined}
+                    disabled={!isReady}
                     className={cn(
                         'flex w-full items-center justify-between gap-2 rounded-lg border border-border/40 bg-background/95 px-2 py-1.5 text-left',
+                        !isReady && 'opacity-60 cursor-not-allowed',
                         className
                     )}
                 >
                     <div className="flex items-center gap-2">
-                        <RiRobot2Line className="h-3.5 w-3.5 text-muted-foreground" />
-                        <span className="typography-meta font-medium text-foreground">
-                            {agentName || t('settings.commands.agentSelector.selectAgentPlaceholder')}
-                        </span>
+                        {!isReady ? (
+                            <>
+                                <RiLoader4Line className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                                <span className="typography-meta text-muted-foreground">{isUnavailable ? t('common.unavailable') : t('common.loading')}</span>
+                            </>
+                        ) : (
+                            <>
+                                <RiRobot2Line className="h-3.5 w-3.5 text-muted-foreground" />
+                                <span className="typography-meta font-medium text-foreground">
+                                    {agentName || t('settings.commands.agentSelector.selectAgentPlaceholder')}
+                                </span>
+                            </>
+                        )}
                     </div>
                     <RiArrowDownSLine className="h-3 w-3 text-muted-foreground" />
                 </button>
+            ) : !isReady ? (
+                <div className={cn(
+                    'flex items-center gap-2 px-2 rounded-lg bg-interactive-selection/20 border border-border/20 h-6 w-fit opacity-60',
+                    className
+                )}>
+                    <RiLoader4Line className="h-3 w-3 animate-spin text-muted-foreground flex-shrink-0" />
+                    <span className="typography-micro font-medium whitespace-nowrap text-muted-foreground">
+                        {isUnavailable ? t('common.unavailable') : t('common.loading')}
+                    </span>
+                </div>
             ) : (
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>

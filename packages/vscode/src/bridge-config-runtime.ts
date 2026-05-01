@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import {
   createAgent,
@@ -54,6 +56,9 @@ type ConfigRuntimeDeps = {
   fetchOpenCodeSkillsFromApi: (ctx: BridgeContext | undefined, workingDirectory?: string) => Promise<DiscoveredSkill[] | null>;
   clientReloadDelayMs: number;
 };
+
+const AGENTS_MD_PATH = path.join(os.homedir(), '.config', 'opencode', 'AGENTS.md');
+const MAX_BEHAVIOR_PROMPT_SIZE = 1024 * 1024;
 
 const resolveWorkingDirectory = (ctx: BridgeContext | undefined, directory?: string): string | undefined => (
   (typeof directory === 'string' && directory.trim())
@@ -142,6 +147,30 @@ export async function handleConfigBridgeMessage(
       const changes = (payload as Record<string, unknown>) || {};
       const updated = await deps.persistSettings(changes, ctx);
       return { id, type, success: true, data: updated };
+    }
+
+    case 'api:behavior/agents-md:get': {
+      try {
+        const content = await fs.promises.readFile(AGENTS_MD_PATH, 'utf8');
+        return { id, type, success: true, data: { content, exists: true } };
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
+          return { id, type, success: true, data: { content: '', exists: false } };
+        }
+        throw error;
+      }
+    }
+
+    case 'api:behavior/agents-md:save': {
+      const request = (payload || {}) as { content?: unknown };
+      const content = typeof request.content === 'string' ? request.content : '';
+      if (content.length > MAX_BEHAVIOR_PROMPT_SIZE) {
+        return { id, type, success: false, error: `Content exceeds maximum size of ${MAX_BEHAVIOR_PROMPT_SIZE} bytes` };
+      }
+      await fs.promises.mkdir(path.dirname(AGENTS_MD_PATH), { recursive: true });
+      await fs.promises.writeFile(AGENTS_MD_PATH, content, 'utf8');
+      await ctx?.manager?.restart();
+      return { id, type, success: true, data: { success: true } };
     }
 
     case 'api:magic-prompts:get': {

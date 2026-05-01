@@ -71,6 +71,8 @@ const DialogOverlay = React.forwardRef<
       data-slot="dialog-overlay"
       className={cn(
         "fixed inset-0 z-50 bg-black/50 dark:bg-black/75",
+        "transition-opacity duration-150 ease-out",
+        "data-[starting-style]:opacity-0 data-[ending-style]:opacity-0",
         className
       )}
       {...props}
@@ -101,15 +103,19 @@ function DialogContent({
   return (
     <DialogPortal>
       <DialogOverlay className="rounded-none" />
-      <BaseDialog.Popup
-        data-slot="dialog-content"
-        data-state-slot="dialog"
-        className={cn(
-          "bg-background text-foreground fixed top-[50%] left-[50%] z-50 flex flex-col w-full max-w-lg max-h-[calc(100dvh-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-xl border p-6 shadow-none overflow-y-auto pwa-dialog-content",
-          className
-        )}
-        {...props}
-      >
+      <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none p-4">
+        <BaseDialog.Popup
+          data-slot="dialog-content"
+          data-state-slot="dialog"
+          className={cn(
+            "relative pointer-events-auto bg-background text-foreground flex flex-col w-full max-w-lg max-h-full gap-4 rounded-xl border p-6 shadow-none overflow-y-auto pwa-dialog-content origin-center",
+            "transition-all duration-150 ease-out",
+            "data-[starting-style]:opacity-0 data-[starting-style]:scale-[0.98]",
+            "data-[ending-style]:opacity-0 data-[ending-style]:scale-[0.98]",
+            className
+          )}
+          {...props}
+        >
         {children}
         {showCloseButton && (
           <BaseDialog.Close
@@ -120,7 +126,8 @@ function DialogContent({
             <span className="sr-only">{t('dialog.common.actions.close')}</span>
           </BaseDialog.Close>
         )}
-      </BaseDialog.Popup>
+        </BaseDialog.Popup>
+      </div>
     </DialogPortal>
   )
 }

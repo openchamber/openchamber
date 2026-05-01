@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Preview: added an embedded dev-server Preview pane for loopback apps, with authenticated proxying, Vite/HMR support, same-origin API request handling, and safer local dev-server shutdown so apps can run inside OpenChamber more like they do in the browser (thanks to @wpbiggs).
+- Preview: added preview console capture, DOM element inspection, annotation context, and Electron screenshot attachments so UI feedback can be sent to the assistant with richer context.
+- Projects/Terminal: added Auto-discover for local dev servers, background terminal startup, action-linked Preview reopen controls, and cleaner terminal tab styling for a smoother Project Actions workflow (thanks to @wpbiggs).
+- GitHub: improved fork-aware issue and pull-request listing, PR status handling, and startup loading feedback so GitHub-backed workspaces are easier to open and track (thanks to @corrm).
+- Chat/UI: added a wide layout option and softened aborted-turn wording so chat can be tuned for roomier review workflows with less alarming interruption messages.
+- UI/Settings: centered empty states more consistently and fixed terminal toolbar overlap, improving polish in settings and docked terminal layouts (thanks to @Yabuku-xD).
+- Reliability/Streaming: reconnects now recover immediately after OS wake-from-sleep, reducing stale chat/session state after a machine resumes (thanks to @jwcrystal).
+
+## [1.9.10] - 2026-04-28
+
+- UI/Localization: added Korean interface translations and default new installs back to English when no language has been chosen (thanks to @An-jinu).
+- Chat/Models: unified the model picker across desktop and mobile with a cleaner, more consistent selection flow (thanks to @daveotero).
+- Projects: improved the project directory picker with expandable pinned folders and better file/path handling for faster project selection.
+- Chat/UI: improved split-response action placement, error-message alignment, tab close affordances, and overscroll behavior for a more polished conversation view.
+- Sessions/Sidebar: fixed stale session, folder, project, and worktree state after mutations, and polished pinned-session indicators so navigation stays accurate (thanks to @corrm, @Yabuku-xD).
+- VSCode/Windows: normalized Windows drive-letter paths in extension webviews and added MiniMax/Ollama quota support, improving file handling and usage visibility in the extension (thanks to @sdunfeng).
+- Reliability/Startup: hardened managed OpenCode startup, preserved shell PATH more reliably, ignored stale downgrade update prompts, and improved stream/proxy recovery with heartbeat support.
+
 ## [1.9.9] - 2026-04-26
 
 - UI/Localization: added a localization foundation with translated interface strings for Spanish, Brazilian Portuguese, Ukrainian, and Simplified Chinese.

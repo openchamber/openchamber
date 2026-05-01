@@ -35,6 +35,8 @@ import {
   createGlobalUiEventBroadcaster,
   createGlobalMessageStreamHub,
   createMessageStreamWsRuntime,
+  DEFAULT_UPSTREAM_STALL_TIMEOUT_MS,
+  UPSTREAM_STALL_TIMEOUT_CONCURRENT_MS,
 } from './lib/event-stream/index.js';
 import { createFsSearchRuntime as createFsSearchRuntimeFactory } from './lib/fs/search.js';
 import { createOpenCodeLifecycleRuntime } from './lib/opencode/lifecycle.js';
@@ -74,6 +76,8 @@ import { createPushRuntime } from './lib/notifications/push-runtime.js';
 import { createNotificationTemplateRuntime } from './lib/notifications/template-runtime.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
 import { createProjectConfigRuntime } from './lib/projects/project-config.js';
+import { createPreviewProxyRuntime } from './lib/preview/proxy-runtime.js';
+import { createProxyMiddleware, responseInterceptor } from 'http-proxy-middleware';
 import webPush from 'web-push';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -379,6 +383,17 @@ const sessionRuntime = createSessionRuntime({
   broadcastEvent: broadcastGlobalUiEvent,
 });
 
+const getActiveSessionCount = () => {
+  const snapshot = sessionRuntime.getSessionActivitySnapshot();
+  return Object.values(snapshot).filter((entry) => entry.type === 'busy').length;
+};
+
+const getUpstreamStallTimeoutMs = () => (
+  getActiveSessionCount() > 1
+    ? UPSTREAM_STALL_TIMEOUT_CONCURRENT_MS
+    : DEFAULT_UPSTREAM_STALL_TIMEOUT_MS
+);
+
 const projectConfigRuntime = createProjectConfigRuntime({
   fsPromises,
   path,
@@ -406,6 +421,7 @@ let openCodeApiPrefix = '';
 let openCodeApiPrefixDetected = true;
 let openCodeApiDetectionTimer = null;
 let lastOpenCodeError = null;
+let lastOpenCodeLaunchDiagnostics = null;
 let isOpenCodeReady = false;
 let openCodeNotReadySince = 0;
 let isExternalOpenCode = false;
@@ -652,6 +668,7 @@ const setAutoAcceptSession = (...args) => notificationTriggerRuntime.setAutoAcce
 const globalMessageStreamHub = createGlobalMessageStreamHub({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
+  upstreamStallTimeoutMs: getUpstreamStallTimeoutMs,
 });
 
 const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
@@ -836,6 +853,7 @@ Object.defineProperties(openCodeLifecycleState, {
   openCodeApiPrefixDetected: { get: () => openCodeApiPrefixDetected, set: (value) => { openCodeApiPrefixDetected = value; } },
   openCodeApiDetectionTimer: { get: () => openCodeApiDetectionTimer, set: (value) => { openCodeApiDetectionTimer = value; } },
   lastOpenCodeError: { get: () => lastOpenCodeError, set: (value) => { lastOpenCodeError = value; } },
+  lastOpenCodeLaunchDiagnostics: { get: () => lastOpenCodeLaunchDiagnostics, set: (value) => { lastOpenCodeLaunchDiagnostics = value; } },
   isOpenCodeReady: { get: () => isOpenCodeReady, set: (value) => { isOpenCodeReady = value; } },
   openCodeNotReadySince: { get: () => openCodeNotReadySince, set: (value) => { openCodeNotReadySince = value; } },
   isExternalOpenCode: { get: () => isExternalOpenCode, set: (value) => { isExternalOpenCode = value; } },
@@ -876,6 +894,8 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   clearResolvedOpenCodeBinary,
   buildAugmentedPath,
   buildManagedOpenCodePath,
+  getManagedOpenCodeShellEnvSnapshot: getLoginShellEnvSnapshot,
+  getActiveSessionCount,
 });
 
 const restartOpenCode = (...args) => openCodeLifecycleRuntime.restartOpenCode(...args);
@@ -1065,6 +1085,7 @@ async function main(options = {}) {
         openCodeApiPrefixDetected: true,
         isOpenCodeReady,
         lastOpenCodeError,
+        lastOpenCodeLaunchDiagnostics,
         opencodeBinaryResolved: resolvedOpencodeBinary || null,
         opencodeBinarySource: resolvedOpencodeBinarySource || null,
         opencodeLaunchBinary: launchSpec?.binary || null,
@@ -1151,6 +1172,20 @@ async function main(options = {}) {
     writeSseEvent,
   });
 
+  const previewProxyRuntime = createPreviewProxyRuntime({
+    crypto,
+    URL,
+    createProxyMiddleware,
+    responseInterceptor,
+  });
+  previewProxyRuntime.attach(app, {
+    server,
+    express,
+    uiAuthController,
+    isRequestOriginAllowed,
+    rejectWebSocketUpgrade,
+  });
+
   const startupPipelineResult = await startupPipelineRuntime.run({
     app,
     server,
@@ -1168,6 +1203,7 @@ async function main(options = {}) {
     globalEventHub: globalMessageStreamHub,
     processForwardedEventPayload,
     messageStreamWsClients: uiNotificationWsClients,
+    upstreamStallTimeoutMs: getUpstreamStallTimeoutMs,
     terminalHeartbeatIntervalMs: TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS,
     terminalRebindWindowMs: TERMINAL_INPUT_WS_REBIND_WINDOW_MS,
     terminalMaxRebindsPerWindow: TERMINAL_INPUT_WS_MAX_REBINDS_PER_WINDOW,
@@ -1213,6 +1249,12 @@ async function main(options = {}) {
     getPort: () => tunnelRuntimeContext.getActivePort(),
     getOpenCodePort: () => openCodePort,
     getTunnelUrl: () => tunnelService.getPublicUrl(),
+    getQuitRiskStatus: () => ({
+      tunnel: {
+        active: Boolean(tunnelService.getPublicUrl()),
+      },
+      scheduledTasks: scheduledTasksRuntime.getStatus(),
+    }),
     isReady: () => isOpenCodeReady,
     restartOpenCode: () => restartOpenCode(),
     stop: (shutdownOptions = {}) =>

@@ -4,7 +4,9 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Radio } from '@/components/ui/radio';
 
 import { cn } from '@/lib/utils';
+import { isIMECompositionEvent } from '@/lib/ime';
 import type { QuestionRequest } from '@/types/question';
+import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessions } from '@/sync/sync-context';
 import * as sessionActions from '@/sync/session-actions';
@@ -21,6 +23,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
   const { t } = useI18n();
   const respondToQuestion = sessionActions.respondToQuestion;
     const rejectQuestion = sessionActions.rejectQuestion;;
+  const isMobile = useUIStore((state) => state.isMobile);
   const sessions = useSessions();
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const isFromSubagent = React.useMemo(() => {
@@ -174,6 +177,22 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
       setIsResponding(false);
     }
   }, [buildAnswersPayload, question.id, question.sessionID, requiredSatisfied, respondToQuestion]);
+
+  const handleKeyDown = React.useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (isIMECompositionEvent(e)) return;
+
+      if (e.key === 'Enter' && !e.shiftKey && (!isMobile || e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        if (requiredSatisfied) {
+          handleConfirm();
+        } else {
+          handleNextUnanswered();
+        }
+      }
+    },
+    [handleConfirm, handleNextUnanswered, isMobile, requiredSatisfied]
+  );
 
   const handleDismiss = React.useCallback(async () => {
     setIsResponding(true);
@@ -385,6 +404,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
                         placeholder={t('chat.questionCard.yourAnswer')}
                         disabled={isResponding}
                         rows={2}
+                        onKeyDown={handleKeyDown}
                         className="w-full bg-transparent border border-border/30 focus:border-primary rounded px-2 py-1 outline-none typography-meta text-foreground placeholder:text-muted-foreground/50 transition-colors resize-none overflow-hidden"
                         autoFocus
                       />

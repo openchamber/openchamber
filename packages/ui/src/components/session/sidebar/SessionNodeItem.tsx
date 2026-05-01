@@ -494,19 +494,17 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           title={t('sessions.sidebar.session.status.unread')}
         />
       );
-  const inlineStatusMarker = !isMinimalMode && showStatusMarker ? (
-    <span className="inline-flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center">
-      {statusMarkerContent}
-    </span>
-  ) : null;
-  const minimalLeadingStatusMarker = isMinimalMode && showStatusMarker ? (
+  const leadingIndicators = showStatusMarker || isPinnedSession ? (
     <span
       className={cn(
-        'pointer-events-none absolute left-[-10px] top-1/2 inline-flex h-3.5 w-3.5 -translate-y-1/2 items-center justify-center transition-opacity',
+        'pointer-events-none absolute inline-flex h-3.5 items-center justify-center gap-0.5 transition-opacity',
+        isMinimalMode ? 'top-1/2 -translate-y-1/2' : 'top-[14.5px] -translate-y-1/2',
+        showStatusMarker && isPinnedSession ? 'left-[-18px] w-6' : 'left-[-10px] w-3.5',
         hasChildren ? 'opacity-100 group-hover:opacity-0 group-focus-within:opacity-0' : '',
       )}
     >
-      {statusMarkerContent}
+      {showStatusMarker ? statusMarkerContent : null}
+      {isPinnedSession ? <RiPushpinLine className="h-3 w-3 flex-shrink-0 text-primary" aria-label={t('sessions.sidebar.session.status.pinned')} /> : null}
     </span>
   ) : null;
   const subsessionChevron = hasChildren ? (
@@ -525,7 +523,8 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
         }
       }}
       className={cn(
-        'absolute left-[-10px] top-1/2 inline-flex h-3.5 w-3.5 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
+        'absolute left-[-10px] inline-flex h-3.5 w-3.5 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
+        isMinimalMode ? 'top-1/2 -translate-y-1/2' : 'top-[14.5px] -translate-y-1/2',
         isMinimalMode && showStatusMarker
           ? 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto'
           : '',
@@ -721,7 +720,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
             isRowSelected && 'bg-primary/15',
           )}
         >
-          {minimalLeadingStatusMarker}
+          {leadingIndicators}
           {subsessionChevron}
           <div className="flex min-w-0 flex-1 items-center">
             {isMinimalMode ? (
@@ -748,7 +747,6 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                     )}
                   >
                     <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isMinimalMode ? 'gap-1' : 'gap-1')}>
-                      {isPinnedSession ? <RiPushpinLine className="h-3 w-3 flex-shrink-0 text-primary" aria-label={t('sessions.sidebar.session.status.pinned')} /> : null}
                       <div className={cn('block min-w-0 flex-1 truncate typography-ui-label font-normal', isActive ? 'text-primary' : 'text-foreground')}>{renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}</div>
                       {mobileVariant ? <span className="ml-2 flex-shrink-0 text-[0.72rem] text-muted-foreground/75">{sessionCompactUpdatedLabel}</span> : null}
                       {!mobileVariant ? (
@@ -813,8 +811,6 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                 )}
               >
                 <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isMinimalMode ? 'gap-1' : 'gap-1')}>
-                    {inlineStatusMarker}
-                    {isPinnedSession ? <RiPushpinLine className="h-3 w-3 flex-shrink-0 text-primary" aria-label={t('sessions.sidebar.session.status.pinned')} /> : null}
                     <div className={cn('block min-w-0 flex-1 truncate typography-ui-label font-normal', isActive ? 'text-primary' : 'text-foreground')}>{renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}</div>
                     {pendingPermissionCount > 0 ? (
                       <span className="inline-flex items-center gap-1 rounded bg-destructive/10 px-1 py-0.5 text-[0.7rem] text-destructive flex-shrink-0" title={t('sessions.sidebar.session.status.permissionRequired')} aria-label={t('sessions.sidebar.session.status.permissionRequired')}>

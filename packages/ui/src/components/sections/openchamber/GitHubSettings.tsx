@@ -244,7 +244,7 @@ export const GitHubSettings: React.FC = () => {
       <div className="mb-3 px-1 flex items-start justify-between gap-4">
         <div className="flex items-center gap-2">
           <h3 className="typography-ui-header font-semibold text-foreground">GitHub</h3>
-          <Tooltip delayDuration={1000}>
+          <Tooltip>
             <TooltipTrigger asChild>
               <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
             </TooltipTrigger>

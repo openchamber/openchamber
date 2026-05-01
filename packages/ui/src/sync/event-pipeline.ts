@@ -20,6 +20,8 @@ export type QueuedEvent = {
 export type FlushHandler = (events: QueuedEvent[]) => void
 
 const FLUSH_FRAME_MS = 33
+const BACKPRESSURE_FLUSH_FRAME_MS = 200
+const BACKPRESSURE_MODE_MS = 10_000
 const STREAM_YIELD_MS = 8
 const DEFAULT_RECONNECT_DELAY_MS = 250
 const DEFAULT_HEARTBEAT_TIMEOUT_MS = 30_000
@@ -44,7 +46,7 @@ export type EventPipelineInput = {
 }
 
 type MessageStreamWsFrame = {
-  type: "ready" | "event" | "error"
+  type: "ready" | "event" | "error" | "backpressure"
   payload?: unknown
   eventId?: string
   directory?: string
@@ -152,6 +154,8 @@ type AttemptAbortReason =
   | "pipeline_stopped"
   | "ws_heartbeat_timeout"
   | "sse_heartbeat_timeout"
+  | "ws_system_resume"
+  | "sse_system_resume"
   | null
 
 export function createEventPipeline(input: EventPipelineInput) {
@@ -252,7 +256,8 @@ export function createEventPipeline(input: EventPipelineInput) {
     const d = getOrCreateDir(directory)
     if (d.timer) return
     const elapsed = Date.now() - d.last
-    d.timer = setTimeout(() => flushDir(directory), Math.max(0, FLUSH_FRAME_MS - elapsed))
+    const flushFrameMs = Date.now() < backpressureUntil ? BACKPRESSURE_FLUSH_FRAME_MS : FLUSH_FRAME_MS
+    d.timer = setTimeout(() => flushDir(directory), Math.max(0, flushFrameMs - elapsed))
   }
 
   const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
@@ -266,6 +271,8 @@ export function createEventPipeline(input: EventPipelineInput) {
   let heartbeat: ReturnType<typeof setTimeout> | undefined
   let activeTransport: "ws" | "sse" = transport === "ws" ? "ws" : "sse"
   let attemptAbortReason: AttemptAbortReason = null
+  let consecutiveFailures = 0
+  let backpressureUntil = 0
 
   const notifyDisconnected = (reason: string) => {
     if (disconnected) {
@@ -277,6 +284,7 @@ export function createEventPipeline(input: EventPipelineInput) {
 
   const markConnected = () => {
     disconnected = false
+    consecutiveFailures = 0
     // Fire onReconnect on every successful connect — including the very
     // first one. Consumer state (isConnected) starts at false and needs
     // to be flipped positively; without this the send button throws
@@ -380,9 +388,10 @@ export function createEventPipeline(input: EventPipelineInput) {
     await new Promise<void>((resolve, reject) => {
       let settled = false
       let opened = false
+      let readyAt = 0
       const socket = new WebSocket(buildGlobalEventWsUrl(lastEventId))
-      const setFallbackCode = (error: Error) => {
-        if (!opened && transport === "auto") {
+      const setFallbackCode = (error: Error, force = false) => {
+        if ((force || !opened) && transport === "auto") {
           wsFallbackUntil = Date.now() + WS_FALLBACK_WINDOW_MS
           ;(error as Error & { code?: string }).code = "WS_FALLBACK"
         }
@@ -439,7 +448,8 @@ export function createEventPipeline(input: EventPipelineInput) {
       signal.addEventListener("abort", handleAbort, { once: true })
 
       socket.onopen = () => {
-        streamErrorLogged = false
+        // Don't clear streamErrorLogged here. If the socket immediately closes
+        // before sending the ready frame, clearing would cause log spam.
       }
 
       socket.onmessage = (messageEvent) => {
@@ -460,10 +470,12 @@ export function createEventPipeline(input: EventPipelineInput) {
 
         if (frame.type === "ready") {
           opened = true
+          readyAt = Date.now()
           if (readyTimer) {
             clearTimeout(readyTimer)
             readyTimer = undefined
           }
+          streamErrorLogged = false
           markConnected()
           return
         }
@@ -478,6 +490,11 @@ export function createEventPipeline(input: EventPipelineInput) {
           } catch {
             // ignore
           }
+          return
+        }
+
+        if (frame.type === "backpressure") {
+          backpressureUntil = Date.now() + BACKPRESSURE_MODE_MS
           return
         }
 
@@ -515,7 +532,12 @@ export function createEventPipeline(input: EventPipelineInput) {
         ;(error as Error & { reason?: string }).reason = opened
           ? `ws_closed:code=${event?.code ?? "?"}`
           : "ws_closed_before_ready"
-        setFallbackCode(error)
+
+        // If the WS stream connects (ready) but then drops quickly, prefer SSE for a while.
+        // This avoids tight reconnect loops with repeated console spam.
+        const livedMs = readyAt > 0 ? Date.now() - readyAt : 0
+        const unstableAfterReady = opened && livedMs > 0 && livedMs < 2_000
+        setFallbackCode(error, unstableAfterReady)
         settleReject(error)
       }
     })
@@ -565,6 +587,7 @@ export function createEventPipeline(input: EventPipelineInput) {
           // a full directory resync.
           onTransportSwitch?.()
         } else if (!isAbortError(error)) {
+          consecutiveFailures += 1
           if (!streamErrorLogged) {
             streamErrorLogged = true
             console.error("[event-pipeline] stream failed", error)
@@ -585,6 +608,10 @@ export function createEventPipeline(input: EventPipelineInput) {
               ? `${currentTransport}_error:${message.slice(0, 80)}`
               : `${currentTransport}_error:unknown`
           notifyDisconnected(reason)
+
+          // Backoff so a hard-down server doesn't spin the browser event loop.
+          // Cap at 5s; reset occurs in markConnected().
+          retryDelayMs = Math.min(5_000, Math.max(retryDelayMs, 250) * (consecutiveFailures <= 1 ? 1 : 2))
         }
       } finally {
         abort.signal.removeEventListener("abort", onAbort)
@@ -616,15 +643,32 @@ export function createEventPipeline(input: EventPipelineInput) {
     attempt?.abort()
   }
 
+  // OS wake-from-sleep (Electron powerMonitor.resume). The SSE connection
+  // is almost certainly dead after sleep — abort immediately so the
+  // reconnect loop fires on the next tick with retryDelayMs = 0.
+  const onSystemResume = () => {
+    attemptAbortReason = `${activeTransport}_system_resume`
+    attempt?.abort()
+  }
+
   if (typeof document !== "undefined") {
     document.addEventListener("visibilitychange", onVisibility)
     window.addEventListener("pageshow", onPageShow)
+  }
+
+  // Use globalThis (not window) for the system-resume listener so that
+  // test environments can replace globalThis.window with a stub.
+  if (typeof globalThis.window !== "undefined") {
+    globalThis.window.addEventListener("openchamber:system-resume", onSystemResume)
   }
 
   const cleanup = () => {
     if (typeof document !== "undefined") {
       document.removeEventListener("visibilitychange", onVisibility)
       window.removeEventListener("pageshow", onPageShow)
+    }
+    if (typeof globalThis.window !== "undefined") {
+      globalThis.window.removeEventListener("openchamber:system-resume", onSystemResume)
     }
     abort.abort()
     flushAll()

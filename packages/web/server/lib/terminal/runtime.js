@@ -192,6 +192,28 @@ export function createTerminalRuntime({
     },
   };
 
+  const killTerminalProcess = (ptyProcess, mode = 'term') => {
+    if (!ptyProcess) return;
+
+    // Best-effort: try killing the process group first so child processes
+    // started by shells (e.g. preview dev servers) don't orphan.
+    if (process.platform !== 'win32') {
+      const pid = ptyProcess.pid;
+      if (typeof pid === 'number' && Number.isFinite(pid) && pid > 0) {
+        try {
+          process.kill(-pid, mode === 'kill' ? 'SIGKILL' : 'SIGTERM');
+        } catch {
+        }
+      }
+    }
+
+    try {
+      // node-pty accepts an optional signal string; bun-pty ignores extra args.
+      ptyProcess.kill(mode === 'kill' ? 'SIGKILL' : undefined);
+    } catch {
+    }
+  };
+
   const sendTerminalInputWsControl = (socket, payload) => {
     if (!socket || socket.readyState !== 1) {
       return;
@@ -453,7 +475,7 @@ export function createTerminalRuntime({
       if (now - session.lastActivity > TERMINAL_IDLE_TIMEOUT) {
         console.log(`Cleaning up idle terminal session: ${sessionId}`);
         try {
-          session.ptyProcess.kill();
+          killTerminalProcess(session.ptyProcess, 'term');
         } catch (error) {
 
         }
@@ -652,7 +674,7 @@ export function createTerminalRuntime({
     }
 
     try {
-      session.ptyProcess.kill();
+      killTerminalProcess(session.ptyProcess, 'term');
       terminalSessions.delete(sessionId);
       console.log(`Closed terminal session: ${sessionId}`);
       res.json({ success: true });
@@ -673,7 +695,7 @@ export function createTerminalRuntime({
     const existingSession = terminalSessions.get(sessionId);
     if (existingSession) {
       try {
-        existingSession.ptyProcess.kill();
+        killTerminalProcess(existingSession.ptyProcess, 'term');
       } catch (error) {
       }
       terminalSessions.delete(sessionId);
@@ -731,7 +753,7 @@ export function createTerminalRuntime({
       const session = terminalSessions.get(sessionId);
       if (session) {
         try {
-          session.ptyProcess.kill();
+          killTerminalProcess(session.ptyProcess, 'kill');
         } catch (error) {
         }
         terminalSessions.delete(sessionId);
@@ -741,7 +763,7 @@ export function createTerminalRuntime({
       for (const [id, session] of terminalSessions) {
         if (session.cwd === cwd) {
           try {
-            session.ptyProcess.kill();
+            killTerminalProcess(session.ptyProcess, 'kill');
           } catch (error) {
           }
           terminalSessions.delete(id);
@@ -751,7 +773,7 @@ export function createTerminalRuntime({
     } else {
       for (const [id, session] of terminalSessions) {
         try {
-          session.ptyProcess.kill();
+          killTerminalProcess(session.ptyProcess, 'kill');
         } catch (error) {
         }
         terminalSessions.delete(id);
@@ -770,7 +792,7 @@ export function createTerminalRuntime({
 
     for (const [sessionId, session] of terminalSessions.entries()) {
       try {
-        session.ptyProcess.kill();
+        killTerminalProcess(session.ptyProcess, 'kill');
       } catch {
       }
       terminalSessions.delete(sessionId);
