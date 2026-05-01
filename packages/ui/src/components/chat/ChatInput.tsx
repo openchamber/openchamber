@@ -1245,6 +1245,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     const canAbort = sessionPhase !== 'idle';
 
+    const getCurrentInputSnapshot = React.useCallback(() => {
+        const currentMessage = textareaRef.current?.value ?? message;
+        return {
+            message: currentMessage,
+            hasContent: currentMessage.trim().length > 0 || sendableAttachedFiles.length > 0 || hasDrafts,
+        };
+    }, [hasDrafts, message, sendableAttachedFiles.length]);
+
     // Keep a ref to handleSubmit so callbacks don't depend on it.
     type SubmitOptions = {
         queuedOnly?: boolean;
@@ -1253,19 +1261,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     // Add message to queue instead of sending
     const handleQueueMessage = React.useCallback(() => {
-        // Read the textarea value directly from the DOM ref to avoid capturing a
-        // stale `message` state from a pending React render.  When the user types
-        // quickly and clicks the Queue button before React commits the latest
-        // render, the `message` closure may still hold a previous (often the first
-        // character) value.  Falling back to the React state handles the case where
-        // the textarea ref is unavailable (e.g., during SSR or after unmount).
-        const currentMessage = textareaRef.current?.value ?? message;
-        const currentHasContent = currentMessage.trim().length > 0 || sendableAttachedFiles.length > 0 || hasDrafts;
-        if (!currentHasContent || !currentSessionId) return;
+        const inputSnapshot = getCurrentInputSnapshot();
+        if (!inputSnapshot.hasContent || !currentSessionId) return;
 
         const drafts = consumeDrafts(currentSessionId);
 
-        let messageToQueue = currentMessage.replace(/^\n+|\n+$/g, '');
+        let messageToQueue = inputSnapshot.message.replace(/^\n+|\n+$/g, '');
         if (drafts.length > 0) {
             messageToQueue = appendInlineComments(messageToQueue, drafts);
         }
@@ -1294,7 +1295,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (!isMobile) {
             textareaRef.current?.focus();
         }
-    }, [hasContent, hasDrafts, currentSessionId, message, sendableAttachedFiles, sanitizeAttachmentsForSend, addToQueue, clearAttachedFiles, isMobile, consumeDrafts, currentProviderId, currentModelId, currentAgentName, currentVariant]);
+    }, [getCurrentInputSnapshot, currentSessionId, sendableAttachedFiles, sanitizeAttachmentsForSend, addToQueue, clearAttachedFiles, isMobile, consumeDrafts, currentProviderId, currentModelId, currentAgentName, currentVariant]);
 
     const handleQueuedMessageEdit = React.useCallback((content: string) => {
         setMessage(content);
@@ -1321,10 +1322,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     const handleSubmit = async (options?: SubmitOptions) => {
         const queuedOnly = options?.queuedOnly ?? false;
+        const inputSnapshot = getCurrentInputSnapshot();
 
         if (queuedOnly) {
             if (!hasQueuedMessages || !currentSessionId) return;
-        } else if (!canSend || (!currentSessionId && !newSessionDraftOpen)) {
+        } else if ((!inputSnapshot.hasContent && !hasQueuedMessages) || (!currentSessionId && !newSessionDraftOpen)) {
             return;
         }
 
@@ -1371,8 +1373,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
 
         // Add current input (skip for queued-only auto-send)
-        if (!queuedOnly && hasContent) {
-            const messageToSend = message.replace(/^\n+|\n+$/g, '');
+        if (!queuedOnly && inputSnapshot.hasContent) {
+            const messageToSend = inputSnapshot.message.replace(/^\n+|\n+$/g, '');
             const { sanitizedText, mention } = parseAgentMentions(messageToSend, agents);
             const { sanitizedText: messageText, attachments: mentionAttachments } = extractInlineFileMentions(sanitizedText);
             const attachmentsToSend = sanitizeAttachmentsForSend(sendableAttachedFiles);
@@ -1643,13 +1645,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     // Primary action for send button - respects queue mode setting
     const handlePrimaryAction = React.useCallback(() => {
-        const canQueue = inputMode === 'normal' && hasContent && currentSessionId && sessionPhase !== 'idle';
+        const inputSnapshot = getCurrentInputSnapshot();
+        const canQueue = inputMode === 'normal' && inputSnapshot.hasContent && currentSessionId && sessionPhase !== 'idle';
         if (queueModeEnabled && canQueue) {
             handleQueueMessage();
         } else {
             void handleSubmitRef.current();
         }
-    }, [inputMode, hasContent, currentSessionId, sessionPhase, queueModeEnabled, handleQueueMessage]);
+    }, [inputMode, getCurrentInputSnapshot, currentSessionId, sessionPhase, queueModeEnabled, handleQueueMessage]);
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         // Early return during IME composition to prevent interference with autocomplete.
