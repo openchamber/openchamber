@@ -234,6 +234,7 @@ export class AgentManagerPanelProvider {
       initialStatus: this._cachedStatus,
       cliAvailable,
       panelType: 'agentManager',
+      extensionVersion: String(this._context.extension?.packageJSON?.version || ''),
       devServerUrl: this._webviewDevServerUrl,
     });
   }

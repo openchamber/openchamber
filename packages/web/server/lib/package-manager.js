@@ -29,7 +29,7 @@ function getOpenChamberConfigDir() {
 }
 
 function sanitizeInstallScope(scope) {
-  if (scope === 'desktop-tauri' || scope === 'vscode' || scope === 'web') return scope;
+  if (scope === 'desktop-electron' || scope === 'desktop-tauri' || scope === 'vscode' || scope === 'web') return scope;
   return 'web';
 }
 
@@ -65,7 +65,7 @@ function mapArch(value) {
 }
 
 function normalizeAppType(value) {
-  if (value === 'web' || value === 'desktop-tauri' || value === 'vscode') return value;
+  if (value === 'web' || value === 'desktop-electron' || value === 'desktop-tauri' || value === 'vscode') return value;
   return 'web';
 }
 
@@ -701,11 +701,12 @@ export async function fetchChangelogNotes(fromVersion, toVersion) {
 export async function checkForUpdates(options = {}) {
   const currentVersion = options.currentVersion || getCurrentVersion();
   const pm = detectPackageManager();
+  const appType = normalizeAppType(options.appType);
 
   if (currentVersion !== 'unknown') {
     const remote = await checkForUpdatesFromApi(currentVersion, options);
     if (remote) {
-      if (remote.available) {
+      if (remote.available && appType === 'web') {
         const npmLatest = await getLatestVersion();
         if (!npmLatest || compareVersions(npmLatest, remote.version) < 0) {
           remote.available = false;

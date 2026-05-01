@@ -23,6 +23,9 @@ declare global {
       theme: string;
       connectionStatus: string;
       cliAvailable?: boolean;
+      extensionVersion?: string;
+      platform?: string;
+      arch?: string;
       panelType?: PanelType;
       viewMode?: 'sidebar' | 'editor';
       initialSessionId?: string | null;
@@ -907,8 +910,8 @@ const handleLocalApiRequest = async (url: URL, init?: RequestInit) => {
       const currentVersion = url.searchParams.get('currentVersion') || undefined;
       const instanceMode = url.searchParams.get('instanceMode') || 'local';
       const deviceClass = url.searchParams.get('deviceClass') || 'desktop';
-      const platform = url.searchParams.get('platform') || undefined;
-      const arch = url.searchParams.get('arch') || undefined;
+      const platform = url.searchParams.get('platform') || window.__VSCODE_CONFIG__?.platform || undefined;
+      const arch = url.searchParams.get('arch') || window.__VSCODE_CONFIG__?.arch || undefined;
       const reportUsageRaw = (url.searchParams.get('reportUsage') || 'true').toLowerCase();
       const reportUsage = !(reportUsageRaw === 'false' || reportUsageRaw === '0' || reportUsageRaw === 'no');
       const data = await sendBridgeMessage('api:openchamber:update-check', {

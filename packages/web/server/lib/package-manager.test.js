@@ -98,6 +98,48 @@ describe('checkForUpdates', () => {
     expect(result.available).toBe(false);
   });
 
+  it('does not cross-check desktop update claims against npm', async () => {
+    fetchMock
+      .when('api.openchamber.dev', {
+        ok: true,
+        json: async () => ({
+          latestVersion: '1.10.0',
+          updateAvailable: true,
+          releaseNotes: '## [1.10.0] - 2026-05-01\n\n- Great new feature',
+        }),
+      });
+
+    const result = await checkForUpdates({
+      appType: 'desktop-tauri',
+      currentVersion: '1.9.10',
+    });
+
+    expect(result.available).toBe(true);
+    expect(result.version).toBe('1.10.0');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('accepts electron desktop update claims without npm cross-checking', async () => {
+    fetchMock
+      .when('api.openchamber.dev', {
+        ok: true,
+        json: async () => ({
+          latestVersion: '1.10.0',
+          updateAvailable: true,
+          releaseNotes: '## [1.10.0] - 2026-05-01\n\n- Great new feature',
+        }),
+      });
+
+    const result = await checkForUpdates({
+      appType: 'desktop-electron',
+      currentVersion: '1.9.10',
+    });
+
+    expect(result.available).toBe(true);
+    expect(result.version).toBe('1.10.0');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('returns available=false when API claims update but npm is behind', async () => {
     fetchMock
       .when('api.openchamber.dev', {

@@ -294,7 +294,7 @@ export async function handleSystemBridgeMessage(
         const body = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>;
         const currentVersion = typeof body.currentVersion === 'string' && body.currentVersion.trim().length > 0
           ? body.currentVersion.trim()
-          : 'unknown';
+          : String(ctx?.context?.extension?.packageJSON?.version || 'unknown');
         const instanceMode = typeof body.instanceMode === 'string' && body.instanceMode.trim().length > 0
           ? body.instanceMode.trim()
           : 'local';
