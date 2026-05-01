@@ -52,6 +52,10 @@ type BrowseRow =
   | { type: 'up'; value: 'browse:up'; name: string; path: string | null; disabled?: false }
   | { type: 'directory'; value: string; name: string; path: string; disabled: boolean };
 
+type PinnedRow = { type: 'pinned'; value: string; name: string; path: string; alreadyAdded: boolean };
+
+type NavigableRow = BrowseRow | PinnedRow;
+
 const isRootPath = (value: string): boolean => value === '/';
 
 const normalizeSeparators = (value: string): string => value.replace(/\\/g, '/');
@@ -123,6 +127,14 @@ const getDirectoryName = (path: string): string => {
   return parts[parts.length - 1] || normalized;
 };
 
+const arePathSetsEqual = (left: Set<string>, right: Set<string>): boolean => {
+  if (left.size !== right.size) return false;
+  for (const value of left) {
+    if (!right.has(value)) return false;
+  }
+  return true;
+};
+
 const displayPathToAbsolutePath = (value: string, homeDirectory: string): string => {
   const trimmed = value.trim();
   if (trimmed === '~') return homeDirectory;
@@ -187,7 +199,8 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   const [addButtonWidth, setAddButtonWidth] = React.useState(0);
   const [pinnedPaths, setPinnedPaths] = React.useState<Set<string>>(new Set());
   const [isPinnedSectionExpanded, setIsPinnedSectionExpanded] = React.useState(true);
-  const isInitialPinnedSync = React.useRef(true);
+  const hasMountedPinnedPersistence = React.useRef(false);
+  const suppressNextPinnedPersistence = React.useRef(false);
 
   const explorerRootDirectory = dialogHomeDirectory || homeDirectory;
 
@@ -230,7 +243,12 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     const normalized = paths
       .map((path) => (typeof path === 'string' ? normalizeStoredDirectoryPath(path) : null))
       .filter((path): path is string => Boolean(path));
-    setPinnedPaths(new Set(normalized));
+    const nextPaths = new Set(normalized);
+    setPinnedPaths((previous) => {
+      if (arePathSetsEqual(previous, nextPaths)) return previous;
+      suppressNextPinnedPersistence.current = true;
+      return nextPaths;
+    });
   }, []);
 
   React.useEffect(() => {
@@ -275,8 +293,12 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   }, [applyPinnedDirectories]);
 
   React.useEffect(() => {
-    if (isInitialPinnedSync.current) {
-      isInitialPinnedSync.current = false;
+    if (!hasMountedPinnedPersistence.current) {
+      hasMountedPinnedPersistence.current = true;
+      return;
+    }
+    if (suppressNextPinnedPersistence.current) {
+      suppressNextPinnedPersistence.current = false;
       return;
     }
     void updateDesktopSettings({ pinnedDirectories: Array.from(pinnedPaths) });
@@ -391,9 +413,31 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     return nextRows;
   }, [addedProjectPaths, filteredEntries, query]);
 
+  const navigableRows = React.useMemo<NavigableRow[]>(() => {
+    const pinnedRows = isPinnedSectionExpanded
+      ? pinnedDirectories.map((entry) => {
+        const normalized = normalizeDirectoryPath(entry.path);
+        return {
+          type: 'pinned' as const,
+          value: `pinned:${entry.path}`,
+          name: entry.name,
+          path: entry.path,
+          alreadyAdded: Boolean(normalized && addedProjectPaths.has(normalized)),
+        };
+      })
+      : [];
+    return [...pinnedRows, ...rows];
+  }, [addedProjectPaths, isPinnedSectionExpanded, pinnedDirectories, rows]);
+
+  const rowIndexByValue = React.useMemo(() => {
+    const indexes = new Map<string, number>();
+    navigableRows.forEach((row, index) => indexes.set(row.value, index));
+    return indexes;
+  }, [navigableRows]);
+
   React.useEffect(() => {
     setHighlightedIndex(0);
-  }, [query, rows.length]);
+  }, [query, navigableRows.length]);
 
   const targetPath = React.useMemo(() => {
     if (!explorerRootDirectory) return '';
@@ -414,9 +458,13 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     )
   );
   const canAddProject = !isConfirming && !isOpeningFinder && !isAlreadyAdded && Boolean(targetPath);
-  const highlightedRow = rows[highlightedIndex] ?? null;
+  const highlightedRow = navigableRows[highlightedIndex] ?? null;
   const hasHighlightedBrowseItem = Boolean(
-    highlightedRow && (highlightedRow.type === 'up' || (highlightedRow.type === 'directory' && !highlightedRow.disabled))
+    highlightedRow && (
+      highlightedRow.type === 'up'
+      || highlightedRow.type === 'pinned'
+      || (highlightedRow.type === 'directory' && !highlightedRow.disabled)
+    )
   );
   const submitModifierLabel = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
     ? '⌘'
@@ -452,10 +500,10 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   }, [open]);
 
   React.useLayoutEffect(() => {
-    const row = rows[highlightedIndex];
+    const row = navigableRows[highlightedIndex];
     if (!row) return;
     rowRefs.current.get(row.value)?.scrollIntoView({ block: 'nearest' });
-  }, [highlightedIndex, rows]);
+  }, [highlightedIndex, navigableRows]);
 
   const handleClose = React.useCallback(() => {
     onOpenChange(false);
@@ -501,15 +549,19 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     setQuery(appendBrowsePathSegment(query, entry.name));
   }, [query]);
 
-  const executeRow = React.useCallback((row: BrowseRow | null) => {
+  const executeRow = React.useCallback((row: NavigableRow | null) => {
     if (!row) return;
+    if (row.type === 'pinned') {
+      browseToAbsolutePath(row.path);
+      return;
+    }
     if (row.type === 'up') {
       if (row.path) browseToDisplayPath(row.path);
       return;
     }
     if (row.disabled) return;
     browseToEntry(row);
-  }, [browseToDisplayPath, browseToEntry]);
+  }, [browseToAbsolutePath, browseToDisplayPath, browseToEntry]);
 
   const handleOpenInFinder = React.useCallback(async () => {
     if (!isDesktop || isOpeningFinder) return;
@@ -546,7 +598,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   const handleKeyDown = React.useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'ArrowDown') {
       event.preventDefault();
-      setHighlightedIndex((index) => Math.min(rows.length - 1, index + 1));
+      setHighlightedIndex((index) => Math.min(Math.max(0, navigableRows.length - 1), index + 1));
       return;
     }
     if (event.key === 'ArrowUp') {
@@ -569,7 +621,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
       event.preventDefault();
       handleClose();
     }
-  }, [executeRow, finalizeSelection, handleClose, hasHighlightedBrowseItem, highlightedRow, query, rows.length, targetPath]);
+  }, [executeRow, finalizeSelection, handleClose, hasHighlightedBrowseItem, highlightedRow, navigableRows.length, query, targetPath]);
 
   const showHiddenToggle = (
     <button
@@ -642,7 +694,10 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     const normalizedPath = normalizeStoredDirectoryPath(entry.path);
     if (!normalizedPath) return null;
 
+    const value = `pinned:${normalizedPath}`;
     const normalized = normalizeDirectoryPath(normalizedPath);
+    const rowIndex = rowIndexByValue.get(value);
+    const isActive = rowIndex === highlightedIndex;
     const isSelected = Boolean(normalizedTargetPath && normalized === normalizedTargetPath);
     const isAlreadyProject = Boolean(normalized && addedProjectPaths.has(normalized));
     const displayPath = absolutePathToDisplayPath(normalizedPath);
@@ -650,9 +705,19 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     return (
       <div
         key={normalizedPath}
+        ref={(node) => {
+          if (node) {
+            rowRefs.current.set(value, node);
+          } else {
+            rowRefs.current.delete(value);
+          }
+        }}
+        onMouseEnter={() => {
+          if (typeof rowIndex === 'number') setHighlightedIndex(rowIndex);
+        }}
         className={cn(
           'group flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors',
-          isSelected ? 'bg-interactive-selection text-interactive-selection-foreground' : 'hover:bg-interactive-hover/50'
+          (isActive || isSelected) ? 'bg-interactive-selection text-interactive-selection-foreground' : 'hover:bg-interactive-hover/50'
         )}
       >
         <button
@@ -714,8 +779,9 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
           </div>
         ) : (
           <div className="space-y-0.5">
-            {rows.map((row, index) => {
-              const isActive = index === highlightedIndex;
+            {rows.map((row) => {
+              const rowIndex = rowIndexByValue.get(row.value);
+              const isActive = rowIndex === highlightedIndex;
               return (
                 <div
                   key={row.value}
@@ -726,7 +792,9 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
                       rowRefs.current.delete(row.value);
                     }
                   }}
-                  onMouseEnter={() => setHighlightedIndex(index)}
+                  onMouseEnter={() => {
+                    if (typeof rowIndex === 'number') setHighlightedIndex(rowIndex);
+                  }}
                   className={cn(
                     'group flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors',
                     isActive && 'bg-interactive-selection text-interactive-selection-foreground',
