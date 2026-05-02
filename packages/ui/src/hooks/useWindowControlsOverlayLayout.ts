@@ -18,6 +18,11 @@ type NavigatorWithWindowControlsOverlay = Navigator & {
   windowControlsOverlay?: WindowControlsOverlayLike;
 };
 
+// Electron does not expose navigator.windowControlsOverlay for the Windows
+// titleBarOverlay controls; reserve the standard 3 x 46px caption button area.
+const WINDOWS_ELECTRON_CAPTION_CONTROLS_WIDTH = 138;
+const WINDOWS_ELECTRON_TITLEBAR_HEIGHT = 48;
+
 const clampPx = (value: number): string => {
   if (!Number.isFinite(value)) {
     return '0px';
@@ -38,11 +43,11 @@ const applyOverlayInsets = (
 
 export const useWindowControlsOverlayLayout = () => {
   React.useEffect(() => {
-    const isElectronDesktop = typeof window !== 'undefined'
+    const isWindowsElectronDesktop = typeof window !== 'undefined'
       && Boolean(window.__OPENCHAMBER_ELECTRON__)
       && window.__OPENCHAMBER_PLATFORM__ === 'win32';
 
-    if (typeof window === 'undefined' || (!isWebRuntime() && !isElectronDesktop)) {
+    if (typeof window === 'undefined' || (!isWebRuntime() && !isWindowsElectronDesktop)) {
       return;
     }
 
@@ -55,6 +60,16 @@ export const useWindowControlsOverlayLayout = () => {
 
     const updateGeometry = () => {
       if (!overlay || !mediaQuery?.matches || !overlay.visible) {
+        if (isWindowsElectronDesktop) {
+          applyOverlayInsets(
+            root,
+            0,
+            WINDOWS_ELECTRON_CAPTION_CONTROLS_WIDTH,
+            WINDOWS_ELECTRON_TITLEBAR_HEIGHT,
+          );
+          return;
+        }
+
         applyOverlayInsets(root, 0, 0, 0);
         return;
       }
@@ -104,6 +119,8 @@ export const useWindowControlsOverlayLayout = () => {
       if (overlay && typeof overlay.removeEventListener === 'function') {
         overlay.removeEventListener('geometrychange', updateGeometry);
       }
+
+      applyOverlayInsets(root, 0, 0, 0);
     };
   }, []);
 };

@@ -149,6 +149,7 @@
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.20",
     "globals": "^16.3.0",
+    "node-addon-api": "7.1.1",
     "nodemon": "^3.1.7",
     "patch-package": "^8.0.0",
     "tailwindcss": "^4.0.0",

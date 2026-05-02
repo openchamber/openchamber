@@ -1655,6 +1655,22 @@ const WINDOWS_APP_EXECUTABLES = {
   'sublime-text': ['subl.exe', 'sublime_text.exe'],
 };
 
+const WINDOWS_APP_ID_BY_NAME = new Map([
+  ['finder', 'finder'],
+  ['file explorer', 'finder'],
+  ['terminal', 'terminal'],
+  ['windows terminal', 'terminal'],
+  ['visual studio code', 'vscode'],
+  ['cursor', 'cursor'],
+  ['vscodium', 'vscodium'],
+  ['windsurf', 'windsurf'],
+  ['zed', 'zed'],
+  ['visual studio', 'visual-studio'],
+  ['sublime text', 'sublime-text'],
+]);
+
+const getWindowsAppIdForName = (appName) => WINDOWS_APP_ID_BY_NAME.get(String(appName || '').trim().toLowerCase()) || '';
+
 const runWhere = (program) => {
   const result = spawnSync('where.exe', [program], { encoding: 'utf8', windowsHide: true });
   if (result.error || result.status !== 0) return null;
@@ -1678,6 +1694,15 @@ const isWindowsAppInstalled = ({ appId, appName }) => {
   return Boolean(runWhere(program));
 };
 
+const buildWindowsInstalledApps = (apps) => {
+  const seen = new Set();
+  return (Array.isArray(apps) ? apps : [])
+    .map((appName) => String(appName || '').trim())
+    .filter((appName) => appName && !seen.has(appName) && seen.add(appName))
+    .filter((appName) => isWindowsAppInstalled({ appId: getWindowsAppIdForName(appName), appName }))
+    .map((name) => ({ name, iconDataUrl: null }));
+};
+
 const buildWindowsOpenProjectSpecs = ({ projectPath, appId }) => {
   if (appId === 'finder') {
     return [{ program: 'explorer.exe', args: [projectPath] }];
@@ -1691,7 +1716,10 @@ const buildWindowsOpenProjectSpecs = ({ projectPath, appId }) => {
   const specs = [];
   const cli = WINDOWS_CLI_BY_APP_ID[appId];
   if (cli) {
-    specs.push({ program: cli, args: [projectPath] });
+    const resolvedCli = runWhere(cli);
+    if (resolvedCli) {
+      specs.push({ program: resolvedCli, args: [projectPath] });
+    }
   }
   const exe = findWindowsExecutable(appId);
   if (exe) {
@@ -1710,7 +1738,10 @@ const buildWindowsOpenFileSpecs = ({ filePath, appId }) => {
   const specs = [];
   const cli = WINDOWS_CLI_BY_APP_ID[appId];
   if (cli) {
-    specs.push({ program: cli, args: [filePath] });
+    const resolvedCli = runWhere(cli);
+    if (resolvedCli) {
+      specs.push({ program: resolvedCli, args: [filePath] });
+    }
   }
   const exe = findWindowsExecutable(appId);
   if (exe) {
@@ -1764,10 +1795,24 @@ const buildOpenFileSpecs = ({ filePath, appId, appName }) => {
   return specs;
 };
 
+const quoteWindowsCommandArg = (value) => `"${String(value).replace(/"/g, '""')}"`;
+
+const runWindowsCommandScript = (spec) => {
+  const commandLine = ['call', quoteWindowsCommandArg(spec.program), ...spec.args.map(quoteWindowsCommandArg)].join(' ');
+  return spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', commandLine], {
+    stdio: 'ignore',
+    windowsHide: true,
+    windowsVerbatimArguments: true,
+  });
+};
+
 const runSpecChain = (specs, appName) => {
   const failures = [];
   for (const spec of specs) {
-    const result = spawnSync(spec.program, spec.args, { stdio: 'ignore' });
+    const isWindowsCommandScript = process.platform === 'win32' && /\.(cmd|bat)$/i.test(spec.program);
+    const result = isWindowsCommandScript
+      ? runWindowsCommandScript(spec)
+      : spawnSync(spec.program, spec.args, { stdio: 'ignore', windowsHide: true });
     if (result.error) {
       failures.push(`${spec.program}: ${result.error.message}`);
       continue;
@@ -1994,10 +2039,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
 
     case 'desktop_filter_installed_apps': {
       if (process.platform === 'win32') {
-        if (!Array.isArray(args.apps)) return [];
-        return args.apps
-          .map((appName) => String(appName || '').trim())
-          .filter((appName) => appName && isWindowsAppInstalled({ appId: '', appName }));
+        return buildWindowsInstalledApps(args.apps).map((app) => app.name);
       }
       if (process.platform !== 'darwin') {
         throw new Error('desktop_filter_installed_apps is only supported on macOS');
@@ -2040,11 +2082,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       const isCacheStale = !cache || (now - Number(cache.updatedAt || 0)) > INSTALLED_APPS_CACHE_TTL_SECS;
       const refresh = async () => {
         const apps = process.platform === 'win32'
-          ? (Array.isArray(args.apps) ? args.apps : [])
-              .map((appName) => String(appName || '').trim())
-              .filter(Boolean)
-              .filter((appName) => isWindowsAppInstalled({ appId: '', appName }))
-              .map((name) => ({ name, iconDataUrl: null }))
+          ? buildWindowsInstalledApps(args.apps)
           : await buildInstalledApps(Array.isArray(args.apps) ? args.apps : []);
         await fsp.mkdir(path.dirname(cachePath), { recursive: true });
         await fsp.writeFile(cachePath, JSON.stringify({ updatedAt: now, apps }, null, 2));
@@ -2171,35 +2209,38 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
           contentLength: null,
         },
       }));
-      if (!state.pendingUpdate.electronUpdate) {
-        throw new Error('Electron updater metadata is not available for this build');
+      try {
+        if (!state.pendingUpdate.electronUpdate) {
+          throw new Error('Electron updater metadata is not available for this build');
+        }
+        if (!state.pendingUpdate.downloaded) {
+          await new Promise((resolve, reject) => {
+            let settled = false;
+            const cleanup = () => {
+              autoUpdater.off('update-downloaded', onDownloaded);
+              autoUpdater.off('error', onError);
+            };
+            const finish = (callback, value) => {
+              if (settled) return;
+              settled = true;
+              cleanup();
+              callback(value);
+            };
+            const onDownloaded = () => finish(resolve, null);
+            const onError = (error) => finish(reject, error);
+            autoUpdater.on('update-downloaded', onDownloaded);
+            autoUpdater.on('error', onError);
+            Promise.resolve(autoUpdater.downloadUpdate()).catch((error) => finish(reject, error));
+          });
+        }
+        emitToAllWindows('openchamber:update-progress', mapUpdaterProgressEvent({
+          event: 'Finished',
+          data: {},
+        }));
+        return null;
+      } finally {
+        setTaskbarProgress(-1);
       }
-      if (!state.pendingUpdate.downloaded) {
-        await new Promise((resolve, reject) => {
-          let settled = false;
-          const cleanup = () => {
-            autoUpdater.off('update-downloaded', onDownloaded);
-            autoUpdater.off('error', onError);
-          };
-          const finish = (callback, value) => {
-            if (settled) return;
-            settled = true;
-            cleanup();
-            callback(value);
-          };
-          const onDownloaded = () => finish(resolve, null);
-          const onError = (error) => finish(reject, error);
-          autoUpdater.on('update-downloaded', onDownloaded);
-          autoUpdater.on('error', onError);
-          Promise.resolve(autoUpdater.downloadUpdate()).catch((error) => finish(reject, error));
-        });
-      }
-      setTaskbarProgress(-1);
-      emitToAllWindows('openchamber:update-progress', mapUpdaterProgressEvent({
-        event: 'Finished',
-        data: {},
-      }));
-      return null;
 
     case 'desktop_restart': {
       const applyUpdate = Boolean(state.pendingUpdate?.downloaded && app.isPackaged);

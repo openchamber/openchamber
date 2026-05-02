@@ -14,8 +14,17 @@ const resourcesDir = path.join(electronDir, 'resources');
 const resourcesWebDistDir = path.join(resourcesDir, 'web-dist');
 const webDistDir = path.join(webDir, 'dist');
 
+const quoteWindowsCommandArg = (value) => `"${String(value).replace(/"/g, '""')}"`;
+
 const run = (cmd, args, cwd) => {
-  const result = spawnSync(cmd, args, { cwd, stdio: 'inherit' });
+  const isWindowsCommandScript = process.platform === 'win32' && /\.(cmd|bat)$/i.test(cmd);
+  const result = isWindowsCommandScript
+    ? spawnSync(
+        process.env.ComSpec || 'cmd.exe',
+        ['/d', '/s', '/c', ['call', quoteWindowsCommandArg(cmd), ...args.map(quoteWindowsCommandArg)].join(' ')],
+        { cwd, stdio: 'inherit', windowsVerbatimArguments: true },
+      )
+    : spawnSync(cmd, args, { cwd, stdio: 'inherit' });
   if (result.error) throw result.error;
   if (result.status !== 0) {
     throw new Error(`Command failed: ${cmd} ${args.join(' ')}`);
@@ -27,8 +36,9 @@ const resolveBun = () => {
     return process.env.BUN.trim();
   }
   if (process.platform === 'win32') {
-    const result = spawnSync('where', ['bun'], { encoding: 'utf8' });
-    const resolved = (result.stdout || '').trim().split('\n')[0];
+    const result = spawnSync('where.exe', ['bun'], { encoding: 'utf8' });
+    const candidates = String(result.stdout || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const resolved = candidates.find((entry) => /\.(exe|cmd|bat)$/i.test(entry)) || candidates[0];
     return resolved || 'bun';
   }
   const result = spawnSync('/bin/bash', ['-lc', 'command -v bun'], { encoding: 'utf8' });
