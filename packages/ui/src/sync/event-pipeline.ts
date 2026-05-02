@@ -314,9 +314,13 @@ export function createEventPipeline(input: EventPipelineInput) {
         } else {
           d.queue[i] = normalizedPayload
           if (normalizedPayload.type === "message.part.updated") {
-            const part = (normalizedPayload.properties as { part: { messageID: string; id: string } }).part
-            d.staleDeltas.add(deltaKey(part.messageID, part.id, "text"))
-            d.staleDeltas.add(deltaKey(part.messageID, part.id, "output"))
+            const part = (normalizedPayload.properties as { part: Record<string, unknown> & { messageID: string; id: string } }).part
+            for (const field of ["text", "output"] as const) {
+              const value = part[field]
+              if (typeof value === "string" && value.length > 0) {
+                d.staleDeltas.add(deltaKey(part.messageID, part.id, field))
+              }
+            }
           }
         }
         syncDebug.pipeline.coalesced(normalizedPayload.type, k)
