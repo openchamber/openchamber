@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -8,12 +8,36 @@ const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '../../..');
 const electronDir = path.join(repoRoot, 'packages/electron');
 
+const quoteWindowsCommandArg = (value) => `"${String(value).replace(/"/g, '""')}"`;
+
+function resolveWindowsCommand(command) {
+  if (process.platform !== 'win32' || path.isAbsolute(command)) {
+    return command;
+  }
+
+  const result = spawnSync('where.exe', [command], { encoding: 'utf8', windowsHide: true });
+  if (result.error || result.status !== 0) {
+    return command;
+  }
+
+  const candidates = String(result.stdout || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  return candidates.find((entry) => /\.(exe|cmd|bat)$/i.test(entry)) || candidates[0] || command;
+}
+
 function spawnProcess(command, args, options = {}) {
-  return spawn(command, args, {
+  const resolvedCommand = resolveWindowsCommand(command);
+  const isWindowsCommandScript = process.platform === 'win32' && /\.(cmd|bat)$/i.test(resolvedCommand);
+  const spawnCommand = isWindowsCommandScript ? (process.env.ComSpec || 'cmd.exe') : resolvedCommand;
+  const spawnArgs = isWindowsCommandScript
+    ? ['/d', '/s', '/c', ['call', quoteWindowsCommandArg(resolvedCommand), ...args.map(quoteWindowsCommandArg)].join(' ')]
+    : args;
+
+  return spawn(spawnCommand, spawnArgs, {
     cwd: repoRoot,
     env: { ...process.env, OPENCHAMBER_ELECTRON_DEV: '1' },
     stdio: 'inherit',
     detached: process.platform !== 'win32',
+    windowsVerbatimArguments: isWindowsCommandScript,
     ...options,
   });
 }

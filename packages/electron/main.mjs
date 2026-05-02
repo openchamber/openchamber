@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, powerMonitor, session, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, powerMonitor, screen, session, shell } from 'electron';
 import contextMenu from 'electron-context-menu';
 import log from 'electron-log/main.js';
 import dgram from 'node:dgram';
@@ -422,6 +422,35 @@ const writeDesktopHostsConfig = async (config) => {
 const readWindowState = () => {
   const stateValue = readSettingsRoot().desktopWindowState;
   return stateValue && typeof stateValue === 'object' ? stateValue : null;
+};
+
+const clampWindowBoundsToVisibleWorkArea = (bounds) => {
+  const width = Math.max(MIN_RESTORE_WINDOW_WIDTH, Math.round(Number(bounds?.width) || 0));
+  const height = Math.max(MIN_RESTORE_WINDOW_HEIGHT, Math.round(Number(bounds?.height) || 0));
+  const x = Math.round(Number(bounds?.x));
+  const y = Math.round(Number(bounds?.y));
+
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return { width, height };
+  }
+
+  try {
+    const display = screen.getDisplayMatching({ x, y, width, height }) || screen.getPrimaryDisplay();
+    const workArea = display.workArea;
+    const clampedWidth = Math.min(width, Math.max(MIN_WINDOW_WIDTH, workArea.width));
+    const clampedHeight = Math.min(height, Math.max(MIN_WINDOW_HEIGHT, workArea.height));
+    const maxX = workArea.x + workArea.width - clampedWidth;
+    const maxY = workArea.y + workArea.height - clampedHeight;
+
+    return {
+      x: clampedWidth >= workArea.width ? workArea.x : Math.min(Math.max(x, workArea.x), maxX),
+      y: clampedHeight >= workArea.height ? workArea.y : Math.min(Math.max(y, workArea.y), maxY),
+      width: clampedWidth,
+      height: clampedHeight,
+    };
+  } catch {
+    return { x, y, width, height };
+  }
 };
 
 const writeWindowState = async (browserWindow) => {
@@ -1127,29 +1156,28 @@ const readThemeSource = () => {
 const createBrowserWindow = ({ label, restoreGeometry, url }) => {
   const saved = restoreGeometry ? readWindowState() : null;
   const useSaved = saved && typeof saved.width === 'number' && typeof saved.height === 'number';
+  const restoredBounds = useSaved ? clampWindowBoundsToVisibleWorkArea(saved) : null;
   const desktopLocalOrigin = state.localOrigin || '';
   const desktopHome = os.homedir() || '';
   const desktopMacosMajor = String(macosMajorVersion());
-  const usesCustomTitleBar = process.platform === 'darwin' || process.platform === 'win32';
+  const usesCustomTitleBar = process.platform === 'darwin';
+  const autoHidesNativeMenuBar = process.platform !== 'darwin';
   const options = {
     title: 'OpenChamber',
-    width: useSaved ? Math.max(saved.width, MIN_RESTORE_WINDOW_WIDTH) : 1280,
-    height: useSaved ? Math.max(saved.height, MIN_RESTORE_WINDOW_HEIGHT) : 800,
+    ...(Number.isFinite(restoredBounds?.x) && Number.isFinite(restoredBounds?.y)
+      ? { x: restoredBounds.x, y: restoredBounds.y }
+      : {}),
+    width: restoredBounds?.width ?? 1280,
+    height: restoredBounds?.height ?? 800,
     minWidth: MIN_WINDOW_WIDTH,
     minHeight: MIN_WINDOW_HEIGHT,
     show: false,
     backgroundColor: '#151313',
+    autoHideMenuBar: autoHidesNativeMenuBar,
     // Tauri used an overlay title bar with explicit traffic-light placement.
     // Electron's hiddenInset adds its own extra inset, which leaves the controls
     // visibly lower than the app header. Use a plain hidden title bar instead.
     titleBarStyle: usesCustomTitleBar ? 'hidden' : 'default',
-    titleBarOverlay: process.platform === 'win32'
-      ? {
-          color: nativeTheme.shouldUseDarkColors ? '#151313' : '#f5f5f4',
-          symbolColor: nativeTheme.shouldUseDarkColors ? '#fafaf9' : '#1c1917',
-          height: 48,
-        }
-      : undefined,
     trafficLightPosition: process.platform === 'darwin' ? { x: 16, y: 17 } : undefined,
     webPreferences: {
       additionalArguments: [
@@ -1172,10 +1200,6 @@ const createBrowserWindow = ({ label, restoreGeometry, url }) => {
 
   const browserWindow = new BrowserWindow(options);
   browserWindow.__ocLabel = label || nextWindowLabel();
-
-  if (useSaved && Number.isFinite(saved.x) && Number.isFinite(saved.y)) {
-    browserWindow.setPosition(saved.x, saved.y);
-  }
 
   if (useSaved && saved.maximized) {
     browserWindow.maximize();
@@ -2449,6 +2473,78 @@ const buildMacMenu = () => {
   ]);
 };
 
+const buildAutoHiddenMenu = () => {
+  const dispatchAction = (action) => dispatchMenuAction(action);
+  const handleCopyAction = () => {
+    BrowserWindow.getFocusedWindow()?.webContents.copy();
+    dispatchAction('copy');
+  };
+
+  return Menu.buildFromTemplate([
+    {
+      label: 'File',
+      submenu: [
+        { label: 'New Window', accelerator: 'Ctrl+Shift+Alt+N', click: () => void handleInvoke(null, 'desktop_new_window') },
+        { type: 'separator' },
+        { label: 'New Session', accelerator: 'Ctrl+N', click: () => dispatchAction('new-session') },
+        { label: 'New Worktree', accelerator: 'Ctrl+Shift+N', click: () => dispatchAction('new-worktree-session') },
+        { type: 'separator' },
+        { label: 'Add Workspace', click: () => dispatchAction('change-workspace') },
+        { type: 'separator' },
+        { role: 'quit' },
+      ],
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { label: 'Copy', accelerator: 'Ctrl+C', click: () => handleCopyAction() },
+        { role: 'paste' },
+        { role: 'selectAll' },
+      ],
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { label: 'Git', accelerator: 'Ctrl+G', click: () => dispatchAction('open-git-tab') },
+        { label: 'Diff', accelerator: 'Ctrl+E', click: () => dispatchAction('open-diff-tab') },
+        { label: 'Files', click: () => dispatchAction('open-files-tab') },
+        { label: 'Terminal', accelerator: 'Ctrl+T', click: () => dispatchAction('open-terminal-tab') },
+        { type: 'separator' },
+        { label: 'Light Theme', click: () => dispatchAction('theme-light') },
+        { label: 'Dark Theme', click: () => dispatchAction('theme-dark') },
+        { label: 'System Theme', click: () => dispatchAction('theme-system') },
+        { type: 'separator' },
+        { label: 'Toggle Session Sidebar', accelerator: 'Ctrl+L', click: () => dispatchAction('toggle-sidebar') },
+        { label: 'Toggle Memory Debug', accelerator: 'Ctrl+Shift+D', click: () => dispatchAction('toggle-memory-debug') },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
+    {
+      label: 'Help',
+      submenu: [
+        { label: 'Keyboard Shortcuts', accelerator: 'Ctrl+.', click: () => dispatchAction('help-dialog') },
+        { label: 'Show Diagnostics', accelerator: 'Ctrl+Shift+L', click: () => dispatchAction('download-logs') },
+        { type: 'separator' },
+        { label: 'Clear Cache', click: () => void handleInvoke(null, 'desktop_clear_cache') },
+        { type: 'separator' },
+        { label: 'Report a Bug', click: () => shell.openExternal(GITHUB_BUG_REPORT_URL) },
+        { label: 'Request a Feature', click: () => shell.openExternal(GITHUB_FEATURE_REQUEST_URL) },
+        { type: 'separator' },
+        { label: 'Join Discord', click: () => shell.openExternal(DISCORD_INVITE_URL) },
+      ],
+    },
+  ]);
+};
+
 contextMenu({
   showInspectElement: isDev,
   showSaveImageAs: true,
@@ -2613,6 +2709,8 @@ app.whenReady().then(async () => {
 
   if (process.platform === 'darwin') {
     Menu.setApplicationMenu(buildMacMenu());
+  } else {
+    Menu.setApplicationMenu(buildAutoHiddenMenu());
   }
 
   const initial = extractInitialDeepLinks();
