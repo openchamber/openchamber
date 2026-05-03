@@ -664,6 +664,17 @@ jobs:
         # target Electron ABI before packaging.
         run: node ./scripts/rebuild-native.mjs
 
+      - name: Validate Windows signing credentials
+        shell: bash
+        env:
+          WINDOWS_CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+          WINDOWS_CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+        run: |
+          if [ -z "$WINDOWS_CSC_LINK" ] || [ -z "$WINDOWS_CSC_KEY_PASSWORD" ]; then
+            echo "Error: Windows Electron releases require WINDOWS_CSC_LINK and WINDOWS_CSC_KEY_PASSWORD so auto-update signature verification remains enabled."
+            exit 1
+          fi
+
       - name: Build Windows app
         working-directory: packages/electron
         shell: bash

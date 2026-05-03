@@ -10,8 +10,10 @@ const execFileAsync = promisify(execFile);
 const gpgconfCandidates = ['gpgconf', '/opt/homebrew/bin/gpgconf', '/usr/local/bin/gpgconf'];
 let resolvedGitBinary = null;
 const worktreeBootstrapState = new Map();
+const remoteExistenceCache = new Map();
 const SIMPLE_GIT_SAFE_BINARY_PATTERN = /^([a-z]:)?([a-z0-9/.\\_~-]+)$/i;
 const SIMPLE_GIT_UNSAFE_BINARY_WARNING = 'Invalid value supplied for custom binary, restricted characters must be removed';
+const REMOTE_EXISTENCE_CACHE_TTL_MS = 30_000;
 
 const WORKTREE_BOOTSTRAP_PENDING = 'pending';
 const WORKTREE_BOOTSTRAP_READY = 'ready';
@@ -609,6 +611,53 @@ const parseAheadBehindCounts = (value) => {
     return null;
   }
   return { ahead, behind };
+};
+
+const getRemoteExistenceCacheKey = (directory, remoteName) => {
+  const normalizedDirectory = normalizeDirectoryPath(directory) || '';
+  return `${path.resolve(normalizedDirectory)}\0${remoteName}`;
+};
+
+const hasRemote = async (git, directory, remoteName) => {
+  const remote = String(remoteName || '').trim();
+  if (!remote) {
+    return false;
+  }
+
+  const key = getRemoteExistenceCacheKey(directory, remote);
+  const cached = remoteExistenceCache.get(key);
+  if (cached && Date.now() - cached.checkedAt < REMOTE_EXISTENCE_CACHE_TTL_MS) {
+    return cached.exists;
+  }
+
+  const exists = await git
+    .raw(['remote', 'get-url', remote])
+    .then((value) => String(value || '').trim().length > 0)
+    .catch(() => false);
+
+  remoteExistenceCache.set(key, { exists, checkedAt: Date.now() });
+  return exists;
+};
+
+const buildRawGitOptions = (raw) => {
+  if (Array.isArray(raw)) {
+    return raw.map((value) => String(value || '').trim()).filter(Boolean);
+  }
+
+  if (!raw || typeof raw !== 'object') {
+    return [];
+  }
+
+  return Object.entries(raw).flatMap(([key, value]) => {
+    const option = String(key || '').trim();
+    if (!option || value === false) {
+      return [];
+    }
+    if (value === true || value == null) {
+      return [option];
+    }
+    return [option, String(value)];
+  });
 };
 
 const getRemoteBranchComparison = async (git, remoteName, branchName) => {
@@ -1457,7 +1506,12 @@ export async function getStatus(directory, options = {}) {
       }
     }
 
-    if (!lightMode && status.current && (!tracking || !tracking.startsWith('upstream/'))) {
+    if (
+      !lightMode
+      && status.current
+      && (!tracking || !tracking.startsWith('upstream/'))
+      && await hasRemote(git, directoryPath, 'upstream')
+    ) {
       upstreamComparison = await getRemoteBranchComparison(git, 'upstream', status.current);
     }
 
@@ -2075,15 +2129,16 @@ export async function fetch(directory, options = {}) {
   try {
     const remote = String(options.remote || '').trim();
     const branch = String(options.branch || '').trim();
+    const fetchOptions = options.options || {};
 
     if (remote && !branch) {
       // simple-git drops the remote when branch is omitted, so use raw to preserve `git fetch <remote>`.
-      await git.raw(['fetch', remote]);
+      await git.raw(['fetch', ...buildRawGitOptions(fetchOptions), remote]);
     } else {
       await git.fetch(
         remote || 'origin',
         branch || undefined,
-        options.options || {}
+        fetchOptions
       );
     }
 

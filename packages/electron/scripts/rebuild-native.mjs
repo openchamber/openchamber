@@ -71,7 +71,15 @@ const createWindowsRebuildPath = (target) => {
     }
   }
 
-  return { buildPath: getWindowsShortPath(target), cleanup: () => {} };
+  const shortPath = getWindowsShortPath(target);
+  if (shortPath === target && /\s/.test(target)) {
+    throw new Error(
+      `Unable to create a space-free Windows rebuild path for ${target}. `
+      + 'All subst drive letters are unavailable and the volume did not return an 8.3 short path.',
+    );
+  }
+
+  return { buildPath: shortPath, cleanup: () => {} };
 };
 
 const writeWindowsNodeAddonApiIndex = async (nodeAddonApiDir, exportedNodeAddonApiDir) => {

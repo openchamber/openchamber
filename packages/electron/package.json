@@ -73,8 +73,7 @@
         "nsis",
         "zip"
       ],
-      "artifactName": "${productName}-${version}-win-${arch}.${ext}",
-      "verifyUpdateCodeSignature": false
+      "artifactName": "${productName}-${version}-win-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,
