@@ -21,6 +21,12 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ isOpen, children, cl
   const setRightSidebarWidth = useUIStore((state) => state.setRightSidebarWidth);
   const isDesktopApp = React.useMemo(() => isDesktopShell(), []);
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
+  const isWindowsElectronDesktop = React.useMemo(() => {
+    if (typeof window === 'undefined') {
+      return false;
+    }
+    return Boolean(window.__OPENCHAMBER_ELECTRON__) && window.__OPENCHAMBER_PLATFORM__ === 'win32';
+  }, []);
   const [isResizing, setIsResizing] = React.useState(false);
   const startXRef = React.useRef(0);
   const startWidthRef = React.useRef(rightSidebarWidth || 420);
@@ -130,7 +136,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ isOpen, children, cl
   }, [isDesktopApp]);
 
   const webWindowControlsOverlayStyle = React.useMemo<React.CSSProperties | undefined>(() => {
-    if (isDesktopApp || isVSCode) {
+    if ((isDesktopApp && !isWindowsElectronDesktop) || isVSCode) {
       return undefined;
     }
 
@@ -138,7 +144,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ isOpen, children, cl
       paddingLeft: 'calc(0.75rem + var(--oc-wco-left-inset, 0px))',
       paddingRight: 'calc(0.75rem + var(--oc-wco-right-inset, 0px))',
     };
-  }, [isDesktopApp, isVSCode]);
+  }, [isDesktopApp, isVSCode, isWindowsElectronDesktop]);
 
   return (
     <aside

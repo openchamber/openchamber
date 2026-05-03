@@ -55,29 +55,39 @@ const submitPassword = async (password: string, trustDevice: boolean): Promise<R
   return response;
 };
 
-const AuthShell: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <div
-    className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background text-foreground"
-    style={{ fontFamily: '"Inter", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", sans-serif' }}
-  >
+const AuthShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const titlebarDragStyle = React.useMemo<React.CSSProperties>(() => {
+    return {
+      height: 'var(--oc-wco-titlebar-height, 0px)',
+      right: 'var(--oc-wco-right-inset, 0px)',
+    };
+  }, []);
+
+  return (
     <div
-      className="pointer-events-none absolute inset-0 opacity-55"
-      style={{
-        background: 'radial-gradient(120% 140% at 50% -20%, var(--surface-overlay) 0%, transparent 68%)',
-      }}
-    />
-    <div
-      className="pointer-events-none absolute inset-0"
-      style={{
-        backgroundColor: 'var(--surface-subtle)',
-        opacity: 0.22,
-      }}
-    />
-    <div className="relative z-10 flex w-full justify-center px-4 py-12 sm:px-6">
-      {children}
+      className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background text-foreground"
+      style={{ fontFamily: '"Inter", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", sans-serif' }}
+    >
+      <div className="app-region-drag fixed left-0 top-0 z-20" style={titlebarDragStyle} aria-hidden />
+      <div
+        className="pointer-events-none absolute inset-0 opacity-55"
+        style={{
+          background: 'radial-gradient(120% 140% at 50% -20%, var(--surface-overlay) 0%, transparent 68%)',
+        }}
+      />
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{
+          backgroundColor: 'var(--surface-subtle)',
+          opacity: 0.22,
+        }}
+      />
+      <div className="app-region-no-drag relative z-10 flex w-full justify-center px-4 py-12 sm:px-6">
+        {children}
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 const LoadingScreen: React.FC = () => (
   <div className="flex min-h-screen items-center justify-center bg-background text-foreground">

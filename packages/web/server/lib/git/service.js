@@ -10,6 +10,10 @@ const execFileAsync = promisify(execFile);
 const gpgconfCandidates = ['gpgconf', '/opt/homebrew/bin/gpgconf', '/usr/local/bin/gpgconf'];
 let resolvedGitBinary = null;
 const worktreeBootstrapState = new Map();
+const remoteExistenceCache = new Map();
+const SIMPLE_GIT_SAFE_BINARY_PATTERN = /^([a-z]:)?([a-z0-9/.\\_~-]+)$/i;
+const SIMPLE_GIT_UNSAFE_BINARY_WARNING = 'Invalid value supplied for custom binary, restricted characters must be removed';
+const REMOTE_EXISTENCE_CACHE_TTL_MS = 30_000;
 
 const WORKTREE_BOOTSTRAP_PENDING = 'pending';
 const WORKTREE_BOOTSTRAP_READY = 'ready';
@@ -83,6 +87,30 @@ const normalizeGitExecutableCandidate = (candidate) => {
   return trimmed;
 };
 
+const isSafeSimpleGitBinary = (candidate) => (
+  typeof candidate === 'string' && SIMPLE_GIT_SAFE_BINARY_PATTERN.test(candidate)
+);
+
+const createSimpleGit = (options) => {
+  if (!options?.unsafe?.allowUnsafeCustomBinary) {
+    return simpleGit(options);
+  }
+
+  const originalWarn = console.warn;
+  console.warn = (...args) => {
+    if (String(args[0] || '').includes(SIMPLE_GIT_UNSAFE_BINARY_WARNING)) {
+      return;
+    }
+    originalWarn(...args);
+  };
+
+  try {
+    return simpleGit(options);
+  } finally {
+    console.warn = originalWarn;
+  }
+};
+
 const listPathExecutableCandidates = (binaryName) => {
   const currentPath = process.env.PATH || '';
   const seen = new Set();
@@ -130,22 +158,34 @@ const resolveGitBinary = () => {
     .map((value) => (typeof value === 'string' ? value.trim() : ''))
     .filter(Boolean);
   for (const candidate of explicit) {
-    if (isExecutableFile(candidate)) {
-      resolvedGitBinary = candidate;
+    const normalized = normalizeGitExecutableCandidate(candidate);
+    if (isExecutableFile(normalized)) {
+      resolvedGitBinary = normalized;
       return resolvedGitBinary;
     }
   }
 
-  const discovered = [
+  const pathDiscovered = [
     ...listPathExecutableCandidates('git.exe'),
     ...listPathExecutableCandidates('git'),
+  ]
+    .map(normalizeGitExecutableCandidate)
+    .filter(Boolean)
+    .filter((candidate) => isExecutableFile(candidate));
+  if (pathDiscovered.length > 0) {
+    resolvedGitBinary = 'git';
+    return resolvedGitBinary;
+  }
+
+  const discovered = [
     ...listWindowsGitInstallCandidates(),
   ]
     .map(normalizeGitExecutableCandidate)
     .filter(Boolean)
     .filter((candidate) => isExecutableFile(candidate));
 
-  const preferredExe = discovered.find((candidate) => candidate.toLowerCase().endsWith('.exe'));
+  const preferredExe = discovered.find((candidate) => isSafeSimpleGitBinary(candidate) && candidate.toLowerCase().endsWith('.exe'))
+    || discovered.find((candidate) => candidate.toLowerCase().endsWith('.exe'));
   resolvedGitBinary = preferredExe || discovered[0] || 'git.exe';
   return resolvedGitBinary;
 };
@@ -273,9 +313,9 @@ const createGit = async (directory) => {
   const hasCustomBinary = typeof binary === 'string' && binary.trim() && binary !== 'git' && binary !== 'git.exe';
   const unsafe = hasCustomBinary ? { allowUnsafeCustomBinary: true } : undefined;
   if (!directory) {
-    return simpleGit({ env, spawnOptions, binary, unsafe });
+    return createSimpleGit({ env, spawnOptions, binary, unsafe });
   }
-  return simpleGit({
+  return createSimpleGit({
     baseDir: normalizeDirectoryPath(directory),
     env,
     spawnOptions,
@@ -561,6 +601,96 @@ const parseGitErrorText = (error) => {
     .filter(Boolean)
     .join('\n')
     .trim();
+};
+
+const parseAheadBehindCounts = (value) => {
+  const [aheadRaw, behindRaw] = String(value || '').trim().split(/\s+/);
+  const ahead = parseInt(aheadRaw, 10);
+  const behind = parseInt(behindRaw, 10);
+  if (!Number.isFinite(ahead) || !Number.isFinite(behind)) {
+    return null;
+  }
+  return { ahead, behind };
+};
+
+const getRemoteExistenceCacheKey = (directory, remoteName) => {
+  const normalizedDirectory = normalizeDirectoryPath(directory) || '';
+  return `${path.resolve(normalizedDirectory)}\0${remoteName}`;
+};
+
+const hasRemote = async (git, directory, remoteName) => {
+  const remote = String(remoteName || '').trim();
+  if (!remote) {
+    return false;
+  }
+
+  const key = getRemoteExistenceCacheKey(directory, remote);
+  const cached = remoteExistenceCache.get(key);
+  if (cached && Date.now() - cached.checkedAt < REMOTE_EXISTENCE_CACHE_TTL_MS) {
+    return cached.exists;
+  }
+
+  const exists = await git
+    .raw(['remote', 'get-url', remote])
+    .then((value) => String(value || '').trim().length > 0)
+    .catch(() => false);
+
+  remoteExistenceCache.set(key, { exists, checkedAt: Date.now() });
+  return exists;
+};
+
+const buildRawGitOptions = (raw) => {
+  if (Array.isArray(raw)) {
+    return raw.map((value) => String(value || '').trim()).filter(Boolean);
+  }
+
+  if (!raw || typeof raw !== 'object') {
+    return [];
+  }
+
+  return Object.entries(raw).flatMap(([key, value]) => {
+    const option = String(key || '').trim();
+    if (!option || value === false) {
+      return [];
+    }
+    if (value === true || value == null) {
+      return [option];
+    }
+    return [option, String(value)];
+  });
+};
+
+const getRemoteBranchComparison = async (git, remoteName, branchName) => {
+  const remote = String(remoteName || '').trim();
+  const branch = String(branchName || '').trim();
+  if (!remote || !branch) {
+    return null;
+  }
+
+  const remoteRef = `refs/remotes/${remote}/${branch}`;
+  const exists = await git
+    .raw(['rev-parse', '--verify', remoteRef])
+    .then((value) => String(value || '').trim())
+    .catch(() => '');
+  if (!exists) {
+    return null;
+  }
+
+  const countsRaw = await git
+    .raw(['rev-list', '--left-right', '--count', `HEAD...${remoteRef}`])
+    .then((value) => String(value || '').trim())
+    .catch(() => '');
+  const counts = parseAheadBehindCounts(countsRaw);
+  if (!counts) {
+    return null;
+  }
+
+  return {
+    remote,
+    branch,
+    ahead: counts.ahead,
+    behind: counts.behind,
+  };
 };
 
 const isNotGitRepositoryError = (error) => {
@@ -1356,6 +1486,7 @@ export async function getStatus(directory, options = {}) {
     let tracking = status.tracking || null;
     let ahead = status.ahead;
     let behind = status.behind;
+    let upstreamComparison;
 
     // When no upstream is configured (common for new worktree branches), Git doesn't report ahead/behind.
     // We still want to show the number of unpublished commits to the user.
@@ -1373,6 +1504,15 @@ export async function getStatus(directory, options = {}) {
           behind = 0;
         }
       }
+    }
+
+    if (
+      !lightMode
+      && status.current
+      && (!tracking || !tracking.startsWith('upstream/'))
+      && await hasRemote(git, directoryPath, 'upstream')
+    ) {
+      upstreamComparison = await getRemoteBranchComparison(git, 'upstream', status.current);
     }
 
     // Check for in-progress operations
@@ -1432,6 +1572,7 @@ export async function getStatus(directory, options = {}) {
       tracking,
       ahead,
       behind,
+      upstreamComparison,
       files: status.files.map((f) => ({
         path: f.path,
         index: f.index,
@@ -1796,9 +1937,20 @@ export async function pull(directory, options = {}) {
   const git = await createGit(directory);
 
   try {
+    const remote = String(options.remote || '').trim();
+    const requestedBranch = String(options.branch || '').trim();
+    let branch = requestedBranch;
+
+    if (remote && !branch) {
+      // simple-git only includes the remote when both remote and branch are provided.
+      // Resolve the current branch so selecting a remote in the UI really runs `git pull <remote> <branch>`.
+      const status = await git.status();
+      branch = String(status.current || '').trim();
+    }
+
     const result = await git.pull(
-      options.remote || 'origin',
-      options.branch,
+      remote || 'origin',
+      branch || undefined,
       options.options || {}
     );
 
@@ -1975,11 +2127,20 @@ export async function fetch(directory, options = {}) {
   const git = await createGit(directory);
 
   try {
-    await git.fetch(
-      options.remote || 'origin',
-      options.branch,
-      options.options || {}
-    );
+    const remote = String(options.remote || '').trim();
+    const branch = String(options.branch || '').trim();
+    const fetchOptions = options.options || {};
+
+    if (remote && !branch) {
+      // simple-git drops the remote when branch is omitted, so use raw to preserve `git fetch <remote>`.
+      await git.raw(['fetch', ...buildRawGitOptions(fetchOptions), remote]);
+    } else {
+      await git.fetch(
+        remote || 'origin',
+        branch || undefined,
+        fetchOptions
+      );
+    }
 
     return { success: true };
   } catch (error) {

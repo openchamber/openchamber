@@ -928,8 +928,13 @@ export const GitView: React.FC = () => {
             : t('gitView.toast.pulledFilesPlural', { count: result.files.length, name: remote.name })
         );
       } else if (action === 'push') {
-        await git.gitPush(currentDirectory);
-        toast.success(t('gitView.toast.pushedToUpstream'));
+        const result = await git.gitPush(currentDirectory);
+        const pushedRemote = result.pushed[0]?.remote
+          || status?.tracking?.split('/')[0]
+          || effectiveRemotes.find((remote) => remote.name === 'origin')?.name
+          || effectiveRemotes[0]?.name
+          || 'origin';
+        toast.success(t('gitView.toast.pushedToUpstream', { name: pushedRemote }));
       }
 
       await refreshStatusAndBranches(false);
@@ -1003,8 +1008,13 @@ export const GitView: React.FC = () => {
       await refreshStatusAndBranches();
 
       if (options.pushAfter) {
-        await git.gitPush(currentDirectory);
-        toast.success(t('gitView.toast.pushedToUpstream'));
+        const result = await git.gitPush(currentDirectory);
+        const pushedRemote = result.pushed[0]?.remote
+          || status?.tracking?.split('/')[0]
+          || effectiveRemotes.find((remote) => remote.name === 'origin')?.name
+          || effectiveRemotes[0]?.name
+          || 'origin';
+        toast.success(t('gitView.toast.pushedToUpstream', { name: pushedRemote }));
         triggerFireworks();
         await refreshStatusAndBranches(false);
       } else {

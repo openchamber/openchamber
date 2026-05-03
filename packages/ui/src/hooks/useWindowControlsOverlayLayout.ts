@@ -100,6 +100,8 @@ export const useWindowControlsOverlayLayout = () => {
       if (overlay && typeof overlay.removeEventListener === 'function') {
         overlay.removeEventListener('geometrychange', updateGeometry);
       }
+
+      applyOverlayInsets(root, 0, 0, 0);
     };
   }, []);
 };

@@ -83,6 +83,7 @@
         "eslint-plugin-react-hooks": "^5.2.0",
         "eslint-plugin-react-refresh": "^0.4.20",
         "globals": "^16.3.0",
+        "node-addon-api": "7.1.1",
         "nodemon": "^3.1.7",
         "patch-package": "^8.0.0",
         "tailwindcss": "^4.0.0",
@@ -95,7 +96,7 @@
     },
     "packages/desktop": {
       "name": "@openchamber/desktop",
-      "version": "1.9.8",
+      "version": "1.9.10",
       "devDependencies": {
         "@tauri-apps/cli": "^2",
         "@types/node": "^24.3.1",
@@ -104,7 +105,7 @@
     },
     "packages/electron": {
       "name": "@openchamber/electron",
-      "version": "1.9.8",
+      "version": "1.9.10",
       "dependencies": {
         "@openchamber/web": "workspace:*",
         "electron-context-menu": "^4.1.2",
@@ -119,7 +120,7 @@
     },
     "packages/ui": {
       "name": "@openchamber/ui",
-      "version": "1.9.8",
+      "version": "1.9.10",
       "dependencies": {
         "@base-ui/react": "^1.4.0",
         "@codemirror/autocomplete": "^6.20.0",
@@ -218,7 +219,7 @@
     },
     "packages/vscode": {
       "name": "openchamber",
-      "version": "1.9.8",
+      "version": "1.9.10",
       "dependencies": {
         "@openchamber/ui": "workspace:*",
         "@opencode-ai/sdk": "^1.4.25",
@@ -241,7 +242,7 @@
     },
     "packages/web": {
       "name": "@openchamber/web",
-      "version": "1.9.8",
+      "version": "1.9.10",
       "bin": {
         "openchamber": "./bin/cli.js",
       },

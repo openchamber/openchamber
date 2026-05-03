@@ -34,13 +34,23 @@ export const DEFAULT_OPEN_IN_APP_ID = 'finder';
 export const OPEN_IN_ALWAYS_AVAILABLE_APP_IDS = new Set(['finder', 'terminal']);
 export const OPEN_DIRECTORY_APP_IDS = new Set(['finder', 'terminal', 'iterm2', 'ghostty']);
 
+export const getPlatformOpenInApp = (app: OpenInApp): OpenInApp => {
+  if (typeof window !== 'undefined' && window.__OPENCHAMBER_PLATFORM__ === 'win32') {
+    if (app.id === 'finder') {
+      return { ...app, label: 'Explorer', appName: 'File Explorer' };
+    }
+  }
+  return app;
+};
+
 export const getOpenInAppById = (id: string | null | undefined): OpenInApp | null => {
   if (!id) {
     return null;
   }
-  return OPEN_IN_APPS.find((app) => app.id === id) ?? null;
+  const app = OPEN_IN_APPS.find((candidate) => candidate.id === id) ?? null;
+  return app ? getPlatformOpenInApp(app) : null;
 };
 
 export const getDefaultOpenInApp = (): OpenInApp => {
-  return getOpenInAppById(DEFAULT_OPEN_IN_APP_ID) ?? OPEN_IN_APPS[0];
+  return getOpenInAppById(DEFAULT_OPEN_IN_APP_ID) ?? getPlatformOpenInApp(OPEN_IN_APPS[0]);
 };
