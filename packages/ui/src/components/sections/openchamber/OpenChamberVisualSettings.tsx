@@ -220,7 +220,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-export type VisibleSetting = 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'stickyUserHeader' | 'splitAssistantMessageActions' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'showToolFileIcons' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage';
+export type VisibleSetting = 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'stickyUserHeader' | 'wideChatLayout' | 'splitAssistantMessageActions' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'showToolFileIcons' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage';
 
 interface OpenChamberVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
@@ -242,6 +242,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setUserMessageRenderingMode = useUIStore(state => state.setUserMessageRenderingMode);
     const stickyUserHeader = useUIStore(state => state.stickyUserHeader);
     const setStickyUserHeader = useUIStore(state => state.setStickyUserHeader);
+    const wideChatLayoutEnabled = useUIStore(state => state.wideChatLayoutEnabled);
+    const setWideChatLayoutEnabled = useUIStore(state => state.setWideChatLayoutEnabled);
     const chatRenderMode = useUIStore(state => state.chatRenderMode);
     const setChatRenderMode = useUIStore(state => state.setChatRenderMode);
     const activityRenderMode = useUIStore(state => state.activityRenderMode);
@@ -366,6 +368,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         void updateDesktopSettings({ stickyUserHeader: enabled });
     }, [setStickyUserHeader]);
 
+    const handleWideChatLayoutChange = React.useCallback((enabled: boolean) => {
+        setWideChatLayoutEnabled(enabled);
+        void updateDesktopSettings({ wideChatLayoutEnabled: enabled });
+    }, [setWideChatLayoutEnabled]);
+
     const handleShowSplitAssistantMessageActionsChange = React.useCallback((enabled: boolean) => {
         setShowSplitAssistantMessageActions(enabled);
         void updateDesktopSettings({ showSplitAssistantMessageActions: enabled });
@@ -469,6 +476,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('messageTransport')
         || (shouldShow('activityRenderMode') && chatRenderMode === 'sorted')
         || shouldShow('stickyUserHeader')
+        || shouldShow('wideChatLayout')
         || shouldShow('splitAssistantMessageActions')
         || shouldShow('diffLayout')
         || (shouldShow('mobileStatusBar') && isMobile)
@@ -681,7 +689,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     >
                                         {themesReloading ? t('settings.openchamber.visual.actions.reloadingThemes') : t('settings.openchamber.visual.actions.reloadThemes')}
                                     </button>
-                                    <Tooltip delayDuration={700}>
+                                    <Tooltip>
                                         <TooltipTrigger asChild>
                                             <button
                                                 type="button"
@@ -1021,7 +1029,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "w-56 shrink-0")}>
                                         <div className="flex items-center gap-1.5">
                                             <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.inputBarOffset')}</span>
-                                            <Tooltip delayDuration={1000}>
+                                            <Tooltip>
                                                 <TooltipTrigger asChild>
                                                     <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                                                 </TooltipTrigger>
@@ -1087,7 +1095,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     />
                                     <div className="flex min-w-0 items-center gap-1.5">
                                         <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.terminalQuickKeys')}</span>
-                                        <Tooltip delayDuration={1000}>
+                                        <Tooltip>
                                             <TooltipTrigger asChild>
                                                 <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                                             </TooltipTrigger>
@@ -1451,7 +1459,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 </div>
                             )}
 
-                            {(shouldShow('stickyUserHeader') || shouldShow('splitAssistantMessageActions') || (shouldShow('mobileStatusBar') && isMobile) || shouldShow('dotfiles') || shouldShow('queueMode') || shouldShow('persistDraft') || shouldShow('showToolFileIcons') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('reasoning')) && (
+                            {(shouldShow('stickyUserHeader') || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || (shouldShow('mobileStatusBar') && isMobile) || shouldShow('dotfiles') || shouldShow('queueMode') || shouldShow('persistDraft') || shouldShow('showToolFileIcons') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('reasoning')) && (
                                 <section className="p-2 space-y-0.5">
                                     {shouldShow('reasoning') && (
                                         <div
@@ -1499,6 +1507,29 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         </div>
                                     )}
 
+                                    {shouldShow('wideChatLayout') && (
+                                        <div
+                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
+                                            role="button"
+                                            tabIndex={0}
+                                            aria-pressed={wideChatLayoutEnabled}
+                                            onClick={() => handleWideChatLayoutChange(!wideChatLayoutEnabled)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    handleWideChatLayoutChange(!wideChatLayoutEnabled);
+                                                }
+                                            }}
+                                        >
+                                            <Checkbox
+                                                checked={wideChatLayoutEnabled}
+                                                onChange={handleWideChatLayoutChange}
+                                                ariaLabel={t('settings.openchamber.visual.field.wideChatLayoutAria')}
+                                            />
+                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.wideChatLayout')}</span>
+                                        </div>
+                                    )}
+
                                     {shouldShow('splitAssistantMessageActions') && (
                                         <div
                                             className="group flex cursor-pointer items-center gap-2 py-0.5"
@@ -1520,7 +1551,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             />
                                             <div className="flex min-w-0 items-center gap-1.5">
                                                 <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.showSplitAssistantMessageActions')}</span>
-                                                <Tooltip delayDuration={1000}>
+                                                <Tooltip>
                                                     <TooltipTrigger asChild>
                                                         <RiInformationLine className="h-3.5 w-3.5 cursor-help text-muted-foreground/60" />
                                                     </TooltipTrigger>
@@ -1622,7 +1653,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             />
                                             <div className="flex min-w-0 items-center gap-1.5">
                                                 <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.queueMessagesByDefault')}</span>
-                                                <Tooltip delayDuration={1000}>
+                                                <Tooltip>
                                                     <TooltipTrigger asChild>
                                                         <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                                                     </TooltipTrigger>

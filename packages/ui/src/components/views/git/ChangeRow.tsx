@@ -150,7 +150,7 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
           <span className="text-muted-foreground mx-0.5">/</span>
           <span style={{ color: 'var(--status-error)' }}>-{deletions}</span>
         </span>
-        <Tooltip delayDuration={200}>
+        <Tooltip>
           <TooltipTrigger asChild>
             <button
               type="button"

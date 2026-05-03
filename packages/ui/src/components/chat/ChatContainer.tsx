@@ -47,6 +47,7 @@ const EMPTY_PERMISSIONS: PermissionRequest[] = [];
 const EMPTY_QUESTIONS: QuestionRequest[] = [];
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
 const SESSION_RESELECTED_EVENT = 'openchamber:session-reselected';
+const CHAT_FORCE_SCROLL_BOTTOM_EVENT = 'openchamber:chat-force-scroll-bottom';
 const DEFAULT_RETRY_MESSAGE = 'Quota limit reached. Retrying automatically.';
 const CHAT_SCROLL_STYLE = {
     overflowAnchor: 'none',
@@ -551,6 +552,7 @@ export const ChatContainer: React.FC = () => {
         isPinned,
         isOverflowing,
         isProgrammaticFollowActive,
+        clearRestoreInProgress,
     } = useChatScrollManager({
         currentSessionId,
         sessionMessageCount,
@@ -578,18 +580,41 @@ export const ChatContainer: React.FC = () => {
         isPinned,
         isOverflowing,
     });
-    const { loadEarlier, resumeToBottomInstant } = timelineController;
+    const { loadEarlier, resumeToBottomInstant, restoreSavedScrollPosition } = timelineController;
 
-    const runLatestInstantResume = React.useCallback(async () => {
+    const runLatestInstantResume = React.useCallback(async (options?: { force?: boolean }) => {
         if (!currentSessionId) {
             scrollToBottom({ instant: true, force: true });
             return;
         }
-        await resumeToBottomInstant();
-    }, [currentSessionId, resumeToBottomInstant, scrollToBottom]);
 
-    const resumeToLatestInstant = React.useCallback(() => {
-        void runLatestInstantResume();
+        if (options?.force) {
+            await resumeToBottomInstant();
+            clearRestoreInProgress(currentSessionId);
+            return;
+        }
+
+        // Check if this session has a saved non-bottom scroll position.
+        const savedMemState = sessionMemoryStateMap.get(currentSessionId);
+        const savedPos = savedMemState?.scrollPosition;
+        if (savedPos && !sessionIsWorking) {
+            const savedMaxScroll = Math.max(0, savedPos.scrollHeight - savedPos.clientHeight);
+            // Use the same pixel threshold as the pin logic: 10% of clientHeight, clamped.
+            const threshold = Math.max(24, Math.min(200, savedPos.clientHeight * 0.10));
+            const distanceFromSavedBottom = savedMaxScroll - savedPos.scrollTop;
+            if (savedMaxScroll > 0 && distanceFromSavedBottom > threshold) {
+                await restoreSavedScrollPosition(savedPos);
+                clearRestoreInProgress(currentSessionId);
+                return;
+            }
+        }
+
+        await resumeToBottomInstant();
+        clearRestoreInProgress(currentSessionId);
+    }, [clearRestoreInProgress, currentSessionId, restoreSavedScrollPosition, resumeToBottomInstant, scrollToBottom, sessionIsWorking, sessionMemoryStateMap]);
+
+    const resumeToLatestInstant = React.useCallback((options?: { force?: boolean }) => {
+        void runLatestInstantResume(options);
     }, [runLatestInstantResume]);
 
     React.useEffect(() => {
@@ -662,6 +687,12 @@ export const ChatContainer: React.FC = () => {
     React.useEffect(() => {
         if (typeof window === 'undefined' || !currentSessionId) return;
 
+        const handleForceScrollBottom = (event: Event) => {
+            const customEvent = event as CustomEvent<{ sessionId?: string }>;
+            if (customEvent.detail?.sessionId && customEvent.detail.sessionId !== currentSessionId) return;
+            resumeToLatestInstant({ force: true });
+        };
+
         const handleSessionReselected = (event: Event) => {
             const customEvent = event as CustomEvent<string>;
             if (customEvent.detail !== currentSessionId) return;
@@ -669,11 +700,13 @@ export const ChatContainer: React.FC = () => {
             void resumeToBottomInstant();
         };
 
+        window.addEventListener(CHAT_FORCE_SCROLL_BOTTOM_EVENT, handleForceScrollBottom as EventListener);
         window.addEventListener(SESSION_RESELECTED_EVENT, handleSessionReselected as EventListener);
         return () => {
+            window.removeEventListener(CHAT_FORCE_SCROLL_BOTTOM_EVENT, handleForceScrollBottom as EventListener);
             window.removeEventListener(SESSION_RESELECTED_EVENT, handleSessionReselected as EventListener);
         };
-    }, [currentSessionId, isOverflowing, isPinned, isProgrammaticFollowActive, resumeToBottomInstant]);
+    }, [currentSessionId, isOverflowing, isPinned, isProgrammaticFollowActive, resumeToBottomInstant, resumeToLatestInstant]);
 
     React.useLayoutEffect(() => {
         const container = scrollRef.current;
@@ -729,6 +762,7 @@ export const ChatContainer: React.FC = () => {
         const hasHashTarget = typeof window !== 'undefined' && window.location.hash.length > 0;
         if (hasHashTarget) {
             lastScrolledSessionRef.current = currentSessionId;
+            clearRestoreInProgress(currentSessionId);
             return;
         }
 
@@ -742,7 +776,7 @@ export const ChatContainer: React.FC = () => {
         window.requestAnimationFrame(() => {
             resumeToLatestInstant();
         });
-    }, [currentSessionId, resumeToLatestInstant]);
+    }, [clearRestoreInProgress, currentSessionId, resumeToLatestInstant]);
 
     React.useEffect(() => {
         if (!currentSessionId) return;

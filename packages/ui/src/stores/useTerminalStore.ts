@@ -16,10 +16,14 @@ export type TerminalTab = {
   terminalSessionId: string | null;
   lifecycle: TerminalTabLifecycle;
   label: string;
+  iconKey: string | null;
   bufferChunks: TerminalChunk[];
   bufferLength: number;
   isConnecting: boolean;
   createdAt: number;
+  previewUrl: string | null;
+  previewAutoOpened: boolean;
+  previewUrlLocked: boolean;
 };
 
 export type DirectoryTerminalState = {
@@ -27,8 +31,18 @@ export type DirectoryTerminalState = {
   activeTabId: string | null;
 };
 
+export type TerminalProjectActionRun = {
+  key: string;
+  directory: string;
+  actionId: string;
+  tabId: string;
+  sessionId: string;
+  status: 'running' | 'waiting-for-preview' | 'stopping';
+};
+
 interface TerminalStore {
   sessions: Map<string, DirectoryTerminalState>;
+  projectActionRuns: Record<string, TerminalProjectActionRun>;
   nextChunkId: number;
   nextTabId: number;
   hasHydrated: boolean;
@@ -40,6 +54,7 @@ interface TerminalStore {
   createTab: (directory: string) => string;
   setActiveTab: (directory: string, tabId: string) => void;
   setTabLabel: (directory: string, tabId: string, label: string) => void;
+  setTabIconKey: (directory: string, tabId: string, iconKey: string | null) => void;
   closeTab: (directory: string, tabId: string) => Promise<void>;
 
   setTabSessionId: (directory: string, tabId: string, sessionId: string | null) => void;
@@ -47,6 +62,11 @@ interface TerminalStore {
   setConnecting: (directory: string, tabId: string, isConnecting: boolean) => void;
   appendToBuffer: (directory: string, tabId: string, chunk: string) => void;
   clearBuffer: (directory: string, tabId: string) => void;
+  setTabPreviewUrl: (directory: string, tabId: string, url: string | null, options?: { locked?: boolean; autoOpened?: boolean }) => void;
+  markPreviewAutoOpened: (directory: string, tabId: string) => void;
+  setProjectActionRun: (run: TerminalProjectActionRun) => void;
+  updateProjectActionRunStatus: (runKey: string, status: TerminalProjectActionRun['status']) => void;
+  removeProjectActionRun: (runKey: string) => void;
 
   removeDirectory: (directory: string) => void;
   clearAll: () => void;
@@ -56,7 +76,7 @@ const TERMINAL_BUFFER_LIMIT = 1_000_000;
 const TERMINAL_STORE_NAME = 'terminal-store';
 let hydrationListenerAttached = false;
 
-type PersistedTerminalTab = Pick<TerminalTab, 'id' | 'label' | 'terminalSessionId' | 'lifecycle' | 'createdAt'>;
+type PersistedTerminalTab = Pick<TerminalTab, 'id' | 'label' | 'iconKey' | 'terminalSessionId' | 'lifecycle' | 'createdAt'>;
 
 type PersistedDirectoryTerminalState = {
   tabs: PersistedTerminalTab[];
@@ -91,11 +111,76 @@ const createEmptyTab = (id: string, label: string): TerminalTab => ({
   terminalSessionId: null,
   lifecycle: 'idle',
   label,
+  iconKey: null,
   bufferChunks: [],
   bufferLength: 0,
   isConnecting: false,
   createdAt: Date.now(),
+  previewUrl: null,
+  previewAutoOpened: false,
+  previewUrlLocked: false,
 });
+
+// eslint-disable-next-line no-control-regex
+const ANSI_ESCAPE_PATTERN = /\x1b\[[0-9;]*m/g;
+// Many dev servers print loopback as 0.0.0.0, localhost, or IPv6 ([::]/[::1]).
+const URL_PATTERN = /(https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[(?:::1|::)\])(?::\d{2,5})?(?:\/[\w\-./~%!$&'()*+,;=:@?#[\]]*)?)/i;
+
+// Dev server logs frequently wrap URLs in punctuation, e.g.
+//   "Local: http://localhost:5173/ (press h to show help)"
+//   "Serving on (http://127.0.0.1:50028/)."
+// The URL_PATTERN above intentionally allows sub-delim characters like `()`
+// in the path (RFC 3986), which means greedy capture can swallow trailing
+// closing brackets that were really part of the surrounding sentence.
+// Peel off any trailing closer that has no matching opener inside the URL,
+// plus common trailing sentence punctuation.
+const TRAILING_PUNCT = new Set(['.', ',', ';', ':', '!', '?']);
+const trimUrlTrailingPunctuation = (url: string): string => {
+  let result = url;
+  while (result.length > 0) {
+    const last = result[result.length - 1];
+    if (last === ')' || last === ']' || last === '}' || last === '>') {
+      const opener = last === ')' ? '(' : last === ']' ? '[' : last === '}' ? '{' : '<';
+      // Count matched pairs in the rest of the URL; if there's no unmatched
+      // opener, the closer is from surrounding text — strip it.
+      const head = result.slice(0, -1);
+      const opens = (head.match(new RegExp(`\\${opener}`, 'g')) || []).length;
+      const closes = (head.match(new RegExp(`\\${last}`, 'g')) || []).length;
+      if (opens > closes) break;
+      result = head;
+      continue;
+    }
+    if (TRAILING_PUNCT.has(last)) {
+      result = result.slice(0, -1);
+      continue;
+    }
+    break;
+  }
+  return result;
+};
+
+const extractPreviewUrl = (chunk: string): string | null => {
+  if (!chunk) return null;
+  const cleaned = chunk.replace(ANSI_ESCAPE_PATTERN, '');
+  const match = cleaned.match(URL_PATTERN);
+  if (!match?.[1]) return null;
+  let url = trimUrlTrailingPunctuation(match[1]);
+  // Normalize common loopback hostnames to a stable value so the iframe can load.
+  url = url.replace('0.0.0.0', '127.0.0.1');
+  url = url.replace('[::1]', '127.0.0.1');
+  url = url.replace('[::]', '127.0.0.1');
+  return url;
+};
+
+const extractPythonHttpServerUrl = (chunk: string): string | null => {
+  if (!chunk) return null;
+  const cleaned = chunk.replace(ANSI_ESCAPE_PATTERN, '');
+  const match = cleaned.match(/Serving HTTP on .*? port (\d{2,5})/i);
+  if (!match?.[1]) return null;
+  const port = Number.parseInt(match[1], 10);
+  if (!Number.isFinite(port) || port <= 0 || port > 65535) return null;
+  return `http://127.0.0.1:${port}/`;
+};
 
 const createEmptyDirectoryState = (firstTab: TerminalTab): DirectoryTerminalState => ({
   tabs: [firstTab],
@@ -110,6 +195,7 @@ export const useTerminalStore = create<TerminalStore>()(
     persist(
       (set, get) => ({
         sessions: new Map(),
+        projectActionRuns: {},
         nextChunkId: 1,
         nextTabId: 1,
         hasHydrated: typeof window === 'undefined',
@@ -235,6 +321,39 @@ export const useTerminalStore = create<TerminalStore>()(
           });
         },
 
+        setTabIconKey: (directory: string, tabId: string, iconKey: string | null) => {
+          const key = normalizeDirectory(directory);
+          set((state) => {
+            const newSessions = new Map(state.sessions);
+            const existing = newSessions.get(key);
+            if (!existing) {
+              return state;
+            }
+
+            const idx = findTabIndex(existing, tabId);
+            if (idx < 0) {
+              return state;
+            }
+
+            const normalizedIconKey = iconKey?.trim() || null;
+            if (existing.tabs[idx]?.iconKey === normalizedIconKey) {
+              return state;
+            }
+
+            const nextTabs = [...existing.tabs];
+            nextTabs[idx] = {
+              ...nextTabs[idx],
+              iconKey: normalizedIconKey,
+            };
+
+            newSessions.set(key, {
+              ...existing,
+              tabs: nextTabs,
+            });
+            return { sessions: newSessions };
+          });
+        },
+
         closeTab: async (directory: string, tabId: string) => {
           const key = normalizeDirectory(directory);
           const entry = get().sessions.get(key);
@@ -262,12 +381,20 @@ export const useTerminalStore = create<TerminalStore>()(
             }
 
             const nextTabs = existing.tabs.filter((t) => t.id !== tabId);
+            const nextRuns = Object.fromEntries(
+              Object.entries(state.projectActionRuns).filter(([, run]) => !(run.directory === key && run.tabId === tabId))
+            );
+            const runsChanged = Object.keys(nextRuns).length !== Object.keys(state.projectActionRuns).length;
 
             if (nextTabs.length === 0) {
               const newTabId = `tab-${state.nextTabId}`;
               const newTab = createEmptyTab(newTabId, 'Terminal');
               newSessions.set(key, createEmptyDirectoryState(newTab));
-              return { sessions: newSessions, nextTabId: state.nextTabId + 1 };
+              return {
+                sessions: newSessions,
+                nextTabId: state.nextTabId + 1,
+                ...(runsChanged ? { projectActionRuns: nextRuns } : {}),
+              };
             }
 
             let nextActive = existing.activeTabId;
@@ -282,7 +409,10 @@ export const useTerminalStore = create<TerminalStore>()(
               activeTabId: nextActive,
             });
 
-            return { sessions: newSessions };
+            return {
+              sessions: newSessions,
+              ...(runsChanged ? { projectActionRuns: nextRuns } : {}),
+            };
           });
         },
 
@@ -397,15 +527,121 @@ export const useTerminalStore = create<TerminalStore>()(
               bufferLength -= removed.data.length;
             }
 
+            const maybePreviewUrl = tab.previewUrlLocked ? null : extractPreviewUrl(chunk) ?? extractPythonHttpServerUrl(chunk);
+            const shouldUpdatePreview = Boolean(maybePreviewUrl && maybePreviewUrl !== tab.previewUrl);
+
             const nextTabs = [...existing.tabs];
             nextTabs[idx] = {
               ...tab,
               bufferChunks,
               bufferLength,
+              ...(shouldUpdatePreview
+                ? { previewUrl: maybePreviewUrl, previewAutoOpened: false }
+                : null),
             };
             newSessions.set(key, { ...existing, tabs: nextTabs });
 
             return { sessions: newSessions, nextChunkId: chunkId + 1 };
+          });
+        },
+
+        setTabPreviewUrl: (directory: string, tabId: string, url: string | null, options = {}) => {
+          const key = normalizeDirectory(directory);
+          set((state) => {
+            const newSessions = new Map(state.sessions);
+            const existing = newSessions.get(key);
+            if (!existing) {
+              return state;
+            }
+
+            const idx = findTabIndex(existing, tabId);
+            if (idx < 0) {
+              return state;
+            }
+
+            const tab = existing.tabs[idx];
+            const nextPreviewAutoOpened = options.autoOpened ?? tab.previewAutoOpened;
+            const nextPreviewUrlLocked = options.locked ?? tab.previewUrlLocked;
+            if (tab.previewUrl === url && tab.previewAutoOpened === nextPreviewAutoOpened && tab.previewUrlLocked === nextPreviewUrlLocked) {
+              return state;
+            }
+
+            const nextTabs = [...existing.tabs];
+            nextTabs[idx] = {
+              ...tab,
+              previewUrl: url,
+              previewAutoOpened: nextPreviewAutoOpened,
+              previewUrlLocked: nextPreviewUrlLocked,
+            };
+            newSessions.set(key, { ...existing, tabs: nextTabs });
+            return { sessions: newSessions };
+          });
+        },
+
+        markPreviewAutoOpened: (directory: string, tabId: string) => {
+          const key = normalizeDirectory(directory);
+          set((state) => {
+            const newSessions = new Map(state.sessions);
+            const existing = newSessions.get(key);
+            if (!existing) {
+              return state;
+            }
+
+            const idx = findTabIndex(existing, tabId);
+            if (idx < 0) {
+              return state;
+            }
+
+            const tab = existing.tabs[idx];
+            if (!tab.previewUrl || tab.previewAutoOpened) {
+              return state;
+            }
+
+            const nextTabs = [...existing.tabs];
+            nextTabs[idx] = { ...tab, previewAutoOpened: true };
+            newSessions.set(key, { ...existing, tabs: nextTabs });
+            return { sessions: newSessions };
+          });
+        },
+
+        setProjectActionRun: (run: TerminalProjectActionRun) => {
+          set((state) => {
+            const existing = state.projectActionRuns[run.key];
+            if (existing
+              && existing.directory === run.directory
+              && existing.actionId === run.actionId
+              && existing.tabId === run.tabId
+              && existing.sessionId === run.sessionId
+              && existing.status === run.status) {
+              return state;
+            }
+            return { projectActionRuns: { ...state.projectActionRuns, [run.key]: run } };
+          });
+        },
+
+        updateProjectActionRunStatus: (runKey: string, status: TerminalProjectActionRun['status']) => {
+          set((state) => {
+            const existing = state.projectActionRuns[runKey];
+            if (!existing || existing.status === status) {
+              return state;
+            }
+            return {
+              projectActionRuns: {
+                ...state.projectActionRuns,
+                [runKey]: { ...existing, status },
+              },
+            };
+          });
+        },
+
+        removeProjectActionRun: (runKey: string) => {
+          set((state) => {
+            if (!state.projectActionRuns[runKey]) {
+              return state;
+            }
+            const next = { ...state.projectActionRuns };
+            delete next[runKey];
+            return { projectActionRuns: next };
           });
         },
 
@@ -439,12 +675,15 @@ export const useTerminalStore = create<TerminalStore>()(
           set((state) => {
             const newSessions = new Map(state.sessions);
             newSessions.delete(key);
-            return { sessions: newSessions };
+            const nextRuns = Object.fromEntries(
+              Object.entries(state.projectActionRuns).filter(([, run]) => run.directory !== key)
+            );
+            return { sessions: newSessions, projectActionRuns: nextRuns };
           });
         },
 
         clearAll: () => {
-          set({ sessions: new Map(), nextChunkId: 1, nextTabId: 1 });
+          set({ sessions: new Map(), projectActionRuns: {}, nextChunkId: 1, nextTabId: 1 });
         },
       }),
       {
@@ -458,6 +697,7 @@ export const useTerminalStore = create<TerminalStore>()(
               tabs: dirState.tabs.map((tab) => ({
                 id: tab.id,
                 label: tab.label,
+                iconKey: tab.iconKey,
                 terminalSessionId: tab.terminalSessionId,
                 lifecycle: tab.lifecycle,
                 createdAt: tab.createdAt,
@@ -519,12 +759,16 @@ export const useTerminalStore = create<TerminalStore>()(
               tabs.push({
                 id,
                 label: typeof rawTab.label === 'string' ? rawTab.label : 'Terminal',
+                iconKey: typeof rawTab.iconKey === 'string' ? rawTab.iconKey : null,
                 terminalSessionId,
                 lifecycle,
                 createdAt: typeof rawTab.createdAt === 'number' ? rawTab.createdAt : Date.now(),
                 bufferChunks: [],
                 bufferLength: 0,
                 isConnecting: false,
+                previewUrl: null,
+                previewAutoOpened: false,
+                previewUrlLocked: false,
               });
             }
 

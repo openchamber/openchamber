@@ -468,7 +468,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
                 const filename = resolveDisplayName(file) || 'Image';
 
                 return (
-                  <Tooltip key={`img-${file.url || file.filename || index}`} delayDuration={1000}>
+                  <Tooltip key={`img-${file.url || file.filename || index}`}>
                     <TooltipTrigger asChild>
                       <button
                         type="button"

@@ -52,13 +52,12 @@ export async function summarizeText(
     }
     
     try {
-        const zenModel = store.settingsZenModel;
          const response = await fetch(resolveSummarizeUrl(), {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
-             body: JSON.stringify({ text, threshold, maxLength, mode, ...(zenModel ? { zenModel } : {}) }),
+             body: JSON.stringify({ text, threshold, maxLength, mode }),
         });
         
         if (!response.ok) {

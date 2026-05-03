@@ -14,7 +14,6 @@ import {
   RiBrainAi3Line,
   RiCloseCircleLine,
   RiCommandLine,
-  RiFileLine,
   RiGitBranchLine,
   RiLayoutLeftLine,
   RiLayoutRightLine,
@@ -68,12 +67,6 @@ export const HelpDialog: React.FC = () => {
           id: 'open_command_palette',
           descriptionKey: "helpDialog.item.openCommandPalette",
           icon: RiCommandLine,
-          keys: '',
-        },
-        {
-          id: 'open_quick_open',
-          descriptionKey: 'helpDialog.item.quickOpenFile',
-          icon: RiFileLine,
           keys: '',
         },
         {
@@ -298,7 +291,7 @@ export const HelpDialog: React.FC = () => {
                 <ul className="space-y-0.5 typography-meta">
                   <li>
                     • {t('helpDialog.proTips.commandPalette', {
-                      shortcut: renderShortcut('open_command_palette', `${mod} K`, shortcutOverrides),
+                      shortcut: renderShortcut('open_command_palette', `${mod} P`, shortcutOverrides),
                     })}
                   </li>
                   <li>

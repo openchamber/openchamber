@@ -131,6 +131,42 @@ function extractZenOutputText(data) {
   return text || null;
 }
 
+function extractZenChatCompletionText(data) {
+  if (!data || typeof data !== 'object') return null;
+  const choices = data.choices;
+  if (!Array.isArray(choices)) return null;
+
+  const choice = choices.find((item) => item && typeof item === 'object');
+  const content = choice?.message?.content;
+  if (typeof content === 'string') {
+    const text = content.trim();
+    return text || null;
+  }
+  if (!Array.isArray(content)) return null;
+
+  const text = content
+    .map((item) => {
+      if (typeof item === 'string') return item;
+      if (item && typeof item === 'object' && typeof item.text === 'string') return item.text;
+      return '';
+    })
+    .join('')
+    .trim();
+  return text || null;
+}
+
+function getZenCompletionEndpoint(model) {
+  if (typeof model !== 'string') return 'responses';
+  if (
+    model.startsWith('gpt-')
+    || model.startsWith('claude-')
+    || model.startsWith('gemini-')
+  ) {
+    return 'responses';
+  }
+  return 'chat/completions';
+}
+
 function distillNoteFallback(text, maxLength) {
   const sanitized = sanitizeForNote(text);
   if (!sanitized) return '';
@@ -176,15 +212,23 @@ export async function summarizeText({ text, threshold = 200, maxLength = 500, ze
 
   try {
     const prompt = buildSummarizationPrompt(maxLength, mode);
-    const response = await fetch('https://opencode.ai/zen/v1/responses', {
+    const model = zenModel || 'gpt-5-nano';
+    const endpoint = getZenCompletionEndpoint(model);
+    const response = await fetch(`https://opencode.ai/zen/v1/${endpoint}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: zenModel || 'gpt-5-nano',
-        input: [{ role: 'user', content: `${prompt}\n\nText to summarize:\n${text}` }],
-        stream: false,
-        reasoning: { effort: 'low' },
-      }),
+      body: JSON.stringify(endpoint === 'responses'
+        ? {
+            model,
+            input: [{ role: 'user', content: `${prompt}\n\nText to summarize:\n${text}` }],
+            stream: false,
+            reasoning: { effort: 'low' },
+          }
+        : {
+            model,
+            messages: [{ role: 'user', content: `${prompt}\n\nText to summarize:\n${text}` }],
+            stream: false,
+          }),
       signal: controller.signal,
     });
 
@@ -199,7 +243,9 @@ export async function summarizeText({ text, threshold = 200, maxLength = 500, ze
     }
 
     const data = await response.json();
-    const summary = extractZenOutputText(data);
+    const summary = endpoint === 'responses'
+      ? extractZenOutputText(data)
+      : extractZenChatCompletionText(data);
 
     if (summary) {
       const sanitized = sanitizeByMode(summary, mode);

@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Preview: added an embedded dev-server Preview pane for loopback apps, with authenticated proxying, Vite/HMR support, same-origin API request handling, and safer local dev-server shutdown so apps can run inside OpenChamber more like they do in the browser (thanks to @wpbiggs).
+- Preview: added preview console capture, DOM element inspection, annotation context, and Electron screenshot attachments so UI feedback can be sent to the assistant with richer context.
+- Projects/Terminal: added Auto-discover for local dev servers, background terminal startup, action-linked Preview reopen controls, and cleaner terminal tab styling for a smoother Project Actions workflow (thanks to @wpbiggs).
+- GitHub: improved fork-aware issue and pull-request listing, PR status handling, and startup loading feedback so GitHub-backed workspaces are easier to open and track (thanks to @corrm).
+- Chat/UI: added a wide layout option and softened aborted-turn wording so chat can be tuned for roomier review workflows with less alarming interruption messages.
+- UI/Settings: centered empty states more consistently and fixed terminal toolbar overlap, improving polish in settings and docked terminal layouts (thanks to @Yabuku-xD).
+- Reliability/Streaming: reconnects now recover immediately after OS wake-from-sleep, reducing stale chat/session state after a machine resumes (thanks to @jwcrystal).
+
 ## [1.9.10] - 2026-04-28
 
 - UI/Localization: added Korean interface translations and default new installs back to English when no language has been chosen (thanks to @An-jinu).

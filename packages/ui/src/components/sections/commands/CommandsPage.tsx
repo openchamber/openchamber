@@ -17,6 +17,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useI18n } from '@/lib/i18n';
+import { parseModelIdentifier } from '@/lib/modelIdentifier';
 
 export const CommandsPage: React.FC = () => {
   const { t } = useI18n();
@@ -295,8 +296,8 @@ export const CommandsPage: React.FC = () => {
               </div>
               <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
                 <ModelSelector
-                  providerId={model ? model.split('/')[0] : ''}
-                  modelId={model ? model.split('/')[1] : ''}
+                  providerId={parseModelIdentifier(model)?.providerId ?? ''}
+                  modelId={parseModelIdentifier(model)?.modelId ?? ''}
                   onChange={(providerId: string, modelId: string) => {
                     if (providerId && modelId) {
                       setModel(`${providerId}/${modelId}`);

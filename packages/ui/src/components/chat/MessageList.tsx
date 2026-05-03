@@ -15,6 +15,7 @@ import { FadeInDisabledProvider } from './message/FadeInOnReveal';
 import { hasPendingUserSendAnimation, consumePendingUserSendAnimation } from '@/lib/userSendAnimation';
 import { streamPerfCount, streamPerfMeasure } from '@/stores/utils/streamDebug';
 import type { StreamPhase } from './message/types';
+import { normalizeParts } from './message/partUtils';
 
 const MESSAGE_LIST_VIRTUALIZE_THRESHOLD = Number.POSITIVE_INFINITY;
 const MESSAGE_LIST_OVERSCAN = 6;
@@ -51,7 +52,7 @@ const resolveMessageRole = (message: ChatMessageEntry): string | null => {
 
 const hasCompactionPart = (message: ChatMessageEntry): boolean => {
     return message.parts.some((part) => {
-        const type = (part as { type?: unknown }).type;
+        const type = (part as { type?: unknown } | null | undefined)?.type;
         return type === 'compaction';
     });
 };
@@ -75,7 +76,7 @@ const normalizeCompactionCommandMessage = (message: ChatMessageEntry): ChatMessa
 
     let changedParts = false;
     const nextParts = message.parts.map((part) => {
-        const type = (part as { type?: unknown }).type;
+        const type = (part as { type?: unknown } | null | undefined)?.type;
         if (type !== 'compaction') {
             return part;
         }
@@ -202,7 +203,7 @@ const getShellBridgeAssistantDetails = (message: ChatMessageEntry, expectedParen
         };
     };
 
-    if (part.type !== 'tool') {
+    if (part?.type !== 'tool') {
         return { hide: false, details: null };
     }
 
@@ -270,9 +271,9 @@ const isSyntheticSubtaskBridgeAssistant = (message: ChatMessageEntry): { hide: b
     const onlyPart = message.parts[0] as unknown as {
         type?: unknown;
         tool?: unknown;
-    };
+    } | null | undefined;
 
-    if (onlyPart.type !== 'tool') {
+    if (onlyPart?.type !== 'tool') {
         return { hide: false, taskSessionId: null };
     }
 
@@ -352,6 +353,17 @@ const withShellBridgeDetails = (message: ChatMessageEntry, details: ShellBridgeD
     };
 };
 
+const normalizeMessageParts = (message: ChatMessageEntry): ChatMessageEntry => {
+    const parts = normalizeParts(message.parts);
+    if (parts.length === message.parts.length) {
+        return message;
+    }
+    return {
+        ...message,
+        parts,
+    };
+};
+
 const normalizedMessageBySource = new WeakMap<ChatMessageEntry, ChatMessageEntry>();
 
 const getNormalizedMessageForDisplay = (message: ChatMessageEntry): ChatMessageEntry => {
@@ -360,7 +372,8 @@ const getNormalizedMessageForDisplay = (message: ChatMessageEntry): ChatMessageE
         return cached;
     }
 
-    const normalizedCompactionMessage = normalizeCompactionCommandMessage(message);
+    const normalizedPartMessage = normalizeMessageParts(message);
+    const normalizedCompactionMessage = normalizeCompactionCommandMessage(normalizedPartMessage);
     const filteredParts = filterSyntheticParts(normalizedCompactionMessage.parts);
     const normalized = filteredParts === normalizedCompactionMessage.parts
         ? normalizedCompactionMessage

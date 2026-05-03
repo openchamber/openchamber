@@ -145,7 +145,7 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                                         </span>
 
                                         <div className="hidden group-hover:flex gap-1">
-                                            <Tooltip delayDuration={1000}>
+                                            <Tooltip>
                                                 <TooltipTrigger asChild>
                                                     <button
                                                         type="button"
@@ -162,7 +162,7 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                                                 <TooltipContent sideOffset={6}>{t('chat.timeline.actions.revertFromHere')}</TooltipContent>
                                             </Tooltip>
 
-                                            <Tooltip delayDuration={1000}>
+                                            <Tooltip>
                                                 <TooltipTrigger asChild>
                                                     <button
                                                         type="button"

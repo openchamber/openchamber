@@ -30,11 +30,13 @@ import {
   RiRestartLine,
   RiServerLine,
   RiSlashCommands2,
+  RiBrainLine,
 } from '@remixicon/react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { AgentsSidebar } from '@/components/sections/agents/AgentsSidebar';
 import { AgentsPage } from '@/components/sections/agents/AgentsPage';
+import { BehaviorPage } from '@/components/sections/behavior/BehaviorPage';
 import { CommandsSidebar } from '@/components/sections/commands/CommandsSidebar';
 import { CommandsPage } from '@/components/sections/commands/CommandsPage';
 import { McpSidebar } from '@/components/sections/mcp/McpSidebar';
@@ -93,6 +95,7 @@ const pageOrder: SettingsPageSlug[] = [
   'projects',
   'remote-instances',
   'agents',
+  'behavior',
   'commands',
   'mcp',
   'providers',
@@ -140,6 +143,8 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): React.ComponentType<
       return RiCloudLine;
     case 'agents':
       return RiAiAgentLine;
+    case 'behavior':
+      return RiBrainLine;
     case 'commands':
       return RiSlashCommands2;
     case 'mcp':
@@ -395,6 +400,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return t('settings.page.usage.title');
       case 'agents':
         return t('settings.page.agents.title');
+      case 'behavior':
+        return t('settings.page.behavior.title');
       case 'commands':
         return t('settings.page.commands.title');
       case 'mcp':
@@ -478,6 +485,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <RemoteInstancesPage />;
       case 'agents':
         return <AgentsPage />;
+      case 'behavior':
+        return <BehaviorPage />;
       case 'commands':
         return <CommandsPage />;
       case 'mcp':
@@ -554,7 +563,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
               if (!Icon) return null;
 
               return (
-                <Tooltip key={page.slug} delayDuration={600}>
+                <Tooltip key={page.slug}>
                   <TooltipTrigger asChild>
                     <button
                       type="button"
@@ -587,7 +596,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         <div className="overflow-hidden transition-opacity duration-150 opacity-100">
           <div className="border-t border-border bg-sidebar px-2 py-1 space-y-0.5">
             {!runtimeCtx.isVSCode && (
-              <Tooltip delayDuration={300}>
+              <Tooltip>
                 <TooltipTrigger asChild>
                   <button
                     type="button"
@@ -669,20 +678,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
           <div className={cn('w-[264px] min-w-[264px] border-r', runtimeCtx.isVSCode ? 'bg-background' : 'bg-sidebar')} style={{ borderColor: 'var(--interactive-border)' }}>
             <ErrorBoundary>{renderPageSidebar(settingsSlug, {})}</ErrorBoundary>
           </div>
-          <div className="flex-1 overflow-auto scrollbar-none bg-background">
-            <div className="mx-auto h-full w-full max-w-3xl">
-              <ErrorBoundary>{renderPageContent(settingsSlug)}</ErrorBoundary>
-            </div>
+          <div className="flex-1 min-h-0 overflow-hidden bg-background">
+            <ErrorBoundary>{renderPageContent(settingsSlug)}</ErrorBoundary>
           </div>
         </div>
       );
     }
 
     return (
-      <div className="h-full overflow-auto scrollbar-none bg-background">
-        <div className="mx-auto h-full w-full max-w-3xl">
-          <ErrorBoundary>{renderPageContent(settingsSlug)}</ErrorBoundary>
-        </div>
+      <div className="h-full min-h-0 overflow-hidden bg-background">
+        <ErrorBoundary>{renderPageContent(settingsSlug)}</ErrorBoundary>
       </div>
     );
   };

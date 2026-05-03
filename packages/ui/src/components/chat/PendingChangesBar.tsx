@@ -1,4 +1,5 @@
 import React from 'react';
+import { Popover } from '@base-ui/react/popover';
 import { RiFileEditLine, RiArrowDownSLine, RiArrowUpSLine } from '@remixicon/react';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useGitStore, useIsGitRepo } from '@/stores/useGitStore';
@@ -27,7 +28,6 @@ export const PendingChangesBar: React.FC = React.memo(() => {
     );
     const ensureStatus = useGitStore((s) => s.ensureStatus);
     const fetchStatus = useGitStore((s) => s.fetchStatus);
-    const popoverRef = React.useRef<HTMLDivElement>(null);
 
     // Seed git store for currentDirectory so the bar can render independently of
     // DiffView/GitView/right-sidebar mounting. ensureStatus has a 5s staleness
@@ -64,19 +64,6 @@ export const PendingChangesBar: React.FC = React.memo(() => {
         return { totalAdded: added, totalRemoved: removed };
     }, [gitChangedFiles]);
 
-    React.useEffect(() => {
-        if (!isExpanded) return;
-
-        const handleClickOutside = (event: MouseEvent) => {
-            if (popoverRef.current && !popoverRef.current.contains(event.target as Node)) {
-                setIsExpanded(false);
-            }
-        };
-
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, [isExpanded]);
-
     if (isGitRepo !== true) return null;
     if (gitChangedFiles.length === 0) return null;
 
@@ -109,41 +96,45 @@ export const PendingChangesBar: React.FC = React.memo(() => {
         : t('chat.pendingChanges.fileCountPlural', { count: fileCount });
 
     return (
-        <div className="relative flex min-w-0 items-center" ref={popoverRef}>
-            <button
-                type="button"
-                onClick={() => setIsExpanded((prev) => !prev)}
-                className="flex min-w-0 max-w-full items-center gap-1 text-left text-muted-foreground"
-            >
-                <RiFileEditLine className="h-3.5 w-3.5 flex-shrink-0 text-[var(--status-warning)]" />
-                <span className="min-w-0 typography-ui-label text-foreground flex-shrink-0">{labelHead}</span>
-                <span className="status-row__changed-label min-w-0 typography-ui-label text-foreground truncate">
-                    {t('chat.pendingChanges.changedInWorkspace')}
-                </span>
-                <span className="text-[0.75rem] tabular-nums inline-flex items-baseline gap-1 flex-shrink-0">
-                    {totalAdded > 0 ? <span style={{ color: 'var(--status-success)' }}>+{totalAdded}</span> : null}
-                    {totalRemoved > 0 ? <span style={{ color: 'var(--status-error)' }}>-{totalRemoved}</span> : null}
-                </span>
-                {isExpanded ? (
-                    <RiArrowUpSLine className="h-3.5 w-3.5 flex-shrink-0" />
-                ) : (
-                    <RiArrowDownSLine className="h-3.5 w-3.5 flex-shrink-0" />
-                )}
-            </button>
-
-            {isExpanded ? (
-                <div
-                    style={changedFilesPopoverStyle}
-                    className={`${changedFilesPopoverClassName} absolute z-50 left-0 bottom-full mb-1 slide-in-from-bottom-2`}
-                >
-                    <ChangedFilesList
-                        files={gitChangedFiles}
-                        currentDirectory={currentDirectory}
-                        onOpenFile={handleOpenFile}
-                    />
-                </div>
-            ) : null}
-        </div>
+        <Popover.Root open={isExpanded} onOpenChange={setIsExpanded}>
+            <Popover.Trigger
+                render={
+                    <button
+                        type="button"
+                        className="flex min-w-0 max-w-full items-center gap-1 text-left text-muted-foreground"
+                    >
+                        <RiFileEditLine className="h-3.5 w-3.5 flex-shrink-0 text-[var(--status-warning)]" />
+                        <span className="min-w-0 typography-ui-label text-foreground flex-shrink-0">{labelHead}</span>
+                        <span className="status-row__changed-label min-w-0 typography-ui-label text-foreground truncate">
+                            {t('chat.pendingChanges.changedInWorkspace')}
+                        </span>
+                        <span className="text-[0.75rem] tabular-nums inline-flex items-baseline gap-1 flex-shrink-0">
+                            {totalAdded > 0 ? <span style={{ color: 'var(--status-success)' }}>+{totalAdded}</span> : null}
+                            {totalRemoved > 0 ? <span style={{ color: 'var(--status-error)' }}>-{totalRemoved}</span> : null}
+                        </span>
+                        {isExpanded ? (
+                            <RiArrowUpSLine className="h-3.5 w-3.5 flex-shrink-0" />
+                        ) : (
+                            <RiArrowDownSLine className="h-3.5 w-3.5 flex-shrink-0" />
+                        )}
+                    </button>
+                }
+            />
+            <Popover.Portal>
+                <Popover.Positioner side="top" align="start" sideOffset={4} collisionPadding={8}>
+                    <Popover.Popup
+                        style={changedFilesPopoverStyle}
+                        className={`${changedFilesPopoverClassName} transition-all duration-150 ease-out data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95`}
+                    >
+                        <ChangedFilesList
+                            files={gitChangedFiles}
+                            currentDirectory={currentDirectory}
+                            onOpenFile={handleOpenFile}
+                        />
+                    </Popover.Popup>
+                </Popover.Positioner>
+            </Popover.Portal>
+        </Popover.Root>
     );
 });
 

@@ -133,6 +133,7 @@ export type DesktopSettings = {
   mermaidRenderingMode?: 'svg' | 'ascii';
   userMessageRenderingMode?: 'markdown' | 'plain';
   stickyUserHeader?: boolean;
+  wideChatLayoutEnabled?: boolean;
   showSplitAssistantMessageActions?: boolean;
   fontSize?: number;
   terminalFontSize?: number;
@@ -157,6 +158,12 @@ export type DesktopSettings = {
   skillCatalogs?: SkillCatalogConfig[];
   // Opt-in to send anonymous usage reports for update checks (default: true)
   reportUsage?: boolean;
+
+  // Global behavior prompt — synced to ~/.config/opencode/AGENTS.md
+  globalBehaviorPrompt?: string;
+  responseStyleEnabled?: boolean;
+  responseStylePreset?: 'concise' | 'detailed' | 'mentor' | 'pushback' | 'noFiller' | 'matchEnergy' | 'warmPeer' | 'custom';
+  responseStyleCustomInstructions?: string;
 };
 
 type TauriGlobal = {

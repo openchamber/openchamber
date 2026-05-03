@@ -25,9 +25,13 @@
   }
 
   .chat-column {
-    width: min(100%, 64rem);
+    width: min(100%, 48rem);
     margin-inline: auto;
     padding-inline: calc(clamp(0.75rem, 2.5vw, 1rem) * var(--padding-scale, 1));
+  }
+
+  .wide-chat-layout .chat-column {
+    width: min(100%, 64rem);
   }
 
   .chat-input-column {
@@ -37,9 +41,13 @@
   }
 
   .chat-message-column {
-    width: min(100%, 64rem);
+    width: min(100%, 48rem);
     margin-inline: auto;
     padding-inline: calc(clamp(0.75rem, 2.5vw, 1rem) * var(--padding-scale, 1));
+  }
+
+  .wide-chat-layout .chat-message-column {
+    width: min(100%, 64rem);
   }
 
   @media (min-width: 1024px) {

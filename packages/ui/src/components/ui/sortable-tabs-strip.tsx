@@ -435,12 +435,12 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                     <>
                       {item.icon ? (
                         <span className="relative flex h-4 w-4 shrink-0 items-center justify-center">
-                          <span className={cn('flex items-center justify-center transition-opacity', closeReplacesIcon && 'group-hover:opacity-0')}>{item.icon}</span>
+                          <span className={cn('flex items-center justify-center transition-opacity', closeReplacesIcon && (isMobile ? 'opacity-0' : 'group-hover:opacity-0'))}>{item.icon}</span>
                           {closeReplacesIcon ? (
                             <span
                               role="button"
                               tabIndex={-1}
-                              className="absolute inset-0 z-20 flex items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
+                              className={cn('absolute inset-0 z-20 flex items-center justify-center rounded-sm text-muted-foreground transition-opacity hover:text-foreground', isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}
                               onPointerDown={(event) => {
                                 event.stopPropagation();
                               }}
@@ -467,12 +467,12 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                             isActive ? 'text-[var(--primary-base)]' : 'text-muted-foreground'
                           )}
                         >
-                          <span className={cn('flex items-center justify-center transition-opacity', closeReplacesIcon && 'group-hover:opacity-0')}>{item.icon}</span>
+                          <span className={cn('flex items-center justify-center transition-opacity', closeReplacesIcon && (isMobile ? 'opacity-0' : 'group-hover:opacity-0'))}>{item.icon}</span>
                           {closeReplacesIcon ? (
                             <span
                               role="button"
                               tabIndex={-1}
-                              className="absolute inset-0 z-20 flex items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
+                              className={cn('absolute inset-0 z-20 flex items-center justify-center rounded-sm text-muted-foreground transition-opacity hover:text-foreground', isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}
                               onPointerDown={(event) => {
                                 event.stopPropagation();
                               }}

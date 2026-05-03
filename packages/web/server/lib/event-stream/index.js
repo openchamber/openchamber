@@ -20,5 +20,6 @@ export {
 export {
   DEFAULT_UPSTREAM_RECONNECT_DELAY_MS,
   DEFAULT_UPSTREAM_STALL_TIMEOUT_MS,
+  UPSTREAM_STALL_TIMEOUT_CONCURRENT_MS,
   createUpstreamSseReader,
 } from './upstream-reader.js';

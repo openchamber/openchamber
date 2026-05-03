@@ -104,6 +104,7 @@ const MIN_WINDOW_WIDTH = 800;
 const MIN_WINDOW_HEIGHT = 520;
 const MIN_RESTORE_WINDOW_WIDTH = 900;
 const MIN_RESTORE_WINDOW_HEIGHT = 560;
+const MAX_CAPTURE_PAGE_RECT_AREA = 4_000_000;
 const LOCAL_HOST_ID = 'local';
 const ENV_OVERRIDE_HOST_ID = '__env';
 const CHANGELOG_URL = 'https://raw.githubusercontent.com/btriapitsyn/openchamber/main/CHANGELOG.md';
@@ -127,7 +128,6 @@ const state = {
   quitConfirmed: false,
   quitConfirmationPending: false,
   installingUpdate: false,
-  quitRiskPollerStarted: false,
   pendingUpdate: null,
   unreachableHosts: new Set(),
   windowCounter: 1,
@@ -137,7 +137,6 @@ const state = {
   sshLogs: new Map(),
 };
 
-const QUIT_RISK_POLL_INTERVAL_MS = 5_000;
 const quitRisk = {
   hasActiveTunnel: false,
   hasRunningScheduledTasks: false,
@@ -205,6 +204,8 @@ const performConfirmedQuit = () => {
 };
 
 const requestQuitWithConfirmation = async () => {
+  await refreshQuitRiskFlags();
+
   if (!shouldRequireQuitConfirmation()) {
     performConfirmedQuit();
     return;
@@ -246,6 +247,24 @@ const requestQuitWithConfirmation = async () => {
 };
 
 const refreshQuitRiskFlags = async () => {
+  if (state.serverHandle && typeof state.serverHandle.getQuitRiskStatus === 'function') {
+    try {
+      const status = await state.serverHandle.getQuitRiskStatus();
+      const scheduled = status?.scheduledTasks;
+      if (scheduled && typeof scheduled === 'object') {
+        const enabledCount = Number(scheduled.enabledScheduledTasksCount ?? 0);
+        const runningCount = Number(scheduled.runningScheduledTasksCount ?? 0);
+        quitRisk.enabledScheduledTasksCount = Number.isFinite(enabledCount) ? enabledCount : 0;
+        quitRisk.runningScheduledTasksCount = Number.isFinite(runningCount) ? runningCount : 0;
+        quitRisk.hasEnabledScheduledTasks = Boolean(scheduled.hasEnabledScheduledTasks) || quitRisk.enabledScheduledTasksCount > 0;
+        quitRisk.hasRunningScheduledTasks = Boolean(scheduled.hasRunningScheduledTasks) || quitRisk.runningScheduledTasksCount > 0;
+      }
+      quitRisk.hasActiveTunnel = Boolean(status?.tunnel?.active);
+      return;
+    } catch {
+    }
+  }
+
   const base = typeof state.sidecarUrl === 'string' ? state.sidecarUrl.trim().replace(/\/$/, '') : '';
   if (!base) return;
 
@@ -276,24 +295,6 @@ const refreshQuitRiskFlags = async () => {
   if (tunnel && typeof tunnel === 'object') {
     quitRisk.hasActiveTunnel = Boolean(tunnel.active);
   }
-};
-
-const startQuitRiskPoller = () => {
-  if (process.platform !== 'darwin') return;
-  if (state.quitRiskPollerStarted) return;
-  state.quitRiskPollerStarted = true;
-
-  const loop = async () => {
-    while (!state.quitConfirmed && !state.quitRequested) {
-      await refreshQuitRiskFlags();
-      if (state.quitConfirmed || state.quitRequested) break;
-      await new Promise((resolve) => {
-        const timer = setTimeout(resolve, QUIT_RISK_POLL_INTERVAL_MS);
-        if (typeof timer?.unref === 'function') timer.unref();
-      });
-    }
-  };
-  void loop();
 };
 
 const settingsFilePath = () => {
@@ -1648,6 +1649,38 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     case 'desktop_get_app_version':
       return APP_VERSION;
 
+    case 'desktop_capture_page_rect': {
+      if (!browserWindow || browserWindow.isDestroyed()) {
+        throw new Error('Window is not available');
+      }
+
+      const bounds = browserWindow.getContentBounds();
+      const x = Number.isFinite(args.x) ? Math.max(0, Math.floor(args.x)) : 0;
+      const y = Number.isFinite(args.y) ? Math.max(0, Math.floor(args.y)) : 0;
+      const width = Number.isFinite(args.width) ? Math.max(1, Math.floor(args.width)) : 1;
+      const height = Number.isFinite(args.height) ? Math.max(1, Math.floor(args.height)) : 1;
+      const clampedX = Math.min(x, Math.max(0, bounds.width - 1));
+      const clampedY = Math.min(y, Math.max(0, bounds.height - 1));
+      const rect = {
+        x: clampedX,
+        y: clampedY,
+        width: Math.min(width, Math.max(1, bounds.width - clampedX)),
+        height: Math.min(height, Math.max(1, bounds.height - clampedY)),
+      };
+      if (rect.width * rect.height > MAX_CAPTURE_PAGE_RECT_AREA) {
+        throw new Error('Capture area is too large');
+      }
+
+      const image = await browserWindow.webContents.capturePage(rect);
+      const buffer = image.toJPEG(82);
+      return {
+        mime: 'image/jpeg',
+        base64: buffer.toString('base64'),
+        width: image.getSize().width,
+        height: image.getSize().height,
+      };
+    }
+
     case 'desktop_save_markdown_file': {
       const defaultPath = typeof args.defaultFileName === 'string' ? args.defaultFileName.trim() : '';
       if (!defaultPath) {
@@ -2115,8 +2148,7 @@ const buildMacMenu = () => {
         },
         { type: 'separator' },
         { label: 'Settings', accelerator: 'Cmd+,', click: () => dispatchAction('settings') },
-        { label: 'Command Palette', accelerator: 'Cmd+K', click: () => dispatchAction('command-palette') },
-        { label: 'Quick Open…', accelerator: 'Cmd+P', click: () => dispatchAction('quick-open') },
+        { label: 'Command Palette', accelerator: 'Cmd+P', click: () => dispatchAction('command-palette') },
         { type: 'separator' },
         { role: 'services' },
         { type: 'separator' },
@@ -2247,6 +2279,7 @@ const COMMANDS_SAFE_FOR_REMOTE = new Set([
   'desktop_start_window_drag',
   'desktop_get_app_version',
   'desktop_get_lan_address',
+  'desktop_capture_page_rect',
 ]);
 
 ipcMain.handle('openchamber:invoke', async (event, command, args) => {
@@ -2365,7 +2398,6 @@ app.whenReady().then(async () => {
 
   const { initialUrl, localOrigin, bootOutcome } = await resolveInitialUrl();
   await activateMainWindow(initialUrl, localOrigin, bootOutcome);
-  startQuitRiskPoller();
 
   // Notify renderer on OS wake-from-sleep so the SSE event pipeline can
   // reconnect immediately instead of waiting for the heartbeat watchdog.

@@ -273,7 +273,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
         <div className="mb-1 px-1">
           <div className="flex items-center gap-2">
             <h3 className="typography-ui-header font-normal text-foreground">{t('settings.openchamber.worktrees.setup.title')}</h3>
-            <Tooltip delayDuration={1000}>
+            <Tooltip>
               <TooltipTrigger asChild>
                 <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
               </TooltipTrigger>
@@ -332,7 +332,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
         <div className="mb-1 px-1">
           <div className="flex items-center gap-2">
             <h3 className="typography-ui-header font-normal text-foreground">{t('settings.openchamber.worktrees.list.title')}</h3>
-            <Tooltip delayDuration={1000}>
+            <Tooltip>
               <TooltipTrigger asChild>
                 <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
               </TooltipTrigger>
