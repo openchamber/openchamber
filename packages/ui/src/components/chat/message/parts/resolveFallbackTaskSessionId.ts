@@ -29,6 +29,8 @@ export interface ResolveFallbackParams {
   parentSessionId: string | undefined;
   /** When the task tool started (ms timestamp) */
   taskStartTime: number | undefined;
+  /** True when the task tool is finalized (completed/error/etc.) */
+  isTaskFinalized?: boolean;
   /** Sessions from the directory store */
   sessions: Session[];
   /** Session status map from the sync store */
@@ -38,17 +40,12 @@ export interface ResolveFallbackParams {
 }
 
 /**
- * Attempts to resolve a child session id for a task tool by matching
+ * Attempts to resolve a child session id for a pending task tool by matching
  * against sessions in the directory store.
- *
- * Resolution runs even after the task is finalized, because the child session
- * may arrive in the store after the parent task status becomes completed.
- * Previously, finalization blocked resolution entirely, causing fast sub-agents
- * to appear as "empty result" when the SSE session.created event lagged behind
- * the message.part.updated (completed) event.
  *
  * Returns `undefined` when:
  * - Not a task tool
+ * - Task is finalized
  * - Parent session is unknown
  * - No unambiguous match found
  */
@@ -57,12 +54,13 @@ export function resolveFallbackTaskSessionId(params: ResolveFallbackParams): str
     isTaskTool,
     parentSessionId,
     taskStartTime,
+    isTaskFinalized = false,
     sessions,
     sessionStatusMap,
     hasRetried = false,
   } = params;
 
-  if (!isTaskTool || !parentSessionId || typeof taskStartTime !== 'number') {
+  if (!isTaskTool || isTaskFinalized || !parentSessionId || typeof taskStartTime !== 'number') {
     return undefined;
   }
 
