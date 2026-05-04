@@ -9,7 +9,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionMessageRecords } from '@/sync/sync-context';
-import { RiLoader4Line, RiSearchLine, RiTimeLine, RiGitBranchLine, RiArrowGoBackLine } from '@remixicon/react';
+import { RiLoader4Line, RiSearchLine, RiTimeLine, RiGitBranchLine, RiArrowGoBackLine, RiUserLine, RiRobot2Line } from '@remixicon/react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { Part } from '@opencode-ai/sdk/v2';
 import { useI18n } from '@/lib/i18n';
@@ -57,22 +57,21 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
         return new Date(timestamp).toLocaleDateString();
     }, [t]);
 
-    // Filter user messages (reversed for newest first)
-    const userMessages = React.useMemo(() => {
-        const filtered = messages.filter(m => m.info.role === 'user');
-        return filtered.reverse();
+    // All messages (reversed for newest first)
+    const allMessages = React.useMemo(() => {
+        return [...messages].reverse();
     }, [messages]);
 
-    // Filter by search query
+    // Filter by search query using full text
     const filteredMessages = React.useMemo(() => {
-        if (!searchQuery.trim()) return userMessages;
+        if (!searchQuery.trim()) return allMessages;
 
         const query = searchQuery.toLowerCase();
-        return userMessages.filter((message) => {
-            const preview = getMessagePreview(message.parts).toLowerCase();
-            return preview.includes(query);
+        return allMessages.filter((message) => {
+            const fullText = getFullText(message.parts).toLowerCase();
+            return fullText.includes(query);
         });
-    }, [userMessages, searchQuery]);
+    }, [allMessages, searchQuery]);
 
     // Handle fork with loading state and session refresh
     const handleFork = async (messageId: string) => {
@@ -121,7 +120,12 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                             const preview = getMessagePreview(message.parts);
                             const timestamp = message.info.time.created;
                             const relativeTime = formatRelativeTime(timestamp);
-                            const messageNumber = userMessages.length - userMessages.indexOf(message);
+                            const messageNumber = allMessages.length - allMessages.indexOf(message);
+                            const isUser = message.info.role === 'user';
+
+                            const snippet = searchQuery.trim()
+                                ? getSearchSnippet(getFullText(message.parts), searchQuery)
+                                : null;
 
                             return (
                                 <div
@@ -138,9 +142,16 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                                     <span className="typography-meta text-muted-foreground w-5 text-right flex-shrink-0">
                                         {messageNumber}.
                                     </span>
+                                    <span className="flex-shrink-0 text-muted-foreground">
+                                        {isUser ? (
+                                            <RiUserLine className="h-3.5 w-3.5" />
+                                        ) : (
+                                            <RiRobot2Line className="h-3.5 w-3.5" />
+                                        )}
+                                    </span>
                                     <p className="flex-1 min-w-0 typography-small text-foreground truncate ml-0.5">
-                                        {preview || t('chat.timeline.noTextContent')}
-                                        {preview && preview.length >= 80 && '…'}
+                                        {snippet ? snippet.snippet : (preview || t('chat.timeline.noTextContent'))}
+                                        {!snippet && preview && preview.length >= 80 && '…'}
                                     </p>
 
                                     <div className="flex-shrink-0 h-5 flex items-center mr-2">
@@ -238,8 +249,37 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
     );
 };
 
+function getFullText(parts: Part[]): string {
+  return parts
+    .filter((p): p is Part & { type: 'text'; text: string } => p.type === 'text' && typeof p.text === 'string')
+    .map((p) => p.text)
+    .join('\n');
+}
+
 function getMessagePreview(parts: Part[]): string {
-    const textPart = parts.find(p => p.type === 'text');
-    if (!textPart || typeof textPart.text !== 'string') return '';
-    return textPart.text.replace(/\n/g, ' ').slice(0, 80);
+  const full = getFullText(parts);
+  const singleLine = full.replace(/\n/g, ' ');
+  return singleLine.length > 80 ? singleLine.slice(0, 80) : singleLine;
+}
+
+interface SearchSnippet {
+  snippet: string;
+  matchStart: number;
+  matchLength: number;
+}
+
+function getSearchSnippet(text: string, query: string, contextChars: number = 30): SearchSnippet | null {
+  const lowerText = text.toLowerCase();
+  const lowerQuery = query.toLowerCase();
+  const matchIndex = lowerText.indexOf(lowerQuery);
+  if (matchIndex === -1) return null;
+
+  const start = Math.max(0, matchIndex - contextChars);
+  const end = Math.min(text.length, matchIndex + query.length + contextChars);
+  const snippet = (start > 0 ? '…' : '') + text.slice(start, end).replace(/\n/g, ' ') + (end < text.length ? '…' : '');
+
+  const matchStart = start > 0 ? contextChars + 1 : matchIndex - start;
+  const matchLength = query.length;
+
+  return { snippet, matchStart, matchLength };
 }
