@@ -2,7 +2,7 @@ import React from 'react';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useFireworksCelebration } from '@/contexts/FireworksContext';
-import type { GitIdentityProfile, CommitFileEntry } from '@/lib/api/types';
+import type { GitIdentityProfile, CommitFileEntry, GitRemoteComparison } from '@/lib/api/types';
 import { useGitIdentitiesStore } from '@/stores/useGitIdentitiesStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
@@ -70,7 +70,8 @@ import { generateCommitMessage as generateSessionCommitMessage, getGitWorktreeBo
 import { sessionEvents } from '@/lib/sessionEvents';
 import { useI18n } from '@/lib/i18n';
 
-type SyncAction = 'fetch' | 'pull' | 'push' | null;
+type PrimarySyncAction = 'fetch' | 'pull' | 'push';
+type SyncAction = PrimarySyncAction | 'upstreamFetch' | 'upstreamSync' | null;
 type CommitAction = 'commit' | 'commitAndPush' | null;
 type BranchOperation = 'merge' | 'rebase' | null;
 type ActionTab = 'commit' | 'branch' | 'pr' | 'worktree';
@@ -906,7 +907,7 @@ export const GitView: React.FC = () => {
     });
   }, [status, changeEntries, hasUserAdjustedSelection]);
 
-  const handleSyncAction = async (action: Exclude<SyncAction, null>, remote?: GitRemote) => {
+  const handleSyncAction = async (action: PrimarySyncAction, remote?: GitRemote) => {
     if (!currentDirectory) return;
     setSyncAction(action);
 
@@ -928,8 +929,13 @@ export const GitView: React.FC = () => {
             : t('gitView.toast.pulledFilesPlural', { count: result.files.length, name: remote.name })
         );
       } else if (action === 'push') {
-        await git.gitPush(currentDirectory);
-        toast.success(t('gitView.toast.pushedToUpstream'));
+        const result = await git.gitPush(currentDirectory);
+        const pushedRemote = result.pushed[0]?.remote
+          || status?.tracking?.split('/')[0]
+          || effectiveRemotes.find((remote) => remote.name === 'origin')?.name
+          || effectiveRemotes[0]?.name
+          || 'origin';
+        toast.success(t('gitView.toast.pushedToUpstream', { name: pushedRemote }));
       }
 
       await refreshStatusAndBranches(false);
@@ -939,6 +945,46 @@ export const GitView: React.FC = () => {
         err instanceof Error
           ? err.message
           : t('gitView.toast.syncActionFailed', { action: action === 'pull' ? t('gitView.sync.pull') : action });
+      toast.error(message);
+    } finally {
+      setSyncAction(null);
+    }
+  };
+
+  const handleUpstreamFetch = async (comparison: GitRemoteComparison) => {
+    if (!currentDirectory) return;
+    setSyncAction('upstreamFetch');
+
+    try {
+      await git.gitFetch(currentDirectory, { remote: comparison.remote });
+      toast.success(t('gitView.toast.fetchedFromRemote', { name: comparison.remote }));
+      await refreshStatusAndBranches(false);
+      await refreshLog();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t('gitView.toast.syncActionFailed', { action: t('gitView.sync.upstreamFetch') });
+      toast.error(message);
+    } finally {
+      setSyncAction(null);
+    }
+  };
+
+  const handleUpstreamSync = async (comparison: GitRemoteComparison) => {
+    if (!currentDirectory) return;
+    setSyncAction('upstreamSync');
+
+    try {
+      const branch = status?.current || comparison.branch;
+      await git.gitFetch(currentDirectory, { remote: comparison.remote });
+      const result = await git.gitPull(currentDirectory, { remote: comparison.remote, branch });
+      toast.success(
+        result.files.length === 1
+          ? t('gitView.toast.pulledFilesSingle', { count: result.files.length, name: comparison.remote })
+          : t('gitView.toast.pulledFilesPlural', { count: result.files.length, name: comparison.remote })
+      );
+      await refreshStatusAndBranches(false);
+      await refreshLog();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t('gitView.toast.syncActionFailed', { action: t('gitView.sync.upstreamSync') });
       toast.error(message);
     } finally {
       setSyncAction(null);
@@ -967,7 +1013,11 @@ export const GitView: React.FC = () => {
         refreshRemotes(),
       ]);
     } catch (error) {
-      const message = error instanceof Error ? error.message : `Failed to remove ${remoteName}`;
+      const message = error instanceof Error
+        ? error.message
+        : t('gitView.toast.syncActionFailed', {
+            action: t('gitView.header.removeRemoteTitle', { name: remoteName }),
+          });
       toast.error(message);
     } finally {
       setRemovingRemoteName(null);
@@ -1003,8 +1053,13 @@ export const GitView: React.FC = () => {
       await refreshStatusAndBranches();
 
       if (options.pushAfter) {
-        await git.gitPush(currentDirectory);
-        toast.success(t('gitView.toast.pushedToUpstream'));
+        const result = await git.gitPush(currentDirectory);
+        const pushedRemote = result.pushed[0]?.remote
+          || status?.tracking?.split('/')[0]
+          || effectiveRemotes.find((remote) => remote.name === 'origin')?.name
+          || effectiveRemotes[0]?.name
+          || 'origin';
+        toast.success(t('gitView.toast.pushedToUpstream', { name: pushedRemote }));
         triggerFireworks();
         await refreshStatusAndBranches(false);
       } else {
@@ -2029,6 +2084,8 @@ export const GitView: React.FC = () => {
         onPush={() => handleSyncAction('push')}
         onRemoveRemote={handleRemoveRemote}
         removingRemoteName={removingRemoteName}
+        onFetchUpstream={handleUpstreamFetch}
+        onSyncUpstream={handleUpstreamSync}
         onCheckoutBranch={handleCheckoutBranch}
         onCreateBranch={handleCreateBranch}
         onRenameBranch={handleRenameBranch}

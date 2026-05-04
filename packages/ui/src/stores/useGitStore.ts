@@ -196,6 +196,21 @@ const haveDiffStatsChanged = (
   return false;
 };
 
+const haveRemoteComparisonChanged = (
+  previous?: GitStatus['upstreamComparison'],
+  next?: GitStatus['upstreamComparison']
+): boolean => {
+  if (!previous && !next) return false;
+  if (!previous || !next) return true;
+
+  return (
+    previous.remote !== next.remote
+    || previous.branch !== next.branch
+    || previous.ahead !== next.ahead
+    || previous.behind !== next.behind
+  );
+};
+
 const hasStatusChanged = (oldStatus: GitStatus | null, newStatus: GitStatus | null): boolean => {
   if (!oldStatus && !newStatus) return false;
   if (!oldStatus || !newStatus) return true;
@@ -209,6 +224,12 @@ const hasStatusChanged = (oldStatus: GitStatus | null, newStatus: GitStatus | nu
   if (oldStatus.current !== newStatus.current) return true;
   if (oldStatus.tracking !== newStatus.tracking) return true;
   if (oldStatus.isClean !== newStatus.isClean) return true;
+  if (
+    newStatus.upstreamComparison !== undefined
+    && haveRemoteComparisonChanged(oldStatus.upstreamComparison, newStatus.upstreamComparison)
+  ) {
+    return true;
+  }
 
   const oldPaths = new Set(oldFiles.map(f => `${f.path}:${f.index}:${f.working_dir}`));
   for (const file of newFiles) {
@@ -387,9 +408,17 @@ export const useGitStore = create<GitStore>()(
               }
 
               // Preserve diffStats from previous status when light mode returns none
-              const mergedStatus = newStatus.diffStats === undefined && currentDirState.status?.diffStats
-                ? { ...newStatus, diffStats: currentDirState.status.diffStats }
-                : newStatus;
+              const mergedStatus = {
+                ...newStatus,
+                diffStats:
+                  newStatus.diffStats === undefined && currentDirState.status?.diffStats !== undefined
+                    ? currentDirState.status.diffStats
+                    : newStatus.diffStats,
+                upstreamComparison:
+                  newStatus.upstreamComparison === undefined
+                    ? currentDirState.status?.upstreamComparison
+                    : newStatus.upstreamComparison,
+              };
 
               newDirectories.set(directory, {
                 ...currentDirState,
