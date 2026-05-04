@@ -13,7 +13,6 @@
  */
 
 import type { Event, OpencodeClient } from "@opencode-ai/sdk/v2/client"
-import { opencodeClient } from "@/lib/opencode/client"
 import { syncDebug } from "./debug"
 
 export type QueuedEvent = {
@@ -136,9 +135,10 @@ function toWebSocketUrl(candidate: string): string {
 }
 
 function buildGlobalEventWsUrl(lastEventId?: string): string {
-  const baseUrl = opencodeClient.getBaseUrl()
-  const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`
-  const httpUrl = new URL("global/event/ws", resolveAbsoluteUrl(normalizedBase))
+  // Resolve from the current runtime origin.
+  // The global event endpoint is served by the OpenChamber web server at `/api/*`
+  // in all runtimes (web, desktop, vscode), even when the OpenCode base URL differs.
+  const httpUrl = new URL(resolveAbsoluteUrl("/api/global/event/ws"))
   if (lastEventId && lastEventId.length > 0) {
     httpUrl.searchParams.set("lastEventId", lastEventId)
   }
