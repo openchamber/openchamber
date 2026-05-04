@@ -91,8 +91,9 @@ export const TerminalView: React.FC = () => {
     const terminalFontSize = useUIStore(state => state.terminalFontSize);
     const bottomTerminalHeight = useUIStore((state) => state.bottomTerminalHeight);
     const isBottomTerminalExpanded = useUIStore((state) => state.isBottomTerminalExpanded);
-    const { isMobile, isTablet } = useDeviceInfo();
+    const { isMobile, isTablet, hasTouchInput } = useDeviceInfo();
     const isTouchTerminal = isMobile || isTablet;
+    const useTouchTerminalInput = hasTouchInput && runtime.platform === 'web';
     // Tabs are supported for web + desktop runtimes, including mobile (not VSCode).
     const enableTabs = runtime.platform !== 'vscode';
     const showTerminalQuickKeysOnDesktop = useUIStore((state) => state.showTerminalQuickKeysOnDesktop);
@@ -177,21 +178,21 @@ export const TerminalView: React.FC = () => {
     const rehydratedSnapshotTakenRef = React.useRef(false);
 
     const focusTerminalWhenWindowActive = React.useCallback(() => {
-        if (isTouchTerminal) {
+        if (useTouchTerminalInput) {
             return;
         }
         if (typeof document !== 'undefined' && !document.hasFocus()) {
             return;
         }
         terminalControllerRef.current?.focus();
-    }, [isTouchTerminal]);
+    }, [useTouchTerminalInput]);
 
     const focusTerminalController = React.useCallback(() => {
-        if (isTouchTerminal) {
+        if (useTouchTerminalInput) {
             return;
         }
         terminalControllerRef.current?.focus();
-    }, [isTouchTerminal]);
+    }, [useTouchTerminalInput]);
 
     React.useEffect(() => {
         if (!terminalHydrated) {
@@ -557,7 +558,7 @@ export const TerminalView: React.FC = () => {
     ]);
 
     React.useEffect(() => {
-        if (!isTerminalVisible || isTouchTerminal) {
+        if (!isTerminalVisible || useTouchTerminalInput) {
             return;
         }
 
@@ -573,7 +574,7 @@ export const TerminalView: React.FC = () => {
         return () => {
             window.cancelAnimationFrame(rafId);
         };
-    }, [activeTabId, focusTerminalWhenWindowActive, isTerminalVisible, isTouchTerminal]);
+    }, [activeTabId, focusTerminalWhenWindowActive, isTerminalVisible, useTouchTerminalInput]);
 
     const handleRestart = React.useCallback(async () => {
         if (!effectiveDirectory) return;
@@ -840,7 +841,7 @@ export const TerminalView: React.FC = () => {
     }, [terminalViewportKey, viewportLayoutVersion]);
 
     React.useEffect(() => {
-        if (isTouchTerminal || !isBottomTerminalOpen || !isTerminalVisible) {
+        if (useTouchTerminalInput || !isBottomTerminalOpen || !isTerminalVisible) {
             return;
         }
 
@@ -856,10 +857,10 @@ export const TerminalView: React.FC = () => {
         return () => {
             window.clearTimeout(timeoutId);
         };
-    }, [bottomTerminalHeight, isBottomTerminalExpanded, isBottomTerminalOpen, isTerminalVisible, isTouchTerminal]);
+    }, [bottomTerminalHeight, isBottomTerminalExpanded, isBottomTerminalOpen, isTerminalVisible, useTouchTerminalInput]);
 
     React.useEffect(() => {
-        if (!isTerminalVisible || isTouchTerminal) {
+        if (!isTerminalVisible || useTouchTerminalInput) {
             return;
         }
         const controller = terminalControllerRef.current;
@@ -881,10 +882,10 @@ export const TerminalView: React.FC = () => {
             };
         }
         fitOnce();
-    }, [focusTerminalWhenWindowActive, isTerminalVisible, isTouchTerminal, terminalViewportKey, terminalSessionId]);
+    }, [focusTerminalWhenWindowActive, isTerminalVisible, useTouchTerminalInput, terminalViewportKey, terminalSessionId]);
 
     React.useEffect(() => {
-        if (isTouchTerminal || !isTerminalVisible || !isBottomTerminalOpen) {
+        if (useTouchTerminalInput || !isTerminalVisible || !isBottomTerminalOpen) {
             return;
         }
 
@@ -909,7 +910,7 @@ export const TerminalView: React.FC = () => {
         }
 
         fitOnce();
-    }, [bottomTerminalHeight, isBottomTerminalExpanded, isBottomTerminalOpen, isTerminalVisible, isTouchTerminal]);
+    }, [bottomTerminalHeight, isBottomTerminalExpanded, isBottomTerminalOpen, isTerminalVisible, useTouchTerminalInput]);
 
     if (!hasActiveContext) {
         return (
@@ -1146,8 +1147,8 @@ export const TerminalView: React.FC = () => {
                             theme={xtermTheme}
                             fontFamily={resolvedFontStack}
                             fontSize={terminalFontSize}
-                            enableTouchScroll={isTouchTerminal}
-                            autoFocus={!isTouchTerminal && isTerminalVisible}
+                            enableTouchScroll={useTouchTerminalInput}
+                            autoFocus={!useTouchTerminalInput && isTerminalVisible}
                             isVisible={isTerminalVisible}
                         />
                     ) : null}
