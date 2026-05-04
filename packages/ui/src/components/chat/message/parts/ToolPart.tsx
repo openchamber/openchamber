@@ -1987,12 +1987,11 @@ const ToolPart: React.FC<ToolPartProps> = ({
                 isTaskTool,
                 parentSessionId: currentSessionId ?? undefined,
                 taskStartTime: taskSessionResolutionStart,
-                isTaskFinalized: isFinalized,
                 sessions: storeState.session,
                 sessionStatusMap: storeState.session_status,
                 hasRetried: taskFallbackRetried,
             });
-        }, [explicitTaskSessionId, isTaskTool, currentSessionId, taskSessionResolutionStart, isFinalized, taskFallbackRetried]),
+        }, [explicitTaskSessionId, isTaskTool, currentSessionId, taskSessionResolutionStart, taskFallbackRetried]),
         currentDirectory,
     );
 
@@ -2074,8 +2073,11 @@ const ToolPart: React.FC<ToolPartProps> = ({
     }, [taskSessionId]);
 
     // Widen fallback resolution window only after a real retry boundary.
+    // Note: isFinalized is intentionally NOT checked here. The child session
+    // may arrive in the store after the parent task finalizes, so the wider
+    // window retry must still fire to give fallback resolution another chance.
     React.useEffect(() => {
-        if (!isTaskTool || taskFallbackRetried || explicitTaskSessionId != null || taskSessionId != null || isFinalized) {
+        if (!isTaskTool || taskFallbackRetried || explicitTaskSessionId != null || taskSessionId != null) {
             return;
         }
 
