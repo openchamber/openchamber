@@ -22,6 +22,7 @@ import { AgentSelector } from './AgentSelector';
 import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo } from '@/components/chat/CommandAutocomplete';
 import { FileMentionAutocomplete, type FileMentionHandle } from '@/components/chat/FileMentionAutocomplete';
 import { isDesktopShell } from '@/lib/desktop';
+import { useTabletStandalonePwaRuntime } from '@/lib/device';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { PROJECT_ICON_MAP, PROJECT_COLOR_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
 import type { ProjectEntry } from '@/lib/api/types';
@@ -56,7 +57,7 @@ interface MultiRunLauncherProps {
 
 /** Info tooltip - small icon that shows helper text on hover */
 const InfoTip: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <Tooltip delayDuration={200}>
+  <Tooltip>
     <TooltipTrigger asChild>
       <button type="button" tabIndex={-1} className="inline-flex items-center justify-center text-muted-foreground/50 hover:text-muted-foreground transition-colors">
         <RiInformationLine className="h-3.5 w-3.5" />
@@ -215,6 +216,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
     }
     return /Macintosh|Mac OS X/.test(navigator.userAgent || '');
   }, []);
+  const isTabletStandalonePwa = useTabletStandalonePwaRuntime();
 
   React.useEffect(() => {
     if (typeof window === 'undefined') {
@@ -250,12 +252,12 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
   }, []);
 
   const desktopHeaderPaddingClass = React.useMemo(() => {
-    if (isDesktopApp && isMacPlatform) {
-      // Match main app header: reserve space for Mac traffic lights.
+    if ((isDesktopApp && isMacPlatform) || isTabletStandalonePwa) {
+      // Match main app header: reserve space for Mac/iPadOS traffic lights.
       return 'pl-[5.5rem]';
     }
     return 'pl-3';
-  }, [isDesktopApp, isMacPlatform]);
+  }, [isDesktopApp, isMacPlatform, isTabletStandalonePwa]);
 
   const macosHeaderSizeClass = React.useMemo(() => {
     if (!isDesktopApp || !isMacPlatform || macosMajorVersion === null) {
@@ -605,7 +607,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
           <h1 className="typography-ui-label font-medium">{t('multirun.launcher.title')}</h1>
           {onCancel && (
             <div className="absolute right-0 flex items-center pr-3">
-              <Tooltip delayDuration={500}>
+              <Tooltip>
                 <TooltipTrigger asChild>
                   <button
                     type="button"
@@ -845,7 +847,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
                   onChange={handleFileSelect}
                   accept="*/*"
                 />
-                <Tooltip delayDuration={300}>
+                <Tooltip>
                   <TooltipTrigger asChild>
                     <button
                       type="button"

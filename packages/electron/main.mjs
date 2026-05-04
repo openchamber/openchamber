@@ -128,7 +128,6 @@ const state = {
   quitConfirmed: false,
   quitConfirmationPending: false,
   installingUpdate: false,
-  quitRiskPollerStarted: false,
   pendingUpdate: null,
   unreachableHosts: new Set(),
   windowCounter: 1,
@@ -138,7 +137,6 @@ const state = {
   sshLogs: new Map(),
 };
 
-const QUIT_RISK_POLL_INTERVAL_MS = 5_000;
 const quitRisk = {
   hasActiveTunnel: false,
   hasRunningScheduledTasks: false,
@@ -206,6 +204,8 @@ const performConfirmedQuit = () => {
 };
 
 const requestQuitWithConfirmation = async () => {
+  await refreshQuitRiskFlags();
+
   if (!shouldRequireQuitConfirmation()) {
     performConfirmedQuit();
     return;
@@ -247,6 +247,24 @@ const requestQuitWithConfirmation = async () => {
 };
 
 const refreshQuitRiskFlags = async () => {
+  if (state.serverHandle && typeof state.serverHandle.getQuitRiskStatus === 'function') {
+    try {
+      const status = await state.serverHandle.getQuitRiskStatus();
+      const scheduled = status?.scheduledTasks;
+      if (scheduled && typeof scheduled === 'object') {
+        const enabledCount = Number(scheduled.enabledScheduledTasksCount ?? 0);
+        const runningCount = Number(scheduled.runningScheduledTasksCount ?? 0);
+        quitRisk.enabledScheduledTasksCount = Number.isFinite(enabledCount) ? enabledCount : 0;
+        quitRisk.runningScheduledTasksCount = Number.isFinite(runningCount) ? runningCount : 0;
+        quitRisk.hasEnabledScheduledTasks = Boolean(scheduled.hasEnabledScheduledTasks) || quitRisk.enabledScheduledTasksCount > 0;
+        quitRisk.hasRunningScheduledTasks = Boolean(scheduled.hasRunningScheduledTasks) || quitRisk.runningScheduledTasksCount > 0;
+      }
+      quitRisk.hasActiveTunnel = Boolean(status?.tunnel?.active);
+      return;
+    } catch {
+    }
+  }
+
   const base = typeof state.sidecarUrl === 'string' ? state.sidecarUrl.trim().replace(/\/$/, '') : '';
   if (!base) return;
 
@@ -277,24 +295,6 @@ const refreshQuitRiskFlags = async () => {
   if (tunnel && typeof tunnel === 'object') {
     quitRisk.hasActiveTunnel = Boolean(tunnel.active);
   }
-};
-
-const startQuitRiskPoller = () => {
-  if (process.platform !== 'darwin') return;
-  if (state.quitRiskPollerStarted) return;
-  state.quitRiskPollerStarted = true;
-
-  const loop = async () => {
-    while (!state.quitConfirmed && !state.quitRequested) {
-      await refreshQuitRiskFlags();
-      if (state.quitConfirmed || state.quitRequested) break;
-      await new Promise((resolve) => {
-        const timer = setTimeout(resolve, QUIT_RISK_POLL_INTERVAL_MS);
-        if (typeof timer?.unref === 'function') timer.unref();
-      });
-    }
-  };
-  void loop();
 };
 
 const settingsFilePath = () => {
@@ -2148,8 +2148,7 @@ const buildMacMenu = () => {
         },
         { type: 'separator' },
         { label: 'Settings', accelerator: 'Cmd+,', click: () => dispatchAction('settings') },
-        { label: 'Command Palette', accelerator: 'Cmd+K', click: () => dispatchAction('command-palette') },
-        { label: 'Quick Open…', accelerator: 'Cmd+P', click: () => dispatchAction('quick-open') },
+        { label: 'Command Palette', accelerator: 'Cmd+P', click: () => dispatchAction('command-palette') },
         { type: 'separator' },
         { role: 'services' },
         { type: 'separator' },
@@ -2399,7 +2398,6 @@ app.whenReady().then(async () => {
 
   const { initialUrl, localOrigin, bootOutcome } = await resolveInitialUrl();
   await activateMainWindow(initialUrl, localOrigin, bootOutcome);
-  startQuitRiskPoller();
 
   // Notify renderer on OS wake-from-sleep so the SSE event pipeline can
   // reconnect immediately instead of waiting for the heartbeat watchdog.

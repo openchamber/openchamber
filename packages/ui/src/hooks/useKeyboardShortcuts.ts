@@ -18,7 +18,6 @@ export const useKeyboardShortcuts = () => {
   const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
     const abortCurrentOperation = sessionActions.abortCurrentOperation;;
   const toggleCommandPalette = useUIStore((s) => s.toggleCommandPalette);
-  const setQuickOpenOpen = useUIStore((s) => s.setQuickOpenOpen);
   const toggleHelpDialog = useUIStore((s) => s.toggleHelpDialog);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
   const toggleRightSidebar = useUIStore((s) => s.toggleRightSidebar);
@@ -59,12 +58,6 @@ export const useKeyboardShortcuts = () => {
       if (eventMatchesShortcut(e, combo('open_command_palette'))) {
         e.preventDefault();
         toggleCommandPalette();
-        return;
-      }
-
-      if (eventMatchesShortcut(e, combo('open_quick_open'))) {
-        e.preventDefault();
-        setQuickOpenOpen(true);
         return;
       }
 
@@ -425,7 +418,6 @@ export const useKeyboardShortcuts = () => {
     openNewSessionDraft,
     abortCurrentOperation,
     toggleCommandPalette,
-    setQuickOpenOpen,
     toggleHelpDialog,
     toggleSidebar,
     toggleRightSidebar,

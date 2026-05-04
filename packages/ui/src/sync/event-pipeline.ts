@@ -1,6 +1,10 @@
 /**
  * Event Pipeline — transport connection, event coalescing, and batched flush.
  *
+ * This module must not make state-dependent decisions about event validity.
+ * For example, deciding whether a delta is already represented by a full part
+ * snapshot belongs in the reducer, which has access to the current state.
+ *
  * Plain closure API:
  *   const { cleanup } = createEventPipeline({ sdk, onEvent })
  *
@@ -20,6 +24,8 @@ export type QueuedEvent = {
 export type FlushHandler = (events: QueuedEvent[]) => void
 
 const FLUSH_FRAME_MS = 33
+const BACKPRESSURE_FLUSH_FRAME_MS = 200
+const BACKPRESSURE_MODE_MS = 10_000
 const STREAM_YIELD_MS = 8
 const DEFAULT_RECONNECT_DELAY_MS = 250
 const DEFAULT_HEARTBEAT_TIMEOUT_MS = 30_000
@@ -44,7 +50,7 @@ export type EventPipelineInput = {
 }
 
 type MessageStreamWsFrame = {
-  type: "ready" | "event" | "error"
+  type: "ready" | "event" | "error" | "backpressure"
   payload?: unknown
   eventId?: string
   directory?: string
@@ -143,7 +149,6 @@ type DirectoryQueue = {
   queue: Event[]
   buffer: Event[]
   coalesced: Map<string, number>
-  staleDeltas: Set<string>
   timer: ReturnType<typeof setTimeout> | undefined
   last: number
 }
@@ -183,7 +188,6 @@ export function createEventPipeline(input: EventPipelineInput) {
       queue: [],
       buffer: [],
       coalesced: new Map(),
-      staleDeltas: new Set(),
       timer: undefined,
       last: 0,
     }
@@ -210,8 +214,6 @@ export function createEventPipeline(input: EventPipelineInput) {
     return undefined
   }
 
-  const deltaKey = (messageID: string, partID: string, field: string) => `${messageID}:${partID}:${field}`
-
   const flushDir = (directory: string) => {
     const d = directories.get(directory)
     if (!d) return
@@ -222,22 +224,14 @@ export function createEventPipeline(input: EventPipelineInput) {
     if (d.queue.length === 0) return
 
     const events = d.queue
-    const staleDeltas = d.staleDeltas.size > 0 ? new Set(d.staleDeltas) : undefined
     d.queue = d.buffer
     d.buffer = events
     d.queue.length = 0
     d.coalesced.clear()
-    d.staleDeltas.clear()
 
     d.last = Date.now()
     syncDebug.pipeline.flush(events.length)
     for (const payload of events) {
-      if (staleDeltas && payload.type === "message.part.delta") {
-        const props = payload.properties as { messageID: string; partID: string; field: string }
-        if (staleDeltas.has(deltaKey(props.messageID, props.partID, props.field))) {
-          continue
-        }
-      }
       onEvent(directory, payload)
     }
 
@@ -254,7 +248,8 @@ export function createEventPipeline(input: EventPipelineInput) {
     const d = getOrCreateDir(directory)
     if (d.timer) return
     const elapsed = Date.now() - d.last
-    d.timer = setTimeout(() => flushDir(directory), Math.max(0, FLUSH_FRAME_MS - elapsed))
+    const flushFrameMs = Date.now() < backpressureUntil ? BACKPRESSURE_FLUSH_FRAME_MS : FLUSH_FRAME_MS
+    d.timer = setTimeout(() => flushDir(directory), Math.max(0, flushFrameMs - elapsed))
   }
 
   const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
@@ -269,6 +264,7 @@ export function createEventPipeline(input: EventPipelineInput) {
   let activeTransport: "ws" | "sse" = transport === "ws" ? "ws" : "sse"
   let attemptAbortReason: AttemptAbortReason = null
   let consecutiveFailures = 0
+  let backpressureUntil = 0
 
   const notifyDisconnected = (reason: string) => {
     if (disconnected) {
@@ -309,11 +305,6 @@ export function createEventPipeline(input: EventPipelineInput) {
           } as unknown as Event
         } else {
           d.queue[i] = normalizedPayload
-          if (normalizedPayload.type === "message.part.updated") {
-            const part = (normalizedPayload.properties as { part: { messageID: string; id: string } }).part
-            d.staleDeltas.add(deltaKey(part.messageID, part.id, "text"))
-            d.staleDeltas.add(deltaKey(part.messageID, part.id, "output"))
-          }
         }
         syncDebug.pipeline.coalesced(normalizedPayload.type, k)
         return
@@ -486,6 +477,11 @@ export function createEventPipeline(input: EventPipelineInput) {
           } catch {
             // ignore
           }
+          return
+        }
+
+        if (frame.type === "backpressure") {
+          backpressureUntil = Date.now() + BACKPRESSURE_MODE_MS
           return
         }
 

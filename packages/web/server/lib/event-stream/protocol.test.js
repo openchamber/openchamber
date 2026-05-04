@@ -4,6 +4,7 @@ import {
   MESSAGE_STREAM_DIRECTORY_WS_PATH,
   MESSAGE_STREAM_GLOBAL_WS_PATH,
   MESSAGE_STREAM_WS_MAX_BUFFERED_BYTES,
+  MESSAGE_STREAM_WS_BACKPRESSURE_WARN_BYTES,
   parseSseEventEnvelope,
   sendMessageStreamWsEvent,
   sendMessageStreamWsFrame,
@@ -86,6 +87,73 @@ describe('event stream protocol helpers', () => {
       code: 1013,
       reason: 'Message stream client is too slow',
     });
+  });
+
+  it('emits a backpressure warning when buffer exceeds the warn threshold', () => {
+    const sentPayloads = [];
+    const socket = {
+      readyState: 1,
+      bufferedAmount: MESSAGE_STREAM_WS_BACKPRESSURE_WARN_BYTES + 1,
+      send(payload) {
+        sentPayloads.push(payload);
+      },
+    };
+
+    const sent = sendMessageStreamWsFrame(socket, { type: 'test' });
+
+    expect(sent).toBe(true);
+    expect(sentPayloads).toHaveLength(2);
+
+    const warning = JSON.parse(sentPayloads[1]);
+    expect(warning.type).toBe('backpressure');
+    expect(warning.bufferedBytes).toBeGreaterThan(0);
+    expect(warning.maxBytes).toBe(MESSAGE_STREAM_WS_MAX_BUFFERED_BYTES);
+  });
+
+  it('does not repeat backpressure warnings while still above threshold', () => {
+    const sentPayloads = [];
+    const socket = {
+      readyState: 1,
+      bufferedAmount: MESSAGE_STREAM_WS_BACKPRESSURE_WARN_BYTES + 1,
+      send(payload) {
+        sentPayloads.push(payload);
+      },
+    };
+
+    sendMessageStreamWsFrame(socket, { type: 'test1' });
+    sendMessageStreamWsFrame(socket, { type: 'test2' });
+
+    // First call: data + warning = 2 sends.  Second call: data only = 1 send.
+    expect(sentPayloads).toHaveLength(3);
+    expect(JSON.parse(sentPayloads[1]).type).toBe('backpressure');
+    expect(JSON.parse(sentPayloads[2])).toEqual({ type: 'test2' });
+  });
+
+  it('resets backpressure warning flag when buffer drains', () => {
+    const sentPayloads = [];
+    const socket = {
+      readyState: 1,
+      bufferedAmount: MESSAGE_STREAM_WS_BACKPRESSURE_WARN_BYTES + 1,
+      send(payload) {
+        sentPayloads.push(payload);
+      },
+    };
+
+    sendMessageStreamWsFrame(socket, { type: 'first' });
+    expect(socket._ocBackpressureWarned).toBe(true);
+
+    // Buffer drains
+    socket.bufferedAmount = 100;
+    sendMessageStreamWsFrame(socket, { type: 'recovered' });
+    expect(socket._ocBackpressureWarned).toBe(false);
+
+    // Buffer spikes again — warning should fire again
+    socket.bufferedAmount = MESSAGE_STREAM_WS_BACKPRESSURE_WARN_BYTES + 1;
+    sendMessageStreamWsFrame(socket, { type: 'again' });
+    const backpressureFrames = sentPayloads
+      .map((p) => JSON.parse(p))
+      .filter((p) => p.type === 'backpressure');
+    expect(backpressureFrames).toHaveLength(2);
   });
 
   it('serializes event frames with routing metadata', () => {

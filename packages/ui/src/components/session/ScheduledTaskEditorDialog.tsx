@@ -1,5 +1,5 @@
 import * as React from 'react';
-import * as DialogPrimitive from '@radix-ui/react-dialog';
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { Input } from '@/components/ui/input';
@@ -1456,7 +1456,7 @@ export function ScheduledTaskEditorDialog(props: {
   }
 
   return (
-    <DialogPrimitive.Root
+    <Dialog
       open={open}
       onOpenChange={(next) => {
         if (!next && hasOpenFloatingMenu()) {
@@ -1465,55 +1465,35 @@ export function ScheduledTaskEditorDialog(props: {
         onOpenChange(next);
       }}
     >
-      <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/50 dark:bg-black/75" />
-        <DialogPrimitive.Content
-          aria-describedby={descriptionId}
-          className={cn(
-            'fixed z-50 top-[50%] left-[50%] translate-x-[-50%] translate-y-[-50%]',
-            'w-[90vw] max-w-[720px] h-[680px] max-h-[85vh]',
-            'flex flex-col rounded-xl border shadow-none overflow-hidden',
-            'bg-background'
-          )}
+      <DialogContent
+        aria-describedby={descriptionId}
+        className="!max-w-[720px] w-[90vw] h-[680px] max-h-[85vh] gap-0 p-0 overflow-hidden"
+      >
+        <DialogDescription id={descriptionId} className="sr-only">
+          {description}
+        </DialogDescription>
+
+        <header className="shrink-0 px-4 sm:px-6 pt-5 pb-3">
+          <div className="mx-auto w-full max-w-2xl">
+            <DialogTitle className="typography-ui-label font-medium text-foreground">
+              {title}
+            </DialogTitle>
+            <p className="typography-meta mt-0.5 text-muted-foreground">{description}</p>
+          </div>
+        </header>
+
+        <ScrollShadow
+          className="flex-1 min-h-0 overflow-auto [scrollbar-gutter:stable_both-edges]"
+          size={64}
+          hideTopShadow
         >
-          <div className="absolute right-0.5 top-0.5 z-50">
-            <button
-              type="button"
-              onClick={() => onOpenChange(false)}
-              aria-label={t('sessions.scheduledTasks.editor.actions.closeAria')}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-md p-0.5 text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            >
-              <RiCloseLine className="h-5 w-5" />
-            </button>
-          </div>
-          <DialogPrimitive.Description id={descriptionId} className="sr-only">
-            {description}
-          </DialogPrimitive.Description>
+          <div className="mx-auto w-full max-w-2xl px-4 sm:px-6 pb-5">{formBody}</div>
+        </ScrollShadow>
 
-          <header className="shrink-0 px-4 sm:px-6 pt-5 pb-3">
-            <div className="mx-auto w-full max-w-2xl">
-              <DialogPrimitive.Title className="typography-ui-label font-medium text-foreground">
-                {title}
-              </DialogPrimitive.Title>
-              <p className="typography-meta mt-0.5 text-muted-foreground">
-                {description}
-              </p>
-            </div>
-          </header>
-
-          <ScrollShadow className="flex-1 min-h-0 overflow-auto [scrollbar-gutter:stable_both-edges]" size={64} hideTopShadow>
-            <div className="mx-auto w-full max-w-2xl px-4 sm:px-6 pb-5">
-              {formBody}
-            </div>
-          </ScrollShadow>
-
-          <div className="shrink-0 px-4 sm:px-6 py-3">
-            <div className="mx-auto w-full max-w-2xl">
-              {footerRow}
-            </div>
-          </div>
-        </DialogPrimitive.Content>
-      </DialogPrimitive.Portal>
-    </DialogPrimitive.Root>
+        <div className="shrink-0 px-4 sm:px-6 py-3">
+          <div className="mx-auto w-full max-w-2xl">{footerRow}</div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

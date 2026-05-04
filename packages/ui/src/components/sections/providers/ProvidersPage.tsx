@@ -634,7 +634,7 @@ export const ProvidersPage: React.FC = () => {
                   <div className="py-1.5">
                     <label className="typography-ui-label text-foreground flex items-center gap-1.5">
                       {t('settings.providers.page.auth.apiKeyLabel')}
-                      <Tooltip delayDuration={1000}>
+                      <Tooltip>
                         <TooltipTrigger asChild>
                           <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                         </TooltipTrigger>
@@ -837,7 +837,7 @@ export const ProvidersPage: React.FC = () => {
                 <div className="py-1.5">
                   <label className="typography-ui-label text-foreground flex items-center gap-1.5">
                     {t('settings.providers.page.auth.apiKeyLabel')}
-                    <Tooltip delayDuration={1000}>
+                    <Tooltip>
                       <TooltipTrigger asChild>
                         <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                       </TooltipTrigger>

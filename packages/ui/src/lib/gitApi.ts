@@ -51,6 +51,13 @@ const getRuntimeGit = () => {
   return null;
 };
 
+const requestChatForceScrollBottom = (sessionId: string) => {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent('openchamber:chat-force-scroll-bottom', {
+    detail: { sessionId },
+  }));
+};
+
 export async function checkIsGitRepository(directory: string): Promise<boolean> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.checkIsGitRepository(directory);
@@ -372,6 +379,8 @@ const runStructuredGenerationInActiveSession = async ({
   if (promptParts.length === 0) {
     throw new Error('Generation prompts are empty');
   }
+
+  requestChatForceScrollBottom(generationSession.sessionId);
 
   const response = await opencodeClient.withDirectory(directory, async () => {
     return opencodeClient.getApiClient().session.prompt({

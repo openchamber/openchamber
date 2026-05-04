@@ -628,7 +628,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
         {resolvedPath ? (
           <div className="flex items-center gap-1">
             <DropdownMenu>
-              <Tooltip delayDuration={500}>
+              <Tooltip>
                 <TooltipTrigger asChild>
                   <DropdownMenuTrigger asChild>
                     <Button
@@ -657,7 +657,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
               </DropdownMenuContent>
             </DropdownMenu>
             <DropdownMenu>
-              <Tooltip delayDuration={500}>
+              <Tooltip>
                 <TooltipTrigger asChild>
                   <DropdownMenuTrigger asChild>
                     <Button

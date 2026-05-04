@@ -75,6 +75,7 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
   const isInternalDevToolResource = (element, value) => {
     const tag = element && element.tagName && typeof element.tagName.toLowerCase === 'function' ? element.tagName.toLowerCase() : '';
     if (tag !== 'script' && tag !== 'link') return false;
+    if (tag === 'script' && typeof element.hasAttribute === 'function' && element.hasAttribute('data-cf-beacon')) return true;
     const path = upstreamPathForUrl(value);
     const pathAndSearch = upstreamPathAndSearchForUrl(value);
     return path === '/@vite/client'
@@ -126,6 +127,14 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
       || path.indexOf('/astro/dist/runtime/client/dev-toolbar/') >= 0
       || path.indexOf('/node_modules/.vite/') >= 0
       || isStyleRuntimeNoise;
+  };
+
+  const isInternalDevToolConsoleNoise = (level, args) => {
+    if (level !== 'error' || typeof args[0] !== 'string' || args[0].indexOf('[vite]') !== 0) return false;
+    const text = args.map((arg) => stringifyArg(arg)).join(' ');
+    return text.indexOf('failed to connect to websocket') >= 0
+      || text.indexOf("Cannot read properties of undefined (reading 'send')") >= 0
+      || text.indexOf('Cannot read properties of undefined (reading "send")') >= 0;
   };
 
   const installViteHmrProxyPatch = () => {
@@ -361,6 +370,9 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
     console[level] = function() {
       const args = Array.prototype.slice.call(arguments);
       if (level === 'debug' && typeof args[0] === 'string' && args[0].indexOf('[vite]') === 0) {
+        return original.apply(console, args);
+      }
+      if (isInternalDevToolConsoleNoise(level, args)) {
         return original.apply(console, args);
       }
       post({ type: 'console', level, args: args.map(stringifyArg), ts: Date.now() });
@@ -676,25 +688,46 @@ export const createPreviewProxyRuntime = ({
   }) => {
     ensureSweeper();
 
-    const rewritePreviewBody = (bodyText, proxyBasePath) => {
+    const rewritePreviewBody = (bodyText, proxyBasePath, targetOrigin) => {
       if (typeof bodyText !== 'string' || bodyText.length === 0) {
         return bodyText;
       }
 
       const prefix = proxyBasePath.endsWith('/') ? proxyBasePath.slice(0, -1) : proxyBasePath;
+      const target = targetOrigin ? new URL(targetOrigin) : null;
+      const isSameLoopbackTarget = (url) => {
+        if (!target) return false;
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+        const host = url.hostname;
+        if (host !== 'localhost' && host !== '127.0.0.1' && host !== '0.0.0.0' && host !== '::1' && host !== '[::1]') {
+          return false;
+        }
+        return url.port === target.port;
+      };
       const rewriteRootPath = (value) => {
-        if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//')) {
+        if (typeof value !== 'string' || value.length === 0) {
           return value;
         }
-        if (value.startsWith('/api/preview/proxy/')) {
+        if (value.startsWith('/') && !value.startsWith('//')) {
+          if (value.startsWith('/api/preview/proxy/')) {
+            return value;
+          }
+          return `${prefix}${value}`;
+        }
+        try {
+          const parsed = new URL(value);
+          if (isSameLoopbackTarget(parsed)) {
+            return `${prefix}${parsed.pathname}${parsed.search}${parsed.hash}`;
+          }
+        } catch {
           return value;
         }
-        return `${prefix}${value}`;
+        return value;
       };
 
       return bodyText
-        .replace(/\b(src|href|action)=(["'])\/(?!\/)([^"']*)\2/gi, (_match, attr, quote, path) => {
-          return `${attr}=${quote}${rewriteRootPath(`/${path}`)}${quote}`;
+        .replace(/\b(src|href|action)=(["'])([^"']*)\2/gi, (_match, attr, quote, value) => {
+          return `${attr}=${quote}${rewriteRootPath(value)}${quote}`;
         })
         .replace(/\bsrcset=(["'])([^"']*)\1/gi, (_match, quote, value) => {
           const rewritten = String(value).split(',').map((part) => {
@@ -707,9 +740,9 @@ export const createPreviewProxyRuntime = ({
           }).join(', ');
           return `srcset=${quote}${rewritten}${quote}`;
         })
-        .replace(/url\((['"]?)\/(?!\/)([^)'"]*)\1\)/gi, (_match, quote, path) => {
+        .replace(/url\((['"]?)([^)'"]*)\1\)/gi, (_match, quote, value) => {
           const q = quote || '';
-          return `url(${q}${rewriteRootPath(`/${path}`)}${q})`;
+          return `url(${q}${rewriteRootPath(value)}${q})`;
         })
         .replace(/@import\s+(["'])\/(?!\/)([^"']*)\1/gi, (_match, quote, path) => {
           return `@import ${quote}${rewriteRootPath(`/${path}`)}${quote}`;
@@ -881,10 +914,10 @@ export const createPreviewProxyRuntime = ({
           const parsed = new URL(req.originalUrl || req.url || '', 'http://localhost');
           const upstreamPath = stripProxyPrefix(parsed.pathname, resolved.id);
           if (isJavaScript && upstreamPath === '/@vite/client') {
-            return rewritePreviewBody(rewriteViteClientHmr(responseBuffer.toString('utf8'), proxyBasePath), proxyBasePath);
+            return rewritePreviewBody(rewriteViteClientHmr(responseBuffer.toString('utf8'), proxyBasePath), proxyBasePath, resolved.entry.origin);
           }
 
-          const rewrittenBody = rewritePreviewBody(responseBuffer.toString('utf8'), proxyBasePath);
+          const rewrittenBody = rewritePreviewBody(responseBuffer.toString('utf8'), proxyBasePath, resolved.entry.origin);
           return isHtml ? injectPreviewBridge(rewrittenBody) : rewrittenBody;
         }),
         error: (err, _req, res) => {
@@ -953,6 +986,7 @@ export const createPreviewProxyRuntime = ({
 
           // Rewrite req.url to what the dev server expects.
           const rawUrl = req.url || '';
+          req.originalUrl = rawUrl;
           const parsed = new URL(rawUrl, 'http://localhost');
           const nextPath = stripProxyPrefix(parsed.pathname, resolved.id);
           const search = parsed.searchParams.toString();

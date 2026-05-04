@@ -95,6 +95,7 @@ type Props = {
   openContextPanelTab: (directory: string, options: { mode: 'chat'; dedupeKey: string; label: string }) => void;
   handleDeleteSession: (session: Session, source?: { archivedBucket?: boolean }) => void;
   mobileVariant: boolean;
+  alwaysShowActions: boolean;
   renderSessionNode: (node: SessionNode, depth?: number, groupDirectory?: string | null, projectId?: string | null, archivedBucket?: boolean, secondaryMeta?: SecondaryMeta | null, renderContext?: 'project' | 'recent') => React.ReactNode;
   secondaryMeta?: SecondaryMeta | null;
   renderContext?: 'project' | 'recent';
@@ -207,6 +208,7 @@ const areEqual = (prev: Props, next: Props): boolean => {
   if ((prev.secondaryMeta?.projectLabel ?? null) !== (next.secondaryMeta?.projectLabel ?? null)) return false;
   if ((prev.secondaryMeta?.branchLabel ?? null) !== (next.secondaryMeta?.branchLabel ?? null)) return false;
   if (prev.mobileVariant !== next.mobileVariant) return false;
+  if (prev.alwaysShowActions !== next.alwaysShowActions) return false;
   if ((prev.renderContext ?? 'project') !== (next.renderContext ?? 'project')) return false;
   if (prev.renamingFolderId !== next.renamingFolderId) return false;
 
@@ -253,6 +255,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     openContextPanelTab,
     handleDeleteSession,
     mobileVariant,
+    alwaysShowActions,
     renderSessionNode,
     secondaryMeta,
     renderContext = 'project',
@@ -500,7 +503,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
         'pointer-events-none absolute inline-flex h-3.5 items-center justify-center gap-0.5 transition-opacity',
         isMinimalMode ? 'top-1/2 -translate-y-1/2' : 'top-[14.5px] -translate-y-1/2',
         showStatusMarker && isPinnedSession ? 'left-[-18px] w-6' : 'left-[-10px] w-3.5',
-        hasChildren ? 'opacity-100 group-hover:opacity-0 group-focus-within:opacity-0' : '',
+        hasChildren && !alwaysShowActions ? 'opacity-100 group-hover:opacity-0 group-focus-within:opacity-0' : '',
       )}
     >
       {showStatusMarker ? statusMarkerContent : null}
@@ -525,7 +528,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       className={cn(
         'absolute left-[-10px] inline-flex h-3.5 w-3.5 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
         isMinimalMode ? 'top-1/2 -translate-y-1/2' : 'top-[14.5px] -translate-y-1/2',
-        isMinimalMode && showStatusMarker
+        isMinimalMode && showStatusMarker && !alwaysShowActions
           ? 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto'
           : '',
       )}
@@ -741,15 +744,15 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                     className={cn(
 	                      'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed transition-[padding]',
 	                      isTouchPressed && 'bg-interactive-hover/70',
-                      mobileVariant
+                      alwaysShowActions
                         ? (isVSCode ? revealPaddingClass : 'pr-7')
                         : revealPaddingClass,
                     )}
                   >
                     <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isMinimalMode ? 'gap-1' : 'gap-1')}>
                       <div className={cn('block min-w-0 flex-1 truncate typography-ui-label font-normal', isActive ? 'text-primary' : 'text-foreground')}>{renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}</div>
-                      {mobileVariant ? <span className="ml-2 flex-shrink-0 text-[0.72rem] text-muted-foreground/75">{sessionCompactUpdatedLabel}</span> : null}
-                      {!mobileVariant ? (
+                      {alwaysShowActions ? <span className="ml-2 flex-shrink-0 text-[0.72rem] text-muted-foreground/75">{sessionCompactUpdatedLabel}</span> : null}
+                      {!alwaysShowActions ? (
                         <div className="relative ml-1 flex h-4 min-w-4 flex-shrink-0 items-center justify-end">
                           <span className={cn(
                             'whitespace-nowrap text-right text-[0.72rem] text-muted-foreground/75 transition-opacity duration-150',
@@ -805,7 +808,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                 className={cn(
 	                  'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed transition-[padding]',
 	                  isTouchPressed && 'bg-interactive-hover/70',
-                  mobileVariant
+                  alwaysShowActions
                     ? (isVSCode ? revealPaddingClass : 'pr-7')
                     : revealPaddingClass
                 )}
@@ -844,7 +847,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
             'absolute right-0 top-1/2 z-10 -translate-y-1/2 transition-opacity',
             isMenuOpen
               ? 'opacity-100'
-              : (mobileVariant && !isVSCode)
+              : (alwaysShowActions && !isVSCode)
                 ? 'opacity-100'
                 : cn('opacity-0', revealOnHoverClass),
           )}>
@@ -854,7 +857,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                   type="button"
                   className={cn(
                     'inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
-                    isMinimalMode && !mobileVariant
+                    isMinimalMode && !alwaysShowActions
                       ? (isMenuOpen
                           ? 'h-4 w-4 opacity-100'
                           : cn('h-4 w-4 opacity-0', revealOnHoverClass))
@@ -866,7 +869,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                   onClick={handleMenuTriggerClick}
                   onKeyDown={(event) => event.stopPropagation()}
                 >
-                  <RiMore2Line className={cn(isMinimalMode && !mobileVariant ? 'h-2.5 w-2.5' : 'h-3.5 w-3.5')} />
+                   <RiMore2Line className={cn(isMinimalMode && !alwaysShowActions ? 'h-2.5 w-2.5' : 'h-3.5 w-3.5')} />
                 </button>
               </DropdownMenuTrigger>
               {sessionMenuContent}

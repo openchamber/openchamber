@@ -51,7 +51,7 @@ export async function detectDevServerCommand(
     if (devScript) {
       // Determine the package manager command
       const pm = await detectPackageManager(directory);
-      const pmCommand = pm === 'npm' ? 'npm run' : pm === 'yarn' ? 'yarn' : pm === 'pnpm' ? 'pnpm' : pm === 'bun' ? 'bun' : 'npm run';
+      const pmCommand = pm === 'npm' ? 'npm run' : pm === 'yarn' ? 'yarn' : pm === 'pnpm' ? 'pnpm' : pm === 'bun' ? 'bun run --shell=bun' : 'npm run';
       return {
         command: `${pmCommand} ${devScript}`,
         label: `Start (${devScript})`,

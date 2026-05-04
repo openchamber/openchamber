@@ -13,6 +13,8 @@ import { RiLoader4Line, RiSearchLine, RiTimeLine, RiGitBranchLine, RiArrowGoBack
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { Part } from '@opencode-ai/sdk/v2';
 import { useI18n } from '@/lib/i18n';
+import { useDeviceInfo } from '@/lib/device';
+import { cn } from '@/lib/utils';
 
 interface TimelineDialogProps {
     open: boolean;
@@ -34,6 +36,8 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
     const messages = useSessionMessageRecords(currentSessionId ?? '');
     const revertToMessage = useSessionUIStore((state) => state.revertToMessage);
     const forkFromMessage = useSessionUIStore((state) => state.forkFromMessage);
+    const { isMobile, isTablet } = useDeviceInfo();
+    const alwaysShowActions = isMobile || isTablet;
 
     const [forkingMessageId, setForkingMessageId] = React.useState<string | null>(null);
     const [searchQuery, setSearchQuery] = React.useState('');
@@ -140,12 +144,12 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                                     </p>
 
                                     <div className="flex-shrink-0 h-5 flex items-center mr-2">
-                                        <span className="typography-meta text-muted-foreground whitespace-nowrap group-hover:hidden">
+                                        <span className={cn("typography-meta text-muted-foreground whitespace-nowrap", alwaysShowActions ? "hidden" : "group-hover:hidden")}>
                                             {relativeTime}
                                         </span>
 
-                                        <div className="hidden group-hover:flex gap-1">
-                                            <Tooltip delayDuration={1000}>
+                                        <div className={cn("gap-1", alwaysShowActions ? "flex" : "hidden group-hover:flex")}>
+                                            <Tooltip>
                                                 <TooltipTrigger asChild>
                                                     <button
                                                         type="button"
@@ -162,7 +166,7 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                                                 <TooltipContent sideOffset={6}>{t('chat.timeline.actions.revertFromHere')}</TooltipContent>
                                             </Tooltip>
 
-                                            <Tooltip delayDuration={1000}>
+                                            <Tooltip>
                                                 <TooltipTrigger asChild>
                                                     <button
                                                         type="button"

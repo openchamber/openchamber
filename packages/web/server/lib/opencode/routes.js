@@ -1,4 +1,7 @@
 import { createProjectIdFromPath } from '../projects/project-id.js';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 export const registerOpenCodeRoutes = (app, dependencies) => {
   const {
@@ -293,6 +296,57 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     } catch (error) {
       console.error('Failed to update OpenCode working directory:', error);
       return res.status(500).json({ error: error.message || 'Failed to update working directory' });
+    }
+  });
+
+  // Behavior / Global AGENTS.md endpoints
+  const AGENTS_MD_PATH = path.join(os.homedir(), '.config', 'opencode', 'AGENTS.md');
+  const MAX_BEHAVIOR_PROMPT_SIZE = 1024 * 1024; // 1 MB
+
+  app.get('/api/behavior/agents-md', async (_req, res) => {
+    try {
+      try {
+        await fs.promises.access(AGENTS_MD_PATH);
+      } catch {
+        return res.json({ content: '', exists: false });
+      }
+      const content = await fs.promises.readFile(AGENTS_MD_PATH, 'utf8');
+      return res.json({ content, exists: true });
+    } catch (error) {
+      console.error('Failed to read AGENTS.md:', error);
+      return res.status(500).json({ error: 'Failed to read AGENTS.md' });
+    }
+  });
+
+  app.put('/api/behavior/agents-md', async (req, res) => {
+    try {
+      const content = typeof req.body?.content === 'string' ? req.body.content : '';
+
+      if (content.length > MAX_BEHAVIOR_PROMPT_SIZE) {
+        return res.status(413).json({ error: `Content exceeds maximum size of ${MAX_BEHAVIOR_PROMPT_SIZE} bytes` });
+      }
+
+      // Ensure parent directory exists
+      const parentDir = path.dirname(AGENTS_MD_PATH);
+      try {
+        await fs.promises.access(parentDir);
+      } catch {
+        await fs.promises.mkdir(parentDir, { recursive: true });
+      }
+
+      await fs.promises.writeFile(AGENTS_MD_PATH, content, 'utf8');
+
+      // Refresh OpenCode so it picks up the new AGENTS.md without a full restart
+      try {
+        await refreshOpenCodeAfterConfigChange('global behavior (AGENTS.md) updated');
+      } catch {
+        // Non-fatal: file was written successfully
+      }
+
+      return res.json({ success: true });
+    } catch (error) {
+      console.error('Failed to write AGENTS.md:', error);
+      return res.status(500).json({ error: error.message || 'Failed to write AGENTS.md' });
     }
   });
 };

@@ -454,7 +454,13 @@ export const registerCommonRequestMiddleware = (app, dependencies) => {
   const { express } = dependencies;
 
   app.use((req, res, next) => {
-    if (
+    if (req.path.startsWith('/api/behavior')) {
+      const contentLength = parseInt(req.headers['content-length'] || '0', 10);
+      if (contentLength > 1024 * 1024) {
+        return res.status(413).json({ error: 'Content exceeds maximum size of 1048576 bytes' });
+      }
+      express.json({ limit: '1mb' })(req, res, next);
+    } else if (
       req.path.startsWith('/api/config/agents') ||
       req.path.startsWith('/api/config/commands') ||
       req.path.startsWith('/api/config/mcp') ||

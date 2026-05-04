@@ -7,6 +7,7 @@ import {
   downloadDesktopUpdate,
   restartToApplyUpdate,
   isDesktopLocalOriginActive,
+  isElectronShell,
   isTauriShell,
   isVSCodeRuntime,
   isWebRuntime,
@@ -46,6 +47,12 @@ function detectDeviceClass(): 'mobile' | 'tablet' | 'desktop' | 'unknown' {
 }
 
 function detectArch(): 'arm64' | 'x64' | 'unknown' {
+  const vscodeArch = typeof window !== 'undefined'
+    ? (window as { __VSCODE_CONFIG__?: { arch?: string } }).__VSCODE_CONFIG__?.arch?.toLowerCase?.()
+    : undefined;
+  if (vscodeArch === 'arm64' || vscodeArch === 'aarch64') return 'arm64';
+  if (vscodeArch === 'x64' || vscodeArch === 'amd64' || vscodeArch === 'x86_64') return 'x64';
+
   const nav = typeof navigator !== 'undefined' ? (navigator as Navigator & { userAgentData?: { architecture?: string } }).userAgentData : undefined;
   const fromUAData = nav?.architecture?.toLowerCase?.();
   if (fromUAData === 'arm' || fromUAData === 'arm64' || fromUAData === 'aarch64') return 'arm64';
@@ -75,7 +82,7 @@ function mapRuntimeParams(runtime: ClientRuntime): URLSearchParams {
   params.set('arch', detectArch());
   params.set('platform', detectPlatform());
   if (runtime === 'desktop') {
-    params.set('appType', 'desktop-tauri');
+    params.set('appType', isElectronShell() ? 'desktop-electron' : 'desktop-tauri');
     params.set('instanceMode', isDesktopLocalOriginActive() ? 'local' : 'remote');
     return params;
   }
@@ -94,7 +101,11 @@ function mapRuntimeParams(runtime: ClientRuntime): URLSearchParams {
 async function checkForWebUpdates(runtime: ClientRuntime, currentVersion?: string): Promise<UpdateInfo | null> {
   try {
     const params = mapRuntimeParams(runtime);
+    const vscodeVersion = typeof window !== 'undefined'
+      ? (window as { __VSCODE_CONFIG__?: { extensionVersion?: string } }).__VSCODE_CONFIG__?.extensionVersion
+      : undefined;
     if (currentVersion) params.set('currentVersion', currentVersion);
+    else if (runtime === 'vscode' && vscodeVersion) params.set('currentVersion', vscodeVersion);
     const response = await fetch(`/api/openchamber/update-check?${params.toString()}`, {
       method: 'GET',
       headers: { Accept: 'application/json' },

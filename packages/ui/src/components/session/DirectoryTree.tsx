@@ -57,7 +57,8 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
   disabledPaths,
 }) => {
   const { t } = useI18n();
-  const { isMobile } = useDeviceInfo();
+  const { isMobile, isTablet } = useDeviceInfo();
+  const showHoverActions = alwaysShowActions || isTablet;
   const [directories, setDirectories] = React.useState<DirectoryItem[]>([]);
   const [expandedPaths, setExpandedPaths] = React.useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = React.useState(true);
@@ -1146,7 +1147,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
               onClick={() => togglePin(path)}
               className={cn(
                 "hover:bg-interactive-hover rounded-md transition-opacity",
-                isMobile ? "p-1.5 opacity-60" : "p-1 opacity-0 group-hover:opacity-100"
+                showHoverActions ? "p-1.5 opacity-60" : "p-1 opacity-0 group-hover:opacity-100"
               )}
               title={t('directoryTree.actions.unpinDirectory')}
             >
@@ -1200,7 +1201,10 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
               e.preventDefault();
               togglePin(path);
             }}
-            className="p-1 opacity-0 group-hover:opacity-100 hover:bg-interactive-hover rounded transition-opacity flex-shrink-0"
+            className={cn(
+              "hover:bg-interactive-hover rounded transition-opacity flex-shrink-0",
+              showHoverActions ? "p-1.5 opacity-60" : "p-1 opacity-0 group-hover:opacity-100"
+            )}
             title={t('directoryTree.actions.unpinDirectory')}
           >
             <RiPushpin2Line className="h-3 w-3 text-primary" />

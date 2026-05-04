@@ -458,6 +458,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       workspaceFolder,
       initialStatus,
       cliAvailable,
+      extensionVersion: String(this._context.extension?.packageJSON?.version || ''),
       devServerUrl: this._webviewDevServerUrl,
     });
   }

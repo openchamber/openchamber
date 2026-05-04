@@ -13,6 +13,7 @@ import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry";
 import { updateDesktopSettings } from "@/lib/persistence";
 import { useDirectoryStore } from "@/stores/useDirectoryStore";
 import { streamDebugEnabled } from "@/stores/utils/streamDebug";
+import { parseModelIdentifier } from "@/lib/modelIdentifier";
 
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
 const MODELS_DEV_PROXY_URL = "/api/openchamber/models-metadata";
@@ -105,14 +106,7 @@ const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
 };
 
 const parseModelString = (modelString: string): { providerId: string; modelId: string } | null => {
-    if (!modelString || typeof modelString !== 'string') {
-        return null;
-    }
-    const parts = modelString.split('/');
-    if (parts.length !== 2 || !parts[0] || !parts[1]) {
-        return null;
-    }
-    return { providerId: parts[0], modelId: parts[1] };
+    return parseModelIdentifier(modelString);
 };
 
 const normalizeProviderId = (value: string) => value?.toLowerCase?.() ?? '';
@@ -550,6 +544,7 @@ interface ConfigStore {
 
     loadProviders: (options?: { directory?: string | null }) => Promise<void>;
     loadAgents: (options?: { directory?: string | null }) => Promise<boolean>;
+    invalidateModelMetadataCache: () => void;
     setProvider: (providerId: string) => void;
     setModel: (modelId: string) => void;
     setCurrentVariant: (variant: string | undefined) => void;
@@ -1548,6 +1543,11 @@ export const useConfigStore = create<ConfigStore>()(
 
                     _inFlightAgents.set(directoryKey, promise);
                     return promise;
+                },
+
+                invalidateModelMetadataCache: () => {
+                    modelsMetadataInFlight = null;
+                    set({ modelsMetadata: new Map<string, ModelMetadata>() });
                 },
 
                 setAgent: (agentName: string | undefined) => {
