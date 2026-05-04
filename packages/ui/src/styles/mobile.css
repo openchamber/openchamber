@@ -169,6 +169,11 @@
     overflow: hidden;
   }
 
+  :root[data-oc-mobile-keyboard-mode="resize-content"].mobile-pointer:not(.desktop-runtime) .main-content-safe-area {
+    height: 100% !important;
+    min-height: 0;
+  }
+
   /* Fix main layout container */
   :root.mobile-pointer:not(.desktop-runtime) .flex.flex-col.h-screen {
     height: 100vh;

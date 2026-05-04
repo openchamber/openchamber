@@ -7,6 +7,7 @@ import { setDirectoryShowHidden } from '@/lib/directoryShowHidden';
 import { setFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { loadAppearancePreferences, applyAppearancePreferences } from '@/lib/appearancePersistence';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { normalizeMobileKeyboardMode, setStoredMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 
 const persistToLocalStorage = (settings: DesktopSettings) => {
   if (typeof window === 'undefined') {
@@ -91,6 +92,9 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
     } else {
       localStorage.removeItem('openchamber.pwaName');
     }
+  }
+  if (typeof settings.mobileKeyboardMode === 'string') {
+    setStoredMobileKeyboardMode(settings.mobileKeyboardMode);
   }
 };
 
@@ -463,6 +467,12 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   }
   if (typeof settings.inputBarOffset === 'number' && Number.isFinite(settings.inputBarOffset) && settings.inputBarOffset !== store.inputBarOffset) {
     store.setInputBarOffset(settings.inputBarOffset);
+  }
+  if (typeof settings.mobileKeyboardMode === 'string') {
+    const mode = normalizeMobileKeyboardMode(settings.mobileKeyboardMode, store.mobileKeyboardMode);
+    if (mode !== store.mobileKeyboardMode) {
+      store.setMobileKeyboardMode(mode);
+    }
   }
 
   if (Array.isArray(settings.favoriteModels)) {
@@ -888,6 +898,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.inputBarOffset === 'number' && Number.isFinite(candidate.inputBarOffset)) {
     result.inputBarOffset = candidate.inputBarOffset;
+  }
+  if (candidate.mobileKeyboardMode === 'native' || candidate.mobileKeyboardMode === 'resize-content') {
+    result.mobileKeyboardMode = candidate.mobileKeyboardMode;
   }
 
   const favoriteModels = sanitizeModelRefs(candidate.favoriteModels, 64);
