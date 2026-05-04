@@ -8,6 +8,7 @@ import {
   type VSCodeThemeKind,
   type VSCodeThemePayload,
 } from '@openchamber/ui/lib/theme/vscode/adapter';
+import type { VSCodeActiveEditorFile } from '@/sync/input-store';
 
 type ConnectionStatus = 'connecting' | 'connected' | 'error' | 'disconnected';
 type PanelType = 'chat' | 'agentManager';
@@ -1231,6 +1232,13 @@ onCommand('showSettings', () => {
 onCommand('settingsSynced', () => {
   import('@openchamber/ui/lib/persistence').then(({ syncDesktopSettings }) => {
     void syncDesktopSettings();
+  });
+});
+
+// Listen for active editor file changes from the extension
+onCommand('activeEditorFile', (payload) => {
+  import('@/sync/input-store').then(({ useInputStore }) => {
+    useInputStore.getState().setActiveEditorFile((payload as VSCodeActiveEditorFile | null) ?? null);
   });
 });
 
