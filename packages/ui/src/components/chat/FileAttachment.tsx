@@ -311,12 +311,12 @@ export const AttachedVSCodeFileChips = memo(() => {
   const attachedFiles = useInputStore((state) => state.attachedFiles);
   const removeAttachedFile = useInputStore((state) => state.removeAttachedFile);
 
-  const vscodeFiles = attachedFiles.filter((file) => file.source !== 'local' && file.source !== 'server');
+  const vscodeFiles = attachedFiles.filter((file) => file.source === 'vscode');
 
   if (vscodeFiles.length === 0) return null;
 
-  const images = vscodeFiles.filter((f) => f.source !== 'server' && f.mimeType.startsWith('image/'));
-  const otherFiles = vscodeFiles.filter((f) => f.source === 'server' || !f.mimeType.startsWith('image/'));
+  const images = vscodeFiles.filter((f) => f.mimeType.startsWith('image/'));
+  const otherFiles = vscodeFiles.filter((f) => !f.mimeType.startsWith('image/'));
 
   return (
     <div className="flex items-center gap-2 flex-wrap">

@@ -23,6 +23,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private _sseCounter = 0;
   private _sseStreams = new Map<string, AbortController>();
   private readonly _webviewDevServerUrl: string | null;
+  private _broadcastSelectionDebounce: ReturnType<typeof setTimeout> | undefined;
 
   // Message delivery confirmation and retry
   private readonly _pendingMessages = new Set<string>();
@@ -50,8 +51,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this._webviewDevServerUrl = resolveWebviewDevServerUrl(this._context);
 
     this._context.subscriptions.push(
-      vscode.window.onDidChangeActiveTextEditor(() => this._broadcastActiveEditorFile()),
-      vscode.window.onDidChangeTextEditorSelection(() => this._broadcastActiveEditorFile()),
+      vscode.window.onDidChangeActiveTextEditor(() => void this._broadcastActiveEditorFile()),
+      vscode.window.onDidChangeTextEditorSelection(() => this._scheduleBroadcast()),
     );
   }
 
@@ -76,7 +77,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this._sendCachedState();
 
     // Send current active editor file state to the new webview
-    this._broadcastActiveEditorFile();
+    void this._broadcastActiveEditorFile();
 
     webviewView.onDidDispose(() => {
       this._clearPendingMessages();
@@ -310,6 +311,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       status: this._cachedStatus,
       error: this._cachedError,
     });
+  }
+
+  private _scheduleBroadcast(): void {
+    if (this._broadcastSelectionDebounce !== undefined) {
+      clearTimeout(this._broadcastSelectionDebounce);
+    }
+    this._broadcastSelectionDebounce = setTimeout(() => {
+      this._broadcastSelectionDebounce = undefined;
+      void this._broadcastActiveEditorFile();
+    }, 150);
   }
 
   private async _broadcastActiveEditorFile() {

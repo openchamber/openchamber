@@ -97,6 +97,9 @@ export const useInputStore = create<InputState>()((set, get) => ({
     )
     if (isDuplicate) return
     const dataUrl = `file://${path}`
+    // `file://` URLs are the same contract used by server-source attachments.
+    // The submission path passes `dataUrl` as `url` directly to the OpenCode
+    // server, which resolves `file://` paths natively. No base64 encoding needed.
     const attached: AttachedFile = {
       id,
       file: new File([], name, { type: 'text/plain' }),
@@ -112,16 +115,16 @@ export const useInputStore = create<InputState>()((set, get) => ({
   },
 
   addVSCodeSelectionAttachment: async (path: string, file: File) => {
-    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`    
+    const isDuplicate = get().attachedFiles.some(
+      (f) => f.source === 'vscode' && f.vscodeSource === 'selection' && f.filename === file.name && f.vscodePath === path
+    )
+    if (isDuplicate) return
     const dataUrl = await new Promise<string>((resolve) => {
       const reader = new FileReader()
       reader.onload = () => resolve(reader.result as string)
       reader.readAsDataURL(file)
     })
-    const isDuplicate = get().attachedFiles.some(
-      (f) => f.source === 'vscode' && f.vscodeSource === 'selection' && f.filename === file.name && f.vscodePath === path
-    )
-    if (isDuplicate) return
     const attached: AttachedFile = {
       id,
       file,
