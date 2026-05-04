@@ -382,7 +382,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
               <div
                 ref={(element) => setTabRef(item.id, element)}
                 className={cn(
-                  'group flex h-full items-center',
+                  'group flex h-full min-w-0 flex-nowrap items-center',
                   (isScrollable || useIntrinsicPillSizing)
                     ? 'shrink-0'
                     : usesActivePillIndicator
@@ -403,8 +403,8 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                   onClick={() => onSelect(item.id)}
                   className={cn(
                     usesActivePillIndicator
-                      ? 'animated-tabs__button pill-tabs__button relative z-10 flex flex-1 items-center justify-center rounded-[9px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] text-sm font-medium transition-colors duration-150 !min-h-0'
-                      : 'flex h-full min-w-0 items-center typography-micro',
+                      ? 'animated-tabs__button pill-tabs__button relative z-10 flex flex-1 min-w-0 flex-nowrap items-center justify-center rounded-[9px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] text-sm font-medium transition-colors duration-150 !min-h-0'
+                      : 'flex h-full min-w-0 flex-nowrap items-center typography-micro',
                     usesActivePillIndicator && activePillLowercase ? 'lowercase' : null,
                     usesActivePillIndicator && (showInactiveIconOnly ? 'gap-0' : 'gap-1.5'),
                     usesActivePillIndicator
@@ -443,7 +443,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                             <span
                               role="button"
                               tabIndex={-1}
-                              className={cn('absolute inset-0 z-20 flex items-center justify-center rounded-sm text-muted-foreground transition-opacity hover:text-foreground', alwaysShowCloseControls ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}
+                              className={cn('absolute inset-0 z-20 flex !min-h-0 !min-w-0 items-center justify-center rounded-sm text-muted-foreground transition-opacity hover:text-foreground', alwaysShowCloseControls ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}
                               onPointerDown={(event) => {
                                 event.stopPropagation();
                               }}
@@ -462,7 +462,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                       {shouldShowLabel ? <span className="animated-tabs__label truncate">{item.label}</span> : null}
                     </>
                   ) : (
-                    <span className={cn('flex min-w-0 items-center gap-1.5', !isScrollable && 'justify-center')}>
+                    <span className={cn('flex min-w-0 flex-nowrap items-center gap-1.5', !isScrollable && 'justify-center')}>
                       {item.icon ? (
                         <span
                           className={cn(
@@ -475,7 +475,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                             <span
                               role="button"
                               tabIndex={-1}
-                              className={cn('absolute inset-0 z-20 flex items-center justify-center rounded-sm text-muted-foreground transition-opacity hover:text-foreground', alwaysShowCloseControls ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}
+                              className={cn('absolute inset-0 z-20 flex !min-h-0 !min-w-0 items-center justify-center rounded-sm text-muted-foreground transition-opacity hover:text-foreground', alwaysShowCloseControls ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}
                               onPointerDown={(event) => {
                                 event.stopPropagation();
                               }}

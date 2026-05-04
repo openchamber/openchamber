@@ -83,7 +83,7 @@ export const MainLayout: React.FC = () => {
     const setMultiRunLauncherOpen = useUIStore((state) => state.setMultiRunLauncherOpen);
     const multiRunLauncherPrefillPrompt = useUIStore((state) => state.multiRunLauncherPrefillPrompt);
 
-    const { isMobile } = useDeviceInfo();
+    const { isMobile, hasTouchInput } = useDeviceInfo();
     const isDesktopShellRuntime = React.useMemo(() => isDesktopShell(), []);
     const sidebarWidth = useUIStore((state) => state.sidebarWidth);
     const rightSidebarWidth = useUIStore((state) => state.rightSidebarWidth);
@@ -289,19 +289,24 @@ export const MainLayout: React.FC = () => {
                 rightSidebarAutoClosedRef.current = false;
             }
 
-            const shouldCloseBottomTerminal =
-                height < BOTTOM_TERMINAL_AUTO_CLOSE_HEIGHT;
-            const canAutoOpenBottomTerminal =
-                height >= BOTTOM_TERMINAL_AUTO_OPEN_HEIGHT;
+            // Touch devices frequently resize when the on-screen keyboard opens.
+            // Treat bottom-terminal auto-collapse/restore as desktop-only so
+            // keyboard viewport changes do not churn terminal layout state.
+            if (!hasTouchInput) {
+                const shouldCloseBottomTerminal =
+                    height < BOTTOM_TERMINAL_AUTO_CLOSE_HEIGHT;
+                const canAutoOpenBottomTerminal =
+                    height >= BOTTOM_TERMINAL_AUTO_OPEN_HEIGHT;
 
-            if (shouldCloseBottomTerminal) {
-                if (state.isBottomTerminalOpen) {
-                    setBottomTerminalOpen(false);
-                    bottomTerminalAutoClosedRef.current = true;
+                if (shouldCloseBottomTerminal) {
+                    if (state.isBottomTerminalOpen) {
+                        setBottomTerminalOpen(false);
+                        bottomTerminalAutoClosedRef.current = true;
+                    }
+                } else if (canAutoOpenBottomTerminal && bottomTerminalAutoClosedRef.current) {
+                    setBottomTerminalOpen(true);
+                    bottomTerminalAutoClosedRef.current = false;
                 }
-            } else if (canAutoOpenBottomTerminal && bottomTerminalAutoClosedRef.current) {
-                setBottomTerminalOpen(true);
-                bottomTerminalAutoClosedRef.current = false;
             }
         };
 
@@ -351,7 +356,7 @@ export const MainLayout: React.FC = () => {
         return () => {
             unsubscribe();
         };
-    }, []);
+    }, [hasTouchInput, setBottomTerminalOpen, setRightSidebarOpen]);
 
     const secondaryView = React.useMemo(() => {
         switch (activeMainTab) {
