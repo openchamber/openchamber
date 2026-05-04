@@ -833,8 +833,9 @@ export const TerminalView: React.FC = () => {
     const terminalViewportKey = React.useMemo(() => {
         const directoryPart = effectiveDirectory ?? 'no-dir';
         const tabPart = activeTabId ?? 'no-tab';
-        return `${directoryPart}::${tabPart}`;
-    }, [effectiveDirectory, activeTabId]);
+        const terminalPart = terminalSessionId ?? 'no-terminal';
+        return `${directoryPart}::${tabPart}::${terminalPart}`;
+    }, [effectiveDirectory, activeTabId, terminalSessionId]);
 
     const viewportSessionKey = React.useMemo(() => {
         return `${terminalViewportKey}::layout-${viewportLayoutVersion}`;
