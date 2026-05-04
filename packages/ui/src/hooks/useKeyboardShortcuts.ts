@@ -30,6 +30,7 @@ export const useKeyboardShortcuts = () => {
   const setActiveMainTab = useUIStore((s) => s.setActiveMainTab);
   const setSettingsDialogOpen = useUIStore((s) => s.setSettingsDialogOpen);
   const setModelSelectorOpen = useUIStore((s) => s.setModelSelectorOpen);
+  const setTimelineDialogOpen = useUIStore((s) => s.setTimelineDialogOpen);
   const toggleExpandedInput = useUIStore((s) => s.toggleExpandedInput);
   const shortcutOverrides = useUIStore((s) => s.shortcutOverrides);
   const { themeMode, setThemeMode } = useThemeSystem();
@@ -58,6 +59,12 @@ export const useKeyboardShortcuts = () => {
       if (eventMatchesShortcut(e, combo('open_command_palette'))) {
         e.preventDefault();
         toggleCommandPalette();
+        return;
+      }
+
+      if (eventMatchesShortcut(e, combo('open_timeline_dialog'))) {
+        e.preventDefault();
+        setTimelineDialogOpen(true);
         return;
       }
 
