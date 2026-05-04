@@ -93,6 +93,7 @@ export type EvictPlan = {
   max: number
   ttl: number
   now: number
+  hasPendingBlockingRequests?: (directory: string) => boolean
 }
 
 export type DisposeCheck = {
@@ -101,6 +102,7 @@ export type DisposeCheck = {
   pinned: boolean
   booting: boolean
   loadingSessions: boolean
+  hasPendingBlockingRequests: boolean
 }
 
 export type ChildOptions = {
