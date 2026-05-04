@@ -22,6 +22,7 @@ import { AgentSelector } from './AgentSelector';
 import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo } from '@/components/chat/CommandAutocomplete';
 import { FileMentionAutocomplete, type FileMentionHandle } from '@/components/chat/FileMentionAutocomplete';
 import { isDesktopShell } from '@/lib/desktop';
+import { useTabletStandalonePwaRuntime } from '@/lib/device';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { PROJECT_ICON_MAP, PROJECT_COLOR_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
 import type { ProjectEntry } from '@/lib/api/types';
@@ -215,6 +216,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
     }
     return /Macintosh|Mac OS X/.test(navigator.userAgent || '');
   }, []);
+  const isTabletStandalonePwa = useTabletStandalonePwaRuntime();
 
   React.useEffect(() => {
     if (typeof window === 'undefined') {
@@ -250,12 +252,12 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
   }, []);
 
   const desktopHeaderPaddingClass = React.useMemo(() => {
-    if (isDesktopApp && isMacPlatform) {
-      // Match main app header: reserve space for Mac traffic lights.
+    if ((isDesktopApp && isMacPlatform) || isTabletStandalonePwa) {
+      // Match main app header: reserve space for Mac/iPadOS traffic lights.
       return 'pl-[5.5rem]';
     }
     return 'pl-3';
-  }, [isDesktopApp, isMacPlatform]);
+  }, [isDesktopApp, isMacPlatform, isTabletStandalonePwa]);
 
   const macosHeaderSizeClass = React.useMemo(() => {
     if (!isDesktopApp || !isMacPlatform || macosMajorVersion === null) {

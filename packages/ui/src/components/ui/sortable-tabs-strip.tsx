@@ -20,6 +20,7 @@ import { RiCloseLine } from '@remixicon/react';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
+import { useDeviceInfo } from '@/lib/device';
 
 export type SortableTabsStripItem = {
   id: string;
@@ -99,6 +100,8 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
 }) => {
   const { t } = useI18n();
   const isMobile = useUIStore((state) => state.isMobile);
+  const { isTablet } = useDeviceInfo();
+  const alwaysShowCloseControls = isMobile || isTablet;
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const [overflow, setOverflow] = React.useState<{ left: boolean; right: boolean }>({ left: false, right: false });
   const itemIDs = React.useMemo(() => items.map((item) => item.id), [items]);
@@ -435,12 +438,12 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                     <>
                       {item.icon ? (
                         <span className="relative flex h-4 w-4 shrink-0 items-center justify-center">
-                          <span className={cn('flex items-center justify-center transition-opacity', closeReplacesIcon && (isMobile ? 'opacity-0' : 'group-hover:opacity-0'))}>{item.icon}</span>
+                          <span className={cn('flex items-center justify-center transition-opacity', closeReplacesIcon && (alwaysShowCloseControls ? 'opacity-0' : 'group-hover:opacity-0'))}>{item.icon}</span>
                           {closeReplacesIcon ? (
                             <span
                               role="button"
                               tabIndex={-1}
-                              className={cn('absolute inset-0 z-20 flex items-center justify-center rounded-sm text-muted-foreground transition-opacity hover:text-foreground', isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}
+                              className={cn('absolute inset-0 z-20 flex items-center justify-center rounded-sm text-muted-foreground transition-opacity hover:text-foreground', alwaysShowCloseControls ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}
                               onPointerDown={(event) => {
                                 event.stopPropagation();
                               }}
@@ -467,12 +470,12 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                             isActive ? 'text-[var(--primary-base)]' : 'text-muted-foreground'
                           )}
                         >
-                          <span className={cn('flex items-center justify-center transition-opacity', closeReplacesIcon && (isMobile ? 'opacity-0' : 'group-hover:opacity-0'))}>{item.icon}</span>
+                          <span className={cn('flex items-center justify-center transition-opacity', closeReplacesIcon && (alwaysShowCloseControls ? 'opacity-0' : 'group-hover:opacity-0'))}>{item.icon}</span>
                           {closeReplacesIcon ? (
                             <span
                               role="button"
                               tabIndex={-1}
-                              className={cn('absolute inset-0 z-20 flex items-center justify-center rounded-sm text-muted-foreground transition-opacity hover:text-foreground', isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}
+                              className={cn('absolute inset-0 z-20 flex items-center justify-center rounded-sm text-muted-foreground transition-opacity hover:text-foreground', alwaysShowCloseControls ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}
                               onPointerDown={(event) => {
                                 event.stopPropagation();
                               }}

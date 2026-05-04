@@ -282,6 +282,7 @@ interface MessageBodyProps {
     syntaxTheme: { [key: string]: React.CSSProperties };
 
     isMobile: boolean;
+    alwaysShowActions?: boolean;
     hasTouchInput?: boolean;
     copiedCode: string | null;
     onCopyCode: (code: string) => void;
@@ -326,10 +327,11 @@ const writeRevealedToolIds = (messageId: string, value: Set<string>): void => {
     revealedToolIdsByMessage.set(messageId, new Set(value));
 };
 
-const UserMessageBody = React.memo(({ messageId, parts, isMobile, hasTouchInput, hasTextContent, onCopyMessage, copiedMessage, onShowPopup, agentMention, onRevert, onFork, userActionsMode = 'inline', stickyUserHeaderEnabled = true }: {
+const UserMessageBody = React.memo(({ messageId, parts, isMobile, alwaysShowActions = isMobile, hasTouchInput, hasTextContent, onCopyMessage, copiedMessage, onShowPopup, agentMention, onRevert, onFork, userActionsMode = 'inline', stickyUserHeaderEnabled = true }: {
     messageId: string;
     parts: Part[];
     isMobile: boolean;
+    alwaysShowActions?: boolean;
     hasTouchInput?: boolean;
     hasTextContent?: boolean;
     onCopyMessage?: () => void;
@@ -438,7 +440,7 @@ const UserMessageBody = React.memo(({ messageId, parts, isMobile, hasTouchInput,
                         : userActionsMode === 'inline'
                             ? 'translate-x-5'
                             : 'translate-x-0',
-                    isMobile
+                    alwaysShowActions
                         ? 'pointer-events-auto opacity-100'
                         : 'pointer-events-none opacity-0 transition-opacity duration-150 group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-hover/user-actions:pointer-events-auto group-hover/user-actions:opacity-100 group-hover/user-shell:pointer-events-auto group-hover/user-shell:opacity-100'
                 )}
@@ -838,6 +840,7 @@ const AssistantMessageBody = React.memo(({
 
     syntaxTheme,
     isMobile,
+    alwaysShowActions,
     hasTouchInput,
     expandedTools,
     onToggleTool,
@@ -865,6 +868,7 @@ const AssistantMessageBody = React.memo(({
     }, []);
 
     const isTouchContext = Boolean(hasTouchInput ?? isMobile);
+    const alwaysShowMessageActions = Boolean(alwaysShowActions ?? isMobile);
     const awaitingMessageCompletion = !isMessageCompleted;
     const animateActivityRows = awaitingMessageCompletion || Boolean(turnGroupingContext?.isWorking);
 
@@ -1550,6 +1554,7 @@ const AssistantMessageBody = React.memo(({
                                 part={part}
                                 messageId={messageId}
                                 onContentChange={onContentChange}
+                                alwaysShowActions={alwaysShowMessageActions}
                             />
                         );
                     } else {
@@ -1601,6 +1606,7 @@ const AssistantMessageBody = React.memo(({
                                     onToggle={onToggleTool}
                                     syntaxTheme={syntaxTheme}
                                     isMobile={isMobile}
+                                    alwaysShowActions={alwaysShowMessageActions}
                                     onContentChange={onContentChange}
                                     onShowPopup={onShowPopup}
                                     animateTailText={animatedToolIdsLookup.has(toolPart.id)}
@@ -1890,6 +1896,7 @@ const MessageBody = React.memo(({ isUser, ...props }: MessageBodyProps) => {
                 messageId={props.messageId}
                 parts={props.parts}
                 isMobile={props.isMobile}
+                alwaysShowActions={props.alwaysShowActions}
                 hasTouchInput={props.hasTouchInput}
                 hasTextContent={props.hasTextContent}
                 onCopyMessage={props.onCopyMessage}

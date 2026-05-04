@@ -32,6 +32,7 @@ import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
+import { useDeviceInfo } from '@/lib/device';
 import { createWorktreeSessionForNewBranch } from '@/lib/worktreeSessionCreator';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
 import type { GitHubIssue, GitHubIssueComment, GitHubIssuesListResult, GitHubIssueSummary, GitHubRepoSelector } from '@/lib/api/types';
@@ -87,6 +88,8 @@ export function GitHubIssuePickerDialog({
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const isMobile = useUIStore((state) => state.isMobile);
+  const { isTablet } = useDeviceInfo();
+  const alwaysShowActions = isMobile || isTablet;
   const activeProject = useProjectsStore((state) => state.getActiveProject());
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
 
@@ -591,7 +594,10 @@ export function GitHubIssuePickerDialog({
                     href={issue.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="hidden group-hover:flex h-5 w-5 items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+                    className={cn(
+                      "h-5 w-5 items-center justify-center text-muted-foreground hover:text-foreground transition-colors",
+                      alwaysShowActions ? "flex" : "hidden group-hover:flex"
+                    )}
                     onClick={(e) => e.stopPropagation()}
                     aria-label={t('session.githubIssuePicker.actions.openInGitHubAria')}
                   >
