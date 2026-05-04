@@ -1,5 +1,5 @@
 import React, { useRef, memo } from 'react';
-import { RiAttachment2, RiCloseLine, RiFileImageLine, RiFileLine, RiFilePdfLine, RiGithubLine, RiGitPullRequestLine } from '@remixicon/react';
+import { RiAttachment2, RiCloseLine, RiFileImageLine, RiFileLine, RiFilePdfLine, RiGithubLine, RiGitPullRequestLine, RiAddLine, RiPushpin2Line } from '@remixicon/react';
 import { useInputStore } from '@/sync/input-store';
 import type { AttachedFile } from '@/sync/session-ui-store';
 import { useUIStore } from '@/stores/useUIStore';
@@ -196,13 +196,7 @@ const ImagePreview = memo(({ file, onRemove }: ImagePreviewProps) => {
 
 ImagePreview.displayName = 'ImagePreview';
 
-interface FileChipProps {
-  file: AttachedFile;
-  onRemove: () => void;
-}
-
-const FileChip = memo(({ file, onRemove }: FileChipProps) => {
-  const { t } = useI18n();
+const useFileDetails = (file: AttachedFile) => {
   const getFileExtension = (filename: string): string => {
     const parts = filename.split('.');
     return parts.length > 1 ? parts[parts.length - 1].toLowerCase() : '';
@@ -222,9 +216,21 @@ const FileChip = memo(({ file, onRemove }: FileChipProps) => {
     return filename || path;
   };
 
-  const displayName = extractFilename(file.filename);
-  const fileSize = formatFileSize(file.size);
-  const extension = getFileExtension(file.filename);
+  return {
+    displayName: extractFilename(file.filename),
+    fileSize: formatFileSize(file.size),
+    extension: getFileExtension(file.filename),
+  };
+};
+
+interface FileChipProps {
+  file: AttachedFile;
+  onRemove: () => void;
+}
+
+const FileChip = memo(({ file, onRemove }: FileChipProps) => {
+  const { t } = useI18n();
+  const { displayName, fileSize, extension } = useFileDetails(file);
 
   return (
     <button
@@ -252,18 +258,85 @@ const FileChip = memo(({ file, onRemove }: FileChipProps) => {
         aria-label={t('chat.fileAttachment.actions.removeNamed', { name: displayName })}
       >
         <RiCloseLine className="h-4 w-4 text-muted-foreground" />
-      </span>
+      </span>        
     </button>
   );
 });
 
 FileChip.displayName = 'FileChip';
 
+const VSCodeFileChip = memo(({ file, onRemove }: FileChipProps) => {
+  const { t } = useI18n();
+  const { displayName, extension } = useFileDetails(file);
+  
+  // Detect selection-style attachments: ends with ":N" or ":N-M"
+  const isSelectionAttachment = /:\d+(?:-\d+)?$/.test(displayName);
+
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        // Prevent click from bubbling if clicking the remove button
+        if ((e.target as HTMLElement).closest('[data-remove-button]')) {
+          return;
+        }
+      }}
+      className="inline-flex items-center gap-1 text-xs pr-1 rounded-sm border border-solid bg-transparent text-foreground not-italic hover:opacity-90 transition-colors text-left"
+      style={{ borderColor: 'var(--syntax-punctuation)' }}
+      title={file.vscodePath}
+    >
+      <span
+        data-remove-button
+        onClick={(e) => {
+          e.stopPropagation();
+          onRemove();
+        }}
+        className="flex items-center justify-center h-5 w-5 flex-shrink-0 hover:bg-[var(--interactive-hover)] rounded-full transition-colors cursor-pointer"
+        aria-label={t('chat.fileAttachment.activeEditor.remove')}
+        title={t('chat.fileAttachment.activeEditor.remove')}
+      >
+        <RiCloseLine className="h-4 w-4 text-muted-foreground" />
+      </span>
+        <FileTypeIcon filePath={file.filename} extension={extension} className="h-4 w-4" />
+        <span className={cn('text-foreground', isSelectionAttachment ? 'whitespace-nowrap' : 'truncate max-w-[200px]')}>
+          {displayName}
+        </span>
+    </button>
+  );
+});
+
+VSCodeFileChip.displayName = 'VSCodeFileChip';
+
+export const AttachedVSCodeFileChips = memo(() => {  
+  const attachedFiles = useInputStore((state) => state.attachedFiles);
+  const removeAttachedFile = useInputStore((state) => state.removeAttachedFile);
+
+  const vscodeFiles = attachedFiles.filter((file) => file.source !== 'local' && file.source !== 'server');
+
+  if (vscodeFiles.length === 0) return null;
+
+  const images = vscodeFiles.filter((f) => f.source !== 'server' && f.mimeType.startsWith('image/'));
+  const otherFiles = vscodeFiles.filter((f) => f.source === 'server' || !f.mimeType.startsWith('image/'));
+
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      {images.map((file) => (
+        <ImagePreview key={file.id} file={file} onRemove={() => removeAttachedFile(file.id)} />
+      ))}
+      {otherFiles.map((file) => (
+        <VSCodeFileChip key={file.id} file={file} onRemove={() => removeAttachedFile(file.id)} />
+      ))}
+    </div>
+  );
+});
+
+AttachedVSCodeFileChips.displayName = 'AttachedVSCodeFileChips';
+
 export const AttachedFilesList = memo(() => {
   const attachedFiles = useInputStore((state) => state.attachedFiles);
   const removeAttachedFile = useInputStore((state) => state.removeAttachedFile);
 
-  const localFiles = attachedFiles.filter((file) => file.source !== 'server');
+  const localFiles = attachedFiles.filter((file) => file.source !== 'server' && file.source !== 'vscode');
 
   if (localFiles.length === 0) return null;
 
@@ -302,6 +375,99 @@ export const AttachedFilesList = memo(() => {
 });
 
 AttachedFilesList.displayName = 'AttachedFilesList';
+
+export const ActiveEditorFileSuggestion = memo(() => {
+  const { t } = useI18n();
+  const activeEditorFile = useInputStore((s) => s.activeEditorFile);
+  const attachedFiles = useInputStore((s) => s.attachedFiles)
+  const addVSCodeFileAttachment = useInputStore((s) => s.addVSCodeFileAttachment)
+  const addVSCodeSelectionAttachment = useInputStore((s) => s.addVSCodeSelectionAttachment)
+  const isVSCodeRuntime = useIsVSCodeRuntime();
+
+  if (!isVSCodeRuntime || !activeEditorFile) return null;
+
+  const { filePath, fileName, relativePath, selection, fileSize } = activeEditorFile;
+
+  // Normalize to forward slashes for comparison
+  const isFileAttached = attachedFiles.some(
+    (f) => f.source === 'vscode' && f.vscodeSource === 'file' && (f.vscodePath || '') === filePath
+  )
+
+  // Compute selection label using a compact range (single line shown as "N" not "N-N")
+  let selectionRange = ''
+  if (selection) {
+    selectionRange = selection.startLine === selection.endLine
+      ? `${selection.startLine}`
+      : `${selection.startLine}-${selection.endLine}`
+  }
+  const selectionLabel = selection ? `${fileName}:${selectionRange}` : ''
+  const isSelectionAttached = !!selectionLabel && attachedFiles.some((f) => f.source === 'vscode' && f.vscodeSource === 'selection' && f.filename === selectionLabel)
+
+  // Nothing to show — file is already attached and there's no (or already-attached) selection
+  if (isFileAttached && (!selection || isSelectionAttached)) return null;
+
+  const ext = fileName.split('.').pop() || '';
+  // Always show only the filename in the suggestion UI
+  const displayName = fileName;
+
+  const handleAddFile = () => {
+    addVSCodeFileAttachment(filePath, fileName, fileSize);
+  };
+
+  const handlePinSelection = async () => {
+    if (!selection) return;
+    const blob = new Blob([selection.text], { type: 'text/plain' });
+    const file = new File([blob], selectionLabel, { type: 'text/plain' });
+    await addVSCodeSelectionAttachment(filePath, file);
+  };
+
+  // Render inline inside the input container so it affects layout (pushes textarea down)
+  // and grows if multiple items wrap. Keep component inline so it sits on the same line as other chips.
+  return (
+    <div className="inline-flex items-center">
+      {/* If there is a selection, prefer showing the pin-selection UI only. */}
+      {selection && !isSelectionAttached ? (
+        <div
+          className="inline-flex items-center gap-1 text-xs pr-1 rounded-sm italic text-muted-foreground border border-dashed bg-transparent"
+          style={{ borderColor: 'var(--syntax-punctuation)' }}
+          title={relativePath}
+        >
+          <button
+            type="button"
+            title={t('chat.fileAttachment.activeEditor.pinSelection')}
+            aria-label={t('chat.fileAttachment.activeEditor.pinSelection')}
+            onClick={() => { void handlePinSelection(); }}
+            className="flex items-center justify-center h-5 w-5 flex-shrink-0 hover:bg-[var(--interactive-hover)] rounded-full transition-colors cursor-pointer"
+          >
+            <RiPushpin2Line className="h-4 w-4" />
+          </button>
+          <FileTypeIcon filePath={fileName} extension={ext} className="h-4 w-4 flex-shrink-0" />
+          <span className="text-xs whitespace-nowrap">{`${displayName}:${selectionRange}`}</span>
+        </div>
+      ) : !isFileAttached ? (
+        <div
+          className="inline-flex items-center gap-1 text-xs pr-1 rounded-sm italic text-muted-foreground border border-dashed bg-transparent"
+          style={{ borderColor: 'var(--syntax-punctuation)' }}
+          title={relativePath}
+        >
+          <button
+            type="button"
+            title={t('chat.fileAttachment.activeEditor.addFile', { name: displayName })}
+            aria-label={t('chat.fileAttachment.activeEditor.addFile', { name: displayName })}
+            onClick={handleAddFile}
+            className="flex items-center justify-center h-5 w-5 flex-shrink-0 hover:bg-[var(--interactive-hover)] rounded-full transition-colors cursor-pointer"
+          >
+            <RiAddLine className="h-4 w-4" />
+          </button>
+          <FileTypeIcon filePath={fileName} extension={ext} className="h-4 w-4 flex-shrink-0" />
+          <span className="text-xs truncate max-w-[220px]">{displayName}</span>
+        </div>
+      ) : null}
+    </div>
+  );
+});
+
+ActiveEditorFileSuggestion.displayName = 'ActiveEditorFileSuggestion';
 
 interface FilePart {
   type: string;
@@ -417,6 +583,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
           <div className="flex flex-wrap gap-1.5">
             {otherFiles.map((file, index) => {
               const fileName = resolveDisplayName(file);
+              const ext = fileName.split('.').pop() || '';
               const sizeText = formatFileSize(file.size);
               const githubLinkKind = getGitHubLinkKind(file);
               return (
@@ -444,7 +611,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
                         {file.mime?.includes('pdf') ? (
                           <RiFilePdfLine className="text-muted-foreground h-3.5 w-3.5" />
                         ) : (
-                          <RiFileLine className="text-muted-foreground h-3.5 w-3.5" />
+                          <FileTypeIcon filePath={fileName} extension={ext} className="text-muted-foreground h-3.5 w-3.5" />
                         )}
                         <div className="overflow-hidden max-w-[140px]">
                           <span className="truncate block" title={fileName}>{fileName}</span>

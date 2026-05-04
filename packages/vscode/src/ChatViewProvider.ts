@@ -48,6 +48,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     private readonly _openCodeManager?: OpenCodeManager
   ) {
     this._webviewDevServerUrl = resolveWebviewDevServerUrl(this._context);
+
+    this._context.subscriptions.push(
+      vscode.window.onDidChangeActiveTextEditor(() => this._broadcastActiveEditorFile()),
+      vscode.window.onDidChangeTextEditorSelection(() => this._broadcastActiveEditorFile()),
+    );
   }
 
   public resolveWebviewView(
@@ -69,6 +74,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
     // Send cached connection status and API URL (may have been set before webview was resolved)
     this._sendCachedState();
+
+    // Send current active editor file state to the new webview
+    this._broadcastActiveEditorFile();
 
     webviewView.onDidDispose(() => {
       this._clearPendingMessages();
@@ -301,6 +309,50 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       type: 'connectionStatus',
       status: this._cachedStatus,
       error: this._cachedError,
+    });
+  }
+
+  private async _broadcastActiveEditorFile() {
+    if (!this._view) {
+      return;
+    }
+
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || editor.document.uri.scheme !== 'file') {
+      this._view.webview.postMessage({
+        type: 'command',
+        command: 'activeEditorFile',
+        payload: null,
+      });
+      return;
+    }
+
+    const filePath = normalizeWindowsDriveLetter(editor.document.uri.fsPath);
+    const rawFileName = editor.document.uri.fsPath;
+    const fileName = rawFileName.replace(/\\/g, '/').split('/').pop() || '';
+    const relativePath = vscode.workspace.asRelativePath(editor.document.uri, false);
+
+    let fileSize: number | null = null;
+    try {
+      const stat = await vscode.workspace.fs.stat(editor.document.uri);
+      fileSize = stat.size;
+    } catch {
+      // File may not be saved yet or inaccessible
+    }
+
+    let selection: { startLine: number; endLine: number; text: string } | null = null;
+    if (!editor.selection.isEmpty) {
+      selection = {
+        startLine: editor.selection.start.line + 1,
+        endLine: editor.selection.end.line + 1,
+        text: editor.document.getText(editor.selection),
+      };
+    }
+
+    this._view.webview.postMessage({
+      type: 'command',
+      command: 'activeEditorFile',
+      payload: { filePath, fileName, relativePath, fileSize, selection },
     });
   }
 

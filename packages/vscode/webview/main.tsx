@@ -1219,6 +1219,14 @@ onCommand('settingsSynced', () => {
   });
 });
 
+// Listen for active editor file changes from the extension
+onCommand('activeEditorFile', (payload) => {
+  import('@/sync/input-store').then(({ useInputStore }) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    useInputStore.getState().setActiveEditorFile((payload as any) ?? null);
+  });
+});
+
 import('@/main')
   .then(async () => {
     await waitForUiMount();
