@@ -55,6 +55,7 @@ type Props = {
   lastRepoStatus: boolean;
   toggleGroupSessionLimit: (groupKey: string) => void;
   mobileVariant: boolean;
+  alwaysShowActions: boolean;
   activeProjectId: string | null;
   setActiveProjectIdOnly: (id: string) => void;
   setActiveMainTab: (tab: MainTab) => void;
@@ -120,6 +121,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     lastRepoStatus,
     toggleGroupSessionLimit,
     mobileVariant,
+    alwaysShowActions,
     activeProjectId,
     setActiveProjectIdOnly,
     setActiveMainTab,
@@ -405,6 +407,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
             groupDirectory={group.directory}
             projectId={projectId}
             mobileVariant={mobileVariant}
+            alwaysShowActions={alwaysShowActions}
             isRenaming={renamingFolderId === folder.id}
             renameDraft={renamingFolderId === folder.id ? renameFolderDraft : undefined}
             onRenameDraftChange={(value) => setRenameFolderDraft(value)}
@@ -443,7 +446,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
 
   const renderFolderItems = () => rootFolders.map(({ folder, nodes }) => renderOneFolderItem(folder, nodes, 0));
   const hasWorktreeDeleteAction = Boolean(!group.isMain && group.worktree);
-  const groupHeaderRightPadding = mobileVariant
+  const groupHeaderRightPadding = alwaysShowActions
     ? (hasWorktreeDeleteAction ? 'pr-14' : 'pr-7')
     : isMinimalMode
       ? (hasWorktreeDeleteAction
@@ -534,10 +537,13 @@ export function SessionGroupSection(props: Props): React.ReactNode {
                       <span className="inline-flex shrink-0 items-center gap-1 leading-none align-middle">
                         <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center">
                           <RiGitBranchLine
-                            className="h-3.5 w-3.5 shrink-0 group-hover/gh:hidden"
+                            className={cn('h-3.5 w-3.5 shrink-0', alwaysShowActions ? 'hidden' : 'group-hover/gh:hidden')}
                             style={branchIconColor ? { color: branchIconColor } : undefined}
                           />
-                          <span className="hidden text-muted-foreground group-hover/gh:inline-flex h-3.5 w-3.5 items-center justify-center">
+                          <span className={cn(
+                            'text-muted-foreground h-3.5 w-3.5 items-center justify-center',
+                            alwaysShowActions ? 'inline-flex' : 'hidden group-hover/gh:inline-flex',
+                          )}>
                             {isCollapsed ? <RiArrowRightSLine className="h-3.5 w-3.5" /> : <RiArrowDownSLine className="h-3.5 w-3.5" />}
                           </span>
                         </span>
@@ -587,8 +593,11 @@ export function SessionGroupSection(props: Props): React.ReactNode {
               ) : group.isArchivedBucket ? (
                 <span className="inline-flex min-w-0 max-w-full items-center gap-1">
                   <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center">
-                    <RiArchiveLine className="h-3.5 w-3.5 shrink-0 text-muted-foreground group-hover/gh:hidden" />
-                    <span className="hidden text-muted-foreground group-hover/gh:inline-flex h-3.5 w-3.5 items-center justify-center">
+                    <RiArchiveLine className={cn('h-3.5 w-3.5 shrink-0 text-muted-foreground', alwaysShowActions ? 'hidden' : 'group-hover/gh:hidden')} />
+                    <span className={cn(
+                      'text-muted-foreground h-3.5 w-3.5 items-center justify-center',
+                      alwaysShowActions ? 'inline-flex' : 'hidden group-hover/gh:inline-flex',
+                    )}>
                       {isCollapsed ? <RiArrowRightSLine className="h-3.5 w-3.5" /> : <RiArrowDownSLine className="h-3.5 w-3.5" />}
                     </span>
                   </span>
@@ -598,10 +607,13 @@ export function SessionGroupSection(props: Props): React.ReactNode {
                 <span className="inline-flex min-w-0 max-w-full items-center gap-1">
                   <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center">
                     <RiGitBranchLine
-                      className="h-3.5 w-3.5 shrink-0 text-muted-foreground group-hover/gh:hidden"
+                      className={cn('h-3.5 w-3.5 shrink-0 text-muted-foreground', alwaysShowActions ? 'hidden' : 'group-hover/gh:hidden')}
                       style={branchIconColor ? { color: branchIconColor } : undefined}
                     />
-                    <span className="hidden text-muted-foreground group-hover/gh:inline-flex h-3.5 w-3.5 items-center justify-center">
+                    <span className={cn(
+                      'text-muted-foreground h-3.5 w-3.5 items-center justify-center',
+                      alwaysShowActions ? 'inline-flex' : 'hidden group-hover/gh:inline-flex',
+                    )}>
                       {isCollapsed ? <RiArrowRightSLine className="h-3.5 w-3.5" /> : <RiArrowDownSLine className="h-3.5 w-3.5" />}
                     </span>
                   </span>
@@ -671,7 +683,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
           </div>
         </div>
         {group.isArchivedBucket && allGroupSessions.length > 0 ? (
-          <div className={cn('absolute right-0.5 top-1/2 -translate-y-1/2 z-10 transition-opacity', mobileVariant ? 'opacity-100' : 'opacity-0 group-hover/gh:opacity-100 group-focus-within/gh:opacity-100')}>
+          <div className={cn('absolute right-0.5 top-1/2 -translate-y-1/2 z-10 transition-opacity', alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/gh:opacity-100 group-focus-within/gh:opacity-100')}>
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -694,7 +706,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
           </div>
         ) : null}
         {group.directory && !group.isMain && group.worktree ? (
-          <div className={cn('absolute right-7 top-1/2 -translate-y-1/2 z-10 transition-opacity', mobileVariant ? 'opacity-100' : 'opacity-0 group-hover/gh:opacity-100 group-focus-within/gh:opacity-100')}>
+          <div className={cn('absolute right-7 top-1/2 -translate-y-1/2 z-10 transition-opacity', alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/gh:opacity-100 group-focus-within/gh:opacity-100')}>
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -718,7 +730,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
           </div>
         ) : null}
         {group.directory ? (
-          <div className={cn('absolute right-0.5 top-1/2 -translate-y-1/2 z-10 transition-opacity', mobileVariant ? 'opacity-100' : 'opacity-0 group-hover/gh:opacity-100 group-focus-within/gh:opacity-100')}>
+          <div className={cn('absolute right-0.5 top-1/2 -translate-y-1/2 z-10 transition-opacity', alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/gh:opacity-100 group-focus-within/gh:opacity-100')}>
             <Tooltip>
               <TooltipTrigger asChild>
                 <button

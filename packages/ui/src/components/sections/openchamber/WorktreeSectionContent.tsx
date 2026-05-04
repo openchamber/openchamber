@@ -22,7 +22,8 @@ export interface WorktreeSectionContentProps {
 
 export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ projectRef: projectRefProp = null }) => {
   const { t } = useI18n();
-  const { isMobile } = useDeviceInfo();
+  const { isMobile, isTablet } = useDeviceInfo();
+  const alwaysShowActions = isMobile || isTablet;
   const activeProject = useProjectsStore((state) => state.getActiveProject());
 
   const projectPath = projectRefProp?.path ?? activeProject?.path ?? null;
@@ -273,7 +274,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
         <div className="mb-1 px-1">
           <div className="flex items-center gap-2">
             <h3 className="typography-ui-header font-normal text-foreground">{t('settings.openchamber.worktrees.setup.title')}</h3>
-            <Tooltip delayDuration={1000}>
+            <Tooltip>
               <TooltipTrigger asChild>
                 <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
               </TooltipTrigger>
@@ -332,7 +333,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
         <div className="mb-1 px-1">
           <div className="flex items-center gap-2">
             <h3 className="typography-ui-header font-normal text-foreground">{t('settings.openchamber.worktrees.list.title')}</h3>
-            <Tooltip delayDuration={1000}>
+            <Tooltip>
               <TooltipTrigger asChild>
                 <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
               </TooltipTrigger>
@@ -374,7 +375,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
                     onClick={() => handleDeleteWorktree(worktree)}
                     className={cn(
                       "flex-shrink-0 flex h-7 w-7 items-center justify-center rounded text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-opacity focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
-                      isMobile ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                      alwaysShowActions ? "opacity-100" : "opacity-0 group-hover:opacity-100"
                     )}
                     aria-label={t('settings.openchamber.worktrees.list.deleteWorktreeAria', { name: worktree.branch || worktree.label || worktree.path })}
                 >

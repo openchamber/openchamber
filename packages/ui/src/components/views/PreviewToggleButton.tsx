@@ -27,7 +27,7 @@ export const PreviewToggleButton: React.FC<PreviewToggleButtonProps> = ({
   const tooltipText = isPreview ? 'Edit' : 'Preview';
 
   return (
-    <Tooltip delayDuration={500}>
+    <Tooltip>
       <TooltipTrigger asChild>
         <Button
           variant="ghost"

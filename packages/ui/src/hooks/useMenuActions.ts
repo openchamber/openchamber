@@ -90,7 +90,7 @@ export const useMenuActions = (
 ) => {
   const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
   const toggleCommandPalette = useUIStore((s) => s.toggleCommandPalette);
-  const setQuickOpenOpen = useUIStore((s) => s.setQuickOpenOpen);
+  const setCommandPaletteOpen = useUIStore((s) => s.setCommandPaletteOpen);
   const toggleHelpDialog = useUIStore((s) => s.toggleHelpDialog);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
   const setSessionSwitcherOpen = useUIStore((s) => s.setSessionSwitcherOpen);
@@ -146,7 +146,7 @@ export const useMenuActions = (
           break;
 
         case 'quick-open':
-          setQuickOpenOpen(true);
+          setCommandPaletteOpen(true);
           break;
 
         case 'new-session':
@@ -237,7 +237,7 @@ export const useMenuActions = (
       setAboutDialogOpen,
       setActiveMainTab,
       setSessionSwitcherOpen,
-      setQuickOpenOpen,
+      setCommandPaletteOpen,
       setSettingsDialogOpen,
       setThemeMode,
       toggleCommandPalette,

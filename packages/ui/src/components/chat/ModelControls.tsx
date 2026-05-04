@@ -426,7 +426,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const [isAgentSelectorOpen, setIsAgentSelectorOpen] = React.useState(false);
     const { favoriteModelsList, recentModelsList } = useModelLists();
 
-    const { isMobile } = useDeviceInfo();
+    const { isMobile, isTablet } = useDeviceInfo();
+    const alwaysShowHoverDetails = isMobile || isTablet;
     const isDesktop = React.useMemo(() => isDesktopShell(), []);
     const isVSCodeRuntime = useIsVSCodeRuntime();
     // Only use mobile panels on actual mobile devices, VSCode uses desktop dropdowns
@@ -2378,7 +2379,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     ) : slides.length > 0 ? (
                         <div className={cn(
                             "items-center",
-                            shouldAnimate ? "flex w-[140px] justify-end" : ((isHighlighted || isSelected) ? "flex" : "hidden group-hover:flex")
+                            shouldAnimate ? "flex w-[140px] justify-end" : ((isHighlighted || isSelected || alwaysShowHoverDetails) ? "flex" : "hidden group-hover:flex")
                         )}>
                             {shouldAnimate ? (
                                 <TextLoop interval={2.1} transition={{ duration: 0.25 }} trigger={shouldAnimate}>
@@ -2654,7 +2655,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         let currentFlatIndex = 0;
 
         return (
-            <Tooltip delayDuration={1000}>
+            <Tooltip delayDuration={600}>
                 {!isCompact ? (
                     <DropdownMenu open={isReady && agentMenuOpen} onOpenChange={isReady ? handleModelMenuOpenChange : undefined}>
                         <TooltipTrigger asChild>
@@ -3119,7 +3120,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         }
 
         return (
-            <Tooltip delayDuration={800}>
+            <Tooltip delayDuration={600}>
                 <DropdownMenu>
                     <TooltipTrigger asChild>
                         <DropdownMenuTrigger asChild>
@@ -3182,7 +3183,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         if (!isCompact) {
             return (
                 <div className="flex items-center gap-2 min-w-0">
-                    <Tooltip delayDuration={1000}>
+                    <Tooltip delayDuration={600}>
                         <DropdownMenu open={isReady && isAgentSelectorOpen} onOpenChange={isReady ? setIsAgentSelectorOpen : undefined}>
                             <TooltipTrigger asChild>
                                 <DropdownMenuTrigger asChild>

@@ -13,6 +13,7 @@ import {
 } from '../lib/turns/windowTurns';
 import type { TurnHistorySignals } from '../lib/turns/historySignals';
 import { getMemoryLimits, type SessionHistoryMeta } from '@/stores/types/sessionTypes';
+import { useViewportStore, type SessionMemoryState } from '@/sync/viewport-store';
 
 type ViewportAnchor = { messageId: string; offsetTop: number };
 
@@ -52,6 +53,7 @@ export interface UseChatTimelineControllerResult {
     revealBufferedTurns: () => Promise<boolean>;
     resumeToBottom: () => void;
     resumeToBottomInstant: () => void;
+    restoreSavedScrollPosition: (savedPos: NonNullable<SessionMemoryState['scrollPosition']>) => Promise<void>;
     scrollToTurn: (turnId: string, options?: { behavior?: ScrollBehavior }) => Promise<boolean>;
     scrollToMessage: (messageId: string, options?: { behavior?: ScrollBehavior }) => Promise<boolean>;
     captureViewportAnchor: () => ViewportAnchor | null;
@@ -490,6 +492,45 @@ export const useChatTimelineController = ({
         scrollToBottom({ instant: true, force: true, followBottom: true });
     }, [prepareForBottomResume, scrollToBottom, waitForNextRenderCommit]);
 
+    // Restore scroll position from a saved pixel snapshot using ratio mapping.
+    // Separate from resumeToBottomInstant to preserve "always go to bottom" semantics.
+    const restoreSavedScrollPosition = React.useCallback(async (savedPos: NonNullable<SessionMemoryState['scrollPosition']>) => {
+        const nextStart = getInitialTurnStart(turnModelRef.current.turnCount);
+        setPendingRevealWork(false);
+        setIsLoadingOlder(false);
+
+        const shouldWaitForRender = nextStart !== turnStartRef.current;
+        if (shouldWaitForRender) {
+            setTurnStart(nextStart);
+            await waitForNextRenderCommit();
+        }
+
+        const container = scrollRef.current;
+        if (!container) return;
+
+        const savedMaxScroll = Math.max(0, savedPos.scrollHeight - savedPos.clientHeight);
+        if (savedMaxScroll <= 0) return;
+
+        const ratio = savedPos.scrollTop / savedMaxScroll;
+        const currentMaxScroll = Math.max(0, container.scrollHeight - container.clientHeight);
+        const restoredTop = Math.round(ratio * currentMaxScroll);
+        container.scrollTop = restoredTop;
+
+        // Re-persist the restored position so intermediate scroll events
+        // during the transition don't leave stale data for the next switch.
+        const sid = sessionIdRef.current;
+        if (sid) {
+            const memState = useViewportStore.getState().sessionMemoryState.get(sid);
+            if (memState) {
+                useViewportStore.getState().updateViewportAnchor(sid, memState.viewportAnchor, {
+                    scrollTop: restoredTop,
+                    scrollHeight: container.scrollHeight,
+                    clientHeight: container.clientHeight,
+                });
+            }
+        }
+    }, [scrollRef, waitForNextRenderCommit]);
+
     const handleActiveTurnChange = React.useCallback((turnId: string | null) => {
         setActiveTurnId(turnId);
     }, []);
@@ -508,6 +549,7 @@ export const useChatTimelineController = ({
         revealBufferedTurns,
         resumeToBottom,
         resumeToBottomInstant,
+        restoreSavedScrollPosition,
         scrollToTurn,
         scrollToMessage,
         captureViewportAnchor,

@@ -22,7 +22,7 @@ import MessageBody from './message/MessageBody';
 import type { AgentMentionInfo } from './message/types';
 import type { StreamPhase, ToolPopupContent } from './message/types';
 import { deriveMessageRole } from './message/messageRole';
-import { filterVisibleParts } from './message/partUtils';
+import { filterVisibleParts, normalizeParts } from './message/partUtils';
 import { normalizeUserDisplayParts } from './message/normalizeUserDisplayParts';
 import { flattenAssistantTextParts } from '@/lib/messages/messageText';
 import { isLikelyProviderAuthFailure, PROVIDER_AUTH_FAILURE_MESSAGE } from '@/lib/messages/providerAuthError';
@@ -149,7 +149,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     animateUserOnMount = false,
     onUserAnimationConsumed,
 }) => {
-    const { isMobile, hasTouchInput } = useDeviceInfo();
+    const { isMobile, isTablet, hasTouchInput } = useDeviceInfo();
+    const alwaysShowMessageActions = isMobile || isTablet;
     const { currentTheme } = useThemeSystem();
     const messageContainerRef = React.useRef<HTMLDivElement | null>(null);
 
@@ -216,11 +217,12 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     );
 
     const normalizedParts = React.useMemo(() => {
+        const safeParts = normalizeParts(message.parts);
         if (!isUser) {
-            return message.parts;
+            return safeParts;
         }
 
-        return normalizeUserDisplayParts(message.parts, { planModeEnabled });
+        return normalizeUserDisplayParts(safeParts, { planModeEnabled });
     }, [isUser, message.parts, planModeEnabled]);
 
     const previousUserMetadata = React.useMemo(() => {
@@ -509,7 +511,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         if (!isUser) {
             return undefined;
         }
-        const mentionPart = message.parts.find((part) => part.type === 'agent');
+        const mentionPart = normalizedParts.find((part) => part.type === 'agent');
         if (!mentionPart) {
             return undefined;
         }
@@ -522,7 +524,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             ? partWithName.source.value
             : `@${name}`;
         return { name, token: rawValue } satisfies AgentMentionInfo;
-    }, [isUser, message.parts]);
+    }, [isUser, normalizedParts]);
 
     const shouldHideUserMessage = isUser && displayParts.length === 0;
 
@@ -1029,8 +1031,9 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                                 isMessageCompleted={isMessageCompleted}
                                                 messageFinish={messageFinish}
                                                 syntaxTheme={syntaxTheme}
-                                                isMobile={isMobile}
-                                                hasTouchInput={hasTouchInput}
+                                                 isMobile={isMobile}
+                                                 alwaysShowActions={alwaysShowMessageActions}
+                                                 hasTouchInput={hasTouchInput}
                                                 copiedCode={copiedCode}
                                                 onCopyCode={handleCopyCode}
                                                 expandedTools={expandedTools}
@@ -1062,8 +1065,9 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                                 isMessageCompleted={isMessageCompleted}
                                                 messageFinish={messageFinish}
                                                 syntaxTheme={syntaxTheme}
-                                                isMobile={isMobile}
-                                                hasTouchInput={hasTouchInput}
+                                                 isMobile={isMobile}
+                                                 alwaysShowActions={alwaysShowMessageActions}
+                                                 hasTouchInput={hasTouchInput}
                                                 copiedCode={copiedCode}
                                                 onCopyCode={handleCopyCode}
                                                 expandedTools={expandedTools}
@@ -1114,8 +1118,9 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                 messageCompletedAt={messageCompletedAt ?? undefined}
                                 messageCreatedAt={messageCreatedAt ?? undefined}
                                 syntaxTheme={syntaxTheme}
-                                isMobile={isMobile}
-                                hasTouchInput={hasTouchInput}
+                                 isMobile={isMobile}
+                                 alwaysShowActions={alwaysShowMessageActions}
+                                 hasTouchInput={hasTouchInput}
                                 copiedCode={copiedCode}
                                 onCopyCode={handleCopyCode}
                                 expandedTools={effectiveExpandedTools}

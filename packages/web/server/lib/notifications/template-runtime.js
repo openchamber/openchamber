@@ -71,18 +71,36 @@ export const createNotificationTemplateRuntime = (deps) => {
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
     const timeout = controller ? setTimeout(() => controller.abort(), 8000) : null;
     try {
-      const response = await fetch('https://opencode.ai/zen/v1/models', {
-        signal: controller?.signal,
-        headers: { Accept: 'application/json' },
-      });
-      if (!response.ok) {
-        throw new Error(`zen/v1/models responded with status ${response.status}`);
+      const [zenResponse, metadataResponse] = await Promise.all([
+        fetch('https://opencode.ai/zen/v1/models', {
+          signal: controller?.signal,
+          headers: { Accept: 'application/json' },
+        }),
+        fetch('https://models.dev/api.json', {
+          signal: controller?.signal,
+          headers: { Accept: 'application/json' },
+        }),
+      ]);
+      if (!zenResponse.ok) {
+        throw new Error(`zen/v1/models responded with status ${zenResponse.status}`);
       }
-      const data = await response.json();
+      if (!metadataResponse.ok) {
+        throw new Error(`models.dev responded with status ${metadataResponse.status}`);
+      }
+
+      const data = await zenResponse.json();
+      const metadata = await metadataResponse.json();
+      const metadataModels = metadata?.opencode?.models && typeof metadata.opencode.models === 'object'
+        ? metadata.opencode.models
+        : {};
       const allModels = Array.isArray(data?.data) ? data.data : [];
       const freeModels = allModels
-        .filter((model) => typeof model?.id === 'string' && model.id.endsWith('-free'))
-        .map((model) => ({ id: model.id, owned_by: model.owned_by }));
+        .filter((model) => {
+          const id = typeof model?.id === 'string' ? model.id.trim() : '';
+          const cost = id ? metadataModels[id]?.cost : null;
+          return id && cost?.input === 0 && cost?.output === 0;
+        })
+        .map((model) => ({ id: model.id.trim(), owned_by: model.owned_by }));
 
       cachedZenModels = { models: freeModels };
       cachedZenModelsTimestamp = Date.now();
@@ -93,16 +111,35 @@ export const createNotificationTemplateRuntime = (deps) => {
   };
 
   const resolveZenModel = async (override) => {
-    if (typeof override === 'string' && override.trim().length > 0) {
-      return override.trim();
-    }
+    const overrideModel = typeof override === 'string' ? override.trim() : '';
+    let settingsModel = '';
     try {
       const settings = await readSettingsFromDisk();
       if (typeof settings?.zenModel === 'string' && settings.zenModel.trim().length > 0) {
-        return settings.zenModel.trim();
+        settingsModel = settings.zenModel.trim();
       }
     } catch {
     }
+
+    const candidate = overrideModel || settingsModel;
+    try {
+      const models = await fetchFreeZenModels();
+      const modelIds = models.map((model) => model.id);
+      if (candidate && modelIds.includes(candidate)) {
+        return candidate;
+      }
+      if (modelIds.includes(ZEN_DEFAULT_MODEL)) {
+        return ZEN_DEFAULT_MODEL;
+      }
+      if (modelIds.length > 0) {
+        return modelIds[0];
+      }
+    } catch {
+      if (candidate) {
+        return candidate;
+      }
+    }
+
     return validatedZenFallback || ZEN_DEFAULT_MODEL;
   };
 

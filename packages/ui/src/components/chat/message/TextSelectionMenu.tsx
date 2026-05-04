@@ -507,13 +507,20 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
 
     try {
       setIsAddingToNotes(true);
-      const distilledInsight = await summarizeText(selectedText, {
-        threshold: 0,
-        maxLength: 100,
-        mode: 'note',
-      });
+      let noteText = selectedText;
+      let usedSummaryFallback = false;
+      try {
+        noteText = await summarizeText(selectedText, {
+          threshold: 0,
+          maxLength: 100,
+          mode: 'note',
+        });
+      } catch (summaryError) {
+        usedSummaryFallback = true;
+        console.warn('[AddToNotes] Summary failed, saving selected text:', summaryError);
+      }
       const projectData = await getProjectNotesAndTodos(currentProjectRef);
-      const nextNotes = appendDistilledInsightToNotes(projectData.notes, distilledInsight);
+      const nextNotes = appendDistilledInsightToNotes(projectData.notes, noteText);
       const saved = await saveProjectNotesAndTodos(currentProjectRef, {
         notes: nextNotes,
         todos: projectData.todos,
@@ -525,7 +532,11 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
       window.dispatchEvent(new CustomEvent('openchamber:project-notes-updated', {
         detail: { projectId: currentProjectRef.id },
       }));
-      toast.success(t('chat.textSelection.toast.addToNotesSuccess'));
+      if (usedSummaryFallback) {
+        toast.warning(t('chat.textSelection.toast.addToNotesSummaryFailed'));
+      } else {
+        toast.success(t('chat.textSelection.toast.addToNotesSuccess'));
+      }
       hideMenu();
       window.getSelection()?.removeAllRanges();
     } catch (error) {

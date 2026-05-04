@@ -362,7 +362,7 @@ export const ProjectActionsSection: React.FC<ProjectActionsSectionProps> = ({ pr
                                 placeholder={t('settings.projects.actions.field.overrideUrlPlaceholder')}
                                 className="h-7 w-full max-w-[24rem]"
                               />
-                              <Tooltip delayDuration={1000}>
+                              <Tooltip>
                                 <TooltipTrigger asChild>
                                   <RiInformationLine className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60 cursor-help" />
                                 </TooltipTrigger>

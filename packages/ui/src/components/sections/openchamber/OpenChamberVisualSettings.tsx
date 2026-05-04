@@ -689,7 +689,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     >
                                         {themesReloading ? t('settings.openchamber.visual.actions.reloadingThemes') : t('settings.openchamber.visual.actions.reloadThemes')}
                                     </button>
-                                    <Tooltip delayDuration={700}>
+                                    <Tooltip>
                                         <TooltipTrigger asChild>
                                             <button
                                                 type="button"
@@ -1029,7 +1029,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "w-56 shrink-0")}>
                                         <div className="flex items-center gap-1.5">
                                             <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.inputBarOffset')}</span>
-                                            <Tooltip delayDuration={1000}>
+                                            <Tooltip>
                                                 <TooltipTrigger asChild>
                                                     <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                                                 </TooltipTrigger>
@@ -1095,7 +1095,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     />
                                     <div className="flex min-w-0 items-center gap-1.5">
                                         <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.terminalQuickKeys')}</span>
-                                        <Tooltip delayDuration={1000}>
+                                        <Tooltip>
                                             <TooltipTrigger asChild>
                                                 <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                                             </TooltipTrigger>
@@ -1551,7 +1551,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             />
                                             <div className="flex min-w-0 items-center gap-1.5">
                                                 <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.showSplitAssistantMessageActions')}</span>
-                                                <Tooltip delayDuration={1000}>
+                                                <Tooltip>
                                                     <TooltipTrigger asChild>
                                                         <RiInformationLine className="h-3.5 w-3.5 cursor-help text-muted-foreground/60" />
                                                     </TooltipTrigger>
@@ -1653,7 +1653,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             />
                                             <div className="flex min-w-0 items-center gap-1.5">
                                                 <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.queueMessagesByDefault')}</span>
-                                                <Tooltip delayDuration={1000}>
+                                                <Tooltip>
                                                     <TooltipTrigger asChild>
                                                         <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                                                     </TooltipTrigger>

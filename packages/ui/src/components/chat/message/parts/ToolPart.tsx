@@ -51,6 +51,7 @@ interface ToolPartProps {
     onToggle: (toolId: string) => void;
     syntaxTheme: { [key: string]: React.CSSProperties };
     isMobile: boolean;
+    alwaysShowActions?: boolean;
     onContentChange?: (reason?: ContentChangeReason) => void;
     onShowPopup?: (content: ToolPopupContent) => void;
     animateTailText?: boolean;
@@ -1714,7 +1715,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                     syntaxTheme={syntaxTheme}
                 />,
                 {
-                    className: 'p-1',
+                    className: part.tool === 'bash' ? 'p-1 rounded-none' : 'p-1',
                     maxHeightClass: part.tool === 'bash' ? 'max-h-[46vh]' : undefined,
                 }
             );
@@ -1757,7 +1758,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                                 ),
                                 {
                                     maxHeightClass: 'max-h-60',
-                                    className: part.tool === 'bash' ? 'tool-input-surface p-0' : 'tool-input-surface',
+                                    className: part.tool === 'bash' ? 'tool-input-surface p-0 rounded-none' : 'tool-input-surface',
                                 }
                             )}
                         </div>
@@ -1804,6 +1805,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
     onToggle,
     syntaxTheme,
     isMobile,
+    alwaysShowActions = isMobile,
     onContentChange,
     onShowPopup,
     animateTailText = true,
@@ -2522,7 +2524,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
                             className={cn(
                                 'absolute inset-0 transition-opacity',
                                 isExpanded && 'opacity-0',
-                                !isExpanded && 'group-hover/tool:opacity-0'
+                                !isExpanded && (alwaysShowActions ? 'opacity-0' : 'group-hover/tool:opacity-0')
                             )}
                             style={iconStyle}
                         >
@@ -2533,7 +2535,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
                             className={cn(
                                 'absolute inset-0 transition-opacity flex items-center justify-center',
                                 isExpanded && 'opacity-100',
-                                !isExpanded && 'opacity-0 group-hover/tool:opacity-100'
+                                !isExpanded && (alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/tool:opacity-100')
                             )}
                         >
                             {isExpanded ? <RiArrowDownSLine className="h-3.5 w-3.5" /> : <RiArrowRightSLine className="h-3.5 w-3.5" />}
@@ -2661,6 +2663,7 @@ export default React.memo(ToolPart, (prev, next) => {
         && prev.isExpanded === next.isExpanded
         && prev.syntaxTheme === next.syntaxTheme
         && prev.isMobile === next.isMobile
+        && prev.alwaysShowActions === next.alwaysShowActions
         && prev.onContentChange === next.onContentChange
         && prev.onShowPopup === next.onShowPopup
         && prev.animateTailText === next.animateTailText;

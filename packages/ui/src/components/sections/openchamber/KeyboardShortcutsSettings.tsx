@@ -153,7 +153,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
           >
             {t('settings.openchamber.keyboardShortcuts.actions.resetAll')}
           </Button>
-          <Tooltip delayDuration={1000}>
+          <Tooltip>
             <TooltipTrigger asChild>
               <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
             </TooltipTrigger>

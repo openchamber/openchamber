@@ -273,6 +273,7 @@ export class SessionEditorPanelProvider {
       panelType: 'chat',
       initialSessionId: sessionId ?? undefined,
       viewMode: 'editor',
+      extensionVersion: String(this._context.extension?.packageJSON?.version || ''),
       devServerUrl: this._webviewDevServerUrl,
     });
   }

@@ -10,6 +10,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip
 import { useIsVSCodeRuntime } from '@/hooks/useRuntimeAPIs';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { useI18n } from '@/lib/i18n';
+import { useDeviceInfo } from '@/lib/device';
 
 import type { ToolPopupContent } from './message/types';
 
@@ -127,6 +128,8 @@ interface ImagePreviewProps {
 
 const ImagePreview = memo(({ file, onRemove }: ImagePreviewProps) => {
   const { t } = useI18n();
+  const { isMobile, isTablet } = useDeviceInfo();
+  const alwaysShowActions = isMobile || isTablet;
   const isLocalImagePreview =
     file.source !== 'server' &&
     file.mimeType.startsWith('image/') &&
@@ -184,7 +187,10 @@ const ImagePreview = memo(({ file, onRemove }: ImagePreviewProps) => {
       />
       <button
         onClick={onRemove}
-        className="absolute top-0.5 right-0.5 h-4 w-4 rounded-full bg-background/80 text-foreground hover:text-destructive flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        className={cn(
+          "absolute top-0.5 right-0.5 h-4 w-4 rounded-full bg-background/80 text-foreground hover:text-destructive flex items-center justify-center transition-opacity focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+          alwaysShowActions ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+        )}
         title={t('chat.fileAttachment.actions.removeImage')}
         aria-label={t('chat.fileAttachment.actions.removeNamed', { name: displayName })}
       >
@@ -639,7 +645,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
                 const filename = resolveDisplayName(file) || 'Image';
 
                 return (
-                  <Tooltip key={`img-${file.url || file.filename || index}`} delayDuration={1000}>
+                  <Tooltip key={`img-${file.url || file.filename || index}`}>
                     <TooltipTrigger asChild>
                       <button
                         type="button"

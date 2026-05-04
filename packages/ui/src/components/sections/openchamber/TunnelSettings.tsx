@@ -1210,7 +1210,7 @@ export const TunnelSettings: React.FC = () => {
               <p className="typography-ui-label text-foreground">{t('settings.openchamber.tunnel.field.tunnelType')}</p>
               <div className="flex flex-wrap items-center gap-1">
                 {TUNNEL_MODE_OPTIONS.map((option) => (
-                  <Tooltip key={option.value} delayDuration={700}>
+                  <Tooltip key={option.value}>
                     <TooltipTrigger asChild>
                       <Button
                         variant="chip"
@@ -1481,7 +1481,7 @@ export const TunnelSettings: React.FC = () => {
 
               <div className="flex items-center gap-1.5">
                 <p className="typography-meta text-muted-foreground/80">{t('settings.openchamber.tunnel.note.tokensSavedPerTunnel')}</p>
-                <Tooltip delayDuration={700}>
+                <Tooltip>
                   <TooltipTrigger asChild>
                     <button
                       type="button"

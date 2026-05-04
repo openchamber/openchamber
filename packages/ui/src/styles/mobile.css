@@ -223,7 +223,9 @@
 
 /* iOS safe area defaults (applies to PWA + Safari) */
 @supports (-webkit-touch-callout: none) {
-  :root.device-mobile:not(.desktop-runtime) {
+  :root.device-mobile:not(.desktop-runtime),
+  :root.device-tablet:not(.desktop-runtime),
+  :root.mobile-pointer:not(.desktop-runtime) {
     --oc-safe-area-top: env(safe-area-inset-top, 0);
     --oc-safe-area-right: env(safe-area-inset-right, 0);
     --oc-safe-area-bottom: env(safe-area-inset-bottom, 0);
@@ -231,7 +233,9 @@
     --oc-safe-area-left: env(safe-area-inset-left, 0);
   }
 
-  :root.device-mobile:not(.desktop-runtime) .header-safe-area {
+  :root.device-mobile:not(.desktop-runtime) .header-safe-area,
+  :root.device-tablet:not(.desktop-runtime) .header-safe-area,
+  :root.mobile-pointer:not(.desktop-runtime) .header-safe-area {
     padding-top: var(--oc-safe-area-top);
   }
 }
@@ -241,7 +245,9 @@
   /* iOS-specific safe area handling with CSS variable support */
   @supports (-webkit-touch-callout: none) {
     /* Safe area handling for fixed positioned elements */
-    :root.device-mobile:not(.desktop-runtime) {
+    :root.device-mobile:not(.desktop-runtime),
+    :root.device-tablet:not(.desktop-runtime),
+    :root.mobile-pointer:not(.desktop-runtime) {
       --oc-safe-area-top: env(safe-area-inset-top, 0);
       --oc-safe-area-right: env(safe-area-inset-right, 0);
       --oc-safe-area-bottom: env(safe-area-inset-bottom, 0);
@@ -249,11 +255,15 @@
       --oc-safe-area-left: env(safe-area-inset-left, 0);
     }
 
-    :root.device-mobile:not(.desktop-runtime) .header-safe-area {
+    :root.device-mobile:not(.desktop-runtime) .header-safe-area,
+    :root.device-tablet:not(.desktop-runtime) .header-safe-area,
+    :root.mobile-pointer:not(.desktop-runtime) .header-safe-area {
       padding-top: var(--oc-safe-area-top);
     }
 
-    :root.device-mobile:not(.desktop-runtime) .main-content-safe-area {
+    :root.device-mobile:not(.desktop-runtime) .main-content-safe-area,
+    :root.device-tablet:not(.desktop-runtime) .main-content-safe-area,
+    :root.mobile-pointer:not(.desktop-runtime) .main-content-safe-area {
       padding-top: 0;
       padding-bottom: 0;
       padding-left: var(--oc-safe-area-left);
@@ -261,35 +271,47 @@
     }
 
     /* Safe area for bottom fixed/bottom-0 elements */
-    :root.device-mobile:not(.desktop-runtime) .bottom-safe-area {
+    :root.device-mobile:not(.desktop-runtime) .bottom-safe-area,
+    :root.device-tablet:not(.desktop-runtime) .bottom-safe-area,
+    :root.mobile-pointer:not(.desktop-runtime) .bottom-safe-area {
       padding-bottom: var(--oc-safe-area-bottom-visual) !important;
     }
 
     /* Drawer safe area - top already offset by header height */
-    :root.device-mobile:not(.desktop-runtime) .drawer-safe-area {
+    :root.device-mobile:not(.desktop-runtime) .drawer-safe-area,
+    :root.device-tablet:not(.desktop-runtime) .drawer-safe-area,
+    :root.mobile-pointer:not(.desktop-runtime) .drawer-safe-area {
       padding-top: 0;
       padding-bottom: var(--oc-safe-area-bottom-visual);
     }
 
     /* Fix iOS viewport issues */
-    :root.device-mobile:not(.desktop-runtime) .flex.flex-col.h-screen {
+    :root.device-mobile:not(.desktop-runtime) .flex.flex-col.h-screen,
+    :root.device-tablet:not(.desktop-runtime) .flex.flex-col.h-screen,
+    :root.mobile-pointer:not(.desktop-runtime) .flex.flex-col.h-screen {
       min-height: 100vh;
       min-height: -webkit-fill-available;
     }
 
     /* Prevent content overlap in iOS */
-    :root.device-mobile:not(.desktop-runtime) .flex-1.overflow-hidden {
+    :root.device-mobile:not(.desktop-runtime) .flex-1.overflow-hidden,
+    :root.device-tablet:not(.desktop-runtime) .flex-1.overflow-hidden,
+    :root.mobile-pointer:not(.desktop-runtime) .flex-1.overflow-hidden {
       position: relative;
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
     }
 
     /* Update header height for iOS */
-    :root.device-mobile:not(.desktop-runtime) .header-safe-area {
+    :root.device-mobile:not(.desktop-runtime) .header-safe-area,
+    :root.device-tablet:not(.desktop-runtime) .header-safe-area,
+    :root.mobile-pointer:not(.desktop-runtime) .header-safe-area {
       --header-height: 4.5rem;
     }
 
-    :root.device-mobile:not(.desktop-runtime) .mobile-sidebar-top {
+    :root.device-mobile:not(.desktop-runtime) .mobile-sidebar-top,
+    :root.device-tablet:not(.desktop-runtime) .mobile-sidebar-top,
+    :root.mobile-pointer:not(.desktop-runtime) .mobile-sidebar-top {
       --header-height: 4.5rem;
     }
 
@@ -326,7 +348,9 @@
 
   /* Fallback for non-iOS standalone mode */
   @supports not (-webkit-touch-callout: none) {
-    :root.device-mobile:not(.desktop-runtime) {
+    :root.device-mobile:not(.desktop-runtime),
+    :root.device-tablet:not(.desktop-runtime),
+    :root.mobile-pointer:not(.desktop-runtime) {
       --oc-safe-area-top: env(safe-area-inset-top, 0);
       --oc-safe-area-right: env(safe-area-inset-right, 0);
       --oc-safe-area-bottom: env(safe-area-inset-bottom, 0);
@@ -334,18 +358,24 @@
       --oc-safe-area-left: env(safe-area-inset-left, 0);
     }
 
-    :root.device-mobile:not(.desktop-runtime) .header-safe-area {
+    :root.device-mobile:not(.desktop-runtime) .header-safe-area,
+    :root.device-tablet:not(.desktop-runtime) .header-safe-area,
+    :root.mobile-pointer:not(.desktop-runtime) .header-safe-area {
       padding-top: var(--oc-safe-area-top);
     }
 
-    :root.device-mobile:not(.desktop-runtime) .main-content-safe-area {
+    :root.device-mobile:not(.desktop-runtime) .main-content-safe-area,
+    :root.device-tablet:not(.desktop-runtime) .main-content-safe-area,
+    :root.mobile-pointer:not(.desktop-runtime) .main-content-safe-area {
       padding-top: 0;
       padding-bottom: 0;
       padding-left: var(--oc-safe-area-left);
       padding-right: var(--oc-safe-area-right);
     }
 
-    :root.device-mobile:not(.desktop-runtime) .bottom-safe-area {
+    :root.device-mobile:not(.desktop-runtime) .bottom-safe-area,
+    :root.device-tablet:not(.desktop-runtime) .bottom-safe-area,
+    :root.mobile-pointer:not(.desktop-runtime) .bottom-safe-area {
       padding-bottom: var(--oc-safe-area-bottom-visual) !important;
     }
   }
@@ -407,7 +437,9 @@
 
 @media (display-mode: standalone) {
   /* Home indicator overlay */
-  :root.device-mobile:not(.desktop-runtime) body::after {
+  :root.device-mobile:not(.desktop-runtime) body::after,
+  :root.device-tablet:not(.desktop-runtime) body::after,
+  :root.mobile-pointer:not(.desktop-runtime) body::after {
     content: '';
     position: fixed;
     bottom: 0;
@@ -428,7 +460,9 @@
 
   /* Fallback for browsers without rgba(from ...) support */
   @supports not (color: rgba(from white r g b / 0.5)) {
-    :root.device-mobile:not(.desktop-runtime) body::after {
+    :root.device-mobile:not(.desktop-runtime) body::after,
+    :root.device-tablet:not(.desktop-runtime) body::after,
+    :root.mobile-pointer:not(.desktop-runtime) body::after {
       background: linear-gradient(
         to top,
         var(--background) 0%,

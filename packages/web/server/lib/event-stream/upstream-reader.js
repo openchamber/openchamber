@@ -1,7 +1,13 @@
 import { parseSseEventEnvelope } from './protocol.js';
 
 export const DEFAULT_UPSTREAM_STALL_TIMEOUT_MS = 20_000;
+export const UPSTREAM_STALL_TIMEOUT_CONCURRENT_MS = DEFAULT_UPSTREAM_STALL_TIMEOUT_MS * 3;
 export const DEFAULT_UPSTREAM_RECONNECT_DELAY_MS = 250;
+
+function resolveTimeoutMs(value, fallback) {
+  const resolved = typeof value === 'function' ? value() : value;
+  return Number.isFinite(resolved) ? resolved : fallback;
+}
 
 function waitForReconnectDelay(ms, signal) {
   if (signal?.aborted) {
@@ -76,14 +82,15 @@ export function createUpstreamSseReader({
         };
         const resetStallTimer = () => {
           clearStallTimer();
-          if (stallTimeoutMs <= 0) {
+          const currentStallTimeoutMs = resolveTimeoutMs(stallTimeoutMs, DEFAULT_UPSTREAM_STALL_TIMEOUT_MS);
+          if (currentStallTimeoutMs <= 0) {
             return;
           }
 
           stallTimer = setTimeout(() => {
             abortReason = 'upstream_stalled';
             controller.abort();
-          }, stallTimeoutMs);
+          }, currentStallTimeoutMs);
         };
 
         try {

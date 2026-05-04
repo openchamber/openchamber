@@ -555,6 +555,32 @@ export const createSettingsHelpers = (dependencies) => {
       result.reportUsage = candidate.reportUsage;
     }
 
+    // Global behavior prompt — synced to ~/.config/opencode/AGENTS.md
+    if (typeof candidate.globalBehaviorPrompt === 'string') {
+      const value = candidate.globalBehaviorPrompt;
+      if (value.length <= 1024 * 1024) {
+        result.globalBehaviorPrompt = value;
+      }
+    }
+
+    if (typeof candidate.responseStyleEnabled === 'boolean') {
+      result.responseStyleEnabled = candidate.responseStyleEnabled;
+    }
+
+    if (
+      typeof candidate.responseStylePreset === 'string' &&
+      ['concise', 'detailed', 'mentor', 'pushback', 'noFiller', 'matchEnergy', 'warmPeer', 'custom'].includes(candidate.responseStylePreset)
+    ) {
+      result.responseStylePreset = candidate.responseStylePreset;
+    }
+
+    if (typeof candidate.responseStyleCustomInstructions === 'string') {
+      const value = candidate.responseStyleCustomInstructions;
+      if (value.length <= 50_000) {
+        result.responseStyleCustomInstructions = value;
+      }
+    }
+
     return result;
   };
 

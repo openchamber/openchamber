@@ -25,6 +25,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     buildAugmentedPath,
     buildManagedOpenCodePath,
     getManagedOpenCodeShellEnvSnapshot,
+    getActiveSessionCount = () => 0,
   } = deps;
 
   const killProcessOnPort = (port) => {
@@ -796,15 +797,51 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
    * Perform an immediate (one-shot) health check and restart OpenCode if it's
    * not healthy.  Callers on the SSE / WS proxy path use this to trigger
    * recovery without waiting for the next periodic interval (up to 15 s).
+   *
+   * Skips restart when sessions are actively busy — a busy server under
+   * concurrent load can fail the health check timeout without actually
+   * being dead (the health endpoint competes with LLM work).
+   * Forces restart if sessions stay "busy" and the server stays unhealthy
+   * for over 2 minutes (staleness guard against stuck session state).
    */
+  const STALE_BUSY_GRACE_MS = 2 * 60 * 1000;
+  let lastUnhealthyWithBusySessionsAt = 0;
+
+  const shouldSkipRestartForBusySessions = () => {
+    const activeCount = getActiveSessionCount();
+    if (activeCount === 0) {
+      lastUnhealthyWithBusySessionsAt = 0;
+      return false;
+    }
+
+    const now = Date.now();
+    if (!lastUnhealthyWithBusySessionsAt) {
+      lastUnhealthyWithBusySessionsAt = now;
+      return true;
+    }
+
+    if (now - lastUnhealthyWithBusySessionsAt >= STALE_BUSY_GRACE_MS) {
+      console.warn(
+        `[lifecycle] OpenCode unhealthy with ${activeCount} busy session(s) for > 2 min — forcing restart`
+      );
+      lastUnhealthyWithBusySessionsAt = 0;
+      return false;
+    }
+
+    return true;
+  };
+
   const triggerHealthCheck = async () => {
     if (!state.openCodeProcess || state.isShuttingDown || state.isRestartingOpenCode) return;
 
     try {
       const healthy = await isOpenCodeProcessHealthy();
       if (!healthy) {
+        if (shouldSkipRestartForBusySessions()) return;
         console.log('[lifecycle] immediate health check: OpenCode not healthy, restarting...');
         await restartOpenCode();
+      } else {
+        lastUnhealthyWithBusySessionsAt = 0;
       }
     } catch (error) {
       console.error(`[lifecycle] immediate health check error: ${error.message}`);
@@ -822,8 +859,11 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       try {
         const healthy = await isOpenCodeProcessHealthy();
         if (!healthy) {
+          if (shouldSkipRestartForBusySessions()) return;
           console.log('OpenCode process not running, restarting...');
           await restartOpenCode();
+        } else {
+          lastUnhealthyWithBusySessionsAt = 0;
         }
       } catch (error) {
         console.error(`Health check error: ${error.message}`);

@@ -414,7 +414,7 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
 
   return (
     <>
-      <Tooltip delayDuration={1000}>
+      <Tooltip>
         <TooltipTrigger asChild>
           <Button
             variant="outline"

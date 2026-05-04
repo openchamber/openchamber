@@ -48,6 +48,7 @@ type Props = {
   onToggleSelectionMode: () => void;
   showSidebarToggle?: boolean;
   onToggleSidebar?: () => void;
+  avoidWindowControlsOverlay?: boolean;
 };
 
 export function SidebarHeader(props: Props): React.ReactNode {
@@ -75,10 +76,13 @@ export function SidebarHeader(props: Props): React.ReactNode {
     onToggleSelectionMode,
     showSidebarToggle = false,
     onToggleSidebar,
+    avoidWindowControlsOverlay = false,
   } = props;
 
   const displayMode = useSessionDisplayStore((state) => state.displayMode);
+  const showRecentSection = useSessionDisplayStore((state) => state.showRecentSection);
   const setDisplayMode = useSessionDisplayStore((state) => state.setDisplayMode);
+  const toggleRecentSection = useSessionDisplayStore((state) => state.toggleRecentSection);
 
   if (hideDirectoryControls) {
     return null;
@@ -88,14 +92,19 @@ export function SidebarHeader(props: Props): React.ReactNode {
     <div
       className={cn(
         'select-none flex-shrink-0',
-        showSidebarToggle ? 'pl-3 pr-3' : 'px-2.5 py-1',
+        showSidebarToggle ? (avoidWindowControlsOverlay ? 'pl-[5.5rem] pr-3' : 'pl-3 pr-3') : 'px-2.5 py-1',
       )}
+      style={showSidebarToggle && avoidWindowControlsOverlay ? { paddingTop: 'var(--oc-safe-area-top, 0px)' } : undefined}
     >
       {reserveHeaderActionsSpace ? (
         <div
           className={cn(
             'flex h-auto flex-col gap-1',
-            showSidebarToggle ? 'min-h-[var(--oc-header-height,56px)] justify-center' : 'min-h-8',
+            showSidebarToggle
+              ? avoidWindowControlsOverlay
+                ? 'min-h-[calc(var(--oc-header-height,56px)-var(--oc-safe-area-top,0px))] justify-center'
+                : 'min-h-[var(--oc-header-height,56px)] justify-center'
+              : 'min-h-8',
           )}
         >
           <div className="flex h-8 items-center justify-between gap-2">
@@ -238,6 +247,14 @@ export function SidebarHeader(props: Props): React.ReactNode {
                   >
                     <span>{t('sessions.sidebar.header.displayMode.minimal')}</span>
                     {displayMode === 'minimal' ? <RiCheckLine className="h-4 w-4 text-primary" /> : null}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={toggleRecentSection}
+                    className="flex items-center justify-between"
+                  >
+                    <span>{t('sessions.sidebar.header.displayMode.showRecent')}</span>
+                    {showRecentSection ? <RiCheckLine className="h-4 w-4 text-primary" /> : null}
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={collapseAllProjects} className="flex items-center gap-2">

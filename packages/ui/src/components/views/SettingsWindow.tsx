@@ -36,21 +36,32 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = ({ open, onOpenChan
       }}
     >
       <Dialog.Portal>
-        <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/50 dark:bg-black/75" />
-        <Dialog.Popup
-          aria-describedby={descriptionId}
+        <Dialog.Backdrop
           className={cn(
-            'fixed z-50 top-[50%] left-[50%] translate-x-[-50%] translate-y-[-50%]',
-            'w-[90vw] max-w-[1200px] h-[85vh] max-h-[900px]',
-            'rounded-xl border shadow-none overflow-hidden',
-            'bg-background'
+            'fixed inset-0 z-50 bg-black/50 dark:bg-black/75',
+            'transition-opacity duration-150 ease-out',
+            'data-[starting-style]:opacity-0 data-[ending-style]:opacity-0',
           )}
-        >
-          <Dialog.Description id={descriptionId} className="sr-only">
-            {t('settings.window.description')}
-          </Dialog.Description>
-          <SettingsView onClose={() => onOpenChange(false)} isWindowed />
-        </Dialog.Popup>
+        />
+        <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+          <Dialog.Popup
+            aria-describedby={descriptionId}
+            className={cn(
+              'relative pointer-events-auto',
+              'w-[90vw] max-w-[1200px] h-[85vh] max-h-[900px]',
+              'rounded-xl border shadow-none overflow-hidden origin-center',
+              'bg-background',
+              'transition-all duration-150 ease-out',
+              'data-[starting-style]:opacity-0 data-[starting-style]:scale-[0.98]',
+              'data-[ending-style]:opacity-0 data-[ending-style]:scale-[0.98]',
+            )}
+          >
+            <Dialog.Description id={descriptionId} className="sr-only">
+              {t('settings.window.description')}
+            </Dialog.Description>
+            <SettingsView onClose={() => onOpenChange(false)} isWindowed />
+          </Dialog.Popup>
+        </div>
       </Dialog.Portal>
     </Dialog.Root>
   );

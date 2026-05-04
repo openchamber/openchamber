@@ -88,7 +88,7 @@ export const HistoryCommitRow = React.memo(({
             <code className="shrink-0 font-mono">
               {entry.hash.slice(0, 8)}
             </code>
-            <Tooltip delayDuration={500}>
+            <Tooltip>
               <TooltipTrigger asChild>
                 <Button
                   variant="ghost"

@@ -1227,12 +1227,12 @@ function handleEvent(
     const messageID = getMessageIdFromPayload(payload) ?? undefined
     syncDebug.dispatch.eventNoChange(payload.type, sessionID, messageID)
 
-    // Parts-gap recovery: if a part event was dropped because the parts array
-    // was missing (message not yet inserted or parts lost), trigger a repair
-    // fetch for the session.
-    if (sessionID && messageID && (
-      payload.type === "message.part.delta" || payload.type === "message.part.updated"
-    )) {
+    // Parts-gap recovery: if a delta event was dropped because the parts array
+    // was missing or the partID was not found, trigger a repair fetch for the
+    // session. message.part.updated never needs repair — it only returns false
+    // for intentionally skipped types (step-start, step-finish, patch) or when
+    // preserving an existing finished tool part, neither of which indicates missing data.
+    if (sessionID && messageID && payload.type === "message.part.delta") {
       enqueuePartsRepair(resolvedDirectory, sessionID, childStores)
     }
   }
