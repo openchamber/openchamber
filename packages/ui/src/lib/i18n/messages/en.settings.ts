@@ -761,6 +761,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.cycle_favorite_model_forward.label': 'Cycle favorite model forward',
   'settings.openchamber.keyboardShortcuts.action.cycle_favorite_model_backward.label': 'Cycle favorite model backward',
   'settings.openchamber.keyboardShortcuts.action.expand_input.label': 'Expand input',
+  'settings.openchamber.keyboardShortcuts.action.open_timeline_dialog.label': 'Open conversation timeline',
   'settings.projects.sidebar.total': 'Total {count}',
   'settings.projects.sidebar.actions.addProject': 'Add project',
   'settings.projects.page.empty.noProjects': 'No projects available.',

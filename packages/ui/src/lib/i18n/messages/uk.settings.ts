@@ -761,6 +761,7 @@ export const settingsDict = {
   "settings.openchamber.keyboardShortcuts.action.cycle_favorite_model_forward.label": "Перемкнути улюблену модель вперед",
   "settings.openchamber.keyboardShortcuts.action.cycle_favorite_model_backward.label": "Перемкнути улюблену модель назад",
   "settings.openchamber.keyboardShortcuts.action.expand_input.label": "Розгорнути введення",
+  "settings.openchamber.keyboardShortcuts.action.open_timeline_dialog.label": "Відкрити хронологію розмови",
   "settings.projects.sidebar.total": "Усього {count}",
   "settings.projects.sidebar.actions.addProject": "Додати проєкт",
   "settings.projects.page.empty.noProjects": "Немає доступних проєктів.",
