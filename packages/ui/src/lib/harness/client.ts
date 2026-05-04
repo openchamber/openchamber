@@ -98,14 +98,16 @@ class OpenChamberHarnessClient implements HarnessClient {
   }
 
   async createSession(input: CreateHarnessSessionInput): Promise<HarnessSession> {
-    return this.withDirectory(input.directory, async () => {
-      const session = await opencodeClient.createSession({
+    const payload = await this.fetchJson("/session", {
+      method: "POST",
+      body: {
+        directory: input.directory,
         title: input.title,
-        parentID: input.parentId ?? undefined,
+        parentId: input.parentId,
         backendId: input.backendId,
-      })
-      return toHarnessSession(session as Session)
+      },
     })
+    return payload as HarnessSession
   }
 
   async deleteSession(input: { sessionId: string; directory?: string | null }): Promise<boolean> {
@@ -229,22 +231,15 @@ class OpenChamberHarnessClient implements HarnessClient {
   }
 
   async forkSession(input: ForkHarnessSessionInput): Promise<HarnessSession> {
-    return this.withDirectory(input.directory, async () => {
-      const session = await opencodeClient.forkSession(input.sessionId, input.messageId)
-      return toHarnessSession(session as Session)
+    const payload = await this.fetchJson(`/session/${encodeURIComponent(input.sessionId)}/fork`, {
+      method: "POST",
+      body: {
+        directory: input.directory,
+        backendId: input.backendId,
+        messageId: input.messageId,
+      },
     })
-  }
-
-  private async withDirectory<T>(directory: string | null | undefined, run: () => Promise<T>): Promise<T> {
-    const previousDirectory = opencodeClient.getDirectory()
-    if (directory) {
-      opencodeClient.setDirectory(directory)
-    }
-    try {
-      return await run()
-    } finally {
-      opencodeClient.setDirectory(previousDirectory)
-    }
+    return payload as HarnessSession
   }
 
   private getHarnessUrl(pathname: string): URL {
