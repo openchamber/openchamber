@@ -91,8 +91,8 @@ export const TerminalView: React.FC = () => {
     const terminalFontSize = useUIStore(state => state.terminalFontSize);
     const bottomTerminalHeight = useUIStore((state) => state.bottomTerminalHeight);
     const isBottomTerminalExpanded = useUIStore((state) => state.isBottomTerminalExpanded);
-    const { isMobile, hasTouchInput } = useDeviceInfo();
-    const isTouchTerminal = isMobile || hasTouchInput;
+    const { isMobile, isTablet } = useDeviceInfo();
+    const isTouchTerminal = isMobile || isTablet;
     // Tabs are supported for web + desktop runtimes, including mobile (not VSCode).
     const enableTabs = runtime.platform !== 'vscode';
     const showTerminalQuickKeysOnDesktop = useUIStore((state) => state.showTerminalQuickKeysOnDesktop);
@@ -1146,7 +1146,7 @@ export const TerminalView: React.FC = () => {
                             theme={xtermTheme}
                             fontFamily={resolvedFontStack}
                             fontSize={terminalFontSize}
-                            enableTouchScroll={hasTouchInput}
+                            enableTouchScroll={isTouchTerminal}
                             autoFocus={!isTouchTerminal && isTerminalVisible}
                             isVisible={isTerminalVisible}
                         />

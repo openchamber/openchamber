@@ -83,7 +83,7 @@ export const MainLayout: React.FC = () => {
     const setMultiRunLauncherOpen = useUIStore((state) => state.setMultiRunLauncherOpen);
     const multiRunLauncherPrefillPrompt = useUIStore((state) => state.multiRunLauncherPrefillPrompt);
 
-    const { isMobile, hasTouchInput } = useDeviceInfo();
+    const { isMobile, isTablet } = useDeviceInfo();
     const isDesktopShellRuntime = React.useMemo(() => isDesktopShell(), []);
     const sidebarWidth = useUIStore((state) => state.sidebarWidth);
     const rightSidebarWidth = useUIStore((state) => state.rightSidebarWidth);
@@ -292,7 +292,7 @@ export const MainLayout: React.FC = () => {
             // Touch devices frequently resize when the on-screen keyboard opens.
             // Treat bottom-terminal auto-collapse/restore as desktop-only so
             // keyboard viewport changes do not churn terminal layout state.
-            if (!hasTouchInput) {
+            if (!isMobile && !isTablet) {
                 const shouldCloseBottomTerminal =
                     height < BOTTOM_TERMINAL_AUTO_CLOSE_HEIGHT;
                 const canAutoOpenBottomTerminal =
@@ -356,7 +356,7 @@ export const MainLayout: React.FC = () => {
         return () => {
             unsubscribe();
         };
-    }, [hasTouchInput, setBottomTerminalOpen, setRightSidebarOpen]);
+    }, [isMobile, isTablet, setBottomTerminalOpen, setRightSidebarOpen]);
 
     const secondaryView = React.useMemo(() => {
         switch (activeMainTab) {
