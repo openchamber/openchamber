@@ -437,6 +437,7 @@ export const useKeyboardShortcuts = () => {
     setActiveMainTab,
     setSettingsDialogOpen,
     setModelSelectorOpen,
+    setTimelineDialogOpen,
     toggleExpandedInput,
     setThemeMode,
     working,
