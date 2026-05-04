@@ -115,6 +115,7 @@ const VisualSectionContent: React.FC = () => {
         'theme',
         'pwaInstallName',
         'pwaOrientation',
+        'mobileKeyboardMode',
         'timeFormat',
         'weekStart',
         'fontSize',

@@ -58,6 +58,7 @@ import { McpOAuthCallbackPage } from '@/components/sections/mcp/McpOAuthCallback
 import { MCP_OAUTH_CALLBACK_PATH } from '@/components/sections/mcp/mcpOAuth';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { useI18n } from '@/lib/i18n';
+import { applyMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 
 // Lazy-loaded heavy views — loaded on demand to reduce initial bundle size.
 const OnboardingScreen = lazyWithChunkRecovery(() =>
@@ -222,6 +223,7 @@ function App({ apis }: AppProps) {
   const [initRetryEpoch, setInitRetryEpoch] = React.useState(0);
   const [manualInitRetrying, setManualInitRetrying] = React.useState(false);
   const wideChatLayoutEnabled = useUIStore((state) => state.wideChatLayoutEnabled);
+  const mobileKeyboardMode = useUIStore((state) => state.mobileKeyboardMode);
   const isDesktopRuntime = React.useMemo(() => isDesktopShell(), []);
   const setPlanModeEnabled = useFeatureFlagsStore((state) => state.setPlanModeEnabled);
   const [bootInjectionStatus, setBootInjectionStatus] = React.useState<BootInjectionStatus>(() => {
@@ -245,6 +247,10 @@ function App({ apis }: AppProps) {
       setStreamPerfEnabled(false);
     };
   }, [showMemoryDebug]);
+
+  React.useEffect(() => {
+    applyMobileKeyboardMode(mobileKeyboardMode);
+  }, [mobileKeyboardMode]);
 
   React.useEffect(() => {
     setIsVSCodeRuntime(apis.runtime.isVSCode);

@@ -1,4 +1,5 @@
 import type { ProjectEntry } from '@/lib/api/types';
+import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 
 export type AssistantNotificationPayload = {
   title?: string;
@@ -121,6 +122,7 @@ export type DesktopSettings = {
   gitModelId?: string;
   pwaAppName?: string;
   pwaOrientation?: 'system' | 'portrait' | 'landscape';
+  mobileKeyboardMode?: MobileKeyboardMode;
   inputSpellcheckEnabled?: boolean;
   showToolFileIcons?: boolean;
   showExpandedBashTools?: boolean;

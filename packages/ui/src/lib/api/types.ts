@@ -594,6 +594,7 @@ export interface SettingsPayload {
   gitProviderId?: string;
   gitModelId?: string;
   pwaAppName?: string;
+  mobileKeyboardMode?: 'native' | 'resize-content';
 
   [key: string]: unknown;
 }
