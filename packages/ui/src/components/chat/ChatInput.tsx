@@ -29,7 +29,7 @@ import { useUserMessageHistory } from '@/sync/sync-context';
 import { useInlineCommentDraftStore, type InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
 import { appendInlineComments } from '@/lib/messages/inlineComments';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
-import { AttachedFilesList, AttachedVSCodeFileChips,  ActiveEditorFileSuggestion } from './FileAttachment';
+import { AttachedFilesList, AttachedVSCodeFileChips, ActiveEditorFileSuggestion } from './FileAttachment';
 import { QueuedMessageChips } from './QueuedMessageChips';
 import { FileMentionAutocomplete, type FileMentionHandle } from './FileMentionAutocomplete';
 import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo } from './CommandAutocomplete';

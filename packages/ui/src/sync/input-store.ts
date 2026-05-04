@@ -96,11 +96,11 @@ export const useInputStore = create<InputState>()((set, get) => ({
       (f) => f.source === 'vscode' && f.vscodeSource === 'file' && (f.vscodePath || '') === path
     )
     if (isDuplicate) return
-    const fileUrl = `file://${path}`
+    const dataUrl = `file://${path}`
     const attached: AttachedFile = {
-      id: id,
+      id,
       file: new File([], name, { type: 'text/plain' }),
-      dataUrl: fileUrl,
+      dataUrl,
       mimeType: 'text/plain',
       filename: name,
       size: fileSize || 0,

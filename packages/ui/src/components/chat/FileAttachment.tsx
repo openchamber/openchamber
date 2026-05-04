@@ -258,7 +258,7 @@ const FileChip = memo(({ file, onRemove }: FileChipProps) => {
         aria-label={t('chat.fileAttachment.actions.removeNamed', { name: displayName })}
       >
         <RiCloseLine className="h-4 w-4 text-muted-foreground" />
-      </span>        
+      </span>
     </button>
   );
 });
@@ -421,12 +421,15 @@ export const ActiveEditorFileSuggestion = memo(() => {
     await addVSCodeSelectionAttachment(filePath, file);
   };
 
-  // Render inline inside the input container so it affects layout (pushes textarea down)
-  // and grows if multiple items wrap. Keep component inline so it sits on the same line as other chips.
+  // If there is a selection, prefer showing the pin-selection UI only.
+  const showSelectionPin = !!selection && !isSelectionAttached;
+  const showFileAdd = !showSelectionPin && !isFileAttached;
+
+  if (!showSelectionPin && !showFileAdd) return null;
+
   return (
     <div className="inline-flex items-center">
-      {/* If there is a selection, prefer showing the pin-selection UI only. */}
-      {selection && !isSelectionAttached ? (
+      {showSelectionPin && (
         <div
           className="inline-flex items-center gap-1 text-xs pr-1 rounded-sm italic text-muted-foreground border border-dashed bg-transparent"
           style={{ borderColor: 'var(--syntax-punctuation)' }}
@@ -444,7 +447,8 @@ export const ActiveEditorFileSuggestion = memo(() => {
           <FileTypeIcon filePath={fileName} extension={ext} className="h-4 w-4 flex-shrink-0" />
           <span className="text-xs whitespace-nowrap">{`${displayName}:${selectionRange}`}</span>
         </div>
-      ) : !isFileAttached ? (
+      )}
+      {showFileAdd && (
         <div
           className="inline-flex items-center gap-1 text-xs pr-1 rounded-sm italic text-muted-foreground border border-dashed bg-transparent"
           style={{ borderColor: 'var(--syntax-punctuation)' }}
@@ -462,7 +466,7 @@ export const ActiveEditorFileSuggestion = memo(() => {
           <FileTypeIcon filePath={fileName} extension={ext} className="h-4 w-4 flex-shrink-0" />
           <span className="text-xs truncate max-w-[220px]">{displayName}</span>
         </div>
-      ) : null}
+      )}
     </div>
   );
 });
