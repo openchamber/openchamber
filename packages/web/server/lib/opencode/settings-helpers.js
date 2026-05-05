@@ -322,8 +322,11 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.pwaOrientation === 'string') {
       result.pwaOrientation = normalizePwaOrientation(candidate.pwaOrientation, undefined);
     }
-    if (candidate.mobileKeyboardMode === 'native' || candidate.mobileKeyboardMode === 'resize-content') {
-      result.mobileKeyboardMode = candidate.mobileKeyboardMode;
+    if (typeof candidate.mobileKeyboardMode === 'string') {
+      const mode = normalizeMobileKeyboardMode(candidate.mobileKeyboardMode, null);
+      if (mode) {
+        result.mobileKeyboardMode = mode;
+      }
     }
     if (typeof candidate.toolCallExpansion === 'string') {
       const mode = candidate.toolCallExpansion.trim();

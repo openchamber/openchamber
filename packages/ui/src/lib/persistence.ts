@@ -899,8 +899,11 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.inputBarOffset === 'number' && Number.isFinite(candidate.inputBarOffset)) {
     result.inputBarOffset = candidate.inputBarOffset;
   }
-  if (candidate.mobileKeyboardMode === 'native' || candidate.mobileKeyboardMode === 'resize-content') {
-    result.mobileKeyboardMode = candidate.mobileKeyboardMode;
+  if (typeof candidate.mobileKeyboardMode === 'string') {
+    const mode = normalizeMobileKeyboardMode(candidate.mobileKeyboardMode, null);
+    if (mode) {
+      result.mobileKeyboardMode = mode;
+    }
   }
 
   const favoriteModels = sanitizeModelRefs(candidate.favoriteModels, 64);

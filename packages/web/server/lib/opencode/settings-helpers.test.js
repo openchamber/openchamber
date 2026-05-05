@@ -61,6 +61,9 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ mobileKeyboardMode: 'resize-content' })).toEqual({
       mobileKeyboardMode: 'resize-content',
     });
+    expect(helpers.sanitizeSettingsUpdate({ mobileKeyboardMode: ' resize-content ' })).toEqual({
+      mobileKeyboardMode: 'resize-content',
+    });
   });
 
   it('rejects invalid mobileKeyboardMode values', () => {
