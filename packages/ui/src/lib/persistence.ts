@@ -900,7 +900,7 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
     result.inputBarOffset = candidate.inputBarOffset;
   }
   if (typeof candidate.mobileKeyboardMode === 'string') {
-    const mode = normalizeMobileKeyboardMode(candidate.mobileKeyboardMode, null);
+    const mode = normalizeMobileKeyboardMode(candidate.mobileKeyboardMode, undefined);
     if (mode) {
       result.mobileKeyboardMode = mode;
     }

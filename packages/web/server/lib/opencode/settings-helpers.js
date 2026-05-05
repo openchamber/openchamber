@@ -323,7 +323,7 @@ export const createSettingsHelpers = (dependencies) => {
       result.pwaOrientation = normalizePwaOrientation(candidate.pwaOrientation, undefined);
     }
     if (typeof candidate.mobileKeyboardMode === 'string') {
-      const mode = normalizeMobileKeyboardMode(candidate.mobileKeyboardMode, null);
+      const mode = normalizeMobileKeyboardMode(candidate.mobileKeyboardMode, undefined);
       if (mode) {
         result.mobileKeyboardMode = mode;
       }

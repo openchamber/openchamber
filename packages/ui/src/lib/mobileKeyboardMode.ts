@@ -4,15 +4,18 @@ export const MOBILE_KEYBOARD_MODE_STORAGE_KEY = 'openchamber.mobileKeyboardMode'
 export const VIEWPORT_META_SELECTOR = 'meta[name="viewport"]';
 export const VIEWPORT_CONTENT_BASE = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover';
 
-export const normalizeMobileKeyboardMode = (
+export function normalizeMobileKeyboardMode(value: unknown): MobileKeyboardMode;
+export function normalizeMobileKeyboardMode(value: unknown, fallback: MobileKeyboardMode): MobileKeyboardMode;
+export function normalizeMobileKeyboardMode(value: unknown, fallback: undefined): MobileKeyboardMode | undefined;
+export function normalizeMobileKeyboardMode(
   value: unknown,
-  fallback: MobileKeyboardMode = 'native',
-): MobileKeyboardMode => {
+  fallback: MobileKeyboardMode | undefined = 'native',
+): MobileKeyboardMode | undefined {
   if (value === 'native' || value === 'resize-content') {
     return value;
   }
   return fallback;
-};
+}
 
 export const getViewportContentForMobileKeyboardMode = (value: unknown): string => {
   const mode = normalizeMobileKeyboardMode(value);

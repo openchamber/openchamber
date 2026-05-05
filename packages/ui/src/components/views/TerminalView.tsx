@@ -97,7 +97,7 @@ export const TerminalView: React.FC = () => {
     // Tabs are supported for web + desktop runtimes, including mobile (not VSCode).
     const enableTabs = runtime.platform !== 'vscode';
     const showTerminalQuickKeysOnDesktop = useUIStore((state) => state.showTerminalQuickKeysOnDesktop);
-    const showQuickKeys = isTouchTerminal || showTerminalQuickKeysOnDesktop;
+    const showQuickKeys = showTerminalQuickKeysOnDesktop;
 
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
     const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
