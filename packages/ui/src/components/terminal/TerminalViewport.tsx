@@ -1170,7 +1170,7 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
         cursorBlinkStateRef.current = null;
         resetWriteState();
       };
-    }, [disableTerminalTextareas, fitTerminal, fontFamily, fontSize, setupTouchScroll, theme, resetWriteState, setTerminalCursorBlink, useHiddenInputOverlay]);
+    }, [disableTerminalTextareas, enableTouchScroll, fitTerminal, focusHiddenInput, fontFamily, fontSize, setupTouchScroll, theme, resetWriteState, setTerminalCursorBlink, useHiddenInputOverlay]);
 
 
     React.useEffect(() => {

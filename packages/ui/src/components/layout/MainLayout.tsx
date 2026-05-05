@@ -329,7 +329,7 @@ export const MainLayout: React.FC = () => {
                 window.clearTimeout(timeoutId);
             }
         };
-    }, [setBottomTerminalOpen, setRightSidebarOpen]);
+    }, [isMobile, isTablet, setBottomTerminalOpen, setRightSidebarOpen]);
 
     React.useEffect(() => {
         if (typeof window === 'undefined') {

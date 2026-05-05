@@ -64,8 +64,25 @@
         return fallback;
       };
 
+      const supportsMobileKeyboardResizeContent = () => {
+        const userAgent = navigator.userAgent || '';
+        const platform = navigator.platform || '';
+        const maxTouchPoints = navigator.maxTouchPoints || 0;
+        const isIOS = /iPhone|iPad|iPod/i.test(userAgent)
+          || ((/Macintosh|MacIntel/i.test(userAgent) || /MacIntel/i.test(platform)) && maxTouchPoints > 1);
+
+        return !isIOS;
+      };
+
+      const getSupportedMobileKeyboardMode = (mode) => {
+        if (mode === 'resize-content' && !supportsMobileKeyboardResizeContent()) {
+          return 'native';
+        }
+        return mode;
+      };
+
       const getViewportContentForMobileKeyboardMode = (value) => {
-        const mode = normalizeMobileKeyboardMode(value, 'native');
+        const mode = getSupportedMobileKeyboardMode(normalizeMobileKeyboardMode(value, 'native'));
         return mode === 'resize-content'
           ? `${viewportBaseContent}, interactive-widget=resizes-content`
           : viewportBaseContent;
@@ -74,7 +91,10 @@
       const applyStoredMobileKeyboardMode = () => {
         let mode = 'native';
         try {
-          mode = normalizeMobileKeyboardMode(localStorage.getItem(mobileKeyboardModeStorageKey), 'native');
+          mode = getSupportedMobileKeyboardMode(normalizeMobileKeyboardMode(localStorage.getItem(mobileKeyboardModeStorageKey), 'native'));
+          if (mode === 'native') {
+            localStorage.removeItem(mobileKeyboardModeStorageKey);
+          }
         } catch {
           mode = 'native';
         }
