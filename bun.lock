@@ -96,7 +96,7 @@
     },
     "packages/desktop": {
       "name": "@openchamber/desktop",
-      "version": "1.9.9",
+      "version": "1.10.0",
       "devDependencies": {
         "@tauri-apps/cli": "^2",
         "@types/node": "^24.3.1",
@@ -105,7 +105,7 @@
     },
     "packages/electron": {
       "name": "@openchamber/electron",
-      "version": "1.9.9",
+      "version": "1.10.0",
       "dependencies": {
         "@openchamber/web": "workspace:*",
         "electron-context-menu": "^4.1.2",
@@ -118,9 +118,22 @@
         "electron-builder": "^26.0.0",
       },
     },
+    "packages/harness-contracts": {
+      "name": "@openchamber/harness-contracts",
+      "version": "1.9.9",
+      "devDependencies": {
+        "@eslint/js": "^9.33.0",
+        "eslint": "^9.33.0",
+        "eslint-plugin-react-hooks": "^5.2.0",
+        "eslint-plugin-react-refresh": "^0.4.20",
+        "globals": "^16.3.0",
+        "typescript": "~5.8.3",
+        "typescript-eslint": "^8.39.1",
+      },
+    },
     "packages/ui": {
       "name": "@openchamber/ui",
-      "version": "1.9.9",
+      "version": "1.10.0",
       "dependencies": {
         "@base-ui/react": "^1.4.0",
         "@codemirror/autocomplete": "^6.20.0",
@@ -151,6 +164,7 @@
         "@fontsource/ibm-plex-sans": "^5.1.1",
         "@ibm/plex": "^6.4.1",
         "@lezer/highlight": "^1.2.3",
+        "@openchamber/harness-contracts": "workspace:*",
         "@opencode-ai/sdk": "^1.4.25",
         "@pierre/diffs": "1.1.0-beta.13",
         "@remixicon/react": "^4.7.0",
@@ -219,7 +233,7 @@
     },
     "packages/vscode": {
       "name": "openchamber",
-      "version": "1.9.9",
+      "version": "1.10.0",
       "dependencies": {
         "@openchamber/ui": "workspace:*",
         "@opencode-ai/sdk": "^1.4.25",
@@ -242,7 +256,7 @@
     },
     "packages/web": {
       "name": "@openchamber/web",
-      "version": "1.9.9",
+      "version": "1.10.0",
       "bin": {
         "openchamber": "./bin/cli.js",
       },
@@ -889,6 +903,8 @@
     "@openchamber/desktop": ["@openchamber/desktop@workspace:packages/desktop"],
 
     "@openchamber/electron": ["@openchamber/electron@workspace:packages/electron"],
+
+    "@openchamber/harness-contracts": ["@openchamber/harness-contracts@workspace:packages/harness-contracts"],
 
     "@openchamber/ui": ["@openchamber/ui@workspace:packages/ui"],
 
