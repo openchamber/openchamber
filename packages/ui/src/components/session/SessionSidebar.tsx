@@ -4,6 +4,7 @@ import { RiLayoutLeftLine } from '@remixicon/react';
 import { toast } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
+import { useDeviceInfo, useTabletStandalonePwaRuntime } from '@/lib/device';
 import { isDesktopShell } from '@/lib/desktop';
 import { isDesktopWindowFullscreen as getDesktopWindowFullscreen, onDesktopWindowResized, startDesktopWindowDrag } from '@/lib/desktopNative';
 import { sessionEvents } from '@/lib/sessionEvents';
@@ -434,9 +435,12 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   }, []);
 
   const isDesktopShellRuntime = React.useMemo(() => isDesktopShell(), []);
+  const isTabletStandalonePwa = useTabletStandalonePwaRuntime();
   const [isDesktopWindowFullscreen, setIsDesktopWindowFullscreen] = React.useState(false);
 
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
+  const { isTablet } = useDeviceInfo();
+  const alwaysShowSidebarActions = mobileVariant || isTablet;
   const isMacPlatform = React.useMemo(() => {
     if (typeof navigator === 'undefined') {
       return false;
@@ -445,7 +449,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   }, []);
   const isWebRuntime = !mobileVariant && !isVSCode && !isDesktopShellRuntime;
   const showDesktopSidebarChrome = !mobileVariant && !isVSCode && !isWebRuntime;
-  const desktopSidebarTopPaddingClass = isDesktopShellRuntime && isMacPlatform && !isDesktopWindowFullscreen ? 'pl-[5.5rem]' : 'pl-3';
+  const desktopSidebarTopPaddingClass = (isDesktopShellRuntime && isMacPlatform && !isDesktopWindowFullscreen) || isTabletStandalonePwa ? 'pl-[5.5rem]' : 'pl-3';
   const desktopSidebarToggleButtonClass = 'app-region-no-drag inline-flex h-8 w-8 items-center justify-center rounded-md typography-ui-label font-medium text-foreground transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50';
 
   React.useEffect(() => {
@@ -1281,6 +1285,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         openContextPanelTab={openContextPanelTab}
         handleDeleteSession={handleDeleteSession}
         mobileVariant={mobileVariant}
+        alwaysShowActions={alwaysShowSidebarActions}
         renderSessionNode={renderSessionNode}
         secondaryMeta={secondaryMeta}
         renderContext={renderContext}
@@ -1319,6 +1324,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       openContextPanelTab,
       handleDeleteSession,
       mobileVariant,
+      alwaysShowSidebarActions,
     ],
   );
 
@@ -1378,6 +1384,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         lastRepoStatus={lastRepoStatusRef.current}
         toggleGroupSessionLimit={toggleGroupSessionLimit}
         mobileVariant={mobileVariant}
+        alwaysShowActions={alwaysShowSidebarActions}
         activeProjectId={activeProjectId}
         setActiveProjectIdOnly={setActiveProjectIdOnly}
         setActiveMainTab={setActiveMainTab}
@@ -1413,6 +1420,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       projectRepoStatus,
       toggleGroupSessionLimit,
       mobileVariant,
+      alwaysShowSidebarActions,
       activeProjectId,
       setActiveProjectIdOnly,
       setActiveMainTab,
@@ -1673,6 +1681,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         onToggleSelectionMode={handleToggleSelectionMode}
         showSidebarToggle={isWebRuntime}
         onToggleSidebar={toggleSidebar}
+        avoidWindowControlsOverlay={isTabletStandalonePwa}
       />
 
       <SidebarProjectsList
@@ -1692,6 +1701,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         isDesktopShellRuntime={isDesktopShellRuntime}
         stuckProjectHeaders={stuckProjectHeaders}
         mobileVariant={mobileVariant}
+        alwaysShowActions={alwaysShowSidebarActions}
         toggleProject={toggleProject}
         setActiveProjectIdOnly={setActiveProjectIdOnly}
         setActiveMainTab={setActiveMainTab}

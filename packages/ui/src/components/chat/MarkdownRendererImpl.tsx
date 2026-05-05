@@ -311,10 +311,15 @@ const TableDownloadButton: React.FC<{ tableRef: React.RefObject<HTMLDivElement |
 // Table wrapper with custom controls
 const TableWrapper: React.FC<{ children?: React.ReactNode; className?: string }> = ({ children, className }) => {
   const tableRef = React.useRef<HTMLDivElement>(null);
+  const { isMobile, isTablet } = useDeviceInfo();
+  const alwaysShowActions = isMobile || isTablet;
 
   return (
     <div className="group my-4 flex flex-col space-y-2" data-markdown="table-wrapper" ref={tableRef}>
-      <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className={cn(
+        "flex items-center justify-end gap-1 transition-opacity",
+        alwaysShowActions ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+      )}>
         <TableCopyButton tableRef={tableRef} />
         <TableDownloadButton tableRef={tableRef} />
       </div>
@@ -330,7 +335,7 @@ const TableWrapper: React.FC<{ children?: React.ReactNode; className?: string }>
 const MermaidBlock: React.FC<{ source: string; mode: 'svg' | 'ascii' }> = ({ source, mode }) => {
   const { t } = useI18n();
   const currentTheme = useCurrentMermaidTheme();
-  const { isMobile } = useDeviceInfo();
+  const { isMobile, isTablet } = useDeviceInfo();
   const [copied, setCopied] = React.useState(false);
   const [downloaded, setDownloaded] = React.useState(false);
 
@@ -362,7 +367,7 @@ const MermaidBlock: React.FC<{ source: string; mode: 'svg' | 'ascii' }> = ({ sou
     }
   }, [mode, source]);
 
-  const copyVisibilityClass = isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100';
+  const copyVisibilityClass = isMobile || isTablet ? 'opacity-100' : 'opacity-0 group-hover:opacity-100';
 
   const handleCopyAscii = async (asciiText: string) => {
     if (!asciiText) return;
@@ -724,6 +729,7 @@ const MarkdownCodeBlock: React.FC<{
   const [viewMode, setViewMode] = React.useState<'code' | 'preview'>('code');
   const prevCodeRef = React.useRef<string>(code);
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { isMobile, isTablet } = useDeviceInfo();
 
   const canPreview = language === 'html' || language === 'htm';
 
@@ -774,7 +780,10 @@ const MarkdownCodeBlock: React.FC<{
     <div data-component="markdown-code" className="my-4 group overflow-hidden rounded-2xl border border-border/80 bg-[var(--surface-elevated)]">
       <div className="flex items-center justify-between border-b border-border/70 px-3 py-1.5">
         <span className="font-mono text-[13px] text-muted-foreground">{language}</span>
-        <div className="flex items-center gap-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">
+        <div className={cn(
+          "flex items-center gap-1 transition-opacity",
+          isMobile || isTablet ? "opacity-100" : "opacity-100 md:opacity-0 md:group-hover:opacity-100"
+        )}>
           {canPreview ? (
             <button
               type="button"

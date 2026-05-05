@@ -426,7 +426,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const [isAgentSelectorOpen, setIsAgentSelectorOpen] = React.useState(false);
     const { favoriteModelsList, recentModelsList } = useModelLists();
 
-    const { isMobile } = useDeviceInfo();
+    const { isMobile, isTablet } = useDeviceInfo();
+    const alwaysShowHoverDetails = isMobile || isTablet;
     const isDesktop = React.useMemo(() => isDesktopShell(), []);
     const isVSCodeRuntime = useIsVSCodeRuntime();
     // Only use mobile panels on actual mobile devices, VSCode uses desktop dropdowns
@@ -2378,7 +2379,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     ) : slides.length > 0 ? (
                         <div className={cn(
                             "items-center",
-                            shouldAnimate ? "flex w-[140px] justify-end" : ((isHighlighted || isSelected) ? "flex" : "hidden group-hover:flex")
+                            shouldAnimate ? "flex w-[140px] justify-end" : ((isHighlighted || isSelected || alwaysShowHoverDetails) ? "flex" : "hidden group-hover:flex")
                         )}>
                             {shouldAnimate ? (
                                 <TextLoop interval={2.1} transition={{ duration: 0.25 }} trigger={shouldAnimate}>

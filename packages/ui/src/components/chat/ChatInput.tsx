@@ -29,7 +29,7 @@ import { useUserMessageHistory } from '@/sync/sync-context';
 import { useInlineCommentDraftStore, type InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
 import { appendInlineComments } from '@/lib/messages/inlineComments';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
-import { AttachedFilesList } from './FileAttachment';
+import { AttachedFilesList, AttachedVSCodeFileChips, ActiveEditorFileSuggestion } from './FileAttachment';
 import { QueuedMessageChips } from './QueuedMessageChips';
 import { FileMentionAutocomplete, type FileMentionHandle } from './FileMentionAutocomplete';
 import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo } from './CommandAutocomplete';
@@ -3677,95 +3677,101 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                 : undefined}
                         />
                     )}
-                    <div className={cn("relative overflow-hidden", isDesktopExpanded && 'flex flex-1 min-h-0 flex-col')}>
-                        {highlightedComposerContent && (
-                            <div
-                                aria-hidden
+                    <div className={cn("overflow-hidden", isDesktopExpanded && 'flex flex-1 min-h-0 flex-col')}>
+                        <div className="flex items-center gap-1 px-3 pt-1 flex-wrap relative z-10">
+                            <AttachedVSCodeFileChips />
+                            <ActiveEditorFileSuggestion />
+                        </div>
+                        <div className={cn("relative overflow-hidden", isDesktopExpanded && 'flex flex-1 min-h-0 flex-col')}>
+                            {highlightedComposerContent && (
+                                <div
+                                    aria-hidden
+                                    className={cn(
+                                        'pointer-events-none absolute inset-0 z-0 whitespace-pre-wrap break-words px-3 rounded-b-none',
+                                        isDesktopExpanded
+                                            ? 'h-full min-h-0 py-4'
+                                            : isMobile
+                                                ? 'py-2.5'
+                                                : 'pt-4 pb-2',
+                                        inputMode === 'shell' ? 'font-mono' : 'typography-markdown md:typography-ui-label',
+                                    )}
+                                    ref={composerHighlightRef}
+                                >
+                                    {highlightedComposerContent.map((part, index) => (
+                                        <span
+                                            key={`${index}-${part.text.length}`}
+                                            className={
+                                                part.mentionKind === 'file'
+                                                    ? 'text-[var(--status-info)]'
+                                                    : part.mentionKind === 'agent'
+                                                        ? 'text-[var(--status-success)]'
+                                                        : 'text-foreground'
+                                            }
+                                        >
+                                            {part.text}
+                                        </span>
+                                    ))}
+                                </div>
+                            )}
+                            <Textarea
+                                simple
+                                ref={textareaRef}
+                                data-chat-input="true"
+                                value={message}
+                                onChange={handleTextChange}
+                                onBeforeInput={handleBeforeInput}
+                                onKeyDown={handleKeyDown}
+                                onPaste={handlePaste}
+                                onDragEnter={handleDragEnter}
+                                onDragOver={handleDragOver}
+                                onDropCapture={handleDropCapture}
+                                onDrop={handleDrop}
+                                onDragEnd={handleDragEnd}
+                                onKeyUp={updateAutocompleteOverlayPosition}
+                                onClick={updateAutocompleteOverlayPosition}
+                                onScroll={(event) => {
+                                    updateAutocompleteOverlayPosition();
+                                    const scrollTop = event.currentTarget.scrollTop;
+                                    if (composerHighlightRef.current) {
+                                        composerHighlightRef.current.style.transform = `translateY(-${scrollTop}px)`;
+                                    }
+                                }}
+                                onSelect={(e) => {
+                                    const ta = e.currentTarget;
+                                    cursorPosRef.current = ta.selectionStart ?? 0;
+                                    updateAutocompleteOverlayPosition();
+                                }}
+                                placeholder={currentSessionId || newSessionDraftOpen
+                                    ? inputMode === 'shell'
+                                        ? t('chat.chatInput.placeholder.shell')
+                                        : t('chat.chatInput.placeholder.chat')
+                                    : t('chat.chatInput.placeholder.selectSession')}
+                                disabled={!currentSessionId && !newSessionDraftOpen}
+                                autoCorrect={isMobile ? "on" : "off"}
+                                autoCapitalize={isMobile ? "sentences" : "off"}
+                                spellCheck={isMobile || inputSpellcheckEnabled}
+                                fillContainer={isDesktopExpanded}
+                                outerClassName={cn('ring-0 bg-transparent shadow-none hover:bg-transparent focus-within:ring-0', isDesktopExpanded && 'flex-1 min-h-0')}
                                 className={cn(
-                                    'pointer-events-none absolute inset-0 z-0 whitespace-pre-wrap break-words px-3 rounded-b-none',
+                                    'min-h-[52px] resize-none border-0 px-3 rounded-b-none appearance-none hover:border-transparent bg-transparent relative z-10',
                                     isDesktopExpanded
                                         ? 'h-full min-h-0 py-4'
                                         : isMobile
                                             ? 'py-2.5'
                                             : 'pt-4 pb-2',
-                                    inputMode === 'shell' ? 'font-mono' : 'typography-markdown md:typography-ui-label',
+                                    inputMode === 'shell' && 'font-mono',
+                                    highlightedComposerContent && 'text-transparent caret-[var(--surface-foreground)]',
                                 )}
-                                ref={composerHighlightRef}
-                            >
-                                {highlightedComposerContent.map((part, index) => (
-                                    <span
-                                        key={`${index}-${part.text.length}`}
-                                        className={
-                                            part.mentionKind === 'file'
-                                                ? 'text-[var(--status-info)]'
-                                                : part.mentionKind === 'agent'
-                                                    ? 'text-[var(--status-success)]'
-                                                    : 'text-foreground'
-                                        }
-                                    >
-                                        {part.text}
-                                    </span>
-                                ))}
-                            </div>
-                        )}
-                        <Textarea
-                            simple
-                            ref={textareaRef}
-                            data-chat-input="true"
-                            value={message}
-                            onChange={handleTextChange}
-                            onBeforeInput={handleBeforeInput}
-                            onKeyDown={handleKeyDown}
-                            onPaste={handlePaste}
-                            onDragEnter={handleDragEnter}
-                            onDragOver={handleDragOver}
-                            onDropCapture={handleDropCapture}
-                            onDrop={handleDrop}
-                            onDragEnd={handleDragEnd}
-                            onKeyUp={updateAutocompleteOverlayPosition}
-                            onClick={updateAutocompleteOverlayPosition}
-                            onScroll={(event) => {
-                                updateAutocompleteOverlayPosition();
-                                const scrollTop = event.currentTarget.scrollTop;
-                                if (composerHighlightRef.current) {
-                                    composerHighlightRef.current.style.transform = `translateY(-${scrollTop}px)`;
-                                }
-                            }}
-                            onSelect={(e) => {
-                                const ta = e.currentTarget;
-                                cursorPosRef.current = ta.selectionStart ?? 0;
-                                updateAutocompleteOverlayPosition();
-                            }}
-                            placeholder={currentSessionId || newSessionDraftOpen
-                                ? inputMode === 'shell'
-                                    ? t('chat.chatInput.placeholder.shell')
-                                    : t('chat.chatInput.placeholder.chat')
-                                : t('chat.chatInput.placeholder.selectSession')}
-                            disabled={!currentSessionId && !newSessionDraftOpen}
-                            autoCorrect={isMobile ? "on" : "off"}
-                            autoCapitalize={isMobile ? "sentences" : "off"}
-                            spellCheck={isMobile || inputSpellcheckEnabled}
-                            fillContainer={isDesktopExpanded}
-                            outerClassName={cn('ring-0 bg-transparent shadow-none hover:bg-transparent focus-within:ring-0', isDesktopExpanded && 'flex-1 min-h-0')}
-                            className={cn(
-                                'min-h-[52px] resize-none border-0 px-3 rounded-b-none appearance-none hover:border-transparent bg-transparent relative z-10',
-                                isDesktopExpanded
-                                    ? 'h-full min-h-0 py-4'
-                                    : isMobile
-                                        ? 'py-2.5'
-                                        : 'pt-4 pb-2',
-                                inputMode === 'shell' && 'font-mono',
-                                highlightedComposerContent && 'text-transparent caret-[var(--surface-foreground)]',
-                            )}
-                            style={{
-                                flex: isDesktopExpanded ? '1 1 auto' : 'none',
-                                height: !isDesktopExpanded && textareaSize ? `${textareaSize.height}px` : undefined,
-                                maxHeight: !isDesktopExpanded && textareaSize ? `${textareaSize.maxHeight}px` : undefined,
-                                borderTopLeftRadius: chatInputRadius,
-                                borderTopRightRadius: chatInputRadius,
-                            }}
-                            rows={1}
-                        />
+                                style={{
+                                    flex: isDesktopExpanded ? '1 1 auto' : 'none',
+                                    height: !isDesktopExpanded && textareaSize ? `${textareaSize.height}px` : undefined,
+                                    maxHeight: !isDesktopExpanded && textareaSize ? `${textareaSize.maxHeight}px` : undefined,
+                                    borderTopLeftRadius: chatInputRadius,
+                                    borderTopRightRadius: chatInputRadius,
+                                }}
+                                rows={1}
+                            />
+                        </div>
                     </div>
                     <div
                         className={cn(
