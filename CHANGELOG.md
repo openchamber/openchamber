@@ -4,13 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-05-05
+
 - Preview: added an embedded dev-server Preview pane for loopback apps, with authenticated proxying, Vite/HMR support, same-origin API request handling, and safer local dev-server shutdown so apps can run inside OpenChamber more like they do in the browser (thanks to @wpbiggs).
 - Preview: added preview console capture, DOM element inspection, annotation context, and Electron screenshot attachments so UI feedback can be sent to the assistant with richer context.
 - Projects/Terminal: added Auto-discover for local dev servers, background terminal startup, action-linked Preview reopen controls, and cleaner terminal tab styling for a smoother Project Actions workflow (thanks to @wpbiggs).
-- GitHub: improved fork-aware issue and pull-request listing, PR status handling, and startup loading feedback so GitHub-backed workspaces are easier to open and track (thanks to @corrm).
-- Chat/UI: added a wide layout option and softened aborted-turn wording so chat can be tuned for roomier review workflows with less alarming interruption messages.
-- UI/Settings: centered empty states more consistently and fixed terminal toolbar overlap, improving polish in settings and docked terminal layouts (thanks to @Yabuku-xD).
-- Reliability/Streaming: reconnects now recover immediately after OS wake-from-sleep, reducing stale chat/session state after a machine resumes (thanks to @jwcrystal).
+- Settings/Behavior: added a dedicated Behavior page with global `AGENTS.md` configuration and response style presets, making it easier to tune assistant instructions and answer style across projects (thanks to @Yabuku-xD).
+- Chat/UI: added a wide layout option, steadier scroll position across sessions and generated prompts, less flicker during streaming, and safer rendering for malformed message parts (thanks to @jwcrystal, @pasta-paul).
+- VSCode/Chat: added the currently open editor file to chat context, making it faster to ask about the file you are already editing (thanks to @daveotero).
+- UI/Settings: improved settings scrolling, empty states, and button/overlay polish for cleaner setup flows (thanks to @Yabuku-xD).
+- GitHub/Git: improved fork-aware issue and pull-request listing, PR status handling, startup loading feedback, remote MCP headers, and long model ID handling so repository-backed and remote-provider workflows are easier to track (thanks to @corrm, @ricautomation, @yart).
+- Reliability/Streaming: reconnects now recover immediately after OS wake-from-sleep, long agent sessions avoid streaming hangs, concurrent sessions sharing the same provider are throttled more safely, and model metadata refreshes after OpenCode restarts (thanks to @jwcrystal, @pasta-paul, @Yabuku-xD).
+- Onboarding/Updates/Mobile: added OpenCode CLI auto-detection during onboarding, cross-checks update prompts against npm, and improved iPad/tablet controls for fewer false update notices and smoother touch use (thanks to @IslamNofl).
 
 ## [1.9.10] - 2026-04-28
 

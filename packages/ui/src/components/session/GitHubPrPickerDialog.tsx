@@ -23,6 +23,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
+import { useDeviceInfo } from '@/lib/device';
 import type { GitHubPullRequestContextResult, GitHubPullRequestSummary, GitHubPullRequestsListResult, GitHubRepoSelector } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 
@@ -75,6 +76,8 @@ export function GitHubPrPickerDialog({
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const isMobile = useUIStore((state) => state.isMobile);
+  const { isTablet } = useDeviceInfo();
+  const alwaysShowActions = isMobile || isTablet;
   const activeProject = useProjectsStore((state) => state.getActiveProject());
 
   const projectDirectory = activeProject?.path ?? null;
@@ -377,7 +380,10 @@ export function GitHubPrPickerDialog({
                     href={pr.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="hidden group-hover:flex h-5 w-5 items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+                    className={cn(
+                      "h-5 w-5 items-center justify-center text-muted-foreground hover:text-foreground transition-colors",
+                      alwaysShowActions ? "flex" : "hidden group-hover:flex"
+                    )}
                     onClick={(e) => e.stopPropagation()}
                     aria-label={t('session.githubPrPicker.actions.openInGitHubAria')}
                   >

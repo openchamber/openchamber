@@ -1,7 +1,13 @@
-## [Unreleased]
+## [1.10.0] - 2026-05-05
 
-- Chat/UI: added a wide layout option for roomier review sessions and softened aborted-turn wording for less alarming interrupted responses.
-- Settings/UI: centered empty states more consistently so settings and management pages feel cleaner in the editor panel (thanks to @Yabuku-xD).
+- Chat/UI: added the currently open editor file to chat context, making it faster to ask about the file you are already editing (thanks to @daveotero).
+- Settings/Behavior: added a dedicated Behavior page with global `AGENTS.md` configuration and response style presets, making it easier to tune assistant instructions and answer style across workspaces (thanks to @Yabuku-xD).
+- Chat/UI: added a wide layout option for roomier review sessions.
+- Chat/Streaming: reduced text flicker, preserved first chunks more reliably, and kept long agent sessions from hanging during active responses (thanks to @pasta-paul).
+- Chat/Scrolling: preserved per-session scroll position and kept generated prompts scrolled into view, making session switching and prompt generation feel steadier (thanks to @jwcrystal).
+- Settings/UI: improved settings scrolling and empty states for cleaner setup flows (thanks to @Yabuku-xD).
+- Models/Providers: fixed slash-containing model IDs, refreshed model metadata after OpenCode restarts, and added safer concurrency controls for sessions sharing the same provider (thanks to @yart, @Yabuku-xD).
+- GitHub/MCP: improved fork-aware issue and pull-request listing, PR status handling, and remote MCP header handling for more reliable repository and remote-provider workflows (thanks to @corrm, @ricautomation).
 
 ## [1.9.10] - 2026-04-28
 

@@ -799,7 +799,8 @@ function parseArgs(argv = process.argv.slice(2)) {
         break;
       case 'daemon':
       case 'd':
-        removedFlagErrors.push('`--daemon` was removed. OpenChamber now always runs in daemon mode.');
+        // Legacy no-op: daemon mode is already the default, but older clients
+        // may still pass this when starting a remote server.
         break;
       case 'try-cf-tunnel':
         removedFlagErrors.push('`--try-cf-tunnel` was removed. Use: openchamber tunnel start --provider cloudflare --mode quick');

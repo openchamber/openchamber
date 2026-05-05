@@ -1,6 +1,10 @@
 /**
  * Event Pipeline — transport connection, event coalescing, and batched flush.
  *
+ * This module must not make state-dependent decisions about event validity.
+ * For example, deciding whether a delta is already represented by a full part
+ * snapshot belongs in the reducer, which has access to the current state.
+ *
  * Plain closure API:
  *   const { cleanup } = createEventPipeline({ sdk, onEvent })
  *
@@ -145,7 +149,6 @@ type DirectoryQueue = {
   queue: Event[]
   buffer: Event[]
   coalesced: Map<string, number>
-  staleDeltas: Set<string>
   timer: ReturnType<typeof setTimeout> | undefined
   last: number
 }
@@ -185,7 +188,6 @@ export function createEventPipeline(input: EventPipelineInput) {
       queue: [],
       buffer: [],
       coalesced: new Map(),
-      staleDeltas: new Set(),
       timer: undefined,
       last: 0,
     }
@@ -212,8 +214,6 @@ export function createEventPipeline(input: EventPipelineInput) {
     return undefined
   }
 
-  const deltaKey = (messageID: string, partID: string, field: string) => `${messageID}:${partID}:${field}`
-
   const flushDir = (directory: string) => {
     const d = directories.get(directory)
     if (!d) return
@@ -224,22 +224,14 @@ export function createEventPipeline(input: EventPipelineInput) {
     if (d.queue.length === 0) return
 
     const events = d.queue
-    const staleDeltas = d.staleDeltas.size > 0 ? new Set(d.staleDeltas) : undefined
     d.queue = d.buffer
     d.buffer = events
     d.queue.length = 0
     d.coalesced.clear()
-    d.staleDeltas.clear()
 
     d.last = Date.now()
     syncDebug.pipeline.flush(events.length)
     for (const payload of events) {
-      if (staleDeltas && payload.type === "message.part.delta") {
-        const props = payload.properties as { messageID: string; partID: string; field: string }
-        if (staleDeltas.has(deltaKey(props.messageID, props.partID, props.field))) {
-          continue
-        }
-      }
       onEvent(directory, payload)
     }
 
@@ -313,11 +305,6 @@ export function createEventPipeline(input: EventPipelineInput) {
           } as unknown as Event
         } else {
           d.queue[i] = normalizedPayload
-          if (normalizedPayload.type === "message.part.updated") {
-            const part = (normalizedPayload.properties as { part: { messageID: string; id: string } }).part
-            d.staleDeltas.add(deltaKey(part.messageID, part.id, "text"))
-            d.staleDeltas.add(deltaKey(part.messageID, part.id, "output"))
-          }
         }
         syncDebug.pipeline.coalesced(normalizedPayload.type, k)
         return

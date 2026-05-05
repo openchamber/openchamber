@@ -54,6 +54,17 @@ describe("getReconnectCandidateSessionIds", () => {
     }).sort()).toContain("active")
   })
 
+  test("includes completed assistant sessions when the latest assistant parts are missing", () => {
+    expect(getReconnectCandidateSessionIds({
+      session: [createSession("blank")],
+      session_status: { blank: { type: "idle" } as SessionStatus },
+      message: {
+        blank: [createAssistantMessage("m-1", "blank", 1)],
+      },
+      part: {},
+    })).toEqual(["blank"])
+  })
+
   test("does not include a viewed session from another directory", () => {
     expect(getReconnectCandidateSessionIds({
       session: [createSession("active")],

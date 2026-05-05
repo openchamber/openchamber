@@ -14,6 +14,7 @@ import ScrollToBottomButton from './components/ScrollToBottomButton';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { useChatScrollManager, type AnimationHandlers, type ContentChangeReason } from '@/hooks/useChatScrollManager';
 import { useChatTimelineController } from './hooks/useChatTimelineController';
+import { TimelineDialog } from './TimelineDialog';
 import { useChatTurnNavigation } from './hooks/useChatTurnNavigation';
 import { useDeviceInfo } from '@/lib/device';
 import { Button } from '@/components/ui/button';
@@ -342,6 +343,8 @@ export const ChatContainer: React.FC = () => {
     const isExpandedInput = useUIStore((state) => state.isExpandedInput);
     const stickyUserHeader = useUIStore((state) => state.stickyUserHeader);
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
+    const isTimelineDialogOpen = useUIStore((s) => s.isTimelineDialogOpen);
+    const setTimelineDialogOpen = useUIStore((s) => s.setTimelineDialogOpen);
 
     // Streaming state
     const streamingMessageId = useStreamingStore(
@@ -958,19 +961,27 @@ export const ChatContainer: React.FC = () => {
             <div
                 className={cn(
                     'relative z-10',
-					isDesktopExpandedInput
-						? 'flex-1 min-h-0 bg-background'
-						: 'bg-background'
-				)}
-			>
-				{!isDesktopExpandedInput && sessionMessages.length > 0 && (
-					<ScrollToBottomButton
+                    isDesktopExpandedInput
+                        ? 'flex-1 min-h-0 bg-background'
+                        : 'bg-background'
+                )}
+            >
+                {!isDesktopExpandedInput && sessionMessages.length > 0 && (
+                    <ScrollToBottomButton
                         visible={timelineController.showScrollToBottom}
                         onClick={navigation.resumeToLatest}
                     />
                 )}
                 <ChatInput scrollToBottom={resumeToLatestInstant} />
             </div>
+
+            <TimelineDialog
+                open={isTimelineDialogOpen}
+                onOpenChange={setTimelineDialogOpen}
+                onScrollToMessage={timelineController.scrollToMessage}
+                onScrollByTurnOffset={navigation.scrollByTurnOffset}
+                onResumeToLatest={resumeToLatestInstant}
+            />
         </div>
     );
 };

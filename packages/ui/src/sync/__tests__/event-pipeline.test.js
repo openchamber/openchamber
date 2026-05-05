@@ -275,7 +275,7 @@ describe('createEventPipeline', () => {
     expect(received[0].payload.type).toBe('server.connected');
   });
 
-  it('skips stale message.part.delta events after a newer message.part.updated for the same field', async () => {
+  it('keeps message.part.delta events when a newer message.part.updated is queued for the same field', async () => {
     installDomStubs();
 
     let releaseStream;
@@ -285,8 +285,8 @@ describe('createEventPipeline', () => {
 
     const received = [];
 
-    // Simulate: part.updated arrives, then delta, then a newer part.updated for the
-    // same part. The older queued delta becomes stale and must be skipped.
+    // The pipeline only routes/coalesces events. Whether this delta is already
+    // represented by the newer snapshot is reducer state, not queue state.
     const directory = '/test/dir';
     const sdk = createSdkWithEvents([
       // T0: message.part.updated for part-A
@@ -299,7 +299,7 @@ describe('createEventPipeline', () => {
           },
         },
       },
-      // T1: message.part.delta for part-A (should be dropped as stale)
+      // T1: message.part.delta for part-A
       {
         payload: {
           type: 'message.part.delta',
@@ -329,7 +329,7 @@ describe('createEventPipeline', () => {
         sdk,
         onEvent: (dir, payload) => {
           received.push({ directory: dir, payload });
-          if (received.length === 1) {
+          if (received.length === 2) {
             cleanup();
             releaseStream();
             resolve();
@@ -340,8 +340,10 @@ describe('createEventPipeline', () => {
 
     await delivered;
 
-    expect(received.length).toBe(1);
+    expect(received.length).toBe(2);
     expect(received[0].payload.type).toBe('message.part.updated');
+    expect(received[1].payload.type).toBe('message.part.delta');
+    expect(received[1].payload.properties.delta).toBe(' world');
   });
 
   it('keeps delta events for other fields on the same part', async () => {

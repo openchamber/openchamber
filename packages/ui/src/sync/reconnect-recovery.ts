@@ -1,10 +1,11 @@
-import type { SessionStatus, Message } from "@opencode-ai/sdk/v2/client"
+import type { SessionStatus, Message, Part } from "@opencode-ai/sdk/v2/client"
 import type { Session } from "@opencode-ai/sdk/v2"
 
 type ReconnectRecoveryState = {
   session: Session[]
   session_status?: Record<string, SessionStatus>
   message?: Record<string, Message[]>
+  part?: Record<string, Part[]>
 }
 
 export type ViewedSessionRecoveryTarget = {
@@ -26,11 +27,16 @@ export function getReconnectCandidateSessionIds(state: ReconnectRecoveryState, o
 
   for (const [sessionId, messages] of Object.entries(state.message ?? {})) {
     const lastMessage = messages[messages.length - 1]
+    const lastAssistantComplete = lastMessage
+      && lastMessage.role === "assistant"
+      && typeof (lastMessage as { time?: { completed?: number } }).time?.completed === "number"
     if (
       lastMessage
       && lastMessage.role === "assistant"
       && typeof (lastMessage as { time?: { completed?: number } }).time?.completed !== "number"
     ) {
+      ids.add(sessionId)
+    } else if (lastAssistantComplete && state.part && (state.part[lastMessage.id]?.length ?? 0) === 0) {
       ids.add(sessionId)
     }
   }
