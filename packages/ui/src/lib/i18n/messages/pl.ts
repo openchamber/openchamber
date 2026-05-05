@@ -395,6 +395,9 @@ export const dict = {
   'chat.fileAttachment.actions.attach': 'Dołącz pliki',
   'chat.fileAttachment.actions.removeNamed': 'Usuń {name}',
   'chat.fileAttachment.actions.removeImage': 'Usuń obraz',
+  'chat.fileAttachment.activeEditor.addFile': 'Dodaj plik:{name} do kontekstu',
+  'chat.fileAttachment.activeEditor.pinSelection': 'Przypnij zaznaczenie do kontekstu',
+  'chat.fileAttachment.activeEditor.remove': 'Usuń z kontekstu',
   'chat.pendingChanges.fileCountSingle': '{count} plik',
   'chat.pendingChanges.fileCountPlural': '{count} plików',
   'chat.pendingChanges.changedInWorkspace': 'zmienione w przestrzeni roboczej',
@@ -2105,6 +2108,12 @@ export const dict = {
 
   // Onboarding
   'onboarding.localSetup.actions.checkAndContinue': 'Sprawdź i kontynuuj',
+  'onboarding.localSetup.intro': 'OpenCode to serce OpenChamber — zainstaluj je, aby zacząć.',
+  'onboarding.localSetup.actions.checkNow': 'Sprawdź teraz',
+  'onboarding.localSetup.status.watching': 'Czekanie na OpenCode',
+  'onboarding.localSetup.status.autoContinue': 'Przejdziemy dalej automatycznie, gdy zostanie wykryty.',
+  'onboarding.localSetup.advanced.title': 'Ustaw niestandardową ścieżkę binarki',
+  'onboarding.localSetup.troubleshoot.title': 'Masz problem?',
 
   // Update dialog
   'updateDialog.changelog.title': 'Informacje o wersji',
