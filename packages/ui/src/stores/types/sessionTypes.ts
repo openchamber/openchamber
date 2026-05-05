@@ -21,8 +21,10 @@ export interface AttachedFile {
     mimeType: string;
     filename: string;
     size: number;
-    source: "local" | "server";
+    source: "local" | "server" | "vscode";
     serverPath?: string;
+    vscodePath?: string;
+    vscodeSource?: 'file' | 'selection';
 }
 
 export type EditPermissionMode = 'allow' | 'ask' | 'deny' | 'full';

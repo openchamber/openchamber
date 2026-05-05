@@ -1651,6 +1651,7 @@ const AssistantMessageBody = React.memo(({
     }, [
         activityByPart,
         activityGroupSegmentsForMessage,
+        alwaysShowMessageActions,
         animatedToolIdsLookup,
         animateActivityRows,
         chatRenderMode,
