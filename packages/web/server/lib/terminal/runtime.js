@@ -819,5 +819,89 @@ export function createTerminalRuntime({
     }
   };
 
-  return { shutdown };
+  const listSessions = () => {
+    const sessions = [];
+    for (const [sessionId, session] of terminalSessions.entries()) {
+      sessions.push({
+        sessionId,
+        cwd: session.cwd,
+        lastActivity: session.lastActivity,
+        ptyBackend: session.ptyBackend,
+      });
+    }
+    return sessions;
+  };
+
+  const getSession = (sessionId) => {
+    const session = terminalSessions.get(sessionId);
+    if (!session) return null;
+    return {
+      sessionId,
+      cwd: session.cwd,
+      lastActivity: session.lastActivity,
+      ptyBackend: session.ptyBackend,
+    };
+  };
+
+  const readRecentOutput = (sessionId) => {
+    const session = terminalSessions.get(sessionId);
+    if (!session) return null;
+    const chunks = listTerminalOutputReplayChunksSince(session.outputReplayBuffer, 0);
+    return chunks.map((c) => c.data).join('');
+  };
+
+  const writeInput = (sessionId, data) => {
+    const session = terminalSessions.get(sessionId);
+    if (!session) return false;
+    try {
+      session.ptyProcess.write(data);
+      session.lastActivity = Date.now();
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const subscribeOutput = (sessionId, listener) => {
+    const session = terminalSessions.get(sessionId);
+    if (!session) {
+      return () => {};
+    }
+
+    const dataHandler = (data) => {
+      try {
+        listener(data);
+      } catch {
+      }
+    };
+
+    const disposable = session.ptyProcess.onData(dataHandler);
+    const exitHandler = () => {
+      try {
+        if (disposable && typeof disposable.dispose === 'function') {
+          disposable.dispose();
+        }
+      } catch {
+      }
+    };
+
+    const exitDisposable = session.ptyProcess.onExit(exitHandler);
+
+    return () => {
+      try {
+        if (disposable && typeof disposable.dispose === 'function') {
+          disposable.dispose();
+        }
+      } catch {
+      }
+      try {
+        if (exitDisposable && typeof exitDisposable.dispose === 'function') {
+          exitDisposable.dispose();
+        }
+      } catch {
+      }
+    };
+  };
+
+  return { shutdown, listSessions, getSession, readRecentOutput, writeInput, subscribeOutput };
 }

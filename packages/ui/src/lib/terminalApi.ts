@@ -1040,6 +1040,25 @@ export function primeTerminalInputTransport(): void {
   manager.prime();
 }
 
+export async function requestTerminalReadGrant(sessionId: string): Promise<{ token: string; sessionId: string; expiresIn: number }> {
+  const response = await fetch('/api/terminal/agent/grants/read', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId }),
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to issue read grant');
+  }
+  return response.json();
+}
+
+export async function revokeTerminalReadGrant(token: string): Promise<void> {
+  await fetch(`/api/terminal/agent/grants/read/${encodeURIComponent(token)}`, {
+    method: 'DELETE',
+  });
+}
+
 const hotModule = (import.meta as ImportMeta & {
   hot?: {
     dispose: (callback: () => void) => void;

@@ -31,6 +31,8 @@ import { prepareNotificationLastMessage } from './lib/notifications/index.js';
 import { registerTtsRoutes } from './lib/tts/routes.js';
 import { detectSayTtsCapability } from './lib/tts/capability-runtime.js';
 import { createTerminalRuntime } from './lib/terminal/runtime.js';
+import { createAgentTerminalService } from './lib/terminal/agent-service.js';
+import { registerAgentTerminalRoutes } from './lib/terminal/agent-routes.js';
 import {
   createGlobalUiEventBroadcaster,
   createGlobalMessageStreamHub,
@@ -437,6 +439,7 @@ const tunnelAuthController = createTunnelAuth();
 let runtimeManagedRemoteTunnelToken = '';
 let runtimeManagedRemoteTunnelHostname = '';
 let terminalRuntime = null;
+let agentTerminalService = null;
 let messageStreamRuntime = null;
 const userProvidedOpenCodePassword = hmrStateRuntime.getUserProvidedOpenCodePassword(hmrState);
 const initialOpenCodeAuthState = hmrStateRuntime.resolveOpenCodeAuthFromState({
@@ -1236,6 +1239,9 @@ async function main(options = {}) {
   });
   terminalRuntime = startupPipelineResult.terminalRuntime;
   messageStreamRuntime = startupPipelineResult.messageStreamRuntime;
+
+  agentTerminalService = createAgentTerminalService(terminalRuntime);
+  registerAgentTerminalRoutes(app, agentTerminalService);
 
   try {
     await scheduledTasksRuntime.start();

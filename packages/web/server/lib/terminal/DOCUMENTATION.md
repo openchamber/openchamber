@@ -1,18 +1,59 @@
 # Terminal Module Documentation
 
 ## Purpose
-This module provides WebSocket transport utilities for terminal input and output in the web server runtime, including message normalization, control frame parsing, rate limiting, pathname resolution, and short-lived output replay buffering for terminal WebSocket connections.
+This module provides WebSocket transport utilities for terminal input and output in the web server runtime, including message normalization, control frame parsing, rate limiting, pathname resolution, short-lived output replay buffering for terminal WebSocket connections, and a permission-gated agent terminal service for bidirectional agent ↔ terminal integration.
 
 ## Entrypoints and structure
 - `packages/web/server/lib/terminal/`: Terminal module directory.
   - `index.js`: Stable module entrypoint that re-exports protocol helpers and replay-buffer helpers.
-  - `runtime.js`: Runtime module that owns terminal session state, WS server setup, and `/api/terminal/*` route registration.
+  - `runtime.js`: Runtime module that owns terminal session state, WS server setup, `/api/terminal/*` route registration, and agent-facing session methods.
   - `terminal-ws-protocol.js`: Single-file module containing terminal WebSocket protocol utilities.
   - `output-replay-buffer.js`: Helper module for buffering recent terminal output so late subscribers can receive startup prompt data.
+  - `agent-service.js`: Permission-gated agent terminal service with read/write grant tracking.
+  - `agent-routes.js`: REST API routes for agent terminal operations (list, read, write, grant management).
+- `packages/web/bin/terminal-mcp-server.js`: Standalone MCP server (stdio transport) that wraps agent terminal routes as discoverable agent tools.
 - `packages/web/server/lib/terminal/terminal-ws-protocol.test.js`: Test file for protocol utilities.
 - `packages/web/server/lib/terminal/output-replay-buffer.test.js`: Test file for replay buffer helpers.
 
 Public API entry point: imported by `packages/web/server/index.js` from `./lib/terminal/index.js`.
+
+### Agent terminal integration
+The agent terminal service (`agent-service.js`) enables the OpenCode agent to read terminal output and inject commands, gated by time-limited grant tokens.
+
+**Grant model:**
+- Read grants: 5-minute TTL, issued per session, allow reading recent output
+- Write grants: 1-minute TTL, issued per session+command, one-shot use only
+- Grants are in-memory only (not persisted)
+
+**API routes** (registered in `index.js` after terminal runtime creation):
+- `POST /api/terminal/agent/list` — list sessions accessible with a read grant
+- `POST /api/terminal/agent/read` — read recent output with a read grant
+- `POST /api/terminal/agent/write` — execute command with a write grant
+- `POST /api/terminal/agent/grants/read` — issue a read grant (UI-facing)
+- `POST /api/terminal/agent/grants/write` — issue a write grant (UI-facing)
+- `DELETE /api/terminal/agent/grants/read/:token` — revoke read grant
+- `DELETE /api/terminal/agent/grants/write/:token` — revoke write grant
+
+**MCP server** (`packages/web/bin/terminal-mcp-server.js`):
+- Implements MCP stdio transport (JSON-RPC 2.0 over stdin/stdout)
+- Config via env vars: `OPENCHAMBER_URL`, `OPENCHAMBER_TERMINAL_READ_TOKEN`, `OPENCHAMBER_TERMINAL_WRITE_TOKEN`
+- Exposes tools: `terminal_list`, `terminal_read`, `terminal_execute`
+- To use: add as a local MCP server in OpenCode config:
+  ```json
+  {
+    "mcp": {
+      "terminal": {
+        "type": "local",
+        "command": ["bun", "run", "packages/web/bin/terminal-mcp-server.js"],
+        "environment": {
+          "OPENCHAMBER_URL": "http://localhost:4096",
+          "OPENCHAMBER_TERMINAL_READ_TOKEN": "<token>"
+        },
+        "enabled": true
+      }
+    }
+  }
+  ```
 
 ## Public exports
 

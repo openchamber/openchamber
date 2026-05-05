@@ -1,5 +1,5 @@
 import React from 'react';
-import { RiAddLine, RiArrowDownLine, RiArrowGoBackLine, RiArrowLeftLine, RiArrowRightLine, RiArrowUpLine, RiCloseLine, RiCommandLine, RiFullscreenExitLine, RiFullscreenLine, RiGlobalLine, RiTerminalLine } from '@remixicon/react';
+import { RiAddLine, RiArrowDownLine, RiArrowGoBackLine, RiArrowLeftLine, RiArrowRightLine, RiArrowUpLine, RiCloseLine, RiCommandLine, RiFullscreenExitLine, RiFullscreenLine, RiGlobalLine, RiRobot2Line, RiTerminalLine } from '@remixicon/react';
 
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useTerminalStore } from '@/stores/useTerminalStore';
@@ -16,7 +16,7 @@ import { Button } from '@/components/ui/button';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { useDeviceInfo } from '@/lib/device';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import { primeTerminalInputTransport } from '@/lib/terminalApi';
+import { primeTerminalInputTransport, requestTerminalReadGrant, revokeTerminalReadGrant } from '@/lib/terminalApi';
 import { useI18n } from '@/lib/i18n';
 import { PROJECT_ACTION_ICON_MAP, type ProjectActionIconKey } from '@/lib/projectActions';
 
@@ -161,7 +161,11 @@ export const TerminalView: React.FC = () => {
     const [isReconnectPending, setIsReconnectPending] = React.useState(false);
     const [activeModifier, setActiveModifier] = React.useState<Modifier | null>(null);
     const [isRestarting, setIsRestarting] = React.useState(false);
+    const [grantToken, setGrantToken] = React.useState<string | null>(null);
+    const [grantExpiresAt, setGrantExpiresAt] = React.useState<number>(0);
+    const [grantSecondsLeft, setGrantSecondsLeft] = React.useState(0);
     const [viewportLayoutVersion, setViewportLayoutVersion] = React.useState(0);
+    const grantTimerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
 
     const streamCleanupRef = React.useRef<(() => void) | null>(null);
     const activeTerminalIdRef = React.useRef<string | null>(null);
@@ -181,6 +185,33 @@ export const TerminalView: React.FC = () => {
         }
         terminalControllerRef.current?.focus();
     }, []);
+
+    React.useEffect(() => {
+      if (!grantExpiresAt) {
+        setGrantSecondsLeft(0);
+        return;
+      }
+      const tick = () => {
+        const left = Math.max(0, Math.ceil((grantExpiresAt - Date.now()) / 1000));
+        setGrantSecondsLeft(left);
+        if (left <= 0) {
+          setGrantToken(null);
+          setGrantExpiresAt(0);
+          if (grantTimerRef.current) {
+            clearInterval(grantTimerRef.current);
+            grantTimerRef.current = null;
+          }
+        }
+      };
+      tick();
+      grantTimerRef.current = setInterval(tick, 1000);
+      return () => {
+        if (grantTimerRef.current) {
+          clearInterval(grantTimerRef.current);
+          grantTimerRef.current = null;
+        }
+      };
+    }, [grantExpiresAt]);
 
     React.useEffect(() => {
         if (!terminalHydrated) {
@@ -1075,6 +1106,44 @@ export const TerminalView: React.FC = () => {
                                     <RiGlobalLine className="h-3.5 w-3.5 shrink-0" />
                                     <span className="whitespace-nowrap">{t('terminalView.preview.open')}</span>
                                 </Button>
+                            ) : null}
+                            {terminalSessionId ? (
+                                grantToken ? (
+                                    <Button
+                                        type="button"
+                                        size="xs"
+                                        variant="outline"
+                                        className="h-6 shrink-0 gap-1 px-2 text-[var(--status-info)]"
+                                        onClick={() => {
+                                            revokeTerminalReadGrant(grantToken).catch(() => {});
+                                            setGrantToken(null);
+                                            setGrantExpiresAt(0);
+                                        }}
+                                        title={t('terminalView.agent.watchingTitle', { seconds: grantSecondsLeft })}
+                                    >
+                                        <RiRobot2Line className="h-3.5 w-3.5 shrink-0" />
+                                        <span className="whitespace-nowrap">{t('terminalView.agent.watching')}</span>
+                                    </Button>
+                                ) : (
+                                    <Button
+                                        type="button"
+                                        size="xs"
+                                        variant="ghost"
+                                        className="h-6 shrink-0 gap-1 px-2"
+                                        onClick={async () => {
+                                            try {
+                                                const result = await requestTerminalReadGrant(terminalSessionId);
+                                                setGrantToken(result.token);
+                                                setGrantExpiresAt(Date.now() + result.expiresIn * 1000);
+                                            } catch {
+                                            }
+                                        }}
+                                        title={t('terminalView.agent.letWatchTitle')}
+                                    >
+                                        <RiRobot2Line className="h-3.5 w-3.5 shrink-0" />
+                                        <span className="whitespace-nowrap">{t('terminalView.agent.letWatch')}</span>
+                                    </Button>
+                                )
                             ) : null}
                             {showBottomDockControls ? (
                                 <>

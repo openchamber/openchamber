@@ -96,6 +96,8 @@ export interface TerminalAPI {
   close(sessionId: string): Promise<void>;
   restartSession?(currentSessionId: string, options: CreateTerminalOptions): Promise<TerminalSession>;
   forceKill?(options: ForceKillOptions): Promise<void>;
+  requestReadGrant?(sessionId: string): Promise<{ token: string; sessionId: string; expiresIn: number }>;
+  revokeReadGrant?(token: string): Promise<void>;
 }
 
 export interface GitStatusFile {

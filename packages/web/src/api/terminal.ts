@@ -6,6 +6,8 @@ import {
   closeTerminal,
   restartTerminalSession,
   forceKillTerminal,
+  requestTerminalReadGrant,
+  revokeTerminalReadGrant,
 } from '@openchamber/ui/lib/terminalApi';
 import type {
   TerminalAPI,
@@ -70,5 +72,13 @@ export const createWebTerminalAPI = (): TerminalAPI => ({
 
   async forceKill(options: ForceKillOptions): Promise<void> {
     await forceKillTerminal(options);
+  },
+
+  async requestReadGrant(sessionId: string) {
+    return requestTerminalReadGrant(sessionId);
+  },
+
+  async revokeReadGrant(token: string) {
+    await revokeTerminalReadGrant(token);
   },
 });

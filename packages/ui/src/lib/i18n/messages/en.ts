@@ -1047,6 +1047,12 @@ export const dict = {
   'terminalView.bottomDock.closeTitle': 'Close terminal panel',
   'terminalView.bottomDock.closeAria': 'Close terminal panel',
   'terminalView.viewport.inputAria': 'Terminal input',
+  'terminalView.agent.letWatch': 'Let agent watch',
+  'terminalView.agent.letWatchTitle': 'Let the AI agent read this terminal\'s output',
+  'terminalView.agent.watching': 'Agent watching',
+  'terminalView.agent.watchingTitle': 'Agent has read access for {seconds}s. Click to revoke.',
+  'terminalView.agent.grantFailed': 'Failed to grant agent access',
+
   'directoryExplorerDialog.title': 'Add project directory',
   'directoryExplorerDialog.description': 'Choose a folder to add as a project.',
   'directoryExplorerDialog.toggle.showHidden': 'Show hidden',
