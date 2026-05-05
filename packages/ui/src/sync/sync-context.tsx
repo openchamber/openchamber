@@ -1502,11 +1502,11 @@ export function SyncProvider(props: {
             ?? opencodeClient.getDirectory()
             ?? props.directory
           if (!sessionDirectory) return
-          const store = childStores.getChild(sessionDirectory)
-          if (!store) return
           if (timer) clearTimeout(timer)
           timer = setTimeout(() => {
-            void resyncBlockingRequestsForDirectory(sessionDirectory, store).catch(() => undefined)
+            const currentStore = childStores.getChild(sessionDirectory)
+            if (!currentStore) return
+            void resyncBlockingRequestsForDirectory(sessionDirectory, currentStore).catch(() => undefined)
           }, 250)
         })
       })
