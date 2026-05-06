@@ -275,12 +275,12 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     : 'group-hover:opacity-0 group-focus-within:opacity-0';
   const revealPaddingClass = isMinimalMode
     ? (isVSCode
-        ? (archivedBucket ? 'group-hover:pr-1' : 'group-hover:pr-9')
-        : (archivedBucket ? 'group-hover:pr-1 group-focus-within:pr-1' : 'group-hover:pr-9 group-focus-within:pr-9'))
+        ? 'group-hover:pr-2'
+        : 'group-hover:pr-2 group-focus-within:pr-2')
     : (isVSCode
         ? (archivedBucket ? 'group-hover:pr-5' : 'group-hover:pr-12')
         : (archivedBucket ? 'group-hover:pr-5 group-focus-within:pr-5' : 'group-hover:pr-12 group-focus-within:pr-12'));
-  const alwaysActionPaddingClass = archivedBucket ? 'pr-7' : 'pr-12';
+  const alwaysActionPaddingClass = archivedBucket ? 'pr-7' : 'pr-13';
   const suppressNextSelectRef = React.useRef(false);
   const [isTouchPressed, setIsTouchPressed] = React.useState(false);
 
@@ -580,7 +580,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     event.preventDefault();
     event.stopPropagation();
     setOpenSidebarMenuKey(null);
-    handleDeleteSession(session, { archivedBucket: false });
+    handleDeleteSession(session, { archivedBucket });
   };
 
   const handleRowSelect = (event?: React.MouseEvent<HTMLButtonElement>) => {
