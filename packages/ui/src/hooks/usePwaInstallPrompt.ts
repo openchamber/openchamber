@@ -17,6 +17,11 @@ const INSTALL_TOAST_SESSION_KEY = 'pwa-install-toast-shown';
 export const usePwaInstallPrompt = () => {
   const { browserTab } = usePwaDetection();
   const { t } = useI18n();
+  const tRef = React.useRef(t);
+
+  React.useEffect(() => {
+    tRef.current = t;
+  }, [t]);
 
   React.useEffect(() => {
     if (typeof window === 'undefined' || !isWebRuntime() || !browserTab) {
@@ -46,7 +51,7 @@ export const usePwaInstallPrompt = () => {
       await promptEvent.prompt();
       const { outcome } = await promptEvent.userChoice;
       if (outcome === 'accepted') {
-        toast.success(t('pwa.installPrompt.started'));
+        toast.success(tRef.current('pwa.installPrompt.started'));
       }
     };
 
@@ -70,10 +75,10 @@ export const usePwaInstallPrompt = () => {
 
       sessionStorage.setItem(INSTALL_TOAST_SESSION_KEY, 'true');
 
-      installToastId = toast.info(t('pwa.installPrompt.description'), {
+      installToastId = toast.info(tRef.current('pwa.installPrompt.description'), {
         duration: Infinity,
         action: {
-          label: t('pwa.installPrompt.action'),
+          label: tRef.current('pwa.installPrompt.action'),
           onClick: () => {
             void triggerInstall();
           },
@@ -84,7 +89,7 @@ export const usePwaInstallPrompt = () => {
     const onAppInstalled = () => {
       deferredPrompt = null;
       dismissInstallToast();
-      toast.success(t('pwa.installPrompt.installed'));
+      toast.success(tRef.current('pwa.installPrompt.installed'));
     };
 
     window.addEventListener('beforeinstallprompt', onBeforeInstallPrompt as EventListener);
@@ -95,5 +100,5 @@ export const usePwaInstallPrompt = () => {
       window.removeEventListener('beforeinstallprompt', onBeforeInstallPrompt as EventListener);
       window.removeEventListener('appinstalled', onAppInstalled);
     };
-  }, [browserTab, t]);
+  }, [browserTab]);
 };
