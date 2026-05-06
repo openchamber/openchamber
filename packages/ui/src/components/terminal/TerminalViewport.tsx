@@ -1000,6 +1000,7 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
           if (useHiddenInputOverlay && target instanceof HTMLElement) {
             window.setTimeout(() => {
               target.blur();
+              focusHiddenInput();
             }, 0);
             setTerminalCursorBlink(false);
             return;
