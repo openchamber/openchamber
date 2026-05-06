@@ -139,6 +139,7 @@ export function createTerminalRuntime({
             ...env,
             TERM: 'xterm-256color',
             COLORTERM: 'truecolor',
+            LANG: env.LANG || process.env.LANG || 'C.UTF-8',
           },
         };
 
