@@ -1,19 +1,13 @@
 import React from 'react';
-import { RiGitCommitLine, RiArrowDownLine, RiLoader4Line } from '@remixicon/react';
+import { RiArchiveStackLine, RiGitCommitLine } from '@remixicon/react';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
 
 interface GitEmptyStateProps {
-  behind: number;
-  onPull: () => void;
-  isPulling: boolean;
+  onOpenStashes?: () => void;
 }
 
-export const GitEmptyState: React.FC<GitEmptyStateProps> = ({
-  behind,
-  onPull,
-  isPulling,
-}) => {
+export const GitEmptyState: React.FC<GitEmptyStateProps> = ({ onOpenStashes }) => {
   const { t } = useI18n();
   return (
     <div className="flex flex-col items-center justify-center py-10 px-4 text-center">
@@ -25,22 +19,18 @@ export const GitEmptyState: React.FC<GitEmptyStateProps> = ({
         {t('gitView.empty.cleanDescription')}
       </p>
 
-      {behind > 0 && (
+      {onOpenStashes ? (
         <Button
+          type="button"
           variant="outline"
-          onClick={onPull}
-          disabled={isPulling}
+          size="sm"
+          onClick={onOpenStashes}
+          className="gap-1.5"
         >
-          {isPulling ? (
-            <RiLoader4Line className="size-4 animate-spin" />
-          ) : (
-            <RiArrowDownLine className="size-4" />
-          )}
-          {behind === 1
-            ? t('gitView.empty.pullBehindSingle', { count: behind })
-            : t('gitView.empty.pullBehindPlural', { count: behind })}
+          <RiArchiveStackLine className="size-4" />
+          {t('gitView.stashes.title')}
         </Button>
-      )}
+      ) : null}
     </div>
   );
 };

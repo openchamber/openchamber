@@ -1,5 +1,5 @@
 import React from 'react';
-import { RiCommandLine, RiFileLine, RiFlashlightLine, RiRefreshLine, RiScissorsLine, RiTerminalBoxLine, RiArrowGoBackLine, RiArrowGoForwardLine, RiSearchEyeLine } from '@remixicon/react';
+import { RiCommandLine, RiFileLine, RiFlashlightLine, RiRefreshLine, RiScissorsLine, RiTerminalBoxLine, RiArrowGoBackLine, RiArrowGoForwardLine, RiSearchEyeLine, RiTimeLine } from '@remixicon/react';
 import { cn, fuzzyMatch } from '@/lib/utils';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionMessages } from '@/sync/sync-context';
@@ -120,6 +120,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
             ? [
                 { id: 'openchamber:undo', name: 'undo', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.undoDescription'), isBuiltIn: true },
                 { id: 'openchamber:redo', name: 'redo', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.redoDescription'), isBuiltIn: true },
+                { id: 'openchamber:timeline', name: 'timeline', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.timelineDescription'), isBuiltIn: true },
               ]
             : []
           ),
@@ -164,6 +165,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
             ? [
                 { id: 'openchamber:undo', name: 'undo', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.undoDescription'), isBuiltIn: true },
                 { id: 'openchamber:redo', name: 'redo', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.redoDescription'), isBuiltIn: true },
+                { id: 'openchamber:timeline', name: 'timeline', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.timelineDescription'), isBuiltIn: true },
               ]
             : []
           ),
@@ -246,6 +248,8 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
         return <RiArrowGoBackLine className="h-3.5 w-3.5 text-orange-500" />;
       case 'redo':
         return <RiArrowGoForwardLine className="h-3.5 w-3.5 text-orange-500" />;
+      case 'timeline':
+        return <RiTimeLine className="h-3.5 w-3.5" />;
       case 'compact':
         return <RiScissorsLine className="h-3.5 w-3.5 text-purple-500" />;
       case 'review':

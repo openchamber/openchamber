@@ -28,12 +28,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
@@ -447,8 +441,6 @@ export const PullRequestSection: React.FC<{
 
     return Array.from(unique).sort((a, b) => a.localeCompare(b));
   }, [baseBranch, remoteBranches, selectedRemote?.name, targetBaseBranch, upstreamBranches, useDetectedUpstream]);
-
-  const hasMultipleRemotes = remotes.length > 1;
 
   // Update selected remote when remotes change
   React.useEffect(() => {
@@ -1018,12 +1010,6 @@ export const PullRequestSection: React.FC<{
     }, delayMs));
   }, [refresh]);
 
-  // Refetch PR status when selected remote changes
-  const handleRemoteChange = React.useCallback((remote: GitRemote) => {
-    didUserOverrideRemoteRef.current = true;
-    setSelectedRemote((prev) => (prev?.name === remote.name ? prev : remote));
-  }, []);
-
   React.useEffect(() => {
     if (!github?.prStatus || !canShow || remotes.length <= 1) {
       return;
@@ -1379,7 +1365,16 @@ export const PullRequestSection: React.FC<{
   }, [directory, editBody, editTitle, github, prStatusKey, refresh, scheduleActionRefresh, updatePrStatus, t]);
 
   if (!canShow) {
-    return null;
+    return (
+      <section className="border-0 bg-transparent rounded-none">
+        <div className="space-y-1 pt-3">
+          <div className="typography-ui-header font-semibold text-foreground">{t('gitView.pullRequest.title')}</div>
+          <div className="typography-micro text-muted-foreground">
+            {t('gitView.pullRequest.availableOnFeatureBranches')}
+          </div>
+        </div>
+      </section>
+    );
   }
 
   const originRepoUrl = status?.repo?.url || null;
@@ -1397,7 +1392,20 @@ export const PullRequestSection: React.FC<{
       : prVisualState === 'closed'
         ? RiGitClosePullRequestLine
         : RiGitPullRequestLine;
-
+  const prStatusText = pr
+    ? [
+        `${pr.state}${pr.draft ? ' (draft)' : ''}`,
+        pr.mergeable === false ? t('gitView.pr.notMergeable') : null,
+        pr.state === 'open' && typeof pr.mergeableState === 'string' && pr.mergeableState && pr.mergeableState !== 'unknown'
+          ? pr.mergeableState
+          : null,
+      ].filter(Boolean).join(' · ')
+    : '';
+  const checksText = checks
+    ? checks.total > 0
+      ? `${checks.success}/${checks.total} ${t('gitView.pr.checks.label')}`
+      : `${checks.state} ${t('gitView.pr.checks.label')}`
+    : '';
   const containerClassName = 'border-0 bg-transparent rounded-none';
   const headerClassName = 'px-0 py-3 border-b border-border/40 flex flex-col gap-1';
   const bodyClassName = 'flex flex-col gap-3 py-3';
@@ -1405,8 +1413,8 @@ export const PullRequestSection: React.FC<{
   return (
     <section className={containerClassName}>
       <div className={headerClassName}>
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
             {pr ? (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -1429,7 +1437,7 @@ export const PullRequestSection: React.FC<{
               <span className="typography-meta text-muted-foreground truncate">#{pr.number}</span>
             ) : null}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1">
             {isLoading ? <RiLoader4Line className="size-4 animate-spin text-muted-foreground" /> : null}
             <Tooltip>
               <TooltipTrigger asChild>
@@ -1445,83 +1453,23 @@ export const PullRequestSection: React.FC<{
               </TooltipTrigger>
               <TooltipContent><p>{t('gitView.pr.actions.refresh')}</p></TooltipContent>
             </Tooltip>
+          </div>
+        </div>
+
+        {pr ? (
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 typography-micro text-muted-foreground">
+            <span style={{ color: prColorVar }}>{prStatusText}</span>
             {checks ? (
-              <span className="inline-flex items-center gap-2 typography-micro text-muted-foreground">
+              <span className="inline-flex items-center gap-1.5">
                 <span className={`h-2 w-2 rounded-full ${statusColor(checks.state)}`} />
-                {checks.total > 0 ? `${checks.success}/${checks.total} checks` : `${checks.state} checks`}
+                {checksText}
               </span>
             ) : null}
             {trackingBranch && selectedRemote && trackingBranch.split('/')[0] !== selectedRemote.name ? (
-              <span className="typography-micro text-muted-foreground">
+              <span className="min-w-0 truncate">
                 {trackingBranch.split('/')[0]} → {selectedRemote.name}
               </span>
             ) : null}
-            {hasMultipleRemotes || detectedUpstream ? (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="xs" className="gap-1">
-                    <span className="typography-micro">
-                      {useDetectedUpstream && detectedUpstream
-                        ? `upstream · ${detectedUpstream.owner}/${detectedUpstream.repo}`
-                        : selectedRemote?.name ?? 'target'}
-                    </span>
-                    <RiArrowDownSLine className="size-3" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="min-w-[200px]">
-                  {remotes.map((remote) => (
-                    <DropdownMenuItem
-                      key={remote.name}
-                      onSelect={() => {
-                        setUseDetectedUpstream(false);
-                        handleRemoteChange(remote);
-                      }}
-                    >
-                      <div className="flex flex-col">
-                        <span className="typography-ui-label text-foreground">
-                          {remote.name}
-                          {!useDetectedUpstream && remote.name === selectedRemote?.name && (
-                            <span className="ml-2 text-primary">✓</span>
-                          )}
-                        </span>
-                        <span className="typography-meta text-muted-foreground truncate">
-                          {remote.pushUrl}
-                        </span>
-                      </div>
-                    </DropdownMenuItem>
-                  ))}
-                  {detectedUpstream ? (
-                    <DropdownMenuItem
-                      key="detected-upstream"
-                      onSelect={() => setUseDetectedUpstream(true)}
-                    >
-                      <div className="flex flex-col">
-                        <span className="typography-ui-label text-foreground">
-                          upstream · {detectedUpstream.owner}/{detectedUpstream.repo}
-                          {useDetectedUpstream && (
-                            <span className="ml-2 text-primary">✓</span>
-                          )}
-                        </span>
-                        <span className="typography-meta text-muted-foreground truncate">
-                          {detectedUpstream.url}
-                        </span>
-                      </div>
-                    </DropdownMenuItem>
-                  ) : null}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            ) : null}
-          </div>
-        </div>
-        {pr ? (
-          <div className="typography-micro text-muted-foreground">
-            <span style={{ color: prColorVar }}>
-              {pr.state}{pr.draft ? ' (draft)' : ''}
-            </span>
-            {pr.mergeable === false ? ` · ${t('gitView.pr.notMergeable')}` : ''}
-            {pr.state === 'open' && typeof pr.mergeableState === 'string' && pr.mergeableState && pr.mergeableState !== 'unknown'
-              ? ` · ${pr.mergeableState}`
-              : ''}
           </div>
         ) : null}
       </div>

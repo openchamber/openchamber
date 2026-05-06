@@ -690,6 +690,169 @@ const updateRoutingIndexFromEvent = (
   }
 }
 
+/**
+ * Re-fetch pending questions and permissions for a directory and merge them
+ * into the directory's child store, preserving any in-flight SSE updates that
+ * arrived while the request was pending. Shared between reconnect resync and
+ * session-switch resync (the latter is a belt-and-suspenders backstop for any
+ * code path that drops a `question.asked` / `permission.requested` event —
+ * directory-eviction rehydration, cross-directory session switches, transport
+ * fallback gaps, etc.). When `candidateSessionIds` is omitted, every session
+ * known to the directory store is treated as a candidate.
+ */
+export async function resyncBlockingRequestsForDirectory(
+  directory: string,
+  store: StoreApi<DirectoryStore>,
+  candidateSessionIds?: string[],
+) {
+  const before = store.getState()
+  const knownSessionIds = new Set<string>([
+    ...before.session.map((session) => session.id),
+    ...Object.keys(before.message ?? {}),
+    ...Object.keys(before.session_status ?? {}),
+    ...Object.keys(before.question ?? {}),
+    ...Object.keys(before.permission ?? {}),
+  ])
+  const candidates = candidateSessionIds ?? Array.from(knownSessionIds)
+  if (candidates.length === 0) return
+
+  // Re-fetch pending questions — they may have been asked during an SSE gap,
+  // a directory-eviction window, or a session-switch that bypassed bootstrap.
+  try {
+    const beforeSignatures = new Map(
+      candidates.map((sessionId) => [sessionId, requestSignature(before.question[sessionId])]),
+    )
+    const pendingQuestions = await opencodeClient.listPendingQuestions({ directories: [directory] })
+    const grouped: Record<string, QuestionRequest[]> = {}
+    for (const q of pendingQuestions) {
+      if (!q?.id || !q.sessionID) continue
+      if (!knownSessionIds.has(q.sessionID)) continue
+      const list = grouped[q.sessionID]
+      if (list) list.push(q)
+      else grouped[q.sessionID] = [q]
+    }
+    for (const sessionId of Object.keys(grouped)) {
+      grouped[sessionId].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    }
+
+    for (const [sessionId, questions] of Object.entries(grouped)) {
+      const knownIds = new Set((before.question[sessionId] ?? []).map((item) => item.id))
+      const isViewed = isViewedInCurrentSession(directory, sessionId)
+      if (isViewed) continue
+      for (const question of questions) {
+        if (knownIds.has(question.id)) continue
+        const toastKey = getQuestionToastKey(sessionId, question.id)
+        if (!toastKey || pendingQuestionToastIds.has(toastKey)) continue
+        pendingQuestionToastIds.add(toastKey)
+        const firstQuestion = question.questions?.[0]
+        const title = firstQuestion?.header?.trim() || "Input needed"
+        const description = firstQuestion?.question?.trim() || "Agent is waiting for your response"
+        toast.info(title, {
+          id: `question-${toastKey}`,
+          description,
+          action: {
+            label: "Open session",
+            onClick: () => openSessionFromToast(sessionId, directory),
+          },
+        })
+      }
+    }
+
+    store.setState((state: DirectoryStore) => {
+      const merged = { ...state.question }
+      for (const [sessionId, questions] of Object.entries(grouped)) {
+        merged[sessionId] = questions
+      }
+      for (const sessionId of candidates) {
+        if (grouped[sessionId]) continue
+        const beforeSignature = beforeSignatures.get(sessionId) ?? ""
+        const currentSignature = requestSignature(state.question[sessionId])
+        if (currentSignature !== beforeSignature) continue
+        delete merged[sessionId]
+      }
+      return { question: merged }
+    })
+  } catch {
+    // Non-fatal: question resync best-effort
+  }
+
+  // Re-fetch pending permissions — same rationale as questions.
+  try {
+    const beforeSignatures = new Map(
+      candidates.map((sessionId) => [sessionId, requestSignature(before.permission[sessionId])]),
+    )
+    const pendingPermissions = await opencodeClient.listPendingPermissions({ directories: [directory] })
+    const grouped: Record<string, PermissionRequest[]> = {}
+    for (const permission of pendingPermissions) {
+      if (!permission?.id || !permission.sessionID) continue
+      if (!knownSessionIds.has(permission.sessionID)) continue
+      const list = grouped[permission.sessionID]
+      if (list) list.push(permission)
+      else grouped[permission.sessionID] = [permission]
+    }
+    for (const sessionId of Object.keys(grouped)) {
+      grouped[sessionId].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    }
+
+    const permissionStore = usePermissionStore.getState()
+    const autoAcceptingSessionIds = Object.keys(grouped).filter((sessionId) => permissionStore.isSessionAutoAccepting(sessionId))
+
+    if (autoAcceptingSessionIds.length > 0) {
+      await Promise.all(
+        autoAcceptingSessionIds.flatMap((sessionId) =>
+          (grouped[sessionId] ?? []).map((permission) =>
+            sessionActions.respondToPermission(permission.sessionID, permission.id, "once").catch(() => undefined),
+          ),
+        ),
+      )
+
+      for (const sessionId of autoAcceptingSessionIds) {
+        delete grouped[sessionId]
+      }
+    }
+
+    for (const [sessionId, permissions] of Object.entries(grouped)) {
+      const knownIds = new Set((before.permission[sessionId] ?? []).map((item) => item.id))
+      const isViewed = isViewedInCurrentSession(directory, sessionId)
+      if (isViewed) continue
+      for (const permission of permissions) {
+        if (knownIds.has(permission.id)) continue
+        const toastKey = getPermissionToastKey(sessionId, permission.id)
+        if (!toastKey || pendingPermissionToastIds.has(toastKey)) continue
+        pendingPermissionToastIds.add(toastKey)
+        const description = typeof permission.permission === "string" && permission.permission.trim().length > 0
+          ? permission.permission
+          : "Agent needs your approval"
+        toast.info("Permission needed", {
+          id: `permission-${toastKey}`,
+          description,
+          action: {
+            label: "Open session",
+            onClick: () => openSessionFromToast(sessionId, directory),
+          },
+        })
+      }
+    }
+
+    store.setState((state: DirectoryStore) => {
+      const merged = { ...state.permission }
+      for (const [sessionId, permissions] of Object.entries(grouped)) {
+        merged[sessionId] = permissions
+      }
+      for (const sessionId of candidates) {
+        if (grouped[sessionId]) continue
+        const beforeSignature = beforeSignatures.get(sessionId) ?? ""
+        const currentSignature = requestSignature(state.permission[sessionId])
+        if (currentSignature !== beforeSignature) continue
+        delete merged[sessionId]
+      }
+      return { permission: merged }
+    })
+  } catch {
+    // Non-fatal: permission resync best-effort
+  }
+}
+
 async function resyncDirectoryAfterReconnect(
   directory: string,
   store: StoreApi<DirectoryStore>,
@@ -805,161 +968,7 @@ async function resyncDirectoryAfterReconnect(
     setIndexedSessionMessages(routingIndex, sessionId, directory, nextMessages)
   }))
 
-  // Re-fetch pending questions on reconnect — they may have been asked
-  // during the SSE disconnection window and will not arrive via SSE events.
-  // Overwrite sessions covered by API response, and clear reconnect candidates
-  // that remain unchanged during the request but are absent from the response.
-  // If SSE changed a session while the request was in-flight, keep that data.
-  try {
-    const before = store.getState()
-    const knownSessionIds = new Set<string>([
-      ...before.session.map((session) => session.id),
-      ...Object.keys(before.message ?? {}),
-      ...Object.keys(before.session_status ?? {}),
-      ...Object.keys(before.question ?? {}),
-      ...Object.keys(before.permission ?? {}),
-    ])
-    const beforeSignatures = new Map(
-      candidateSessionIds.map((sessionId) => [sessionId, requestSignature(before.question[sessionId])]),
-    )
-    const pendingQuestions = await opencodeClient.listPendingQuestions({ directories: [directory] })
-    const grouped: Record<string, QuestionRequest[]> = {}
-    for (const q of pendingQuestions) {
-      if (!q?.id || !q.sessionID) continue
-      if (!knownSessionIds.has(q.sessionID)) continue
-      const list = grouped[q.sessionID]
-      if (list) list.push(q)
-      else grouped[q.sessionID] = [q]
-    }
-    // Sort each group by id for binary-search compatibility
-    for (const sessionId of Object.keys(grouped)) {
-      grouped[sessionId].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-    }
-
-    for (const [sessionId, questions] of Object.entries(grouped)) {
-      const knownIds = new Set((before.question[sessionId] ?? []).map((item) => item.id))
-      const isViewed = isViewedInCurrentSession(directory, sessionId)
-      if (isViewed) continue
-      for (const question of questions) {
-        if (knownIds.has(question.id)) continue
-        const toastKey = getQuestionToastKey(sessionId, question.id)
-        if (!toastKey || pendingQuestionToastIds.has(toastKey)) continue
-        pendingQuestionToastIds.add(toastKey)
-        const firstQuestion = question.questions?.[0]
-        const title = firstQuestion?.header?.trim() || "Input needed"
-        const description = firstQuestion?.question?.trim() || "Agent is waiting for your response"
-        toast.info(title, {
-          id: `question-${toastKey}`,
-          description,
-          action: {
-            label: "Open session",
-            onClick: () => openSessionFromToast(sessionId, directory),
-          },
-        })
-      }
-    }
-
-    store.setState((state: DirectoryStore) => {
-      const merged = { ...state.question }
-      for (const [sessionId, questions] of Object.entries(grouped)) {
-        merged[sessionId] = questions
-      }
-      for (const sessionId of candidateSessionIds) {
-        if (grouped[sessionId]) continue
-        const beforeSignature = beforeSignatures.get(sessionId) ?? ""
-        const currentSignature = requestSignature(state.question[sessionId])
-        if (currentSignature !== beforeSignature) continue
-        delete merged[sessionId]
-      }
-      return { question: merged }
-    })
-  } catch {
-    // Non-fatal: question resync best-effort
-  }
-
-  // Re-fetch pending permissions on reconnect — same rationale as questions.
-  try {
-    const before = store.getState()
-    const knownSessionIds = new Set<string>([
-      ...before.session.map((session) => session.id),
-      ...Object.keys(before.message ?? {}),
-      ...Object.keys(before.session_status ?? {}),
-      ...Object.keys(before.question ?? {}),
-      ...Object.keys(before.permission ?? {}),
-    ])
-    const beforeSignatures = new Map(
-      candidateSessionIds.map((sessionId) => [sessionId, requestSignature(before.permission[sessionId])]),
-    )
-    const pendingPermissions = await opencodeClient.listPendingPermissions({ directories: [directory] })
-    const grouped: Record<string, PermissionRequest[]> = {}
-    for (const permission of pendingPermissions) {
-      if (!permission?.id || !permission.sessionID) continue
-      if (!knownSessionIds.has(permission.sessionID)) continue
-      const list = grouped[permission.sessionID]
-      if (list) list.push(permission)
-      else grouped[permission.sessionID] = [permission]
-    }
-    for (const sessionId of Object.keys(grouped)) {
-      grouped[sessionId].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-    }
-
-    const permissionStore = usePermissionStore.getState()
-    const autoAcceptingSessionIds = Object.keys(grouped).filter((sessionId) => permissionStore.isSessionAutoAccepting(sessionId))
-
-    if (autoAcceptingSessionIds.length > 0) {
-      await Promise.all(
-        autoAcceptingSessionIds.flatMap((sessionId) =>
-          (grouped[sessionId] ?? []).map((permission) =>
-            sessionActions.respondToPermission(permission.sessionID, permission.id, "once").catch(() => undefined),
-          ),
-        ),
-      )
-
-      for (const sessionId of autoAcceptingSessionIds) {
-        delete grouped[sessionId]
-      }
-    }
-
-    for (const [sessionId, permissions] of Object.entries(grouped)) {
-      const knownIds = new Set((before.permission[sessionId] ?? []).map((item) => item.id))
-      const isViewed = isViewedInCurrentSession(directory, sessionId)
-      if (isViewed) continue
-      for (const permission of permissions) {
-        if (knownIds.has(permission.id)) continue
-        const toastKey = getPermissionToastKey(sessionId, permission.id)
-        if (!toastKey || pendingPermissionToastIds.has(toastKey)) continue
-        pendingPermissionToastIds.add(toastKey)
-        const description = typeof permission.permission === "string" && permission.permission.trim().length > 0
-          ? permission.permission
-          : "Agent needs your approval"
-        toast.info("Permission needed", {
-          id: `permission-${toastKey}`,
-          description,
-          action: {
-            label: "Open session",
-            onClick: () => openSessionFromToast(sessionId, directory),
-          },
-        })
-      }
-    }
-
-    store.setState((state: DirectoryStore) => {
-      const merged = { ...state.permission }
-      for (const [sessionId, permissions] of Object.entries(grouped)) {
-        merged[sessionId] = permissions
-      }
-      for (const sessionId of candidateSessionIds) {
-        if (grouped[sessionId]) continue
-        const beforeSignature = beforeSignatures.get(sessionId) ?? ""
-        const currentSignature = requestSignature(state.permission[sessionId])
-        if (currentSignature !== beforeSignature) continue
-        delete merged[sessionId]
-      }
-      return { permission: merged }
-    })
-  } catch {
-    // Non-fatal: permission resync best-effort
-  }
+  await resyncBlockingRequestsForDirectory(directory, store, candidateSessionIds)
 
   ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
 }
@@ -1467,6 +1476,46 @@ export function SyncProvider(props: {
       updateStreamingState(state)
     })
     return unsubscribe
+  }, [props.directory, childStores])
+
+  // Re-fetch pending questions/permissions on session-switch.
+  // PR #909 only re-fetches on SSE reconnect, leaving an event-drop gap when
+  // switching sessions within the same socket — the question.asked event may
+  // have arrived while a different session was active and the directory store
+  // was evicted, or the user may navigate back to a directory whose store was
+  // rebuilt after eviction. A 250ms debounce coalesces rapid switches.
+  useEffect(() => {
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let lastSessionId: string | null = null
+    let unsub: (() => void) | undefined
+    void import("./session-ui-store")
+      .then(({ useSessionUIStore }) => {
+        if (cancelled) return
+        lastSessionId = useSessionUIStore.getState().currentSessionId
+        unsub = useSessionUIStore.subscribe((state) => {
+          const nextSessionId = state.currentSessionId
+          if (nextSessionId === lastSessionId) return
+          lastSessionId = nextSessionId
+          if (!nextSessionId) return
+          const sessionDirectory = state.getDirectoryForSession(nextSessionId)
+            ?? opencodeClient.getDirectory()
+            ?? props.directory
+          if (!sessionDirectory) return
+          if (timer) clearTimeout(timer)
+          timer = setTimeout(() => {
+            const currentStore = childStores.getChild(sessionDirectory)
+            if (!currentStore) return
+            void resyncBlockingRequestsForDirectory(sessionDirectory, currentStore).catch(() => undefined)
+          }, 250)
+        })
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+      unsub?.()
+    }
   }, [props.directory, childStores])
 
   return <SyncContext.Provider value={system}>{props.children}</SyncContext.Provider>

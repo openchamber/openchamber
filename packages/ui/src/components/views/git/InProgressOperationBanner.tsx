@@ -79,8 +79,8 @@ export const InProgressOperationBanner: React.FC<InProgressOperationBannerProps>
 
   return (
     <div className="bg-[var(--status-warning-bg)] border border-[var(--status-warning)] rounded-lg p-3 mx-3 mt-3">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2 min-w-0">
+      <div className="flex flex-col gap-3">
+        <div className="flex items-start gap-2 min-w-0">
           <OperationIcon className="size-4 text-[var(--status-warning)] shrink-0" />
           <div className="min-w-0">
             <p className="typography-label text-[var(--status-warning)]">
@@ -94,7 +94,7 @@ export const InProgressOperationBanner: React.FC<InProgressOperationBannerProps>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2">
           {hasUnresolvedConflicts && onResolveWithAI && (
             <Button
               variant="outline"
@@ -142,13 +142,13 @@ export const InProgressOperationBanner: React.FC<InProgressOperationBannerProps>
             </Button>
           )}
         </div>
-      </div>
 
-      {hasUnresolvedConflicts && (
-        <p className="typography-micro text-[var(--status-warning)] mt-2">
-          {t('gitView.operation.resolveConflictsHint')}
-        </p>
-      )}
+        {hasUnresolvedConflicts && (
+          <p className="typography-micro text-[var(--status-warning)]">
+            {t('gitView.operation.resolveConflictsHint')}
+          </p>
+        )}
+      </div>
     </div>
   );
 };

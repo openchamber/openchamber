@@ -875,6 +875,51 @@ export const createOpenCodeEnvRuntime = (deps) => {
     }
   };
 
+  const isMacOpenCodeAppBundlePath = (candidate) => {
+    if (process.platform !== 'darwin' || typeof candidate !== 'string') {
+      return false;
+    }
+    return /\/OpenCode\.app\/Contents\/MacOS\/(?:OpenCode|opencode-cli)$/i.test(candidate);
+  };
+
+  const createConfiguredOpencodeBinaryError = (raw, normalized) => {
+    const configured = typeof raw === 'string' ? raw.trim() : '';
+    const candidate = typeof normalized === 'string' && normalized.trim().length > 0 ? normalized.trim() : configured;
+    const messageSuffix = 'OpenChamber needs the standalone opencode CLI. Install it and set settings.opencodeBinary to the CLI path, for example ~/.opencode/bin/opencode, or leave the setting empty to use PATH lookup.';
+    const error = (() => {
+      if (isMacOpenCodeAppBundlePath(candidate) || isMacOpenCodeAppBundlePath(configured)) {
+        return new Error(`Configured OpenCode binary points at the macOS desktop app bundle, not the CLI: ${candidate}. ${messageSuffix}`);
+      }
+
+      try {
+        const configuredStat = fs.statSync(configured);
+        if (configuredStat.isDirectory()) {
+          return new Error(`Configured OpenCode binary directory does not contain an executable ${process.platform === 'win32' ? 'opencode.exe' : 'opencode'}: ${configured}. ${messageSuffix}`);
+        }
+      } catch {
+      }
+
+      try {
+        const stat = fs.statSync(candidate);
+        if (stat.isDirectory()) {
+          return new Error(`Configured OpenCode binary directory does not contain an executable ${process.platform === 'win32' ? 'opencode.exe' : 'opencode'}: ${candidate}. ${messageSuffix}`);
+        }
+        if (!stat.isFile()) {
+          return new Error(`Configured OpenCode binary is not a file: ${candidate}. ${messageSuffix}`);
+        }
+        return new Error(`Configured OpenCode binary is not executable: ${candidate}. ${messageSuffix}`);
+      } catch {
+        return new Error(`Configured OpenCode binary not found: ${candidate}. ${messageSuffix}`);
+      }
+    })();
+    error.code = 'OPENCODE_BINARY_INVALID';
+    return error;
+  };
+
+  const createConfiguredWslOpencodeError = (raw) => new Error(
+    `Configured settings.opencodeBinary uses WSL but OpenChamber could not resolve a WSL OpenCode command: ${raw}. Ensure WSL is available and opencode is installed in the configured distro.`
+  );
+
   const normalizeOpencodeBinarySetting = (raw) => {
     if (typeof raw !== 'string') {
       return null;
@@ -896,7 +941,8 @@ export const createOpenCodeEnvRuntime = (deps) => {
     return trimmed;
   };
 
-  const applyOpencodeBinaryFromSettings = async () => {
+  const applyOpencodeBinaryFromSettings = async (options = {}) => {
+    const strict = options?.strict === true;
     try {
       const settings = await readSettingsFromDiskMigrated();
       if (!settings || typeof settings !== 'object') {
@@ -932,6 +978,9 @@ export const createOpenCodeEnvRuntime = (deps) => {
         if (applied) {
           return applied;
         }
+        if (strict) {
+          throw createConfiguredWslOpencodeError(raw);
+        }
       }
 
       if (process.platform === 'win32' && (isWslExecutableValue(raw) || isWslExecutableValue(normalized || ''))) {
@@ -945,9 +994,12 @@ export const createOpenCodeEnvRuntime = (deps) => {
         if (applied) {
           return applied;
         }
+        if (strict) {
+          throw createConfiguredWslOpencodeError(raw);
+        }
       }
 
-      if (normalized && isExecutable(normalized)) {
+      if (normalized && isExecutable(normalized) && !isMacOpenCodeAppBundlePath(normalized)) {
         clearWslOpencodeResolution();
         process.env.OPENCODE_BINARY = normalized;
         prependToPath(path.dirname(normalized));
@@ -958,9 +1010,15 @@ export const createOpenCodeEnvRuntime = (deps) => {
       }
 
       if (raw) {
+        if (strict) {
+          throw createConfiguredOpencodeBinaryError(raw, normalized);
+        }
         console.warn(`Configured settings.opencodeBinary is not executable: ${raw}`);
       }
-    } catch {
+    } catch (error) {
+      if (strict) {
+        throw error;
+      }
     }
 
     return null;

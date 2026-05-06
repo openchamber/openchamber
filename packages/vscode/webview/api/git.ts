@@ -193,11 +193,12 @@ export const createVSCodeGitAPI = (): GitAPI => ({
     });
   },
 
-  gitPull: async (directory: string, options?: { remote?: string; branch?: string }): Promise<GitPullResult> => {
+  gitPull: async (directory: string, options?: { remote?: string; branch?: string; rebase?: boolean }): Promise<GitPullResult> => {
     return sendBridgeMessage<GitPullResult>('api:git/pull', {
       directory,
       remote: options?.remote,
       branch: options?.branch,
+      rebase: options?.rebase,
     });
   },
 
@@ -208,6 +209,13 @@ export const createVSCodeGitAPI = (): GitAPI => ({
       branch: options?.branch,
     });
   },
+
+  listGitStashes: async (directory: string) => sendBridgeMessage('api:git/stashes', { directory }),
+  countGitStashFiles: async (directory: string, refs: string[]) => sendBridgeMessage('api:git/stashes/file-counts', { directory, refs }),
+  stashGitChanges: async (directory: string, options?: { message?: string }) => sendBridgeMessage('api:git/stash', { directory, message: options?.message }),
+  applyGitStash: async (directory: string, options: { ref: string }) => sendBridgeMessage('api:git/stash/apply', { directory, ref: options.ref }),
+  popGitStash: async (directory: string, options: { ref: string }) => sendBridgeMessage('api:git/stash/pop', { directory, ref: options.ref }),
+  dropGitStash: async (directory: string, options: { ref: string }) => sendBridgeMessage('api:git/stash/drop', { directory, ref: options.ref }),
 
   checkoutBranch: async (directory: string, branch: string): Promise<{ success: boolean; branch: string }> => {
     return sendBridgeMessage<{ success: boolean; branch: string }>('api:git/checkout', {

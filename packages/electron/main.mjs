@@ -768,6 +768,7 @@ const spawnLocalServer = async () => {
   process.env.OPENCHAMBER_DIST_DIR = resolveWebDistDir();
   process.env.OPENCHAMBER_RUNTIME = 'desktop';
   process.env.OPENCHAMBER_DESKTOP_NOTIFY = 'true';
+  process.env.OPENCHAMBER_SKIP_API_COMPRESSION = process.env.OPENCHAMBER_SKIP_API_COMPRESSION || 'true';
   process.env.NO_PROXY = process.env.NO_PROXY || 'localhost,127.0.0.1';
   process.env.no_proxy = process.env.no_proxy || 'localhost,127.0.0.1';
 

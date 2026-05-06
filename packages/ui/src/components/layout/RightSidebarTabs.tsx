@@ -3,7 +3,7 @@ import { RiBookletLine, RiFolder3Line, RiGitBranchLine } from '@remixicon/react'
 
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { ProjectNotesTodoPanel } from '@/components/session/ProjectNotesTodoPanel';
-import { GitView } from '@/components/views';
+import { GitView } from '@/components/views/GitView';
 import { useGitStore } from '@/stores/useGitStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';

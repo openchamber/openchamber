@@ -19,6 +19,7 @@ export const createSettingsHelpers = (dependencies) => {
 
   const PWA_APP_NAME_MAX_LENGTH = 64;
   const PWA_ORIENTATION_VALUES = new Set(['system', 'portrait', 'landscape']);
+  const MOBILE_KEYBOARD_MODE_VALUES = new Set(['native', 'resize-content']);
 
   const normalizePwaAppName = (value, fallback = '') => {
     if (typeof value !== 'string') {
@@ -37,6 +38,17 @@ export const createSettingsHelpers = (dependencies) => {
     }
     const normalized = value.trim();
     if (PWA_ORIENTATION_VALUES.has(normalized)) {
+      return normalized;
+    }
+    return fallback;
+  };
+
+  const normalizeMobileKeyboardMode = (value, fallback = 'native') => {
+    if (typeof value !== 'string') {
+      return fallback;
+    }
+    const normalized = value.trim();
+    if (MOBILE_KEYBOARD_MODE_VALUES.has(normalized)) {
       return normalized;
     }
     return fallback;
@@ -309,6 +321,12 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.pwaOrientation === 'string') {
       result.pwaOrientation = normalizePwaOrientation(candidate.pwaOrientation, undefined);
+    }
+    if (typeof candidate.mobileKeyboardMode === 'string') {
+      const mode = normalizeMobileKeyboardMode(candidate.mobileKeyboardMode, undefined);
+      if (mode) {
+        result.mobileKeyboardMode = mode;
+      }
     }
     if (typeof candidate.toolCallExpansion === 'string') {
       const mode = candidate.toolCallExpansion.trim();
@@ -650,12 +668,14 @@ export const createSettingsHelpers = (dependencies) => {
     const hasManagedRemoteTunnelToken = typeof settings?.managedRemoteTunnelToken === 'string' && settings.managedRemoteTunnelToken.trim().length > 0;
     const pwaAppName = normalizePwaAppName(settings?.pwaAppName, '');
     const pwaOrientation = normalizePwaOrientation(settings?.pwaOrientation, 'system');
+    const mobileKeyboardMode = normalizeMobileKeyboardMode(settings?.mobileKeyboardMode, 'native');
 
     return {
       ...sanitized,
       hasManagedRemoteTunnelToken,
       ...(pwaAppName ? { pwaAppName } : {}),
       pwaOrientation,
+      mobileKeyboardMode,
       approvedDirectories: approved,
       securityScopedBookmarks: bookmarks,
       pinnedDirectories: normalizeStringArray(settings.pinnedDirectories),
@@ -672,6 +692,7 @@ export const createSettingsHelpers = (dependencies) => {
   return {
     normalizePwaAppName,
     normalizePwaOrientation,
+    normalizeMobileKeyboardMode,
     sanitizeSettingsUpdate,
     mergePersistedSettings,
     formatSettingsResponse,

@@ -1,8 +1,6 @@
 import React from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
-import { VSCodeLayout } from '@/components/layout/VSCodeLayout';
-import { AgentManagerView } from '@/components/views/agent-manager';
-import { ChatView } from '@/components/views';
+import { ChatView } from '@/components/views/ChatView';
 import { FireworksProvider } from '@/contexts/FireworksContext';
 import { Toaster } from '@/components/ui/sonner';
 import { Button } from '@/components/ui/button';
@@ -58,10 +56,19 @@ import { McpOAuthCallbackPage } from '@/components/sections/mcp/McpOAuthCallback
 import { MCP_OAUTH_CALLBACK_PATH } from '@/components/sections/mcp/mcpOAuth';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { useI18n } from '@/lib/i18n';
+import { applyMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 
 // Lazy-loaded heavy views — loaded on demand to reduce initial bundle size.
 const OnboardingScreen = lazyWithChunkRecovery(() =>
   import('@/components/onboarding/OnboardingScreen').then((m) => ({ default: m.OnboardingScreen })),
+);
+
+const VSCodeLayoutLazy = lazyWithChunkRecovery(() =>
+  import('@/components/layout/VSCodeLayout').then((m) => ({ default: m.VSCodeLayout })),
+);
+
+const AgentManagerViewLazy = lazyWithChunkRecovery(() =>
+  import('@/components/views/agent-manager').then((m) => ({ default: m.AgentManagerView })),
 );
 
 const AboutDialogWrapper: React.FC = () => {
@@ -222,6 +229,7 @@ function App({ apis }: AppProps) {
   const [initRetryEpoch, setInitRetryEpoch] = React.useState(0);
   const [manualInitRetrying, setManualInitRetrying] = React.useState(false);
   const wideChatLayoutEnabled = useUIStore((state) => state.wideChatLayoutEnabled);
+  const mobileKeyboardMode = useUIStore((state) => state.mobileKeyboardMode);
   const isDesktopRuntime = React.useMemo(() => isDesktopShell(), []);
   const setPlanModeEnabled = useFeatureFlagsStore((state) => state.setPlanModeEnabled);
   const [bootInjectionStatus, setBootInjectionStatus] = React.useState<BootInjectionStatus>(() => {
@@ -234,7 +242,6 @@ function App({ apis }: AppProps) {
       : null;
   });
   const appReadyDispatchedRef = React.useRef(false);
-  const initializationInFlightRef = React.useRef(false);
   const embeddedSessionChat = React.useMemo<EmbeddedSessionChatConfig | null>(() => readEmbeddedSessionChatConfig(), []);
   const embeddedBackgroundWorkEnabled = !embeddedSessionChat || isEmbeddedVisible;
   const isMcpOAuthCallback = React.useMemo(() => isMcpOAuthCallbackPath(), []);
@@ -245,6 +252,10 @@ function App({ apis }: AppProps) {
       setStreamPerfEnabled(false);
     };
   }, [showMemoryDebug]);
+
+  React.useEffect(() => {
+    applyMobileKeyboardMode(mobileKeyboardMode);
+  }, [mobileKeyboardMode]);
 
   React.useEffect(() => {
     setIsVSCodeRuntime(apis.runtime.isVSCode);
@@ -377,24 +388,12 @@ function App({ apis }: AppProps) {
   }, [setPlanModeEnabled]);
 
   React.useEffect(() => {
-    const init = async () => {
-      // VS Code runtime bootstraps config + sessions after the managed OpenCode instance reports "connected".
-      // Doing the default initialization here can race with startup and lead to one-shot failures.
-      if (isVSCodeRuntime) {
-        return;
-      }
-      if (initializationInFlightRef.current) {
-        return;
-      }
-      initializationInFlightRef.current = true;
-      try {
-        await initializeApp();
-      } finally {
-        initializationInFlightRef.current = false;
-      }
-    };
-
-    init();
+    // VS Code runtime bootstraps config + sessions after the managed OpenCode instance reports "connected".
+    // Doing the default initialization here can race with startup and lead to one-shot failures.
+    if (isVSCodeRuntime) {
+      return;
+    }
+    void initializeApp();
   }, [initializeApp, isVSCodeRuntime]);
 
   React.useEffect(() => {
@@ -417,18 +416,8 @@ function App({ apis }: AppProps) {
         setInitRetryExhausted(false);
         return;
       }
-      if (initializationInFlightRef.current) {
-        retryTimer = setTimeout(retryInitialization, BASE_DELAY_MS);
-        return;
-      }
-
       retryCount += 1;
-      initializationInFlightRef.current = true;
-      try {
-        await state.initializeApp();
-      } finally {
-        initializationInFlightRef.current = false;
-      }
+      await state.initializeApp();
 
       const next = useConfigStore.getState();
       if (!active) return;
@@ -754,15 +743,13 @@ function App({ apis }: AppProps) {
   }, []);
 
   const handleManualInitRetry = React.useCallback(async () => {
-    if (manualInitRetrying || initializationInFlightRef.current) return;
+    if (manualInitRetrying) return;
 
     setInitRetryExhausted(false);
     setManualInitRetrying(true);
-    initializationInFlightRef.current = true;
     try {
       await useConfigStore.getState().initializeApp();
     } finally {
-      initializationInFlightRef.current = false;
       setManualInitRetrying(false);
     }
 
@@ -876,7 +863,9 @@ function App({ apis }: AppProps) {
             <TooltipProvider delayDuration={300} skipDelayDuration={150}>
               <div className="h-full text-foreground bg-background">
                 <SyncAppEffects embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
-                <AgentManagerView />
+                <React.Suspense fallback={<div className="h-full" />}>
+                  <AgentManagerViewLazy />
+                </React.Suspense>
                 <Toaster />
               </div>
             </TooltipProvider>
@@ -894,7 +883,9 @@ function App({ apis }: AppProps) {
               <TooltipProvider delayDuration={300} skipDelayDuration={150}>
                 <div className="h-full text-foreground bg-background">
                   <SyncAppEffects embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
-                  <VSCodeLayout />
+                  <React.Suspense fallback={<div className="h-full" />}>
+                    <VSCodeLayoutLazy />
+                  </React.Suspense>
                   <Toaster />
                 </div>
               </TooltipProvider>

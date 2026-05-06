@@ -799,6 +799,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const inputSpellcheckEnabled = useUIStore((state) => state.inputSpellcheckEnabled);
     const isExpandedInput = useUIStore((state) => state.isExpandedInput);
     const setExpandedInput = useUIStore((state) => state.setExpandedInput);
+    const setTimelineDialogOpen = useUIStore((state) => state.setTimelineDialogOpen);
     const { git: runtimeGit } = useRuntimeAPIs();
     const { currentTheme } = useThemeSystem();
     const chatSearchDirectory = useChatSearchDirectory();
@@ -1492,6 +1493,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             else if (commandName === 'redo' && currentSessionId) {
                 await useSessionUIStore.getState().handleSlashRedo(currentSessionId);
                 scrollToBottom?.({ instant: true, force: true });
+                return;
+            }
+            else if (commandName === 'timeline' && currentSessionId) {
+                setTimelineDialogOpen(true);
                 return;
             }
             else if (commandName === 'compact' && currentSessionId) {

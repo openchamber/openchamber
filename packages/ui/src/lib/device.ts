@@ -11,6 +11,7 @@ export interface DeviceInfo {
   screenWidth: number;
   breakpoint: 'xs' | 'sm' | 'md' | 'lg' | 'xl' | '2xl';
   hasTouchInput: boolean;
+  hasTouchOnlyPointer: boolean;
 }
 
 export const CSS_DEVICE_VARIABLES = {
@@ -100,6 +101,7 @@ export function getDeviceInfo(): DeviceInfo {
   const { isExplicitTablet } = getNavigatorDeviceHints(maxTouchPoints);
 
   const hasTouchInput = prefersCoarsePointer || noHover || maxTouchPoints > 0;
+  const hasTouchOnlyPointer = prefersCoarsePointer || noHover;
 
   const isTabletWidth = width > BREAKPOINTS.md && width <= BREAKPOINTS.lg;
   const isMobileWidth = width <= BREAKPOINTS.md;
@@ -140,6 +142,7 @@ export function getDeviceInfo(): DeviceInfo {
     screenWidth: width,
     breakpoint,
     hasTouchInput,
+    hasTouchOnlyPointer,
   };
 }
 
@@ -231,6 +234,7 @@ export function useDeviceInfo(): DeviceInfo {
         screenWidth: 1024,
         breakpoint: 'lg',
         hasTouchInput: false,
+        hasTouchOnlyPointer: false,
       };
     }
     return getDeviceInfo();

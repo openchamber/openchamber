@@ -166,6 +166,13 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
     customizable: true,
   },
   {
+    id: 'open_timeline_dialog',
+    defaultCombo: 'mod+t',
+    label: 'Open conversation timeline',
+    description: 'Search and navigate within current conversation',
+    customizable: true,
+  },
+  {
     id: 'toggle_right_sidebar',
     defaultCombo: 'mod+b',
     label: 'Toggle right sidebar',

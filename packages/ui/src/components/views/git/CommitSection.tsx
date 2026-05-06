@@ -25,7 +25,6 @@ interface CommitSectionProps {
   onCommit: () => void;
   onCommitAndPush: () => void;
   commitAction: CommitAction;
-  isBusy: boolean;
   gitmojiEnabled: boolean;
   onOpenGitmojiPicker: () => void;
 }
@@ -41,7 +40,6 @@ export const CommitSection: React.FC<CommitSectionProps> = ({
   onCommit,
   onCommitAndPush,
   commitAction,
-  isBusy,
   gitmojiEnabled,
   onOpenGitmojiPicker,
 }) => {
@@ -102,8 +100,7 @@ export const CommitSection: React.FC<CommitSectionProps> = ({
             disabled={
               isGeneratingMessage ||
               commitAction !== null ||
-              selectedCount === 0 ||
-              isBusy
+              selectedCount === 0
             }
             type="button"
             aria-label={t('gitView.commit.generateAria')}

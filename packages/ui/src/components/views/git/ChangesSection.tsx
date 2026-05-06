@@ -1,6 +1,6 @@
 import React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { RiFolder3Fill, RiFolderOpenFill } from '@remixicon/react';
+import { RiArchiveStackLine, RiFolder3Fill, RiFolderOpenFill } from '@remixicon/react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import {
@@ -33,6 +33,7 @@ interface ChangesSectionProps {
   isRevertingAll?: boolean;
   maxListHeightClassName?: string;
   onVisiblePathsChange?: (paths: string[]) => void;
+  onOpenStashes?: () => void;
 }
 
 const CHANGE_LIST_VIRTUALIZE_THRESHOLD = 120;
@@ -183,6 +184,7 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
   isRevertingAll = false,
   maxListHeightClassName,
   onVisiblePathsChange,
+  onOpenStashes,
 }) => {
   const { t } = useI18n();
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
@@ -462,6 +464,19 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
                 />
                 <span className="typography-meta text-muted-foreground">{selectedCount}/{totalCount}</span>
               </div>
+            ) : null}
+            {onOpenStashes ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                className="h-6 px-1.5"
+                onClick={onOpenStashes}
+                aria-label={t('gitView.stashes.title')}
+                title={t('gitView.stashes.title')}
+              >
+                <RiArchiveStackLine className="size-4" />
+              </Button>
             ) : null}
           </div>
           <div className="flex items-center gap-2 pr-1">

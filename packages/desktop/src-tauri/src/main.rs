@@ -2653,6 +2653,7 @@ async fn spawn_local_server(app: &tauri::AppHandle) -> Result<String> {
             .env("OPENCHAMBER_DIST_DIR", dist_dir.clone())
             .env("OPENCHAMBER_RUNTIME", "desktop")
             .env("OPENCHAMBER_DESKTOP_NOTIFY", "true")
+            .env("OPENCHAMBER_SKIP_API_COMPRESSION", "true")
             .env("PATH", augmented_path.clone())
             .env("NO_PROXY", no_proxy)
             .env("no_proxy", no_proxy);

@@ -1,7 +1,7 @@
 import { create, type StoreApi } from "zustand"
 import type { DirState, State } from "./types"
 import { INITIAL_STATE, MAX_DIR_STORES, DIR_IDLE_TTL_MS } from "./types"
-import { pickDirectoriesToEvict, canDisposeDirectory } from "./eviction"
+import { pickDirectoriesToEvict, canDisposeDirectory, hasPendingBlockingRequests } from "./eviction"
 import { readDirCache, persistVcs, persistProjectMeta, persistIcon } from "./persist-cache"
 
 export type DirectoryStore = State & {
@@ -123,6 +123,7 @@ export class ChildStoreManager {
         pinned: this.pinned(directory),
         booting: this.isBooting?.(directory) ?? false,
         loadingSessions: this.isLoadingSessions?.(directory) ?? false,
+        hasPendingBlockingRequests: this.hasPendingBlockingRequestsForDirectory(directory),
       })
     ) {
       return false
@@ -150,10 +151,15 @@ export class ChildStoreManager {
       max: MAX_DIR_STORES,
       ttl: DIR_IDLE_TTL_MS,
       now: Date.now(),
+      hasPendingBlockingRequests: (dir) => this.hasPendingBlockingRequestsForDirectory(dir),
     }).filter((d) => d !== skip)
     for (const directory of list) {
       this.disposeDirectory(directory)
     }
+  }
+
+  hasPendingBlockingRequestsForDirectory(directory: string): boolean {
+    return hasPendingBlockingRequests(this.children.get(directory)?.getState())
   }
 
   /** Apply a state mutation to a directory's store */
