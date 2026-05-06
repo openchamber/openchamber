@@ -136,6 +136,10 @@ function shouldSkipCompression(req, res) {
   }
 
   const pathname = req.path || req.url || '';
+  if ((pathname === '/api' || pathname.startsWith('/api/')) && shouldSkipApiCompression()) {
+    return true;
+  }
+
   if (pathname.startsWith('/api/terminal/') && pathname.endsWith('/stream')) {
     return true;
   }
@@ -167,6 +171,22 @@ const isEnvFlagEnabled = (value) => {
   const normalized = value.trim().toLowerCase();
   return normalized === '1' || normalized === 'true';
 };
+
+const isEnvFlagDisabled = (value) => {
+  if (value === false || value === 0) return true;
+  if (typeof value !== 'string') return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === '0' || normalized === 'false';
+};
+
+const shouldSkipApiCompression = () => {
+  if (isEnvFlagEnabled(process.env.OPENCHAMBER_SKIP_API_COMPRESSION)) return true;
+  if (isEnvFlagEnabled(process.env.OPENCHAMBER_COMPRESS_API)) return false;
+  if (isEnvFlagDisabled(process.env.OPENCHAMBER_COMPRESS_API)) return true;
+  return process.env.OPENCHAMBER_RUNTIME === 'desktop';
+};
+
+const OPENCHAMBER_VERBOSE_REQUEST_LOGS = isEnvFlagEnabled(process.env.OPENCHAMBER_VERBOSE_REQUEST_LOGS);
 
 const PLAN_MODE_EXPERIMENT_ENABLED =
   isEnvFlagEnabled(process.env.OPENCODE_EXPERIMENTAL_PLAN_MODE)
@@ -1101,6 +1121,7 @@ async function main(options = {}) {
         planModeExperimentalEnabled: PLAN_MODE_EXPERIMENT_ENABLED,
       };
     },
+    verboseRequestLogs: OPENCHAMBER_VERBOSE_REQUEST_LOGS,
     uiPassword,
     tunnelAuthController,
     readSettingsFromDiskMigrated,

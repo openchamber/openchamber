@@ -203,6 +203,19 @@ export interface GitPullResult {
   deletions: number;
 }
 
+export interface GitPullOptions {
+  remote?: string;
+  branch?: string;
+  rebase?: boolean;
+}
+
+export interface GitStashEntry {
+  ref: string;
+  message: string;
+  relativeTime: string;
+  hash: string;
+}
+
 export interface GitRemote {
   name: string;
   fetchUrl: string;
@@ -421,8 +434,14 @@ export interface GitAPI {
   deleteGitWorktree?(directory: string, payload: RemoveGitWorktreePayload): Promise<{ success: boolean }>;
   createGitCommit(directory: string, message: string, options?: CreateGitCommitOptions): Promise<GitCommitResult>;
   gitPush(directory: string, options?: { remote?: string; branch?: string; options?: string[] | Record<string, unknown> }): Promise<GitPushResult>;
-  gitPull(directory: string, options?: { remote?: string; branch?: string }): Promise<GitPullResult>;
+  gitPull(directory: string, options?: GitPullOptions): Promise<GitPullResult>;
   gitFetch(directory: string, options?: { remote?: string; branch?: string }): Promise<{ success: boolean }>;
+  listGitStashes(directory: string): Promise<{ stashes: GitStashEntry[] }>;
+  countGitStashFiles(directory: string, refs: string[]): Promise<{ counts: Record<string, number> }>;
+  stashGitChanges(directory: string, options?: { message?: string }): Promise<{ success: boolean; created: boolean; message: string; output: string }>;
+  applyGitStash(directory: string, options: { ref: string }): Promise<{ success: boolean; ref: string }>;
+  popGitStash(directory: string, options: { ref: string }): Promise<{ success: boolean; ref: string }>;
+  dropGitStash(directory: string, options: { ref: string }): Promise<{ success: boolean; ref: string }>;
   checkoutBranch(directory: string, branch: string): Promise<{ success: boolean; branch: string }>;
   createBranch(directory: string, name: string, startPoint?: string): Promise<{ success: boolean; branch: string }>;
   renameBranch(directory: string, oldName: string, newName: string): Promise<{ success: boolean; branch: string }>;
@@ -594,6 +613,7 @@ export interface SettingsPayload {
   gitProviderId?: string;
   gitModelId?: string;
   pwaAppName?: string;
+  mobileKeyboardMode?: 'native' | 'resize-content';
 
   [key: string]: unknown;
 }

@@ -530,7 +530,7 @@ export async function gitPush(
 
 export async function gitPull(
   directory: string,
-  options: { remote?: string; branch?: string } = {}
+  options: import('./api/types').GitPullOptions = {}
 ): Promise<import('./api/types').GitPullResult> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.gitPull(directory, options);
@@ -544,6 +544,42 @@ export async function gitFetch(
   const runtime = getRuntimeGit();
   if (runtime) return runtime.gitFetch(directory, options);
   return gitHttp.gitFetch(directory, options);
+}
+
+export async function listGitStashes(directory: string): Promise<{ stashes: import('./api/types').GitStashEntry[] }> {
+  const runtime = getRuntimeGit();
+  if (runtime) return runtime.listGitStashes(directory);
+  return gitHttp.listGitStashes(directory);
+}
+
+export async function countGitStashFiles(directory: string, refs: string[]): Promise<{ counts: Record<string, number> }> {
+  const runtime = getRuntimeGit();
+  if (runtime) return runtime.countGitStashFiles(directory, refs);
+  return gitHttp.countGitStashFiles(directory, refs);
+}
+
+export async function stashGitChanges(directory: string, options: { message?: string } = {}): Promise<{ success: boolean; created: boolean; message: string; output: string }> {
+  const runtime = getRuntimeGit();
+  if (runtime) return runtime.stashGitChanges(directory, options);
+  return gitHttp.stashGitChanges(directory, options);
+}
+
+export async function applyGitStash(directory: string, options: { ref: string }): Promise<{ success: boolean; ref: string }> {
+  const runtime = getRuntimeGit();
+  if (runtime) return runtime.applyGitStash(directory, options);
+  return gitHttp.applyGitStash(directory, options);
+}
+
+export async function popGitStash(directory: string, options: { ref: string }): Promise<{ success: boolean; ref: string }> {
+  const runtime = getRuntimeGit();
+  if (runtime) return runtime.popGitStash(directory, options);
+  return gitHttp.popGitStash(directory, options);
+}
+
+export async function dropGitStash(directory: string, options: { ref: string }): Promise<{ success: boolean; ref: string }> {
+  const runtime = getRuntimeGit();
+  if (runtime) return runtime.dropGitStash(directory, options);
+  return gitHttp.dropGitStash(directory, options);
 }
 
 export async function checkoutBranch(directory: string, branch: string): Promise<{ success: boolean; branch: string }> {

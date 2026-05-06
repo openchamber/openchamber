@@ -28,7 +28,9 @@
       const defaultShortName = 'OpenChamber';
       const pwaNameStorageKey = 'openchamber.pwaName';
       const pwaOrientationStorageKey = 'openchamber.pwaOrientation';
+      const mobileKeyboardModeStorageKey = 'openchamber.mobileKeyboardMode';
       const pwaRecentSessionsStorageKey = 'openchamber.pwaRecentSessions';
+      const viewportBaseContent = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover';
 
       const normalizePwaName = (value, fallback) => {
         if (typeof value !== 'string') {
@@ -54,6 +56,57 @@
         }
         return fallback;
       };
+
+      const normalizeMobileKeyboardMode = (value, fallback = 'native') => {
+        if (value === 'native' || value === 'resize-content') {
+          return value;
+        }
+        return fallback;
+      };
+
+      const supportsMobileKeyboardResizeContent = () => {
+        const userAgent = navigator.userAgent || '';
+        const platform = navigator.platform || '';
+        const maxTouchPoints = navigator.maxTouchPoints || 0;
+        const isIOS = /iPhone|iPad|iPod/i.test(userAgent)
+          || ((/Macintosh|MacIntel/i.test(userAgent) || /MacIntel/i.test(platform)) && maxTouchPoints > 1);
+
+        return !isIOS;
+      };
+
+      const getSupportedMobileKeyboardMode = (mode) => {
+        if (mode === 'resize-content' && !supportsMobileKeyboardResizeContent()) {
+          return 'native';
+        }
+        return mode;
+      };
+
+      const getViewportContentForMobileKeyboardMode = (value) => {
+        const mode = getSupportedMobileKeyboardMode(normalizeMobileKeyboardMode(value, 'native'));
+        return mode === 'resize-content'
+          ? `${viewportBaseContent}, interactive-widget=resizes-content`
+          : viewportBaseContent;
+      };
+
+      const applyStoredMobileKeyboardMode = () => {
+        let mode = 'native';
+        try {
+          mode = getSupportedMobileKeyboardMode(normalizeMobileKeyboardMode(localStorage.getItem(mobileKeyboardModeStorageKey), 'native'));
+          if (mode === 'native') {
+            localStorage.removeItem(mobileKeyboardModeStorageKey);
+          }
+        } catch {
+          mode = 'native';
+        }
+
+        document.documentElement.setAttribute('data-oc-mobile-keyboard-mode', mode);
+        const viewportMeta = document.querySelector('meta[name="viewport"]');
+        if (viewportMeta) {
+          viewportMeta.setAttribute('content', getViewportContentForMobileKeyboardMode(mode));
+        }
+      };
+
+      applyStoredMobileKeyboardMode();
 
       const getStoredInstallName = () => {
         try {

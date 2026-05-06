@@ -253,14 +253,15 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
     }
 
     case 'api:git/pull': {
-      const { directory, remote, branch } = (payload || {}) as {
+      const { directory, remote, branch, rebase } = (payload || {}) as {
         directory?: string;
         remote?: string;
         branch?: string;
+        rebase?: boolean;
       };
       const dirError = requireDirectory(id, type, directory);
       if (dirError) return dirError;
-      const result = await gitService.gitPull(directory!, { remote, branch });
+      const result = await gitService.gitPull(directory!, { remote, branch, rebase });
       return { id, type, success: true, data: result };
     }
 
@@ -274,6 +275,42 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       if (dirError) return dirError;
       const result = await gitService.gitFetch(directory!, { remote, branch });
       return { id, type, success: true, data: result };
+    }
+
+    case 'api:git/stashes': {
+      const { directory } = (payload || {}) as { directory?: string };
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+      return { id, type, success: true, data: { stashes: await gitService.listGitStashes(directory!) } };
+    }
+
+    case 'api:git/stashes/file-counts': {
+      const { directory, refs } = (payload || {}) as { directory?: string; refs?: string[] };
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+      return { id, type, success: true, data: { counts: await gitService.countGitStashFiles(directory!, refs ?? []) } };
+    }
+
+    case 'api:git/stash': {
+      const { directory, message } = (payload || {}) as { directory?: string; message?: string };
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+      return { id, type, success: true, data: await gitService.stashGitChanges(directory!, { message }) };
+    }
+
+    case 'api:git/stash/apply':
+    case 'api:git/stash/pop':
+    case 'api:git/stash/drop': {
+      const { directory, ref } = (payload || {}) as { directory?: string; ref?: string };
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+      const stashRef = ref || 'stash@{0}';
+      const data = type === 'api:git/stash/apply'
+        ? await gitService.applyGitStash(directory!, { ref: stashRef })
+        : type === 'api:git/stash/pop'
+          ? await gitService.popGitStash(directory!, { ref: stashRef })
+          : await gitService.dropGitStash(directory!, { ref: stashRef });
+      return { id, type, success: true, data };
     }
 
     case 'api:git/remotes': {
@@ -353,26 +390,6 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       const dirError = requireDirectory(id, type, directory);
       if (dirError) return dirError;
       const result = await gitService.continueMerge(directory!);
-      return { id, type, success: true, data: result };
-    }
-
-    case 'api:git/stash': {
-      const { directory, message, includeUntracked } = (payload || {}) as {
-        directory?: string;
-        message?: string;
-        includeUntracked?: boolean;
-      };
-      const dirError = requireDirectory(id, type, directory);
-      if (dirError) return dirError;
-      const result = await gitService.stash(directory!, { message, includeUntracked });
-      return { id, type, success: true, data: result };
-    }
-
-    case 'api:git/stash/pop': {
-      const { directory } = (payload || {}) as { directory?: string };
-      const dirError = requireDirectory(id, type, directory);
-      if (dirError) return dirError;
-      const result = await gitService.stashPop(directory!);
       return { id, type, success: true, data: result };
     }
 

@@ -84,6 +84,7 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
                 isStreaming={isStreaming}
                 disableStreamAnimation={chatRenderMode === 'sorted'}
                 variant={part.type === 'reasoning' ? 'reasoning' : 'assistant'}
+                enableFileReferences={isFinalized}
             />
         </div>
     );

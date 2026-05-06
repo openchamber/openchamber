@@ -29,8 +29,8 @@
 /* Buttons should never look selectable. */
 button,
 [role="button"] {
-  user-select: none;
-  -webkit-user-select: none;
+  user-select: none !important;
+  -webkit-user-select: none !important;
 }
 
 :root.oc-theme-switching *,
@@ -976,6 +976,8 @@ html:not(.dark) .chat-scroll {
   cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 2px;
+  user-select: text !important;
+  -webkit-user-select: text !important;
 }
 
 .markdown-content [data-openchamber-file-link="true"]:hover {
@@ -1261,45 +1263,6 @@ html:not(.dark) .chat-scroll {
   background: transparent;
 }
 
-/* Hide system caret in terminal - targets both Ghostty internal input and our custom touch input */
-.terminal-viewport-container textarea,
-.terminal-viewport-container input {
-  caret-color: transparent !important;
-}
-
-.terminal-viewport-container [contenteditable="true"][aria-label="Terminal input"] {
-  caret-color: transparent !important;
-  outline: none !important;
-}
-
-[contenteditable="true"][aria-label="Terminal input"] {
-  caret-color: transparent !important;
-  outline: none !important;
-}
-
-/* Keep Ghostty's internal focus textarea fully non-painting on desktop. */
-.terminal-viewport-container textarea:not([data-terminal-hidden-input="true"]) {
-  opacity: 0 !important;
-  font-size: 0 !important;
-  line-height: 0 !important;
-  color: transparent !important;
-  -webkit-text-fill-color: transparent !important;
-  background: transparent !important;
-  border: 0 !important;
-  outline: none !important;
-  box-shadow: none !important;
-  text-shadow: none !important;
-}
-
-textarea[aria-label="Terminal input"],
-input[aria-label="Terminal input"] {
-  caret-color: transparent !important;
-  color: transparent !important;
-  -webkit-text-fill-color: transparent !important;
-  opacity: 0 !important;
-  outline: none !important;
-}
-
 /* Terminal touch input is portaled to document.body; keep it fully non-painting across engines. */
 input[data-terminal-hidden-input="true"],
 textarea[data-terminal-hidden-input="true"] {
@@ -1324,6 +1287,45 @@ textarea[data-terminal-hidden-input="true"]::selection {
 input[data-terminal-hidden-input="true"]::placeholder,
 textarea[data-terminal-hidden-input="true"]::placeholder {
   color: transparent !important;
+}
+
+/* Hide browser/system caret for Ghostty's own input surfaces.
+   Terminal cursor is rendered by the canvas renderer. */
+.terminal-viewport-container [contenteditable="true"][aria-label="Terminal input"] {
+  caret-color: transparent !important;
+  outline: none !important;
+}
+
+textarea[aria-label="Terminal input"],
+input[aria-label="Terminal input"] {
+  caret-color: transparent !important;
+  outline: none !important;
+}
+
+/* When touch terminal input uses the portaled overlay, keep Ghostty's
+   internal editable surfaces fully non-painting to avoid duplicate cursors. */
+.terminal-viewport-container[data-hidden-input-overlay-active="true"] textarea:not([data-terminal-hidden-input="true"]),
+.terminal-viewport-container[data-hidden-input-overlay-active="true"] input:not([data-terminal-hidden-input="true"]),
+.terminal-viewport-container[data-hidden-input-overlay-active="true"] [contenteditable="true"] {
+  caret-color: transparent !important;
+  color: transparent !important;
+  -webkit-text-fill-color: transparent !important;
+  background: transparent !important;
+  border: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+}
+
+.terminal-viewport-container[data-hidden-input-overlay-active="true"] textarea:not([data-terminal-hidden-input="true"]),
+.terminal-viewport-container[data-hidden-input-overlay-active="true"] input:not([data-terminal-hidden-input="true"]),
+.terminal-viewport-container[data-hidden-input-overlay-active="true"] [contenteditable="true"] {
+  opacity: 0 !important;
+  font-size: 0 !important;
+  line-height: 0 !important;
+  pointer-events: none !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
 }
 
 /* Mobile Terminal Optimizations */

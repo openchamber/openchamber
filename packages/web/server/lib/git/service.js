@@ -1260,45 +1260,55 @@ export async function getStatus(directory, options = {}) {
 
     const diffStats = Object.fromEntries(diffStatsMap.entries());
 
-    const newFileStats = lightMode ? [] : await Promise.all(
-      status.files.map(async (file) => {
+    const MAX_NEW_FILE_STATS = 200;
+    const MAX_NEW_FILE_STAT_SIZE = 1024 * 1024;
+    const newFileStats = [];
+
+    if (!lightMode) {
+      for (const file of status.files) {
+        if (newFileStats.length >= MAX_NEW_FILE_STATS) {
+          break;
+        }
+
         const working = (file.working_dir || '').trim();
         const indexStatus = (file.index || '').trim();
         const statusCode = working || indexStatus;
 
         if (statusCode !== '?' && statusCode !== 'A') {
-          return null;
+          continue;
         }
 
         const existing = diffStats[file.path];
         if (existing && existing.insertions > 0) {
-          return null;
+          continue;
         }
 
         const absolutePath = path.join(directoryPath, file.path);
 
         try {
           const stat = await fsp.stat(absolutePath);
-          if (!stat.isFile()) {
-            return null;
+          if (!stat.isFile() || stat.size > MAX_NEW_FILE_STAT_SIZE) {
+            continue;
           }
 
           const buffer = await fsp.readFile(absolutePath);
           if (buffer.indexOf(0) !== -1) {
-            return {
+            newFileStats.push({
               path: file.path,
               insertions: existing?.insertions ?? 0,
               deletions: existing?.deletions ?? 0,
-            };
+            });
+            continue;
           }
 
           const normalized = buffer.toString('utf8').replace(/\r\n/g, '\n');
           if (!normalized.length) {
-            return {
+            newFileStats.push({
               path: file.path,
               insertions: 0,
               deletions: 0,
-            };
+            });
+            continue;
           }
 
           const segments = normalized.split('\n');
@@ -1307,20 +1317,20 @@ export async function getStatus(directory, options = {}) {
           }
 
           const lineCount = segments.length;
-          return {
+          newFileStats.push({
             path: file.path,
             insertions: lineCount,
             deletions: 0,
-          };
+          });
         } catch (error) {
-          console.warn('Failed to estimate diff stats for new file', file.path, error);
-          return null;
+          if (error?.code !== 'ENOENT') {
+            console.warn('Failed to estimate diff stats for new file', file.path, error);
+          }
         }
-      })
-    );
+      }
+    }
 
     for (const entry of newFileStats) {
-      if (!entry) continue;
       diffStats[entry.path] = {
         insertions: entry.insertions,
         deletions: entry.deletions,
@@ -1794,12 +1804,15 @@ export async function collectDiffs(directory, files = []) {
 
 export async function pull(directory, options = {}) {
   const git = await createGit(directory);
+  const pullOptions = options.rebase === true
+    ? { ...(options.options && typeof options.options === 'object' && !Array.isArray(options.options) ? options.options : {}), '--rebase': null }
+    : options.options || {};
 
   try {
     const result = await git.pull(
       options.remote || 'origin',
       options.branch,
-      options.options || {}
+      pullOptions
     );
 
     return {
@@ -1813,6 +1826,78 @@ export async function pull(directory, options = {}) {
     console.error('Failed to pull:', error);
     throw error;
   }
+}
+
+export async function listStashes(directory) {
+  const git = await createGit(directory);
+  const output = await git.raw(['stash', 'list', '--format=%gd%x1f%gs%x1f%cr%x1f%H']);
+  return String(output || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [ref = '', message = '', relativeTime = '', hash = ''] = line.split('\x1f');
+      return { ref, message, relativeTime, hash };
+    })
+    .filter((entry) => entry.ref);
+}
+
+export async function countStashFiles(directory, refs = []) {
+  const git = await createGit(directory);
+  const uniqueRefs = Array.from(new Set((Array.isArray(refs) ? refs : []).map((ref) => String(ref || '').trim()).filter(Boolean)));
+  const counts = {};
+  const concurrency = 4;
+  let cursor = 0;
+
+  const worker = async () => {
+    while (cursor < uniqueRefs.length) {
+      const ref = uniqueRefs[cursor++];
+      if (!ref) continue;
+      try {
+        const names = await git.raw(['stash', 'show', '--name-only', ref]);
+        counts[ref] = String(names || '').split('\n').map((line) => line.trim()).filter(Boolean).length;
+      } catch {
+        counts[ref] = 0;
+      }
+    }
+  };
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, uniqueRefs.length) }, () => worker()));
+  return counts;
+}
+export async function stashPush(directory, options = {}) {
+  const git = await createGit(directory);
+  const message = typeof options.message === 'string' && options.message.trim()
+    ? options.message.trim()
+    : `OpenChamber stash ${new Date().toISOString()}`;
+  const output = await git.raw(['stash', 'push', '--include-untracked', '-m', message]);
+  return {
+    success: true,
+    created: !/no local changes/i.test(String(output || '')),
+    message,
+    output: String(output || '').trim(),
+  };
+}
+
+export async function stashApply(directory, options = {}) {
+  const git = await createGit(directory);
+  const ref = typeof options.ref === 'string' && options.ref.trim() ? options.ref.trim() : 'stash@{0}';
+  await git.raw(['stash', 'apply', ref]);
+  return { success: true, ref };
+}
+
+export async function stashDrop(directory, options = {}) {
+  const git = await createGit(directory);
+  const ref = typeof options.ref === 'string' && options.ref.trim() ? options.ref.trim() : 'stash@{0}';
+  await git.raw(['stash', 'drop', ref]);
+  return { success: true, ref };
+}
+
+export async function stashPop(directory, options = {}) {
+  const ref = typeof options.ref === 'string' && options.ref.trim() ? options.ref.trim() : 'stash@{0}';
+  await stashApply(directory, { ref });
+  await stashDrop(directory, { ref });
+  return { success: true, ref };
 }
 
 export async function push(directory, options = {}) {
@@ -3251,43 +3336,6 @@ export async function getConflictDetails(directory) {
     };
   } catch (error) {
     console.error('Failed to get conflict details:', error);
-    throw error;
-  }
-}
-
-// ============== Stash Operations ==============
-
-export async function stash(directory, options = {}) {
-  const git = await createGit(directory);
-
-  try {
-    const args = ['stash', 'push'];
-    
-    // Include untracked files by default
-    if (options.includeUntracked !== false) {
-      args.push('--include-untracked');
-    }
-    
-    if (options.message) {
-      args.push('-m', options.message);
-    }
-
-    await git.raw(args);
-    return { success: true };
-  } catch (error) {
-    console.error('Failed to stash:', error);
-    throw error;
-  }
-}
-
-export async function stashPop(directory) {
-  const git = await createGit(directory);
-
-  try {
-    await git.raw(['stash', 'pop']);
-    return { success: true };
-  } catch (error) {
-    console.error('Failed to pop stash:', error);
     throw error;
   }
 }

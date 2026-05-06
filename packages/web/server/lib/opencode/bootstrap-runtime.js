@@ -18,6 +18,7 @@ export const createBootstrapRuntime = (dependencies) => {
       serverStartedAt,
       gracefulShutdown,
       getHealthSnapshot,
+      verboseRequestLogs,
       uiPassword,
       tunnelAuthController,
       readSettingsFromDiskMigrated,
@@ -60,7 +61,7 @@ export const createBootstrapRuntime = (dependencies) => {
       getHealthSnapshot,
     });
 
-    registerCommonRequestMiddleware(app, { express });
+    registerCommonRequestMiddleware(app, { express, verboseRequestLogs });
 
     const uiAuthController = createUiAuth({
       password: uiPassword,

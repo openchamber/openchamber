@@ -69,8 +69,12 @@ The following functions are exported and used by the web server:
 - `getConflictDetails(directory)`: Get detailed conflict information including operation type, unmerged files, and diff.
 
 ### Stash Operations
-- `stash(directory, options)`: Stash changes (supports message and includeUntracked options).
-- `stashPop(directory)`: Pop and apply the most recent stash.
+- `listStashes(directory)`: List stash entries with ref, message, relative time, and hash.
+- `countStashFiles(directory, refs)`: Batch-count changed files for stash refs with bounded concurrency.
+- `stashPush(directory, options)`: Stash changes, always including untracked files, with optional message.
+- `stashApply(directory, options)`: Apply a stash by ref without removing it.
+- `stashPop(directory, options)`: Apply a stash by ref and drop it only after a successful apply.
+- `stashDrop(directory, options)`: Drop a stash by ref.
 
 ## Internal Helpers
 

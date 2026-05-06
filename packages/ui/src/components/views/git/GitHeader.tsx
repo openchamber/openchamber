@@ -13,6 +13,7 @@ import {
   RiUser3Line,
 } from '@remixicon/react';
 import { Button } from '@/components/ui/button';
+import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,7 +27,7 @@ import { SyncActions } from './SyncActions';
 import type { GitStatus, GitIdentityProfile, GitRemote } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 
-type SyncAction = 'fetch' | 'pull' | 'push' | null;
+type SyncAction = 'fetch' | 'pull' | 'push' | 'sync' | null;
 
 interface GitHeaderProps {
   status: GitStatus | null;
@@ -36,8 +37,7 @@ interface GitHeaderProps {
   syncAction: SyncAction;
   remotes: GitRemote[];
   onFetch: (remote: GitRemote) => void;
-  onPull: (remote: GitRemote) => void;
-  onPush: () => void;
+  onSync: (remote: GitRemote) => void;
   onRemoveRemote: (remote: GitRemote) => void;
   removingRemoteName: string | null;
   onCheckoutBranch: (branch: string) => void;
@@ -49,6 +49,9 @@ interface GitHeaderProps {
   isApplyingIdentity: boolean;
   isWorktreeMode: boolean;
   onOpenHistory?: () => void;
+  actionTabItems?: SortableTabsStripItem[];
+  activeActionTab?: string;
+  onSelectActionTab?: (tabID: string) => void;
 }
 
 const IDENTITY_ICON_MAP: Record<
@@ -195,8 +198,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
   syncAction,
   remotes,
   onFetch,
-  onPull,
-  onPush,
+  onSync,
   onRemoveRemote,
   removingRemoteName,
   onCheckoutBranch,
@@ -208,6 +210,9 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
   isApplyingIdentity,
   isWorktreeMode,
   onOpenHistory,
+  actionTabItems,
+  activeActionTab,
+  onSelectActionTab,
 }) => {
   const { t } = useI18n();
   if (!status) {
@@ -239,8 +244,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
       syncAction={syncAction}
       remotes={remotes}
       onFetch={onFetch}
-      onPull={onPull}
-      onPush={onPush}
+      onSync={onSync}
       onRemoveRemote={onRemoveRemote}
       removingRemoteName={removingRemoteName}
       disabled={!status}
@@ -248,6 +252,8 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
 
       aheadCount={status.ahead}
       behindCount={status.behind}
+      trackingRemoteName={status.tracking?.split('/')[0]}
+      hasUncommittedChanges={(status.files?.length ?? 0) > 0}
     />
   );
 
@@ -258,7 +264,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
       onSelect={onSelectIdentity}
       isApplying={isApplyingIdentity}
 
-      iconOnly={false}
+      iconOnly={true}
     />
   );
 
@@ -284,15 +290,29 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
             />
           )}
         </div>
+        <div className="flex shrink-0 items-center gap-1">
+          {managementButtons}
+          {identityControl}
+        </div>
       </div>
 
-      <div className="mt-1.5 flex items-center justify-between gap-2 min-w-0">
-        <div className="flex min-w-0 flex-wrap items-center gap-1">
-          {syncButtons}
-          {managementButtons}
+      {actionTabItems && activeActionTab && onSelectActionTab ? (
+        <div className="mt-3 flex h-8 min-w-0 items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <SortableTabsStrip
+              items={actionTabItems}
+              activeId={activeActionTab}
+              onSelect={onSelectActionTab}
+              layoutMode="fit"
+              variant="active-pill"
+              iconOnlyActiveTab={true}
+              activePillButtonClassName="h-7"
+              className="h-full"
+            />
+          </div>
+          <div className="shrink-0">{syncButtons}</div>
         </div>
-        <div className="min-w-0 max-w-[45%]">{identityControl}</div>
-      </div>
+      ) : null}
     </header>
   );
 };

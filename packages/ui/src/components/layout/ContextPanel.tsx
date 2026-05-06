@@ -4,7 +4,9 @@ import { RiArrowLeftRightLine, RiChat4Line, RiCloseLine, RiDonutChartFill, RiFil
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Button } from '@/components/ui/button';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
-import { DiffView, FilesView, PlanView } from '@/components/views';
+import { DiffView } from '@/components/views/DiffView';
+import { FilesView } from '@/components/views/FilesView';
+import { PlanView } from '@/components/views/PlanView';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { openExternalUrl } from '@/lib/url';
 import { copyTextToClipboard } from '@/lib/clipboard';

@@ -25,7 +25,7 @@ import { cn } from '@/lib/utils';
 import { isDesktopShell } from '@/lib/desktop';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 
-import { ChatView } from '@/components/views';
+import { ChatView } from '@/components/views/ChatView';
 
 // Heavy views loaded on-demand to reduce initial bundle parse time.
 const PlanView = lazyWithChunkRecovery(() => import('@/components/views/PlanView').then(m => ({ default: m.PlanView })));
@@ -83,7 +83,7 @@ export const MainLayout: React.FC = () => {
     const setMultiRunLauncherOpen = useUIStore((state) => state.setMultiRunLauncherOpen);
     const multiRunLauncherPrefillPrompt = useUIStore((state) => state.multiRunLauncherPrefillPrompt);
 
-    const { isMobile } = useDeviceInfo();
+    const { isMobile, isTablet } = useDeviceInfo();
     const isDesktopShellRuntime = React.useMemo(() => isDesktopShell(), []);
     const sidebarWidth = useUIStore((state) => state.sidebarWidth);
     const rightSidebarWidth = useUIStore((state) => state.rightSidebarWidth);
@@ -289,19 +289,24 @@ export const MainLayout: React.FC = () => {
                 rightSidebarAutoClosedRef.current = false;
             }
 
-            const shouldCloseBottomTerminal =
-                height < BOTTOM_TERMINAL_AUTO_CLOSE_HEIGHT;
-            const canAutoOpenBottomTerminal =
-                height >= BOTTOM_TERMINAL_AUTO_OPEN_HEIGHT;
+            // Touch devices frequently resize when the on-screen keyboard opens.
+            // Treat bottom-terminal auto-collapse/restore as desktop-only so
+            // keyboard viewport changes do not churn terminal layout state.
+            if (!isMobile && !isTablet) {
+                const shouldCloseBottomTerminal =
+                    height < BOTTOM_TERMINAL_AUTO_CLOSE_HEIGHT;
+                const canAutoOpenBottomTerminal =
+                    height >= BOTTOM_TERMINAL_AUTO_OPEN_HEIGHT;
 
-            if (shouldCloseBottomTerminal) {
-                if (state.isBottomTerminalOpen) {
-                    setBottomTerminalOpen(false);
-                    bottomTerminalAutoClosedRef.current = true;
+                if (shouldCloseBottomTerminal) {
+                    if (state.isBottomTerminalOpen) {
+                        setBottomTerminalOpen(false);
+                        bottomTerminalAutoClosedRef.current = true;
+                    }
+                } else if (canAutoOpenBottomTerminal && bottomTerminalAutoClosedRef.current) {
+                    setBottomTerminalOpen(true);
+                    bottomTerminalAutoClosedRef.current = false;
                 }
-            } else if (canAutoOpenBottomTerminal && bottomTerminalAutoClosedRef.current) {
-                setBottomTerminalOpen(true);
-                bottomTerminalAutoClosedRef.current = false;
             }
         };
 
@@ -324,7 +329,7 @@ export const MainLayout: React.FC = () => {
                 window.clearTimeout(timeoutId);
             }
         };
-    }, [setBottomTerminalOpen, setRightSidebarOpen]);
+    }, [isMobile, isTablet, setBottomTerminalOpen, setRightSidebarOpen]);
 
     React.useEffect(() => {
         if (typeof window === 'undefined') {
@@ -351,7 +356,7 @@ export const MainLayout: React.FC = () => {
         return () => {
             unsubscribe();
         };
-    }, []);
+    }, [isMobile, isTablet, setBottomTerminalOpen, setRightSidebarOpen]);
 
     const secondaryView = React.useMemo(() => {
         switch (activeMainTab) {

@@ -838,7 +838,7 @@ export const registerFsRoutes = (app, dependencies) => {
       const err = error;
       const code = err && typeof err === 'object' && 'code' in err ? err.code : undefined;
       const isPlansPath = code === 'ENOENT' && (isPlansDirectory(resolvedPath) || isPlansDirectory(rawPath));
-      if (!isPlansPath) {
+      if (code !== 'ENOENT') {
         console.error('Failed to list directory:', error);
       }
       if (code === 'ENOENT') {
