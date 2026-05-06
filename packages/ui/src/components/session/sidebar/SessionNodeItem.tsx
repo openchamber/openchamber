@@ -13,6 +13,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   RiAddLine,
+  RiArchiveLine,
   RiArrowDownSLine,
   RiArrowRightSLine,
   RiChat4Line,
@@ -274,11 +275,12 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     : 'group-hover:opacity-0 group-focus-within:opacity-0';
   const revealPaddingClass = isMinimalMode
     ? (isVSCode
-        ? 'group-hover:pr-1'
-        : 'group-hover:pr-1 group-focus-within:pr-1')
+        ? (archivedBucket ? 'group-hover:pr-1' : 'group-hover:pr-9')
+        : (archivedBucket ? 'group-hover:pr-1 group-focus-within:pr-1' : 'group-hover:pr-9 group-focus-within:pr-9'))
     : (isVSCode
-        ? 'group-hover:pr-5'
-        : 'group-hover:pr-5 group-focus-within:pr-5');
+        ? (archivedBucket ? 'group-hover:pr-5' : 'group-hover:pr-12')
+        : (archivedBucket ? 'group-hover:pr-5 group-focus-within:pr-5' : 'group-hover:pr-12 group-focus-within:pr-12'));
+  const alwaysActionPaddingClass = archivedBucket ? 'pr-7' : 'pr-12';
   const suppressNextSelectRef = React.useRef(false);
   const [isTouchPressed, setIsTouchPressed] = React.useState(false);
 
@@ -564,6 +566,23 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     event.stopPropagation();
   };
 
+  const handleQuickArchivePointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const handleQuickArchiveMouseDown = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const handleQuickArchiveClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setOpenSidebarMenuKey(null);
+    handleDeleteSession(session, { archivedBucket: false });
+  };
+
   const handleRowSelect = (event?: React.MouseEvent<HTMLButtonElement>) => {
     if (suppressNextSelectRef.current) {
       suppressNextSelectRef.current = false;
@@ -745,7 +764,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
 	                      'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed transition-[padding]',
 	                      isTouchPressed && 'bg-interactive-hover/70',
                       alwaysShowActions
-                        ? (isVSCode ? revealPaddingClass : 'pr-7')
+                        ? (isVSCode ? revealPaddingClass : alwaysActionPaddingClass)
                         : revealPaddingClass,
                     )}
                   >
@@ -809,7 +828,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
 	                  'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed transition-[padding]',
 	                  isTouchPressed && 'bg-interactive-hover/70',
                   alwaysShowActions
-                    ? (isVSCode ? revealPaddingClass : 'pr-7')
+                    ? (isVSCode ? revealPaddingClass : alwaysActionPaddingClass)
                     : revealPaddingClass
                 )}
               >
@@ -844,13 +863,36 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           ) : null}
 
           <div className={cn(
-            'absolute right-0 top-1/2 z-10 -translate-y-1/2 transition-opacity',
+            'absolute right-0 top-1/2 z-10 flex -translate-y-1/2 items-center gap-0.5 transition-opacity',
             isMenuOpen
               ? 'opacity-100'
               : (alwaysShowActions && !isVSCode)
                 ? 'opacity-100'
                 : cn('opacity-0', revealOnHoverClass),
           )}>
+            {!archivedBucket ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    className={cn(
+                      'inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
+                      isMinimalMode && !alwaysShowActions ? 'h-4 w-4' : 'h-6 w-6',
+                    )}
+                    aria-label={t('sessions.sidebar.bulkActions.archive')}
+                    onPointerDown={handleQuickArchivePointerDown}
+                    onMouseDown={handleQuickArchiveMouseDown}
+                    onClick={handleQuickArchiveClick}
+                    onKeyDown={(event) => event.stopPropagation()}
+                  >
+                    <RiArchiveLine className={cn(isMinimalMode && !alwaysShowActions ? 'h-2.5 w-2.5' : 'h-3.5 w-3.5')} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="left" sideOffset={8}>
+                  {t('sessions.sidebar.bulkActions.archive')}
+                </TooltipContent>
+              </Tooltip>
+            ) : null}
             <DropdownMenu open={isMenuOpen} onOpenChange={handleMenuOpenChange}>
               <DropdownMenuTrigger asChild>
                 <button
