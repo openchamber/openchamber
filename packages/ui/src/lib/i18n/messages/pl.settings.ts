@@ -1,4 +1,5 @@
 export const settingsDict = {
+  'settings.appearance.language.description': 'Wybierz język interfejsu.',
   'settings.agents.modelSelector.actions.addToFavorites': 'Dodaj do ulubionych',
   'settings.agents.modelSelector.actions.favorite': 'Ulubione',
   'settings.agents.modelSelector.actions.removeFromFavorites': 'Usuń z ulubionych',
@@ -1518,7 +1519,7 @@ export const settingsDict = {
   'settings.voice.page.hint.shiftClickSuffix': 'na przycisku mikrofonu, aby przełączyć tryb ciągły',
   'settings.voice.page.preview.browserVoiceFallback': 'głos przeglądarki',
   'settings.voice.page.preview.customServerLine': 'Cześć! To jest podgląd własnego serwera TTS.',
-  'settings.voice.page.preview.voiceLine': 'Cześć! Ja\',
+  'settings.voice.page.preview.voiceLine': 'Cześć! Jestem {voiceName}. Tak brzmi mój głos.',
   'settings.voice.page.provider.browser': 'Przeglądarka',
   'settings.voice.page.provider.custom': 'Własny',
   'settings.voice.page.provider.say': 'Say',
