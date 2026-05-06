@@ -41,7 +41,7 @@ const reconcileSessionActivityFromStatus = async (manager: OpenCodeManager): Pro
   }
 
   // Drop stale in-memory activity entries not present in authoritative status.
-  for (const [sessionId] of sessionActivityPhases) {
+  for (const sessionId of Array.from(sessionActivityPhases.keys())) {
     if (!knownSessionIds.has(sessionId)) {
       setSessionActivityPhase(sessionId, 'idle');
     }
@@ -114,8 +114,9 @@ const deriveSessionActivity = (payload: Record<string, unknown>): SessionActivit
 
   if (type === 'session.status') {
     const status = properties?.status as Record<string, unknown> | undefined;
+    const info = properties?.info as Record<string, unknown> | undefined;
     const sessionId = (properties?.sessionID ?? properties?.sessionId) as string;
-    const statusType = status?.type as string;
+    const statusType = (status?.type ?? info?.type) as string;
 
     if (typeof sessionId === 'string' && sessionId.length > 0 && typeof statusType === 'string') {
       const phase = statusType === 'busy' || statusType === 'retry' ? 'busy' : 'idle';
