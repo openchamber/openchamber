@@ -2,6 +2,7 @@ import React from 'react';
 import { toast } from '@/components/ui';
 import { isWebRuntime } from '@/lib/desktop';
 import { usePwaDetection } from '@/hooks/usePwaDetection';
+import { useI18n } from '@/lib/i18n';
 import { getSafeSessionStorage } from '@/stores/utils/safeStorage';
 
 type InstallPromptOutcome = 'accepted' | 'dismissed';
@@ -15,6 +16,7 @@ const INSTALL_TOAST_SESSION_KEY = 'pwa-install-toast-shown';
 
 export const usePwaInstallPrompt = () => {
   const { browserTab } = usePwaDetection();
+  const { t } = useI18n();
 
   React.useEffect(() => {
     if (typeof window === 'undefined' || !isWebRuntime() || !browserTab) {
@@ -44,7 +46,7 @@ export const usePwaInstallPrompt = () => {
       await promptEvent.prompt();
       const { outcome } = await promptEvent.userChoice;
       if (outcome === 'accepted') {
-        toast.success('Install started');
+        toast.success(t('pwa.installPrompt.started'));
       }
     };
 
@@ -68,10 +70,10 @@ export const usePwaInstallPrompt = () => {
 
       sessionStorage.setItem(INSTALL_TOAST_SESSION_KEY, 'true');
 
-      installToastId = toast.info('Install OpenChamber for quicker access', {
+      installToastId = toast.info(t('pwa.installPrompt.description'), {
         duration: Infinity,
         action: {
-          label: 'Install',
+          label: t('pwa.installPrompt.action'),
           onClick: () => {
             void triggerInstall();
           },
@@ -82,7 +84,7 @@ export const usePwaInstallPrompt = () => {
     const onAppInstalled = () => {
       deferredPrompt = null;
       dismissInstallToast();
-      toast.success('OpenChamber installed');
+      toast.success(t('pwa.installPrompt.installed'));
     };
 
     window.addEventListener('beforeinstallprompt', onBeforeInstallPrompt as EventListener);
@@ -93,5 +95,5 @@ export const usePwaInstallPrompt = () => {
       window.removeEventListener('beforeinstallprompt', onBeforeInstallPrompt as EventListener);
       window.removeEventListener('appinstalled', onAppInstalled);
     };
-  }, [browserTab]);
+  }, [browserTab, t]);
 };
