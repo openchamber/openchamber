@@ -59,14 +59,15 @@ export const fetchQuota = async () => {
     const remaining = totalCredits !== null && totalUsage !== null
       ? Math.max(0, totalCredits - totalUsage)
       : null;
-    const usedPercent = totalCredits && totalUsage !== null
-      ? Math.max(0, Math.min(100, (totalUsage / totalCredits) * 100))
-      : null;
-    const valueLabel = remaining !== null ? `$${formatMoney(remaining)} remaining` : null;
+    const valueLabel = remaining !== null && totalUsage !== null
+      ? `$${formatMoney(remaining)} left · $${formatMoney(totalUsage)} spent`
+      : remaining !== null
+        ? `$${formatMoney(remaining)} left`
+        : null;
 
     const windows = {
       credits: toUsageWindow({
-        usedPercent,
+        usedPercent: null,
         windowSeconds: null,
         resetAt: null,
         valueLabel

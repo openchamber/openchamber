@@ -22,7 +22,7 @@ import { useI18n } from '@/lib/i18n';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { UsageProgressBar } from '@/components/sections/usage/UsageProgressBar';
 import { PaceIndicator } from '@/components/sections/usage/PaceIndicator';
-import { formatPercent, formatWindowLabel, QUOTA_PROVIDERS, calculatePace, calculateExpectedUsagePercent } from '@/lib/quota';
+import { formatPercent, formatQuotaValueLabel, formatWindowLabel, QUOTA_PROVIDERS, calculatePace, calculateExpectedUsagePercent } from '@/lib/quota';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { updateDesktopSettings } from '@/lib/persistence';
@@ -823,6 +823,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
                           ? 100 - calculateExpectedUsagePercent(paceInfo.elapsedRatio)
                           : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
                       : null;
+                    const metricLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
                     return (
                     <DropdownMenuItem
                       key={`${group.providerId}-${label}`}
@@ -833,7 +834,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
                               <span className="flex min-w-0 items-center justify-between gap-3">
                                 <span className="truncate typography-micro text-muted-foreground">{formatWindowLabel(label)}</span>
                                 <span className="typography-ui-label text-foreground tabular-nums">
-                                  {formatPercent(displayPercent) === '-' ? '' : formatPercent(displayPercent)}
+                                  {metricLabel === '-' ? '' : metricLabel}
                                 </span>
                               </span>
                               <UsageProgressBar

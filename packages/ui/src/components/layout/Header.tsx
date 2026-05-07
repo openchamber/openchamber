@@ -39,7 +39,7 @@ import { cn, hasModifier } from '@/lib/utils';
 import { McpDropdownContent } from '@/components/mcp/McpDropdown';
 import { McpIcon } from '@/components/icons/McpIcon';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
-import { formatPercent, formatWindowLabel, QUOTA_PROVIDERS, calculatePace, calculateExpectedUsagePercent } from '@/lib/quota';
+import { formatPercent, formatQuotaValueLabel, formatWindowLabel, QUOTA_PROVIDERS, calculatePace, calculateExpectedUsagePercent } from '@/lib/quota';
 import { UsageProgressBar } from '@/components/sections/usage/UsageProgressBar';
 import { PaceIndicator } from '@/components/sections/usage/PaceIndicator';
 import { updateDesktopSettings } from '@/lib/persistence';
@@ -446,6 +446,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
                                 ? 100 - calculateExpectedUsagePercent(paceInfo.elapsedRatio)
                                 : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
                             : null;
+                          const metricLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
                           return (
                             <div key={`${group.providerId}-${label}`} className="flex flex-col gap-1.5">
                               <div className="flex min-w-0 items-center justify-between gap-3">
@@ -458,7 +459,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
                                   ) : null}
                                 </div>
                                 <span className="typography-ui-label tabular-nums text-foreground">
-                                  {formatPercent(displayPercent) === '-' ? '' : formatPercent(displayPercent)}
+                                  {metricLabel === '-' ? '' : metricLabel}
                                 </span>
                               </div>
                               <UsageProgressBar
@@ -496,12 +497,13 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
                                               ? 100 - calculateExpectedUsagePercent(paceInfo.elapsedRatio)
                                               : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
                                           : null;
+                                        const metricLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
                                         return (
                                           <div key={`${group.providerId}-${modelName}`} className="flex flex-col gap-1.5">
                                             <div className="flex min-w-0 items-center justify-between gap-3">
                                               <span className="truncate typography-micro text-muted-foreground">{getDisplayModelName(modelName)}</span>
                                               <span className="typography-ui-label tabular-nums text-foreground">
-                                                {formatPercent(displayPercent) === '-' ? '' : formatPercent(displayPercent)}
+                                                {metricLabel === '-' ? '' : metricLabel}
                                               </span>
                                             </div>
                                             <UsageProgressBar
@@ -2194,6 +2196,7 @@ export const Header: React.FC<HeaderProps> = ({
                                         ? 100 - calculateExpectedUsagePercent(paceInfo.elapsedRatio)
                                         : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
                                     : null;
+                                  const metricLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
                                   return (
                                     <div key={`${group.providerId}-${label}`} className="flex flex-col gap-1.5">
                                       <div className="flex min-w-0 items-center justify-between gap-3">
@@ -2206,7 +2209,7 @@ export const Header: React.FC<HeaderProps> = ({
                                           ) : null}
                                         </div>
                                         <span className="typography-ui-label text-foreground tabular-nums">
-                                          {formatPercent(displayPercent) === '-' ? '' : formatPercent(displayPercent)}
+                                          {metricLabel === '-' ? '' : metricLabel}
                                         </span>
                                       </div>
                                       <UsageProgressBar
@@ -2257,12 +2260,13 @@ export const Header: React.FC<HeaderProps> = ({
                                                       ? 100 - calculateExpectedUsagePercent(paceInfo.elapsedRatio)
                                                       : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
                                                   : null;
+                                                const metricLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
                                                 return (
                                                   <div key={`${group.providerId}-${modelName}`} className="flex flex-col gap-1.5">
                                                     <div className="flex min-w-0 items-center justify-between gap-3">
                                                       <span className="truncate typography-micro text-muted-foreground">{getDisplayModelName(modelName)}</span>
                                                       <span className="typography-ui-label text-foreground tabular-nums">
-                                                        {formatPercent(displayPercent) === '-' ? '' : formatPercent(displayPercent)}
+                                                        {metricLabel === '-' ? '' : metricLabel}
                                                       </span>
                                                     </div>
                                                     <UsageProgressBar

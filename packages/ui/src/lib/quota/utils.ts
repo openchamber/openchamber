@@ -12,6 +12,13 @@ export const formatPercent = (value: number | null): string => {
   return `${Math.round(value)}%`;
 };
 
+export const formatQuotaValueLabel = (
+  valueLabel: string | null | undefined,
+  percent: number | null,
+): string => {
+  return valueLabel ?? formatPercent(percent);
+};
+
 export const resolveUsageTone = (percent: number | null): 'safe' | 'warn' | 'critical' => {
   if (percent === null) {
     return 'safe';
