@@ -1420,11 +1420,10 @@ export const fetchOpenRouterQuota = async (): Promise<ProviderResult> => {
     const remaining = totalCredits !== null && totalUsage !== null
       ? Math.max(0, totalCredits - totalUsage)
       : null;
-    const valueLabel = remaining !== null && totalUsage !== null
-      ? `$${formatMoney(remaining)} left · $${formatMoney(totalUsage)} spent`
-      : remaining !== null
-        ? `$${formatMoney(remaining)} left`
-        : null;
+    let valueLabel: string | null = null;
+    if (remaining !== null && totalUsage !== null) {
+      valueLabel = `$${formatMoney(remaining)} left · $${formatMoney(totalUsage)} spent`;
+    }
 
     return buildResult({
       providerId: 'openrouter',
