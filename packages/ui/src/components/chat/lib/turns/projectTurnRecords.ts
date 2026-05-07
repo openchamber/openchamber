@@ -100,9 +100,33 @@ export const projectTurnRecords = (
     };
 
     const turns: TurnRecord[] = [];
-    const turnByUserId = new Map<string, TurnRecord>();
+    const turnByMessageId = new Map<string, TurnRecord>();
+    const pendingAssistantsByParentId = new Map<string, Array<{ message: ChatMessageEntry; index: number }>>();
     const groupedMessageIds = new Set<string>();
     let currentTurn: TurnRecord | undefined;
+
+    const attachAssistantToTurn = (targetTurn: TurnRecord, message: ChatMessageEntry, index: number) => {
+        targetTurn.assistantMessages.push(message);
+        targetTurn.assistantMessageIds.push(message.info.id);
+        targetTurn.messages.push(createTurnMessageRecord(message, index));
+        if (!targetTurn.headerMessageId) {
+            targetTurn.headerMessageId = message.info.id;
+        }
+        groupedMessageIds.add(message.info.id);
+        turnByMessageId.set(message.info.id, targetTurn);
+    };
+
+    const flushPendingAssistants = (parentMessageId: string, targetTurn: TurnRecord) => {
+        const pending = pendingAssistantsByParentId.get(parentMessageId);
+        if (!pending || pending.length === 0) {
+            return;
+        }
+        pendingAssistantsByParentId.delete(parentMessageId);
+        pending.forEach(({ message, index }) => {
+            attachAssistantToTurn(targetTurn, message, index);
+            flushPendingAssistants(message.info.id, targetTurn);
+        });
+    };
 
     messages.forEach((message, index) => {
         const role = resolveMessageRole(message);
@@ -129,9 +153,10 @@ export const projectTurnRecords = (
                 },
             };
             turns.push(turn);
-            turnByUserId.set(turn.userMessageId, turn);
+            turnByMessageId.set(turn.userMessageId, turn);
             groupedMessageIds.add(message.info.id);
             currentTurn = turn;
+            flushPendingAssistants(message.info.id, turn);
             return;
         }
 
@@ -140,19 +165,24 @@ export const projectTurnRecords = (
         }
 
         const parentId = getMessageParentId(message);
-        const parentTurn = parentId ? turnByUserId.get(parentId) : undefined;
+        const parentTurn = parentId ? turnByMessageId.get(parentId) : undefined;
+        if (parentId && !parentTurn) {
+            const pending = pendingAssistantsByParentId.get(parentId);
+            if (pending) {
+                pending.push({ message, index });
+            } else {
+                pendingAssistantsByParentId.set(parentId, [{ message, index }]);
+            }
+            return;
+        }
+
         const targetTurn = parentTurn ?? currentTurn;
         if (!targetTurn) {
             return;
         }
 
-        targetTurn.assistantMessages.push(message);
-        targetTurn.assistantMessageIds.push(message.info.id);
-        targetTurn.messages.push(createTurnMessageRecord(message, index));
-        if (!targetTurn.headerMessageId) {
-            targetTurn.headerMessageId = message.info.id;
-        }
-        groupedMessageIds.add(message.info.id);
+        attachAssistantToTurn(targetTurn, message, index);
+        flushPendingAssistants(message.info.id, targetTurn);
 
         if (!parentTurn) {
             currentTurn = targetTurn;
