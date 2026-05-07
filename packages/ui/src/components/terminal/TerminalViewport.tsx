@@ -128,7 +128,10 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
     inputHandlerRef.current = onInput;
     resizeHandlerRef.current = onResize;
 
-    const isAndroid = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent);
+    const isAndroid = typeof navigator !== 'undefined' && (
+      /Android/i.test(navigator.userAgent) ||
+      (navigator as { userAgentData?: { platform: string } }).userAgentData?.platform === 'Android'
+    );
     // Touch devices need a dedicated editable surface so special keys like
     // Backspace and arrows are captured reliably without relying on Ghostty's
     // internal mobile text handling.
@@ -1406,6 +1409,25 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
         if ((isMacCopyShortcut || isWindowsLinuxCopyShortcut) && hasCopyableSelectionInViewport()) {
           event.preventDefault();
           void copySelectionToClipboard();
+          return;
+        }
+
+        if (event.ctrlKey && !event.metaKey && !event.altKey && event.key.length === 1) {
+          const upper = event.key.toUpperCase();
+          if (upper >= 'A' && upper <= 'Z') {
+            event.preventDefault();
+            (event.nativeEvent as KeyboardEvent | undefined)?.stopImmediatePropagation();
+            inputHandlerRef.current(String.fromCharCode(upper.charCodeAt(0) - 64));
+            clearEditableValue(event.currentTarget as HTMLElement);
+            return;
+          }
+        }
+
+        if (event.altKey && !event.ctrlKey && !event.metaKey && event.key.length === 1) {
+          event.preventDefault();
+          (event.nativeEvent as KeyboardEvent | undefined)?.stopImmediatePropagation();
+          inputHandlerRef.current('\x1b' + event.key);
+          clearEditableValue(event.currentTarget as HTMLElement);
           return;
         }
 

@@ -187,6 +187,14 @@ export const useKeyboardShortcuts = () => {
         if (isMobile) {
           return;
         }
+        const target = e.target as Element | null;
+        const isInsideTerminal = Boolean(
+          target?.closest('.terminal-viewport-container') ||
+          target?.getAttribute('data-terminal-hidden-input') === 'true'
+        );
+        if (isInsideTerminal) {
+          return;
+        }
         e.preventDefault();
         toggleRightSidebar();
         return;
