@@ -3,6 +3,7 @@ import { describe, expect, it } from 'bun:test'
 import {
   aggregateLiveSessions,
   aggregateLiveSessionStatuses,
+  areStatusMapsEquivalent,
   findLiveSession,
   findLiveSessionStatus,
 } from '../live-aggregate.ts'
@@ -77,6 +78,20 @@ describe('live aggregate', () => {
     const statuses = aggregateLiveSessionStatuses(states)
     expect(statuses['ses-1']?.type).toBe('idle')
     expect(findLiveSessionStatus(states, 'ses-1')?.type).toBe('idle')
+  })
+
+  it('detects retry metadata changes in status maps', () => {
+    const retryStatus = { type: 'retry', message: 'retrying|server|message', attempt: 1, next: 100 }
+
+    expect(areStatusMapsEquivalent(
+      { 'ses-1': retryStatus },
+      { 'ses-1': { ...retryStatus } },
+    )).toBe(true)
+
+    expect(areStatusMapsEquivalent(
+      { 'ses-1': retryStatus },
+      { 'ses-1': { ...retryStatus, attempt: 2, next: 200 } },
+    )).toBe(false)
   })
 
   it('derives active-now sessions from live statuses instead of persisted history', () => {

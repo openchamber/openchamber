@@ -1,4 +1,4 @@
-import type { PermissionRequest, Project, QuestionRequest, SessionStatus, Todo } from "@opencode-ai/sdk/v2/client"
+import type { Event, PermissionRequest, Project, QuestionRequest, SessionStatus, Todo } from "@opencode-ai/sdk/v2/client"
 import type { ChatSyncEvent, HarnessMessage, HarnessPart, HarnessSession } from "@openchamber/harness-contracts"
 import { Binary } from "./binary"
 import type { FileDiff, GlobalState, State } from "./types"
@@ -88,6 +88,18 @@ function shouldPreserveExistingPart(previous: HarnessPart, next: HarnessPart): b
   return false
 }
 
+function areSessionStatusesEqual(left: SessionStatus | undefined, right: SessionStatus): boolean {
+  if (left === right) return true
+  if (!left || left.type !== right.type) return false
+  if (left.type === "retry") {
+    return right.type === "retry"
+      && left.attempt === right.attempt
+      && left.message === right.message
+      && left.next === right.next
+  }
+  return true
+}
+
 // ---------------------------------------------------------------------------
 // Global events
 // ---------------------------------------------------------------------------
@@ -102,6 +114,23 @@ export type GlobalEventResult = {
 export type GlobalEvent = {
   type: "global.disposed" | "server.connected" | "project.updated" | string
   properties?: unknown
+}
+
+export type DirectoryEventResult = boolean | {
+  changed: boolean
+  materialization: {
+    type: "incomplete-session-snapshot"
+    sessionID?: string
+    messageID: string
+    partID?: string
+  }
+}
+
+function hasMessage(draft: State, sessionID: string | undefined, messageID: string): boolean {
+  if (!sessionID) return false
+  const messages = draft.message[sessionID]
+  if (!messages) return false
+  return Binary.search(messages, messageID, (message) => message.id).found
 }
 
 export function reduceGlobalEvent(event: GlobalEvent): GlobalEventResult {
@@ -149,13 +178,13 @@ export function applyGlobalProject(state: GlobalState, project: Project): Global
 
 export function applyDirectoryEvent(
   draft: State,
-  event: DirectorySyncEvent,
+  event: DirectorySyncEvent | Event,
   callbacks?: {
     onRefresh?: (directory: string) => void
     onLoadLsp?: () => void
     onSetSessionTodo?: (sessionID: string, todos: Todo[] | undefined) => void
   },
-): boolean {
+): DirectoryEventResult {
   switch (event.type) {
     case "server.instance.disposed": {
       callbacks?.onRefresh?.("")
@@ -201,7 +230,13 @@ export function applyDirectoryEvent(
 
     case "session.status.updated": {
       const rawStatus = event.status.raw
-      draft.session_status[event.sessionId] = isObject(rawStatus) ? rawStatus as SessionStatus : { type: event.status.status === "running" ? "busy" : "idle" } as SessionStatus
+      const status = isObject(rawStatus)
+        ? rawStatus as SessionStatus
+        : { type: event.status.status === "running" ? "busy" : "idle" } as SessionStatus
+      if (areSessionStatusesEqual(draft.session_status[event.sessionId], status)) {
+        return false
+      }
+      draft.session_status[event.sessionId] = status
       return true
     }
 
@@ -235,16 +270,19 @@ export function applyDirectoryEvent(
     }
 
     case "message.removed": {
-      const messages = draft.message[event.sessionId]
+      const props = "properties" in event
+        ? event.properties as { sessionID: string; messageID: string }
+        : { sessionID: event.sessionId, messageID: event.messageId }
+      const messages = draft.message[props.sessionID]
       if (messages) {
         const next = [...messages]
-        const result = Binary.search(next, event.messageId, (m) => m.id)
+        const result = Binary.search(next, props.messageID, (m) => m.id)
         if (result.found) {
           next.splice(result.index, 1)
-          draft.message[event.sessionId] = next
+          draft.message[props.sessionID] = next
         }
       }
-      delete draft.part[event.messageId]
+      delete draft.part[props.messageID]
       return true
     }
 
@@ -256,11 +294,18 @@ export function applyDirectoryEvent(
         return false
       }
       const messageID = part.messageId
+      const sessionID = part.sessionId
+      const missingOwningMessage = !hasMessage(draft, sessionID, messageID)
       const parts = draft.part[messageID]
       if (!parts) {
         syncDebug.reducer.partUpdatedNoExistingParts(messageID, part.id, rawType ?? part.kind)
         draft.part[messageID] = [part]
-        return true
+        return missingOwningMessage
+          ? {
+            changed: true,
+            materialization: { type: "incomplete-session-snapshot", sessionID, messageID, partID: part.id },
+          }
+          : true
       }
       const next = [...parts]
       const result = Binary.search(next, part.id, (p) => p.id)
@@ -289,7 +334,12 @@ export function applyDirectoryEvent(
         next.splice(insertResult.index, 0, part)
       }
       draft.part[messageID] = next
-      return true
+      return missingOwningMessage
+        ? {
+          changed: true,
+          materialization: { type: "incomplete-session-snapshot", sessionID, messageID, partID: part.id },
+        }
+        : true
     }
 
     case "part.removed": {
@@ -313,12 +363,18 @@ export function applyDirectoryEvent(
       const parts = draft.part[event.messageId]
       if (!parts) {
         syncDebug.reducer.partDeltaNoParts(event.messageId, event.partId)
-        return false
+        return {
+          changed: false,
+          materialization: { type: "incomplete-session-snapshot", messageID: event.messageId, partID: event.partId },
+        }
       }
       const result = Binary.search(parts, event.partId, (p) => p.id)
       if (!result.found) {
         syncDebug.reducer.partDeltaNotFound(event.messageId, event.partId)
-        return false
+        return {
+          changed: false,
+          materialization: { type: "incomplete-session-snapshot", messageID: event.messageId, partID: event.partId },
+        }
       }
       const existing = parts[result.index] as unknown as Record<string, unknown>
       const existingValue = existing[event.field] as string | undefined
@@ -346,14 +402,15 @@ export function applyDirectoryEvent(
 
     case "permission.asked": {
       const permission = event.properties as PermissionRequest
-      const permissions = [...(draft.permission[permission.sessionID] ?? [])]
-      draft.permission[permission.sessionID] = permissions
-      const result = Binary.search(permissions, permission.id, (p) => p.id)
+      const permissions = draft.permission[permission.sessionID] ?? []
+      const next = [...permissions]
+      const result = Binary.search(next, permission.id, (p) => p.id)
       if (result.found) {
-        permissions[result.index] = permission
+        next[result.index] = permission
       } else {
-        permissions.splice(result.index, 0, permission)
+        next.splice(result.index, 0, permission)
       }
+      draft.permission[permission.sessionID] = next
       return true
     }
 
@@ -363,7 +420,9 @@ export function applyDirectoryEvent(
       if (!permissions) return false
       const result = Binary.search(permissions, props.requestID, (p) => p.id)
       if (result.found) {
-        draft.permission[props.sessionID] = [...permissions.slice(0, result.index), ...permissions.slice(result.index + 1)]
+        const next = [...permissions]
+        next.splice(result.index, 1)
+        draft.permission[props.sessionID] = next
         return true
       }
       return false
@@ -371,14 +430,15 @@ export function applyDirectoryEvent(
 
     case "question.asked": {
       const question = event.properties as QuestionRequest
-      const questions = [...(draft.question[question.sessionID] ?? [])]
-      draft.question[question.sessionID] = questions
-      const result = Binary.search(questions, question.id, (q) => q.id)
+      const questions = draft.question[question.sessionID] ?? []
+      const next = [...questions]
+      const result = Binary.search(next, question.id, (q) => q.id)
       if (result.found) {
-        questions[result.index] = question
+        next[result.index] = question
       } else {
-        questions.splice(result.index, 0, question)
+        next.splice(result.index, 0, question)
       }
+      draft.question[question.sessionID] = next
       return true
     }
 
@@ -389,7 +449,9 @@ export function applyDirectoryEvent(
       if (!questions) return false
       const result = Binary.search(questions, props.requestID, (q) => q.id)
       if (result.found) {
-        draft.question[props.sessionID] = [...questions.slice(0, result.index), ...questions.slice(result.index + 1)]
+        const next = [...questions]
+        next.splice(result.index, 1)
+        draft.question[props.sessionID] = next
         return true
       }
       return false

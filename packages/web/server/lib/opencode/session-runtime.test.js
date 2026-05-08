@@ -29,7 +29,7 @@ describe('session runtime', () => {
       type: 'session.status',
       properties: {
         sessionID: 'session-1',
-        info: {
+        status: {
           type: 'busy',
         },
       },
@@ -39,7 +39,7 @@ describe('session runtime', () => {
       type: 'session.status',
       properties: {
         sessionID: 'session-1',
-        info: {
+        status: {
           type: 'idle',
         },
       },
@@ -63,6 +63,38 @@ describe('session runtime', () => {
         metadata: {},
         needsAttention: false,
       },
+    });
+  });
+
+  it('accepts legacy session.status info.type payloads', () => {
+    const events = [];
+    const runtime = createSessionRuntime({
+      writeSseEvent() {
+        throw new Error('SSE fallback should not be used when broadcastEvent is provided');
+      },
+      getNotificationClients: () => new Set(),
+      broadcastEvent: (payload) => {
+        events.push(payload);
+      },
+    });
+    runtimes.push(runtime);
+
+    runtime.processOpenCodeSsePayload({
+      type: 'session.status',
+      properties: {
+        sessionID: 'legacy-session-1',
+        info: {
+          type: 'busy',
+        },
+      },
+    });
+
+    expect(events).toContainEqual({
+      type: 'openchamber:session-status',
+      properties: expect.objectContaining({
+        sessionId: 'legacy-session-1',
+        status: 'busy',
+      }),
     });
   });
 });

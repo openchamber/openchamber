@@ -140,6 +140,10 @@ function shouldSkipCompression(req, res) {
   }
 
   const pathname = req.path || req.url || '';
+  if ((pathname === '/api' || pathname.startsWith('/api/')) && shouldSkipApiCompression()) {
+    return true;
+  }
+
   if (pathname.startsWith('/api/terminal/') && pathname.endsWith('/stream')) {
     return true;
   }
@@ -171,6 +175,22 @@ const isEnvFlagEnabled = (value) => {
   const normalized = value.trim().toLowerCase();
   return normalized === '1' || normalized === 'true';
 };
+
+const isEnvFlagDisabled = (value) => {
+  if (value === false || value === 0) return true;
+  if (typeof value !== 'string') return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === '0' || normalized === 'false';
+};
+
+const shouldSkipApiCompression = () => {
+  if (isEnvFlagEnabled(process.env.OPENCHAMBER_SKIP_API_COMPRESSION)) return true;
+  if (isEnvFlagEnabled(process.env.OPENCHAMBER_COMPRESS_API)) return false;
+  if (isEnvFlagDisabled(process.env.OPENCHAMBER_COMPRESS_API)) return true;
+  return process.env.OPENCHAMBER_RUNTIME === 'desktop';
+};
+
+const OPENCHAMBER_VERBOSE_REQUEST_LOGS = isEnvFlagEnabled(process.env.OPENCHAMBER_VERBOSE_REQUEST_LOGS);
 
 const PLAN_MODE_EXPERIMENT_ENABLED =
   isEnvFlagEnabled(process.env.OPENCODE_EXPERIMENTAL_PLAN_MODE)
@@ -734,9 +754,12 @@ const processForwardedEventPayload = (payload, emitSyntheticEvent) => {
   }
 
   const properties = payload.properties && typeof payload.properties === 'object' ? payload.properties : {};
+  const statusInfo = properties.status && typeof properties.status === 'object' ? properties.status : {};
   const info = properties.info && typeof properties.info === 'object' ? properties.info : {};
   const sessionId = typeof properties.sessionID === 'string' ? properties.sessionID.trim() : '';
-  const status = typeof info.type === 'string' ? info.type.trim() : '';
+  const status = typeof statusInfo.type === 'string'
+    ? statusInfo.type.trim()
+    : (typeof info.type === 'string' ? info.type.trim() : '');
 
   if (!sessionId || !status) {
     return;
@@ -749,9 +772,15 @@ const processForwardedEventPayload = (payload, emitSyntheticEvent) => {
       status,
       timestamp: Date.now(),
       metadata: {
-        attempt: typeof info.attempt === 'number' ? info.attempt : undefined,
-        message: typeof info.message === 'string' ? info.message : undefined,
-        next: typeof info.next === 'number' ? info.next : undefined,
+        attempt: typeof statusInfo.attempt === 'number'
+          ? statusInfo.attempt
+          : (typeof info.attempt === 'number' ? info.attempt : undefined),
+        message: typeof statusInfo.message === 'string'
+          ? statusInfo.message
+          : (typeof info.message === 'string' ? info.message : undefined),
+        next: typeof statusInfo.next === 'number'
+          ? statusInfo.next
+          : (typeof info.next === 'number' ? info.next : undefined),
       },
       needsAttention: false,
     },
@@ -1141,6 +1170,7 @@ async function main(options = {}) {
         planModeExperimentalEnabled: PLAN_MODE_EXPERIMENT_ENABLED,
       };
     },
+    verboseRequestLogs: OPENCHAMBER_VERBOSE_REQUEST_LOGS,
     uiPassword,
     tunnelAuthController,
     readSettingsFromDiskMigrated,

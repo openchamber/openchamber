@@ -16,7 +16,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
 
-import { RiArrowLeftSLine, RiChat4Line, RiChatNewLine, RiCheckLine, RiCloseLine, RiCommandLine, RiFileTextLine, RiFolder6Line, RiGitBranchLine, RiGithubFill, RiLayoutLeftLine, RiLayoutRightLine, RiPlayListAddLine, RiRefreshLine, RiServerLine, RiStackLine, RiTerminalBoxLine, RiTimerLine, RiAlertLine, type RemixiconComponentType } from '@remixicon/react';
+import { RiArrowLeftSLine, RiChat4Line, RiChatNewLine, RiCheckLine, RiCloseLine, RiCommandLine, RiFileTextLine, RiFolder6Line, RiGitBranchLine, RiGithubFill, RiLayoutLeftLine, RiLayoutRightLine, RiPictureInPicture2Line, RiPlayListAddLine, RiRefreshLine, RiServerLine, RiStackLine, RiTerminalBoxLine, RiTimerLine, RiAlertLine, RiWindowLine, type RemixiconComponentType } from '@remixicon/react';
 import { DiffIcon } from '@/components/icons/DiffIcon';
 import { useUIStore, type MainTab } from '@/stores/useUIStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -41,7 +41,7 @@ import { cn, hasModifier } from '@/lib/utils';
 import { McpDropdownContent } from '@/components/mcp/McpDropdown';
 import { McpIcon } from '@/components/icons/McpIcon';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
-import { formatPercent, formatWindowLabel, QUOTA_PROVIDERS, calculatePace, calculateExpectedUsagePercent } from '@/lib/quota';
+import { formatQuotaValueLabel, formatWindowLabel, QUOTA_PROVIDERS, calculatePace, calculateExpectedUsagePercent } from '@/lib/quota';
 import { UsageProgressBar } from '@/components/sections/usage/UsageProgressBar';
 import { PaceIndicator } from '@/components/sections/usage/PaceIndicator';
 import { updateDesktopSettings } from '@/lib/persistence';
@@ -68,7 +68,7 @@ import { forceKillTerminal } from '@/lib/terminalApi';
 import { useTerminalStore } from '@/stores/useTerminalStore';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { BackendIcon } from '@/components/ui/BackendIcon';
-import { isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag } from '@/lib/desktop';
+import { canUseElectronDesktopIPC, invokeDesktop, isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag } from '@/lib/desktop';
 import { desktopHostsGet, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { formatSessionDateLabel, resolveSessionDiffStats } from '@/components/session/sidebar/utils';
 import { useI18n } from '@/lib/i18n';
@@ -470,6 +470,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
                                 ? 100 - calculateExpectedUsagePercent(paceInfo.elapsedRatio)
                                 : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
                             : null;
+                          const metricLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
                           return (
                             <div key={`${group.providerId}-${label}`} className="flex flex-col gap-1.5">
                               <div className="flex min-w-0 items-center justify-between gap-3">
@@ -482,7 +483,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
                                   ) : null}
                                 </div>
                                 <span className="typography-ui-label tabular-nums text-foreground">
-                                  {formatPercent(displayPercent) === '-' ? '' : formatPercent(displayPercent)}
+                                  {metricLabel === '-' ? '' : metricLabel}
                                 </span>
                               </div>
                               <UsageProgressBar
@@ -520,12 +521,13 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
                                               ? 100 - calculateExpectedUsagePercent(paceInfo.elapsedRatio)
                                               : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
                                           : null;
+                                        const metricLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
                                         return (
                                           <div key={`${group.providerId}-${modelName}`} className="flex flex-col gap-1.5">
                                             <div className="flex min-w-0 items-center justify-between gap-3">
                                               <span className="truncate typography-micro text-muted-foreground">{getDisplayModelName(modelName)}</span>
                                               <span className="typography-ui-label tabular-nums text-foreground">
-                                                {formatPercent(displayPercent) === '-' ? '' : formatPercent(displayPercent)}
+                                                {metricLabel === '-' ? '' : metricLabel}
                                               </span>
                                             </div>
                                             <UsageProgressBar
@@ -765,6 +767,7 @@ export const Header: React.FC<HeaderProps> = ({
     }
     return isDesktopShell();
   });
+  const hasElectronDesktopIPC = React.useMemo(() => canUseElectronDesktopIPC(), []);
   const isTabletStandalonePwa = useTabletStandalonePwaRuntime();
   const [isDesktopWindowFullscreen, setIsDesktopWindowFullscreen] = React.useState(false);
 
@@ -1350,6 +1353,27 @@ export const Header: React.FC<HeaderProps> = ({
     openNewSessionDraft();
   }, [openNewSessionDraft, setActiveMainTab, setSessionSwitcherOpen]);
 
+  const handleOpenDraftMiniChat = React.useCallback(() => {
+    void invokeDesktop('desktop_open_draft_mini_chat_window', {
+      directory: normalize(openDirectory || activeProject?.path || ''),
+      projectId: activeProject?.id ?? null,
+    }).catch((error) => {
+      console.warn('[header] failed to open draft mini chat window', error);
+    });
+  }, [activeProject?.id, activeProject?.path, openDirectory]);
+
+  const handleOpenCurrentSessionMiniChat = React.useCallback(() => {
+    if (!currentSessionId) {
+      return;
+    }
+    void invokeDesktop('desktop_open_session_mini_chat_window', {
+      sessionId: currentSessionId,
+      directory: normalize(openDirectory || activeProject?.path || ''),
+    }).catch((error) => {
+      console.warn('[header] failed to open session mini chat window', error);
+    });
+  }, [activeProject?.path, currentSessionId, openDirectory]);
+
   const handleOpenContextPanel = React.useCallback(() => {
     const directory = normalize(openDirectory || '');
     if (!directory) {
@@ -1912,6 +1936,23 @@ export const Header: React.FC<HeaderProps> = ({
             </TooltipContent>
           </Tooltip>
         ) : null}
+        {hasElectronDesktopIPC && !isLeftSidebarOpen ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-label={t('header.actions.newMiniChatAria')}
+                onClick={handleOpenDraftMiniChat}
+                className={cn(desktopHeaderIconButtonClass, 'mr-6 shrink-0')}
+              >
+                <RiWindowLine className="h-[18px] w-[18px]" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>{t('header.actions.newMiniChat')}</p>
+            </TooltipContent>
+          </Tooltip>
+        ) : null}
         {!isNewSessionDraftOpen ? (
           <div className="mr-3 min-w-0">
             <div className="truncate pl-1 typography-ui-label text-[14px] font-medium leading-tight text-foreground">
@@ -1984,6 +2025,14 @@ export const Header: React.FC<HeaderProps> = ({
               className="mr-2"
             />
           )}
+          <HeaderIconActionButton
+            visible={hasElectronDesktopIPC && !isNewSessionDraftOpen && Boolean(currentSessionId)}
+            title={t('header.actions.openSessionMiniChat')}
+            ariaLabel={t('header.actions.openSessionMiniChatAria')}
+            onClick={handleOpenCurrentSessionMiniChat}
+            className={`${desktopHeaderIconButtonClass} mr-1`}
+            Icon={RiPictureInPicture2Line}
+          />
           {showDesktopHeaderContextUsage && stableDesktopContextUsage ? (
             <ContextUsageDisplay
               totalTokens={stableDesktopContextUsage.totalTokens}
@@ -2288,6 +2337,7 @@ export const Header: React.FC<HeaderProps> = ({
                                         ? 100 - calculateExpectedUsagePercent(paceInfo.elapsedRatio)
                                         : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
                                     : null;
+                                  const metricLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
                                   return (
                                     <div key={`${group.providerId}-${label}`} className="flex flex-col gap-1.5">
                                       <div className="flex min-w-0 items-center justify-between gap-3">
@@ -2300,7 +2350,7 @@ export const Header: React.FC<HeaderProps> = ({
                                           ) : null}
                                         </div>
                                         <span className="typography-ui-label text-foreground tabular-nums">
-                                          {formatPercent(displayPercent) === '-' ? '' : formatPercent(displayPercent)}
+                                          {metricLabel === '-' ? '' : metricLabel}
                                         </span>
                                       </div>
                                       <UsageProgressBar
@@ -2351,12 +2401,13 @@ export const Header: React.FC<HeaderProps> = ({
                                                       ? 100 - calculateExpectedUsagePercent(paceInfo.elapsedRatio)
                                                       : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
                                                   : null;
+                                                const metricLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
                                                 return (
                                                   <div key={`${group.providerId}-${modelName}`} className="flex flex-col gap-1.5">
                                                     <div className="flex min-w-0 items-center justify-between gap-3">
                                                       <span className="truncate typography-micro text-muted-foreground">{getDisplayModelName(modelName)}</span>
                                                       <span className="typography-ui-label text-foreground tabular-nums">
-                                                        {formatPercent(displayPercent) === '-' ? '' : formatPercent(displayPercent)}
+                                                        {metricLabel === '-' ? '' : metricLabel}
                                                       </span>
                                                     </div>
                                                     <UsageProgressBar

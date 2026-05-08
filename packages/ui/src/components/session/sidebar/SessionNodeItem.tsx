@@ -14,6 +14,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { BackendIcon } from '@/components/ui/BackendIcon';
 import {
   RiAddLine,
+  RiArchiveLine,
   RiArrowDownSLine,
   RiArrowRightSLine,
   RiChat4Line,
@@ -32,9 +33,10 @@ import {
   RiShieldLine,
   RiUnpinLine,
   RiGitBranchLine,
+  RiWindowLine,
 } from '@remixicon/react';
 import { cn } from '@/lib/utils';
-import { isVSCodeRuntime } from '@/lib/desktop';
+import { canUseElectronDesktopIPC, invokeDesktop, isVSCodeRuntime } from '@/lib/desktop';
 import { useProviderLogo } from '@/hooks/useProviderLogo';
 import { toast } from '@/components/ui';
 import { useSessionQuestions } from '@/sync/sync-context';
@@ -292,19 +294,22 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const displayMode = useSessionDisplayStore((state) => state.displayMode);
   const isMinimalMode = displayMode === 'minimal';
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
+  const isElectron = React.useMemo(() => canUseElectronDesktopIPC(), []);
   const revealOnHoverClass = isVSCode
     ? 'group-hover:opacity-100 group-hover:pointer-events-auto'
     : 'group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto';
   const hideOnHoverClass = isVSCode
     ? 'group-hover:opacity-0'
     : 'group-hover:opacity-0 group-focus-within:opacity-0';
+  const showQuickArchiveAction = !archivedBucket && !mobileVariant;
   const revealPaddingClass = isMinimalMode
     ? (isVSCode
-        ? 'group-hover:pr-1'
-        : 'group-hover:pr-1 group-focus-within:pr-1')
+        ? 'group-hover:pr-2'
+        : 'group-hover:pr-2 group-focus-within:pr-2')
     : (isVSCode
-        ? 'group-hover:pr-5'
-        : 'group-hover:pr-5 group-focus-within:pr-5');
+        ? (showQuickArchiveAction ? 'group-hover:pr-12' : 'group-hover:pr-5')
+        : (showQuickArchiveAction ? 'group-hover:pr-12 group-focus-within:pr-12' : 'group-hover:pr-5 group-focus-within:pr-5'));
+  const alwaysActionPaddingClass = showQuickArchiveAction ? 'pr-13' : 'pr-7';
   const suppressNextSelectRef = React.useRef(false);
   const [isTouchPressed, setIsTouchPressed] = React.useState(false);
 
@@ -433,7 +438,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     let skipped = 0;
     for (const child of children) {
       try {
-        await sync.syncSession(child.session.id);
+        await sync.ensureSessionRenderable(child.session.id);
         const childRecords = buildSessionMessageRecordsSnapshot(directoryStore.getState(), child.session.id).list;
         const childTitle = child.session.title || t('sessions.sidebar.session.export.untitledSubagent');
         const childAgent = (child.session as Session & { agent?: string }).agent;
@@ -465,7 +470,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       return;
     }
 
-    await sync.syncSession(session.id);
+    await sync.ensureSessionRenderable(session.id);
 
     const records = buildSessionMessageRecordsSnapshot(directoryStore.getState(), session.id).list;
     if (records.length === 0) {
@@ -514,6 +519,16 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     }
     await doExportSession(false);
   }, [doExportSession, node.children.length]);
+
+  const handleOpenMiniChatWindow = React.useCallback(() => {
+    if (!sessionDirectory) return;
+    void invokeDesktop('desktop_open_session_mini_chat_window', {
+      sessionId: session.id,
+      directory: sessionDirectory,
+    }).catch((error) => {
+      console.warn('[session-sidebar] failed to open mini chat window', error);
+    });
+  }, [session.id, sessionDirectory]);
 
   if (editingId === session.id) {
     return (
@@ -661,6 +676,23 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     event.stopPropagation();
   };
 
+  const handleQuickArchivePointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const handleQuickArchiveMouseDown = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const handleQuickArchiveClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setOpenSidebarMenuKey(null);
+    handleDeleteSession(session, { archivedBucket });
+  };
+
   const handleRowSelect = (event?: React.MouseEvent<HTMLButtonElement>) => {
     if (suppressNextSelectRef.current) {
       suppressNextSelectRef.current = false;
@@ -798,6 +830,17 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
         </DropdownMenuItem>
       ) : null}
 
+      {isElectron ? (
+        <DropdownMenuItem
+          disabled={!sessionDirectory}
+          onClick={handleOpenMiniChatWindow}
+          className="[&>svg]:mr-1"
+        >
+          <RiWindowLine className="mr-1 h-4 w-4" />
+          <span className="truncate">{t('sessions.sidebar.session.menu.openMiniChatWindow')}</span>
+        </DropdownMenuItem>
+      ) : null}
+
       <DropdownMenuSeparator />
       <DropdownMenuItem className="text-destructive focus:text-destructive [&>svg]:mr-1" onClick={() => handleDeleteSession(session, { archivedBucket })}>
         <RiDeleteBinLine className="mr-1 h-4 w-4" />
@@ -842,7 +885,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
 	                      'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed transition-[padding]',
 	                      isTouchPressed && 'bg-interactive-hover/70',
                       alwaysShowActions
-                        ? (isVSCode ? revealPaddingClass : 'pr-7')
+                        ? (isVSCode ? revealPaddingClass : alwaysActionPaddingClass)
                         : revealPaddingClass,
                     )}
                   >
@@ -915,7 +958,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
 	                  'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed transition-[padding]',
 	                  isTouchPressed && 'bg-interactive-hover/70',
                   alwaysShowActions
-                    ? (isVSCode ? revealPaddingClass : 'pr-7')
+                    ? (isVSCode ? revealPaddingClass : alwaysActionPaddingClass)
                     : revealPaddingClass
                 )}
               >
@@ -956,13 +999,36 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           ) : null}
 
           <div className={cn(
-            'absolute right-0 top-1/2 z-10 -translate-y-1/2 transition-opacity',
+            'absolute right-0 top-1/2 z-10 flex -translate-y-1/2 items-center gap-0.5 transition-opacity',
             isMenuOpen
               ? 'opacity-100'
               : (alwaysShowActions && !isVSCode)
                 ? 'opacity-100'
                 : cn('opacity-0', revealOnHoverClass),
           )}>
+            {showQuickArchiveAction ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    className={cn(
+                      'inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
+                      isMinimalMode && !alwaysShowActions ? 'h-4 w-4' : 'h-6 w-6',
+                    )}
+                    aria-label={t('sessions.sidebar.bulkActions.archive')}
+                    onPointerDown={handleQuickArchivePointerDown}
+                    onMouseDown={handleQuickArchiveMouseDown}
+                    onClick={handleQuickArchiveClick}
+                    onKeyDown={(event) => event.stopPropagation()}
+                  >
+                    <RiArchiveLine className={cn(isMinimalMode && !alwaysShowActions ? 'h-2.5 w-2.5' : 'h-3.5 w-3.5')} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="left" sideOffset={8}>
+                  {t('sessions.sidebar.bulkActions.archive')}
+                </TooltipContent>
+              </Tooltip>
+            ) : null}
             <DropdownMenu open={isMenuOpen} onOpenChange={handleMenuOpenChange}>
               <DropdownMenuTrigger asChild>
                 <button

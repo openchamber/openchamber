@@ -4,6 +4,45 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.10.3] - 2026-05-08
+
+- Desktop/Electron: added Mini Chat windows for focused conversations without the full workspace shell, including session/draft handoff back to the main window, always-on-top pinning, and quick access from the header, session list, command palette, and keyboard shortcuts.
+- Desktop/Startup: show the splash window earlier while the local runtime starts, making app launch feel more responsive.
+- Chat/Scrolling: rebuilt auto-follow behavior so active responses stay pinned when you want them to, while wheel, touch, keyboard, scrollbar, and find-in-page interactions more reliably release control when you scroll away.
+- Chat/Scrolling: restored saved scroll positions more consistently after session switches, hydration, and draft-to-session transitions, reducing jumps to the wrong part of a conversation.
+- Chat/UI: tightened scroll-to-bottom behavior so the button appears only after you move past the visible bottom spacer, and code-block scrolling no longer prevents the main chat from releasing auto-follow when the nested block cannot scroll further.
+- Chat/Input: fixed attachment-only queued sends, stale attachment restores, stale file-search results, autocomplete tab handling, and focusable removal controls so drafting stays reliable across queued, linked, and restored messages (thanks to @isanchez404).
+- Reliability/Sync: reduced stale and duplicate live-state updates across request arrays, retry metadata, streaming indicators, and session status events, cutting unnecessary rerenders and stuck activity states during long-running chats (thanks to @isanchez404).
+- Files/Skills: ignored stale directory refreshes and outdated skills catalog/repo scans, keeping file and skills views from showing results from an older workspace or request (thanks to @isanchez404).
+- Git/Terminal/Desktop: fixed sandbox database loading in ESM, forwarded lightweight Git status mode across runtimes, preserved Electron SSH desktop hosts when saving instances, and made terminal UTF-8 locale fallbacks platform-aware (thanks to @isanchez404, @liyiopener).
+- UI/Reliability: added smaller polish fixes for mobile Settings Escape handling, Multirun model limits, text-selection cleanup, and upstream event-stream cancellation (thanks to @isanchez404).
+
+## [1.10.2] - 2026-05-07
+
+- Projects: added repository cloning to the Add Project flow, so you can clone a repo into a chosen folder and open it in OpenChamber without leaving setup.
+- Chat/Reliability: stabilized live turn rendering and session sync caches, reducing flicker, stale state, and missing updates during reconnects or long-running chats.
+- Terminal: improved Android tablet keyboard handling, including control-key shortcuts, and kept app shortcuts from stealing focus while typing in the terminal (thanks to @Dav1dch).
+- Terminal: set a UTF-8 locale for terminal sessions so Unicode output renders more reliably across shells and commands (thanks to @liyiopener).
+- Usage: OpenRouter credit balances now avoid misleading percentage displays and use clearer labels across usage views (thanks to @zerone0x).
+- Preview: improved embedded preview proxying with cleaner URL rewriting, fewer false-positive dev-server errors, steadier navigation, and theme-aware preview frames.
+- Notifications: suppressed inherited subagent completion notifications, reducing duplicate or irrelevant alerts during delegated work.
+- VSCode: split the extension into a dedicated app root, improving extension startup boundaries and reducing cross-runtime UI assumptions.
+
+## [1.10.1] - 2026-05-06
+
+- Git: added one-click Sync and stash management, including stash access from a clean worktree, making it faster to pull, push, review, apply, or drop saved changes without leaving OpenChamber.
+- Git: improved sync safety and feedback with latest remote refs, clearer progress banners, less flicker during refresh, cleaner header controls, and better unavailable pull-request states.
+- UI/Localization: added Polish interface translations, expanding language support for Polish-speaking users (thanks to @levy52).
+- Sessions: added a quick archive action directly on session rows, making cleanup faster from the session list (thanks to @zoubenr).
+- Files: added a manual save mode to the file editor, giving you more control over when edits are written while reviewing or drafting changes.
+- Chat/Timeline: added full-text timeline search across user, assistant, and tool messages in a session, making it easier to jump back to earlier context (thanks to @jwcrystal).
+- Chat/Reliability: pending questions now survive session switches and directory eviction, reducing lost approval or clarification prompts during longer multi-session work (thanks to @ablepharus).
+- Mobile/Terminal: added an opt-in keyboard resize mode and steadier touch terminal input, improving typing and terminal control on mobile devices (thanks to @vhqtvn).
+- Terminal: restored focus back to terminal input after Ghostty element blur events, keeping keyboard input more reliable during terminal use (thanks to @Dav1dch).
+- VSCode/Reliability: aligned session status parsing and reconnect reconciliation so activity state recovers more accurately after extension reconnects (thanks to @vhqtvn).
+- Startup/Reliability: configured OpenCode CLI paths are now validated before managed startup, with clearer errors for missing, non-executable, or app-bundle paths.
+- Performance/Reliability: reduced duplicate app initialization, deferred heavier views until needed, lowered local server status overhead, optimized markdown file-link detection, reduced sync recovery payloads, and suppressed expected missing-directory noise for smoother day-to-day use.
+
 ## [1.10.0] - 2026-05-05
 
 - Preview: added an embedded dev-server Preview pane for loopback apps, with authenticated proxying, Vite/HMR support, same-origin API request handling, and safer local dev-server shutdown so apps can run inside OpenChamber more like they do in the browser (thanks to @wpbiggs).

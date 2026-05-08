@@ -136,7 +136,15 @@ function toWebSocketUrl(candidate: string): string {
 }
 
 function buildGlobalEventWsUrl(lastEventId?: string): string {
-  const baseUrl = opencodeClient.getBaseUrl()
+  let baseUrl = "/api"
+  try {
+    const client = opencodeClient as { getBaseUrl?: () => string }
+    if (typeof client.getBaseUrl === "function") {
+      baseUrl = client.getBaseUrl()
+    }
+  } catch {
+    baseUrl = "/api"
+  }
   const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`
   const httpUrl = new URL("global/event/ws", resolveAbsoluteUrl(normalizedBase))
   if (lastEventId && lastEventId.length > 0) {

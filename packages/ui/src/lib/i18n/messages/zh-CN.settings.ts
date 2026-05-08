@@ -753,6 +753,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.cycle_right_sidebar_tab.label': '轮换右侧边栏标签',
   'settings.openchamber.keyboardShortcuts.action.new_chat.label': '新建会话',
   'settings.openchamber.keyboardShortcuts.action.new_chat_worktree.label': '新建工作树草稿',
+  'settings.openchamber.keyboardShortcuts.action.new_mini_chat.label': '新建 Mini Chat 窗口',
   'settings.openchamber.keyboardShortcuts.action.open_help.label': '打开键盘快捷键',
   'settings.openchamber.keyboardShortcuts.action.toggle_context_plan.label': '切换上下文面板中的计划',
   'settings.openchamber.keyboardShortcuts.action.toggle_services_menu.label': '切换服务菜单',

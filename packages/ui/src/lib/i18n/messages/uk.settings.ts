@@ -753,6 +753,7 @@ export const settingsDict = {
   "settings.openchamber.keyboardShortcuts.action.cycle_right_sidebar_tab.label": "Перемкнути вкладку правої бічної панелі",
   "settings.openchamber.keyboardShortcuts.action.new_chat.label": "Нова сесія",
   "settings.openchamber.keyboardShortcuts.action.new_chat_worktree.label": "Нова чернетка worktree",
+  "settings.openchamber.keyboardShortcuts.action.new_mini_chat.label": "Нове вікно Mini Chat",
   "settings.openchamber.keyboardShortcuts.action.open_help.label": "Відкрити комбінації клавіш",
   "settings.openchamber.keyboardShortcuts.action.toggle_context_plan.label": "Перемкнути контекстну панель плану",
   "settings.openchamber.keyboardShortcuts.action.toggle_services_menu.label": "Перемкнути меню сервісів",

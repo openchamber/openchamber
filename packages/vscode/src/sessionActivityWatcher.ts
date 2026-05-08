@@ -16,6 +16,38 @@ const SESSION_COOLDOWN_DURATION_MS = 2000;
 let globalEventWatcherAbortController: AbortController | null = null;
 let chatViewProvider: { postMessage: (message: unknown) => void } | null = null;
 
+const reconcileSessionActivityFromStatus = async (manager: OpenCodeManager): Promise<void> => {
+  const baseUrl = manager.getApiUrl();
+  if (!baseUrl) {
+    return;
+  }
+
+  const url = new URL('/session/status', baseUrl);
+  const response = await fetch(url.toString(), {
+    headers: manager.getOpenCodeAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error(`session status fetch failed (${response.status})`);
+  }
+
+  const statuses = await response.json() as Record<string, { type?: string }>;
+  const knownSessionIds = new Set(Object.keys(statuses || {}));
+
+  for (const [sessionId, data] of Object.entries(statuses || {})) {
+    const type = typeof data?.type === 'string' ? data.type : 'idle';
+    const phase: ActivityPhase = type === 'busy' || type === 'retry' ? 'busy' : 'idle';
+    setSessionActivityPhase(sessionId, phase);
+  }
+
+  // Drop stale in-memory activity entries not present in authoritative status.
+  for (const sessionId of Array.from(sessionActivityPhases.keys())) {
+    if (!knownSessionIds.has(sessionId)) {
+      setSessionActivityPhase(sessionId, 'idle');
+    }
+  }
+};
+
 const setSessionActivityPhase = (sessionId: string, phase: ActivityPhase): void => {
   if (!sessionId) return;
 
@@ -82,8 +114,9 @@ const deriveSessionActivity = (payload: Record<string, unknown>): SessionActivit
 
   if (type === 'session.status') {
     const status = properties?.status as Record<string, unknown> | undefined;
+    const info = properties?.info as Record<string, unknown> | undefined;
     const sessionId = (properties?.sessionID ?? properties?.sessionId) as string;
-    const statusType = status?.type as string;
+    const statusType = (status?.type ?? info?.type) as string;
 
     if (typeof sessionId === 'string' && sessionId.length > 0 && typeof statusType === 'string') {
       const phase = statusType === 'busy' || statusType === 'retry' ? 'busy' : 'idle';
@@ -166,6 +199,14 @@ export const startGlobalEventWatcher = async (
           baseUrl,
           headers: manager.getOpenCodeAuthHeaders(),
         });
+        try {
+          await reconcileSessionActivityFromStatus(manager);
+        } catch (error) {
+          console.warn(
+            '[VSCode:Activity] session status reconcile failed',
+            error instanceof Error ? error.message : error,
+          );
+        }
         const result = await client.global.event({
           signal,
           sseMaxRetryAttempts: 0,

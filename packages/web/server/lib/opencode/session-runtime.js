@@ -9,9 +9,13 @@ const extractSessionStatusUpdate = (payload) => {
   }
 
   const properties = payload.properties && typeof payload.properties === 'object' ? payload.properties : {};
+  const status = properties.status && typeof properties.status === 'object' ? properties.status : {};
   const info = properties.info && typeof properties.info === 'object' ? properties.info : {};
   const sessionId = typeof properties.sessionID === 'string' ? properties.sessionID.trim() : '';
-  const type = typeof info.type === 'string' ? info.type.trim() : '';
+  // Canonical OpenCode schema uses properties.status.type. Keep legacy info.type fallback for compatibility.
+  const type = typeof status.type === 'string'
+    ? status.type.trim()
+    : (typeof info.type === 'string' ? info.type.trim() : '');
 
   if (!sessionId || !type) {
     return null;
@@ -21,9 +25,15 @@ const extractSessionStatusUpdate = (payload) => {
     sessionId,
     type,
     eventId: typeof payload.id === 'string' ? payload.id : '',
-    attempt: typeof info.attempt === 'number' ? info.attempt : undefined,
-    message: typeof info.message === 'string' ? info.message : undefined,
-    next: typeof info.next === 'number' ? info.next : undefined,
+    attempt: typeof status.attempt === 'number'
+      ? status.attempt
+      : (typeof info.attempt === 'number' ? info.attempt : undefined),
+    message: typeof status.message === 'string'
+      ? status.message
+      : (typeof info.message === 'string' ? info.message : undefined),
+    next: typeof status.next === 'number'
+      ? status.next
+      : (typeof info.next === 'number' ? info.next : undefined),
   };
 };
 

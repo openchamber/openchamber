@@ -289,7 +289,10 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
       const onExit = (code, signal) => {
         const reason = signal ? `signal ${signal}` : `code ${code}`;
-        finish(reject, new Error(`OpenCode exited with ${reason}. ${formatCapturedOutput({ stdout, stderr })}`));
+        const appBundleHint = process.platform === 'darwin' && /\/OpenCode\.app\/Contents\/MacOS\/(?:OpenCode|opencode-cli)$/i.test(binary)
+          ? ' The configured binary appears to point at the macOS desktop app bundle; OpenChamber needs the standalone opencode CLI.'
+          : '';
+        finish(reject, new Error(`OpenCode process exited before serving with ${reason}. Binary used: ${binary}.${appBundleHint} ${formatCapturedOutput({ stdout, stderr })}`));
       };
 
       const onError = (error) => {
@@ -425,7 +428,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         : `Starting OpenCode on allocated port ${spawnPort}...`
     );
 
-    await applyOpencodeBinaryFromSettings();
+    await applyOpencodeBinaryFromSettings({ strict: true });
     ensureOpencodeCliEnv();
     const openCodePassword = await ensureLocalOpenCodeServerPassword({ rotateManaged: true });
     const envPath = typeof buildManagedOpenCodePath === 'function'
@@ -493,6 +496,9 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         return await startOpenCodeOnce();
       } catch (error) {
         lastError = error;
+        if (error?.code === 'OPENCODE_BINARY_INVALID') {
+          break;
+        }
         if (attempt >= START_OPEN_CODE_MAX_ATTEMPTS) {
           break;
         }

@@ -11,6 +11,144 @@ const LOOPBACK_HOSTS = new Set([
 
 const PREVIEW_BRIDGE_SCRIPT_ID = 'openchamber-preview-bridge';
 
+const parsePreviewResourcePath = (url) => {
+  try {
+    const parsed = new URL(String(url || ''), 'http://localhost');
+    const match = parsed.pathname.match(/^\/api\/preview\/proxy\/[a-f0-9]{16,64}(\/.*)?$/i);
+    const path = match ? (match[1] || '/') : parsed.pathname;
+    return path + parsed.search;
+  } catch {
+    return String(url || '');
+  }
+};
+
+const previewResourceNoiseRuleSets = [
+  {
+    name: 'vite',
+    suppress: ({ lower, path, tag }) => path === '/@vite/client'
+      || path === '/@react-refresh'
+      || path.startsWith('/@id/__x00__vite/')
+      || lower.includes('/node_modules/.vite/')
+      || lower.includes('/vite/dist/client/')
+      || (tag === 'script' && lower.includes('/@id/')),
+  },
+  {
+    name: 'astro',
+    suppress: ({ lower, path, tag }) => path.startsWith('/@id/astro:')
+      || lower.includes('/astro/dist/runtime/client/dev-toolbar/')
+      || (tag === 'script' && lower.includes('.astro?') && lower.includes('type=script'))
+      || (tag === 'script' && (
+        lower.endsWith('.css')
+        || lower.includes('.css?')
+        || lower.includes('type=style')
+        || lower.includes('lang.css')
+      )),
+  },
+  {
+    name: 'next',
+    suppress: ({ lower, path, tag }) => tag === 'script' && (
+      path === '/_next/webpack-hmr'
+      || lower.includes('/_next/static/webpack/')
+      || lower.includes('/_next/static/chunks/webpack')
+      || lower.includes('/_next/static/chunks/react-refresh')
+      || lower.includes('/_next/static/development/')
+    ),
+  },
+  {
+    name: 'sveltekit',
+    suppress: ({ lower, tag }) => tag === 'script' && (
+      lower.includes('/@id/__x00__virtual:')
+      || lower.includes('/@id/virtual:')
+      || lower.includes('/.svelte-kit/generated/')
+      || lower.includes('/node_modules/.vite/deps/')
+    ),
+  },
+  {
+    name: 'remix',
+    suppress: ({ lower, tag }) => tag === 'script' && (
+      lower.includes('/@remix-run/dev/')
+      || lower.includes('/__manifest')
+      || lower.includes('/__hmr')
+    ),
+  },
+  {
+    name: 'nuxt',
+    suppress: ({ lower, tag }) => tag === 'script' && (
+      lower.includes('/_nuxt/@vite/client')
+      || lower.includes('/_nuxt/@id/')
+      || lower.includes('/_nuxt/node_modules/.vite/')
+      || lower.includes('/__nuxt_error')
+      || lower.includes('/__nuxt_vite_node__')
+    ),
+  },
+  {
+    name: 'webpack',
+    suppress: ({ lower, path, tag }) => tag === 'script' && (
+      path === '/sockjs-node/info'
+      || lower.includes('/webpack-dev-server/')
+      || lower.includes('/webpack/hot/')
+      || lower.includes('/__webpack_hmr')
+      || lower.includes('/ws') && lower.includes('webpack')
+    ),
+  },
+];
+
+export const classifyPreviewResourceError = ({ tagName, url }) => {
+  const tag = typeof tagName === 'string' ? tagName.toLowerCase() : '';
+  if (tag !== 'script' && tag !== 'link') return 'report';
+
+  const pathAndSearch = parsePreviewResourcePath(url);
+  const lower = pathAndSearch.toLowerCase();
+  const path = pathAndSearch.split('?', 1)[0] || '';
+  const context = { tag, path, pathAndSearch, lower };
+
+  if (previewResourceNoiseRuleSets.some((ruleSet) => ruleSet.suppress(context))) return 'suppress';
+
+  return 'report';
+};
+
+export const classifyPreviewNavigation = ({ url, currentUrl }) => {
+  let parsed;
+  try {
+    parsed = new URL(String(url || ''), currentUrl || 'http://localhost/');
+  } catch {
+    return { action: 'allow', url: String(url || '') };
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return { action: 'allow', url: parsed.toString() };
+  }
+
+  let current;
+  try {
+    current = new URL(currentUrl || 'http://localhost/');
+  } catch {
+    current = null;
+  }
+
+  if (current
+    && parsed.origin === current.origin
+    && parsed.pathname === current.pathname
+    && parsed.search === current.search
+    && parsed.hash
+  ) {
+    return { action: 'allow', url: parsed.toString() };
+  }
+
+  const path = parsed.pathname || '/';
+  if (parsed.origin === current?.origin && path.startsWith('/api/preview/proxy/')) {
+    return { action: 'allow', url: parsed.toString() };
+  }
+
+  const host = parsed.hostname;
+  const isLoopback = host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '::1' || host === '[::1]';
+  if (isLoopback || (parsed.origin === current?.origin && path.startsWith('/'))) {
+    return { action: 'proxy', url: parsed.toString() };
+  }
+
+  return { action: 'external', url: parsed.toString() };
+};
+
 const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
   if (window.__openchamberPreviewBridgeInstalled) return;
   window.__openchamberPreviewBridgeInstalled = true;
@@ -22,6 +160,9 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
   let inspectMode = false;
   let lastHoverKey = '';
   let pendingHover = null;
+  let previewColorScheme = null;
+  let nativeMatchMedia = null;
+  const colorSchemeListeners = new Set();
 
   const post = (payload) => {
     try {
@@ -45,6 +186,94 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
     } catch {
       return clip(String(value), MAX_ARG);
     }
+  };
+
+  const normalizeColorScheme = (value) => value === 'dark' ? 'dark' : value === 'light' ? 'light' : null;
+
+  const mediaQueryColorScheme = (query) => {
+    const normalized = String(query || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    if (normalized === '(prefers-color-scheme: dark)') return 'dark';
+    if (normalized === '(prefers-color-scheme: light)') return 'light';
+    return null;
+  };
+
+  const mediaQueryMatchesPreviewScheme = (query) => {
+    const scheme = mediaQueryColorScheme(query);
+    if (!scheme || !previewColorScheme) return null;
+    return previewColorScheme === scheme;
+  };
+
+  const notifyColorSchemeListeners = () => {
+    for (const listener of Array.from(colorSchemeListeners)) {
+      try {
+        const matches = mediaQueryMatchesPreviewScheme(listener.media);
+        if (matches === null) continue;
+        const event = { matches, media: listener.media, type: 'change', target: listener.mql, currentTarget: listener.mql };
+        listener.callback.call(listener.mql, event);
+      } catch {}
+    }
+  };
+
+  const installColorSchemeMatchMediaPatch = () => {
+    if (window.__openchamberPreviewColorSchemePatched || typeof window.matchMedia !== 'function') return;
+    window.__openchamberPreviewColorSchemePatched = true;
+    nativeMatchMedia = window.matchMedia.bind(window);
+    window.matchMedia = function(query) {
+      const nativeMql = nativeMatchMedia(query);
+      if (!mediaQueryColorScheme(query)) return nativeMql;
+      const listenersForMql = new Map();
+      const mql = Object.create(nativeMql);
+      Object.defineProperty(mql, 'matches', { get: () => mediaQueryMatchesPreviewScheme(query) ?? nativeMql.matches });
+      Object.defineProperty(mql, 'media', { get: () => nativeMql.media });
+      mql.addEventListener = function(type, callback, options) {
+        if (type !== 'change' || typeof callback !== 'function') return nativeMql.addEventListener?.(type, callback, options);
+        const entry = { media: query, mql, callback };
+        listenersForMql.set(callback, entry);
+        colorSchemeListeners.add(entry);
+      };
+      mql.removeEventListener = function(type, callback, options) {
+        if (type !== 'change' || typeof callback !== 'function') return nativeMql.removeEventListener?.(type, callback, options);
+        const entry = listenersForMql.get(callback);
+        if (entry) colorSchemeListeners.delete(entry);
+        listenersForMql.delete(callback);
+      };
+      mql.addListener = function(callback) { mql.addEventListener('change', callback); };
+      mql.removeListener = function(callback) { mql.removeEventListener('change', callback); };
+      return mql;
+    };
+  };
+
+  const shouldSyncDataTheme = () => {
+    try {
+      const root = document.documentElement;
+      if (!root) return false;
+      if (root.hasAttribute('data-theme')) return true;
+      if (document.querySelector('starlight-theme-select, starlight-menu-button')) return true;
+      const generator = document.querySelector('meta[name="generator"]');
+      const generatorContent = generator && typeof generator.getAttribute === 'function' ? generator.getAttribute('content') || '' : '';
+      if (generatorContent.toLowerCase().indexOf('starlight') >= 0) return true;
+      const styles = window.getComputedStyle(root);
+      return Boolean(styles.getPropertyValue('--sl-color-bg').trim()
+        || styles.getPropertyValue('--sl-color-text').trim()
+        || styles.getPropertyValue('--sl-color-accent').trim());
+    } catch {
+      return false;
+    }
+  };
+
+  const applyPreviewColorScheme = (scheme) => {
+    const next = normalizeColorScheme(scheme);
+    if (!next || previewColorScheme === next) return;
+    previewColorScheme = next;
+    try {
+      const root = document.documentElement;
+      root.style.colorScheme = next;
+      root.dataset.openchamberPreviewColorScheme = next;
+      if (shouldSyncDataTheme()) {
+        root.dataset.theme = next;
+      }
+    } catch {}
+    notifyColorSchemeListeners();
   };
 
   const readElementUrl = (element) => {
@@ -76,41 +305,83 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
     const tag = element && element.tagName && typeof element.tagName.toLowerCase === 'function' ? element.tagName.toLowerCase() : '';
     if (tag !== 'script' && tag !== 'link') return false;
     if (tag === 'script' && typeof element.hasAttribute === 'function' && element.hasAttribute('data-cf-beacon')) return true;
-    const path = upstreamPathForUrl(value);
     const pathAndSearch = upstreamPathAndSearchForUrl(value);
-    return path === '/@vite/client'
+    const lower = pathAndSearch.toLowerCase();
+    const path = pathAndSearch.split('?', 1)[0] || '';
+
+    const viteNoise = path === '/@vite/client'
       || path === '/@react-refresh'
-      || path.indexOf('/@id/astro:') === 0
-      || path.startsWith('/@id/__x00__vite/')
-      || path.includes('/node_modules/.vite/')
-      || path.includes('/vite/dist/client/')
-      || path.includes('/astro/dist/runtime/client/dev-toolbar/')
-      || (pathAndSearch.indexOf('/node_modules/') >= 0 && pathAndSearch.indexOf('.astro?') >= 0 && pathAndSearch.indexOf('type=script') >= 0);
+      || path.indexOf('/@id/__x00__vite/') === 0
+      || lower.indexOf('/node_modules/.vite/') >= 0
+      || lower.indexOf('/vite/dist/client/') >= 0
+      || (tag === 'script' && lower.indexOf('/@id/') >= 0);
+    const astroNoise = path.indexOf('/@id/astro:') === 0
+      || lower.indexOf('/astro/dist/runtime/client/dev-toolbar/') >= 0
+      || (tag === 'script' && lower.indexOf('.astro?') >= 0 && lower.indexOf('type=script') >= 0)
+      || (tag === 'script' && (
+        lower.endsWith('.css')
+        || lower.indexOf('.css?') >= 0
+        || lower.indexOf('type=style') >= 0
+        || lower.indexOf('lang.css') >= 0
+      ));
+    const nextNoise = tag === 'script' && (
+      path === '/_next/webpack-hmr'
+      || lower.indexOf('/_next/static/webpack/') >= 0
+      || lower.indexOf('/_next/static/chunks/webpack') >= 0
+      || lower.indexOf('/_next/static/chunks/react-refresh') >= 0
+      || lower.indexOf('/_next/static/development/') >= 0
+    );
+    const svelteKitNoise = tag === 'script' && (
+      lower.indexOf('/@id/__x00__virtual:') >= 0
+      || lower.indexOf('/@id/virtual:') >= 0
+      || lower.indexOf('/.svelte-kit/generated/') >= 0
+      || lower.indexOf('/node_modules/.vite/deps/') >= 0
+    );
+    const remixNoise = tag === 'script' && (
+      lower.indexOf('/@remix-run/dev/') >= 0
+      || lower.indexOf('/__manifest') >= 0
+      || lower.indexOf('/__hmr') >= 0
+    );
+    const nuxtNoise = tag === 'script' && (
+      lower.indexOf('/_nuxt/@vite/client') >= 0
+      || lower.indexOf('/_nuxt/@id/') >= 0
+      || lower.indexOf('/_nuxt/node_modules/.vite/') >= 0
+      || lower.indexOf('/__nuxt_error') >= 0
+      || lower.indexOf('/__nuxt_vite_node__') >= 0
+    );
+    const webpackNoise = tag === 'script' && (
+      path === '/sockjs-node/info'
+      || lower.indexOf('/webpack-dev-server/') >= 0
+      || lower.indexOf('/webpack/hot/') >= 0
+      || lower.indexOf('/__webpack_hmr') >= 0
+      || (lower.indexOf('/ws') >= 0 && lower.indexOf('webpack') >= 0)
+    );
+
+    if (viteNoise || astroNoise || nextNoise || svelteKitNoise || remixNoise || nuxtNoise || webpackNoise) return true;
+    return false;
   };
 
-  const toLoopbackHttpUrl = (value) => {
+  installColorSchemeMatchMediaPatch();
+
+  const classifyNavigation = (value) => {
     try {
       const parsed = new URL(value, window.location.href);
-      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
-      const host = parsed.hostname;
-      if (host !== 'localhost' && host !== '127.0.0.1' && host !== '0.0.0.0' && host !== '::1' && host !== '[::1]') {
-        return null;
-      }
-      return parsed.toString();
-    } catch {
-      return null;
-    }
-  };
-
-  const shouldParentHandleNavigation = (url) => {
-    if (!url) return false;
-    try {
-      const parsed = new URL(url);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return { action: 'allow', url: parsed.toString() };
       const current = new URL(window.location.href);
-      if (parsed.origin !== current.origin) return true;
-      return !parsed.pathname.startsWith('/api/preview/proxy/');
+      if (parsed.origin === current.origin && parsed.pathname === current.pathname && parsed.search === current.search && parsed.hash) {
+        return { action: 'allow', url: parsed.toString() };
+      }
+      if (parsed.origin === current.origin && parsed.pathname.startsWith('/api/preview/proxy/')) {
+        return { action: 'allow', url: parsed.toString() };
+      }
+      const host = parsed.hostname;
+      const isLoopback = host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '::1' || host === '[::1]';
+      if (isLoopback || (parsed.origin === current.origin && parsed.pathname.startsWith('/'))) {
+        return { action: 'proxy', url: parsed.toString() };
+      }
+      return { action: 'external', url: parsed.toString() };
     } catch {
-      return false;
+      return { action: 'allow', url: String(value || '') };
     }
   };
 
@@ -429,6 +700,9 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
     if (data.type === 'set-inspect-mode') {
       setInspectMode(data.enabled === true);
     }
+    if (data.type === 'set-color-scheme') {
+      applyPreviewColorScheme(data.scheme);
+    }
   });
 
   window.addEventListener('mousemove', sendHover, true);
@@ -440,11 +714,11 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
   window.addEventListener('click', (event) => {
     const anchor = event.target && typeof event.target.closest === 'function' ? event.target.closest('a[href]') : null;
     if (anchor && !inspectMode) {
-      const nextUrl = toLoopbackHttpUrl(anchor.href);
-      if (shouldParentHandleNavigation(nextUrl)) {
+      const navigation = classifyNavigation(anchor.href);
+      if (navigation.action === 'proxy' || navigation.action === 'external') {
         event.preventDefault();
         event.stopPropagation();
-        post({ type: 'navigate-preview', url: nextUrl, ts: Date.now() });
+        post({ type: 'navigate-preview', url: navigation.url, navigation: navigation.action, ts: Date.now() });
         return;
       }
     }
@@ -535,6 +809,78 @@ const normalizeLoopbackUrl = (rawUrl) => {
 
   // Only keep origin here; the proxy path is preserved on the OpenChamber side.
   return { ok: true, origin: url.origin };
+};
+
+export const rewritePreviewBody = ({ bodyText, proxyBasePath, targetOrigin, kind }) => {
+  if (typeof bodyText !== 'string' || bodyText.length === 0) {
+    return bodyText;
+  }
+
+  const prefix = proxyBasePath.endsWith('/') ? proxyBasePath.slice(0, -1) : proxyBasePath;
+  const target = targetOrigin ? new URL(targetOrigin) : null;
+  const isSameLoopbackTarget = (url) => {
+    if (!target) return false;
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+    const host = url.hostname;
+    if (host !== 'localhost' && host !== '127.0.0.1' && host !== '0.0.0.0' && host !== '::1' && host !== '[::1]') {
+      return false;
+    }
+    return url.port === target.port;
+  };
+  const rewriteResourceUrl = (value) => {
+    if (typeof value !== 'string' || value.length === 0) return value;
+    if (value.startsWith('/') && !value.startsWith('//')) {
+      if (value.startsWith('/api/preview/proxy/')) return value;
+      return `${prefix}${value}`;
+    }
+    try {
+      const parsed = new URL(value);
+      if (isSameLoopbackTarget(parsed)) {
+        return `${prefix}${parsed.pathname}${parsed.search}${parsed.hash}`;
+      }
+    } catch {
+      return value;
+    }
+    return value;
+  };
+  const rewriteHtml = (text) => text
+    .replace(/\b(src|href|action)=(['"])([^'"]*)\2/gi, (_match, attr, quote, value) => {
+      return `${attr}=${quote}${rewriteResourceUrl(value)}${quote}`;
+    })
+    .replace(/\bsrcset=(['"])([^'"]*)\1/gi, (_match, quote, value) => {
+      const rewritten = String(value).split(',').map((part) => {
+        const trimmed = part.trim();
+        if (!trimmed) return trimmed;
+        const segments = trimmed.split(/\s+/);
+        const url = segments[0] || '';
+        segments[0] = rewriteResourceUrl(url);
+        return segments.join(' ');
+      }).join(', ');
+      return `srcset=${quote}${rewritten}${quote}`;
+    });
+  const rewriteCss = (text) => text
+    .replace(/url\((['"]?)([^)'"]*)\1\)/gi, (_match, quote, value) => {
+      const q = quote || '';
+      return `url(${q}${rewriteResourceUrl(value)}${q})`;
+    })
+    .replace(/@import\s+(['"])\/(?!\/)([^'"]*)\1/gi, (_match, quote, path) => {
+      return `@import ${quote}${rewriteResourceUrl(`/${path}`)}${quote}`;
+    });
+  const rewriteJavaScript = (text) => text
+    .replace(/\bfrom\s+(['"])\/(?!\/)([^'"]*)\1/gi, (_match, quote, path) => {
+      return `from ${quote}${rewriteResourceUrl(`/${path}`)}${quote}`;
+    })
+    .replace(/\bimport\s+(['"])\/(?!\/)([^'"]*)\1/gi, (_match, quote, path) => {
+      return `import ${quote}${rewriteResourceUrl(`/${path}`)}${quote}`;
+    })
+    .replace(/\bimport\(\s*(['"])\/(?!\/)([^'"]*)\1\s*\)/gi, (_match, quote, path) => {
+      return `import(${quote}${rewriteResourceUrl(`/${path}`)}${quote})`;
+    });
+
+  if (kind === 'html') return rewriteHtml(bodyText);
+  if (kind === 'css') return rewriteCss(bodyText);
+  if (kind === 'javascript') return rewriteJavaScript(bodyText);
+  return bodyText;
 };
 
 export const createPreviewProxyRuntime = ({
@@ -687,76 +1033,6 @@ export const createPreviewProxyRuntime = ({
     rejectWebSocketUpgrade,
   }) => {
     ensureSweeper();
-
-    const rewritePreviewBody = (bodyText, proxyBasePath, targetOrigin) => {
-      if (typeof bodyText !== 'string' || bodyText.length === 0) {
-        return bodyText;
-      }
-
-      const prefix = proxyBasePath.endsWith('/') ? proxyBasePath.slice(0, -1) : proxyBasePath;
-      const target = targetOrigin ? new URL(targetOrigin) : null;
-      const isSameLoopbackTarget = (url) => {
-        if (!target) return false;
-        if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
-        const host = url.hostname;
-        if (host !== 'localhost' && host !== '127.0.0.1' && host !== '0.0.0.0' && host !== '::1' && host !== '[::1]') {
-          return false;
-        }
-        return url.port === target.port;
-      };
-      const rewriteRootPath = (value) => {
-        if (typeof value !== 'string' || value.length === 0) {
-          return value;
-        }
-        if (value.startsWith('/') && !value.startsWith('//')) {
-          if (value.startsWith('/api/preview/proxy/')) {
-            return value;
-          }
-          return `${prefix}${value}`;
-        }
-        try {
-          const parsed = new URL(value);
-          if (isSameLoopbackTarget(parsed)) {
-            return `${prefix}${parsed.pathname}${parsed.search}${parsed.hash}`;
-          }
-        } catch {
-          return value;
-        }
-        return value;
-      };
-
-      return bodyText
-        .replace(/\b(src|href|action)=(["'])([^"']*)\2/gi, (_match, attr, quote, value) => {
-          return `${attr}=${quote}${rewriteRootPath(value)}${quote}`;
-        })
-        .replace(/\bsrcset=(["'])([^"']*)\1/gi, (_match, quote, value) => {
-          const rewritten = String(value).split(',').map((part) => {
-            const trimmed = part.trim();
-            if (!trimmed) return trimmed;
-            const segments = trimmed.split(/\s+/);
-            const url = segments[0] || '';
-            segments[0] = rewriteRootPath(url);
-            return segments.join(' ');
-          }).join(', ');
-          return `srcset=${quote}${rewritten}${quote}`;
-        })
-        .replace(/url\((['"]?)([^)'"]*)\1\)/gi, (_match, quote, value) => {
-          const q = quote || '';
-          return `url(${q}${rewriteRootPath(value)}${q})`;
-        })
-        .replace(/@import\s+(["'])\/(?!\/)([^"']*)\1/gi, (_match, quote, path) => {
-          return `@import ${quote}${rewriteRootPath(`/${path}`)}${quote}`;
-        })
-        .replace(/\bfrom\s+(["'])\/(?!\/)([^"']*)\1/gi, (_match, quote, path) => {
-          return `from ${quote}${rewriteRootPath(`/${path}`)}${quote}`;
-        })
-        .replace(/\bimport\s+(["'])\/(?!\/)([^"']*)\1/gi, (_match, quote, path) => {
-          return `import ${quote}${rewriteRootPath(`/${path}`)}${quote}`;
-        })
-        .replace(/\bimport\(\s*(["'])\/(?!\/)([^"']*)\1\s*\)/gi, (_match, quote, path) => {
-          return `import(${quote}${rewriteRootPath(`/${path}`)}${quote})`;
-        });
-    };
 
     const injectPreviewBridge = (bodyText) => {
       if (typeof bodyText !== 'string' || bodyText.includes(PREVIEW_BRIDGE_SCRIPT_ID)) {
@@ -914,10 +1190,20 @@ export const createPreviewProxyRuntime = ({
           const parsed = new URL(req.originalUrl || req.url || '', 'http://localhost');
           const upstreamPath = stripProxyPrefix(parsed.pathname, resolved.id);
           if (isJavaScript && upstreamPath === '/@vite/client') {
-            return rewritePreviewBody(rewriteViteClientHmr(responseBuffer.toString('utf8'), proxyBasePath), proxyBasePath, resolved.entry.origin);
+            return rewritePreviewBody({
+              bodyText: rewriteViteClientHmr(responseBuffer.toString('utf8'), proxyBasePath),
+              proxyBasePath,
+              targetOrigin: resolved.entry.origin,
+              kind: 'javascript',
+            });
           }
 
-          const rewrittenBody = rewritePreviewBody(responseBuffer.toString('utf8'), proxyBasePath, resolved.entry.origin);
+          const rewrittenBody = rewritePreviewBody({
+            bodyText: responseBuffer.toString('utf8'),
+            proxyBasePath,
+            targetOrigin: resolved.entry.origin,
+            kind: isHtml ? 'html' : isCss ? 'css' : 'javascript',
+          });
           return isHtml ? injectPreviewBridge(rewrittenBody) : rewrittenBody;
         }),
         error: (err, _req, res) => {

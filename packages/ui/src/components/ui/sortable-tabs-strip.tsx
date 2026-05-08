@@ -42,6 +42,7 @@ type SortableTabsStripProps = {
   activePillInsetClassName?: string;
   activePillButtonClassName?: string;
   inactiveTabsIconOnly?: boolean;
+  iconOnlyActiveTab?: boolean;
   animateActivePill?: boolean;
   activePillLowercase?: boolean;
   className?: string;
@@ -94,6 +95,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
   activePillInsetClassName,
   activePillButtonClassName,
   inactiveTabsIconOnly = false,
+  iconOnlyActiveTab = false,
   animateActivePill,
   activePillLowercase = true,
   className,
@@ -367,6 +369,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
           const isActive = item.id === activeId;
           const showInactiveIconOnly = inactiveTabsIconOnly && usesActivePillIndicator && !isActive && Boolean(item.icon);
           const shouldShowLabel = !showInactiveIconOnly;
+          const shouldShowIcon = Boolean(item.icon) && (!iconOnlyActiveTab || isActive);
           const useIntrinsicActiveTab = inactiveTabsIconOnly && usesActivePillIndicator && isActive && !isScrollable && !useIntrinsicPillSizing;
           const closable = item.closable !== false && Boolean(onClose);
           const closeReplacesIcon = closable && Boolean(item.icon);
@@ -436,7 +439,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                 >
                   {usesActivePillIndicator ? (
                     <>
-                      {item.icon ? (
+                      {shouldShowIcon ? (
                         <span className="relative flex h-4 w-4 shrink-0 items-center justify-center">
                           <span className={cn('flex items-center justify-center transition-opacity', closeReplacesIcon && (alwaysShowCloseControls ? 'opacity-0' : 'group-hover:opacity-0'))}>{item.icon}</span>
                           {closeReplacesIcon ? (
@@ -463,7 +466,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                     </>
                   ) : (
                     <span className={cn('flex min-w-0 flex-nowrap items-center gap-1.5', !isScrollable && 'justify-center')}>
-                      {item.icon ? (
+                      {shouldShowIcon ? (
                         <span
                           className={cn(
                             'relative flex h-4 w-4 shrink-0 items-center justify-center transition-colors duration-200 ease-out',

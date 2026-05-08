@@ -104,6 +104,7 @@ export const BottomTerminalDock: React.FC<BottomTerminalDockProps> = ({ isOpen, 
   const appliedHeight = isOpen
     ? (isFullscreen ? Math.max(0, fullscreenHeight ?? standardHeight) : standardHeight)
     : 0;
+  const shouldApplyFullscreenLayout = isOpen && isFullscreen;
 
   const handlePointerDown = (event: React.PointerEvent) => {
     if (!isOpen || isFullscreen) return;
@@ -118,11 +119,11 @@ export const BottomTerminalDock: React.FC<BottomTerminalDockProps> = ({ isOpen, 
       ref={dockRef}
       className={cn(
         'flex overflow-hidden border-t border-border bg-sidebar',
-        isFullscreen ? 'absolute inset-x-0 bottom-0 z-40' : 'relative',
+        shouldApplyFullscreenLayout ? 'absolute inset-x-0 bottom-0 z-40' : 'relative',
         isResizing ? 'transition-none' : 'transition-[height] duration-300 ease-in-out',
         !isOpen && 'border-t-0'
       )}
-      style={isFullscreen ? {
+      style={shouldApplyFullscreenLayout ? {
         top: 'var(--oc-header-height, 48px)',
       } : {
         height: `${appliedHeight}px`,

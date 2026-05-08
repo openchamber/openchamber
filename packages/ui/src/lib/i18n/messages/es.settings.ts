@@ -753,6 +753,7 @@ export const settingsDict = {
   "settings.openchamber.keyboardShortcuts.action.cycle_right_sidebar_tab.label": "Cambiar pestaña de la barra lateral derecha",
   "settings.openchamber.keyboardShortcuts.action.new_chat.label": "Nueva sesión",
   "settings.openchamber.keyboardShortcuts.action.new_chat_worktree.label": "Nuevo borrador de worktree",
+  "settings.openchamber.keyboardShortcuts.action.new_mini_chat.label": "Nueva ventana Mini Chat",
   "settings.openchamber.keyboardShortcuts.action.open_help.label": "Abrir atajos de teclado",
   "settings.openchamber.keyboardShortcuts.action.toggle_context_plan.label": "Alternar panel de plan de contexto",
   "settings.openchamber.keyboardShortcuts.action.toggle_services_menu.label": "Mostrar u ocultar menú de servicios",

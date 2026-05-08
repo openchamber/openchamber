@@ -25,13 +25,15 @@ async function loadDictionary(locale: Locale): Promise<I18nDictionary> {
     ? await import('./messages/zh-CN') as { dict: I18nDictionary }
     : locale === 'es'
       ? await import('./messages/es') as { dict: I18nDictionary }
-    : locale === 'pt-BR'
-      ? await import('./messages/pt-BR') as { dict: I18nDictionary }
-    : locale === 'uk'
-      ? await import('./messages/uk') as { dict: I18nDictionary }
-    : locale === 'ko'
-      ? await import('./messages/ko') as { dict: I18nDictionary }
-      : { dict: enDict };
+      : locale === 'pt-BR'
+        ? await import('./messages/pt-BR') as { dict: I18nDictionary }
+        : locale === 'uk'
+          ? await import('./messages/uk') as { dict: I18nDictionary }
+          : locale === 'ko'
+            ? await import('./messages/ko') as { dict: I18nDictionary }
+            : locale === 'pl'
+              ? await import('./messages/pl') as { dict: I18nDictionary }
+              : { dict: enDict };
   dictionaries.set(locale, mod.dict);
   return mod.dict;
 }

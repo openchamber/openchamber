@@ -1,24 +1,25 @@
 import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
 import type { HarnessMessage, HarnessPart, HarnessSession } from "@openchamber/harness-contracts"
+import { getSessionMaterializationStatus } from "./materialization"
 
-type ReconnectRecoveryState = {
+type ReconnectMaterializationState = {
   session: HarnessSession[]
   session_status?: Record<string, SessionStatus>
   message?: Record<string, HarnessMessage[]>
   part?: Record<string, HarnessPart[]>
 }
 
-export type ViewedSessionRecoveryTarget = {
+export type ViewedSessionMaterializationTarget = {
   directory: string
   sessionId: string
 }
 
 type ReconnectCandidateOptions = {
   directory?: string
-  viewedSession?: ViewedSessionRecoveryTarget | null
+  viewedSession?: ViewedSessionMaterializationTarget | null
 }
 
-export function getReconnectCandidateSessionIds(state: ReconnectRecoveryState, options?: ReconnectCandidateOptions) {
+export function getReconnectCandidateSessionIds(state: ReconnectMaterializationState, options?: ReconnectCandidateOptions) {
   const ids = new Set<string>()
 
   for (const [sessionId, status] of Object.entries(state.session_status ?? {})) {
@@ -27,16 +28,13 @@ export function getReconnectCandidateSessionIds(state: ReconnectRecoveryState, o
 
   for (const [sessionId, messages] of Object.entries(state.message ?? {})) {
     const lastMessage = messages[messages.length - 1]
-    const lastAssistantComplete = lastMessage
-      && lastMessage.role === "assistant"
-      && typeof (lastMessage as { time?: { completed?: number } }).time?.completed === "number"
     if (
       lastMessage
       && lastMessage.role === "assistant"
       && typeof (lastMessage as { time?: { completed?: number } }).time?.completed !== "number"
     ) {
       ids.add(sessionId)
-    } else if (lastAssistantComplete && state.part && (state.part[lastMessage.id]?.length ?? 0) === 0) {
+    } else if (!getSessionMaterializationStatus({ message: state.message ?? {}, part: state.part ?? {} }, sessionId).renderable) {
       ids.add(sessionId)
     }
   }

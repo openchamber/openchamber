@@ -1,7 +1,7 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { getSyncMessages } from '@/sync/sync-refs';
+import { getSyncSessionMaterializationStatus } from '@/sync/sync-refs';
 
 const SESSION_PREFETCH_HOVER_DELAY_MS = 180;
 const SESSION_PREFETCH_SETTLE_MS = 600;
@@ -12,10 +12,10 @@ type Args = {
   currentSessionId: string | null;
   sortedSessions: Session[];
   recentSessionIds?: string[];
-  loadMessages: (sessionId: string) => Promise<unknown>;
+  ensureSessionRenderable: (sessionId: string) => Promise<unknown>;
 };
 
-export const useSessionPrefetch = ({ currentSessionId, sortedSessions, recentSessionIds = [], loadMessages }: Args): void => {
+export const useSessionPrefetch = ({ currentSessionId, sortedSessions, recentSessionIds = [], ensureSessionRenderable }: Args): void => {
   const sessionPrefetchTimersRef = React.useRef<Map<string, number>>(new Map());
   const sessionPrefetchQueueRef = React.useRef<string[]>([]);
   const sessionPrefetchInFlightRef = React.useRef<Set<string>>(new Set());
@@ -36,30 +36,28 @@ export const useSessionPrefetch = ({ currentSessionId, sortedSessions, recentSes
         continue;
       }
 
-      // Check if messages already loaded in sync child store
-      const hasMessages = getSyncMessages(nextSessionId).length > 0;
-      if (hasMessages) {
+      // Check if the session is already renderable in the sync child store.
+      if (getSyncSessionMaterializationStatus(nextSessionId).renderable) {
         continue;
       }
 
       sessionPrefetchInFlightRef.current.add(nextSessionId);
-      void loadMessages(nextSessionId)
+      void ensureSessionRenderable(nextSessionId)
         .catch(() => undefined)
         .finally(() => {
           sessionPrefetchInFlightRef.current.delete(nextSessionId);
           pumpSessionPrefetchQueue();
         });
     }
-  }, [loadMessages]);
+  }, [ensureSessionRenderable]);
 
   const scheduleSessionPrefetch = React.useCallback((sessionId: string | null | undefined) => {
     if (!sessionId || sessionId === currentSessionId || typeof window === 'undefined') {
       return;
     }
 
-    // Already loaded in sync
-    const hasMessages = getSyncMessages(sessionId).length > 0;
-    if (hasMessages) {
+    // Already renderable in sync
+    if (getSyncSessionMaterializationStatus(sessionId).renderable) {
       return;
     }
 

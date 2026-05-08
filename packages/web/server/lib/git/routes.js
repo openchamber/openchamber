@@ -336,6 +336,78 @@ export function registerGitRoutes(app) {
     }
   });
 
+  app.get('/api/git/stashes', async (req, res) => {
+    const { listStashes } = await getGitLibraries();
+    try {
+      const directory = req.query.directory;
+      if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
+      res.json({ stashes: await listStashes(directory) });
+    } catch (error) {
+      console.error('Failed to list stashes:', error);
+      res.status(500).json({ error: error.message || 'Failed to list stashes' });
+    }
+  });
+
+  app.post('/api/git/stashes/file-counts', async (req, res) => {
+    const { countStashFiles } = await getGitLibraries();
+    try {
+      const directory = req.query.directory;
+      if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
+      res.json({ counts: await countStashFiles(directory, req.body?.refs) });
+    } catch (error) {
+      console.error('Failed to count stash files:', error);
+      res.status(500).json({ error: error.message || 'Failed to count stash files' });
+    }
+  });
+
+  app.post('/api/git/stash', async (req, res) => {
+    const { stashPush } = await getGitLibraries();
+    try {
+      const directory = req.query.directory;
+      if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
+      res.json(await stashPush(directory, req.body));
+    } catch (error) {
+      console.error('Failed to stash changes:', error);
+      res.status(500).json({ error: error.message || 'Failed to stash changes' });
+    }
+  });
+
+  app.post('/api/git/stash/apply', async (req, res) => {
+    const { stashApply } = await getGitLibraries();
+    try {
+      const directory = req.query.directory;
+      if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
+      res.json(await stashApply(directory, req.body));
+    } catch (error) {
+      console.error('Failed to apply stash:', error);
+      res.status(500).json({ error: error.message || 'Failed to apply stash' });
+    }
+  });
+
+  app.post('/api/git/stash/pop', async (req, res) => {
+    const { stashPop } = await getGitLibraries();
+    try {
+      const directory = req.query.directory;
+      if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
+      res.json(await stashPop(directory, req.body));
+    } catch (error) {
+      console.error('Failed to pop stash:', error);
+      res.status(500).json({ error: error.message || 'Failed to pop stash' });
+    }
+  });
+
+  app.post('/api/git/stash/drop', async (req, res) => {
+    const { stashDrop } = await getGitLibraries();
+    try {
+      const directory = req.query.directory;
+      if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
+      res.json(await stashDrop(directory, req.body));
+    } catch (error) {
+      console.error('Failed to drop stash:', error);
+      res.status(500).json({ error: error.message || 'Failed to drop stash' });
+    }
+  });
+
   app.post('/api/git/fetch', async (req, res) => {
     const { fetch: gitFetch } = await getGitLibraries();
     try {
@@ -498,38 +570,6 @@ export function registerGitRoutes(app) {
     } catch (error) {
       console.error('Failed to get conflict details:', error);
       res.status(500).json({ error: error.message || 'Failed to get conflict details' });
-    }
-  });
-
-  app.post('/api/git/stash', async (req, res) => {
-    const { stash } = await getGitLibraries();
-    try {
-      const directory = req.query.directory;
-      if (!directory) {
-        return res.status(400).json({ error: 'directory parameter is required' });
-      }
-
-      const result = await stash(directory, req.body);
-      res.json(result);
-    } catch (error) {
-      console.error('Failed to stash:', error);
-      res.status(500).json({ error: error.message || 'Failed to stash' });
-    }
-  });
-
-  app.post('/api/git/stash/pop', async (req, res) => {
-    const { stashPop } = await getGitLibraries();
-    try {
-      const directory = req.query.directory;
-      if (!directory) {
-        return res.status(400).json({ error: 'directory parameter is required' });
-      }
-
-      const result = await stashPop(directory);
-      res.json(result);
-    } catch (error) {
-      console.error('Failed to pop stash:', error);
-      res.status(500).json({ error: error.message || 'Failed to pop stash' });
     }
   });
 

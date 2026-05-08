@@ -1134,7 +1134,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     currentSessionId,
     sortedSessions,
     recentSessionIds: recentSessionIdsList,
-    loadMessages: sync.syncSession,
+    ensureSessionRenderable: sync.ensureSessionRenderable,
   });
 
   const sectionsForSidebarRender = React.useMemo(() => {

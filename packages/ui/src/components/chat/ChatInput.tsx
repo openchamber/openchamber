@@ -41,6 +41,7 @@ import { ModelControls } from './ModelControls';
 import { parseAgentMentions } from '@/lib/messages/agentMentions';
 import { StatusRow } from './StatusRow';
 import { PendingChangesBar } from './PendingChangesBar';
+import { useChatSurfaceMode } from './useChatSurfaceMode';
 import { MobileAgentButton } from './MobileAgentButton';
 import { MobileModelButton } from './MobileModelButton';
 import { MobileSessionStatusBar } from './MobileSessionStatusBar';
@@ -77,6 +78,7 @@ import { getAllSyncSessions } from '@/sync/sync-refs';
 import { extractGitChangedFiles } from './changedFiles';
 import { useI18n } from '@/lib/i18n';
 import { fetchResponseStyleInstruction } from '@/lib/responseStyle';
+import { wrapSystemReminder } from '@/lib/systemReminder';
 import { getSyncMessages } from '@/sync/sync-refs';
 
 const MAX_VISIBLE_TEXTAREA_LINES = 8;
@@ -616,6 +618,9 @@ const ComposerActionButtons = React.memo(function ComposerActionButtons(props: C
     && prev.hasContent === next.hasContent
     && prev.currentSessionId === next.currentSessionId
     && prev.newSessionDraftOpen === next.newSessionDraftOpen
+    && prev.onPrimaryAction === next.onPrimaryAction
+    && prev.onQueueMessage === next.onQueueMessage
+    && prev.onAbort === next.onAbort
 ));
 
 const appendWithLineBreaks = (base: string, next: string): string => {
@@ -650,7 +655,7 @@ const appendInlineText = (base: string, next: string): string => {
 
 interface ChatInputProps {
     onOpenSettings?: () => void;
-    scrollToBottom?: (options?: { instant?: boolean; force?: boolean }) => void;
+    scrollToBottom?: () => void;
 }
 
 type AutocompleteOverlayPosition = {
@@ -1512,12 +1517,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
             if (commandName === 'undo' && currentSessionId) {
                 await useSessionUIStore.getState().handleSlashUndo(currentSessionId);
-                scrollToBottom?.({ instant: true, force: true });
+                scrollToBottom?.();
                 return;
             }
             else if (commandName === 'redo' && currentSessionId) {
                 await useSessionUIStore.getState().handleSlashRedo(currentSessionId);
-                scrollToBottom?.({ instant: true, force: true });
+                scrollToBottom?.();
                 return;
             }
             else if (commandName === 'timeline' && currentSessionId) {
@@ -1563,7 +1568,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         currentVariant,
                         inputMode,
                     );
-                    scrollToBottom?.({ instant: true, force: true });
+                    scrollToBottom?.();
                 } catch (error) {
                     toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.summaryFailed'));
                 }
@@ -1585,7 +1590,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         currentVariant,
                         inputMode,
                     );
-                    scrollToBottom?.({ instant: true, force: true });
+                    scrollToBottom?.();
                 } catch (error) {
                     toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.reviewFailed'));
                 }
@@ -1601,7 +1606,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             const responseStyleInstruction = await fetchResponseStyleInstruction().catch(() => null);
             if (responseStyleInstruction) {
                 additionalParts.push({
-                    text: responseStyleInstruction,
+                    text: wrapSystemReminder(responseStyleInstruction),
                     synthetic: true,
                 });
             }
@@ -1626,10 +1631,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         );
 
         if (typeof window === 'undefined') {
-            scrollToBottom?.({ instant: true, force: true });
+            scrollToBottom?.();
         } else {
             window.requestAnimationFrame(() => {
-                scrollToBottom?.({ instant: true, force: true });
+                scrollToBottom?.();
             });
         }
 
@@ -1666,21 +1671,21 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             if (normalized.includes('payload too large') || normalized.includes('413') || normalized.includes('entity too large')) {
                 toast.error(t('chat.chatInput.toast.attachmentsTooLarge'));
                 if (allAttachments.length > 0) {
-                    useInputStore.setState({ attachedFiles: allAttachments });
+                    useInputStore.getState().setAttachedFiles(allAttachments);
                 }
                 return;
             }
 
             if (isSoftNetworkError) {
                 if (allAttachments.length > 0) {
-                    useInputStore.setState({ attachedFiles: allAttachments });
+                    useInputStore.getState().setAttachedFiles(allAttachments);
                     toast.error(t('chat.chatInput.toast.sendAttachmentsFailed'));
                 }
                 return;
             }
 
             if (allAttachments.length > 0) {
-                useInputStore.setState({ attachedFiles: allAttachments });
+                useInputStore.getState().setAttachedFiles(allAttachments);
             }
             toast.error(rawMessage || t('chat.chatInput.toast.messageSendFailed'));
         });
@@ -1796,7 +1801,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             return;
         }
 
-        if (e.key === 'Tab' && !showCommandAutocomplete && !showFileMention) {
+        if (e.key === 'Tab' && !showCommandAutocomplete && !showSkillAutocomplete && !showFileMention) {
             e.preventDefault();
             handleCycleAgent();
             return;
@@ -3166,12 +3171,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         return draftBranchItems.find((item) => item.value === selectedValue)?.label ?? formatDirectoryName(selectedValue);
     }, [draftBranchItems, selectedDraftDirectory]);
 
+    const chatSurfaceMode = useChatSurfaceMode();
+    const isMiniChatSurface = chatSurfaceMode === 'mini-chat';
+
     const hasPendingChanges = React.useMemo(() => {
+        if (isMiniChatSurface) {
+            return false;
+        }
         if (isGitRepo !== true || !currentGitStatus || currentGitStatus.isClean) {
             return false;
         }
         return extractGitChangedFiles(currentGitStatus.files, currentGitStatus.diffStats, currentDirectory).length > 0;
-    }, [currentDirectory, currentGitStatus, isGitRepo]);
+    }, [currentDirectory, currentGitStatus, isGitRepo, isMiniChatSurface]);
 
     const selectedDraftBranchIsKnown = React.useMemo(() => {
         if (!selectedDraftDirectory) {
@@ -3431,101 +3442,105 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 {/* Linked Issue row */}
                 {linkedIssue && !isVSCode && (
                     <div className="pb-2 w-full px-1">
-                        <button
-                            type="button"
-                            onClick={() => setIssuePickerOpen(true)}
-                            className="flex w-full items-center gap-1.5 text-sm hover:opacity-80 transition-opacity text-left h-5 px-1"
-                        >
-                            {linkedIssue.author?.avatarUrl && (
-                                <img
-                                    src={linkedIssue.author.avatarUrl}
-                                    alt={linkedIssue.author.login}
-                                    className="h-5 w-5 rounded-full flex-shrink-0"
-                                />
-                            )}
-                            <span className="text-muted-foreground flex-shrink-0">
-                                #{linkedIssue.number}
-                                {linkedIssue.author && (
-                                    <span className="ml-1">{t('chat.chatInput.linked.byAuthor', { author: linkedIssue.author.login })}</span>
+                        <div className="flex w-full items-center gap-1.5 text-sm h-5 px-1">
+                            <button
+                                type="button"
+                                onClick={() => setIssuePickerOpen(true)}
+                                className="flex min-w-0 flex-1 items-center gap-1.5 text-left hover:opacity-80 transition-opacity"
+                            >
+                                {linkedIssue.author?.avatarUrl && (
+                                    <img
+                                        src={linkedIssue.author.avatarUrl}
+                                        alt={linkedIssue.author.login}
+                                        className="h-5 w-5 rounded-full flex-shrink-0"
+                                    />
                                 )}
-                            </span>
-                            <span className="text-foreground truncate">
-                                {linkedIssue.title}
-                            </span>
+                                <span className="text-muted-foreground flex-shrink-0">
+                                    #{linkedIssue.number}
+                                    {linkedIssue.author && (
+                                        <span className="ml-1">{t('chat.chatInput.linked.byAuthor', { author: linkedIssue.author.login })}</span>
+                                    )}
+                                </span>
+                                <span className="text-foreground truncate">
+                                    {linkedIssue.title}
+                                </span>
+                            </button>
                             <span className="flex items-center gap-0.5 flex-shrink-0">
                                 <a
                                     href={linkedIssue.url}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    onClick={(e) => e.stopPropagation()}
                                     className="flex items-center justify-center h-6 w-6 hover:bg-[var(--interactive-hover)] rounded-full transition-colors"
                                     aria-label={t('chat.chatInput.linked.issue.openInBrowserAria')}
                                 >
                                     <RiExternalLinkLine className="h-4 w-4 text-muted-foreground" />
                                 </a>
-                                <span
-                                    onClick={(e) => {
-                                        e.stopPropagation();
+                                <button
+                                    type="button"
+                                    onClick={() => {
                                         setLinkedIssue(null);
                                     }}
-                                    className="flex items-center justify-center h-6 w-6 hover:bg-[var(--interactive-hover)] rounded-full transition-colors cursor-pointer"
+                                    className="flex items-center justify-center h-6 w-6 hover:bg-[var(--interactive-hover)] rounded-full transition-colors"
                                     aria-label={t('chat.chatInput.linked.issue.removeAria')}
+                                    title={t('chat.chatInput.linked.issue.removeAria')}
                                 >
                                     <RiCloseLine className="h-4 w-4 text-muted-foreground" />
-                                </span>
+                                </button>
                             </span>
-                        </button>
+                        </div>
                     </div>
                 )}
                 {linkedPr && !isVSCode && (
                     <div className="pb-2 w-full px-1">
-                        <button
-                            type="button"
-                            onClick={() => setPrPickerOpen(true)}
-                            className="flex w-full items-center gap-1.5 text-sm hover:opacity-80 transition-opacity text-left h-5 px-1"
-                        >
-                            {linkedPr.author?.avatarUrl && (
-                                <img
-                                    src={linkedPr.author.avatarUrl}
-                                    alt={linkedPr.author.login}
-                                    className="h-5 w-5 rounded-full flex-shrink-0"
-                                />
-                            )}
-                            <span className="text-muted-foreground flex-shrink-0">
-                                {t('chat.chatInput.linked.pr.number', { number: linkedPr.number })}
-                                {linkedPr.author && (
-                                    <span className="ml-1">{t('chat.chatInput.linked.byAuthor', { author: linkedPr.author.login })}</span>
+                        <div className="flex w-full items-center gap-1.5 text-sm h-5 px-1">
+                            <button
+                                type="button"
+                                onClick={() => setPrPickerOpen(true)}
+                                className="flex min-w-0 flex-1 items-center gap-1.5 text-left hover:opacity-80 transition-opacity"
+                            >
+                                {linkedPr.author?.avatarUrl && (
+                                    <img
+                                        src={linkedPr.author.avatarUrl}
+                                        alt={linkedPr.author.login}
+                                        className="h-5 w-5 rounded-full flex-shrink-0"
+                                    />
                                 )}
-                            </span>
-                            <span className="text-foreground truncate">
-                                {linkedPr.title}
-                            </span>
-                            <span className="text-muted-foreground flex-shrink-0 typography-meta">
-                                {linkedPr.head} → {linkedPr.base}
-                            </span>
+                                <span className="text-muted-foreground flex-shrink-0">
+                                    {t('chat.chatInput.linked.pr.number', { number: linkedPr.number })}
+                                    {linkedPr.author && (
+                                        <span className="ml-1">{t('chat.chatInput.linked.byAuthor', { author: linkedPr.author.login })}</span>
+                                    )}
+                                </span>
+                                <span className="text-foreground truncate">
+                                    {linkedPr.title}
+                                </span>
+                                <span className="text-muted-foreground flex-shrink-0 typography-meta">
+                                    {linkedPr.head} → {linkedPr.base}
+                                </span>
+                            </button>
                             <span className="flex items-center gap-0.5 flex-shrink-0">
                                 <a
                                     href={linkedPr.url}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    onClick={(e) => e.stopPropagation()}
                                     className="flex items-center justify-center h-6 w-6 hover:bg-[var(--interactive-hover)] rounded-full transition-colors"
                                     aria-label={t('chat.chatInput.linked.pr.openInBrowserAria')}
                                 >
                                     <RiExternalLinkLine className="h-4 w-4 text-muted-foreground" />
                                 </a>
-                                <span
-                                    onClick={(e) => {
-                                        e.stopPropagation();
+                                <button
+                                    type="button"
+                                    onClick={() => {
                                         setLinkedPr(null);
                                     }}
-                                    className="flex items-center justify-center h-6 w-6 hover:bg-[var(--interactive-hover)] rounded-full transition-colors cursor-pointer"
+                                    className="flex items-center justify-center h-6 w-6 hover:bg-[var(--interactive-hover)] rounded-full transition-colors"
                                     aria-label={t('chat.chatInput.linked.pr.removeAria')}
+                                    title={t('chat.chatInput.linked.pr.removeAria')}
                                 >
                                     <RiCloseLine className="h-4 w-4 text-muted-foreground" />
-                                </span>
+                                </button>
                             </span>
-                        </button>
+                        </div>
                     </div>
                 )}
                 <MemoStatusRow

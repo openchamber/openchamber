@@ -630,6 +630,7 @@ const getEffectiveProviders = (state: Pick<ConfigStore, 'providers' | 'virtualPr
         ...state.providers.filter((provider) => !virtualIds.has(provider.id)),
     ];
 };
+let _initializeAppInFlight: Promise<void> | null = null;
 
 export const useConfigStore = create<ConfigStore>()(
     devtools(
@@ -2194,47 +2195,58 @@ export const useConfigStore = create<ConfigStore>()(
                 },
 
                 initializeApp: async () => {
-                    try {
-                        const debug = streamDebugEnabled();
-                        if (debug) console.log("Starting app initialization...");
+                    if (_initializeAppInFlight) {
+                        return _initializeAppInFlight;
+                    }
 
-                        const isConnected = await get().checkConnection();
-                        if (debug) console.log("Connection check result:", isConnected);
+                    const run = (async () => {
+                        try {
+                            const debug = streamDebugEnabled();
+                            if (debug) console.log("Starting app initialization...");
 
-                        if (!isConnected) {
-                            if (debug) console.log("Server not connected");
-                            // checkConnection already set lastDisconnectReason; do not overwrite.
+                            const isConnected = await get().checkConnection();
+                            if (debug) console.log("Connection check result:", isConnected);
+
+                            if (!isConnected) {
+                                if (debug) console.log("Server not connected");
+                                // checkConnection already set lastDisconnectReason; do not overwrite.
+                                set({
+                                    isConnected: false,
+                                    connectionPhase: get().hasEverConnected ? "reconnecting" : "connecting",
+                                });
+                                return;
+                            }
+
+                            if (debug) console.log("Initializing app...");
+                            await opencodeClient.initApp();
+
+                            if (debug) console.log("Loading providers...");
+                            if (isOpenCodeBackendTarget()) {
+                                await get().loadProviders();
+                            }
+
+                            if (debug) console.log("Loading agents...");
+                            if (isOpenCodeBackendTarget()) {
+                                await get().loadAgents();
+                            }
+
+                            set({ isInitialized: true, isConnected: true, hasEverConnected: true, connectionPhase: "connected" });
+                            if (debug) console.log("App initialized successfully");
+                        } catch (error) {
+                            console.error("Failed to initialize app:", error);
                             set({
+                                isInitialized: false,
                                 isConnected: false,
                                 connectionPhase: get().hasEverConnected ? "reconnecting" : "connecting",
+                                lastDisconnectReason: 'init_error',
                             });
-                            return;
                         }
+                    })().finally(() => {
+                        _initializeAppInFlight = null;
+                    });
 
-                        if (debug) console.log("Initializing app...");
-                        await opencodeClient.initApp();
-
-                        if (debug) console.log("Loading providers...");
-                        if (isOpenCodeBackendTarget()) {
-                            await get().loadProviders();
-                        }
-
-                        if (debug) console.log("Loading agents...");
-                        if (isOpenCodeBackendTarget()) {
-                            await get().loadAgents();
-                        }
-
-                        set({ isInitialized: true, isConnected: true, hasEverConnected: true, connectionPhase: "connected" });
-                        if (debug) console.log("App initialized successfully");
-                    } catch (error) {
-                        console.error("Failed to initialize app:", error);
-                        set({
-                            isInitialized: false,
-                            isConnected: false,
-                            connectionPhase: get().hasEverConnected ? "reconnecting" : "connecting",
-                            lastDisconnectReason: 'init_error',
-                        });
-                    }
+                    _initializeAppInFlight = run;
+                    return run;
                 },
 
                 getCurrentProvider: () => {

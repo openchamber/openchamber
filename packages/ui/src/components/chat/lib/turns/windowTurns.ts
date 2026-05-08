@@ -119,9 +119,10 @@ export const updateTurnWindowModelIncremental = (
     }
 
     const parentId = resolveParentMessageId(nextMessage);
-    const targetTurnIndex = parentId
-        ? nextModel.turnIndexById.get(parentId)
-        : nextModel.turnIds.length - 1;
+    if (!parentId) {
+        return nextModel;
+    }
+    const targetTurnIndex = nextModel.turnIndexById.get(parentId);
     if (typeof targetTurnIndex !== 'number' || targetTurnIndex < 0) {
         return null;
     }
@@ -173,8 +174,13 @@ export const buildTurnWindowModel = (messages: ChatMessageEntry[]): TurnWindowMo
         }
 
         const parentId = resolveParentMessageId(message);
-        const parentTurnIndex = parentId ? userMessageToTurnIndex.get(parentId) : undefined;
-        const targetTurnIndex = typeof parentTurnIndex === 'number' ? parentTurnIndex : currentTurnIndex;
+        if (!parentId) {
+            return;
+        }
+        const targetTurnIndex = userMessageToTurnIndex.get(parentId);
+        if (typeof targetTurnIndex !== 'number') {
+            return;
+        }
         if (targetTurnIndex < 0) {
             return;
         }

@@ -102,46 +102,47 @@ export const projectTurnRecords = (
     const turns: TurnRecord[] = [];
     const turnByUserId = new Map<string, TurnRecord>();
     const groupedMessageIds = new Set<string>();
-    let currentTurn: TurnRecord | undefined;
 
     messages.forEach((message, index) => {
         const role = resolveMessageRole(message);
-        if (role === 'user') {
-            const turnId = message.info.id;
-            const turn: TurnRecord = {
-                turnId,
-                userMessageId: message.info.id,
-                userMessage: message,
-                headerMessageId: undefined,
-                messages: [createTurnMessageRecord(message, index)],
-                assistantMessageIds: [],
-                assistantMessages: [],
-                activityParts: [],
-                activitySegments: [],
-                summary: {},
-                summaryText: undefined,
-                hasTools: false,
-                hasReasoning: false,
-                diffStats: undefined,
-                stream: {
-                    isStreaming: false,
-                    isRetrying: false,
-                },
-            };
-            turns.push(turn);
-            turnByUserId.set(turn.userMessageId, turn);
-            groupedMessageIds.add(message.info.id);
-            currentTurn = turn;
+        if (role !== 'user') {
             return;
         }
 
+        const turnId = message.info.id;
+        const turn: TurnRecord = {
+            turnId,
+            userMessageId: message.info.id,
+            userMessage: message,
+            headerMessageId: undefined,
+            messages: [createTurnMessageRecord(message, index)],
+            assistantMessageIds: [],
+            assistantMessages: [],
+            activityParts: [],
+            activitySegments: [],
+            summary: {},
+            summaryText: undefined,
+            hasTools: false,
+            hasReasoning: false,
+            diffStats: undefined,
+            stream: {
+                isStreaming: false,
+                isRetrying: false,
+            },
+        };
+        turns.push(turn);
+        turnByUserId.set(turn.userMessageId, turn);
+        groupedMessageIds.add(message.info.id);
+    });
+
+    messages.forEach((message, index) => {
+        const role = resolveMessageRole(message);
         if (role !== 'assistant') {
             return;
         }
 
         const parentId = getMessageParentId(message);
-        const parentTurn = parentId ? turnByUserId.get(parentId) : undefined;
-        const targetTurn = parentTurn ?? currentTurn;
+        const targetTurn = parentId ? turnByUserId.get(parentId) : undefined;
         if (!targetTurn) {
             return;
         }
@@ -153,10 +154,6 @@ export const projectTurnRecords = (
             targetTurn.headerMessageId = message.info.id;
         }
         groupedMessageIds.add(message.info.id);
-
-        if (!parentTurn) {
-            currentTurn = targetTurn;
-        }
     });
 
     turns.forEach((turn) => {
@@ -185,6 +182,9 @@ export const projectTurnRecords = (
     const projection = projectTurnIndexes(turns);
     const ungroupedMessageIds = new Set<string>();
     messages.forEach((message) => {
+        if (resolveMessageRole(message) === 'assistant') {
+            return;
+        }
         if (!groupedMessageIds.has(message.info.id)) {
             ungroupedMessageIds.add(message.info.id);
         }

@@ -125,10 +125,6 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
             )}
           </div>
 
-          <p className="typography-meta text-muted-foreground">
-            {t('aboutDialog.tagline')}
-          </p>
-
           <div className="flex flex-col items-center gap-2 pt-2">
             <button
               onClick={handleCopyDiagnostics}

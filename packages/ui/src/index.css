@@ -29,8 +29,8 @@
 /* Buttons should never look selectable. */
 button,
 [role="button"] {
-  user-select: none;
-  -webkit-user-select: none;
+  user-select: none !important;
+  -webkit-user-select: none !important;
 }
 
 :root.oc-theme-switching *,
@@ -975,6 +975,8 @@ html:not(.dark) .chat-scroll {
   cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 2px;
+  user-select: text !important;
+  -webkit-user-select: text !important;
 }
 
 .markdown-content [data-openchamber-file-link="true"]:hover {

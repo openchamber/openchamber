@@ -753,6 +753,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.cycle_right_sidebar_tab.label': '오른쪽 사이드바 탭 순환',
   'settings.openchamber.keyboardShortcuts.action.new_chat.label': '새 세션',
   'settings.openchamber.keyboardShortcuts.action.new_chat_worktree.label': '새 worktree 초안',
+  'settings.openchamber.keyboardShortcuts.action.new_mini_chat.label': '새 Mini Chat 창',
   'settings.openchamber.keyboardShortcuts.action.open_help.label': '키보드 단축키 열기',
   'settings.openchamber.keyboardShortcuts.action.toggle_context_plan.label': '계획 컨텍스트 패널 토글',
   'settings.openchamber.keyboardShortcuts.action.toggle_services_menu.label': '서비스 메뉴 토글',

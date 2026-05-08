@@ -68,6 +68,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useDirectorySync, useSession, useSessionMessages } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
+import { getSessionMaterializationStatus } from '@/sync/materialization';
 import { useUIStore } from '@/stores/useUIStore';
 import { useModelLists } from '@/hooks/useModelLists';
 import { useIsTextTruncated } from '@/hooks/useIsTextTruncated';
@@ -1037,9 +1038,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const prevAgentNameRef = React.useRef<string | undefined>(undefined);
     const latestLoadedUserChoiceRestoreRef = React.useRef<string | null>(null);
 
-    const hasCurrentSessionMessagesEntry = useDirectorySync(
+    const hasRenderableCurrentSessionSnapshot = useDirectorySync(
         React.useCallback(
-            (state) => (currentSessionId ? state.message[currentSessionId] !== undefined : false),
+            (state) => (currentSessionId ? getSessionMaterializationStatus(state, currentSessionId).renderable : false),
             [currentSessionId],
         ),
         currentSessionDirectory ?? undefined,
@@ -1215,7 +1216,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             return;
         }
 
-        if (!contextHydrated || effectiveProviders.length === 0 || !hasCurrentSessionMessagesEntry || !latestLoadedUserChoice?.providerID || !latestLoadedUserChoice.modelID) {
+        if (!contextHydrated || effectiveProviders.length === 0 || !hasRenderableCurrentSessionSnapshot || !latestLoadedUserChoice?.providerID || !latestLoadedUserChoice.modelID) {
             return;
         }
 
@@ -1270,7 +1271,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         currentAgentName,
         contextHydrated,
         effectiveProviders,
-        hasCurrentSessionMessagesEntry,
+        hasRenderableCurrentSessionSnapshot,
         latestLoadedUserChoice,
         setAgent,
         tryApplyModelSelection,
@@ -1399,9 +1400,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             return;
         }
 
-        if (!hasCurrentSessionMessagesEntry) {
+        if (!hasRenderableCurrentSessionSnapshot) {
             if (!sync.isLoading(currentSessionId)) {
-                void sync.syncSession(currentSessionId);
+                void sync.ensureSessionRenderable(currentSessionId);
             }
             return;
         }
@@ -1414,7 +1415,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     }, [
         currentSessionId,
         primarySelectorKind,
-        hasCurrentSessionMessagesEntry,
+        hasRenderableCurrentSessionSnapshot,
         latestLoadedUserChoice,
         agents,
         primaryAgents,

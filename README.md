@@ -17,7 +17,6 @@
 
 ![Tool Output](docs/references/tool_output_example.png)
 ![Settings](docs/references/settings_example.png)
-![Web Version](docs/references/web_version_example.png)
 ![Diff View](docs/references/diff_example.png)
 ![VS Code Extension](packages/vscode/extension.jpg)
 

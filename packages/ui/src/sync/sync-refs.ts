@@ -7,6 +7,7 @@
 
 import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
 import type { ChildStoreManager } from "./child-store"
+import { getSessionMaterializationStatus } from "./materialization"
 import type { State } from "./types"
 import {
   getOpenCodeCompatibleMessages,
@@ -89,6 +90,13 @@ export function getAllSyncSessions() {
 export function getSyncMessages(sessionId: string, directory?: string) {
   const state = getDirectoryState(directory)
   return state ? getOpenCodeCompatibleMessages(state, sessionId) : []
+}
+
+/** Read renderability of a session snapshot from current directory's child store */
+export function getSyncSessionMaterializationStatus(sessionId: string, directory?: string) {
+  const state = getDirectoryState(directory)
+  if (!state) return { hasMessages: false, renderable: false, missingPartMessageIDs: [] }
+  return getSessionMaterializationStatus(state, sessionId)
 }
 
 /** Read parts for a message from current directory's child store */

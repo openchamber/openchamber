@@ -53,6 +53,7 @@ interface BranchIntegrationSectionProps {
   operationLogs?: OperationLogEntry[];
   onOperationComplete?: () => void;
   mode?: 'dialog' | 'inline';
+  defaultTargetBranch?: string;
 }
 
 export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> = ({
@@ -66,6 +67,7 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
   operationLogs = [],
   onOperationComplete,
   mode = 'dialog',
+  defaultTargetBranch,
 }) => {
   const { t } = useI18n();
   const [dialogOpen, setDialogOpen] = React.useState(false);
@@ -94,10 +96,15 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
   // Filter branches based on search
   const filteredLocal = React.useMemo(() => {
     const term = branchSearch.toLowerCase();
-    const filtered = localBranches.filter((b) => b !== currentBranch);
+    const remoteBranchNames = new Set(
+      remoteBranches
+        .map((branch) => branch.slice(branch.indexOf('/') + 1))
+        .filter(Boolean)
+    );
+    const filtered = localBranches.filter((branch) => branch !== currentBranch && !remoteBranchNames.has(branch));
     if (!term) return filtered;
     return filtered.filter((b) => b.toLowerCase().includes(term));
-  }, [branchSearch, localBranches, currentBranch]);
+  }, [branchSearch, localBranches, currentBranch, remoteBranches]);
 
   const filteredRemote = React.useMemo(() => {
     const term = branchSearch.toLowerCase();
@@ -105,9 +112,16 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
     return remoteBranches.filter((b) => b.toLowerCase().includes(term));
   }, [branchSearch, remoteBranches]);
 
+  const resolveDefaultBranch = React.useCallback(() => {
+    if (!defaultTargetBranch) return null;
+    if (remoteBranches.includes(defaultTargetBranch)) return defaultTargetBranch;
+    if (localBranches.includes(defaultTargetBranch)) return defaultTargetBranch;
+    return null;
+  }, [defaultTargetBranch, localBranches, remoteBranches]);
+
   const handleOpenDialog = () => {
     setDialogOpen(true);
-    setSelectedBranch(null);
+    setSelectedBranch(resolveDefaultBranch());
     setOperation('merge');
     setBranchSearch('');
   };
@@ -157,6 +171,11 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
       setBranchSearch('');
     }
   }, [branchDropdownOpen]);
+
+  React.useEffect(() => {
+    if (mode !== 'inline' || selectedBranch) return;
+    setSelectedBranch(resolveDefaultBranch());
+  }, [mode, resolveDefaultBranch, selectedBranch]);
 
   const renderOperating = () => (
     <div className="space-y-3">
@@ -306,6 +325,7 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
                 placeholder={t('gitView.branch.searchPlaceholder')}
                 value={branchSearch}
                 onValueChange={setBranchSearch}
+                onKeyDown={(event) => event.stopPropagation()}
               />
               <CommandList className="h-full min-h-0" disableHorizontal>
                 <CommandEmpty>{t('gitView.branch.empty')}</CommandEmpty>

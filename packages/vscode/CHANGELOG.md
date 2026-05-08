@@ -1,3 +1,31 @@
+## [1.10.3] - 2026-05-08
+
+- Chat/Scrolling: rebuilt auto-follow behavior so active responses stay pinned when you want them to, while wheel, touch, keyboard, scrollbar, and find-in-page interactions more reliably release control when you scroll away.
+- Chat/Scrolling: restored saved scroll positions more consistently after session switches, hydration, and draft-to-session transitions, reducing jumps to the wrong part of a conversation.
+- Chat/UI: tightened scroll-to-bottom behavior so the button appears only after you move past the visible bottom spacer, and code-block scrolling no longer prevents the main chat from releasing auto-follow when the nested block cannot scroll further.
+- Chat/Input: fixed attachment-only queued sends, stale attachment restores, stale file-search results, autocomplete tab handling, and focusable removal controls so drafting stays reliable across queued, linked, and restored messages (thanks to @isanchez404).
+- Reliability/Sync: reduced stale and duplicate live-state updates across request arrays, retry metadata, streaming indicators, and session status events, cutting unnecessary rerenders and stuck activity states during long-running chats (thanks to @isanchez404).
+- Skills/Reliability: ignored outdated skills catalog and repo scans, keeping skills setup from showing results from an older request (thanks to @isanchez404).
+- Chat/Reliability: added smaller polish fixes for text-selection cleanup (thanks to @isanchez404).
+
+## [1.10.2] - 2026-05-07
+
+- Chat/Reliability: stabilized live turn rendering and session sync caches, reducing flicker, stale state, and missing updates during reconnects or long-running chats.
+- Terminal: improved Android tablet keyboard handling, including control-key shortcuts, and kept app shortcuts from stealing focus while typing in the terminal (thanks to @Dav1dch).
+- Terminal: set a UTF-8 locale for terminal sessions so Unicode output renders more reliably across shells and commands (thanks to @liyiopener).
+- Usage: OpenRouter credit balances now avoid misleading percentage displays and use clearer labels across usage views (thanks to @zerone0x).
+- Reliability: split the extension into a dedicated app root, improving startup boundaries and reducing cross-runtime UI assumptions.
+
+## [1.10.1] - 2026-05-06
+
+- UI/Localization: added Polish interface translations, expanding language support for Polish-speaking users (thanks to @levy52).
+- Sessions: added a quick archive action directly on session rows, making cleanup faster from the session list (thanks to @zoubenr).
+- Chat/Timeline: added full-text timeline search across user, assistant, and tool messages in a session, making it easier to jump back to earlier context (thanks to @jwcrystal).
+- Chat/Reliability: pending questions now survive session switches and directory eviction, reducing lost approval or clarification prompts during longer multi-session work (thanks to @ablepharus).
+- Reliability/Sync: aligned session status parsing and reconnect reconciliation so activity state recovers more accurately after extension reconnects (thanks to @vhqtvn).
+- Startup/Reliability: configured OpenCode CLI paths are now validated before managed startup, with clearer errors for missing, non-executable, or app-bundle paths.
+- Performance/Reliability: reduced duplicate extension initialization, deferred heavier views until needed, lowered managed runtime status overhead, optimized markdown file-link detection, reduced sync recovery payloads, and suppressed expected missing-directory noise for smoother day-to-day use.
+
 ## [1.10.0] - 2026-05-05
 
 - Chat/UI: added the currently open editor file to chat context, making it faster to ask about the file you are already editing (thanks to @daveotero).

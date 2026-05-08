@@ -96,10 +96,22 @@ export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpen
 
   const [identityOptions, setIdentityOptions] = React.useState<IdentityOption[]>([]);
   const [gitIdentityId, setGitIdentityId] = React.useState<string | null>(null);
+  const scanRequestIdRef = React.useRef(0);
+
+  const invalidateScan = React.useCallback((options?: { clearIdentity?: boolean }) => {
+    scanRequestIdRef.current += 1;
+    setScanOk(false);
+    setScanCount(null);
+    if (options?.clearIdentity) {
+      setIdentityOptions([]);
+      setGitIdentityId(null);
+    }
+  }, []);
 
   React.useEffect(() => {
     if (!open) return;
 
+    scanRequestIdRef.current += 1;
     setLabel('');
     setSource('');
     setSubpath('');
@@ -140,12 +152,18 @@ export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpen
 
     setScanOk(false);
     setScanCount(null);
+    const requestId = scanRequestIdRef.current + 1;
+    scanRequestIdRef.current = requestId;
 
     const result = await scanRepo({
       source: trimmedSource,
       subpath: subpath.trim() || undefined,
       gitIdentityId: gitIdentityId || undefined,
     });
+
+    if (scanRequestIdRef.current !== requestId) {
+      return;
+    }
 
     if (!result.ok) {
       if (result.error?.kind === 'authRequired') {
@@ -257,8 +275,7 @@ export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpen
               value={source}
               onChange={(e) => {
                 setSource(e.target.value);
-                setScanOk(false);
-                setScanCount(null);
+                invalidateScan({ clearIdentity: true });
               }}
               placeholder={t('settings.skills.catalog.shared.field.repositoryPlaceholder')}
             />
@@ -273,8 +290,7 @@ export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpen
               value={subpath}
               onChange={(e) => {
                 setSubpath(e.target.value);
-                setScanOk(false);
-                setScanCount(null);
+                invalidateScan({ clearIdentity: true });
               }}
               placeholder={t('settings.skills.catalog.shared.field.subpathPlaceholder')}
             />
@@ -286,7 +302,13 @@ export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpen
                 <span className="typography-ui-label text-[var(--status-warning)]">{t('settings.skills.catalog.shared.auth.title')}</span>
                 <span className="typography-meta text-muted-foreground ml-2">{t('settings.skills.catalog.shared.auth.description')}</span>
               </div>
-              <Select value={gitIdentityId || ''} onValueChange={(v) => setGitIdentityId(v)}>
+              <Select
+                value={gitIdentityId || ''}
+                onValueChange={(v) => {
+                  setGitIdentityId(v);
+                  invalidateScan();
+                }}
+              >
                 <SelectTrigger className="w-fit">
                   <span>{identityOptions.find((i) => i.id === gitIdentityId)?.name || t('settings.skills.catalog.shared.auth.chooseIdentity')}</span>
                 </SelectTrigger>

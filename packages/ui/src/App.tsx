@@ -1,8 +1,6 @@
 import React from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
-import { VSCodeLayout } from '@/components/layout/VSCodeLayout';
-import { AgentManagerView } from '@/components/views/agent-manager';
-import { ChatView } from '@/components/views';
+import { ChatView } from '@/components/views/ChatView';
 import { FireworksProvider } from '@/contexts/FireworksContext';
 import { Toaster } from '@/components/ui/sonner';
 import { Button } from '@/components/ui/button';
@@ -10,16 +8,11 @@ import { MemoryDebugPanel } from '@/components/ui/MemoryDebugPanel';
 import { setStreamPerfEnabled } from '@/stores/utils/streamDebug';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 // useEventStream removed — replaced by SyncProvider + SyncBridge
-import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useMenuActions } from '@/hooks/useMenuActions';
 import { useSessionStatusBootstrap } from '@/hooks/useSessionStatusBootstrap';
-import { useSessionAutoCleanup } from '@/hooks/useSessionAutoCleanup';
-import { useQueuedMessageAutoSend } from '@/hooks/useQueuedMessageAutoSend';
 import { useRouter } from '@/hooks/useRouter';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
-import { usePwaManifestSync } from '@/hooks/usePwaManifestSync';
 import { usePwaInstallPrompt } from '@/hooks/usePwaInstallPrompt';
-import { useWindowControlsOverlayLayout } from '@/hooks/useWindowControlsOverlayLayout';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useBackendsStore } from '@/stores/useBackendsStore';
@@ -62,6 +55,8 @@ import { MCP_OAUTH_CALLBACK_PATH } from '@/components/sections/mcp/mcpOAuth';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { useI18n } from '@/lib/i18n';
 import { applyMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
+import { SyncAppEffects } from '@/apps/AppEffects';
+import { useAppFontEffects } from '@/apps/useAppFontEffects';
 
 // Lazy-loaded heavy views — loaded on demand to reduce initial bundle size.
 const OnboardingScreen = lazyWithChunkRecovery(() =>
@@ -175,35 +170,6 @@ const EmbeddedSessionSelectionGate: React.FC<{
   return null;
 };
 
-const SyncOptimisticBridge: React.FC = () => {
-  const sync = useSync();
-  const addRef = React.useRef(sync.optimistic.add);
-  const removeRef = React.useRef(sync.optimistic.remove);
-  addRef.current = sync.optimistic.add;
-  removeRef.current = sync.optimistic.remove;
-
-  React.useEffect(() => {
-    setOptimisticRefs(
-      (input) => addRef.current(input),
-      (input) => removeRef.current(input),
-    );
-  }, []);
-
-  return null;
-};
-
-function SyncAppEffects({ embeddedBackgroundWorkEnabled }: {
-  embeddedBackgroundWorkEnabled: boolean;
-}) {
-  usePwaManifestSync();
-  useWindowControlsOverlayLayout();
-  useSessionAutoCleanup(embeddedBackgroundWorkEnabled);
-  useQueuedMessageAutoSend(embeddedBackgroundWorkEnabled);
-  useKeyboardShortcuts();
-
-  return <SyncOptimisticBridge />;
-}
-
 function App({ apis }: AppProps) {
   const initializeApp = useConfigStore((s) => s.initializeApp);
   const isInitialized = useConfigStore((s) => s.isInitialized);
@@ -223,7 +189,6 @@ function App({ apis }: AppProps) {
   const setDirectory = useDirectoryStore((state) => state.setDirectory);
   const isSwitchingDirectory = useDirectoryStore((state) => state.isSwitchingDirectory);
   const [showMemoryDebug, setShowMemoryDebug] = React.useState(false);
-  const { uiFont, monoFont } = useFontPreferences();
   const refreshGitHubAuthStatus = useGitHubAuthStore((state) => state.refreshStatus);
   const [isVSCodeRuntime, setIsVSCodeRuntime] = React.useState<boolean>(() => apis.runtime.isVSCode);
   const [isEmbeddedVisible, setIsEmbeddedVisible] = React.useState(true);
@@ -244,7 +209,6 @@ function App({ apis }: AppProps) {
       : null;
   });
   const appReadyDispatchedRef = React.useRef(false);
-  const initializationInFlightRef = React.useRef(false);
   const embeddedSessionChat = React.useMemo<EmbeddedSessionChatConfig | null>(() => readEmbeddedSessionChatConfig(), []);
   const embeddedBackgroundWorkEnabled = !embeddedSessionChat || isEmbeddedVisible;
   const activeBackendId = React.useMemo(() => {
@@ -293,27 +257,7 @@ function App({ apis }: AppProps) {
     void refreshGitHubAuthStatus(apis.github, { force: true });
   }, [apis.github, embeddedSessionChat, refreshGitHubAuthStatus]);
 
-  React.useEffect(() => {
-    if (typeof document === 'undefined') {
-      return;
-    }
-    const root = document.documentElement;
-    const uiStack = UI_FONT_OPTION_MAP[uiFont]?.stack ?? UI_FONT_OPTION_MAP[DEFAULT_UI_FONT].stack;
-    const monoStack = CODE_FONT_OPTION_MAP[monoFont]?.stack ?? CODE_FONT_OPTION_MAP[DEFAULT_MONO_FONT].stack;
-    void loadUiFont(uiFont);
-    void loadMonoFont(monoFont);
-
-    root.style.setProperty('--font-sans', uiStack);
-    root.style.setProperty('--font-heading', uiStack);
-    root.style.setProperty('--font-family-sans', uiStack);
-    root.style.setProperty('--font-mono', monoStack);
-    root.style.setProperty('--font-family-mono', monoStack);
-    root.style.setProperty('--ui-regular-font-weight', '400');
-
-    if (document.body) {
-      document.body.style.fontFamily = uiStack;
-    }
-  }, [uiFont, monoFont]);
+  useAppFontEffects();
 
   const bootOutcomeKnown = bootInjectionStatus === 'valid';
   const bootViewIsMain = bootView?.screen === 'main';
@@ -400,24 +344,12 @@ function App({ apis }: AppProps) {
   }, [setPlanModeEnabled]);
 
   React.useEffect(() => {
-    const init = async () => {
-      // VS Code runtime bootstraps config + sessions after the managed OpenCode instance reports "connected".
-      // Doing the default initialization here can race with startup and lead to one-shot failures.
-      if (isVSCodeRuntime) {
-        return;
-      }
-      if (initializationInFlightRef.current) {
-        return;
-      }
-      initializationInFlightRef.current = true;
-      try {
-        await initializeApp();
-      } finally {
-        initializationInFlightRef.current = false;
-      }
-    };
-
-    init();
+    // VS Code runtime bootstraps config + sessions after the managed OpenCode instance reports "connected".
+    // Doing the default initialization here can race with startup and lead to one-shot failures.
+    if (isVSCodeRuntime) {
+      return;
+    }
+    void initializeApp();
   }, [initializeApp, isVSCodeRuntime]);
 
   React.useEffect(() => {
@@ -440,18 +372,8 @@ function App({ apis }: AppProps) {
         setInitRetryExhausted(false);
         return;
       }
-      if (initializationInFlightRef.current) {
-        retryTimer = setTimeout(retryInitialization, BASE_DELAY_MS);
-        return;
-      }
-
       retryCount += 1;
-      initializationInFlightRef.current = true;
-      try {
-        await state.initializeApp();
-      } finally {
-        initializationInFlightRef.current = false;
-      }
+      await state.initializeApp();
 
       const next = useConfigStore.getState();
       if (!active) return;
@@ -616,14 +538,42 @@ function App({ apis }: AppProps) {
     if (typeof window === 'undefined') return;
 
     const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ sessionId?: string }>).detail;
+      const detail = (event as CustomEvent<{ sessionId?: string; directory?: string }>).detail;
       const sessionId = typeof detail?.sessionId === 'string' ? detail.sessionId.trim() : '';
       if (!sessionId) return;
-      void useSessionUIStore.getState().setCurrentSession(sessionId);
+      const directory = typeof detail?.directory === 'string' && detail.directory.trim().length > 0
+        ? detail.directory.trim()
+        : null;
+      useUIStore.getState().setActiveMainTab('chat');
+      void useSessionUIStore.getState().setCurrentSession(sessionId, directory);
     };
 
     window.addEventListener('openchamber:open-session', handler as EventListener);
     return () => window.removeEventListener('openchamber:open-session', handler as EventListener);
+  }, []);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ directory?: string; projectId?: string }>).detail;
+      const directory = typeof detail?.directory === 'string' && detail.directory.trim().length > 0
+        ? detail.directory.trim()
+        : null;
+      const projectId = typeof detail?.projectId === 'string' && detail.projectId.trim().length > 0
+        ? detail.projectId.trim()
+        : null;
+      useUIStore.getState().setActiveMainTab('chat');
+      useUIStore.getState().setSessionSwitcherOpen(false);
+      useSessionUIStore.getState().openNewSessionDraft({
+        selectedProjectId: projectId,
+        directoryOverride: directory,
+        preserveDirectoryOverride: Boolean(directory),
+      });
+    };
+
+    window.addEventListener('openchamber:open-draft-session', handler as EventListener);
+    return () => window.removeEventListener('openchamber:open-draft-session', handler as EventListener);
   }, []);
 
   React.useEffect(() => {
@@ -777,15 +727,13 @@ function App({ apis }: AppProps) {
   }, []);
 
   const handleManualInitRetry = React.useCallback(async () => {
-    if (manualInitRetrying || initializationInFlightRef.current) return;
+    if (manualInitRetrying) return;
 
     setInitRetryExhausted(false);
     setManualInitRetrying(true);
-    initializationInFlightRef.current = true;
     try {
       await useConfigStore.getState().initializeApp();
     } finally {
-      initializationInFlightRef.current = false;
       setManualInitRetrying(false);
     }
 
@@ -880,50 +828,6 @@ function App({ apis }: AppProps) {
           onRetry={() => { void handleManualInitRetry(); }}
           isRetrying={manualInitRetrying}
         />
-      </ErrorBoundary>
-    );
-  }
-
-  // VS Code runtime - simplified layout without git/terminal views
-  if (isVSCodeRuntime) {
-    // Check if this is the Agent Manager panel
-    const panelType = typeof window !== 'undefined'
-      ? (window as { __OPENCHAMBER_PANEL_TYPE__?: 'chat' | 'agentManager' }).__OPENCHAMBER_PANEL_TYPE__
-      : 'chat';
-
-    if (panelType === 'agentManager') {
-    return (
-      <ErrorBoundary>
-        <SyncProvider sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
-          <RuntimeAPIProvider apis={apis}>
-            <TooltipProvider delayDuration={300} skipDelayDuration={150}>
-              <div className="h-full text-foreground bg-background">
-                <SyncAppEffects embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
-                <AgentManagerView />
-                <Toaster />
-              </div>
-            </TooltipProvider>
-          </RuntimeAPIProvider>
-        </SyncProvider>
-      </ErrorBoundary>
-    );
-    }
-
-    return (
-      <ErrorBoundary>
-        <SyncProvider sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
-          <RuntimeAPIProvider apis={apis}>
-            <FireworksProvider>
-              <TooltipProvider delayDuration={300} skipDelayDuration={150}>
-                <div className="h-full text-foreground bg-background">
-                  <SyncAppEffects embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
-                  <VSCodeLayout />
-                  <Toaster />
-                </div>
-              </TooltipProvider>
-            </FireworksProvider>
-          </RuntimeAPIProvider>
-        </SyncProvider>
       </ErrorBoundary>
     );
   }

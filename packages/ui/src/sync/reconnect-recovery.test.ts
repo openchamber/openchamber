@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
-import type { HarnessMessage, HarnessSession } from "@openchamber/harness-contracts"
+import type { HarnessMessage, HarnessPart, HarnessSession } from "@openchamber/harness-contracts"
 import { getReconnectCandidateSessionIds } from "./reconnect-recovery"
 
 function createSession(id: string, overrides: Partial<HarnessSession> = {}): HarnessSession {
@@ -20,6 +20,10 @@ function createAssistantMessage(id: string, sessionID: string, completed?: numbe
     role: "assistant",
     time: completed ? { created: 1, completed } : { created: 1 },
   }
+}
+
+function createPart(id: string, messageID: string): HarnessPart {
+  return { id, messageId: messageID, sessionId: "active", kind: "text", text: "done" }
 }
 
 describe("getReconnectCandidateSessionIds", () => {
@@ -47,6 +51,9 @@ describe("getReconnectCandidateSessionIds", () => {
       message: {
         active: [createAssistantMessage("m-1", "active", 1)],
       },
+      part: {
+        "m-1": [createPart("p-1", "m-1")],
+      },
     }, {
       directory: "/repo",
       viewedSession: { directory: "/repo", sessionId: "active" },
@@ -70,6 +77,9 @@ describe("getReconnectCandidateSessionIds", () => {
       session_status: { active: { type: "idle" } as SessionStatus },
       message: {
         active: [createAssistantMessage("m-1", "active", 1)],
+      },
+      part: {
+        "m-1": [createPart("p-1", "m-1")],
       },
     }, {
       directory: "/repo-a",

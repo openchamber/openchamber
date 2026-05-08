@@ -451,7 +451,7 @@ export const registerSettingsUtilityRoutes = (app, dependencies) => {
 };
 
 export const registerCommonRequestMiddleware = (app, dependencies) => {
-  const { express } = dependencies;
+  const { express, verboseRequestLogs = false } = dependencies;
 
   app.use((req, res, next) => {
     if (req.path.startsWith('/api/behavior')) {
@@ -494,7 +494,9 @@ export const registerCommonRequestMiddleware = (app, dependencies) => {
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
   app.use((req, _res, next) => {
-    console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+    if (verboseRequestLogs) {
+      console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+    }
     next();
   });
 };

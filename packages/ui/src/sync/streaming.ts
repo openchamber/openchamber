@@ -58,20 +58,43 @@ export function updateStreamingState(state: State) {
     }
   }
 
+  const completeStreamingMessage = (sessionID: string, msgId: string) => {
+    nextStreamingIds.set(sessionID, null)
+    const existing = nextStreamStates.get(msgId)
+    if (existing && existing.phase === "streaming") {
+      nextStreamStates.set(msgId, {
+        ...existing,
+        phase: "completed",
+        completedAt: now,
+      })
+    }
+    changed = true
+  }
+
   for (const sessionID of busySessionIds) {
     const messages = state.message[sessionID]
     if (!messages || messages.length === 0) continue
 
-    // Find the last assistant message — that's the one streaming
     let streamingMsg: HarnessMessage | null = null
+    // Only the trailing assistant turn can be streaming. If a new user turn is
+    // last, the next assistant message has not arrived yet.
     for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === "user") {
+        break
+      }
       if (messages[i].role === "assistant") {
         streamingMsg = messages[i]
         break
       }
     }
 
-    if (!streamingMsg) continue
+    if (!streamingMsg) {
+      const prevId = currentStreamingIds.get(sessionID)
+      if (prevId) {
+        completeStreamingMessage(sessionID, prevId)
+      }
+      continue
+    }
 
     const prevId = currentStreamingIds.get(sessionID)
     if (prevId !== streamingMsg.id) changed = true
@@ -101,16 +124,7 @@ export function updateStreamingState(state: State) {
     const isStillBusy = busySessionIds.has(sessionID)
     if (isStillBusy) continue
 
-    nextStreamingIds.set(sessionID, null)
-    const existing = nextStreamStates.get(msgId)
-    if (existing && existing.phase === "streaming") {
-      nextStreamStates.set(msgId, {
-        ...existing,
-        phase: "completed",
-        completedAt: now,
-      })
-      changed = true
-    }
+    completeStreamingMessage(sessionID, msgId)
   }
 
   if (changed) {

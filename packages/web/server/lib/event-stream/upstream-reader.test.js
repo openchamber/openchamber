@@ -165,6 +165,7 @@ describe('createUpstreamSseReader', () => {
   it('reports unavailable upstream responses and continues reconnecting until stopped', async () => {
     const errors = [];
     let attempt = 0;
+    let unavailableBodyCanceled = false;
     let reader;
 
     reader = createUpstreamSseReader({
@@ -173,7 +174,15 @@ describe('createUpstreamSseReader', () => {
       fetchImpl: async (_url, options) => {
         attempt += 1;
         if (attempt === 1) {
-          return { ok: false, status: 503, body: null };
+          return {
+            ok: false,
+            status: 503,
+            body: {
+              cancel: async () => {
+                unavailableBodyCanceled = true;
+              },
+            },
+          };
         }
 
         return createSseResponse({
@@ -199,6 +208,7 @@ describe('createUpstreamSseReader', () => {
         status: 503,
       }),
     ]);
+    expect(unavailableBodyCanceled).toBe(true);
     expect(attempt).toBe(2);
   });
 });

@@ -95,6 +95,48 @@ const resolveWorkspacePathFromContext = async ({ req, targetPath, resolveProject
   });
 };
 
+const deriveCloneDirectoryName = (remoteUrl) => {
+  const remote = typeof remoteUrl === 'string' ? remoteUrl.trim() : '';
+  if (!remote) return '';
+  const withoutQuery = remote.split(/[?#]/, 1)[0] || remote;
+  const match = withoutQuery.match(/([^/:]+?)(?:\.git)?\/?$/);
+  return match?.[1]?.trim() || '';
+};
+
+const resolveCloneGitIdentity = async (gitIdentityId) => {
+  const id = typeof gitIdentityId === 'string' ? gitIdentityId.trim() : '';
+  if (!id) return null;
+  const { getProfile, getGlobalIdentity } = await import('../git/index.js');
+  if (id === 'global') {
+    const globalIdentity = await getGlobalIdentity();
+    if (!globalIdentity?.userName || !globalIdentity?.userEmail) return null;
+    return {
+      id: 'global',
+      name: 'Global Identity',
+      userName: globalIdentity.userName,
+      userEmail: globalIdentity.userEmail,
+      sshKey: globalIdentity.sshCommand ? globalIdentity.sshCommand.replace('ssh -i ', '') : null,
+    };
+  }
+  return getProfile(id) || null;
+};
+
+const escapeCloneSshKeyPath = (sshKeyPath) => {
+  const raw = String(sshKeyPath || '').trim();
+  if (!raw) return '';
+  const normalized = process.platform === 'win32' ? raw.replace(/\\/g, '/') : raw;
+  const dangerousChars = /[`$!"';&|<>(){}[\]*?#~]/;
+  if (dangerousChars.test(normalized)) {
+    throw new Error(`SSH key path contains invalid characters: ${raw}`);
+  }
+  if (process.platform === 'win32') {
+    const driveMatch = normalized.match(/^([A-Za-z]):\//);
+    const unixPath = driveMatch ? `/${driveMatch[1].toLowerCase()}${normalized.slice(2)}` : normalized;
+    return `'${unixPath}'`;
+  }
+  return `'${normalized.replace(/'/g, "'\\''")}'`;
+};
+
 const resolveReadPathFromContext = async ({ req, targetPath, resolveProjectDirectory, path, os, normalizeDirectoryPath, openchamberUserConfigRoot }) => {
   if (req.query?.allowOutsideWorkspace === 'true') {
     const normalized = normalizeDirectoryPath(targetPath);
@@ -301,6 +343,115 @@ export const registerFsRoutes = (app, dependencies) => {
     } catch (error) {
       console.error('Failed to create directory:', error);
       return res.status(500).json({ error: error.message || 'Failed to create directory' });
+    }
+  });
+
+  app.post('/api/fs/clone', async (req, res) => {
+    try {
+      const { remoteUrl, destinationPath, gitIdentityId } = req.body ?? {};
+      const remote = typeof remoteUrl === 'string' ? remoteUrl.trim() : '';
+      const destination = typeof destinationPath === 'string' ? destinationPath.trim() : '';
+      if (!remote) {
+        return res.status(400).json({ error: 'Repository URL is required' });
+      }
+      if (!destination) {
+        return res.status(400).json({ error: 'Destination path is required' });
+      }
+
+      let resolvedDestination = path.resolve(normalizeDirectoryPath(destination));
+      let parentPath = path.dirname(resolvedDestination);
+      let directoryName = path.basename(resolvedDestination);
+
+      const cloneIntoDestinationDirectory = destination.endsWith('/') || destination.endsWith('\\');
+      if (cloneIntoDestinationDirectory) {
+        const inferredName = deriveCloneDirectoryName(remote);
+        if (!inferredName) {
+          return res.status(400).json({ error: 'Could not infer repository directory name from URL' });
+        }
+        parentPath = resolvedDestination;
+        directoryName = inferredName;
+        resolvedDestination = path.join(parentPath, directoryName);
+      } else {
+        try {
+          const stat = await fsPromises.stat(resolvedDestination);
+          if (stat.isDirectory()) {
+            const inferredName = deriveCloneDirectoryName(remote);
+            if (!inferredName) {
+              return res.status(400).json({ error: 'Could not infer repository directory name from URL' });
+            }
+            parentPath = resolvedDestination;
+            directoryName = inferredName;
+            resolvedDestination = path.join(parentPath, directoryName);
+          }
+        } catch (error) {
+          if (!error || error.code !== 'ENOENT') {
+            throw error;
+          }
+        }
+      }
+      if (!directoryName || directoryName === '.' || directoryName === '..') {
+        return res.status(400).json({ error: 'Destination path must include a directory name' });
+      }
+
+      const identity = await resolveCloneGitIdentity(gitIdentityId);
+      const gitArgs = ['clone', '--', remote, directoryName];
+      const sshKeyPath = typeof identity?.sshKey === 'string' ? identity.sshKey.trim() : '';
+      if (sshKeyPath) {
+        gitArgs.unshift(`core.sshCommand=ssh -i ${escapeCloneSshKeyPath(sshKeyPath)} -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new`);
+        gitArgs.unshift('-c');
+      }
+
+      await fsPromises.mkdir(parentPath, { recursive: true });
+      try {
+        await fsPromises.access(resolvedDestination);
+        return res.status(409).json({ error: 'Destination path already exists' });
+      } catch (error) {
+        if (!error || error.code !== 'ENOENT') {
+          throw error;
+        }
+      }
+
+      const output = await new Promise((resolve, reject) => {
+        const child = spawn(resolveGitBinaryForSpawn(), gitArgs, {
+          cwd: parentPath,
+          windowsHide: true,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: {
+            ...process.env,
+            PATH: buildAugmentedPath ? buildAugmentedPath(process.env.PATH || '') : process.env.PATH,
+            GIT_TERMINAL_PROMPT: '0',
+          },
+        });
+
+        let stdout = '';
+        let stderr = '';
+        child.stdout.on('data', (data) => { stdout += data.toString(); });
+        child.stderr.on('data', (data) => { stderr += data.toString(); });
+        child.on('error', reject);
+        child.on('close', (code) => {
+          const combined = `${stdout}\n${stderr}`.trim();
+          if (code === 0) {
+            resolve(combined);
+            return;
+          }
+          const message = combined || `git clone failed with exit code ${code}`;
+          reject(new Error(message));
+        });
+      });
+
+      if (identity?.userName && identity?.userEmail) {
+        try {
+          const { setLocalIdentity } = await import('../git/index.js');
+          await setLocalIdentity(resolvedDestination, identity);
+        } catch (error) {
+          console.warn('Failed to apply git identity after clone:', error);
+        }
+      }
+
+      return res.json({ success: true, path: resolvedDestination, output });
+    } catch (error) {
+      console.error('Failed to clone repository:', error);
+      return res.status(500).json({ error: error.message || 'Failed to clone repository' });
     }
   });
 
@@ -842,7 +993,7 @@ export const registerFsRoutes = (app, dependencies) => {
       const err = error;
       const code = err && typeof err === 'object' && 'code' in err ? err.code : undefined;
       const isPlansPath = code === 'ENOENT' && (isPlansDirectory(resolvedPath) || isPlansDirectory(rawPath));
-      if (!isPlansPath) {
+      if (code !== 'ENOENT') {
         console.error('Failed to list directory:', error);
       }
       if (code === 'ENOENT') {

@@ -10,6 +10,8 @@ import {
   RiFolder3Fill,
   RiFolderOpenFill,
   RiFolderReceivedLine,
+  RiFileCheckFill,
+  RiFileCheckLine,
   RiFullscreenExitLine,
   RiFullscreenLine,
   RiLoader4Line,
@@ -266,6 +268,19 @@ const isDirectoryReadError = (error: unknown): boolean => {
 };
 
 const MAX_VIEW_CHARS = 200_000;
+const FILE_EDITOR_AUTO_SAVE_KEY = 'openchamber:files:auto-save-enabled';
+
+const getInitialAutoSaveEnabled = (): boolean => {
+  if (typeof window === 'undefined') {
+    return true;
+  }
+
+  try {
+    return window.localStorage.getItem(FILE_EDITOR_AUTO_SAVE_KEY) !== 'false';
+  } catch {
+    return true;
+  }
+};
 
 const getFileIcon = (filePath: string, extension?: string): React.ReactNode => {
   return <FileTypeIcon filePath={filePath} extension={extension} />;
@@ -633,6 +648,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const [childrenByDir, setChildrenByDir] = React.useState<Record<string, FileNode[]>>({});
   const loadedDirsRef = React.useRef<Set<string>>(new Set());
   const inFlightDirsRef = React.useRef<Set<string>>(new Set());
+  const activeDirectoryLoadIdsRef = React.useRef<Map<string, number>>(new Map());
+  const nextDirectoryLoadIdRef = React.useRef(0);
 
   const [searchResults, setSearchResults] = React.useState<FileNode[]>([]);
   const [searching, setSearching] = React.useState(false);
@@ -649,6 +666,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const autoSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastLoadedFileStatRef = React.useRef<FileStatSnapshot | null>(null);
   const [autoSaveStatus, setAutoSaveStatus] = React.useState<'idle' | 'saved'>('idle');
+  const [autoSaveEnabled, setAutoSaveEnabled] = React.useState(getInitialAutoSaveEnabled);
 
   const [confirmDiscardOpen, setConfirmDiscardOpen] = React.useState(false);
   const pendingSelectFileRef = React.useRef<FileNode | null>(null);
@@ -884,6 +902,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
     inFlightDirsRef.current = new Set(inFlightDirsRef.current);
     inFlightDirsRef.current.add(normalizedDir);
+    const requestId = nextDirectoryLoadIdRef.current + 1;
+    nextDirectoryLoadIdRef.current = requestId;
+    activeDirectoryLoadIdsRef.current = new Map(activeDirectoryLoadIdsRef.current);
+    activeDirectoryLoadIdsRef.current.set(normalizedDir, requestId);
+
+    const isCurrentRequest = () => activeDirectoryLoadIdsRef.current.get(normalizedDir) === requestId;
 
     const respectGitignore = !showGitignored;
     const listPromise = runtime.isDesktop
@@ -900,6 +924,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
     await listPromise
       .then((entries) => {
+        if (!isCurrentRequest()) {
+          return;
+        }
+
         const mapped = mapDirectoryEntries(normalizedDir, entries);
 
         loadedDirsRef.current = new Set(loadedDirsRef.current);
@@ -907,12 +935,22 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         setChildrenByDir((prev) => ({ ...prev, [normalizedDir]: mapped }));
       })
       .catch(() => {
+        if (!isCurrentRequest()) {
+          return;
+        }
+
         setChildrenByDir((prev) => ({
           ...prev,
           [normalizedDir]: prev[normalizedDir] ?? [],
         }));
       })
       .finally(() => {
+        if (!isCurrentRequest()) {
+          return;
+        }
+
+        activeDirectoryLoadIdsRef.current = new Map(activeDirectoryLoadIdsRef.current);
+        activeDirectoryLoadIdsRef.current.delete(normalizedDir);
         inFlightDirsRef.current = new Set(inFlightDirsRef.current);
         inFlightDirsRef.current.delete(normalizedDir);
       });
@@ -925,6 +963,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
     loadedDirsRef.current = new Set();
     inFlightDirsRef.current = new Set();
+    activeDirectoryLoadIdsRef.current = new Map();
     setChildrenByDir((prev) => (Object.keys(prev).length === 0 ? prev : {}));
 
     await loadDirectory(root);
@@ -980,6 +1019,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       lastFilesViewTreeKeyRef.current = treeKey;
       loadedDirsRef.current = new Set();
       inFlightDirsRef.current = new Set();
+      activeDirectoryLoadIdsRef.current = new Map();
       setChildrenByDir((prev) => (Object.keys(prev).length === 0 ? prev : {}));
       void loadDirectory(root);
     }
@@ -1331,12 +1371,32 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     };
   }, [isDirty, setMainTabGuard]);
 
+  React.useEffect(() => {
+    try {
+      window.localStorage.setItem(FILE_EDITOR_AUTO_SAVE_KEY, autoSaveEnabled ? 'true' : 'false');
+    } catch {
+      // Ignore localStorage errors; the in-memory preference still applies.
+    }
+  }, [autoSaveEnabled]);
+
+  React.useEffect(() => {
+    if (autoSaveEnabled) {
+      return;
+    }
+
+    setAutoSaveStatus('idle');
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+  }, [autoSaveEnabled]);
+
   // Auto-save: debounce 1.5s after user stops typing
   const AUTO_SAVE_DELAY = 1500;
 
   React.useEffect(() => {
     const canWrite = Boolean(selectedFile && files.writeFile);
-    if (!isDirty || !canWrite || isSaving) {
+    if (!autoSaveEnabled || !isDirty || !canWrite || isSaving) {
       return;
     }
 
@@ -1353,7 +1413,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         autoSaveTimerRef.current = null;
       }
     };
-  }, [draftContent, isDirty, selectedFile, files.writeFile, isSaving, saveDraft]);
+  }, [autoSaveEnabled, draftContent, isDirty, selectedFile, files.writeFile, isSaving, saveDraft]);
 
   // Reset auto-save status when switching files
   React.useEffect(() => {
@@ -2478,28 +2538,43 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     return (
       <div className="pointer-events-auto flex items-center gap-1 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-1 shadow-sm">
         {canEdit && textViewMode === 'edit' && (
-          isSaving ? (
-            <span className="flex items-center gap-1 px-1 text-muted-foreground typography-meta">
-              <RiLoader4Line className="h-3.5 w-3.5 animate-spin" />
-              {t('filesView.editor.saving')}
-            </span>
-          ) : autoSaveStatus === 'saved' && !isDirty ? (
-            <span className="flex items-center gap-1 px-1 text-[color:var(--status-success)] typography-meta">
-              <RiCheckLine className="h-3.5 w-3.5" />
-              {t('filesView.editor.saved')}
-            </span>
-          ) : isDirty ? (
+          <>
+            {isSaving ? (
+              <span className="flex items-center gap-1 px-1 text-muted-foreground typography-meta">
+                <RiLoader4Line className="h-3.5 w-3.5 animate-spin" />
+                {t('filesView.editor.saving')}
+              </span>
+            ) : autoSaveEnabled && autoSaveStatus === 'saved' && !isDirty ? (
+              <span className="flex items-center gap-1 px-1 text-[color:var(--status-success)] typography-meta">
+                <RiCheckLine className="h-3.5 w-3.5" />
+                {t('filesView.editor.saved')}
+              </span>
+            ) : isDirty ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => void saveDraft()}
+                className="h-6 gap-1 px-1 text-muted-foreground opacity-80 hover:bg-transparent hover:opacity-100 focus-visible:bg-transparent active:bg-transparent"
+                title={t(autoSaveEnabled ? 'filesView.editor.saveNowTitle' : 'filesView.editor.saveNowManualTitle', { shortcut: `${getModifierLabel()}+S` })}
+                aria-label={t('filesView.editor.saveAria', { shortcut: `${getModifierLabel()}+S` })}
+              >
+                <RiSave3Line className="h-4 w-4" />
+              </Button>
+            ) : null}
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => void saveDraft()}
-              className="h-6 gap-1 px-1 text-muted-foreground opacity-80 hover:bg-transparent hover:opacity-100 focus-visible:bg-transparent active:bg-transparent"
-              title={t('filesView.editor.saveNowTitle', { shortcut: `${getModifierLabel()}+S` })}
-              aria-label={t('filesView.editor.saveAria', { shortcut: `${getModifierLabel()}+S` })}
+              onClick={() => setAutoSaveEnabled((enabled) => !enabled)}
+              className={cn(
+                'h-6 w-6 p-0 transition-opacity hover:bg-transparent focus-visible:bg-transparent active:bg-transparent',
+                autoSaveEnabled ? 'text-foreground opacity-100' : 'text-muted-foreground opacity-65 hover:opacity-100'
+              )}
+              title={autoSaveEnabled ? t('filesView.editor.autoSaveOn') : t('filesView.editor.manualSave')}
+              aria-label={autoSaveEnabled ? t('filesView.editor.autoSaveOn') : t('filesView.editor.manualSave')}
             >
-              <RiSave3Line className="h-4 w-4" />
+              {autoSaveEnabled ? <RiFileCheckFill className="size-4" /> : <RiFileCheckLine className="size-4" />}
             </Button>
-          ) : null
+          </>
         )}
 
         <DropdownMenu onOpenChange={handleToolbarDropdownOpenChange}>

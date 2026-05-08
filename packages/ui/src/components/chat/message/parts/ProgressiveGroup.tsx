@@ -3,7 +3,7 @@ import { RiStackLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import type { TurnActivityRecord as TurnActivityPart } from '../../lib/turns/types';
 import type { StreamPhase } from '../types';
-import type { ContentChangeReason } from '@/hooks/useChatScrollManager';
+import type { ContentChangeReason } from '@/hooks/useChatAutoFollow';
 import type { ToolPopupContent } from '../types';
 import ToolPart from './ToolPart';
 import { toRenderableToolActivity, type RenderableToolPart } from '../renderable';

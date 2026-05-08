@@ -60,7 +60,7 @@ const bootstrapConnectionStatus = () => {
 
 bootstrapConnectionStatus();
 
-// Expose panel type globally for App.tsx to conditionally render
+// Expose panel type globally for the VS Code app root to conditionally render.
 window.__OPENCHAMBER_PANEL_TYPE__ = (window.__VSCODE_CONFIG__?.panelType as PanelType) || 'chat';
 
 const handleConnectionMessage = (event: MessageEvent) => {
@@ -1242,8 +1242,9 @@ onCommand('activeEditorFile', (payload) => {
   });
 });
 
-import('@/main')
-  .then(async () => {
+import('@openchamber/ui/apps/renderVSCodeApp')
+  .then(async ({ renderVSCodeApp }) => {
+    renderVSCodeApp(window.__OPENCHAMBER_RUNTIME_APIS__ ?? createVSCodeAPIs());
     await waitForUiMount();
     uiMounted = true;
     maybeHideLoadingOverlay();
