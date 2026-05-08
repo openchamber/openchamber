@@ -665,6 +665,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const [isSaving, setIsSaving] = React.useState(false);
   const autoSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastLoadedFileStatRef = React.useRef<FileStatSnapshot | null>(null);
+  const activeFileLoadIdRef = React.useRef(0);
   const [autoSaveStatus, setAutoSaveStatus] = React.useState<'idle' | 'saved'>('idle');
   const [autoSaveEnabled, setAutoSaveEnabled] = React.useState(getInitialAutoSaveEnabled);
 
@@ -1450,6 +1451,15 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   }, [isSaving, saveDraft]);
 
   const loadSelectedFile = React.useCallback(async (node: FileNode) => {
+    const loadId = activeFileLoadIdRef.current + 1;
+    activeFileLoadIdRef.current = loadId;
+    const isCurrentLoad = () => {
+      if (!root) return false;
+      const rootState = useFilesViewTabsStore.getState().byRoot[root];
+      const currentPath = rootState?.selectedPath ?? rootState?.openPaths[0] ?? null;
+      return activeFileLoadIdRef.current === loadId && currentPath === node.path;
+    };
+
     setFileError(null);
     setDesktopImageSrc('');
     setLoadedFilePath(null);
@@ -1484,6 +1494,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
     await readFile(node.path, readOptions)
       .then((content) => {
+        if (!isCurrentLoad()) {
+          return;
+        }
         setFileContent(content);
         setDraftContent(content.length > MAX_VIEW_CHARS
           ? `${content.slice(0, MAX_VIEW_CHARS)}\n\n… truncated …`
@@ -1491,13 +1504,16 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         setLoadedFilePath(node.path);
         void readFileStat(node.path, readOptions)
           .then((stat) => {
-            if (stat) {
+            if (stat && isCurrentLoad()) {
               lastLoadedFileStatRef.current = stat;
             }
           })
           .catch(() => {});
       })
       .catch((error) => {
+        if (!isCurrentLoad()) {
+          return;
+        }
         if (isDirectoryReadError(error)) {
           if (root) {
             setSelectedPath(root, null);
@@ -1533,7 +1549,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         lastLoadedFileStatRef.current = null;
       })
       .finally(() => {
-        setFileLoading(false);
+        if (isCurrentLoad()) {
+          setFileLoading(false);
+        }
       });
   }, [expandPaths, isMobile, loadDirectory, mode, readFile, readFileStat, root, runtime.isDesktop, searchQuery, setSelectedPath, t]);
 
@@ -1599,6 +1617,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
   React.useEffect(() => {
     if (!selectedFile) {
+      activeFileLoadIdRef.current += 1;
+      setFileLoading(false);
       return;
     }
 
