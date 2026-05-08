@@ -50,6 +50,7 @@ import {
 } from "./session-actions"
 import { useInputStore, type SyntheticContextPart } from "./input-store"
 import { useSelectionStore } from "./selection-store"
+import { recordRootSessionUserMessageAt, removeRootSessionUserActivity } from "./session-user-activity-store"
 import { useViewportStore } from "./viewport-store"
 import { useSessionWorktreeStore } from "./session-worktree-store"
 import { getAttachedSessionDirectory } from "./session-worktree-contract"
@@ -769,6 +770,10 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
       notifyMessageSent(created.id)
 
+      if (!draft.parentID) {
+        recordRootSessionUserMessageAt(created.id, Date.now())
+      }
+
       markPendingUserSendAnimation(created.id)
 
       const files = attachments?.map((a) => ({
@@ -815,6 +820,12 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     }
 
     if (currentSessionId) {
+      const currentSession = getAllSyncSessions().find((session) => session.id === currentSessionId)
+      const parentID = (currentSession as Session & { parentID?: string | null } | undefined)?.parentID
+      if (!parentID) {
+        recordRootSessionUserMessageAt(currentSessionId, Date.now())
+      }
+
       const viewportState = useViewportStore.getState()
       const memState = viewportState.sessionMemoryState.get(currentSessionId)
       if (!memState || !memState.lastUserMessageAt) {
@@ -905,28 +916,44 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // ---------------------------------------------------------------------------
   // deleteSession — calls SDK, SSE event updates child store
   // ---------------------------------------------------------------------------
-  deleteSession: (id) => deleteSessionAction(id),
+  deleteSession: async (id) => {
+    const ok = await deleteSessionAction(id)
+    if (ok) removeRootSessionUserActivity(id)
+    return ok
+  },
 
   deleteSessions: async (ids) => {
     const deletedIds: string[] = []
     const failedIds: string[] = []
     for (const id of ids) {
       const ok = await deleteSessionAction(id)
-      if (ok) deletedIds.push(id)
-      else failedIds.push(id)
+      if (ok) {
+        removeRootSessionUserActivity(id)
+        deletedIds.push(id)
+      } else {
+        failedIds.push(id)
+      }
     }
     return { deletedIds, failedIds }
   },
 
-  archiveSession: (id) => archiveSessionAction(id),
+  archiveSession: async (id) => {
+    const ok = await archiveSessionAction(id)
+    if (ok) removeRootSessionUserActivity(id)
+    return ok
+  },
 
   archiveSessions: async (ids) => {
     const archivedIds: string[] = []
     const failedIds: string[] = []
     for (const id of ids) {
       const ok = await archiveSessionAction(id)
-      if (ok) archivedIds.push(id)
-      else failedIds.push(id)
+      if (ok) {
+        removeRootSessionUserActivity(id)
+        archivedIds.push(id)
+      } else {
+        failedIds.push(id)
+      }
     }
     return { archivedIds, failedIds }
   },

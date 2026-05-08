@@ -71,11 +71,13 @@ import {
   readActiveNowEntries,
 } from './sidebar/activitySections';
 import {
+  compareRootSessionsByPinnedAndUserActivity,
   compareSessionsByPinnedAndTime,
   formatProjectLabel,
   normalizePath,
 } from './sidebar/utils';
 import { refreshGlobalSessions, resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { useSessionUserActivityStore } from '@/sync/session-user-activity-store';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
@@ -137,6 +139,11 @@ const isKnownActiveSessionDirectory = (session: Session, knownDirectories: Set<s
   if (!directory) return true;
   if (knownDirectories.size === 0) return true;
   return knownDirectories.has(directory);
+};
+
+const hasParentSession = (session: Session): boolean => {
+  const parentID = (session as Session & { parentID?: string | null }).parentID;
+  return Boolean(parentID);
 };
 
 const SIDEBAR_PR_NO_PR_RETRY_MS = 5 * 60_000;
@@ -306,6 +313,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   const sync = useSync();
   const liveSessions = useAllLiveSessions();
+  const lastUserMessageAtBySession = useSessionUserActivityStore((state) => state.lastUserMessageAtBySession);
   const liveSessionStatuses = useAllSessionStatuses();
   const hasLoadedGlobalSessions = useGlobalSessionsStore((state) => state.hasLoaded);
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
@@ -560,8 +568,17 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   }, []);
 
   const sortedSessions = React.useMemo(() => {
-    return [...sessions].sort((a, b) => compareSessionsByPinnedAndTime(a, b, pinnedSessionIds));
-  }, [sessions, pinnedSessionIds]);
+    return [...sessions].sort((a, b) => {
+      const aIsRoot = !hasParentSession(a);
+      const bIsRoot = !hasParentSession(b);
+
+      if (aIsRoot && bIsRoot) {
+        return compareRootSessionsByPinnedAndUserActivity(a, b, pinnedSessionIds, lastUserMessageAtBySession);
+      }
+
+      return compareSessionsByPinnedAndTime(a, b, pinnedSessionIds);
+    });
+  }, [lastUserMessageAtBySession, sessions, pinnedSessionIds]);
 
   const sessionOrderIndex = React.useMemo(
     () => new Map(sortedSessions.map((session, index) => [session.id, index])),

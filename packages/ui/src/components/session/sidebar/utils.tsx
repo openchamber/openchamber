@@ -133,6 +133,27 @@ export const compareSessionsByPinnedAndTime = (
   return getSessionUpdatedAt(b) - getSessionUpdatedAt(a);
 };
 
+export const compareRootSessionsByPinnedAndUserActivity = (
+  a: Session,
+  b: Session,
+  pinnedSessionIds: Set<string>,
+  lastUserMessageAtBySession: Map<string, number>,
+): number => {
+  const aPinned = pinnedSessionIds.has(a.id);
+  const bPinned = pinnedSessionIds.has(b.id);
+  if (aPinned !== bPinned) {
+    return aPinned ? -1 : 1;
+  }
+
+  if (aPinned && bPinned) {
+    return getSessionCreatedAt(b) - getSessionCreatedAt(a);
+  }
+
+  const aRank = lastUserMessageAtBySession.get(a.id) ?? getSessionUpdatedAt(a);
+  const bRank = lastUserMessageAtBySession.get(b.id) ?? getSessionUpdatedAt(b);
+  return bRank - aRank;
+};
+
 export const compareSessionsByPinnedAndCreated = (
   a: Session,
   b: Session,
