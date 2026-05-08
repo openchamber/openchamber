@@ -42,9 +42,16 @@ const getStatusPriority = (status: SessionStatus | undefined): number => {
   }
 }
 
-const getStatusMessage = (status: SessionStatus | undefined): string | null => {
+const getStatusSignature = (status: SessionStatus | undefined): string => {
   const message = (status as { message?: unknown } | undefined)?.message
-  return typeof message === 'string' ? message : null
+  const attempt = (status as { attempt?: unknown } | undefined)?.attempt
+  const next = (status as { next?: unknown } | undefined)?.next
+  return [
+    status?.type ?? '',
+    typeof message === 'string' ? message : '',
+    typeof attempt === 'number' ? attempt : '',
+    typeof next === 'number' ? next : '',
+  ].join('|')
 }
 
 type StatusCandidate = {
@@ -114,10 +121,7 @@ export const areStatusMapsEquivalent = (
     }
     const leftStatus = left[key]
     const rightStatus = right[key]
-    if (leftStatus?.type !== rightStatus?.type) {
-      return false
-    }
-    if (getStatusMessage(leftStatus) !== getStatusMessage(rightStatus)) {
+    if (getStatusSignature(leftStatus) !== getStatusSignature(rightStatus)) {
       return false
     }
   }
