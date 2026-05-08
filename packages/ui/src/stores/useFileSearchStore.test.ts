@@ -56,6 +56,22 @@ describe('useFileSearchStore', () => {
     expect(useFileSearchStore.getState().cacheKeys).toEqual([]);
   });
 
+  test('does not notify subscribers when stale search handlers make no state change', async () => {
+    const searchPromise = useFileSearchStore.getState().searchFiles('/project', 'foo');
+    useFileSearchStore.getState().invalidateDirectory('/project');
+
+    let updateCount = 0;
+    const unsubscribe = useFileSearchStore.subscribe(() => {
+      updateCount += 1;
+    });
+
+    searchRequests[0].resolve([{ path: 'stale.ts' }]);
+    await searchPromise;
+    unsubscribe();
+
+    expect(updateCount).toBe(0);
+  });
+
   test('does not let a stale request remove a newer in-flight search', async () => {
     const stalePromise = useFileSearchStore.getState().searchFiles('/project', 'foo');
     useFileSearchStore.getState().invalidateDirectory('/project');
