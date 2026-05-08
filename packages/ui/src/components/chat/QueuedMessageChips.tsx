@@ -88,9 +88,7 @@ export const QueuedMessageChips = memo(({ onEditMessage }: QueuedMessageChipsPro
         if (popped) {
             if (popped.attachments && popped.attachments.length > 0) {
                 const currentAttachments = useInputStore.getState().attachedFiles;
-                useInputStore.setState({ 
-                    attachedFiles: [...currentAttachments, ...popped.attachments] 
-                });
+                useInputStore.getState().setAttachedFiles([...currentAttachments, ...popped.attachments]);
             }
             onEditMessage(popped.content, popped.attachments);
         }

@@ -52,6 +52,26 @@ describe("input-store attachments", () => {
     expect(useInputStore.getState().attachedFiles).toEqual([])
   })
 
+  test("does not attach a local file after attached files are restored", async () => {
+    const addPromise = useInputStore.getState().addAttachedFile(new File(["hello"], "hello.txt", { type: "text/plain" }))
+    expect(pendingReaders).toHaveLength(1)
+
+    const restored = new File(["restored"], "restored.txt", { type: "text/plain" })
+    useInputStore.getState().setAttachedFiles([{
+      id: "restored",
+      file: restored,
+      dataUrl: "data:text/plain;base64,cmVzdG9yZWQ=",
+      mimeType: "text/plain",
+      filename: "restored.txt",
+      size: restored.size,
+      source: "local",
+    }])
+    resolveReader(pendingReaders[0], "data:text/plain;base64,aGVsbG8=")
+    await addPromise
+
+    expect(useInputStore.getState().attachedFiles.map((file) => file.filename)).toEqual(["restored.txt"])
+  })
+
   test("does not attach a VS Code selection that finishes reading after attachments are cleared", async () => {
     const addPromise = useInputStore.getState().addVSCodeSelectionAttachment(
       "/workspace/hello.txt",
