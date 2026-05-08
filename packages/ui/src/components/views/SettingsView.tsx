@@ -73,6 +73,11 @@ import {
 // Same constraints as main sidebar
 const SETTINGS_NAV_MIN_WIDTH = 176;
 const SETTINGS_NAV_MAX_WIDTH = 280;
+const SETTINGS_NAV_RESIZE_STEP = 8;
+
+function clampSettingsNavWidth(width: number): number {
+  return Math.min(SETTINGS_NAV_MAX_WIDTH, Math.max(SETTINGS_NAV_MIN_WIDTH, width));
+}
 
 type MobileStage = 'nav' | 'page-sidebar' | 'page-content';
 
@@ -296,10 +301,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     if (typeof window === 'undefined') return;
     const handleResize = () => {
       if (!hasManuallyResized) {
-        const proportionalWidth = Math.min(
-          SETTINGS_NAV_MAX_WIDTH,
-          Math.max(SETTINGS_NAV_MIN_WIDTH, Math.floor(window.innerWidth * 0.12))
-        );
+        const proportionalWidth = clampSettingsNavWidth(Math.floor(window.innerWidth * 0.12));
         setNavWidth(proportionalWidth);
       }
     };
@@ -311,10 +313,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     if (!isResizing) return;
     const handlePointerMove = (event: PointerEvent) => {
       const delta = event.clientX - startXRef.current;
-      const nextWidth = Math.min(
-        SETTINGS_NAV_MAX_WIDTH,
-        Math.max(SETTINGS_NAV_MIN_WIDTH, startWidthRef.current + delta)
-      );
+      const nextWidth = clampSettingsNavWidth(startWidthRef.current + delta);
       setNavWidth(nextWidth);
       setHasManuallyResized(true);
     };
@@ -332,6 +331,32 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     startXRef.current = event.clientX;
     startWidthRef.current = navWidth;
     event.preventDefault();
+  };
+
+  const handleResizeKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const step = event.shiftKey ? SETTINGS_NAV_RESIZE_STEP * 4 : SETTINGS_NAV_RESIZE_STEP;
+    let nextWidth: number;
+
+    switch (event.key) {
+      case 'ArrowLeft':
+        nextWidth = navWidth - step;
+        break;
+      case 'ArrowRight':
+        nextWidth = navWidth + step;
+        break;
+      case 'Home':
+        nextWidth = SETTINGS_NAV_MIN_WIDTH;
+        break;
+      case 'End':
+        nextWidth = SETTINGS_NAV_MAX_WIDTH;
+        break;
+      default:
+        return;
+    }
+
+    event.preventDefault();
+    setNavWidth(clampSettingsNavWidth(nextWidth));
+    setHasManuallyResized(true);
   };
 
   // Load stores when project changes or when a page becomes active.
@@ -795,11 +820,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
               <div
                 className={cn(
                   'absolute right-0 top-0 z-20 h-full w-[6px] -mr-[3px] cursor-col-resize',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]',
                   isResizing ? 'bg-primary/30' : 'bg-transparent hover:bg-primary/20'
                 )}
+                tabIndex={0}
                 onPointerDown={handlePointerDown}
+                onKeyDown={handleResizeKeyDown}
                 role="separator"
                 aria-orientation="vertical"
+                aria-valuemin={SETTINGS_NAV_MIN_WIDTH}
+                aria-valuemax={SETTINGS_NAV_MAX_WIDTH}
+                aria-valuenow={navWidth}
                 aria-label={t('settings.view.actions.resizeNavigation')}
               />
               <ErrorBoundary>
