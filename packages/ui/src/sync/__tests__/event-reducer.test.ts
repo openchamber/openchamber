@@ -8,6 +8,7 @@ function state(overrides: Partial<State> = {}): State {
     ...INITIAL_STATE,
     message: {},
     part: {},
+    session_status: {},
     ...overrides,
   }
 }
@@ -93,6 +94,34 @@ describe("applyDirectoryEvent", () => {
     const event = {
       type: "session.status",
       properties: { sessionID: "ses_1", status: busyStatus },
+    } as Event
+
+    expect(applyDirectoryEvent(draft, event)).toBe(true)
+    const statusRef = draft.session_status.ses_1
+
+    expect(applyDirectoryEvent(draft, event)).toBe(false)
+    expect(draft.session_status.ses_1).toBe(statusRef)
+  })
+
+  test("skips duplicate session idle events", () => {
+    const draft = state()
+    const event = {
+      type: "session.idle",
+      properties: { sessionID: "ses_1" },
+    } as Event
+
+    expect(applyDirectoryEvent(draft, event)).toBe(true)
+    const statusRef = draft.session_status.ses_1
+
+    expect(applyDirectoryEvent(draft, event)).toBe(false)
+    expect(draft.session_status.ses_1).toBe(statusRef)
+  })
+
+  test("skips duplicate session error idle-state events", () => {
+    const draft = state()
+    const event = {
+      type: "session.error",
+      properties: { sessionID: "ses_1" },
     } as Event
 
     expect(applyDirectoryEvent(draft, event)).toBe(true)

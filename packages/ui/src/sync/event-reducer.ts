@@ -93,9 +93,8 @@ function shouldPreserveExistingPart(previous: Part, next: Part): boolean {
 function areSessionStatusesEqual(left: SessionStatus | undefined, right: SessionStatus): boolean {
   if (left === right) return true
   if (!left || left.type !== right.type) return false
-  if (left.type === "retry" || right.type === "retry") {
-    return left.type === "retry"
-      && right.type === "retry"
+  if (left.type === "retry") {
+    return right.type === "retry"
       && left.attempt === right.attempt
       && left.message === right.message
       && left.next === right.next
