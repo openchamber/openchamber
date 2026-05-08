@@ -1312,37 +1312,37 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const saveDraft = React.useCallback(async () => {
     if (!selectedFile || !files.writeFile) {
       toast.error(t('filesView.toast.savingNotSupported'));
-      return;
+      return false;
     }
 
     if (!isDirty) {
-      return;
+      return true;
     }
 
     setIsSaving(true);
 
-    await files.writeFile(selectedFile.path, draftContent)
-      .then((result) => {
-        if (!result?.success) {
-          toast.error(t('filesView.toast.writeFileFailed'));
-          return;
-        }
-        setFileContent(draftContent);
-        // Refresh stat after write so polling doesn't see a stale metadata change.
-        void readFileStat(selectedFile.path)
-          .then((stat) => {
-            if (stat) {
-              lastLoadedFileStatRef.current = stat;
-            }
-          })
-          .catch(() => {});
-      })
-      .catch((error) => {
-        toast.error(error instanceof Error ? error.message : t('filesView.toast.saveFailed'));
-      })
-      .finally(() => {
-        setIsSaving(false);
-      });
+    try {
+      const result = await files.writeFile(selectedFile.path, draftContent);
+      if (!result?.success) {
+        toast.error(t('filesView.toast.writeFileFailed'));
+        return false;
+      }
+      setFileContent(draftContent);
+      // Refresh stat after write so polling doesn't see a stale metadata change.
+      void readFileStat(selectedFile.path)
+        .then((stat) => {
+          if (stat) {
+            lastLoadedFileStatRef.current = stat;
+          }
+        })
+        .catch(() => {});
+      return true;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('filesView.toast.saveFailed'));
+      return false;
+    } finally {
+      setIsSaving(false);
+    }
   }, [draftContent, files, isDirty, readFileStat, selectedFile, t]);
 
   React.useEffect(() => {
@@ -1401,7 +1401,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     }
 
     autoSaveTimerRef.current = setTimeout(() => {
-      void saveDraft().then(() => {
+      void saveDraft().then((saved) => {
+        if (!saved) return;
         setAutoSaveStatus('saved');
         setTimeout(() => setAutoSaveStatus('idle'), 2000);
       });
@@ -1434,7 +1435,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           autoSaveTimerRef.current = null;
         }
         if (!isSaving) {
-          void saveDraft().then(() => {
+          void saveDraft().then((saved) => {
+            if (!saved) return;
             setAutoSaveStatus('saved');
             setTimeout(() => setAutoSaveStatus('idle'), 2000);
           });
@@ -1723,6 +1725,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     const nextTab = pendingTabRef.current;
     const closePath = pendingClosePathRef.current;
 
+    const saved = await saveDraft();
+    if (!saved) {
+      skipDirtyOnceRef.current = false;
+      return;
+    }
+
     pendingSelectFileRef.current = null;
     pendingTabRef.current = null;
     pendingClosePathRef.current = null;
@@ -1731,8 +1739,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     skipDirtyOnceRef.current = true;
 
     setConfirmDiscardOpen(false);
-
-    await saveDraft();
 
     if (closePath) {
       if (root) {
