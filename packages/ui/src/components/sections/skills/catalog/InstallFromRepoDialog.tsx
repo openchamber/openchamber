@@ -77,6 +77,7 @@ export const InstallFromRepoDialog: React.FC<InstallFromRepoDialogProps> = ({ op
     setSelected({});
     if (options?.clearIdentities) {
       setIdentities([]);
+      setGitIdentityId(null);
     }
   }, []);
 
