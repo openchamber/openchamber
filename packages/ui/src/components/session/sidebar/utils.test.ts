@@ -29,4 +29,12 @@ describe("compareSessionsByPinnedAndTime", () => {
     const sorted = [...sessions].sort((a, b) => compareSessionsByPinnedAndTime(a, b, pinned, byUser))
     expect(sorted.map((session) => session.id)).toEqual(["a", "b"])
   })
+
+  test("falls back to creation time when user activity is unknown", () => {
+    const pinned = new Set<string>()
+    const sessions = [makeSession("a", 100, 99999), makeSession("b", 200, 1)]
+
+    const sorted = [...sessions].sort((a, b) => compareSessionsByPinnedAndTime(a, b, pinned, new Map()))
+    expect(sorted.map((session) => session.id)).toEqual(["b", "a"])
+  })
 })

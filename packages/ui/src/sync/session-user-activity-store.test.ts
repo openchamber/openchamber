@@ -1,6 +1,13 @@
 import { beforeEach, describe, expect, test } from "bun:test"
-import type { Message } from "@opencode-ai/sdk/v2/client"
-import { useSessionUserActivityStore } from "./session-user-activity-store"
+import type { Message, Session } from "@opencode-ai/sdk/v2/client"
+import { getApexSessionId, getApexUserActivityMap, useSessionUserActivityStore } from "./session-user-activity-store"
+
+const session = (id: string, parentID?: string | null): Session => ({
+  id,
+  title: id,
+  parentID: parentID ?? null,
+  time: { created: 0, updated: 0, archived: 0 },
+}) as unknown as Session
 
 describe("session-user-activity-store", () => {
   beforeEach(() => {
@@ -50,5 +57,25 @@ describe("session-user-activity-store", () => {
     const state = useSessionUserActivityStore.getState()
     expect(state.bySessionId.has("s-1")).toBe(false)
     expect(state.resolvedSessionIds.has("s-1")).toBe(false)
+  })
+
+  test("resolves child sessions to the apex session", () => {
+    const sessions = new Map([
+      ["root", session("root")],
+      ["child", session("child", "root")],
+      ["grandchild", session("grandchild", "child")],
+    ])
+
+    expect(getApexSessionId("grandchild", sessions)).toBe("root")
+  })
+
+  test("aggregates child user activity onto the apex session", () => {
+    const activity = getApexUserActivityMap(
+      [session("root"), session("child", "root"), session("other")],
+      new Map([["root", 100], ["child", 300], ["other", 200]]),
+    )
+
+    expect(activity.get("root")).toBe(300)
+    expect(activity.get("other")).toBe(200)
   })
 })

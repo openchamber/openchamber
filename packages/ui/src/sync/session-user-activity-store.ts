@@ -1,5 +1,5 @@
 import { create } from "zustand"
-import type { Message } from "@opencode-ai/sdk/v2/client"
+import type { Message, Session } from "@opencode-ai/sdk/v2/client"
 
 export type SessionUserActivityState = {
   bySessionId: Map<string, number>
@@ -37,6 +37,43 @@ export const getLatestUserMessageTimestamp = (messages: Message[]): number | nul
     }
   }
   return latest
+}
+
+export const getApexSessionId = (sessionId: string, sessionsById: Map<string, Session>): string => {
+  let currentId = sessionId
+  const seen = new Set<string>()
+
+  while (currentId && !seen.has(currentId)) {
+    seen.add(currentId)
+    const session = sessionsById.get(currentId) as (Session & { parentID?: string | null }) | undefined
+    const parentId = session?.parentID
+    if (!parentId) {
+      return currentId
+    }
+    currentId = parentId
+  }
+
+  return sessionId
+}
+
+export const getApexUserActivityMap = (
+  sessions: Session[],
+  lastUserMessageAtBySessionId: Map<string, number>,
+): Map<string, number> => {
+  if (lastUserMessageAtBySessionId.size === 0) {
+    return lastUserMessageAtBySessionId
+  }
+
+  const sessionsById = new Map(sessions.map((session) => [session.id, session]))
+  const activityByApexSessionId = new Map<string, number>()
+  lastUserMessageAtBySessionId.forEach((timestamp, sessionId) => {
+    const apexSessionId = getApexSessionId(sessionId, sessionsById)
+    const existing = activityByApexSessionId.get(apexSessionId)
+    if (existing === undefined || timestamp > existing) {
+      activityByApexSessionId.set(apexSessionId, timestamp)
+    }
+  })
+  return activityByApexSessionId
 }
 
 export const useSessionUserActivityStore = create<SessionUserActivityState>()((set) => ({

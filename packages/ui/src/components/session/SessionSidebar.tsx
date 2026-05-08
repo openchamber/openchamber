@@ -81,7 +81,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { getSyncMessages } from '@/sync/sync-refs';
-import { useSessionUserActivityStore } from '@/sync/session-user-activity-store';
+import { getApexUserActivityMap, useSessionUserActivityStore } from '@/sync/session-user-activity-store';
 import { opencodeClient } from '@/lib/opencode/client';
 
 const PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse';
@@ -521,6 +521,11 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     await startDesktopWindowDrag();
   }, [isDesktopShellRuntime]);
 
+  const visualUserActivityBySessionId = React.useMemo(
+    () => getApexUserActivityMap(sessions, lastUserMessageAtBySessionId),
+    [sessions, lastUserMessageAtBySessionId],
+  );
+
   const {
     buildGroupSearchText,
     filterSessionNodesForSearch,
@@ -531,7 +536,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     pinnedSessionIds,
     gitBranches,
     isVSCode,
-    lastUserMessageAtBySessionId,
+    lastUserMessageAtBySessionId: visualUserActivityBySessionId,
   });
 
   const { scheduleCollapsedProjectsPersist } = useSidebarPersistence({
@@ -569,8 +574,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   }, []);
 
   const sortedSessions = React.useMemo(() => {
-    return [...sessions].sort((a, b) => compareSessionsByPinnedAndTime(a, b, pinnedSessionIds, lastUserMessageAtBySessionId));
-  }, [sessions, pinnedSessionIds, lastUserMessageAtBySessionId]);
+    return [...sessions].sort((a, b) => compareSessionsByPinnedAndTime(a, b, pinnedSessionIds, visualUserActivityBySessionId));
+  }, [sessions, pinnedSessionIds, visualUserActivityBySessionId]);
 
   const sessionOrderIndex = React.useMemo(
     () => new Map(sortedSessions.map((session, index) => [session.id, index])),
@@ -588,9 +593,9 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       collection.push(session);
       map.set(parentID, collection);
     });
-    map.forEach((list) => list.sort((a, b) => compareSessionsByPinnedAndTime(a, b, pinnedSessionIds, lastUserMessageAtBySessionId)));
+    map.forEach((list) => list.sort((a, b) => compareSessionsByPinnedAndTime(a, b, pinnedSessionIds, visualUserActivityBySessionId)));
     return map;
-  }, [sortedSessions, pinnedSessionIds, lastUserMessageAtBySessionId]);
+  }, [sortedSessions, pinnedSessionIds, visualUserActivityBySessionId]);
 
   const userActivityHydrationQueueRef = React.useRef<Array<{ sessionId: string; directory: string | null }>>([]);
   const userActivityHydrationQueuedIdsRef = React.useRef<Set<string>>(new Set());
@@ -631,6 +636,9 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
               .map((record: { info?: Message }) => record.info ?? null)
               .filter((message): message is Message => Boolean(message?.id));
             activityStore.reconcileSessionFromMessages(next.sessionId, messages);
+          } catch {
+            // Leave this session unresolved so a later render can retry it, but
+            // keep draining the rest of the hydration queue.
           } finally {
             userActivityHydrationQueuedIdsRef.current.delete(next.sessionId);
           }
@@ -1086,17 +1094,17 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       return [];
     }
 
-    return deriveActiveNowSessions(activeNowEntries, new Map(sessions.map((session) => [session.id, session])), lastUserMessageAtBySessionId)
-      .sort((a, b) => compareSessionsByPinnedAndTime(a, b, pinnedSessionIds, lastUserMessageAtBySessionId));
-  }, [activeNowEntries, pinnedSessionIds, sessions, showRecentSection, lastUserMessageAtBySessionId]);
+    return deriveActiveNowSessions(activeNowEntries, new Map(sessions.map((session) => [session.id, session])), visualUserActivityBySessionId)
+      .sort((a, b) => compareSessionsByPinnedAndTime(a, b, pinnedSessionIds, visualUserActivityBySessionId));
+  }, [activeNowEntries, pinnedSessionIds, sessions, showRecentSection, visualUserActivityBySessionId]);
 
   const liveActiveSessions = React.useMemo(() => {
     if (!showRecentSection) {
       return [];
     }
 
-    return deriveLiveActiveNowSessions(sessions, liveSessionStatuses, lastUserMessageAtBySessionId);
-  }, [liveSessionStatuses, sessions, showRecentSection, lastUserMessageAtBySessionId]);
+    return deriveLiveActiveNowSessions(sessions, liveSessionStatuses, visualUserActivityBySessionId);
+  }, [liveSessionStatuses, sessions, showRecentSection, visualUserActivityBySessionId]);
 
   React.useEffect(() => {
     if (!showRecentSection || liveActiveSessions.length === 0) {
@@ -1123,14 +1131,14 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       allKnownSessionsById.set(session.id, session);
     });
 
-    const pruned = pruneActiveNowEntries(activeNowEntries, allKnownSessionsById, lastUserMessageAtBySessionId);
+    const pruned = pruneActiveNowEntries(activeNowEntries, allKnownSessionsById, visualUserActivityBySessionId, resolvedSessionUserActivityIds);
     if (pruned.length === activeNowEntries.length && pruned.every((entry, index) => entry.sessionId === activeNowEntries[index]?.sessionId)) {
       return;
     }
 
     setActiveNowEntries(pruned);
     persistActiveNowEntries(safeStorage, pruned);
-  }, [activeNowEntries, archivedSessions, lastUserMessageAtBySessionId, safeStorage, sessions, showRecentSection]);
+  }, [activeNowEntries, archivedSessions, visualUserActivityBySessionId, resolvedSessionUserActivityIds, safeStorage, sessions, showRecentSection]);
 
   // Prefetch is wired below, after recentSessionIds is computed.
 
@@ -1475,7 +1483,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         setRenameFolderDraft={setRenameFolderDraft}
         setRenamingFolderId={setRenamingFolderId}
         pinnedSessionIds={pinnedSessionIds}
-        lastUserMessageAtBySessionId={lastUserMessageAtBySessionId}
+        lastUserMessageAtBySessionId={visualUserActivityBySessionId}
         sessionOrderIndex={sessionOrderIndex}
         prVisualStateByDirectoryBranch={prVisualStateByDirectoryBranch}
         onToggleCollapsedGroup={toggleCollapsedGroup}
@@ -1510,7 +1518,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       renamingFolderId,
       renameFolderDraft,
       pinnedSessionIds,
-      lastUserMessageAtBySessionId,
+      visualUserActivityBySessionId,
       sessionOrderIndex,
       prVisualStateByDirectoryBranch,
       toggleCollapsedGroup,

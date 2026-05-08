@@ -22,6 +22,35 @@ const getSessionCreatedAt = (session: Session): number => {
   return typeof created === 'number' && Number.isFinite(created) ? created : 0;
 };
 
+const isDescendantOf = (session: Session, ancestorId: string, sessionsById: Map<string, Session>): boolean => {
+  let parentId: string | null | undefined = (session as Session & { parentID?: string | null }).parentID;
+  const seen = new Set<string>();
+
+  while (parentId && !seen.has(parentId)) {
+    if (parentId === ancestorId) {
+      return true;
+    }
+    seen.add(parentId);
+    const parent = sessionsById.get(parentId) as (Session & { parentID?: string | null }) | undefined;
+    parentId = parent?.parentID ?? null;
+  }
+
+  return false;
+};
+
+const hasUnresolvedDescendantActivitySource = (
+  sessionId: string,
+  sessionsById: Map<string, Session>,
+  resolvedSessionUserActivityIds: Set<string>,
+): boolean => {
+  for (const session of sessionsById.values()) {
+    if (session.id !== sessionId && !resolvedSessionUserActivityIds.has(session.id) && isDescendantOf(session, sessionId, sessionsById)) {
+      return true;
+    }
+  }
+  return false;
+};
+
 const compareByVisualActivity = (a: Session, b: Session, lastUserMessageAtBySessionId: Map<string, number>): number => {
   const byActivity = getSessionVisualSortTimestamp(b, lastUserMessageAtBySessionId)
     - getSessionVisualSortTimestamp(a, lastUserMessageAtBySessionId);
@@ -75,8 +104,15 @@ export const pruneActiveNowEntries = (
   entries: ActiveNowEntry[],
   sessionsById: Map<string, Session>,
   lastUserMessageAtBySessionId: Map<string, number>,
-  now = Date.now(),
+  resolvedSessionUserActivityIdsOrNow: Set<string> | number = new Set(),
+  nowArg?: number,
 ): ActiveNowEntry[] => {
+  const resolvedSessionUserActivityIds = typeof resolvedSessionUserActivityIdsOrNow === 'number'
+    ? new Set<string>()
+    : resolvedSessionUserActivityIdsOrNow;
+  const now = typeof resolvedSessionUserActivityIdsOrNow === 'number'
+    ? resolvedSessionUserActivityIdsOrNow
+    : (nowArg ?? Date.now());
   const minUpdatedAt = now - ACTIVE_NOW_MAX_AGE_MS;
   return entries.filter((entry) => {
     const session = sessionsById.get(entry.sessionId);
@@ -85,6 +121,12 @@ export const pruneActiveNowEntries = (
     }
     if (isArchivedSession(session)) {
       return false;
+    }
+    if (!lastUserMessageAtBySessionId.has(session.id) && (
+      !resolvedSessionUserActivityIds.has(session.id)
+      || hasUnresolvedDescendantActivitySource(session.id, sessionsById, resolvedSessionUserActivityIds)
+    )) {
+      return true;
     }
     return getSessionVisualSortTimestamp(session, lastUserMessageAtBySessionId) >= minUpdatedAt;
   });
@@ -131,4 +173,4 @@ export const deriveLiveActiveNowSessions = (
   return sortSessionsByVisualActivity(activeSessions, lastUserMessageAtBySessionId);
 };
 
-export const getSessionUpdatedAtMs = getSessionCreatedAt;
+export const getSessionCreatedAtMs = getSessionCreatedAt;
