@@ -753,6 +753,7 @@ export const ChatContainer: React.FC = () => {
     const isSessionHydrating =
         Boolean(currentSessionId)
         && !hasRenderableSessionSnapshot;
+    const materializationAttemptedSessionsRef = React.useRef<Set<string>>(new Set());
 
     React.useEffect(() => {
         if (!currentSessionId) {
@@ -784,16 +785,30 @@ export const ChatContainer: React.FC = () => {
 
     React.useEffect(() => {
         if (!currentSessionId) return;
-        if (hasRenderableSessionSnapshot) return;
+
+        if (hasRenderableSessionSnapshot) {
+            materializationAttemptedSessionsRef.current.delete(currentSessionId);
+            return;
+        }
+
+        if (materializationAttemptedSessionsRef.current.has(currentSessionId)) {
+            return;
+        }
+        materializationAttemptedSessionsRef.current.add(currentSessionId);
+
+        let cancelled = false;
 
         const load = async () => {
             await ensureSessionRenderable(currentSessionId).finally(() => {
+                if (cancelled) {
+                    return;
+                }
                 const statusType = sessionStatusForCurrent.type ?? 'idle';
                 const isActivePhase = statusType === 'busy' || statusType === 'retry';
                 const hasHashTarget = typeof window !== 'undefined' && window.location.hash.length > 0;
                 // Active sessions are already followed by the scroll manager when pinned.
                 // If the user scrolled away, a materialization retry must not force-resume.
-                const shouldSkipScroll = hasHashTarget || isActivePhase;
+                const shouldSkipScroll = hasHashTarget || isActivePhase || !isPinned;
 
                 if (!shouldSkipScroll) {
                     if (typeof window === 'undefined') {
@@ -808,7 +823,10 @@ export const ChatContainer: React.FC = () => {
         };
 
         void load();
-    }, [currentSessionId, ensureSessionRenderable, hasRenderableSessionSnapshot, resumeToLatestInstant, sessionStatusForCurrent.type]);
+        return () => {
+            cancelled = true;
+        };
+    }, [currentSessionId, ensureSessionRenderable, hasRenderableSessionSnapshot, isPinned, resumeToLatestInstant, sessionStatusForCurrent.type]);
 
 	if (!currentSessionId && !draftOpen) {
 		return (
