@@ -30,6 +30,7 @@ export const SidebarGroup: React.FC<SidebarGroupProps> = ({
   children,
 }) => {
   const key = getStorageKey(storageKey, label);
+  const contentId = React.useId();
 
   const [expanded, setExpanded] = useState<boolean>(() => {
     try {
@@ -54,6 +55,8 @@ export const SidebarGroup: React.FC<SidebarGroupProps> = ({
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        aria-controls={contentId}
         className={cn(
           'flex w-full items-center gap-1 rounded-md px-2 py-1 text-left',
           'text-xs font-semibold uppercase tracking-wide text-muted-foreground',
@@ -72,7 +75,7 @@ export const SidebarGroup: React.FC<SidebarGroupProps> = ({
       </button>
 
       {expanded && (
-        <div className="mt-0.5 space-y-0.5 ml-2 pl-3 border-l-2 border-[var(--interactive-border)]">
+        <div id={contentId} className="mt-0.5 space-y-0.5 ml-2 pl-3 border-l-2 border-[var(--interactive-border)]">
           {children}
         </div>
       )}
