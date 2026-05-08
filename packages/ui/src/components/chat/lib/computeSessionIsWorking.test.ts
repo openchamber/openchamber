@@ -18,7 +18,7 @@ describe('computeSessionIsWorking', () => {
       computeSessionIsWorking({
         sessionId: 'ses_1',
         hasBlockingRequests: false,
-        statusType: 'idle',
+        statusType: undefined,
         hasLiveStatus: false,
         lastMessage: assistantMessage('msg_1'),
       }),

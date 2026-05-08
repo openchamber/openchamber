@@ -796,6 +796,7 @@ export const ChatContainer: React.FC = () => {
         }
         materializationAttemptedSessionsRef.current.add(currentSessionId);
 
+        const sessionIdSnapshot = currentSessionId;
         let cancelled = false;
 
         const load = async () => {
@@ -825,6 +826,8 @@ export const ChatContainer: React.FC = () => {
         void load();
         return () => {
             cancelled = true;
+            // eslint-disable-next-line react-hooks/exhaustive-deps
+            materializationAttemptedSessionsRef.current.delete(sessionIdSnapshot);
         };
     }, [currentSessionId, ensureSessionRenderable, hasRenderableSessionSnapshot, isPinned, resumeToLatestInstant, sessionStatusForCurrent.type]);
 
