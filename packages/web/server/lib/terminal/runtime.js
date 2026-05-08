@@ -121,6 +121,9 @@ export function createTerminalRuntime({
     return resolved;
   };
 
+  const utf8LocaleFallback = process.platform === 'darwin' ? 'en_US.UTF-8' : 'C.UTF-8';
+  const lcCtypeFallback = process.platform === 'darwin' ? 'UTF-8' : 'C.UTF-8';
+
   const spawnTerminalPtyWithFallback = (pty, { cols, rows, cwd, env }) => {
     const shellCandidates = getTerminalShellCandidates();
     if (shellCandidates.length === 0) {
@@ -139,7 +142,8 @@ export function createTerminalRuntime({
             ...env,
             TERM: 'xterm-256color',
             COLORTERM: 'truecolor',
-            LANG: env.LANG || process.env.LANG || 'C.UTF-8',
+            LANG: env.LANG || process.env.LANG || utf8LocaleFallback,
+            LC_CTYPE: env.LC_CTYPE || process.env.LC_CTYPE || lcCtypeFallback,
           },
         };
 
