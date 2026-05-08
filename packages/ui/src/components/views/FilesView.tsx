@@ -1515,6 +1515,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           return;
         }
         if (isDirectoryReadError(error)) {
+          setFileLoading(false);
           if (root) {
             setSelectedPath(root, null);
           }
