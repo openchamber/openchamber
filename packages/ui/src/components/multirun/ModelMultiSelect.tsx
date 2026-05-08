@@ -292,7 +292,6 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
         type="button"
         disabled={!canAddModel}
         onClick={() => {
-          if (!canAddModel) return;
           onAdd({
             providerID,
             modelID,
@@ -347,7 +346,6 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
             )}
             disabled={!canAddModel}
             onClick={() => {
-              if (!canAddModel) return;
               setIsOpen(!isOpen);
             }}
           >
