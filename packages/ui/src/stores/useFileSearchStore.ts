@@ -77,6 +77,10 @@ export const useFileSearchStore = create<FileSearchStoreState>()(
           })
           .then((files) => {
             set((state) => {
+              if (state.inFlight[key] !== searchPromise) {
+                return state;
+              }
+
               const nextCache = { ...state.cache, [key]: { files, timestamp: Date.now() } };
               const nextKeys = state.cacheKeys.filter((cacheKey) => cacheKey !== key);
               nextKeys.push(key);
@@ -97,6 +101,10 @@ export const useFileSearchStore = create<FileSearchStoreState>()(
           })
           .finally(() => {
             set((state) => {
+              if (state.inFlight[key] !== searchPromise) {
+                return state;
+              }
+
               const nextInFlight = { ...state.inFlight };
               delete nextInFlight[key];
               return { inFlight: nextInFlight };

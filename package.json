@@ -94,7 +94,7 @@
     "@ibm/plex": "^6.4.1",
     "@lezer/highlight": "^1.2.3",
     "@octokit/rest": "^22.0.1",
-    "@opencode-ai/sdk": "^1.4.39",
+    "@opencode-ai/sdk": "^1.4.41",
     "@base-ui/react": "^1.4.0",
     "@radix-ui/react-collapsible": "^1.1.12",
     "@radix-ui/react-dialog": "^1.1.15",

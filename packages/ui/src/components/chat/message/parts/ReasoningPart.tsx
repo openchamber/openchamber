@@ -3,7 +3,7 @@ import type { ComponentType } from 'react';
 import type { Part } from '@opencode-ai/sdk/v2';
 import { RiArrowDownSLine, RiArrowRightSLine, RiBrainAi3Line, RiChatAi3Line } from '@remixicon/react';
 import { cn } from '@/lib/utils';
-import type { ContentChangeReason } from '@/hooks/useChatScrollManager';
+import type { ContentChangeReason } from '@/hooks/useChatAutoFollow';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDurationTickerNow } from './useDurationTicker';

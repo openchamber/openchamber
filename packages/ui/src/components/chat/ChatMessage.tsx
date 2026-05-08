@@ -16,7 +16,7 @@ import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { generateSyntaxTheme } from '@/lib/theme/syntaxThemeGenerator';
 import { cn } from '@/lib/utils';
 
-import type { AnimationHandlers, ContentChangeReason } from '@/hooks/useChatScrollManager';
+import type { AnimationHandlers, ContentChangeReason } from '@/hooks/useChatAutoFollow';
 import MessageHeader from './message/MessageHeader';
 import MessageBody from './message/MessageBody';
 import type { AgentMentionInfo } from './message/types';
@@ -127,7 +127,7 @@ interface ChatMessageProps {
     };
     onContentChange?: (reason?: ContentChangeReason) => void;
     animationHandlers?: AnimationHandlers;
-    scrollToBottom?: (options?: { instant?: boolean; force?: boolean }) => void;
+    scrollToBottom?: () => void;
     turnGroupingContext?: TurnGroupingContext;
     assistantHeaderMessageId?: string;
     isInActiveTurn?: boolean;

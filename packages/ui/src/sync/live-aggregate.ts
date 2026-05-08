@@ -47,6 +47,18 @@ const getStatusMessage = (status: SessionStatus | undefined): string | null => {
   return typeof message === 'string' ? message : null
 }
 
+const getStatusNumberField = (status: SessionStatus | undefined, field: 'attempt' | 'next'): number | null => {
+  const value = (status as Record<string, unknown> | undefined)?.[field]
+  return typeof value === 'number' ? value : null
+}
+
+const areStatusesEquivalent = (left: SessionStatus | undefined, right: SessionStatus | undefined): boolean => {
+  return left?.type === right?.type
+    && getStatusMessage(left) === getStatusMessage(right)
+    && getStatusNumberField(left, 'attempt') === getStatusNumberField(right, 'attempt')
+    && getStatusNumberField(left, 'next') === getStatusNumberField(right, 'next')
+}
+
 type StatusCandidate = {
   status: SessionStatus
   sessionUpdatedAt: number
@@ -114,10 +126,7 @@ export const areStatusMapsEquivalent = (
     }
     const leftStatus = left[key]
     const rightStatus = right[key]
-    if (leftStatus?.type !== rightStatus?.type) {
-      return false
-    }
-    if (getStatusMessage(leftStatus) !== getStatusMessage(rightStatus)) {
+    if (!areStatusesEquivalent(leftStatus, rightStatus)) {
       return false
     }
   }

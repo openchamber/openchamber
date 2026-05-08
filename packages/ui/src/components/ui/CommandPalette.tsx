@@ -36,19 +36,21 @@ import {
   RiLayoutLeftLine,
   RiLayoutRightLine,
   RiPieChartLine,
+  RiWindowLine,
   RiSettings3Line,
   RiTerminalBoxLine,
 } from '@remixicon/react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
-import { isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
+import { canUseElectronDesktopIPC, invokeDesktop, isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
 import { SETTINGS_PAGE_METADATA, type SettingsRuntimeContext } from '@/lib/settings/metadata';
 import { getSettingsNavIcon } from '@/components/views/SettingsView';
 import { scoreByFuzzyQuery } from '@/lib/search/fuzzySearch';
 import { truncatePathMiddle } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { sessionEvents } from '@/lib/sessionEvents';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 
 type CommandEntry = {
   id: string;
@@ -94,6 +96,7 @@ export const CommandPalette: React.FC = () => {
 
   const activeSessions = useGlobalSessionsStore((s) => s.activeSessions);
   const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
+  const activeProject = useProjectsStore((s) => s.getActiveProject());
   const effectiveDirectory = useEffectiveDirectory();
   const searchFiles = useFileSearchStore((s) => s.searchFiles);
   const { files: filesApi, git: gitApi } = useRuntimeAPIs();
@@ -232,6 +235,23 @@ export const CommandPalette: React.FC = () => {
         onSelect: run(() => setSettingsDialogOpen(true)),
       },
     ];
+    if (canUseElectronDesktopIPC()) {
+      list.splice(1, 0, {
+        id: 'new-mini-chat',
+        title: t('commandPalette.item.newMiniChat'),
+        icon: <RiWindowLine className="mr-2 h-4 w-4" />,
+        shortcutId: 'new_mini_chat',
+        searchText: t('commandPalette.item.newMiniChat'),
+        onSelect: run(() => {
+          void invokeDesktop('desktop_open_draft_mini_chat_window', {
+            directory: normalizePath(currentDirectory || activeProject?.path || ''),
+            projectId: activeProject?.id ?? null,
+          }).catch((error) => {
+            console.warn('[command-palette] failed to open draft mini chat window', error);
+          });
+        }),
+      });
+    }
     return list;
   }, [
     t,
@@ -246,6 +266,8 @@ export const CommandPalette: React.FC = () => {
     currentDirectory,
     openContextOverview,
     setSettingsDialogOpen,
+    activeProject?.id,
+    activeProject?.path,
   ]);
 
   // ---------------------------------------------------------------------------

@@ -215,6 +215,12 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
     customizable: true,
   },
   {
+    id: 'new_mini_chat',
+    defaultCombo: 'mod+alt+n',
+    label: 'New Mini Chat window',
+    description: 'Open a new Mini Chat draft window',
+  },
+  {
     id: 'submit_message',
     defaultCombo: 'mod+enter',
     label: 'Submit message',

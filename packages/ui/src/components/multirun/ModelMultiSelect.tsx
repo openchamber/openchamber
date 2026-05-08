@@ -128,6 +128,7 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
   const dropdownRef = React.useRef<HTMLDivElement>(null);
   const triggerRef = React.useRef<HTMLButtonElement>(null);
   const itemRefs = React.useRef<(HTMLButtonElement | null)[]>([]);
+  const canAddModel = maxModels === undefined || selectedModels.length < maxModels;
 
   // Count occurrences of each model for display purposes
   const modelCounts = React.useMemo(() => {
@@ -239,6 +240,14 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
     }
   }, [isOpen]);
 
+  React.useEffect(() => {
+    if (!canAddModel && isOpen) {
+      setIsOpen(false);
+      setSearchQuery('');
+      setSelectedIndex(0);
+    }
+  }, [canAddModel, isOpen]);
+
   // Close dropdown when clicking outside
   React.useEffect(() => {
     if (!isOpen) return;
@@ -281,6 +290,7 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
         key={`${keyPrefix}-${key}`}
         ref={(el) => { itemRefs.current[flatIndex] = el; }}
         type="button"
+        disabled={!canAddModel}
         onClick={() => {
           onAdd({
             providerID,
@@ -293,7 +303,8 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
         onMouseEnter={() => setSelectedIndex(flatIndex)}
         className={cn(
           'w-full text-left px-2 py-1.5 rounded-md typography-meta transition-colors flex items-center gap-2',
-          isHighlighted ? 'bg-interactive-selection' : 'hover:bg-interactive-hover/50'
+          canAddModel && (isHighlighted ? 'bg-interactive-selection' : 'hover:bg-interactive-hover/50'),
+          !canAddModel && 'cursor-not-allowed opacity-60'
         )}
       >
         <div className="flex items-center gap-1.5 flex-1 min-w-0">
@@ -333,7 +344,10 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
               '!border-border/80 !bg-[var(--surface-subtle)] hover:!bg-[var(--interactive-hover)]/70',
               addButtonClassName,
             )}
-            onClick={() => setIsOpen(!isOpen)}
+            disabled={!canAddModel}
+            onClick={() => {
+              setIsOpen(!isOpen);
+            }}
           >
             <RiAddLine className="h-3.5 w-3.5 mr-1" />
             {addButtonLabel ?? t('multirun.modelMultiSelect.actions.addModel')}
@@ -383,7 +397,7 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
                 e.preventDefault();
                 e.stopPropagation();
                 const selectedItem = flatModelList[selectedIndex];
-                if (selectedItem) {
+                if (selectedItem && canAddModel) {
                   onAdd({
                     providerID: selectedItem.providerID,
                     modelID: selectedItem.modelID,

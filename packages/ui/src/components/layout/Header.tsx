@@ -16,7 +16,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
 
-import { RiArrowLeftSLine, RiChat4Line, RiChatNewLine, RiCheckLine, RiCloseLine, RiCommandLine, RiFileTextLine, RiFolder6Line, RiGitBranchLine, RiGithubFill, RiLayoutLeftLine, RiLayoutRightLine, RiPlayListAddLine, RiRefreshLine, RiServerLine, RiStackLine, RiTerminalBoxLine, RiTimerLine, RiAlertLine, type RemixiconComponentType } from '@remixicon/react';
+import { RiArrowLeftSLine, RiChat4Line, RiChatNewLine, RiCheckLine, RiCloseLine, RiCommandLine, RiFileTextLine, RiFolder6Line, RiGitBranchLine, RiGithubFill, RiLayoutLeftLine, RiLayoutRightLine, RiPictureInPicture2Line, RiPlayListAddLine, RiRefreshLine, RiServerLine, RiStackLine, RiTerminalBoxLine, RiTimerLine, RiAlertLine, RiWindowLine, type RemixiconComponentType } from '@remixicon/react';
 import { DiffIcon } from '@/components/icons/DiffIcon';
 import { useUIStore, type MainTab } from '@/stores/useUIStore';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -65,7 +65,7 @@ import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
 import { forceKillTerminal } from '@/lib/terminalApi';
 import { useTerminalStore } from '@/stores/useTerminalStore';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
-import { isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag } from '@/lib/desktop';
+import { canUseElectronDesktopIPC, invokeDesktop, isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag } from '@/lib/desktop';
 import { desktopHostsGet, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { resolveSessionDiffStats } from '@/components/session/sidebar/utils';
 import { useI18n } from '@/lib/i18n';
@@ -722,6 +722,7 @@ export const Header: React.FC<HeaderProps> = ({
     }
     return isDesktopShell();
   });
+  const hasElectronDesktopIPC = React.useMemo(() => canUseElectronDesktopIPC(), []);
   const isTabletStandalonePwa = useTabletStandalonePwaRuntime();
   const [isDesktopWindowFullscreen, setIsDesktopWindowFullscreen] = React.useState(false);
 
@@ -1278,6 +1279,27 @@ export const Header: React.FC<HeaderProps> = ({
     setSessionSwitcherOpen(false);
     openNewSessionDraft();
   }, [openNewSessionDraft, setActiveMainTab, setSessionSwitcherOpen]);
+
+  const handleOpenDraftMiniChat = React.useCallback(() => {
+    void invokeDesktop('desktop_open_draft_mini_chat_window', {
+      directory: normalize(openDirectory || activeProject?.path || ''),
+      projectId: activeProject?.id ?? null,
+    }).catch((error) => {
+      console.warn('[header] failed to open draft mini chat window', error);
+    });
+  }, [activeProject?.id, activeProject?.path, openDirectory]);
+
+  const handleOpenCurrentSessionMiniChat = React.useCallback(() => {
+    if (!currentSessionId) {
+      return;
+    }
+    void invokeDesktop('desktop_open_session_mini_chat_window', {
+      sessionId: currentSessionId,
+      directory: normalize(openDirectory || activeProject?.path || ''),
+    }).catch((error) => {
+      console.warn('[header] failed to open session mini chat window', error);
+    });
+  }, [activeProject?.path, currentSessionId, openDirectory]);
 
   const handleOpenContextPanel = React.useCallback(() => {
     const directory = normalize(openDirectory || '');
@@ -1841,6 +1863,23 @@ export const Header: React.FC<HeaderProps> = ({
             </TooltipContent>
           </Tooltip>
         ) : null}
+        {hasElectronDesktopIPC && !isLeftSidebarOpen ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-label={t('header.actions.newMiniChatAria')}
+                onClick={handleOpenDraftMiniChat}
+                className={cn(desktopHeaderIconButtonClass, 'mr-6 shrink-0')}
+              >
+                <RiWindowLine className="h-[18px] w-[18px]" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>{t('header.actions.newMiniChat')}</p>
+            </TooltipContent>
+          </Tooltip>
+        ) : null}
         {projectActionsContext && (
           <ProjectActionsButton
             projectRef={projectActionsContext.projectRef}
@@ -1892,6 +1931,14 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex-1" />
 
         <div className="flex shrink-0 items-center gap-1">
+          <HeaderIconActionButton
+            visible={hasElectronDesktopIPC && !isNewSessionDraftOpen && Boolean(currentSessionId)}
+            title={t('header.actions.openSessionMiniChat')}
+            ariaLabel={t('header.actions.openSessionMiniChatAria')}
+            onClick={handleOpenCurrentSessionMiniChat}
+            className={`${desktopHeaderIconButtonClass} mr-1`}
+            Icon={RiPictureInPicture2Line}
+          />
           {showDesktopHeaderContextUsage && stableDesktopContextUsage ? (
             <ContextUsageDisplay
               totalTokens={stableDesktopContextUsage.totalTokens}

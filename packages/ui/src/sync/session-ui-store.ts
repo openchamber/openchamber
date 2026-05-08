@@ -46,6 +46,7 @@ import {
   shareSession as shareSessionAction,
   unshareSession as unshareSessionAction,
   optimisticSend,
+  refetchSessionMessages,
 } from "./session-actions"
 import { useInputStore, type SyntheticContextPart } from "./input-store"
 import { useSelectionStore } from "./selection-store"
@@ -967,8 +968,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const revertToId = currentSession?.revert?.messageID
     let targetMessage: typeof messages[number] | undefined
     if (revertToId) {
-      const revertIndex = userMessages.findIndex((m) => m.id === revertToId)
-      targetMessage = userMessages[revertIndex + 1]
+      targetMessage = [...userMessages].reverse().find((m) => m.id < revertToId)
     } else {
       targetMessage = userMessages[userMessages.length - 1]
     }
@@ -996,10 +996,11 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const revertToId = currentSession?.revert?.messageID
     if (!revertToId) return
 
+    await refetchSessionMessages(sessionId)
+
     const messages = getSyncMessages(sessionId)
     const userMessages = messages.filter((m) => m.role === "user")
-    const revertIndex = userMessages.findIndex((m) => m.id === revertToId)
-    const targetMessage = userMessages[revertIndex - 1]
+    const targetMessage = userMessages.find((m) => m.id > revertToId)
 
     if (targetMessage) {
       const targetParts = getSyncParts(targetMessage.id)

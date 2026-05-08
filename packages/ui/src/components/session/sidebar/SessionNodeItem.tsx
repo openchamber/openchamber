@@ -32,9 +32,10 @@ import {
   RiShieldLine,
   RiUnpinLine,
   RiGitBranchLine,
+  RiWindowLine,
 } from '@remixicon/react';
 import { cn } from '@/lib/utils';
-import { isVSCodeRuntime } from '@/lib/desktop';
+import { canUseElectronDesktopIPC, invokeDesktop, isVSCodeRuntime } from '@/lib/desktop';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -267,6 +268,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const displayMode = useSessionDisplayStore((state) => state.displayMode);
   const isMinimalMode = displayMode === 'minimal';
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
+  const isElectron = React.useMemo(() => canUseElectronDesktopIPC(), []);
   const revealOnHoverClass = isVSCode
     ? 'group-hover:opacity-100 group-hover:pointer-events-auto'
     : 'group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto';
@@ -428,6 +430,16 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     }
     await doExportSession(false);
   }, [doExportSession, node.children.length]);
+
+  const handleOpenMiniChatWindow = React.useCallback(() => {
+    if (!sessionDirectory) return;
+    void invokeDesktop('desktop_open_session_mini_chat_window', {
+      sessionId: session.id,
+      directory: sessionDirectory,
+    }).catch((error) => {
+      console.warn('[session-sidebar] failed to open mini chat window', error);
+    });
+  }, [session.id, sessionDirectory]);
 
   if (editingId === session.id) {
     return (
@@ -718,6 +730,17 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           <RiChat4Line className="mr-1 h-4 w-4" />
           <span className="truncate">{t('sessions.sidebar.session.menu.openInSidePanel')}</span>
           <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-[var(--status-warning)] bg-[var(--status-warning)]/10">{t('sessions.sidebar.session.menu.betaBadge')}</span>
+        </DropdownMenuItem>
+      ) : null}
+
+      {isElectron ? (
+        <DropdownMenuItem
+          disabled={!sessionDirectory}
+          onClick={handleOpenMiniChatWindow}
+          className="[&>svg]:mr-1"
+        >
+          <RiWindowLine className="mr-1 h-4 w-4" />
+          <span className="truncate">{t('sessions.sidebar.session.menu.openMiniChatWindow')}</span>
         </DropdownMenuItem>
       ) : null}
 

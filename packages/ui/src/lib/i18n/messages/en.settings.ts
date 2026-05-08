@@ -753,6 +753,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.cycle_right_sidebar_tab.label': 'Cycle right sidebar tab',
   'settings.openchamber.keyboardShortcuts.action.new_chat.label': 'New session',
   'settings.openchamber.keyboardShortcuts.action.new_chat_worktree.label': 'New worktree draft',
+  'settings.openchamber.keyboardShortcuts.action.new_mini_chat.label': 'New Mini Chat window',
   'settings.openchamber.keyboardShortcuts.action.open_help.label': 'Open keyboard shortcuts',
   'settings.openchamber.keyboardShortcuts.action.toggle_context_plan.label': 'Toggle plan context panel',
   'settings.openchamber.keyboardShortcuts.action.toggle_services_menu.label': 'Toggle services menu',

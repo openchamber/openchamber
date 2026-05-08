@@ -18,7 +18,7 @@ import { SaveProjectPlanDialog } from '@/components/session/SaveProjectPlanDialo
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { RiCheckLine, RiFileCopyLine, RiChatNewLine, RiArrowGoBackLine, RiGitBranchLine, RiHourglassLine, RiTimeLine, RiVolumeUpLine, RiStopLine, RiImageDownloadLine, RiLoader4Line, RiErrorWarningLine, RiBookletLine, RiGlobalLine, RiInformationLine } from '@remixicon/react';
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
-import type { ContentChangeReason } from '@/hooks/useChatScrollManager';
+import type { ContentChangeReason } from '@/hooks/useChatAutoFollow';
 
 import { SimpleMarkdownRenderer } from '../MarkdownRenderer';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -30,6 +30,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { TextSelectionMenu } from './TextSelectionMenu';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { useChatSurfaceMode } from '@/components/chat/useChatSurfaceMode';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { toPng } from 'html-to-image';
 import { toast } from '@/components/ui';
@@ -344,6 +345,7 @@ const UserMessageBody = React.memo(({ messageId, parts, isMobile, alwaysShowActi
     stickyUserHeaderEnabled?: boolean;
 }) => {
     const { t } = useI18n();
+    const chatSurfaceMode = useChatSurfaceMode();
     const [copyHintVisible, setCopyHintVisible] = React.useState(false);
     const copyHintTimeoutRef = React.useRef<number | null>(null);
 
@@ -417,7 +419,8 @@ const UserMessageBody = React.memo(({ messageId, parts, isMobile, alwaysShowActi
         [hasCopyableText, isTouchContext, onCopyMessage, revealCopyHint]
     );
 
-    const actionsBlock = ((canCopyMessage && hasCopyableText) || onRevert || onFork) && showUserActions ? (
+    const effectiveOnFork = chatSurfaceMode === 'mini-chat' ? undefined : onFork;
+    const actionsBlock = ((canCopyMessage && hasCopyableText) || onRevert || effectiveOnFork) && showUserActions ? (
         <div className={cn(
             'group/user-actions',
             isMobile
@@ -466,7 +469,7 @@ const UserMessageBody = React.memo(({ messageId, parts, isMobile, alwaysShowActi
                         <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.revert')}</TooltipContent>
                     </Tooltip>
                 )}
-                {onFork && (
+                {effectiveOnFork && (
                     <Tooltip>
                         <TooltipTrigger asChild>
                             <Button
@@ -478,7 +481,7 @@ const UserMessageBody = React.memo(({ messageId, parts, isMobile, alwaysShowActi
                                 onPointerDown={(event) => event.stopPropagation()}
                                 onClick={(event) => {
                                     event.stopPropagation();
-                                    onFork();
+                                    effectiveOnFork();
                                 }}
                             >
                                 <RiGitBranchLine className="h-3 w-3" />
@@ -598,6 +601,7 @@ const AssistantMessageActionButtons = React.memo(({
     ttsText,
 }: AssistantMessageActionButtonsProps) => {
     const { t } = useI18n();
+    const chatSurfaceMode = useChatSurfaceMode();
     const { isPlaying: isTTSPlaying, play: playTTS, stop: stopTTS } = useMessageTTS();
     const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
     const voiceProvider = useConfigStore((state) => state.voiceProvider);
@@ -775,7 +779,7 @@ const AssistantMessageActionButtons = React.memo(({
                     <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.copyAnswer')}</TooltipContent>
                 </Tooltip>
             )}
-            <Tooltip>
+            {chatSurfaceMode !== 'mini-chat' ? <Tooltip>
                 <TooltipTrigger asChild>
                     <Button
                         type="button"
@@ -799,8 +803,8 @@ const AssistantMessageActionButtons = React.memo(({
                     </Button>
                 </TooltipTrigger>
                 <TooltipContent sideOffset={6}>{isSharing ? t('chat.messageBody.actions.savingImage') : t('chat.messageBody.actions.saveAsImage')}</TooltipContent>
-            </Tooltip>
-            {showMessageTTSButtons && hasCopyableText && (
+            </Tooltip> : null}
+            {chatSurfaceMode !== 'mini-chat' && showMessageTTSButtons && hasCopyableText && (
                 <Tooltip>
                     <TooltipTrigger asChild>
                         <Button
@@ -857,6 +861,7 @@ const AssistantMessageBody = React.memo(({
     errorVariant = 'error',
 }: Omit<MessageBodyProps, 'isUser'>) => {
     const { t } = useI18n();
+    const chatSurfaceMode = useChatSurfaceMode();
     const streamPhase = _streamPhase;
     void _allowAnimation;
     const messageContentRef = React.useRef<HTMLDivElement>(null);
@@ -1008,6 +1013,7 @@ const AssistantMessageBody = React.memo(({
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
     const showSplitAssistantMessageActions = useUIStore((state) => state.showSplitAssistantMessageActions);
     const isSortedRenderMode = chatRenderMode === 'sorted';
+    const isMiniChatSurface = chatSurfaceMode === 'mini-chat';
     const collapsedPreviewCount = 7;
     const isLastAssistantInTurn = turnGroupingContext?.isLastAssistantInTurn ?? false;
     const hasStopFinish = messageFinish === 'stop';
@@ -1700,7 +1706,7 @@ const AssistantMessageBody = React.memo(({
 
     const footerTimestampClassName = 'text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1';
     const isVSCode = isVSCodeRuntime();
-    const canOpenMessagePreview = !isMobile && !isVSCode;
+    const canOpenMessagePreview = !isMiniChatSurface && !isMobile && !isVSCode;
 
     const finalTurnActionButtons = (
         <>
@@ -1729,7 +1735,7 @@ const AssistantMessageBody = React.memo(({
                     <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.openPreview')}</TooltipContent>
                 </Tooltip>
             ) : null}
-            {!isVSCode ? (
+            {!isMiniChatSurface && !isVSCode ? (
                 <Tooltip>
                     <TooltipTrigger asChild>
                         <Button
@@ -1750,7 +1756,7 @@ const AssistantMessageBody = React.memo(({
                     <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.saveAsPlan')}</TooltipContent>
                 </Tooltip>
             ) : null}
-            <Tooltip>
+            {!isMiniChatSurface ? <Tooltip>
                 <TooltipTrigger asChild>
                     <Button
                         type="button"
@@ -1764,8 +1770,8 @@ const AssistantMessageBody = React.memo(({
                     </Button>
                 </TooltipTrigger>
                 <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.startNewSession')}</TooltipContent>
-            </Tooltip>
-            {!isVSCode ? (
+            </Tooltip> : null}
+            {!isMiniChatSurface && !isVSCode ? (
                 <Tooltip>
                     <TooltipTrigger asChild>
                         <Button
@@ -1877,7 +1883,7 @@ const AssistantMessageBody = React.memo(({
                                     <TooltipContent>{footerTimestamp}</TooltipContent>
                                 </Tooltip>
                             ) : null}
-                            {isLastAssistantInTurn && hasStopFinish ? (
+                            {!isMiniChatSurface && isLastAssistantInTurn && hasStopFinish ? (
                                 <TurnChangedFilesDropdown activityParts={turnGroupingContext?.activityParts} />
                             ) : null}
                         </div>

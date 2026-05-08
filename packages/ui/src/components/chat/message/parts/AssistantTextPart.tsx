@@ -2,7 +2,7 @@ import React from 'react';
 import type { Part } from '@opencode-ai/sdk/v2';
 import { MarkdownRenderer } from '../../MarkdownRenderer';
 import type { StreamPhase } from '../types';
-import type { ContentChangeReason } from '@/hooks/useChatScrollManager';
+import type { ContentChangeReason } from '@/hooks/useChatAutoFollow';
 import { useStreamingTextThrottle } from '../../hooks/useStreamingTextThrottle';
 import { resolveAssistantDisplayText, shouldRenderAssistantText } from './assistantTextVisibility';
 import { streamPerfCount, streamPerfObserve } from '@/stores/utils/streamDebug';

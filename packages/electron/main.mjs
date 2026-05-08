@@ -104,6 +104,10 @@ const MIN_WINDOW_WIDTH = 800;
 const MIN_WINDOW_HEIGHT = 520;
 const MIN_RESTORE_WINDOW_WIDTH = 900;
 const MIN_RESTORE_WINDOW_HEIGHT = 560;
+const MINI_CHAT_WINDOW_WIDTH = 520;
+const MINI_CHAT_WINDOW_HEIGHT = 760;
+const MINI_CHAT_MIN_WINDOW_WIDTH = 360;
+const MINI_CHAT_MIN_WINDOW_HEIGHT = 480;
 const MAX_CAPTURE_PAGE_RECT_AREA = 4_000_000;
 const LOCAL_HOST_ID = 'local';
 const ENV_OVERRIDE_HOST_ID = '__env';
@@ -133,6 +137,7 @@ const state = {
   windowCounter: 1,
   focusedWindowIds: new Set(),
   windowGeometryRevisions: new Map(),
+  miniChatWindowsBySession: new Map(),
   sshStatuses: new Map(),
   sshLogs: new Map(),
 };
@@ -1362,6 +1367,137 @@ const createAdditionalWindow = async (url) => {
   return browserWindow;
 };
 
+const buildMiniChatUrl = ({ mode, sessionId, directory, projectId }) => {
+  const base = state.localOrigin || state.sidecarUrl;
+  if (!base) {
+    throw new Error('Local UI is not available');
+  }
+
+  const url = new URL('/mini-chat.html', base);
+  url.searchParams.set('mode', mode === 'session' ? 'session' : 'draft');
+  if (sessionId) url.searchParams.set('sessionId', sessionId);
+  if (directory) url.searchParams.set('directory', directory);
+  if (projectId) url.searchParams.set('projectId', projectId);
+  return url.toString();
+};
+
+const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', projectId = '' } = {}) => {
+  if (mode === 'session' && sessionId) {
+    const existing = state.miniChatWindowsBySession.get(sessionId);
+    if (existing && !existing.isDestroyed()) {
+      if (existing.isMinimized()) existing.restore();
+      existing.show();
+      existing.focus();
+      return existing;
+    }
+    state.miniChatWindowsBySession.delete(sessionId);
+  }
+
+  const desktopLocalOrigin = state.localOrigin || '';
+  const desktopHome = os.homedir() || '';
+  const desktopMacosMajor = String(macosMajorVersion());
+  const browserWindow = new BrowserWindow({
+    title: 'OpenChamber Mini Chat',
+    width: MINI_CHAT_WINDOW_WIDTH,
+    height: MINI_CHAT_WINDOW_HEIGHT,
+    minWidth: MINI_CHAT_MIN_WINDOW_WIDTH,
+    minHeight: MINI_CHAT_MIN_WINDOW_HEIGHT,
+    show: false,
+    backgroundColor: '#151313',
+    titleBarStyle: process.platform === 'darwin' ? 'hidden' : 'default',
+    trafficLightPosition: process.platform === 'darwin' ? { x: 16, y: 17 } : undefined,
+    webPreferences: {
+      additionalArguments: [
+        `--openchamber-local-origin=${desktopLocalOrigin}`,
+        `--openchamber-home=${desktopHome}`,
+        `--openchamber-macos-major=${desktopMacosMajor}`,
+      ],
+      preload: isDev ? path.join(__dirname, 'preload.mjs') : path.join(app.getAppPath(), 'preload.mjs'),
+      backgroundThrottling: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  browserWindow.__ocLabel = nextWindowLabel();
+  browserWindow.__ocMiniChat = true;
+  browserWindow.__ocMiniChatSessionId = mode === 'session' ? sessionId : '';
+  browserWindow.__ocPinned = false;
+
+  if (mode === 'session' && sessionId) {
+    state.miniChatWindowsBySession.set(sessionId, browserWindow);
+  }
+
+  browserWindow.on('closed', () => {
+    if (browserWindow.__ocMiniChatSessionId) {
+      const existing = state.miniChatWindowsBySession.get(browserWindow.__ocMiniChatSessionId);
+      if (existing?.id === browserWindow.id) {
+        state.miniChatWindowsBySession.delete(browserWindow.__ocMiniChatSessionId);
+      }
+    }
+  });
+
+  if (process.platform === 'darwin') {
+    const refreshTrafficLights = () => {
+      if (browserWindow.isDestroyed()) return;
+      try {
+        browserWindow.setWindowButtonVisibility(true);
+        browserWindow.setTrafficLightPosition({ x: 16, y: 17 });
+      } catch {}
+    };
+    browserWindow.on('show', refreshTrafficLights);
+    browserWindow.on('focus', refreshTrafficLights);
+  }
+
+  browserWindow.once('ready-to-show', () => {
+    browserWindow.show();
+    browserWindow.focus();
+  });
+
+  browserWindow.webContents.setWindowOpenHandler(({ url }) => {
+    void shell.openExternal(url).catch(() => {});
+    return { action: 'deny' };
+  });
+  browserWindow.webContents.on('will-navigate', (event, url) => {
+    try {
+      const target = new URL(url);
+      const local = new URL(state.localOrigin || state.sidecarUrl || '');
+      if (target.origin === local.origin) return;
+    } catch {
+    }
+    event.preventDefault();
+    void shell.openExternal(url).catch(() => {});
+  });
+  browserWindow.webContents.on('dom-ready', () => {
+    if (state.initScript) {
+      void browserWindow.webContents.executeJavaScript(state.initScript).catch(() => {});
+    }
+  });
+
+  await navigateWindow(browserWindow, buildMiniChatUrl({ mode, sessionId, directory, projectId }));
+  return browserWindow;
+};
+
+const setMiniChatPinned = (browserWindow, pinned) => {
+  if (!browserWindow || browserWindow.isDestroyed()) {
+    throw new Error('Window is not available');
+  }
+  if (browserWindow.__ocMiniChat !== true) {
+    throw new Error('Pinning is only available for Mini Chat windows');
+  }
+  const nextPinned = pinned === true;
+  browserWindow.__ocPinned = nextPinned;
+  if (nextPinned) {
+    browserWindow.setAlwaysOnTop(true, 'floating');
+  } else {
+    browserWindow.setAlwaysOnTop(false);
+    if (process.platform === 'darwin') {
+      browserWindow.setVisibleOnAllWorkspaces(false);
+    }
+  }
+  return { pinned: nextPinned };
+};
+
 const resolveInitialUrl = async () => {
   const localUrl = isDev && await waitForHealth('http://127.0.0.1:3901', 5_000, 100)
     ? 'http://127.0.0.1:3901'
@@ -2149,6 +2285,51 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       await createAdditionalWindow(targetUrl);
       return null;
     }
+
+    case 'desktop_open_session_mini_chat_window': {
+      const sessionId = typeof args.sessionId === 'string' ? args.sessionId.trim() : '';
+      if (!sessionId) throw new Error('Session id is required');
+      const directory = typeof args.directory === 'string' ? args.directory.trim() : '';
+      await createMiniChatWindow({ mode: 'session', sessionId, directory });
+      return null;
+    }
+
+    case 'desktop_open_draft_mini_chat_window': {
+      const directory = typeof args.directory === 'string' ? args.directory.trim() : '';
+      const projectId = typeof args.projectId === 'string' ? args.projectId.trim() : '';
+      await createMiniChatWindow({ mode: 'draft', directory, projectId });
+      return null;
+    }
+
+    case 'desktop_set_window_pinned':
+      return setMiniChatPinned(browserWindow, args.pinned === true);
+
+    case 'desktop_get_window_pinned':
+      return { pinned: Boolean(browserWindow?.__ocPinned) };
+
+    case 'desktop_focus_main_window':
+      if (state.mainWindow && !state.mainWindow.isDestroyed()) {
+        if (state.mainWindow.isMinimized()) state.mainWindow.restore();
+        state.mainWindow.show();
+        state.mainWindow.focus();
+        const sessionId = typeof args.sessionId === 'string' ? args.sessionId.trim() : '';
+        const directory = typeof args.directory === 'string' ? args.directory.trim() : '';
+        const mode = typeof args.mode === 'string' ? args.mode.trim() : '';
+        if (sessionId) {
+          emitToWindow(state.mainWindow, 'openchamber:open-session', { sessionId, directory });
+        } else if (mode === 'draft') {
+          const projectId = typeof args.projectId === 'string' ? args.projectId.trim() : '';
+          emitToWindow(state.mainWindow, 'openchamber:open-draft-session', { directory, projectId });
+        }
+        return { focused: true };
+      }
+      return { focused: false };
+
+    case 'desktop_close_current_window':
+      if (browserWindow && !browserWindow.isDestroyed()) {
+        browserWindow.close();
+      }
+      return null;
 
     case 'desktop_ssh_instances_get':
       return sshManager.readInstances();

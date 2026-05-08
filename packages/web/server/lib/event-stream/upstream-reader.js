@@ -31,6 +31,12 @@ function normalizeHeaders(headers) {
   return { ...headers };
 }
 
+async function cancelResponseBody(response) {
+  if (response?.body && typeof response.body.cancel === 'function') {
+    await response.body.cancel().catch(() => {});
+  }
+}
+
 export function createUpstreamSseReader({
   buildUrl,
   getHeaders = () => ({}),
@@ -116,6 +122,7 @@ export function createUpstreamSseReader({
               status: response?.status ?? 0,
               response,
             });
+            await cancelResponseBody(response);
             await waitForReconnectDelay(reconnectDelayMs, signal);
             continue;
           }

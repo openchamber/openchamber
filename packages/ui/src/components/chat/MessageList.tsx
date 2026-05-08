@@ -5,7 +5,7 @@ import { measureElement as measureVirtualElement, type VirtualItem, useVirtualiz
 import ChatMessage from './ChatMessage';
 import { areOptionalRenderRelevantMessagesEqual, areRelevantTurnGroupingContextsEqual, areRenderRelevantMessagesEqual } from './message/renderCompare';
 import TurnItem from './components/TurnItem';
-import type { AnimationHandlers, ContentChangeReason } from '@/hooks/useChatScrollManager';
+import type { AnimationHandlers, ContentChangeReason } from '@/hooks/useChatAutoFollow';
 import { filterSyntheticParts } from '@/lib/messages/synthetic';
 import type { ChatMessageEntry, TurnRecord, TurnGroupingContext } from './lib/turns/types';
 import { useTurnRecords } from './hooks/useTurnRecords';
@@ -405,7 +405,7 @@ interface MessageListProps {
     hasMoreAbove: boolean;
     isLoadingOlder: boolean;
     onLoadOlder: () => void;
-    scrollToBottom?: (options?: { instant?: boolean; force?: boolean }) => void;
+    scrollToBottom?: () => void;
     scrollRef?: React.RefObject<HTMLDivElement | null>;
 }
 
@@ -442,7 +442,7 @@ interface MessageRowProps {
     onUserAnimationConsumed?: (messageId: string) => void;
     onContentChange: (reason?: ContentChangeReason) => void;
     animationHandlers: AnimationHandlers;
-    scrollToBottom?: (options?: { instant?: boolean; force?: boolean }) => void;
+    scrollToBottom?: () => void;
 }
 
 const MessageRow = React.memo<MessageRowProps>(({ 
@@ -511,7 +511,7 @@ interface TurnBlockProps {
     chatRenderMode: 'sorted' | 'live';
     onMessageContentChange: (reason?: ContentChangeReason) => void;
     getAnimationHandlers: (messageId: string) => AnimationHandlers;
-    scrollToBottom?: (options?: { instant?: boolean; force?: boolean }) => void;
+    scrollToBottom?: () => void;
     stickyUserHeader?: boolean;
     shouldAnimateUserMessage: (message: ChatMessageEntry) => boolean;
     onUserAnimationConsumed: (messageId: string) => void;
@@ -806,7 +806,7 @@ interface UngroupedMessageRowProps {
     nextMessage?: ChatMessageEntry;
     onMessageContentChange: (reason?: ContentChangeReason) => void;
     getAnimationHandlers: (messageId: string) => AnimationHandlers;
-    scrollToBottom?: (options?: { instant?: boolean; force?: boolean }) => void;
+    scrollToBottom?: () => void;
     shouldAnimateUserMessage: (message: ChatMessageEntry) => boolean;
     onUserAnimationConsumed: (messageId: string) => void;
     activeStreamingMessageId?: string | null;
@@ -847,7 +847,7 @@ interface MessageListEntryProps {
     entry: RenderEntry;
     onMessageContentChange: (reason?: ContentChangeReason) => void;
     getAnimationHandlers: (messageId: string) => AnimationHandlers;
-    scrollToBottom?: (options?: { instant?: boolean; force?: boolean }) => void;
+    scrollToBottom?: () => void;
     stickyUserHeader?: boolean;
     sessionIsWorking: boolean;
     defaultActivityExpanded: boolean;
@@ -938,7 +938,7 @@ const StaticHistoryList: React.FC<{
     contentRef: React.RefObject<HTMLDivElement | null>;
     onMessageContentChange: (reason?: ContentChangeReason) => void;
     getAnimationHandlers: (messageId: string) => AnimationHandlers;
-    scrollToBottom?: (options?: { instant?: boolean; force?: boolean }) => void;
+    scrollToBottom?: () => void;
     stickyUserHeader: boolean;
     defaultActivityExpanded: boolean;
     turnUiStates: Map<string, TurnUiState>;
@@ -1023,7 +1023,7 @@ const StreamingTailContent: React.FC<{
     entry: RenderEntry;
     onMessageContentChange: (reason?: ContentChangeReason) => void;
     getAnimationHandlers: (messageId: string) => AnimationHandlers;
-    scrollToBottom?: (options?: { instant?: boolean; force?: boolean }) => void;
+    scrollToBottom?: () => void;
     stickyUserHeader: boolean;
     sessionIsWorking: boolean;
     defaultActivityExpanded: boolean;
@@ -1103,8 +1103,8 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     }>({ sessionKey: undefined, previousOrder: [], animatedIds: new Set() });
     const stableGetAnimationHandlers = useStableEvent(getAnimationHandlers);
     const stableOnLoadOlder = useStableEvent(onLoadOlder);
-    const stableScrollToBottom = useStableEvent((options?: { instant?: boolean; force?: boolean }) => {
-        scrollToBottom?.(options);
+    const stableScrollToBottom = useStableEvent(() => {
+        scrollToBottom?.();
     });
 
     React.useEffect(() => {

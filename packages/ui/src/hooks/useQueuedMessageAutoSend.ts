@@ -126,7 +126,7 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
       }
 
       const payload = buildQueuedPayload(queueSnapshot);
-      if (!payload.primaryText && !payload.additionalParts?.length) {
+      if (!payload.primaryText && payload.primaryAttachments.length === 0 && !payload.additionalParts?.length) {
         return;
       }
 

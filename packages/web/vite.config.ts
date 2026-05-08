@@ -101,6 +101,10 @@ export default defineConfig({
     emptyOutDir: true,
     chunkSizeWarningLimit: 500,
     rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, 'index.html'),
+        miniChat: path.resolve(__dirname, 'mini-chat.html'),
+      },
       external: ['node:child_process', 'node:fs', 'node:path', 'node:url'],
       output: {
         manualChunks(id) {

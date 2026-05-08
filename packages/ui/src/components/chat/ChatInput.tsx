@@ -39,6 +39,7 @@ import { ModelControls } from './ModelControls';
 import { parseAgentMentions } from '@/lib/messages/agentMentions';
 import { StatusRow } from './StatusRow';
 import { PendingChangesBar } from './PendingChangesBar';
+import { useChatSurfaceMode } from './useChatSurfaceMode';
 import { MobileAgentButton } from './MobileAgentButton';
 import { MobileModelButton } from './MobileModelButton';
 import { MobileSessionStatusBar } from './MobileSessionStatusBar';
@@ -599,6 +600,9 @@ const ComposerActionButtons = React.memo(function ComposerActionButtons(props: C
     && prev.hasContent === next.hasContent
     && prev.currentSessionId === next.currentSessionId
     && prev.newSessionDraftOpen === next.newSessionDraftOpen
+    && prev.onPrimaryAction === next.onPrimaryAction
+    && prev.onQueueMessage === next.onQueueMessage
+    && prev.onAbort === next.onAbort
 ));
 
 const appendWithLineBreaks = (base: string, next: string): string => {
@@ -633,7 +637,7 @@ const appendInlineText = (base: string, next: string): string => {
 
 interface ChatInputProps {
     onOpenSettings?: () => void;
-    scrollToBottom?: (options?: { instant?: boolean; force?: boolean }) => void;
+    scrollToBottom?: () => void;
 }
 
 type AutocompleteOverlayPosition = {
@@ -1488,12 +1492,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
             if (commandName === 'undo' && currentSessionId) {
                 await useSessionUIStore.getState().handleSlashUndo(currentSessionId);
-                scrollToBottom?.({ instant: true, force: true });
+                scrollToBottom?.();
                 return;
             }
             else if (commandName === 'redo' && currentSessionId) {
                 await useSessionUIStore.getState().handleSlashRedo(currentSessionId);
-                scrollToBottom?.({ instant: true, force: true });
+                scrollToBottom?.();
                 return;
             }
             else if (commandName === 'timeline' && currentSessionId) {
@@ -1539,7 +1543,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         currentVariant,
                         inputMode,
                     );
-                    scrollToBottom?.({ instant: true, force: true });
+                    scrollToBottom?.();
                 } catch (error) {
                     toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.summaryFailed'));
                 }
@@ -1561,7 +1565,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         currentVariant,
                         inputMode,
                     );
-                    scrollToBottom?.({ instant: true, force: true });
+                    scrollToBottom?.();
                 } catch (error) {
                     toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.reviewFailed'));
                 }
@@ -1602,10 +1606,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         );
 
         if (typeof window === 'undefined') {
-            scrollToBottom?.({ instant: true, force: true });
+            scrollToBottom?.();
         } else {
             window.requestAnimationFrame(() => {
-                scrollToBottom?.({ instant: true, force: true });
+                scrollToBottom?.();
             });
         }
 
@@ -1642,21 +1646,21 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             if (normalized.includes('payload too large') || normalized.includes('413') || normalized.includes('entity too large')) {
                 toast.error(t('chat.chatInput.toast.attachmentsTooLarge'));
                 if (allAttachments.length > 0) {
-                    useInputStore.setState({ attachedFiles: allAttachments });
+                    useInputStore.getState().setAttachedFiles(allAttachments);
                 }
                 return;
             }
 
             if (isSoftNetworkError) {
                 if (allAttachments.length > 0) {
-                    useInputStore.setState({ attachedFiles: allAttachments });
+                    useInputStore.getState().setAttachedFiles(allAttachments);
                     toast.error(t('chat.chatInput.toast.sendAttachmentsFailed'));
                 }
                 return;
             }
 
             if (allAttachments.length > 0) {
-                useInputStore.setState({ attachedFiles: allAttachments });
+                useInputStore.getState().setAttachedFiles(allAttachments);
             }
             toast.error(rawMessage || t('chat.chatInput.toast.messageSendFailed'));
         });
@@ -3142,12 +3146,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         return draftBranchItems.find((item) => item.value === selectedValue)?.label ?? formatDirectoryName(selectedValue);
     }, [draftBranchItems, selectedDraftDirectory]);
 
+    const chatSurfaceMode = useChatSurfaceMode();
+    const isMiniChatSurface = chatSurfaceMode === 'mini-chat';
+
     const hasPendingChanges = React.useMemo(() => {
+        if (isMiniChatSurface) {
+            return false;
+        }
         if (isGitRepo !== true || !currentGitStatus || currentGitStatus.isClean) {
             return false;
         }
         return extractGitChangedFiles(currentGitStatus.files, currentGitStatus.diffStats, currentDirectory).length > 0;
-    }, [currentDirectory, currentGitStatus, isGitRepo]);
+    }, [currentDirectory, currentGitStatus, isGitRepo, isMiniChatSurface]);
 
     const selectedDraftBranchIsKnown = React.useMemo(() => {
         if (!selectedDraftDirectory) {
