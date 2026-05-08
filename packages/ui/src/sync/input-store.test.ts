@@ -25,9 +25,9 @@ describe("input-store attachments", () => {
       pendingInputText: null,
       pendingInputMode: "replace",
       pendingSyntheticParts: null,
-      attachedFiles: [],
       activeEditorFile: null,
     })
+    useInputStore.getState().setAttachedFiles([])
   })
 
   test("does not attach a local file that finishes reading after attachments are cleared", async () => {
@@ -35,6 +35,17 @@ describe("input-store attachments", () => {
     expect(pendingReaders).toHaveLength(1)
 
     useInputStore.getState().clearAttachedFiles()
+    resolveReader(pendingReaders[0], "data:text/plain;base64,aGVsbG8=")
+    await addPromise
+
+    expect(useInputStore.getState().attachedFiles).toEqual([])
+  })
+
+  test("does not attach a local file after attached files are replaced", async () => {
+    const addPromise = useInputStore.getState().addAttachedFile(new File(["hello"], "hello.txt", { type: "text/plain" }))
+    expect(pendingReaders).toHaveLength(1)
+
+    useInputStore.getState().setAttachedFiles([])
     resolveReader(pendingReaders[0], "data:text/plain;base64,aGVsbG8=")
     await addPromise
 

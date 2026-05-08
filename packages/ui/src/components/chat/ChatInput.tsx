@@ -1642,21 +1642,21 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             if (normalized.includes('payload too large') || normalized.includes('413') || normalized.includes('entity too large')) {
                 toast.error(t('chat.chatInput.toast.attachmentsTooLarge'));
                 if (allAttachments.length > 0) {
-                    useInputStore.setState({ attachedFiles: allAttachments });
+                    useInputStore.getState().setAttachedFiles(allAttachments);
                 }
                 return;
             }
 
             if (isSoftNetworkError) {
                 if (allAttachments.length > 0) {
-                    useInputStore.setState({ attachedFiles: allAttachments });
+                    useInputStore.getState().setAttachedFiles(allAttachments);
                     toast.error(t('chat.chatInput.toast.sendAttachmentsFailed'));
                 }
                 return;
             }
 
             if (allAttachments.length > 0) {
-                useInputStore.setState({ attachedFiles: allAttachments });
+                useInputStore.getState().setAttachedFiles(allAttachments);
             }
             toast.error(rawMessage || t('chat.chatInput.toast.messageSendFailed'));
         });

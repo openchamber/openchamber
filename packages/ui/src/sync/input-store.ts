@@ -73,6 +73,7 @@ export type InputState = {
   consumePendingSyntheticParts: () => SyntheticContextPart[] | null
   addAttachedFile: (file: File) => Promise<void>
   removeAttachedFile: (id: string) => void
+  setAttachedFiles: (files: AttachedFile[]) => void
   clearAttachedFiles: () => void
   addVSCodeFileAttachment: (path: string, name: string, fileSize: number | null) => void
   addVSCodeSelectionAttachment: (path: string, file: File) => Promise<void>
@@ -129,6 +130,11 @@ export const useInputStore = create<InputState>()((set, get) => ({
 
   removeAttachedFile: (id) =>
     set((s) => ({ attachedFiles: s.attachedFiles.filter((f) => f.id !== id) })),
+
+  setAttachedFiles: (files) => {
+    attachmentReadGeneration += 1
+    set({ attachedFiles: files })
+  },
 
   clearAttachedFiles: () => {
     attachmentReadGeneration += 1
