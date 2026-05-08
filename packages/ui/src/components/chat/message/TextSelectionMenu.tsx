@@ -218,6 +218,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
   const menuWidthRef = React.useRef(DESKTOP_MENU_FALLBACK_WIDTH_PX);
   const pendingSelectionRef = React.useRef<SelectionPayload | null>(null);
   const openRafRef = React.useRef<number | null>(null);
+  const mouseUpTimeoutRef = React.useRef<number | null>(null);
   const isMenuVisibleRef = React.useRef(false);
   const createSession = useSessionUIStore((state) => state.createSession);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
@@ -237,6 +238,10 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
       if (openRafRef.current !== null) {
         window.cancelAnimationFrame(openRafRef.current);
         openRafRef.current = null;
+      }
+      if (mouseUpTimeoutRef.current !== null) {
+        window.clearTimeout(mouseUpTimeoutRef.current);
+        mouseUpTimeoutRef.current = null;
       }
     };
   }, []);
@@ -408,8 +413,12 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
       isDraggingRef.current = false;
       // Check if we have a pending selection to show
       if (pendingSelectionRef.current) {
+        if (mouseUpTimeoutRef.current !== null) {
+          window.clearTimeout(mouseUpTimeoutRef.current);
+        }
         // Small delay to ensure selection is finalized
-        setTimeout(() => {
+        mouseUpTimeoutRef.current = window.setTimeout(() => {
+          mouseUpTimeoutRef.current = null;
           const selection = window.getSelection();
           if (selection && selection.toString().trim()) {
             showMenu();
@@ -440,6 +449,10 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     document.addEventListener('mousedown', handleClickOutside);
 
     return () => {
+      if (mouseUpTimeoutRef.current !== null) {
+        window.clearTimeout(mouseUpTimeoutRef.current);
+        mouseUpTimeoutRef.current = null;
+      }
       document.removeEventListener('selectionchange', handleSelectionChange);
       container.removeEventListener('mousedown', handleMouseDown);
       document.removeEventListener('mouseup', handleMouseUp);
