@@ -3398,101 +3398,105 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 {/* Linked Issue row */}
                 {linkedIssue && !isVSCode && (
                     <div className="pb-2 w-full px-1">
-                        <button
-                            type="button"
-                            onClick={() => setIssuePickerOpen(true)}
-                            className="flex w-full items-center gap-1.5 text-sm hover:opacity-80 transition-opacity text-left h-5 px-1"
-                        >
-                            {linkedIssue.author?.avatarUrl && (
-                                <img
-                                    src={linkedIssue.author.avatarUrl}
-                                    alt={linkedIssue.author.login}
-                                    className="h-5 w-5 rounded-full flex-shrink-0"
-                                />
-                            )}
-                            <span className="text-muted-foreground flex-shrink-0">
-                                #{linkedIssue.number}
-                                {linkedIssue.author && (
-                                    <span className="ml-1">{t('chat.chatInput.linked.byAuthor', { author: linkedIssue.author.login })}</span>
+                        <div className="flex w-full items-center gap-1.5 text-sm h-5 px-1">
+                            <button
+                                type="button"
+                                onClick={() => setIssuePickerOpen(true)}
+                                className="flex min-w-0 flex-1 items-center gap-1.5 text-left hover:opacity-80 transition-opacity"
+                            >
+                                {linkedIssue.author?.avatarUrl && (
+                                    <img
+                                        src={linkedIssue.author.avatarUrl}
+                                        alt={linkedIssue.author.login}
+                                        className="h-5 w-5 rounded-full flex-shrink-0"
+                                    />
                                 )}
-                            </span>
-                            <span className="text-foreground truncate">
-                                {linkedIssue.title}
-                            </span>
+                                <span className="text-muted-foreground flex-shrink-0">
+                                    #{linkedIssue.number}
+                                    {linkedIssue.author && (
+                                        <span className="ml-1">{t('chat.chatInput.linked.byAuthor', { author: linkedIssue.author.login })}</span>
+                                    )}
+                                </span>
+                                <span className="text-foreground truncate">
+                                    {linkedIssue.title}
+                                </span>
+                            </button>
                             <span className="flex items-center gap-0.5 flex-shrink-0">
                                 <a
                                     href={linkedIssue.url}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    onClick={(e) => e.stopPropagation()}
                                     className="flex items-center justify-center h-6 w-6 hover:bg-[var(--interactive-hover)] rounded-full transition-colors"
                                     aria-label={t('chat.chatInput.linked.issue.openInBrowserAria')}
                                 >
                                     <RiExternalLinkLine className="h-4 w-4 text-muted-foreground" />
                                 </a>
-                                <span
-                                    onClick={(e) => {
-                                        e.stopPropagation();
+                                <button
+                                    type="button"
+                                    onClick={() => {
                                         setLinkedIssue(null);
                                     }}
-                                    className="flex items-center justify-center h-6 w-6 hover:bg-[var(--interactive-hover)] rounded-full transition-colors cursor-pointer"
+                                    className="flex items-center justify-center h-6 w-6 hover:bg-[var(--interactive-hover)] rounded-full transition-colors"
                                     aria-label={t('chat.chatInput.linked.issue.removeAria')}
+                                    title={t('chat.chatInput.linked.issue.removeAria')}
                                 >
                                     <RiCloseLine className="h-4 w-4 text-muted-foreground" />
-                                </span>
+                                </button>
                             </span>
-                        </button>
+                        </div>
                     </div>
                 )}
                 {linkedPr && !isVSCode && (
                     <div className="pb-2 w-full px-1">
-                        <button
-                            type="button"
-                            onClick={() => setPrPickerOpen(true)}
-                            className="flex w-full items-center gap-1.5 text-sm hover:opacity-80 transition-opacity text-left h-5 px-1"
-                        >
-                            {linkedPr.author?.avatarUrl && (
-                                <img
-                                    src={linkedPr.author.avatarUrl}
-                                    alt={linkedPr.author.login}
-                                    className="h-5 w-5 rounded-full flex-shrink-0"
-                                />
-                            )}
-                            <span className="text-muted-foreground flex-shrink-0">
-                                {t('chat.chatInput.linked.pr.number', { number: linkedPr.number })}
-                                {linkedPr.author && (
-                                    <span className="ml-1">{t('chat.chatInput.linked.byAuthor', { author: linkedPr.author.login })}</span>
+                        <div className="flex w-full items-center gap-1.5 text-sm h-5 px-1">
+                            <button
+                                type="button"
+                                onClick={() => setPrPickerOpen(true)}
+                                className="flex min-w-0 flex-1 items-center gap-1.5 text-left hover:opacity-80 transition-opacity"
+                            >
+                                {linkedPr.author?.avatarUrl && (
+                                    <img
+                                        src={linkedPr.author.avatarUrl}
+                                        alt={linkedPr.author.login}
+                                        className="h-5 w-5 rounded-full flex-shrink-0"
+                                    />
                                 )}
-                            </span>
-                            <span className="text-foreground truncate">
-                                {linkedPr.title}
-                            </span>
-                            <span className="text-muted-foreground flex-shrink-0 typography-meta">
-                                {linkedPr.head} → {linkedPr.base}
-                            </span>
+                                <span className="text-muted-foreground flex-shrink-0">
+                                    {t('chat.chatInput.linked.pr.number', { number: linkedPr.number })}
+                                    {linkedPr.author && (
+                                        <span className="ml-1">{t('chat.chatInput.linked.byAuthor', { author: linkedPr.author.login })}</span>
+                                    )}
+                                </span>
+                                <span className="text-foreground truncate">
+                                    {linkedPr.title}
+                                </span>
+                                <span className="text-muted-foreground flex-shrink-0 typography-meta">
+                                    {linkedPr.head} → {linkedPr.base}
+                                </span>
+                            </button>
                             <span className="flex items-center gap-0.5 flex-shrink-0">
                                 <a
                                     href={linkedPr.url}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    onClick={(e) => e.stopPropagation()}
                                     className="flex items-center justify-center h-6 w-6 hover:bg-[var(--interactive-hover)] rounded-full transition-colors"
                                     aria-label={t('chat.chatInput.linked.pr.openInBrowserAria')}
                                 >
                                     <RiExternalLinkLine className="h-4 w-4 text-muted-foreground" />
                                 </a>
-                                <span
-                                    onClick={(e) => {
-                                        e.stopPropagation();
+                                <button
+                                    type="button"
+                                    onClick={() => {
                                         setLinkedPr(null);
                                     }}
-                                    className="flex items-center justify-center h-6 w-6 hover:bg-[var(--interactive-hover)] rounded-full transition-colors cursor-pointer"
+                                    className="flex items-center justify-center h-6 w-6 hover:bg-[var(--interactive-hover)] rounded-full transition-colors"
                                     aria-label={t('chat.chatInput.linked.pr.removeAria')}
+                                    title={t('chat.chatInput.linked.pr.removeAria')}
                                 >
                                     <RiCloseLine className="h-4 w-4 text-muted-foreground" />
-                                </span>
+                                </button>
                             </span>
-                        </button>
+                        </div>
                     </div>
                 )}
                 <MemoStatusRow
