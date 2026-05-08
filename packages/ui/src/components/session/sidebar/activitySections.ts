@@ -1,5 +1,6 @@
 import type { Session } from '@opencode-ai/sdk/v2';
 import type { SessionStatus } from '@opencode-ai/sdk/v2/client';
+import { getSessionVisualSortTimestamp } from './utils';
 
 export const ACTIVE_NOW_STORAGE_KEY = 'oc.sessions.activeNow';
 export const ACTIVE_NOW_MAX_AGE_MS = 36 * 60 * 60 * 1000;
@@ -16,16 +17,22 @@ const isArchivedSession = (session: Session): boolean => {
   return Boolean(session.time?.archived);
 };
 
-const getSessionUpdatedAt = (session: Session): number => {
-  const updated = session.time?.updated;
+const getSessionCreatedAt = (session: Session): number => {
   const created = session.time?.created;
-  if (typeof updated === 'number' && Number.isFinite(updated)) {
-    return updated;
+  return typeof created === 'number' && Number.isFinite(created) ? created : 0;
+};
+
+const compareByVisualActivity = (a: Session, b: Session, lastUserMessageAtBySessionId: Map<string, number>): number => {
+  const byActivity = getSessionVisualSortTimestamp(b, lastUserMessageAtBySessionId)
+    - getSessionVisualSortTimestamp(a, lastUserMessageAtBySessionId);
+  if (byActivity !== 0) {
+    return byActivity;
   }
-  if (typeof created === 'number' && Number.isFinite(created)) {
-    return created;
+  const byCreated = getSessionCreatedAt(b) - getSessionCreatedAt(a);
+  if (byCreated !== 0) {
+    return byCreated;
   }
-  return 0;
+  return a.id.localeCompare(b.id);
 };
 
 export const readActiveNowEntries = (storage: Storage): ActiveNowEntry[] => {
@@ -67,6 +74,7 @@ export const persistActiveNowEntries = (storage: Storage, entries: ActiveNowEntr
 export const pruneActiveNowEntries = (
   entries: ActiveNowEntry[],
   sessionsById: Map<string, Session>,
+  lastUserMessageAtBySessionId: Map<string, number>,
   now = Date.now(),
 ): ActiveNowEntry[] => {
   const minUpdatedAt = now - ACTIVE_NOW_MAX_AGE_MS;
@@ -78,7 +86,7 @@ export const pruneActiveNowEntries = (
     if (isArchivedSession(session)) {
       return false;
     }
-    return getSessionUpdatedAt(session) >= minUpdatedAt;
+    return getSessionVisualSortTimestamp(session, lastUserMessageAtBySessionId) >= minUpdatedAt;
   });
 };
 
@@ -89,25 +97,27 @@ export const addActiveNowSession = (entries: ActiveNowEntry[], sessionId: string
   return [{ sessionId }, ...entries];
 };
 
-export const sortSessionsByUpdated = (sessions: Session[]): Session[] => {
-  return [...sessions].sort((a, b) => getSessionUpdatedAt(b) - getSessionUpdatedAt(a));
+export const sortSessionsByVisualActivity = (sessions: Session[], lastUserMessageAtBySessionId: Map<string, number>): Session[] => {
+  return [...sessions].sort((a, b) => compareByVisualActivity(a, b, lastUserMessageAtBySessionId));
 };
 
 export const deriveActiveNowSessions = (
   entries: ActiveNowEntry[],
   sessionsById: Map<string, Session>,
+  lastUserMessageAtBySessionId: Map<string, number>,
 ): Session[] => {
   const sessions = entries
     .map((entry) => sessionsById.get(entry.sessionId) ?? null)
     .filter((session): session is Session => Boolean(session))
     .filter((session) => !isArchivedSession(session))
     .filter((session) => !isSubtaskSession(session));
-  return sortSessionsByUpdated(sessions);
+  return sortSessionsByVisualActivity(sessions, lastUserMessageAtBySessionId);
 };
 
 export const deriveLiveActiveNowSessions = (
   sessions: Session[],
   statuses: Record<string, SessionStatus>,
+  lastUserMessageAtBySessionId: Map<string, number>,
 ): Session[] => {
   const activeSessions = sessions.filter((session) => {
     if (isArchivedSession(session) || isSubtaskSession(session)) {
@@ -118,7 +128,7 @@ export const deriveLiveActiveNowSessions = (
     return status?.type === 'busy' || status?.type === 'retry';
   });
 
-  return sortSessionsByUpdated(activeSessions);
+  return sortSessionsByVisualActivity(activeSessions, lastUserMessageAtBySessionId);
 };
 
-export const getSessionUpdatedAtMs = getSessionUpdatedAt;
+export const getSessionUpdatedAtMs = getSessionCreatedAt;

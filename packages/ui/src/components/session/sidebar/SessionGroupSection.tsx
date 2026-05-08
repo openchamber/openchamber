@@ -68,6 +68,7 @@ type Props = {
   setRenameFolderDraft: React.Dispatch<React.SetStateAction<string>>;
   setRenamingFolderId: React.Dispatch<React.SetStateAction<string | null>>;
   pinnedSessionIds: Set<string>;
+  lastUserMessageAtBySessionId: Map<string, number>;
   sessionOrderIndex: Map<string, number>;
   prVisualStateByDirectoryBranch: Map<string, {
     visualState: 'draft' | 'open' | 'blocked' | 'merged' | 'closed';
@@ -134,6 +135,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     setRenameFolderDraft,
     setRenamingFolderId,
     pinnedSessionIds,
+    lastUserMessageAtBySessionId,
     sessionOrderIndex,
     prVisualStateByDirectoryBranch,
     onToggleCollapsedGroup,
@@ -149,8 +151,8 @@ export function SessionGroupSection(props: Props): React.ReactNode {
       if (bIndex === undefined) return -1;
       if (aIndex !== bIndex) return aIndex - bIndex;
     }
-    return compareSessionsByPinnedAndTime(a.session, b.session, pinnedSessionIds);
-  }, [pinnedSessionIds, sessionOrderIndex]);
+    return compareSessionsByPinnedAndTime(a.session, b.session, pinnedSessionIds, lastUserMessageAtBySessionId);
+  }, [pinnedSessionIds, sessionOrderIndex, lastUserMessageAtBySessionId]);
 
   const searchData = hasSessionSearchQuery ? groupSearchDataByGroup.get(group) : null;
   const displayMode = useSessionDisplayStore((state) => state.displayMode);

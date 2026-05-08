@@ -1,5 +1,6 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
+import type { Message } from '@opencode-ai/sdk/v2/client';
 import { RiLayoutLeftLine } from '@remixicon/react';
 import { toast } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -79,6 +80,9 @@ import { refreshGlobalSessions, resolveGlobalSessionDirectory, useGlobalSessions
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
+import { getSyncMessages } from '@/sync/sync-refs';
+import { useSessionUserActivityStore } from '@/sync/session-user-activity-store';
+import { opencodeClient } from '@/lib/opencode/client';
 
 const PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse';
 const GROUP_ORDER_STORAGE_KEY = 'oc.sessions.groupOrder';
@@ -86,6 +90,7 @@ const GROUP_COLLAPSE_STORAGE_KEY = 'oc.sessions.groupCollapse';
 const PROJECT_ACTIVE_SESSION_STORAGE_KEY = 'oc.sessions.activeSessionByProject';
 const SESSION_EXPANDED_STORAGE_KEY = 'oc.sessions.expandedParents';
 const SESSION_PINNED_STORAGE_KEY = 'oc.sessions.pinned';
+const SESSION_USER_ACTIVITY_MESSAGE_LIMIT = 200;
 
 type PrVisualState = 'draft' | 'open' | 'blocked' | 'merged' | 'closed';
 
@@ -305,8 +310,11 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const gitBranches = useGitAllBranches();
 
   const sync = useSync();
+  const syncSession = sync.syncSession;
   const liveSessions = useAllLiveSessions();
   const liveSessionStatuses = useAllSessionStatuses();
+  const lastUserMessageAtBySessionId = useSessionUserActivityStore((state) => state.bySessionId);
+  const resolvedSessionUserActivityIds = useSessionUserActivityStore((state) => state.resolvedSessionIds);
   const hasLoadedGlobalSessions = useGlobalSessionsStore((state) => state.hasLoaded);
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const archivedSessions = useGlobalSessionsStore((state) => state.archivedSessions);
@@ -523,6 +531,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     pinnedSessionIds,
     gitBranches,
     isVSCode,
+    lastUserMessageAtBySessionId,
   });
 
   const { scheduleCollapsedProjectsPersist } = useSidebarPersistence({
@@ -560,8 +569,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   }, []);
 
   const sortedSessions = React.useMemo(() => {
-    return [...sessions].sort((a, b) => compareSessionsByPinnedAndTime(a, b, pinnedSessionIds));
-  }, [sessions, pinnedSessionIds]);
+    return [...sessions].sort((a, b) => compareSessionsByPinnedAndTime(a, b, pinnedSessionIds, lastUserMessageAtBySessionId));
+  }, [sessions, pinnedSessionIds, lastUserMessageAtBySessionId]);
 
   const sessionOrderIndex = React.useMemo(
     () => new Map(sortedSessions.map((session, index) => [session.id, index])),
@@ -579,9 +588,78 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       collection.push(session);
       map.set(parentID, collection);
     });
-    map.forEach((list) => list.sort((a, b) => compareSessionsByPinnedAndTime(a, b, pinnedSessionIds)));
+    map.forEach((list) => list.sort((a, b) => compareSessionsByPinnedAndTime(a, b, pinnedSessionIds, lastUserMessageAtBySessionId)));
     return map;
-  }, [sortedSessions, pinnedSessionIds]);
+  }, [sortedSessions, pinnedSessionIds, lastUserMessageAtBySessionId]);
+
+  const userActivityHydrationQueueRef = React.useRef<Array<{ sessionId: string; directory: string | null }>>([]);
+  const userActivityHydrationQueuedIdsRef = React.useRef<Set<string>>(new Set());
+  const userActivityHydrationInFlightRef = React.useRef(false);
+
+  const pumpUserActivityHydrationQueue = React.useCallback(() => {
+    if (userActivityHydrationInFlightRef.current) {
+      return;
+    }
+
+    userActivityHydrationInFlightRef.current = true;
+    void (async () => {
+      try {
+        while (userActivityHydrationQueueRef.current.length > 0) {
+          const next = userActivityHydrationQueueRef.current.shift();
+          if (!next) {
+            continue;
+          }
+
+          try {
+            const activityStore = useSessionUserActivityStore.getState();
+            if (activityStore.resolvedSessionIds.has(next.sessionId)) {
+              continue;
+            }
+
+            const cachedMessages = getSyncMessages(next.sessionId, next.directory ?? undefined);
+            if (cachedMessages.length > 0) {
+              activityStore.reconcileSessionFromMessages(next.sessionId, cachedMessages);
+              continue;
+            }
+
+            const scopedClient = opencodeClient.getScopedSdkClient(next.directory ?? '');
+            const response = await scopedClient.session.messages({
+              sessionID: next.sessionId,
+              limit: SESSION_USER_ACTIVITY_MESSAGE_LIMIT,
+            });
+            const messages = (response.data ?? [])
+              .map((record: { info?: Message }) => record.info ?? null)
+              .filter((message): message is Message => Boolean(message?.id));
+            activityStore.reconcileSessionFromMessages(next.sessionId, messages);
+          } finally {
+            userActivityHydrationQueuedIdsRef.current.delete(next.sessionId);
+          }
+        }
+      } finally {
+        userActivityHydrationInFlightRef.current = false;
+      }
+    })();
+  }, []);
+
+  React.useEffect(() => {
+    if (sortedSessions.length === 0) {
+      return;
+    }
+
+    sortedSessions.forEach((session) => {
+      if (resolvedSessionUserActivityIds.has(session.id) || userActivityHydrationQueuedIdsRef.current.has(session.id)) {
+        return;
+      }
+
+      userActivityHydrationQueuedIdsRef.current.add(session.id);
+      userActivityHydrationQueueRef.current.push({
+        sessionId: session.id,
+        directory: normalizePath(resolveGlobalSessionDirectory(session)),
+      });
+    });
+
+    pumpUserActivityHydrationQueue();
+  }, [pumpUserActivityHydrationQueue, resolvedSessionUserActivityIds, sortedSessions]);
 
   const emptyState = (
     <div className="py-6 text-center text-muted-foreground">
@@ -1008,17 +1086,17 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       return [];
     }
 
-    return deriveActiveNowSessions(activeNowEntries, new Map(sessions.map((session) => [session.id, session])))
-      .sort((a, b) => compareSessionsByPinnedAndTime(a, b, pinnedSessionIds));
-  }, [activeNowEntries, pinnedSessionIds, sessions, showRecentSection]);
+    return deriveActiveNowSessions(activeNowEntries, new Map(sessions.map((session) => [session.id, session])), lastUserMessageAtBySessionId)
+      .sort((a, b) => compareSessionsByPinnedAndTime(a, b, pinnedSessionIds, lastUserMessageAtBySessionId));
+  }, [activeNowEntries, pinnedSessionIds, sessions, showRecentSection, lastUserMessageAtBySessionId]);
 
   const liveActiveSessions = React.useMemo(() => {
     if (!showRecentSection) {
       return [];
     }
 
-    return deriveLiveActiveNowSessions(sessions, liveSessionStatuses);
-  }, [liveSessionStatuses, sessions, showRecentSection]);
+    return deriveLiveActiveNowSessions(sessions, liveSessionStatuses, lastUserMessageAtBySessionId);
+  }, [liveSessionStatuses, sessions, showRecentSection, lastUserMessageAtBySessionId]);
 
   React.useEffect(() => {
     if (!showRecentSection || liveActiveSessions.length === 0) {
@@ -1045,14 +1123,14 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       allKnownSessionsById.set(session.id, session);
     });
 
-    const pruned = pruneActiveNowEntries(activeNowEntries, allKnownSessionsById);
+    const pruned = pruneActiveNowEntries(activeNowEntries, allKnownSessionsById, lastUserMessageAtBySessionId);
     if (pruned.length === activeNowEntries.length && pruned.every((entry, index) => entry.sessionId === activeNowEntries[index]?.sessionId)) {
       return;
     }
 
     setActiveNowEntries(pruned);
     persistActiveNowEntries(safeStorage, pruned);
-  }, [activeNowEntries, archivedSessions, safeStorage, sessions, showRecentSection]);
+  }, [activeNowEntries, archivedSessions, lastUserMessageAtBySessionId, safeStorage, sessions, showRecentSection]);
 
   // Prefetch is wired below, after recentSessionIds is computed.
 
@@ -1087,7 +1165,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     currentSessionId,
     sortedSessions,
     recentSessionIds: recentSessionIdsList,
-    loadMessages: sync.syncSession,
+    loadMessages: syncSession,
   });
 
   const sectionsForSidebarRender = React.useMemo(() => {
@@ -1397,6 +1475,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         setRenameFolderDraft={setRenameFolderDraft}
         setRenamingFolderId={setRenamingFolderId}
         pinnedSessionIds={pinnedSessionIds}
+        lastUserMessageAtBySessionId={lastUserMessageAtBySessionId}
         sessionOrderIndex={sessionOrderIndex}
         prVisualStateByDirectoryBranch={prVisualStateByDirectoryBranch}
         onToggleCollapsedGroup={toggleCollapsedGroup}
@@ -1431,6 +1510,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       renamingFolderId,
       renameFolderDraft,
       pinnedSessionIds,
+      lastUserMessageAtBySessionId,
       sessionOrderIndex,
       prVisualStateByDirectoryBranch,
       toggleCollapsedGroup,

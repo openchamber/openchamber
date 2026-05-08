@@ -10,6 +10,7 @@ import { useInputStore } from "./input-store"
 import type { ChildStoreManager } from "./child-store"
 import { opencodeClient } from "@/lib/opencode/client"
 import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
+import { useSessionUserActivityStore } from "./session-user-activity-store"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { registerSessionDirectory } from "./sync-refs"
 import { isSyntheticPart } from "@/lib/messages/synthetic"
@@ -398,6 +399,7 @@ export async function optimisticSend(input: {
     }
   }
 
+  const createdAt = Date.now()
   const optimisticMessage = {
     id: messageID,
     role: "user" as const,
@@ -409,8 +411,10 @@ export async function optimisticSend(input: {
     agent: input.agent ?? "",
     model: `${input.providerID}/${input.modelID}`,
     metadata: {} as Record<string, unknown>,
-    time: { created: Date.now(), completed: 0 },
+    time: { created: createdAt, completed: 0 },
   } as unknown as Message
+
+  useSessionUserActivityStore.getState().recordUserMessageAt(input.sessionId, createdAt)
 
   // Insert into store + register in shadow Map (for mergeOptimisticPage cleanup)
   _optimisticAdd({

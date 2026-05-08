@@ -134,6 +134,9 @@ export function applyDirectoryEvent(
     onRefresh?: (directory: string) => void
     onLoadLsp?: () => void
     onSetSessionTodo?: (sessionID: string, todos: Todo[] | undefined) => void
+    onRecordUserMessageAt?: (sessionID: string, createdAt: number) => void
+    onReconcileSessionUserActivity?: (sessionID: string, messages: Message[]) => void
+    onInvalidateSessionUserActivity?: (sessionID: string) => void
   },
 ): boolean {
   switch (event.type) {
@@ -220,6 +223,12 @@ export function applyDirectoryEvent(
 
     case "message.updated": {
       const info = (event.properties as { info: Message }).info
+      if (info.role === "user") {
+        const createdAt = info.time?.created
+        if (typeof createdAt === "number" && Number.isFinite(createdAt)) {
+          callbacks?.onRecordUserMessageAt?.(info.sessionID, createdAt)
+        }
+      }
       const messages = draft.message[info.sessionID]
       if (!messages) {
         draft.message[info.sessionID] = [info]
@@ -256,7 +265,12 @@ export function applyDirectoryEvent(
         if (result.found) {
           next.splice(result.index, 1)
           draft.message[props.sessionID] = next
+          callbacks?.onReconcileSessionUserActivity?.(props.sessionID, next)
+        } else {
+          callbacks?.onInvalidateSessionUserActivity?.(props.sessionID)
         }
+      } else {
+        callbacks?.onInvalidateSessionUserActivity?.(props.sessionID)
       }
       delete draft.part[props.messageID]
       return true

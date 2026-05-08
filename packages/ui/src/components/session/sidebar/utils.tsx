@@ -111,14 +111,27 @@ const getSessionCreatedAt = (session: Session): number => {
   return toFiniteNumber(session.time?.created) ?? 0;
 };
 
-const getSessionUpdatedAt = (session: Session): number => {
-  return toFiniteNumber(session.time?.updated) ?? toFiniteNumber(session.time?.created) ?? 0;
+const getLastUserMessageAt = (session: Session, lastUserMessageAtBySessionId?: Map<string, number>): number | null => {
+  const fromActivity = lastUserMessageAtBySessionId?.get(session.id);
+  return typeof fromActivity === 'number' && Number.isFinite(fromActivity) ? fromActivity : null;
+};
+
+export const getSessionVisualSortTimestamp = (
+  session: Session,
+  lastUserMessageAtBySessionId?: Map<string, number>,
+): number => {
+  return getLastUserMessageAt(session, lastUserMessageAtBySessionId) ?? getSessionCreatedAt(session);
+};
+
+const compareSessionIds = (a: Session, b: Session): number => {
+  return a.id.localeCompare(b.id);
 };
 
 export const compareSessionsByPinnedAndTime = (
   a: Session,
   b: Session,
   pinnedSessionIds: Set<string>,
+  lastUserMessageAtBySessionId?: Map<string, number>,
 ): number => {
   const aPinned = pinnedSessionIds.has(a.id);
   const bPinned = pinnedSessionIds.has(b.id);
@@ -126,11 +139,18 @@ export const compareSessionsByPinnedAndTime = (
     return aPinned ? -1 : 1;
   }
 
-  if (aPinned && bPinned) {
-    return getSessionCreatedAt(b) - getSessionCreatedAt(a);
+  const byActivityTime = getSessionVisualSortTimestamp(b, lastUserMessageAtBySessionId)
+    - getSessionVisualSortTimestamp(a, lastUserMessageAtBySessionId);
+  if (byActivityTime !== 0) {
+    return byActivityTime;
   }
 
-  return getSessionUpdatedAt(b) - getSessionUpdatedAt(a);
+  const byCreated = getSessionCreatedAt(b) - getSessionCreatedAt(a);
+  if (byCreated !== 0) {
+    return byCreated;
+  }
+
+  return compareSessionIds(a, b);
 };
 
 export const compareSessionsByPinnedAndCreated = (

@@ -5,6 +5,7 @@ import type { SessionGroup, SessionNode } from '../types';
 import {
   compareSessionsByPinnedAndTime,
   dedupeSessionsById,
+  getSessionVisualSortTimestamp,
   getArchivedScopeKey,
   normalizeForBranchComparison,
   normalizePath,
@@ -18,6 +19,7 @@ type Args = {
   pinnedSessionIds: Set<string>;
   gitBranches: Map<string, string | null>;
   isVSCode: boolean;
+  lastUserMessageAtBySessionId: Map<string, number>;
 };
 
 const isArchivedSession = (session: Session): boolean => Boolean(session.time?.archived);
@@ -67,7 +69,7 @@ export const useSessionGrouping = (args: Args) => {
     ) => {
       const normalizedProjectRoot = normalizePath(projectRoot ?? null);
       const sortedProjectSessions = dedupeSessionsById(projectSessions)
-        .sort((a, b) => compareSessionsByPinnedAndTime(a, b, args.pinnedSessionIds));
+        .sort((a, b) => compareSessionsByPinnedAndTime(a, b, args.pinnedSessionIds, args.lastUserMessageAtBySessionId));
 
       const sessionMap = new Map(sortedProjectSessions.map((session) => [session.id, session]));
       const childrenMap = new Map<string, Session[]>();
@@ -82,7 +84,7 @@ export const useSessionGrouping = (args: Args) => {
         collection.push(session);
         childrenMap.set(parentID, collection);
       });
-      childrenMap.forEach((list) => list.sort((a, b) => compareSessionsByPinnedAndTime(a, b, args.pinnedSessionIds)));
+      childrenMap.forEach((list) => list.sort((a, b) => compareSessionsByPinnedAndTime(a, b, args.pinnedSessionIds, args.lastUserMessageAtBySessionId)));
 
       const worktreeByPath = new Map<string, WorktreeMetadata>();
       availableWorktrees.forEach((meta) => {
@@ -158,38 +160,33 @@ export const useSessionGrouping = (args: Args) => {
       }];
 
       // Calculate activity info for each worktree to determine sorting priority
-      const worktreeActivityInfo = new Map<string, { hasActiveSession: boolean; lastUpdatedAt: number }>();
+      const worktreeActivityInfo = new Map<string, { hasActiveSession: boolean; lastUserActivityAt: number }>();
       availableWorktrees.forEach((meta) => {
         const directory = normalizePath(meta.path) ?? meta.path;
         const sessionsInWorktree = groupedNodes.get(directory) ?? [];
         const hasActiveSession = sessionsInWorktree.length > 0;
-        // Calculate the latest update time among all sessions in this worktree
-        const lastUpdatedAt = sessionsInWorktree.reduce((max, node) => {
-          const updatedAt = Number(node.session.time?.updated ?? node.session.time?.created ?? 0);
-          if (!Number.isFinite(updatedAt)) {
-            return max;
-          }
-          return Math.max(max, updatedAt);
+        const lastUserActivityAt = sessionsInWorktree.reduce((max, node) => {
+          return Math.max(max, getSessionVisualSortTimestamp(node.session, args.lastUserMessageAtBySessionId));
         }, 0);
 
-        worktreeActivityInfo.set(directory, { hasActiveSession, lastUpdatedAt });
+        worktreeActivityInfo.set(directory, { hasActiveSession, lastUserActivityAt });
       });
 
-      // Sort worktrees: active first (by last updated desc), then inactive (by label asc)
+      // Sort worktrees: active first (by latest user activity desc), then inactive (by label asc)
       const sortedWorktrees = [...availableWorktrees].sort((a, b) => {
         const aDir = normalizePath(a.path) ?? a.path;
         const bDir = normalizePath(b.path) ?? b.path;
-        const aInfo = worktreeActivityInfo.get(aDir) ?? { hasActiveSession: false, lastUpdatedAt: 0 };
-        const bInfo = worktreeActivityInfo.get(bDir) ?? { hasActiveSession: false, lastUpdatedAt: 0 };
+        const aInfo = worktreeActivityInfo.get(aDir) ?? { hasActiveSession: false, lastUserActivityAt: 0 };
+        const bInfo = worktreeActivityInfo.get(bDir) ?? { hasActiveSession: false, lastUserActivityAt: 0 };
 
         // First priority: active status (active first)
         if (aInfo.hasActiveSession !== bInfo.hasActiveSession) {
           return aInfo.hasActiveSession ? -1 : 1;
         }
 
-        // Second priority: for active worktrees, sort by last updated (desc)
+        // Second priority: for active worktrees, sort by latest user activity (desc)
         if (aInfo.hasActiveSession && bInfo.hasActiveSession) {
-          return bInfo.lastUpdatedAt - aInfo.lastUpdatedAt;
+          return bInfo.lastUserActivityAt - aInfo.lastUserActivityAt;
         }
 
         // Third priority: for inactive worktrees, sort by label (asc)
@@ -241,7 +238,7 @@ export const useSessionGrouping = (args: Args) => {
 
       return groups;
     },
-    [args.homeDirectory, args.worktreeMetadata, args.pinnedSessionIds, args.gitBranches, args.isVSCode, t],
+    [args.homeDirectory, args.worktreeMetadata, args.pinnedSessionIds, args.gitBranches, args.isVSCode, args.lastUserMessageAtBySessionId, t],
   );
 
   return {

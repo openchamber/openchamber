@@ -37,6 +37,7 @@ import type { PermissionRequest } from "@/types/permission"
 import type { QuestionRequest } from "@/types/question"
 import * as sessionActions from "./session-actions"
 import { mergeMessages } from "./optimistic"
+import { useSessionUserActivityStore } from "./session-user-activity-store"
 
 // ---------------------------------------------------------------------------
 // Context
@@ -1214,6 +1215,15 @@ function handleEvent(
   if (applyDirectoryEvent(draft, payload, {
     onSetSessionTodo: (sessionID, todos) => {
       useTodosPersistStore.getState().setSessionTodos(sessionID, todos)
+    },
+    onRecordUserMessageAt: (sessionID, createdAt) => {
+      useSessionUserActivityStore.getState().recordUserMessageAt(sessionID, createdAt)
+    },
+    onReconcileSessionUserActivity: (sessionID, messages) => {
+      useSessionUserActivityStore.getState().reconcileSessionFromMessages(sessionID, messages)
+    },
+    onInvalidateSessionUserActivity: (sessionID) => {
+      useSessionUserActivityStore.getState().invalidateSession(sessionID)
     },
   })) {
     store.setState(draft)

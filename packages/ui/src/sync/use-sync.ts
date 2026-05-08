@@ -18,6 +18,7 @@ import {
   setSessionPrefetch,
   clearSessionPrefetch,
 } from "./session-prefetch-cache"
+import { useSessionUserActivityStore } from "./session-user-activity-store"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 const MESSAGE_PAGE_SIZE = 200
@@ -247,6 +248,7 @@ export function useSync() {
           patch.part = partUpdate
         }
         store.setState(patch)
+        useSessionUserActivityStore.getState().reconcileSessionFromMessages(sessionID, messages)
         setMetaFor(sessionID, {
           limit: messages.length,
           cursor: merged.cursor,
@@ -388,6 +390,7 @@ export function useSync() {
         if (result.found) {
           next.splice(result.index, 1)
           message[input.sessionID] = next
+          useSessionUserActivityStore.getState().reconcileSessionFromMessages(input.sessionID, next)
         }
       }
       delete part[input.messageID]
