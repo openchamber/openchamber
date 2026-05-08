@@ -8,10 +8,10 @@ const message = (id: string, role: "user" | "assistant"): Message => ({
   role,
 } as unknown as Message)
 
-const stateWithMessages = (messages: Message[]): State => ({
+const stateWithMessages = (messages: Message[], status: SessionStatus = { type: "busy" } as SessionStatus): State => ({
   ...INITIAL_STATE,
   session_status: {
-    ses_1: { type: "busy" } as SessionStatus,
+    ses_1: status,
   },
   message: {
     ses_1: messages,
@@ -47,10 +47,37 @@ describe("updateStreamingState", () => {
     updateStreamingState(stateWithMessages([
       message("msg_user_1", "user"),
       message("msg_assistant_1", "assistant"),
+    ]))
+    updateStreamingState(stateWithMessages([
+      message("msg_user_1", "user"),
+      message("msg_assistant_1", "assistant"),
+      message("msg_user_2", "user"),
+    ]))
+    expect(useStreamingStore.getState().streamingMessageIds.get("ses_1")).toBeNull()
+
+    updateStreamingState(stateWithMessages([
+      message("msg_user_1", "user"),
+      message("msg_assistant_1", "assistant"),
       message("msg_user_2", "user"),
       message("msg_assistant_2", "assistant"),
     ]))
 
     expect(useStreamingStore.getState().streamingMessageIds.get("ses_1")).toBe("msg_assistant_2")
+  })
+
+  test("completes the streaming message when the session becomes idle", () => {
+    updateStreamingState(stateWithMessages([
+      message("msg_user_1", "user"),
+      message("msg_assistant_1", "assistant"),
+    ]))
+    expect(useStreamingStore.getState().streamingMessageIds.get("ses_1")).toBe("msg_assistant_1")
+
+    updateStreamingState(stateWithMessages([
+      message("msg_user_1", "user"),
+      message("msg_assistant_1", "assistant"),
+    ], { type: "idle" } as SessionStatus))
+
+    expect(useStreamingStore.getState().streamingMessageIds.get("ses_1")).toBeNull()
+    expect(useStreamingStore.getState().messageStreamStates.get("msg_assistant_1")?.phase).toBe("completed")
   })
 })
