@@ -74,11 +74,13 @@ export const SidebarGroup: React.FC<SidebarGroupProps> = ({
         <span className="ml-1 tabular-nums opacity-60">{count}</span>
       </button>
 
-      {expanded && (
-        <div id={contentId} className="mt-0.5 space-y-0.5 ml-2 pl-3 border-l-2 border-[var(--interactive-border)]">
-          {children}
-        </div>
-      )}
+      <div
+        id={contentId}
+        hidden={!expanded}
+        className="mt-0.5 space-y-0.5 ml-2 pl-3 border-l-2 border-[var(--interactive-border)]"
+      >
+        {children}
+      </div>
     </div>
   );
 };
