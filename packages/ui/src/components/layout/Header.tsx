@@ -1953,6 +1953,13 @@ export const Header: React.FC<HeaderProps> = ({
             </TooltipContent>
           </Tooltip>
         ) : null}
+        {projectActionsContext && (
+          <ProjectActionsButton
+            projectRef={projectActionsContext.projectRef}
+            directory={projectActionsContext.directory}
+            className="mr-2"
+          />
+        )}
         {!isNewSessionDraftOpen ? (
           <div className="mr-3 min-w-0">
             <div className="truncate pl-1 typography-ui-label text-[14px] font-medium leading-tight text-foreground">
@@ -2018,13 +2025,6 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex-1" />
 
         <div className="flex shrink-0 items-center gap-1">
-          {projectActionsContext && (
-            <ProjectActionsButton
-              projectRef={projectActionsContext.projectRef}
-              directory={projectActionsContext.directory}
-              className="mr-2"
-            />
-          )}
           <HeaderIconActionButton
             visible={hasElectronDesktopIPC && !isNewSessionDraftOpen && Boolean(currentSessionId)}
             title={t('header.actions.openSessionMiniChat')}
