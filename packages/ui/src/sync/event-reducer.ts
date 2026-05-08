@@ -90,6 +90,19 @@ function shouldPreserveExistingPart(previous: Part, next: Part): boolean {
   return false
 }
 
+function areSessionStatusesEqual(left: SessionStatus | undefined, right: SessionStatus): boolean {
+  if (left === right) return true
+  if (!left || left.type !== right.type) return false
+  if (left.type === "retry" || right.type === "retry") {
+    return left.type === "retry"
+      && right.type === "retry"
+      && left.attempt === right.attempt
+      && left.message === right.message
+      && left.next === right.next
+  }
+  return true
+}
+
 // ---------------------------------------------------------------------------
 // Global events
 // ---------------------------------------------------------------------------
@@ -219,19 +232,30 @@ export function applyDirectoryEvent(
 
     case "session.status": {
       const props = event.properties as { sessionID: string; status: SessionStatus }
+      if (areSessionStatusesEqual(draft.session_status[props.sessionID], props.status)) {
+        return false
+      }
       draft.session_status[props.sessionID] = props.status
       return true
     }
 
     case "session.idle": {
       const props = event.properties as { sessionID: string }
-      draft.session_status[props.sessionID] = { type: "idle" }
+      const status = { type: "idle" } as const
+      if (areSessionStatusesEqual(draft.session_status[props.sessionID], status)) {
+        return false
+      }
+      draft.session_status[props.sessionID] = status
       return true
     }
 
     case "session.error": {
       const props = event.properties as { sessionID: string }
-      draft.session_status[props.sessionID] = { type: "idle" }
+      const status = { type: "idle" } as const
+      if (areSessionStatusesEqual(draft.session_status[props.sessionID], status)) {
+        return false
+      }
+      draft.session_status[props.sessionID] = status
       return true
     }
 
