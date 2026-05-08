@@ -88,6 +88,7 @@ describe('useGitStore', () => {
     expect(statusCalls).toEqual([{ directory: '/repo', options: undefined }]);
 
     requests[0].resolve(createStatus({ 'src/index.ts': { insertions: 1, deletions: 0 } }));
-    await Promise.all([fullPromise, lightPromise]);
+    const [fullResult, lightResult] = await Promise.all([fullPromise, lightPromise]);
+    expect(lightResult).toBe(fullResult);
   });
 });
