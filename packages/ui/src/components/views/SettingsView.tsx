@@ -568,6 +568,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                     <button
                       type="button"
                       onClick={() => openPage(page.slug)}
+                      aria-current={selected ? 'page' : undefined}
                       className={cn(
                         'flex h-8 items-center gap-2 rounded-md px-2 overflow-hidden',
                         selected
