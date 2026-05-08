@@ -133,5 +133,14 @@ describe("applyDirectoryEvent", () => {
 
     expect(draft.question.ses_1).not.toBe(afterAsk)
     expect(draft.question.ses_1.map((item) => item.id)).toEqual(["ques_2"])
+
+    const afterReply = draft.question.ses_1
+    applyDirectoryEvent(draft, {
+      type: "question.rejected",
+      properties: { sessionID: "ses_1", requestID: "ques_2" },
+    } as Event)
+
+    expect(draft.question.ses_1).not.toBe(afterReply)
+    expect(draft.question.ses_1).toEqual([])
   })
 })
