@@ -22,6 +22,7 @@ const DIFF_PREFETCH_LARGE_FILE_THRESHOLD = 500; // skip prefetch for files with 
 // Diff cache limits to prevent memory bloat with many modified files
 const DIFF_CACHE_MAX_ENTRIES = 30;
 const DIFF_CACHE_MAX_TOTAL_SIZE_BYTES = 20 * 1024 * 1024; // 20MB
+type GitStatusFetchMode = 'full' | 'light';
 
 interface DirectoryGitState {
   isGitRepo: boolean | null;
@@ -90,8 +91,10 @@ interface GitAPI {
 
 const inFlightDiffFetchesByDirectory = new Map<string, Set<string>>();
 const diffFetchGenerationByDirectory = new Map<string, number>();
-const inFlightStatusFetchesByDirectory = new Map<string, Promise<boolean>>();
+const inFlightStatusFetches = new Map<string, Promise<boolean>>();
 const inFlightEnsureAllByDirectory = new Map<string, Promise<void>>();
+
+const getStatusFetchKey = (directory: string, mode: GitStatusFetchMode): string => `${mode}:${directory}`;
 
 const getDiffFetchGeneration = (directory: string): number =>
   diffFetchGenerationByDirectory.get(directory) ?? 0;
@@ -306,7 +309,10 @@ export const useGitStore = create<GitStore>()(
       },
 
       fetchStatus: async (directory, git, options = {}) => {
-        const existing = inFlightStatusFetchesByDirectory.get(directory);
+        const statusFetchMode: GitStatusFetchMode = options.mode ?? 'full';
+        const statusFetchKey = getStatusFetchKey(directory, statusFetchMode);
+        const existing = inFlightStatusFetches.get(statusFetchKey)
+          ?? (statusFetchMode === 'light' ? inFlightStatusFetches.get(getStatusFetchKey(directory, 'full')) : undefined);
         if (existing) {
           return existing;
         }
@@ -428,13 +434,13 @@ export const useGitStore = create<GitStore>()(
           return statusChanged;
         })();
 
-        inFlightStatusFetchesByDirectory.set(directory, fetchPromise);
+        inFlightStatusFetches.set(statusFetchKey, fetchPromise);
 
         try {
           return await fetchPromise;
         } finally {
-          if (inFlightStatusFetchesByDirectory.get(directory) === fetchPromise) {
-            inFlightStatusFetchesByDirectory.delete(directory);
+          if (inFlightStatusFetches.get(statusFetchKey) === fetchPromise) {
+            inFlightStatusFetches.delete(statusFetchKey);
           }
         }
       },
