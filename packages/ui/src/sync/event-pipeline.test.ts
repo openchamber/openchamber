@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test"
 import type { Event, OpencodeClient } from "@opencode-ai/sdk/v2/client"
 import { createEventPipeline } from "./event-pipeline"
 
-const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+const failAfter = (ms: number) => new Promise<never>((_, reject) => {
+  setTimeout(() => reject(new Error("Timed out waiting for event pipeline flush")), ms)
+})
 
 function partUpdatedEvent(text: string): Event {
   return {
@@ -59,6 +61,10 @@ describe("createEventPipeline", () => {
     const streamFinished = new Promise<void>((resolve) => {
       resolveStreamFinished = resolve
     })
+    let resolveDelivered!: () => void
+    const deliveredAll = new Promise<void>((resolve) => {
+      resolveDelivered = resolve
+    })
     const delivered: Event[] = []
     const pipeline = createEventPipeline({
       sdk: createSdk([
@@ -66,14 +72,22 @@ describe("createEventPipeline", () => {
         deltaEvent("b"),
         partUpdatedEvent("ab"),
       ], resolveStreamFinished),
-      onEvent: (_directory, payload) => delivered.push(payload),
+      onEvent: (_directory, payload) => {
+        delivered.push(payload)
+        if (delivered.length === 3) {
+          resolveDelivered()
+        }
+      },
       transport: "sse",
       heartbeatTimeoutMs: 1_000,
     })
 
-    await streamFinished
-    await wait(40)
-    pipeline.cleanup()
+    try {
+      await streamFinished
+      await Promise.race([deliveredAll, failAfter(500)])
+    } finally {
+      pipeline.cleanup()
+    }
 
     expect(delivered.map((event) => {
       if (event.type === "message.part.delta") {
