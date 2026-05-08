@@ -66,7 +66,7 @@ export async function checkIsGitRepository(directory: string): Promise<boolean> 
 
 export async function getGitStatus(directory: string, options?: { mode?: 'light' }): Promise<import('./api/types').GitStatus> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtime.getGitStatus(directory);
+  if (runtime) return runtime.getGitStatus(directory, options);
   return gitHttp.getGitStatus(directory, options);
 }
 

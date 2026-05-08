@@ -342,6 +342,10 @@ export interface GitStatusResult {
   rebaseInProgress?: GitRebaseInProgress | null;
 }
 
+type GitStatusOptions = {
+  mode?: 'light';
+};
+
 /**
  * Map VS Code git status to our status codes
  */
@@ -374,7 +378,10 @@ function mapStatus(status: Status): string {
 /**
  * Get git status for a directory
  */
-export async function getGitStatus(directory: string): Promise<GitStatusResult> {
+export async function getGitStatus(directory: string, options?: GitStatusOptions): Promise<GitStatusResult> {
+  // The VS Code Git API path does not compute heavyweight diff stats today,
+  // but accepts the shared options contract so callers can rely on parity.
+  void options;
   const repo = await getRepository(directory);
   
   if (!repo) {
