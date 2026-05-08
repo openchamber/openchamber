@@ -388,11 +388,6 @@ export const useKeyboardShortcuts = () => {
           target?.getAttribute('data-terminal-hidden-input') === 'true'
         );
 
-        if (isInsideDialog || isSettingsMounted || isInsideTerminal) {
-          resetAbortPriming();
-          return;
-        }
-
         const {
           isSettingsDialogOpen,
           isCommandPaletteOpen,
@@ -404,10 +399,20 @@ export const useKeyboardShortcuts = () => {
           activeMainTab,
         } = useUIStore.getState();
 
+        if (isInsideDialog || isInsideTerminal) {
+          resetAbortPriming();
+          return;
+        }
+
         // If settings is open, close it
         if (isSettingsDialogOpen) {
           e.preventDefault();
           setSettingsDialogOpen(false);
+          resetAbortPriming();
+          return;
+        }
+
+        if (isSettingsMounted) {
           resetAbortPriming();
           return;
         }
