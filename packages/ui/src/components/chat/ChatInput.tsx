@@ -599,6 +599,9 @@ const ComposerActionButtons = React.memo(function ComposerActionButtons(props: C
     && prev.hasContent === next.hasContent
     && prev.currentSessionId === next.currentSessionId
     && prev.newSessionDraftOpen === next.newSessionDraftOpen
+    && prev.onPrimaryAction === next.onPrimaryAction
+    && prev.onQueueMessage === next.onQueueMessage
+    && prev.onAbort === next.onAbort
 ));
 
 const appendWithLineBreaks = (base: string, next: string): string => {
