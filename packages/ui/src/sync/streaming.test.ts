@@ -1,14 +1,17 @@
 import { beforeEach, describe, expect, test } from "bun:test"
-import type { Message, SessionStatus } from "@opencode-ai/sdk/v2/client"
+import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
+import type { HarnessMessage } from "@openchamber/harness-contracts"
 import { INITIAL_STATE, type State } from "./types"
 import { updateStreamingState, useStreamingStore } from "./streaming"
 
-const message = (id: string, role: "user" | "assistant"): Message => ({
+const message = (id: string, role: "user" | "assistant"): HarnessMessage => ({
   id,
+  sessionId: "ses_1",
   role,
-} as unknown as Message)
+  time: { created: 1 },
+})
 
-const stateWithMessages = (messages: Message[], status: SessionStatus = { type: "busy" } as SessionStatus): State => ({
+const stateWithMessages = (messages: HarnessMessage[], status: SessionStatus = { type: "busy" } as SessionStatus): State => ({
   ...INITIAL_STATE,
   session_status: {
     ses_1: status,

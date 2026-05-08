@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import type { Event, Part, PermissionRequest, QuestionRequest, SessionStatus } from "@opencode-ai/sdk/v2/client"
+import type { Event, PermissionRequest, QuestionRequest, SessionStatus } from "@opencode-ai/sdk/v2/client"
+import type { HarnessPart } from "@openchamber/harness-contracts"
 import { applyDirectoryEvent } from "../event-reducer"
 import { INITIAL_STATE, type State } from "../types"
 
@@ -52,7 +53,7 @@ describe("applyDirectoryEvent", () => {
 
   test("returns typed materialization when delta part is missing", () => {
     const result = applyDirectoryEvent(
-      state({ part: { msg_1: [{ id: "prt_2", messageID: "msg_1", type: "text", text: "" } as Part] } }),
+      state({ part: { msg_1: [{ id: "prt_2", sessionId: "ses_1", messageId: "msg_1", kind: "text", text: "" } satisfies HarnessPart] } }),
       deltaEvent(),
     )
 

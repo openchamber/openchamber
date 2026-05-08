@@ -77,6 +77,7 @@ const toViewKeyBindings = (bindings: readonly unknown[]): readonly KeyBinding[] 
 const forceParsingCompat = forceParsing as unknown as (view: EditorView, upto?: number, timeout?: number) => boolean;
 const openSearchPanelCompat = openSearchPanel as unknown as (view: EditorView) => void;
 const closeSearchPanelCompat = closeSearchPanel as unknown as (view: EditorView) => void;
+const searchPanelOpenCompat = searchPanelOpen as unknown as (state: EditorState) => boolean;
 
 // BlockWidget class definition moved inside helper or adapted to take map
 class BlockWidget extends WidgetType {
@@ -134,7 +135,7 @@ const createBlockWidgetsExtension = (widgets: BlockWidgetDef[] | undefined, cont
       // If the widgets prop changed, the compartment reconfigure will handle it (create() will run).
       return deco.map(tr.changes);
     },
-    provide: f => EditorView.decorations.from(f)
+    provide: (field) => EditorView.decorations.from(field as never)
   });
 };
 
@@ -294,8 +295,8 @@ export function CodeMirrorEditor({
             syncPortalWidgets(blockWidgetsRef.current);
           }
           // Detect search panel open/close and sync back to React state
-          const wasOpen = searchPanelOpen(update.startState);
-          const isOpen = searchPanelOpen(update.state);
+          const wasOpen = searchPanelOpenCompat(update.startState as unknown as EditorState);
+          const isOpen = searchPanelOpenCompat(update.state as unknown as EditorState);
           if (wasOpen !== isOpen) {
             onSearchOpenChangeRef.current?.(isOpen);
           }
@@ -316,7 +317,7 @@ export function CodeMirrorEditor({
     });
 
     viewRef.current = new EditorView({
-      state,
+      state: state as never,
       parent: hostRef.current,
     });
 

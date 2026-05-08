@@ -73,7 +73,7 @@ function createDirectoryStore(initial: Partial<State>): StoreApi<DirectoryStore>
   return create<DirectoryStore>()((set) => ({
     ...INITIAL_STATE,
     ...initial,
-    session: initial.session ?? [{ id: "ses_a", title: "ses_a", time: { created: 1, updated: 1 }, version: "1" } as State["session"][number]],
+    session: initial.session ?? [{ id: "ses_a", backendId: "opencode", title: "ses_a", time: { created: 1, updated: 1 }, raw: { version: "1" } } satisfies State["session"][number]],
     patch: (partial) => set(partial),
     replace: (next) => set(next),
   }))
