@@ -782,7 +782,6 @@ const connectTerminalStreamViaSse = (
   let retryTimeout: ReturnType<typeof setTimeout> | null = null;
   let connectionTimeoutId: ReturnType<typeof setTimeout> | null = null;
   let isClosed = false;
-  let hasDispatchedOpen = false;
   let terminalExited = false;
 
   const clearTimeouts = () => {
@@ -846,20 +845,21 @@ const connectTerminalStreamViaSse = (
     }
 
     eventSource = new EventSource(`/api/terminal/${sessionId}/stream`);
+    let opened = false;
 
     connectionTimeoutId = setTimeout(() => {
-      if (!hasDispatchedOpen && eventSource?.readyState !== EventSource.OPEN) {
+      if (!opened && eventSource?.readyState !== EventSource.OPEN) {
         eventSource?.close();
         handleError(new Error('Connection timeout'), false);
       }
     }, connectionTimeout);
 
     eventSource.onopen = () => {
-      if (hasDispatchedOpen) {
+      if (opened) {
         return;
       }
 
-      hasDispatchedOpen = true;
+      opened = true;
       retryCount = 0;
       clearTimeouts();
       onEvent({ type: 'connected' });
