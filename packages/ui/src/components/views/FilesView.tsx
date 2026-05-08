@@ -2111,9 +2111,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     }
 
     if (selectedFile?.path !== targetPath) {
-      if (selectedPath !== targetPath) {
-        setSelectedPath(root, targetPath);
-      }
+      void handleSelectFile(toFileNode(targetPath));
       return;
     }
 
@@ -2192,13 +2190,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     fileLoading,
     isSelectedImage,
     loadedFilePath,
+    handleSelectFile,
     pendingFileNavigation,
     root,
     selectedFile?.path,
-    selectedPath,
     setPendingFileNavigation,
-    setSelectedPath,
     textViewMode,
+    toFileNode,
   ]);
 
   React.useEffect(() => {
@@ -2213,9 +2211,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     }
 
     if (selectedFile?.path !== targetPath) {
-      if (selectedPath !== targetPath) {
-        setSelectedPath(root, targetPath);
-      }
+      void handleSelectFile(toFileNode(targetPath));
       return;
     }
 
@@ -2236,15 +2232,15 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     canEdit,
     fileError,
     fileLoading,
+    handleSelectFile,
     isSelectedImage,
     loadedFilePath,
     pendingFileFocusPath,
     root,
     selectedFile?.path,
-    selectedPath,
     setPendingFileFocusPath,
-    setSelectedPath,
     textViewMode,
+    toFileNode,
   ]);
 
   const nudgeEditorSelectionAboveKeyboard = React.useCallback((view: EditorView | null) => {
