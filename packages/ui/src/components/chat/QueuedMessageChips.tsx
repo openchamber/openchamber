@@ -29,34 +29,34 @@ const QueuedMessageChip = memo(({ message, sessionId, onEdit }: QueuedMessageChi
     const attachmentCount = message.attachments?.length ?? 0;
 
     return (
-        <button
-            type="button"
-            onClick={() => onEdit(message)}
-            className="flex w-full items-center gap-1.5 text-sm hover:opacity-80 transition-opacity text-left h-5 px-1"
-        >
-            <RiMessage2Line 
-                className="h-4 w-4 flex-shrink-0 text-muted-foreground" 
-            />
-            <span className="text-muted-foreground flex-shrink-0">
-                Queued
-                {attachmentCount > 0 && (
-                    <span className="ml-1">{t('chat.queuedMessage.attachments', { count: attachmentCount })}</span>
-                )}
-            </span>
-            <span className="text-foreground truncate">
-                {firstLine || t('chat.queuedMessage.empty')}
-            </span>
-            <span
-                onClick={(e) => {
-                    e.stopPropagation();
-                    removeFromQueue(sessionId, message.id);
-                }}
-                className="flex items-center justify-center h-6 w-6 flex-shrink-0 hover:bg-[var(--interactive-hover)] rounded-full transition-colors cursor-pointer"
+        <div className="flex w-full items-center gap-1.5 text-sm h-5 px-1">
+            <button
+                type="button"
+                onClick={() => onEdit(message)}
+                className="flex min-w-0 flex-1 items-center gap-1.5 text-left hover:opacity-80 transition-opacity"
+            >
+                <RiMessage2Line
+                    className="h-4 w-4 flex-shrink-0 text-muted-foreground"
+                />
+                <span className="text-muted-foreground flex-shrink-0">
+                    Queued
+                    {attachmentCount > 0 && (
+                        <span className="ml-1">{t('chat.queuedMessage.attachments', { count: attachmentCount })}</span>
+                    )}
+                </span>
+                <span className="text-foreground truncate">
+                    {firstLine || t('chat.queuedMessage.empty')}
+                </span>
+            </button>
+            <button
+                type="button"
+                onClick={() => removeFromQueue(sessionId, message.id)}
+                className="flex items-center justify-center h-6 w-6 flex-shrink-0 hover:bg-[var(--interactive-hover)] rounded-full transition-colors"
                 aria-label={t('chat.queuedMessage.removeAria')}
             >
                 <RiCloseLine className="h-4 w-4 text-muted-foreground" />
-            </span>
-        </button>
+            </button>
+        </div>
     );
 });
 
