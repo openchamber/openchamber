@@ -69,6 +69,16 @@ export const InstallFromRepoDialog: React.FC<InstallFromRepoDialogProps> = ({ op
 
   const [identities, setIdentities] = React.useState<IdentityOption[]>([]);
   const [gitIdentityId, setGitIdentityId] = React.useState<string | null>(null);
+  const scanRequestIdRef = React.useRef(0);
+
+  const invalidateScan = React.useCallback((options?: { clearIdentities?: boolean }) => {
+    scanRequestIdRef.current += 1;
+    setItems([]);
+    setSelected({});
+    if (options?.clearIdentities) {
+      setIdentities([]);
+    }
+  }, []);
 
   const [conflictsOpen, setConflictsOpen] = React.useState(false);
   const [conflicts, setConflicts] = React.useState<SkillConflict[]>([]);
@@ -83,6 +93,7 @@ export const InstallFromRepoDialog: React.FC<InstallFromRepoDialogProps> = ({ op
   } | null>(null);
 
   React.useEffect(() => {
+    scanRequestIdRef.current += 1;
     if (!open) return;
     setSource('');
     setSubpath('');
@@ -190,11 +201,20 @@ export const InstallFromRepoDialog: React.FC<InstallFromRepoDialogProps> = ({ op
       return;
     }
 
+    setItems([]);
+    setSelected({});
+    const requestId = scanRequestIdRef.current + 1;
+    scanRequestIdRef.current = requestId;
+
     const result = await scanRepo({
       source: trimmed,
       subpath: subpath.trim() || undefined,
       gitIdentityId: gitIdentityId || undefined,
     });
+
+    if (scanRequestIdRef.current !== requestId) {
+      return;
+    }
 
     if (!result.ok) {
       if (result.error?.kind === 'authRequired') {
@@ -329,7 +349,10 @@ export const InstallFromRepoDialog: React.FC<InstallFromRepoDialogProps> = ({ op
               <div className="flex items-center gap-2">
                 <Input
                   value={source}
-                  onChange={(e) => setSource(e.target.value)}
+                  onChange={(e) => {
+                    setSource(e.target.value);
+                    invalidateScan({ clearIdentities: true });
+                  }}
                   placeholder={t('settings.skills.catalog.shared.field.repositoryPlaceholder')}
                   className="text-foreground placeholder:text-muted-foreground"
                 />
@@ -357,7 +380,10 @@ export const InstallFromRepoDialog: React.FC<InstallFromRepoDialogProps> = ({ op
                 <label className="typography-ui-label font-medium text-foreground">{t('settings.skills.catalog.shared.field.optionalSubpath')}</label>
                 <Input
                   value={subpath}
-                  onChange={(e) => setSubpath(e.target.value)}
+                  onChange={(e) => {
+                    setSubpath(e.target.value);
+                    invalidateScan({ clearIdentities: true });
+                  }}
                   placeholder={t('settings.skills.catalog.shared.field.subpathPlaceholder')}
                   className="text-foreground placeholder:text-muted-foreground"
                 />
@@ -429,7 +455,13 @@ export const InstallFromRepoDialog: React.FC<InstallFromRepoDialogProps> = ({ op
                   {t('settings.skills.catalog.installFromRepo.authDescription')}
                 </div>
                 <div className="mt-2">
-                  <Select value={gitIdentityId || ''} onValueChange={(v) => setGitIdentityId(v)}>
+                  <Select
+                    value={gitIdentityId || ''}
+                    onValueChange={(v) => {
+                      setGitIdentityId(v);
+                      invalidateScan();
+                    }}
+                  >
                     <SelectTrigger size="lg" className="w-full justify-between">
                       <span>{identities.find((i) => i.id === gitIdentityId)?.name || t('settings.skills.catalog.shared.auth.chooseIdentity')}</span>
                     </SelectTrigger>
