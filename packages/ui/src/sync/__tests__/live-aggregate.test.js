@@ -81,9 +81,16 @@ describe('live aggregate', () => {
   })
 
   it('detects retry metadata changes in status maps', () => {
+    const retryStatus = { type: 'retry', message: 'retrying|server|message', attempt: 1, next: 100 }
+
     expect(areStatusMapsEquivalent(
-      { 'ses-1': { type: 'retry', message: 'retrying', attempt: 1, next: 100 } },
-      { 'ses-1': { type: 'retry', message: 'retrying', attempt: 2, next: 200 } },
+      { 'ses-1': retryStatus },
+      { 'ses-1': { ...retryStatus } },
+    )).toBe(true)
+
+    expect(areStatusMapsEquivalent(
+      { 'ses-1': retryStatus },
+      { 'ses-1': { ...retryStatus, attempt: 2, next: 200 } },
     )).toBe(false)
   })
 
