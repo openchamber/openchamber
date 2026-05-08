@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { Event, Part } from "@opencode-ai/sdk/v2/client"
+import type { Event, Part, PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2/client"
 import { applyDirectoryEvent } from "../event-reducer"
 import { INITIAL_STATE, type State } from "../types"
 
@@ -85,5 +85,53 @@ describe("applyDirectoryEvent", () => {
 
     expect(draft.part.msg_1.map((item) => item.id)).toEqual(["prt_1"])
     expect(result).toBe(true)
+  })
+
+  test("updates permission request arrays immutably", () => {
+    const initialPermissions = [
+      { id: "perm_1", sessionID: "ses_1" } as PermissionRequest,
+    ]
+    const draft = state({ permission: { ses_1: initialPermissions } })
+
+    applyDirectoryEvent(draft, {
+      type: "permission.asked",
+      properties: { id: "perm_2", sessionID: "ses_1" } as PermissionRequest,
+    } as Event)
+
+    expect(draft.permission.ses_1).not.toBe(initialPermissions)
+    expect(draft.permission.ses_1.map((item) => item.id)).toEqual(["perm_1", "perm_2"])
+
+    const afterAsk = draft.permission.ses_1
+    applyDirectoryEvent(draft, {
+      type: "permission.replied",
+      properties: { sessionID: "ses_1", requestID: "perm_1" },
+    } as Event)
+
+    expect(draft.permission.ses_1).not.toBe(afterAsk)
+    expect(draft.permission.ses_1.map((item) => item.id)).toEqual(["perm_2"])
+  })
+
+  test("updates question request arrays immutably", () => {
+    const initialQuestions = [
+      { id: "ques_1", sessionID: "ses_1" } as QuestionRequest,
+    ]
+    const draft = state({ question: { ses_1: initialQuestions } })
+
+    applyDirectoryEvent(draft, {
+      type: "question.asked",
+      properties: { id: "ques_2", sessionID: "ses_1" } as QuestionRequest,
+    } as Event)
+
+    expect(draft.question.ses_1).not.toBe(initialQuestions)
+    expect(draft.question.ses_1.map((item) => item.id)).toEqual(["ques_1", "ques_2"])
+
+    const afterAsk = draft.question.ses_1
+    applyDirectoryEvent(draft, {
+      type: "question.replied",
+      properties: { sessionID: "ses_1", requestID: "ques_1" },
+    } as Event)
+
+    expect(draft.question.ses_1).not.toBe(afterAsk)
+    expect(draft.question.ses_1.map((item) => item.id)).toEqual(["ques_2"])
   })
 })
