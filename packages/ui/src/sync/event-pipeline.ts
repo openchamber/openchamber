@@ -211,10 +211,6 @@ export function createEventPipeline(input: EventPipelineInput) {
     if (payload.type === "lsp.updated") {
       return "lsp.updated"
     }
-    if (payload.type === "message.part.updated") {
-      const part = (payload.properties as { part: { messageID: string; id: string } }).part
-      return `message.part.updated:${part.messageID}:${part.id}`
-    }
     if (payload.type === "message.part.delta") {
       const props = payload.properties as { messageID: string; partID: string; field: string }
       return `message.part.delta:${props.messageID}:${props.partID}:${props.field}`
