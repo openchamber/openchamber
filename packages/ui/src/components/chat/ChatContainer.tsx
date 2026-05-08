@@ -16,6 +16,7 @@ import { useChatScrollManager, type AnimationHandlers, type ContentChangeReason 
 import { useChatTimelineController } from './hooks/useChatTimelineController';
 import { TimelineDialog } from './TimelineDialog';
 import { useChatTurnNavigation } from './hooks/useChatTurnNavigation';
+import { computeSessionIsWorking } from './lib/computeSessionIsWorking';
 import { useDeviceInfo } from '@/lib/device';
 import { Button } from '@/components/ui/button';
 import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
@@ -422,22 +423,25 @@ export const ChatContainer: React.FC = () => {
         return flattenBlockingRequests(questionsMap, scopedSessionIds);
     }, [questionsMap, scopedSessionIds]);
     const sessionIsWorking = React.useMemo(() => {
-        if (!currentSessionId || sessionPermissions.length > 0 || sessionQuestions.length > 0) {
-            return false;
-        }
-
-        const statusType = sessionStatusForCurrent.type ?? 'idle';
-        if (statusType === 'busy' || statusType === 'retry') {
-            return true;
-        }
-
         const lastMessage = sessionMessages[sessionMessages.length - 1]?.info as Message | undefined;
-        return Boolean(
-            lastMessage
-            && lastMessage.role === 'assistant'
-            && typeof (lastMessage as { time?: { completed?: number } }).time?.completed !== 'number',
-        );
-    }, [currentSessionId, sessionMessages, sessionPermissions.length, sessionQuestions.length, sessionStatusForCurrent.type]);
+        return computeSessionIsWorking({
+            sessionId: currentSessionId,
+            hasBlockingRequests: sessionPermissions.length > 0 || sessionQuestions.length > 0,
+            streamingMessageId,
+            activeStreamingPhase,
+            statusType: sessionStatusForCurrent.type,
+            hasLiveStatus: Boolean(sessionStatusForCurrent.type),
+            lastMessage,
+        });
+    }, [
+        activeStreamingPhase,
+        currentSessionId,
+        sessionMessages,
+        sessionPermissions.length,
+        sessionQuestions.length,
+        sessionStatusForCurrent.type,
+        streamingMessageId,
+    ]);
     const activeRetryStatus = React.useMemo(() => {
         if (!currentSessionId || sessionStatusForCurrent.type !== 'retry') {
             return null;
