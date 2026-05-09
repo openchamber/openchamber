@@ -47,12 +47,16 @@ import {
   unshareSession as unshareSessionAction,
   optimisticSend,
   refetchSessionMessages,
+  revertToMessage as revertToMessageAction,
+  unrevertSession as unrevertSessionAction,
+  forkFromMessage as forkFromMessageAction,
 } from "./session-actions"
 import { useInputStore, type SyntheticContextPart } from "./input-store"
 import { useSelectionStore } from "./selection-store"
 import { useViewportStore } from "./viewport-store"
 import { useSessionWorktreeStore } from "./session-worktree-store"
 import { getAttachedSessionDirectory } from "./session-worktree-contract"
+import { setSessionOpener } from "./session-navigation"
 
 export type { AttachedFile }
 
@@ -950,8 +954,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // revertToMessage — delegates to session-actions (single implementation)
   // ---------------------------------------------------------------------------
   revertToMessage: async (sessionId, messageId) => {
-    const { revertToMessage: revert } = await import("./session-actions")
-    await revert(sessionId, messageId)
+    await revertToMessageAction(sessionId, messageId)
   },
 
   // ---------------------------------------------------------------------------
@@ -1015,8 +1018,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       toast.success(`Redid to: ${preview}`)
     } else {
       // Full unrevert
-      const { unrevertSession } = await import("./session-actions")
-      await unrevertSession(sessionId)
+      await unrevertSessionAction(sessionId)
 
       const { toast } = await import("sonner")
       toast.success("Restored all messages")
@@ -1032,8 +1034,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     if (!existingSession) return
 
     try {
-      const { forkFromMessage: fork } = await import("./session-actions")
-      await fork(sessionId, messageId)
+      await forkFromMessageAction(sessionId, messageId)
 
       const { toast } = await import("sonner")
       toast.success(`Forked from ${existingSession.title}`)
@@ -1190,3 +1191,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     return get().sessionPlanAvailable.get(sessionId) ?? false
   },
 }))
+
+setSessionOpener((sessionID, directory) => {
+  useSessionUIStore.getState().setCurrentSession(sessionID, directory)
+})

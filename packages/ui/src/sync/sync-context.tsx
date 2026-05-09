@@ -37,6 +37,7 @@ import type { PermissionRequest } from "@/types/permission"
 import type { QuestionRequest } from "@/types/question"
 import * as sessionActions from "./session-actions"
 import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./materialization"
+import { openSessionFromToast } from "./session-navigation"
 
 // ---------------------------------------------------------------------------
 // Context
@@ -236,14 +237,6 @@ const getQuestionToastKey = (sessionID?: string, requestID?: string) => {
 const getPermissionToastKey = (sessionID?: string, requestID?: string) => {
   if (!sessionID || !requestID) return null
   return `${sessionID}:${requestID}`
-}
-
-const openSessionFromToast = (sessionID: string, directory: string) => {
-  void import("./session-ui-store")
-    .then(({ useSessionUIStore }) => {
-      useSessionUIStore.getState().setCurrentSession(sessionID, directory)
-    })
-    .catch(() => undefined)
 }
 
 export function setActiveSession(directory: string, sessionId: string) {
