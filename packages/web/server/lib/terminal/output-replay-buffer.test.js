@@ -56,6 +56,15 @@ describe('terminal output replay buffer', () => {
     expect(bufferState.totalBytes).toBe(4);
   });
 
+  it('does not split multibyte characters when trimming oversized chunks', () => {
+    const bufferState = createTerminalOutputReplayBuffer();
+    const chunk = appendTerminalOutputReplayChunk(bufferState, '🙂x', 2);
+
+    expect(chunk?.data).toBe('x');
+    expect(chunk?.bytes).toBe(1);
+    expect(bufferState.totalBytes).toBe(1);
+  });
+
   it('uses the default max bytes when not provided', () => {
     const bufferState = createTerminalOutputReplayBuffer();
     const chunk = appendTerminalOutputReplayChunk(bufferState, 'ok');
