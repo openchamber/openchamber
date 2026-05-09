@@ -15,11 +15,19 @@ function waitForReconnectDelay(ms, signal) {
   }
 
   return new Promise((resolve) => {
-    const timeout = setTimeout(resolve, Math.max(0, ms));
-    signal?.addEventListener('abort', () => {
-      clearTimeout(timeout);
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener('abort', onAbort);
       resolve();
-    }, { once: true });
+    };
+    const timeout = setTimeout(finish, Math.max(0, ms));
+    const onAbort = () => {
+      clearTimeout(timeout);
+      finish();
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
   });
 }
 
