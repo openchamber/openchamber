@@ -73,4 +73,30 @@ describe('session folders routes', () => {
     expect(new Set(tempPaths).size).toBe(2);
     expect(tempPaths.every((tempPath) => tempPath.includes('sessions-directories.json.tmp-'))).toBe(true);
   });
+
+  it('removes the temp file when rename fails', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    const fsPromises = {
+      mkdir: vi.fn(async () => {}),
+      writeFile: vi.fn(async () => {}),
+      rename: vi.fn(async () => {
+        throw new Error('rename failed');
+      }),
+      unlink: vi.fn(async () => {}),
+    };
+
+    registerSessionFoldersRoutes(app, {
+      fsPromises,
+      path,
+      openchamberDataDir: '/tmp/openchamber-test',
+    });
+
+    const handler = getRoute('POST', '/api/session-folders');
+    const response = createMockResponse();
+
+    await handler({ body: { version: 1, updatedAt: 1 } }, response);
+
+    expect(response.statusCode).toBe(500);
+    expect(fsPromises.unlink).toHaveBeenCalledWith(expect.stringContaining('sessions-directories.json.tmp-'));
+  });
 });
