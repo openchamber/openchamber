@@ -7,6 +7,11 @@ type PwaDetectionState = {
   browserTab: boolean;
 };
 
+type MediaQueryListWithLegacyListeners = MediaQueryList & {
+  addListener?: (listener: () => void) => void;
+  removeListener?: (listener: () => void) => void;
+};
+
 const getState = (): PwaDetectionState => {
   const displayMode = getPWADisplayMode();
   return {
@@ -24,7 +29,7 @@ export const usePwaDetection = (): PwaDetectionState => {
       return;
     }
 
-    const queries = [
+    const queries: MediaQueryListWithLegacyListeners[] = [
       window.matchMedia('(display-mode: standalone)'),
       window.matchMedia('(display-mode: minimal-ui)'),
       window.matchMedia('(display-mode: fullscreen)'),
@@ -38,7 +43,11 @@ export const usePwaDetection = (): PwaDetectionState => {
     onChange();
 
     for (const query of queries) {
-      query.addEventListener('change', onChange);
+      if (typeof query.addEventListener === 'function') {
+        query.addEventListener('change', onChange);
+      } else if (typeof query.addListener === 'function') {
+        query.addListener(onChange);
+      }
     }
 
     window.addEventListener('appinstalled', onChange);
@@ -46,7 +55,11 @@ export const usePwaDetection = (): PwaDetectionState => {
 
     return () => {
       for (const query of queries) {
-        query.removeEventListener('change', onChange);
+        if (typeof query.removeEventListener === 'function') {
+          query.removeEventListener('change', onChange);
+        } else if (typeof query.removeListener === 'function') {
+          query.removeListener(onChange);
+        }
       }
       window.removeEventListener('appinstalled', onChange);
       window.removeEventListener('focus', onChange);
