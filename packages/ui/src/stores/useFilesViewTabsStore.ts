@@ -238,13 +238,18 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
               return state;
             }
 
-            const prefixWithSlash = normalizedPrefix.endsWith('/') ? normalizedPrefix : `${normalizedPrefix}/`;
-            const openPaths = current.openPaths.filter((p) => p !== normalizedPrefix && !p.startsWith(prefixWithSlash));
+            const comparablePrefix = toComparablePath(normalizedPrefix);
+            const comparablePrefixWithSlash = comparablePrefix.endsWith('/') ? comparablePrefix : `${comparablePrefix}/`;
+            const isWithinPrefix = (candidate: string) => {
+              const comparablePath = toComparablePath(candidate);
+              return comparablePath === comparablePrefix || comparablePath.startsWith(comparablePrefixWithSlash);
+            };
+            const openPaths = current.openPaths.filter((p) => !isWithinPrefix(p));
             if (openPaths.length === current.openPaths.length) {
               return state;
             }
 
-            const selectedPath = current.selectedPath && (current.selectedPath === normalizedPrefix || current.selectedPath.startsWith(prefixWithSlash))
+            const selectedPath = current.selectedPath && isWithinPrefix(current.selectedPath)
               ? (openPaths[0] ?? null)
               : current.selectedPath;
 
