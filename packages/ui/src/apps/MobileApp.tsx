@@ -38,7 +38,7 @@ import { MobileChangesSurface } from './MobileChangesSurface';
 import { MobileFilesSurface } from './MobileFilesSurface';
 import { MobileSessionsSheet } from './MobileSessionsSheet';
 import { MobileSurfaceShell } from './MobileSurfaceShell';
-import { DedicatedMobileAppProvider } from './mobileAppContext';
+import { DedicatedMobileAppProvider, type MobileAppActions } from './mobileAppContext';
 import { useAppFontEffects } from './useAppFontEffects';
 
 const MOBILE_SETTINGS_PAGES = [
@@ -216,9 +216,28 @@ const MobileShell: React.FC = () => {
   const [changesOpen, setChangesOpen] = React.useState(false);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [overflowOpen, setOverflowOpen] = React.useState(false);
+  // When set, the Changes surface opens directly into the per-file diff for this path.
+  const [pendingChangesDiffPath, setPendingChangesDiffPath] = React.useState<string | null>(null);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const gitStatus = useGitStatus(normalizePath(currentDirectory) || null);
   const dirtyChangeCount = gitStatus?.files?.length ?? 0;
+
+  const mobileActions = React.useMemo<MobileAppActions>(
+    () => ({
+      openChanges: ({ diffPath } = {}) => {
+        setPendingChangesDiffPath(diffPath ?? null);
+        setChangesOpen(true);
+      },
+      openFiles: () => setFilesOpen(true),
+      openSettings: () => setSettingsOpen(true),
+    }),
+    [],
+  );
+
+  const closeChanges = React.useCallback(() => {
+    setChangesOpen(false);
+    setPendingChangesDiffPath(null);
+  }, []);
 
   const overflowItems: OverflowItem[] = React.useMemo(
     () => [
@@ -246,66 +265,68 @@ const MobileShell: React.FC = () => {
   );
 
   return (
-    <div
-      className="main-content-safe-area flex h-[100dvh] flex-col bg-background text-foreground"
-      data-page-scroll-lock="true"
-    >
-      <MobileHeader
-        onOpenSessions={() => setSessionsSheetOpen(true)}
-        onOpenMenu={() => setOverflowOpen(true)}
-      />
-      <main className="relative min-h-0 flex-1 overflow-hidden" data-page-scroll-lock="true">
-        <ErrorBoundary>
-          <ChatView />
-        </ErrorBoundary>
-      </main>
-
-      <MobileOverflowMenu
-        open={overflowOpen}
-        onClose={() => setOverflowOpen(false)}
-        items={overflowItems}
-      />
-
-      <MobileSessionsSheet open={sessionsSheetOpen} onOpenChange={setSessionsSheetOpen} />
-
-      <MobileSurfaceShell
-        open={filesOpen}
-        onClose={() => setFilesOpen(false)}
-        ariaLabel={t('mobile.menu.files')}
-        headerless
+    <DedicatedMobileAppProvider actions={mobileActions}>
+      <div
+        className="main-content-safe-area flex h-[100dvh] flex-col bg-background text-foreground"
+        data-page-scroll-lock="true"
       >
-        <ErrorBoundary>
-          <MobileFilesSurface onClose={() => setFilesOpen(false)} />
-        </ErrorBoundary>
-      </MobileSurfaceShell>
+        <MobileHeader
+          onOpenSessions={() => setSessionsSheetOpen(true)}
+          onOpenMenu={() => setOverflowOpen(true)}
+        />
+        <main className="relative min-h-0 flex-1 overflow-hidden" data-page-scroll-lock="true">
+          <ErrorBoundary>
+            <ChatView />
+          </ErrorBoundary>
+        </main>
 
-      <MobileSurfaceShell
-        open={changesOpen}
-        onClose={() => setChangesOpen(false)}
-        ariaLabel={t('mobile.menu.changes')}
-        headerless
-      >
-        <ErrorBoundary>
-          <MobileChangesSurface onClose={() => setChangesOpen(false)} />
-        </ErrorBoundary>
-      </MobileSurfaceShell>
+        <MobileOverflowMenu
+          open={overflowOpen}
+          onClose={() => setOverflowOpen(false)}
+          items={overflowItems}
+        />
 
-      <MobileSurfaceShell
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        ariaLabel={t('mobile.menu.settings')}
-        headerless
-      >
-        <ErrorBoundary>
-          <SettingsView
-            forceMobile
-            isWindowed
-            visiblePageSlugs={[...MOBILE_SETTINGS_PAGES]}
-            onClose={() => setSettingsOpen(false)}
-          />
-        </ErrorBoundary>
-      </MobileSurfaceShell>
-    </div>
+        <MobileSessionsSheet open={sessionsSheetOpen} onOpenChange={setSessionsSheetOpen} />
+
+        <MobileSurfaceShell
+          open={filesOpen}
+          onClose={() => setFilesOpen(false)}
+          ariaLabel={t('mobile.menu.files')}
+          headerless
+        >
+          <ErrorBoundary>
+            <MobileFilesSurface onClose={() => setFilesOpen(false)} />
+          </ErrorBoundary>
+        </MobileSurfaceShell>
+
+        <MobileSurfaceShell
+          open={changesOpen}
+          onClose={closeChanges}
+          ariaLabel={t('mobile.menu.changes')}
+          headerless
+        >
+          <ErrorBoundary>
+            <MobileChangesSurface onClose={closeChanges} initialDiffPath={pendingChangesDiffPath} />
+          </ErrorBoundary>
+        </MobileSurfaceShell>
+
+        <MobileSurfaceShell
+          open={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+          ariaLabel={t('mobile.menu.settings')}
+          headerless
+        >
+          <ErrorBoundary>
+            <SettingsView
+              forceMobile
+              isWindowed
+              visiblePageSlugs={[...MOBILE_SETTINGS_PAGES]}
+              onClose={() => setSettingsOpen(false)}
+            />
+          </ErrorBoundary>
+        </MobileSurfaceShell>
+      </div>
+    </DedicatedMobileAppProvider>
   );
 };
 
@@ -431,15 +452,13 @@ export function MobileApp({ apis }: MobileAppProps) {
     <ErrorBoundary>
       <SyncProvider sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
         <RuntimeAPIProvider apis={apis}>
-          <DedicatedMobileAppProvider>
-            <TooltipProvider delayDuration={300} skipDelayDuration={150}>
-              <div className="h-full bg-background text-foreground">
-                <SyncAppEffects embeddedBackgroundWorkEnabled={isInitialized} />
-                <MobileShell />
-                <Toaster />
-              </div>
-            </TooltipProvider>
-          </DedicatedMobileAppProvider>
+          <TooltipProvider delayDuration={300} skipDelayDuration={150}>
+            <div className="h-full bg-background text-foreground">
+              <SyncAppEffects embeddedBackgroundWorkEnabled={isInitialized} />
+              <MobileShell />
+              <Toaster />
+            </div>
+          </TooltipProvider>
         </RuntimeAPIProvider>
       </SyncProvider>
     </ErrorBoundary>

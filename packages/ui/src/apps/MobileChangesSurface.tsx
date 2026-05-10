@@ -29,9 +29,15 @@ const normalizePath = (value?: string | null): string => (value || '').replace(/
 type MobileChangesSurfaceProps = {
   /** When provided, the list header gets a close X that calls this; used when the surface is hosted in MobileSurfaceShell. */
   onClose?: () => void;
+  /**
+   * When set (and non-null), the surface opens directly into the per-file diff view for this
+   * relative path. Updating it (incl. setting it to a different path while open) routes the
+   * surface to that diff. Setting it back to null leaves the user on the current internal route.
+   */
+  initialDiffPath?: string | null;
 };
 
-export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onClose }) => {
+export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onClose, initialDiffPath }) => {
   const { t } = useI18n();
   const { git } = useRuntimeAPIs();
   const currentDirectory = normalizePath(useEffectiveDirectory() ?? null);
@@ -46,7 +52,17 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
   const getDiff = useGitStore((state) => state.getDiff);
   const setDiff = useGitStore((state) => state.setDiff);
 
-  const [route, setRoute] = React.useState<{ type: 'list' } | { type: 'diff'; path: string }>({ type: 'list' });
+  const [route, setRoute] = React.useState<{ type: 'list' } | { type: 'diff'; path: string }>(
+    () => (initialDiffPath ? { type: 'diff', path: initialDiffPath } : { type: 'list' }),
+  );
+
+  // Allow the host (MobileApp) to push us into a specific diff when the surface
+  // is reopened or when an external trigger (e.g. PendingChangesBar tap) requests
+  // a different file mid-session.
+  React.useEffect(() => {
+    if (!initialDiffPath) return;
+    setRoute((current) => (current.type === 'diff' && current.path === initialDiffPath ? current : { type: 'diff', path: initialDiffPath }));
+  }, [initialDiffPath]);
   const [syncAction, setSyncAction] = React.useState<SyncAction>(null);
   const [commitAction, setCommitAction] = React.useState<CommitAction>(null);
   const [commitMessage, setCommitMessage] = React.useState('');
@@ -536,7 +552,11 @@ const MobileDiffDetail: React.FC<{
         ) : isImageFile(path) ? (
           <MobileChangesState icon message={t('mobile.changes.diffDetail.imageUnavailable')} />
         ) : (
-          <ScrollShadow className="h-full overflow-y-auto overflow-x-hidden p-3">
+          <ScrollShadow
+            className="h-full overflow-y-auto overflow-x-hidden p-3"
+            data-diff-virtual-root
+            data-diff-virtual-content
+          >
             <PierreDiffViewer
               original={diff.original}
               modified={diff.modified}
