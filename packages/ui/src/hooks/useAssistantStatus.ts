@@ -224,7 +224,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
         let activePartType: 'text' | 'tool' | 'reasoning' | 'editing' | undefined = undefined;
         let activeToolName: string | undefined = undefined;
 
-        const editingTools = new Set(['edit', 'write', 'apply_patch']);
+        const editingTools = new Set(['edit', 'write', 'multiedit', 'apply_patch']);
 
         for (let i = (lastAssistant.parts ?? []).length - 1; i >= 0; i -= 1) {
             const part = lastAssistant.parts?.[i];
