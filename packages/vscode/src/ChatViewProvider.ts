@@ -103,7 +103,23 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     void this._broadcastActiveEditorFile();
 
     webviewView.onDidDispose(() => {
+      for (const controller of this._sseStreams.values()) {
+        controller.abort();
+      }
+      this._sseStreams.clear();
+      if (this._broadcastSelectionDebounce !== undefined) {
+        clearTimeout(this._broadcastSelectionDebounce);
+        this._broadcastSelectionDebounce = undefined;
+      }
+      if (this._clearActiveEditorFileTimer !== undefined) {
+        clearTimeout(this._clearActiveEditorFileTimer);
+        this._clearActiveEditorFileTimer = undefined;
+      }
+      this._lastActiveEditorFilePayload = null;
       this._clearPendingMessages();
+      if (this._view === webviewView) {
+        this._view = undefined;
+      }
     });
 
     webviewView.webview.onDidReceiveMessage(async (message: (BridgeRequest & { _msgId?: string }) | { type: 'bridge:ack'; _msgId: string }) => {
