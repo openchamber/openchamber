@@ -166,7 +166,7 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
         addOpenPath: (root, path) => {
           const normalizedRoot = normalizePath((root || '').trim());
           const normalizedPath = normalizePath((path || '').trim());
-          if (!normalizedRoot || !normalizedPath) {
+          if (!normalizedRoot || !normalizedPath || !isPathWithinRoot(normalizedPath, normalizedRoot)) {
             return;
           }
 
@@ -265,7 +265,7 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
         setSelectedPath: (root, path) => {
           const normalizedRoot = normalizePath((root || '').trim());
           const normalizedPath = path ? normalizePath(path.trim()) : null;
-          if (!normalizedRoot) {
+          if (!normalizedRoot || (normalizedPath && !isPathWithinRoot(normalizedPath, normalizedRoot))) {
             return;
           }
 
@@ -314,7 +314,7 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
         toggleExpandedPath: (root, path) => {
           const normalizedRoot = normalizePath((root || '').trim());
           const normalizedPath = normalizePath((path || '').trim());
-          if (!normalizedRoot || !normalizedPath) {
+          if (!normalizedRoot || !normalizedPath || !isPathWithinRoot(normalizedPath, normalizedRoot)) {
             return;
           }
 
@@ -344,7 +344,7 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
         expandPath: (root, path) => {
           const normalizedRoot = normalizePath((root || '').trim());
           const normalizedPath = normalizePath((path || '').trim());
-          if (!normalizedRoot || !normalizedPath) {
+          if (!normalizedRoot || !normalizedPath || !isPathWithinRoot(normalizedPath, normalizedRoot)) {
             return;
           }
 
@@ -374,7 +374,12 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
             return;
           }
 
-          const normalizedPaths = paths.map((p) => normalizePath((p || '').trim())).filter(Boolean);
+          const normalizedPaths = paths
+            .map((p) => normalizePath((p || '').trim()))
+            .filter((p) => p && isPathWithinRoot(p, normalizedRoot));
+          if (normalizedPaths.length === 0) {
+            return;
+          }
 
           set((state) => {
             const prev = state.byRoot[normalizedRoot];
