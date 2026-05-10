@@ -4,6 +4,9 @@ import { useInputStore } from "./input-store"
 class MockFileReader {
   result: string | ArrayBuffer | null = null
   onload: ((this: FileReader, event: ProgressEvent<FileReader>) => unknown) | null = null
+  onerror: ((this: FileReader, event: ProgressEvent<FileReader>) => unknown) | null = null
+  onabort: ((this: FileReader, event: ProgressEvent<FileReader>) => unknown) | null = null
+  error: DOMException | null = null
 
   readAsDataURL() {
     pendingReaders.push(this)
@@ -15,6 +18,11 @@ const pendingReaders: MockFileReader[] = []
 const resolveReader = (reader: MockFileReader, result: string) => {
   reader.result = result
   reader.onload?.call(reader as unknown as FileReader, {} as ProgressEvent<FileReader>)
+}
+
+const rejectReader = (reader: MockFileReader) => {
+  reader.error = new DOMException("read failed", "NotReadableError")
+  reader.onerror?.call(reader as unknown as FileReader, {} as ProgressEvent<FileReader>)
 }
 
 describe("input-store attachments", () => {
@@ -84,5 +92,31 @@ describe("input-store attachments", () => {
     await addPromise
 
     expect(useInputStore.getState().attachedFiles).toEqual([])
+  })
+
+  test("does not leave local file reads pending after a reader error", async () => {
+    const addPromise = useInputStore.getState().addAttachedFile(new File(["hello"], "hello.txt", { type: "text/plain" }))
+    expect(pendingReaders).toHaveLength(1)
+
+    rejectReader(pendingReaders[0])
+    await addPromise
+
+    expect(useInputStore.getState().attachedFiles).toEqual([])
+  })
+
+  test("cleans up pending VS Code selection keys after a reader error", async () => {
+    const file = new File(["hello"], "hello.txt", { type: "text/plain" })
+    const firstAdd = useInputStore.getState().addVSCodeSelectionAttachment("/workspace/hello.txt", file)
+    expect(pendingReaders).toHaveLength(1)
+
+    rejectReader(pendingReaders[0])
+    await firstAdd
+
+    const secondAdd = useInputStore.getState().addVSCodeSelectionAttachment("/workspace/hello.txt", file)
+    expect(pendingReaders).toHaveLength(2)
+    resolveReader(pendingReaders[1], "data:text/plain;base64,aGVsbG8=")
+    await secondAdd
+
+    expect(useInputStore.getState().attachedFiles.map((attached) => attached.filename)).toEqual(["hello.txt"])
   })
 })

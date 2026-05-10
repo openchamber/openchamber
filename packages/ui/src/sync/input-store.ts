@@ -34,6 +34,14 @@ const toFileUrl = (filepath: string): string => {
 
 const getVSCodeSelectionKey = (path: string, filename: string): string => `${path}\u0000${filename}`
 
+const readFileAsDataUrl = (file: File): Promise<string> => new Promise((resolve, reject) => {
+  const reader = new FileReader()
+  reader.onload = () => resolve(reader.result as string)
+  reader.onerror = () => reject(reader.error ?? new Error("Failed to read file"))
+  reader.onabort = () => reject(new Error("File read aborted"))
+  reader.readAsDataURL(file)
+})
+
 const isSameVSCodeActiveEditorFile = (a: VSCodeActiveEditorFile | null, b: VSCodeActiveEditorFile | null): boolean => {
   if (a === b) return true
   if (!a || !b) return false
@@ -110,11 +118,12 @@ export const useInputStore = create<InputState>()((set, get) => ({
   addAttachedFile: async (file: File) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
     const generation = attachmentReadGeneration
-    const dataUrl = await new Promise<string>((resolve) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve(reader.result as string)
-      reader.readAsDataURL(file)
-    })
+    let dataUrl: string
+    try {
+      dataUrl = await readFileAsDataUrl(file)
+    } catch {
+      return
+    }
     if (generation !== attachmentReadGeneration) return
     const attached: AttachedFile = {
       id,
@@ -176,11 +185,9 @@ export const useInputStore = create<InputState>()((set, get) => ({
     pendingVSCodeSelectionKeys.add(selectionKey)
     let dataUrl: string
     try {
-      dataUrl = await new Promise<string>((resolve) => {
-        const reader = new FileReader()
-        reader.onload = () => resolve(reader.result as string)
-        reader.readAsDataURL(file)
-      })
+      dataUrl = await readFileAsDataUrl(file)
+    } catch {
+      return
     } finally {
       pendingVSCodeSelectionKeys.delete(selectionKey)
     }
