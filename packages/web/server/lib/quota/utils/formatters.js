@@ -1,6 +1,10 @@
 export const formatResetTime = (timestamp) => {
   try {
     const resetDate = new Date(timestamp);
+    if (!Number.isFinite(resetDate.getTime())) {
+      return null;
+    }
+
     const now = new Date();
     const isToday = resetDate.toDateString() === now.toDateString();
     
