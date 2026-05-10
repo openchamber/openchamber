@@ -61,4 +61,28 @@ describe('text summarization zen requests', () => {
     );
     expect(result.summary).toBe('Chat summary');
   });
+
+  it('clamps successful model summaries to the requested max length', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        output: [{
+          type: 'message',
+          content: [{ type: 'output_text', text: 'This response is too long' }],
+        }],
+      }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await summarizeText({
+      text: 'Long text '.repeat(30),
+      threshold: 0,
+      maxLength: 12,
+      zenModel: 'gpt-5-nano',
+      mode: 'notification',
+    });
+
+    expect(result.summary).toBe('This respons');
+    expect(result.summaryLength).toBe(12);
+  });
 });
