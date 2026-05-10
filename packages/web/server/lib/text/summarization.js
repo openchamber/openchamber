@@ -116,8 +116,9 @@ function sanitizeByMode(text, mode) {
 }
 
 function clampToMaxLength(text, maxLength) {
-  const limit = Number.isFinite(maxLength) ? Math.max(0, Math.floor(maxLength)) : 0;
-  if (!text || text.length <= limit) return text || '';
+  if (!text) return '';
+  const limit = Number.isFinite(maxLength) ? Math.max(0, Math.floor(maxLength)) : Infinity;
+  if (text.length <= limit) return text;
   return text.slice(0, limit).trim();
 }
 
