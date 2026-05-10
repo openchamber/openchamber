@@ -79,6 +79,7 @@ export const tryHandleLocalFsProxy = async (method: string, requestPath: string)
           path: normalizeFsPath(resolution.resolvedPath),
           isFile: true,
           size: stats.size,
+          mtimeMs: stats.mtimeMs,
         })),
       };
     }
