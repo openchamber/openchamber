@@ -96,6 +96,7 @@ export function useLongPress({
     onTouchStart: onPointerDown, // Add touch handlers for better mobile support
     onTouchMove: onPointerMove,
     onTouchEnd: onPointerUp,
+    onTouchCancel: clear,
     onContextMenu,
   };
 }
