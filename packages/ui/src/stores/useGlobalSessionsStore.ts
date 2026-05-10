@@ -76,7 +76,7 @@ const getSessionSignature = (session: Session): string => {
     session.time?.created ?? 0,
     session.time?.updated ?? 0,
     session.time?.archived ?? 0,
-    session.share ? 1 : 0,
+    session.share?.url ?? '',
     resolveGlobalSessionDirectory(session) ?? '',
   ].join(':');
 };
