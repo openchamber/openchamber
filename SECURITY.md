@@ -2,7 +2,7 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in OpenChamber, please report it responsibly.
+If you discover a security vulnerability in ALIAS ADE, please report it responsibly.
 
 **Email:** [artmore@protonmail.com](mailto:artmore@protonmail.com)
 
@@ -18,7 +18,7 @@ I'll acknowledge receipt within 48 hours and aim to provide a fix or mitigation 
 
 ## Scope
 
-OpenChamber handles sensitive context including:
+ALIAS ADE handles sensitive context including:
 - UI authentication (password-protected sessions, JWT tokens)
 - Cloudflare tunnel access (remote connectivity)
 - Terminal access (PTY sessions)

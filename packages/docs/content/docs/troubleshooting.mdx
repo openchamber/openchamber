@@ -5,26 +5,26 @@ description: Common setup and runtime issues with quick fixes.
 
 # Troubleshooting
 
-## OpenChamber command exits or fails to start
+## ALIAS ADE command exits or fails to start
 
 - confirm Node.js `>=20`
-- run `openchamber --version`
+- run `alias-ade --version`
 - reinstall latest CLI if needed
 
 ## Web UI is not reachable
 
-- check server logs with `openchamber logs`
+- check server logs with `alias-ade logs`
 - verify active port (default `3000`)
 - open `http://localhost:3000` directly first before testing tunnel links
 
 ## Remote/tunnel link does not work
 
-- run `openchamber tunnel status --all`
+- run `alias-ade tunnel status --all`
 - restart tunnel from the same instance/port
 - regenerate connect link if previous token was already used
 
 ## VS Code extension does not connect
 
-- confirm OpenChamber server is running
+- confirm ALIAS ADE server is running
 - verify extension is updated
 - reload VS Code window and retry connection

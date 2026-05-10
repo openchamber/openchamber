@@ -74,7 +74,7 @@ jobs:
           draft: true
           generate_release_notes: false
           body_path: artifacts/release-notes.md
-          name: OpenChamber v${{ steps.get_version.outputs.version }}
+          name: ALIAS ADE v${{ steps.get_version.outputs.version }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -155,7 +155,7 @@ jobs:
             exit 1
           fi
 
-          xcrun notarytool store-credentials "openchamber-notarize" \
+          xcrun notarytool store-credentials "alias-ade-notarize" \
             --apple-id "$APPLE_ID" \
             --team-id "$APPLE_TEAM_ID" \
             --password "$APPLE_PASSWORD"
@@ -199,8 +199,8 @@ jobs:
           echo "🔍 Verifying binary architectures in $APP_PATH"
           
           # Extract raw architecture names (macOS file command reports ARM as "arm64")
-          MAIN_ARCH_RAW=$(file "$APP_PATH/Contents/MacOS/openchamber-desktop" | grep -oE 'arm64|x86_64|aarch64' | head -1)
-          SIDEARCH_ARCH_RAW=$(file "$APP_PATH/Contents/MacOS/openchamber-server" | grep -oE 'arm64|x86_64|aarch64' | head -1)
+          MAIN_ARCH_RAW=$(file "$APP_PATH/Contents/MacOS/alias-ade-desktop" | grep -oE 'arm64|x86_64|aarch64' | head -1)
+          SIDEARCH_ARCH_RAW=$(file "$APP_PATH/Contents/MacOS/alias-ade-server" | grep -oE 'arm64|x86_64|aarch64' | head -1)
           
           # Normalize architecture names (arm64 -> aarch64 for consistency with Rust/Tauri)
           normalize_arch() {
@@ -285,7 +285,7 @@ jobs:
           DMG_PATH="packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg"
           if ls $DMG_PATH 1> /dev/null 2>&1; then
             DMG_FILE=$(ls $DMG_PATH | head -n 1)
-            DMG_NAME="OpenChamber_${VERSION}_${{ matrix.platform }}.dmg"
+            DMG_NAME="ALIAS_ADE_${VERSION}_${{ matrix.platform }}.dmg"
             cp "$DMG_FILE" "artifacts/$DMG_NAME"
           else
             echo "Error: DMG file not found at $DMG_PATH"
@@ -333,7 +333,7 @@ jobs:
 
           # Find the tar.gz file name for this platform
           TAR_FILE=$(find artifacts -name "*-${{ matrix.platform }}.tar.gz" ! -name "*.sig" | head -1)
-          TAR_NAME=$(basename "$TAR_FILE" 2>/dev/null || echo "OpenChamber-${{ matrix.platform }}.app.tar.gz")
+          TAR_NAME=$(basename "$TAR_FILE" 2>/dev/null || echo "ALIAS_ADE-${{ matrix.platform }}.app.tar.gz")
 
           cat > artifacts/latest-${{ matrix.platform }}.json << EOF
           {
@@ -645,7 +645,7 @@ jobs:
         env:
           LATEST_YML_DIR: ${{ github.workspace }}/artifacts
           GH_REPO: ${{ github.repository }}
-          OPENCHAMBER_VERSION: ${{ needs.create-release.outputs.version }}
+          ALIAS_ADE_VERSION: ${{ needs.create-release.outputs.version }}
         run: node packages/electron/scripts/finalize-latest-yml.mjs
 
       - name: Upload combined latest-mac.yml to release
@@ -699,11 +699,11 @@ jobs:
             }
 
             const release = await releaseRes.json();
-            const description = (release.body || `OpenChamber ${tag} released.`).slice(0, 4096);
+            const description = (release.body || `ALIAS ADE ${tag} released.`).slice(0, 4096);
             const mention = updateRoleId ? `<@&${updateRoleId}>` : '';
 
             const payload = {
-              username: 'OpenChamber Releases',
+              username: 'ALIAS ADE Releases',
               ...(mention ? { content: mention } : {}),
               ...(updateRoleId
                 ? {
@@ -714,11 +714,11 @@ jobs:
                 : {}),
               embeds: [
                 {
-                  title: release.name || `OpenChamber ${tag}`,
+                  title: release.name || `ALIAS ADE ${tag}`,
                   url: release.html_url,
                   description,
                   color: 2105893,
-                  footer: { text: 'OpenChamber Changelog' },
+                  footer: { text: 'ALIAS ADE Changelog' },
                 },
               ],
             };
@@ -739,14 +739,14 @@ jobs:
           });
           NODE
 
-      - name: Trigger openchamber-website site refresh (optional)
+      - name: Trigger alias-ade-website site refresh (optional)
         env:
-          WEBSITE_REPO: openchamber/openchamber-website
-          WEBSITE_TOKEN: ${{ secrets.OPENCHAMBER_WEBSITE_REPO_TOKEN }}
+          WEBSITE_REPO: alias-ade/alias-ade-website
+          WEBSITE_TOKEN: ${{ secrets.ALIAS_ADE_WEBSITE_REPO_TOKEN }}
           VERSION: ${{ needs.create-release.outputs.version }}
         run: |
           if [ -z "$WEBSITE_TOKEN" ]; then
-            echo "OPENCHAMBER_WEBSITE_REPO_TOKEN not set; skip site refresh dispatch."
+            echo "ALIAS_ADE_WEBSITE_REPO_TOKEN not set; skip site refresh dispatch."
             exit 0
           fi
 

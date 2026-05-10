@@ -577,7 +577,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
       return;
     }
     frameWindow.postMessage({
-      source: 'openchamber-preview-parent',
+      source: 'alias-ade-preview-parent',
       version: 1,
       type: 'set-inspect-mode',
       enabled: inspectMode,
@@ -590,7 +590,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
       return;
     }
     frameWindow.postMessage({
-      source: 'openchamber-preview-parent',
+      source: 'alias-ade-preview-parent',
       version: 1,
       type: 'set-color-scheme',
       scheme: previewColorScheme,
@@ -641,7 +641,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
         return;
       }
       const data = event.data;
-      if (!data || data.source !== 'openchamber-preview-bridge' || data.version !== 1) {
+      if (!data || data.source !== 'alias-ade-preview-bridge' || data.version !== 1) {
         return;
       }
 
@@ -1290,8 +1290,8 @@ export const ContextPanel: React.FC = () => {
       }
 
       const directThemeSync = (frameWindow as unknown as {
-        __openchamberApplyThemeSync?: (themePayload: typeof payload) => void;
-      }).__openchamberApplyThemeSync;
+        __aliasAdeApplyThemeSync?: (themePayload: typeof payload) => void;
+      }).__aliasAdeApplyThemeSync;
 
       if (typeof directThemeSync === 'function') {
         try {
@@ -1304,7 +1304,7 @@ export const ContextPanel: React.FC = () => {
 
       frameWindow.postMessage(
         {
-          type: 'openchamber:theme-sync',
+          type: 'aliasAde:theme-sync',
           payload,
         },
         window.location.origin,
@@ -1325,8 +1325,8 @@ export const ContextPanel: React.FC = () => {
 
       const payload = { visible: activeChatTabID === tabID };
       const directVisibilitySync = (frameWindow as unknown as {
-        __openchamberSetEmbeddedVisibility?: (visibilityPayload: typeof payload) => void;
-      }).__openchamberSetEmbeddedVisibility;
+        __aliasAdeSetEmbeddedVisibility?: (visibilityPayload: typeof payload) => void;
+      }).__aliasAdeSetEmbeddedVisibility;
 
       if (typeof directVisibilitySync === 'function') {
         try {
@@ -1339,7 +1339,7 @@ export const ContextPanel: React.FC = () => {
 
       frameWindow.postMessage(
         {
-          type: 'openchamber:embedded-visibility',
+          type: 'aliasAde:embedded-visibility',
           payload,
         },
         window.location.origin,

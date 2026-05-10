@@ -30,7 +30,7 @@ All notable changes to this project will be documented in this file.
 
 ## [1.10.2] - 2026-05-07
 
-- Projects: added repository cloning to the Add Project flow, so you can clone a repo into a chosen folder and open it in OpenChamber without leaving setup.
+- Projects: added repository cloning to the Add Project flow, so you can clone a repo into a chosen folder and open it in ALIAS ADE without leaving setup.
 - Chat/Reliability: stabilized live turn rendering and session sync caches, reducing flicker, stale state, and missing updates during reconnects or long-running chats.
 - Terminal: improved Android tablet keyboard handling, including control-key shortcuts, and kept app shortcuts from stealing focus while typing in the terminal (thanks to @Dav1dch).
 - Terminal: set a UTF-8 locale for terminal sessions so Unicode output renders more reliably across shells and commands (thanks to @liyiopener).
@@ -41,7 +41,7 @@ All notable changes to this project will be documented in this file.
 
 ## [1.10.1] - 2026-05-06
 
-- Git: added one-click Sync and stash management, including stash access from a clean worktree, making it faster to pull, push, review, apply, or drop saved changes without leaving OpenChamber.
+- Git: added one-click Sync and stash management, including stash access from a clean worktree, making it faster to pull, push, review, apply, or drop saved changes without leaving ALIAS ADE.
 - Git: improved sync safety and feedback with latest remote refs, clearer progress banners, less flicker during refresh, cleaner header controls, and better unavailable pull-request states.
 - UI/Localization: added Polish interface translations, expanding language support for Polish-speaking users (thanks to @levy52).
 - Sessions: added a quick archive action directly on session rows, making cleanup faster from the session list (thanks to @zoubenr).
@@ -56,7 +56,7 @@ All notable changes to this project will be documented in this file.
 
 ## [1.10.0] - 2026-05-05
 
-- Preview: added an embedded dev-server Preview pane for loopback apps, with authenticated proxying, Vite/HMR support, same-origin API request handling, and safer local dev-server shutdown so apps can run inside OpenChamber more like they do in the browser (thanks to @wpbiggs).
+- Preview: added an embedded dev-server Preview pane for loopback apps, with authenticated proxying, Vite/HMR support, same-origin API request handling, and safer local dev-server shutdown so apps can run inside ALIAS ADE more like they do in the browser (thanks to @wpbiggs).
 - Preview: added preview console capture, DOM element inspection, annotation context, and Electron screenshot attachments so UI feedback can be sent to the assistant with richer context.
 - Projects/Terminal: added Auto-discover for local dev servers, background terminal startup, action-linked Preview reopen controls, and cleaner terminal tab styling for a smoother Project Actions workflow (thanks to @wpbiggs).
 - Settings/Behavior: added a dedicated Behavior page with global `AGENTS.md` configuration and response style presets, making it easier to tune assistant instructions and answer style across projects (thanks to @Yabuku-xD).
@@ -156,14 +156,14 @@ All notable changes to this project will be documented in this file.
 - Sessions/Drafts: draft chat config now stays synced with the selected draft target directory, reducing wrong-model or wrong-agent carryover when switching draft context (thanks to @hkay-dev).
 - VSCode/Files: added file stat support in the extension bridge so markdown-related file checks resolve more reliably before opening or rendering (thanks to @geekifan).
 - Chat/Models: added arrow-key navigation for thinking-mode selection in model controls, making keyboard model tuning faster during prompt setup (thanks to @daveotero).
-- Files: added HTML preview support in the file viewer, so `.html` files can be inspected visually without leaving OpenChamber (thanks to @nguyenngothuong).
+- Files: added HTML preview support in the file viewer, so `.html` files can be inspected visually without leaving ALIAS ADE (thanks to @nguyenngothuong).
 - Chat: improved error message readability with clearer styling and safer word-wrapping, so failures are easier to scan without layout breakage (thanks to @nguyenngothuong).
 - Chat/JSON: added an interactive JSON tree viewer with collapse/expand controls and richer color cues for easier inspection of large structured outputs (thanks to @nguyenngothuong).
 - Mobile/Settings: fixed lingering settings drawers and removed extra top spacing for a cleaner, less obstructed mobile layout (thanks to @Jovines).
 - Git/Worktrees: fixed worktree detection and reset stale integration state when switching contexts, reducing wrong-target behavior in worktree flows (thanks to @jwcrystal).
 - Desktop/Settings: window vibrancy now correctly controls macOS window transparency, and settings copy now clarifies when full transparency changes take effect.
 - Reliability/Proxy: hardened OpenCode proxy header handling (including identity-encoding normalization, compression-header cleanup, hop-by-hop response-header stripping) and suppressed expected SSE close noise, improving stream stability and reducing false proxy errors (thanks to @jwcrystal, @Jovines, @JiwaniZakir, @shekohex).
-- Reliability/Proxy: restored proxied chat event streaming so live responses continue working when OpenChamber is deployed behind a proxy.
+- Reliability/Proxy: restored proxied chat event streaming so live responses continue working when ALIAS ADE is deployed behind a proxy.
 - Terminal/Reliability: switched terminal transport to a pure WebSocket path with fallback handling, improving responsiveness and stability for interactive terminal sessions (thanks to @geekifan).
 - Usage/Providers: added ZhipuAI quota tracking and fixed MiniMax coding-plan and GitHub Copilot overusage calculations for more accurate usage reporting (thanks to @kalac2232, @baruchvitorino, @ebrainte).
 
@@ -207,7 +207,7 @@ All notable changes to this project will be documented in this file.
 
 ## [1.8.7] - 2026-03-13
 
-- CLI: fixed a startup regression in global npm/bun installs where wrapper or symlinked `openchamber` entrypoints could exit without output on commands like `--version` or `status`.
+- CLI: fixed a startup regression in global npm/bun installs where wrapper or symlinked `alias-ade` entrypoints could exit without output on commands like `--version` or `status`.
 - CLI: hardened entrypoint detection across direct, symlinked, and shim-based launches to keep startup behavior consistent across package managers (thanks to @shekohex).
 - Windows/Web: daemon startup and Git operations no longer flash extra console windows, making background workflows less distracting (thanks to @SergioChan).
 - Deployment/Docker: improved `docker run` startup behavior and entrypoint handling so containerized installs start more reliably (thanks to @nzlov).
@@ -340,7 +340,7 @@ All notable changes to this project will be documented in this file.
 
 ## [1.7.3] - 2026-02-21
 
-- Settings: added customizable keyboard shortcuts for chat actions, panel toggles, and services, so you can better match OpenChamber to your workflow (thanks to @nelsonPires5).
+- Settings: added customizable keyboard shortcuts for chat actions, panel toggles, and services, so you can better match ALIAS ADE to your workflow (thanks to @nelsonPires5).
 - Sessions: added custom folders to group chat sessions, with move/rename/delete flows and persisted collapse state per project (thanks to @nguyenngothuong).
 - Notifications: improved agent progress notifications and permission handling to reduce noisy prompts during active runs (thanks to @nguyenngothuong).
 - Diff/Plans/Files: restored inline comments making more like a GitHub style again (thanks to @nelsonPires5).
@@ -434,7 +434,7 @@ All notable changes to this project will be documented in this file.
 
 ## [1.6.5] - 2026-02-6
 
-- Settings: added an OpenCode CLI path override so you can point OpenChamber at a custom/local CLI install.
+- Settings: added an OpenCode CLI path override so you can point ALIAS ADE at a custom/local CLI install.
 - Chat: added arrow-key prompt history and an optional setting to persist input drafts between restarts (thanks to @gsxdsm).
 - Chat: thinking/reasoning blocks now render more consistently, and justification visibility settings now apply reliably (thanks to @gsxdsm).
 - Diff/Plans: added inline comment drafts so you can leave line-level notes and feed them back into requests (thanks to @nelsonPires5).
@@ -446,7 +446,7 @@ All notable changes to this project will be documented in this file.
 
 ## [1.6.4] - 2026-02-5
 
-- Desktop: switch between local and remote OpenChamber instances, plus a thinner runtime for better feature parity and fewer desktop-only quirks.
+- Desktop: switch between local and remote ALIAS ADE instances, plus a thinner runtime for better feature parity and fewer desktop-only quirks.
 - VSCode: improved Windows PATH resolution and cold-start readiness checks to reduce "stuck loading" for sessions/models/agents.
 - Mobile: split Agent/Model controls and a quick commands button with autocomplete (Commands/Agents/Files) for easier input (thanks to @Jovines, @gsxdsm).
 - Chat: select text in messages to quickly add it to your prompt or start a new session (thanks to @gsxdsm).
@@ -470,7 +470,7 @@ All notable changes to this project will be documented in this file.
 - Settings: now opens in a windowed dialog on desktop with backdrop blur for better focus.
 - Terminal: added tabbed interface to manage multiple terminal sessions per directory.
 - Files: added multi-file tabs on desktop and dropdown selector on mobile (thanks to @nelsonPires5).
-- UI: introduced token-based theming system and 18 themes with light/dark variants; with support for custom user themes from `~/.config/openchamber/themes`.
+- UI: introduced token-based theming system and 18 themes with light/dark variants; with support for custom user themes from `~/.config/alias-ade/themes`.
 - Diff: optimized stacked view with worker-pool processing and lazy DOM rendering for smoother scrolling.
 - Worktrees: workspace path now resolves correctly when using git worktrees (thanks to @nelsonPires5).
 - Projects: fixed directory creation outside workspace in the Add Project modal (thanks to @nelsonPires5).
@@ -698,7 +698,7 @@ All notable changes to this project will be documented in this file.
 - Build workflow now generates separate builds for Apple Silicon (arm64) and Intel (x86_64) Macs (thanks to @rothnic).
 - Improved dev server HMR by reusing a healthy OpenCode process to avoid zombie instances.
 - Added queued message mode with chips, batching, and idle auto‑send (including attachments).
-- Added queue mode toggle to OpenChamber settings (chat section) with persistence across runtimes.
+- Added queue mode toggle to ALIAS ADE settings (chat section) with persistence across runtimes.
 - Fixed scroll position persistence for active conversation turns across session switches.
 - Refactored Agents/Commands management with ability to configure project/user scopes.
 
@@ -868,7 +868,7 @@ All notable changes to this project will be documented in this file.
 ## [1.1.0] - 2025-12-13
 
 - Added assistant answer fork flow so users can start a new session from an assistant plan/response with inherited context.
-- Added OpenChamber VS Code extension with editor integration: file picker, click-to-open in tool parts.
+- Added ALIAS ADE VS Code extension with editor integration: file picker, click-to-open in tool parts.
 - Improved scroll performance with force flag and RAF placeholder.
 - Added git polling backoff optimization.
 
@@ -915,6 +915,6 @@ All notable changes to this project will be documented in this file.
 
 ## [1.0.1] - 2025-12-07
 
-- Initial public release of OpenChamber web and desktop packages in a unified monorepo.
+- Initial public release of ALIAS ADE web and desktop packages in a unified monorepo.
 - Added GitHub Actions release pipeline with macOS signing/notarization, npm publish, and release asset uploads.
 - Introduced OpenCode agent chat experience with section-based navigation, theming, and session persistence.

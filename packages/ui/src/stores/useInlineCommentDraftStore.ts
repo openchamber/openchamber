@@ -206,7 +206,7 @@ export const useInlineCommentDraftStore = create<InlineCommentDraftStore>()(
         },
       }),
       {
-        name: 'openchamber-inline-comment-drafts',
+        name: 'alias-ade-inline-comment-drafts',
         storage: createJSONStorage(() => getSafeStorage()),
         version: 1,
         migrate: (persistedState: unknown) => {

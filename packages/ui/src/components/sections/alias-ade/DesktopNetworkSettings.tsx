@@ -29,7 +29,7 @@ export const DesktopNetworkSettings: React.FC = () => {
           headers: { Accept: 'application/json' },
         });
         if (!response.ok) {
-          throw new Error(t('settings.openchamber.desktopNetwork.error.loadFailed'));
+          throw new Error(t('settings.aliasAde.desktopNetwork.error.loadFailed'));
         }
 
         const data = (await response.json().catch(() => null)) as null | { desktopLanAccessEnabled?: unknown };
@@ -43,7 +43,7 @@ export const DesktopNetworkSettings: React.FC = () => {
         setError(null);
       } catch (cause) {
         if (!cancelled) {
-          setError(cause instanceof Error ? cause.message : t('settings.openchamber.desktopNetwork.error.loadFailed'));
+          setError(cause instanceof Error ? cause.message : t('settings.aliasAde.desktopNetwork.error.loadFailed'));
         }
       } finally {
         if (!cancelled) {
@@ -111,17 +111,17 @@ export const DesktopNetworkSettings: React.FC = () => {
       });
 
       if (!response.ok) {
-        throw new Error(t('settings.openchamber.desktopNetwork.error.saveFailed'));
+        throw new Error(t('settings.aliasAde.desktopNetwork.error.saveFailed'));
       }
 
       setSavedValue(draftValue);
 
       const restarted = await restartDesktopApp();
       if (!restarted) {
-        throw new Error(t('settings.openchamber.desktopNetwork.error.savedRestartFailed'));
+        throw new Error(t('settings.aliasAde.desktopNetwork.error.savedRestartFailed'));
       }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t('settings.openchamber.desktopNetwork.error.saveFailed'));
+      setError(cause instanceof Error ? cause.message : t('settings.aliasAde.desktopNetwork.error.saveFailed'));
       setIsSaving(false);
     }
   }, [draftValue, isDirty, t]);
@@ -133,7 +133,7 @@ export const DesktopNetworkSettings: React.FC = () => {
   return (
     <div className="mb-8">
       <div className="mb-1 px-1">
-        <h3 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.desktopNetwork.title')}</h3>
+        <h3 className="typography-ui-header font-medium text-foreground">{t('settings.aliasAde.desktopNetwork.title')}</h3>
       </div>
 
       <section className="space-y-2 px-2 pb-2 pt-0">
@@ -152,16 +152,16 @@ export const DesktopNetworkSettings: React.FC = () => {
           <Checkbox
             checked={draftValue}
             onChange={handleToggle}
-            ariaLabel={t('settings.openchamber.desktopNetwork.field.allowLanAccessAria')}
+            ariaLabel={t('settings.aliasAde.desktopNetwork.field.allowLanAccessAria')}
             disabled={isLoading || isSaving}
           />
           <div className="min-w-0 flex-1">
-            <div className="typography-ui-label text-foreground">{t('settings.openchamber.desktopNetwork.field.allowLanAccess')}</div>
+            <div className="typography-ui-label text-foreground">{t('settings.aliasAde.desktopNetwork.field.allowLanAccess')}</div>
             <div className="typography-micro text-muted-foreground/70">
-              {t('settings.openchamber.desktopNetwork.field.allowLanAccessDescription')}
+              {t('settings.aliasAde.desktopNetwork.field.allowLanAccessDescription')}
             </div>
             <div className="typography-micro text-[var(--status-warning)]/85">
-              {t('settings.openchamber.desktopNetwork.field.warning')}
+              {t('settings.aliasAde.desktopNetwork.field.warning')}
             </div>
           </div>
         </div>
@@ -173,8 +173,8 @@ export const DesktopNetworkSettings: React.FC = () => {
         {lanUrl ? (
           <div className="px-2 typography-micro text-muted-foreground/80">
             {isDirty && !savedValue
-              ? t('settings.openchamber.desktopNetwork.hint.openAfterRestart')
-              : t('settings.openchamber.desktopNetwork.hint.openNow')}
+              ? t('settings.aliasAde.desktopNetwork.hint.openAfterRestart')
+              : t('settings.aliasAde.desktopNetwork.hint.openNow')}
             <span className="font-mono text-foreground">{lanUrl}</span>
           </div>
         ) : null}
@@ -187,7 +187,7 @@ export const DesktopNetworkSettings: React.FC = () => {
             disabled={isLoading || isSaving || !isDirty}
             className="shrink-0 !font-normal"
           >
-            {isSaving ? t('settings.common.actions.saving') : t('settings.openchamber.desktopNetwork.actions.saveAndRestart')}
+            {isSaving ? t('settings.common.actions.saving') : t('settings.aliasAde.desktopNetwork.actions.saveAndRestart')}
           </Button>
         </div>
       </section>

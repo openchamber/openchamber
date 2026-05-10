@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-HOME="/home/openchamber"
+HOME="/home/alias-ade"
 
 OPENCODE_CONFIG_DIR="${OPENCODE_CONFIG_DIR:-${HOME}/.config/opencode}"
 export OPENCODE_CONFIG_DIR
@@ -59,8 +59,8 @@ if [ "${OH_MY_OPENCODE:-false}" = "true" ]; then
 fi
 
 # Docker containers need to listen on all interfaces for port mapping to work.
-OPENCHAMBER_HOST="${OPENCHAMBER_HOST:-0.0.0.0}"
-export OPENCHAMBER_HOST
+ALIAS_ADE_HOST="${ALIAS_ADE_HOST:-0.0.0.0}"
+export ALIAS_ADE_HOST
 
 echo "[entrypoint] starting..."
 

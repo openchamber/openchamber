@@ -17,14 +17,14 @@ interface AgentManagerViewProps {
 export const AgentManagerView: React.FC<AgentManagerViewProps> = ({ className }) => {
   const isVSCodeRuntime = Boolean(
     (typeof window !== 'undefined'
-      ? (window as unknown as { __OPENCHAMBER_RUNTIME_APIS__?: { runtime?: { isVSCode?: boolean } } })
-          .__OPENCHAMBER_RUNTIME_APIS__?.runtime?.isVSCode
+      ? (window as unknown as { __ALIAS_ADE_RUNTIME_APIS__?: { runtime?: { isVSCode?: boolean } } })
+          .__ALIAS_ADE_RUNTIME_APIS__?.runtime?.isVSCode
       : false)
   );
   const [connectionStatus, setConnectionStatus] = React.useState<'connecting' | 'connected' | 'error' | 'disconnected'>(
     () =>
       (typeof window !== 'undefined'
-        ? (window as unknown as { __OPENCHAMBER_CONNECTION__?: { status?: string } }).__OPENCHAMBER_CONNECTION__?.status as
+        ? (window as unknown as { __ALIAS_ADE_CONNECTION__?: { status?: string } }).__ALIAS_ADE_CONNECTION__?.status as
             'connecting' | 'connected' | 'error' | 'disconnected' | undefined
         : 'connecting') || 'connecting'
   );
@@ -53,7 +53,7 @@ export const AgentManagerView: React.FC<AgentManagerViewProps> = ({ className })
 
     const current =
       (typeof window !== 'undefined'
-        ? (window as unknown as { __OPENCHAMBER_CONNECTION__?: { status?: string } }).__OPENCHAMBER_CONNECTION__?.status
+        ? (window as unknown as { __ALIAS_ADE_CONNECTION__?: { status?: string } }).__ALIAS_ADE_CONNECTION__?.status
         : undefined) as 'connecting' | 'connected' | 'error' | 'disconnected' | undefined;
     if (current) setConnectionStatus(current);
 
@@ -63,8 +63,8 @@ export const AgentManagerView: React.FC<AgentManagerViewProps> = ({ className })
         setConnectionStatus(status);
       }
     };
-    window.addEventListener('openchamber:connection-status', handler as EventListener);
-    return () => window.removeEventListener('openchamber:connection-status', handler as EventListener);
+    window.addEventListener('aliasAde:connection-status', handler as EventListener);
+    return () => window.removeEventListener('aliasAde:connection-status', handler as EventListener);
   }, [isVSCodeRuntime]);
 
   React.useEffect(() => {

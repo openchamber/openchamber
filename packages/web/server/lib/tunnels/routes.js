@@ -210,7 +210,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
   };
 
   const registerRoutes = (app) => {
-    app.get('/api/openchamber/tunnel/check', async (req, res) => {
+    app.get('/api/alias-ade/tunnel/check', async (req, res) => {
       try {
         const requestedProvider = typeof req?.query?.provider === 'string' && req.query.provider.trim().length > 0
           ? normalizeTunnelProvider(req.query.provider)
@@ -313,15 +313,15 @@ export const createTunnelRoutesRuntime = (dependencies) => {
         return res.status(500).json({ ok: false, error: 'Failed to run tunnel doctor' });
       }
     };
-    app.post('/api/openchamber/tunnel/doctor', handleTunnelDoctor);
-    app.get('/api/openchamber/tunnel/doctor', handleTunnelDoctor);
+    app.post('/api/alias-ade/tunnel/doctor', handleTunnelDoctor);
+    app.get('/api/alias-ade/tunnel/doctor', handleTunnelDoctor);
 
-    app.get('/api/openchamber/tunnel/providers', (_req, res) => {
+    app.get('/api/alias-ade/tunnel/providers', (_req, res) => {
       const providers = tunnelProviderRegistry.listCapabilities();
       return res.json({ providers });
     });
 
-    app.get('/api/openchamber/tunnel/status', async (_req, res) => {
+    app.get('/api/alias-ade/tunnel/status', async (_req, res) => {
       try {
         const settings = await readSettingsFromDiskMigrated();
         const normalizedMode = normalizeTunnelMode(settings?.tunnelMode);
@@ -414,7 +414,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
       }
     });
 
-    app.put('/api/openchamber/tunnel/managed-remote-token', async (req, res) => {
+    app.put('/api/alias-ade/tunnel/managed-remote-token', async (req, res) => {
       try {
         const presetId = typeof req?.body?.presetId === 'string' ? req.body.presetId.trim() : '';
         const presetName = typeof req?.body?.presetName === 'string' ? req.body.presetName.trim() : '';
@@ -439,7 +439,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
       }
     });
 
-    app.post('/api/openchamber/tunnel/start', async (_req, res) => {
+    app.post('/api/alias-ade/tunnel/start', async (_req, res) => {
       try {
         const settings = await readSettingsFromDiskMigrated();
         if (typeof _req?.body?.provider === 'string' && _req.body.provider.trim().length > 0) {
@@ -577,7 +577,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
       }
     });
 
-    app.post('/api/openchamber/tunnel/stop', (_req, res) => {
+    app.post('/api/alias-ade/tunnel/stop', (_req, res) => {
       let revokedBootstrapCount = 0;
       let invalidatedSessionCount = 0;
       const activeTunnelId = tunnelAuthController.getActiveTunnelId();

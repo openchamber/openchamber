@@ -2,7 +2,7 @@ export const registerServerStatusRoutes = (app, dependencies) => {
   const {
     express,
     process,
-    openchamberVersion,
+    aliasAdeVersion,
     runtimeName,
     serverStartedAt,
     gracefulShutdown,
@@ -35,7 +35,7 @@ export const registerServerStatusRoutes = (app, dependencies) => {
   const isDevShutdownAllowed = () => {
     // Dev-only escape hatch: allow terminating the whole dev process group.
     // This should never be enabled in production runtimes.
-    return process.env.OPENCHAMBER_DEV_SHUTDOWN === 'true';
+    return process.env.ALIAS_ADE_DEV_SHUTDOWN === 'true';
   };
 
   const isSameOriginRequest = (req) => {
@@ -219,7 +219,7 @@ export const registerServerStatusRoutes = (app, dependencies) => {
 
   app.get('/api/system/info', (_req, res) => {
     res.json({
-      openchamberVersion,
+      aliasAdeVersion,
       runtime: runtimeName,
       pid: process.pid,
       startedAt: serverStartedAt,
@@ -479,7 +479,7 @@ export const registerCommonRequestMiddleware = (app, dependencies) => {
       req.path.startsWith('/api/text') ||
       req.path.startsWith('/api/voice') ||
       req.path.startsWith('/api/tts') ||
-      req.path.startsWith('/api/openchamber/tunnel')
+      req.path.startsWith('/api/alias-ade/tunnel')
     ) {
       express.json({ limit: '50mb' })(req, res, next);
     } else if (req.path.startsWith('/api')) {

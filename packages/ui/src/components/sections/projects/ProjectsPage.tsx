@@ -8,7 +8,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { PROJECT_COLORS, PROJECT_ICONS, PROJECT_COLOR_MAP as COLOR_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
 import { RiCloseLine } from '@remixicon/react';
-import { WorktreeSectionContent } from '@/components/sections/openchamber/WorktreeSectionContent';
+import { WorktreeSectionContent } from '@/components/sections/alias-ade/WorktreeSectionContent';
 import { ProjectActionsSection } from '@/components/sections/projects/ProjectActionsSection';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';

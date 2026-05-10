@@ -3,7 +3,7 @@ import {
   Dialog,
   DialogContent,
 } from '@/components/ui/dialog';
-import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
+import { AliasAdeLogo } from '@/components/ui/AliasAdeLogo';
 import { RiDiscordFill, RiGithubFill, RiTwitterXFill } from '@remixicon/react';
 import { debugUtils } from '@/lib/debug';
 import { cn } from '@/lib/utils';
@@ -64,8 +64,8 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
         const response = await fetch('/api/system/info');
         if (response.ok) {
           const data = await response.json();
-          if (typeof data.openchamberVersion === 'string' && data.openchamberVersion.trim()) {
-            setVersion(data.openchamberVersion);
+          if (typeof data.aliasAdeVersion === 'string' && data.aliasAdeVersion.trim()) {
+            setVersion(data.aliasAdeVersion);
             return;
           }
         }
@@ -114,10 +114,10 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xs p-6">
         <div className="flex flex-col items-center text-center space-y-4">
-          <OpenChamberLogo width={64} height={64} />
+          <AliasAdeLogo width={64} height={64} />
 
           <div className="space-y-1">
-            <h2 className="text-lg font-semibold">OpenChamber</h2>
+            <h2 className="text-lg font-semibold">ALIAS ADE</h2>
             {displayVersion && (
               <p className="typography-meta text-muted-foreground">
                 {t('aboutDialog.versionLabel', { version: displayVersion })}
@@ -148,7 +148,7 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
 
           <div className="flex items-center gap-4 pt-2">
             <a
-              href="https://github.com/btriapitsyn/openchamber"
+              href="https://github.com/btriapitsyn/alias-ade"
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-1.5 typography-meta text-muted-foreground hover:text-foreground transition-colors"

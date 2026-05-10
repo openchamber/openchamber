@@ -134,7 +134,7 @@ The following functions are internal helpers used by exported functions:
 ### Worktree Naming
 - Worktree names are slugified via `slugWorktreeName`.
 - Random names use adjectives/nouns from `OPENCODE_ADJECTIVES` and `OPENCODE_NOUNS` lists.
-- Branches created for new worktrees use `openchamber/<worktree-name>` pattern.
+- Branches created for new worktrees use `alias-ade/<worktree-name>` pattern.
 
 ### Cross-Platform Considerations
 - Use `normalizeDirectoryPath` for all directory inputs to handle `~` and path separators.

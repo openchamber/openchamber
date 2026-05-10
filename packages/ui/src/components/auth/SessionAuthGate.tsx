@@ -9,7 +9,7 @@ import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { syncDesktopSettings, initializeAppearancePreferences } from '@/lib/persistence';
 import { applyPersistedDirectoryPreferences } from '@/lib/directoryPersistence';
 import { DesktopHostSwitcherInline } from '@/components/desktop/DesktopHostSwitcher';
-import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
+import { AliasAdeLogo } from '@/components/ui/AliasAdeLogo';
 import { useI18n } from '@/lib/i18n';
 import {
   authenticateWithPasskey,
@@ -22,7 +22,7 @@ import {
 } from '@/lib/passkeys';
 
 const STATUS_CHECK_ENDPOINT = '/auth/session';
-const TRUST_DEVICE_STORAGE_KEY = 'openchamber.uiAuth.trustDevice';
+const TRUST_DEVICE_STORAGE_KEY = 'aliasAde.uiAuth.trustDevice';
 
 const fetchSessionStatus = async (): Promise<Response> => {
   const response = await fetch(STATUS_CHECK_ENDPOINT, {
@@ -81,7 +81,7 @@ const AuthShell: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 
 const LoadingScreen: React.FC = () => (
   <div className="flex min-h-screen items-center justify-center bg-background text-foreground">
-    <OpenChamberLogo width={120} height={120} />
+    <AliasAdeLogo width={120} height={120} />
   </div>
 );
 
@@ -496,7 +496,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
                 <div className="relative flex-1">
                   <RiLockLine className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/60" />
                   <Input
-                    id="openchamber-ui-password"
+                    id="alias-ade-ui-password"
                     ref={passwordInputRef}
                     type="password"
                     autoComplete="current-password"

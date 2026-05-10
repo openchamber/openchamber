@@ -14,7 +14,7 @@ release
 *.vsix
 /npm
 /tsc
-/openchamber@*
+/alias-ade@*
 local-dev*
 # Editor directories and files
 .vscode/*

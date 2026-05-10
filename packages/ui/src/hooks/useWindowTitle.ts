@@ -4,7 +4,7 @@ import { isDesktopShell, isTauriShell } from '@/lib/desktop';
 import { desktopHostsGet, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { setDesktopWindowTitle } from '@/lib/desktopNative';
 
-const APP_TITLE = 'OpenChamber';
+const APP_TITLE = 'ALIAS ADE';
 
 const formatProjectLabel = (label: string): string => {
   return label.replace(/[-_]/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
@@ -60,7 +60,7 @@ export const useWindowTitle = () => {
     const refreshInstanceLabel = async () => {
       try {
         const currentHref = window.location.href;
-        const localOrigin = window.__OPENCHAMBER_LOCAL_ORIGIN__ || window.location.origin;
+        const localOrigin = window.__ALIAS_ADE_LOCAL_ORIGIN__ || window.location.origin;
 
         if (locationMatchesHost(currentHref, localOrigin)) {
           if (!cancelled) {

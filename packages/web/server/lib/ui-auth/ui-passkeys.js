@@ -11,13 +11,13 @@ import {
 
 const DEFAULT_STORE_VERSION = 1;
 const DEFAULT_CHALLENGE_TTL_MS = 5 * 60 * 1000;
-const DEFAULT_RP_NAME = 'OpenChamber';
+const DEFAULT_RP_NAME = 'ALIAS ADE';
 
-const OPENCHAMBER_DATA_DIR = process.env.OPENCHAMBER_DATA_DIR
-  ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
-  : path.join(os.homedir(), '.config', 'openchamber');
+const ALIAS_ADE_DATA_DIR = process.env.ALIAS_ADE_DATA_DIR
+  ? path.resolve(process.env.ALIAS_ADE_DATA_DIR)
+  : path.join(os.homedir(), '.config', 'alias-ade');
 
-const PASSKEY_STORE_FILE = path.join(OPENCHAMBER_DATA_DIR, 'ui-passkeys.json');
+const PASSKEY_STORE_FILE = path.join(ALIAS_ADE_DATA_DIR, 'ui-passkeys.json');
 
 const createUserId = () => crypto.randomBytes(32).toString('base64url');
 
@@ -330,8 +330,8 @@ export const createUiPasskeys = ({
       rpName,
       rpID,
       userID,
-      userName: 'openchamber-ui',
-      userDisplayName: 'OpenChamber UI',
+      userName: 'alias-ade-ui',
+      userDisplayName: 'ALIAS ADE UI',
       attestationType: 'none',
       excludeCredentials: getPasskeysForRpId(store, rpID).map((passkey) => ({
         id: passkey.id,
@@ -471,7 +471,7 @@ export const createUiPasskeys = ({
     const passkey = store.passkeys.find((item) => item.id === response?.id);
 
     if (!passkey) {
-      const error = new Error('That passkey is not registered for this OpenChamber instance');
+      const error = new Error('That passkey is not registered for this ALIAS ADE instance');
       error.statusCode = 404;
       throw error;
     }

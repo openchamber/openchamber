@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/schema.json",
-  "productName": "OpenChamber",
+  "productName": "ALIAS ADE",
   "version": "1.10.4",
-  "identifier": "ai.opencode.openchamber",
+  "identifier": "ai.opencode.aliasAde",
   "build": {
     "beforeDevCommand": "node ./scripts/dev-web-server.mjs",
     "beforeBuildCommand": "bun run build:sidecar",
@@ -14,7 +14,7 @@
       {
         "label": "main",
         "create": false,
-        "title": "OpenChamber",
+        "title": "ALIAS ADE",
         "width": 1280,
         "height": 800,
         "resizable": true,
@@ -39,7 +39,7 @@
   "bundle": {
     "active": true,
     "externalBin": [
-      "sidecars/openchamber-server"
+      "sidecars/alias-ade-server"
     ],
     "resources": [
       "resources/web-dist/**/*"
@@ -74,7 +74,7 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/btriapitsyn/openchamber/releases/latest/download/latest.json"
+        "https://github.com/btriapitsyn/alias-ade/releases/latest/download/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDIwRDMyQUQzNjNFRTc1ODIKUldTQ2RlNWoweXJUSUdpVWVWNm84R1pHamYzNVFhYWgyWmlpWFVzem5nUTlHd1dlRlNTV0FFc3IK"
     }

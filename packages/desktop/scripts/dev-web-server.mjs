@@ -32,8 +32,8 @@ const inferTargetTriple = () => {
 
 const targetTriple = inferTargetTriple();
 const sidecarName = process.platform === 'win32'
-  ? `openchamber-server-${targetTriple}.exe`
-  : `openchamber-server-${targetTriple}`;
+  ? `alias-ade-server-${targetTriple}.exe`
+  : `alias-ade-server-${targetTriple}`;
 
 const sidecarPath = path.join(tauriDir, 'sidecars', sidecarName);
 const distDir = path.join(tauriDir, 'resources', 'web-dist');
@@ -58,8 +58,8 @@ const apiChild = spawn(sidecarPath, ['--port', String(DESKTOP_DEV_PORT)], {
   detached: process.platform !== 'win32',
   env: {
     ...process.env,
-    OPENCHAMBER_HOST: '127.0.0.1',
-    OPENCHAMBER_DIST_DIR: distDir,
+    ALIAS_ADE_HOST: '127.0.0.1',
+    ALIAS_ADE_DIST_DIR: distDir,
     NO_PROXY: process.env.NO_PROXY || 'localhost,127.0.0.1',
     no_proxy: process.env.no_proxy || 'localhost,127.0.0.1',
   },
@@ -73,7 +73,7 @@ const webChild = spawn('bun', ['x', 'vite', '--host', '127.0.0.1', '--port', '51
   detached: process.platform !== 'win32',
   env: {
     ...process.env,
-    OPENCHAMBER_PORT: String(DESKTOP_DEV_PORT),
+    ALIAS_ADE_PORT: String(DESKTOP_DEV_PORT),
     NO_PROXY: process.env.NO_PROXY || 'localhost,127.0.0.1',
     no_proxy: process.env.no_proxy || 'localhost,127.0.0.1',
   },

@@ -1122,7 +1122,7 @@ const resolveCandidateDirectory = async (
       return { name, directory, branch: explicitBranchName };
     }
 
-    const branch = `openchamber/${name}`;
+    const branch = `alias-ade/${name}`;
     const branchRef = `refs/heads/${branch}`;
     const branchExists = await runGitCommand(primaryWorktree, ['show-ref', '--verify', '--quiet', branchRef]);
     if (branchExists.success) {
@@ -2445,7 +2445,7 @@ export async function countGitStashFiles(directory: string, refs: string[]): Pro
 }
 
 export async function stashGitChanges(directory: string, options: { message?: string } = {}): Promise<{ success: boolean; created: boolean; message: string; output: string }> {
-  const message = options.message?.trim() || `OpenChamber stash ${new Date().toISOString()}`;
+  const message = options.message?.trim() || `ALIAS ADE stash ${new Date().toISOString()}`;
   const result = await execGit(['stash', 'push', '--include-untracked', '-m', message], directory);
   if (result.exitCode !== 0) throw new Error(result.stderr.trim() || 'Failed to stash changes');
   const output = result.stdout.trim() || result.stderr.trim();

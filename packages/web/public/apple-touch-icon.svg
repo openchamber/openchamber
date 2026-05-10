@@ -1,5 +1,5 @@
 <svg width="180" height="180" viewBox="0 0 180 180" xmlns="http://www.w3.org/2000/svg">
-  <!-- OpenChamber logo - simplified, no background (for iOS) -->
+  <!-- ALIAS ADE logo - simplified, no background (for iOS) -->
   <g transform="translate(90, 90) scale(1.4)">
     <!-- Left face - simplified, no grid cells -->
     <path d="M0 0 L-41.568 -24 L-41.568 24 L0 48 Z" fill="white" fill-opacity="0.2" stroke="white" stroke-width="3" stroke-linejoin="round"/>

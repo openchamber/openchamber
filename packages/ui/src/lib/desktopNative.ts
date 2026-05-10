@@ -3,7 +3,7 @@ import { isDesktopShell } from '@/lib/desktop';
 type InvokeArgs = Record<string, unknown>;
 
 const isElectronDesktop = (): boolean => {
-  return typeof window !== 'undefined' && Boolean((window as { __OPENCHAMBER_ELECTRON__?: unknown }).__OPENCHAMBER_ELECTRON__);
+  return typeof window !== 'undefined' && Boolean((window as { __ALIAS_ADE_ELECTRON__?: unknown }).__ALIAS_ADE_ELECTRON__);
 };
 
 const getInvoke = () => {

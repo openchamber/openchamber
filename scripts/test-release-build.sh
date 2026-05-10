@@ -219,7 +219,7 @@ run_native_build() {
 
     for target in "${TARGETS[@]}"; do
         if [[ "$NO_BUNDLE" == true ]]; then
-            local BINARY_PATH="packages/desktop/src-tauri/target/$target/release/openchamber-desktop"
+            local BINARY_PATH="packages/desktop/src-tauri/target/$target/release/alias-ade-desktop"
         else
             local BINARY_PATH="packages/desktop/src-tauri/target/$target/release/bundle/dmg"
         fi

@@ -1,4 +1,4 @@
-import type { SettingsAPI, SettingsLoadResult, SettingsPayload } from '@openchamber/ui/lib/api/types';
+import type { SettingsAPI, SettingsLoadResult, SettingsPayload } from '@alias-ade/ui/lib/api/types';
 
 // Use same endpoints as web - fetch interceptor handles URL rewriting
 const SETTINGS_ENDPOINT = '/api/config/settings';

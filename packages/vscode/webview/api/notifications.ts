@@ -1,4 +1,4 @@
-import type { NotificationPayload, NotificationsAPI } from '@openchamber/ui/lib/api/types';
+import type { NotificationPayload, NotificationsAPI } from '@alias-ade/ui/lib/api/types';
 import { sendBridgeMessage } from './bridge';
 
 type NotifyResponse = { shown?: boolean };

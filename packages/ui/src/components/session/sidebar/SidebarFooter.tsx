@@ -47,11 +47,11 @@ export function SidebarFooter({
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
-              <button type="button" onClick={onOpenAbout} className={footerButtonClassName} aria-label={t('sessions.sidebar.footer.actions.aboutOpenChamber')}>
+              <button type="button" onClick={onOpenAbout} className={footerButtonClassName} aria-label={t('sessions.sidebar.footer.actions.aboutAliasAde')}>
                 <RiInformationLine className="h-4.5 w-4.5" />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="top" sideOffset={4}><p>{t('sessions.sidebar.footer.actions.aboutOpenChamber')}</p></TooltipContent>
+            <TooltipContent side="top" sideOffset={4}><p>{t('sessions.sidebar.footer.actions.aboutAliasAde')}</p></TooltipContent>
           </Tooltip>
         </>
       ) : null}

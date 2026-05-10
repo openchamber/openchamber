@@ -25,7 +25,7 @@ import type { GitBranch, GitWorktreeInfo } from '@/lib/api/types';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { createWorktreeWithDefaults } from '@/lib/worktrees/worktreeCreate';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
-import { getWorktreeSetupCommands } from '@/lib/openchamberConfig';
+import { getWorktreeSetupCommands } from '@/lib/aliasAdeConfig';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { useSessions } from '@/sync/sync-context';
 import { useI18n } from '@/lib/i18n';

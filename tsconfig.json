@@ -13,9 +13,9 @@
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "paths": {
-      "@openchamber/ui/*": ["./packages/ui/src/*"],
-      "@openchamber/web/*": ["./packages/web/src/*"],
-      "@openchamber/desktop/*": ["./packages/desktop/src/*"]
+      "@alias-ade/ui/*": ["./packages/ui/src/*"],
+      "@alias-ade/web/*": ["./packages/web/src/*"],
+      "@alias-ade/desktop/*": ["./packages/desktop/src/*"]
     }
   }
 }

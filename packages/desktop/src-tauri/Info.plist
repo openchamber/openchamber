@@ -7,17 +7,17 @@
 	<key>NSSupportsSuddenTermination</key>
 	<false/>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>OpenChamber needs to run the OpenCode CLI to provide AI coding assistance.</string>
+	<string>ALIAS ADE needs to run the OpenCode CLI to provide AI coding assistance.</string>
 	<key>NSDesktopFolderUsageDescription</key>
-	<string>OpenChamber needs access to work with your projects.</string>
+	<string>ALIAS ADE needs access to work with your projects.</string>
 	<key>NSDocumentsFolderUsageDescription</key>
-	<string>OpenChamber needs access to work with your projects.</string>
+	<string>ALIAS ADE needs access to work with your projects.</string>
 	<key>NSDownloadsFolderUsageDescription</key>
-	<string>OpenChamber needs access to work with your projects.</string>
+	<string>ALIAS ADE needs access to work with your projects.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>OpenChamber needs microphone access for voice input.</string>
+	<string>ALIAS ADE needs microphone access for voice input.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>OpenChamber needs speech recognition to transcribe voice input.</string>
+	<string>ALIAS ADE needs speech recognition to transcribe voice input.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoadsInWebContent</key>

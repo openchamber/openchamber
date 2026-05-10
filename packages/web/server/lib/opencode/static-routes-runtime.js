@@ -16,7 +16,7 @@ export const createStaticRoutesRuntime = (dependencies) => {
   } = dependencies;
 
   const resolveDistPath = () => {
-    const env = typeof process.env.OPENCHAMBER_DIST_DIR === 'string' ? process.env.OPENCHAMBER_DIST_DIR.trim() : '';
+    const env = typeof process.env.ALIAS_ADE_DIST_DIR === 'string' ? process.env.ALIAS_ADE_DIST_DIR.trim() : '';
     if (env) {
       return path.resolve(env);
     }

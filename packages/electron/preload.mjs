@@ -11,14 +11,14 @@ const readArgValue = (name) => {
   return entry.slice(prefix.length);
 };
 
-const localOrigin = readArgValue('--openchamber-local-origin');
-const homeDirectory = readArgValue('--openchamber-home');
-const macosMajorRaw = readArgValue('--openchamber-macos-major');
+const localOrigin = readArgValue('--alias-ade-local-origin');
+const homeDirectory = readArgValue('--alias-ade-home');
+const macosMajorRaw = readArgValue('--alias-ade-macos-major');
 const macosMajor = Number.parseInt(macosMajorRaw, 10);
 
 // Preload re-executes on every cross-origin navigation (we run with
 // sandbox:false, per-document). Two separate concerns to balance:
-//  - __OPENCHAMBER_ELECTRON__ is a shell-identity flag (no capability).
+//  - __ALIAS_ADE_ELECTRON__ is a shell-identity flag (no capability).
 //    Remote UIs still need it so isDesktopShell() returns true and the
 //    window renders with desktop affordances (DesktopHostSwitcher,
 //    title bar offsets, etc.). Expose unconditionally.
@@ -40,29 +40,29 @@ const isLocalPage = currentOrigin === 'null'
   || isLoopbackOrigin
   || (localOrigin && currentOrigin === localOrigin);
 
-// Remote pages need __OPENCHAMBER_LOCAL_ORIGIN__ so the HostSwitcher knows
+// Remote pages need __ALIAS_ADE_LOCAL_ORIGIN__ so the HostSwitcher knows
 // the URL of the Local entry (isDesktopLocalOriginActive() falls back to
 // window.location.origin otherwise — wrong on remote). Low risk: the value
 // is just "http://127.0.0.1:<port>" which is not exploitable without the
 // IPC channel, and CORS on the local server prevents remote-origin fetches.
 if (localOrigin) {
-  contextBridge.exposeInMainWorld('__OPENCHAMBER_LOCAL_ORIGIN__', localOrigin);
+  contextBridge.exposeInMainWorld('__ALIAS_ADE_LOCAL_ORIGIN__', localOrigin);
 }
 
 // Home directory leaks the OS username — keep local-only. Remote pages
 // operate on the REMOTE server's filesystem, local home is irrelevant
 // (and would be misleading if consumed as a workspace hint).
 if (isLocalPage && homeDirectory) {
-  contextBridge.exposeInMainWorld('__OPENCHAMBER_HOME__', homeDirectory);
+  contextBridge.exposeInMainWorld('__ALIAS_ADE_HOME__', homeDirectory);
 }
 
 // macOS major version drives window chrome offsets (traffic lights) — UI
 // presentation only, safe to expose.
 if (Number.isFinite(macosMajor) && macosMajor > 0) {
-  contextBridge.exposeInMainWorld('__OPENCHAMBER_MACOS_MAJOR__', macosMajor);
+  contextBridge.exposeInMainWorld('__ALIAS_ADE_MACOS_MAJOR__', macosMajor);
 }
 
-contextBridge.exposeInMainWorld('__OPENCHAMBER_ELECTRON__', {
+contextBridge.exposeInMainWorld('__ALIAS_ADE_ELECTRON__', {
   runtime: 'electron',
 });
 
@@ -113,7 +113,7 @@ const dispatchNativeEvent = (event, detail) => {
 // Main-process events are read-only notifications (update progress,
 // window focus, etc.) — safe to deliver to any page rendered in this
 // webContents. The events themselves don't grant capability.
-ipcRenderer.on('openchamber:emit', (_evt, payload) => {
+ipcRenderer.on('aliasAde:emit', (_evt, payload) => {
   if (!payload || typeof payload !== 'object') {
     return;
   }
@@ -127,18 +127,18 @@ ipcRenderer.on('openchamber:emit', (_evt, payload) => {
 });
 
 // __TAURI__ is exposed on all pages; the main-process gate in
-// ipcMain.handle('openchamber:invoke') decides per-command what is safe
+// ipcMain.handle('aliasAde:invoke') decides per-command what is safe
 // for non-local callers (window/host-switcher ops yes, file/shell ops
 // no). See COMMANDS_SAFE_FOR_REMOTE in main.mjs.
 contextBridge.exposeInMainWorld('__TAURI__', {
   core: {
-    invoke: (cmd, args) => ipcRenderer.invoke('openchamber:invoke', cmd, args || {}),
+    invoke: (cmd, args) => ipcRenderer.invoke('aliasAde:invoke', cmd, args || {}),
   },
   dialog: {
-    open: (options) => ipcRenderer.invoke('openchamber:dialog:open', options || {}),
+    open: (options) => ipcRenderer.invoke('aliasAde:dialog:open', options || {}),
   },
   shell: {
-    open: (url) => ipcRenderer.invoke('openchamber:invoke', 'desktop_open_external_url', { url }),
+    open: (url) => ipcRenderer.invoke('aliasAde:invoke', 'desktop_open_external_url', { url }),
   },
   event: {
     listen: async (event, handler) => addListener(event, handler),

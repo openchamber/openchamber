@@ -14,7 +14,7 @@ let outputChannel: vscode.OutputChannel | undefined;
 let activeSessionId: string | null = null;
 let activeSessionTitle: string | null = null;
 
-const SETTINGS_KEY = 'openchamber.settings';
+const SETTINGS_KEY = 'aliasAde.settings';
 
 const formatIso = (value: number | null | undefined) => {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '(none)';
@@ -32,7 +32,7 @@ const formatDurationMs = (value: number | null | undefined) => {
 };
 
 export async function activate(context: vscode.ExtensionContext) {
-  outputChannel = vscode.window.createOutputChannel('OpenChamber');
+  outputChannel = vscode.window.createOutputChannel('ALIAS ADE');
 
   let moveToRightSidebarScheduled = false;
 
@@ -74,12 +74,12 @@ export async function activate(context: vscode.ExtensionContext) {
     if (!moveCommandId) return 'unsupported';
 
     try {
-      await vscode.commands.executeCommand('openchamber.chatView.focus');
+      await vscode.commands.executeCommand('aliasAde.chatView.focus');
       await vscode.commands.executeCommand(moveCommandId);
       return 'moved';
     } catch (error) {
       outputChannel?.appendLine(
-        `[OpenChamber] Failed moving chat view to right sidebar (command=${moveCommandId}): ${error instanceof Error ? error.message : String(error)}`
+        `[ALIAS ADE] Failed moving chat view to right sidebar (command=${moveCommandId}): ${error instanceof Error ? error.message : String(error)}`
       );
       return 'failed';
     }
@@ -88,9 +88,9 @@ export async function activate(context: vscode.ExtensionContext) {
   const maybeMoveChatToRightSidebarOnStartup = async () => {
     if (isCursorLikeHost()) return;
 
-    const attempted = context.globalState.get<boolean>('openchamber.sidebarAutoMoveAttempted') || false;
+    const attempted = context.globalState.get<boolean>('aliasAde.sidebarAutoMoveAttempted') || false;
     if (attempted) return;
-    await context.globalState.update('openchamber.sidebarAutoMoveAttempted', true);
+    await context.globalState.update('aliasAde.sidebarAutoMoveAttempted', true);
 
     if (moveToRightSidebarScheduled) return;
     moveToRightSidebarScheduled = true;
@@ -109,7 +109,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
 
   // Migration: clear legacy auto-set API URLs (ports 47680-47689 were auto-assigned by older extension versions)
-  const config = vscode.workspace.getConfiguration('openchamber');
+  const config = vscode.workspace.getConfiguration('alias-ade');
   const legacyApiUrl = config.get<string>('apiUrl') || '';
   if (/^https?:\/\/localhost:4768\d\/?$/.test(legacyApiUrl.trim())) {
     await config.update('apiUrl', '', vscode.ConfigurationTarget.Global);
@@ -132,26 +132,26 @@ export async function activate(context: vscode.ExtensionContext) {
 
   // Register sidebar/focus commands AFTER the webview view provider is registered
   context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.openSidebar', async () => {
+    vscode.commands.registerCommand('aliasAde.openSidebar', async () => {
       // Best-effort: open the container (if available), then focus the chat view.
       try {
-        await vscode.commands.executeCommand('workbench.view.extension.openchamber');
+        await vscode.commands.executeCommand('workbench.view.extension.aliasAde');
       } catch (e) {
-        outputChannel?.appendLine(`[OpenChamber] workbench.view.extension.openchamber failed: ${e}`);
+        outputChannel?.appendLine(`[ALIAS ADE] workbench.view.extension.aliasAde failed: ${e}`);
       }
 
       try {
-        await vscode.commands.executeCommand('openchamber.chatView.focus');
+        await vscode.commands.executeCommand('aliasAde.chatView.focus');
       } catch (e) {
-        outputChannel?.appendLine(`[OpenChamber] openchamber.chatView.focus failed: ${e}`);
-        vscode.window.showErrorMessage(`OpenChamber: Failed to open sidebar - ${e}`);
+        outputChannel?.appendLine(`[ALIAS ADE] aliasAde.chatView.focus failed: ${e}`);
+        vscode.window.showErrorMessage(`ALIAS ADE: Failed to open sidebar - ${e}`);
       }
     })
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.focusChat', async () => {
-      await vscode.commands.executeCommand('openchamber.chatView.focus');
+    vscode.commands.registerCommand('aliasAde.focusChat', async () => {
+      await vscode.commands.executeCommand('aliasAde.chatView.focus');
     })
   );
 
@@ -162,20 +162,20 @@ export async function activate(context: vscode.ExtensionContext) {
   sessionEditorProvider = new SessionEditorPanelProvider(context, context.extensionUri, openCodeManager);
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.internal.settingsSynced', (settings: unknown) => {
+    vscode.commands.registerCommand('aliasAde.internal.settingsSynced', (settings: unknown) => {
       chatViewProvider?.notifySettingsSynced(settings);
       sessionEditorProvider?.notifySettingsSynced(settings);
     })
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.openAgentManager', () => {
+    vscode.commands.registerCommand('aliasAde.openAgentManager', () => {
       agentManagerProvider?.createOrShow();
     })
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.setActiveSession', (sessionId: unknown, title?: unknown) => {
+    vscode.commands.registerCommand('aliasAde.setActiveSession', (sessionId: unknown, title?: unknown) => {
       if (typeof sessionId === 'string' && sessionId.trim().length > 0) {
         activeSessionId = sessionId.trim();
         activeSessionTitle = typeof title === 'string' && title.trim().length > 0 ? title.trim() : null;
@@ -188,9 +188,9 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.openActiveSessionInEditor', () => {
+    vscode.commands.registerCommand('aliasAde.openActiveSessionInEditor', () => {
       if (!activeSessionId) {
-        vscode.window.showInformationMessage('OpenChamber: No active session');
+        vscode.window.showInformationMessage('ALIAS ADE: No active session');
         return;
       }
       sessionEditorProvider?.createOrShow(activeSessionId, activeSessionTitle ?? undefined);
@@ -198,7 +198,7 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.openSessionInEditor', (sessionId: string, title?: string) => {
+    vscode.commands.registerCommand('aliasAde.openSessionInEditor', (sessionId: string, title?: string) => {
       if (typeof sessionId !== 'string' || sessionId.trim().length === 0) {
         return;
       }
@@ -207,13 +207,13 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.openNewSessionInEditor', () => {
+    vscode.commands.registerCommand('aliasAde.openNewSessionInEditor', () => {
       sessionEditorProvider?.createOrShowNewSession();
     })
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.openCurrentOrNewSessionInEditor', () => {
+    vscode.commands.registerCommand('aliasAde.openCurrentOrNewSessionInEditor', () => {
       if (activeSessionId) {
         sessionEditorProvider?.createOrShow(activeSessionId, activeSessionTitle ?? undefined);
       } else {
@@ -223,21 +223,21 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.restartApi', async () => {
+    vscode.commands.registerCommand('aliasAde.restartApi', async () => {
       try {
         await openCodeManager?.restart();
-        vscode.window.showInformationMessage('OpenChamber: API connection restarted');
+        vscode.window.showInformationMessage('ALIAS ADE: API connection restarted');
       } catch (e) {
-        vscode.window.showErrorMessage(`OpenChamber: Failed to restart API - ${e}`);
+        vscode.window.showErrorMessage(`ALIAS ADE: Failed to restart API - ${e}`);
       }
     })
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.addToContext', async () => {
+    vscode.commands.registerCommand('aliasAde.addToContext', async () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor) {
-        vscode.window.showWarningMessage('OpenChamber [Add to Context]:No active editor');
+        vscode.window.showWarningMessage('ALIAS ADE [Add to Context]:No active editor');
         return;
       }
 
@@ -245,7 +245,7 @@ export async function activate(context: vscode.ExtensionContext) {
       const selectedText = editor.document.getText(selection);
 
       if (!selectedText) {
-        vscode.window.showWarningMessage('OpenChamber [Add to Context]: No text selected');
+        vscode.window.showWarningMessage('ALIAS ADE [Add to Context]: No text selected');
         return;
       }
 
@@ -265,12 +265,12 @@ export async function activate(context: vscode.ExtensionContext) {
       chatViewProvider?.addTextToInput(contextText);
 
       // Focus the chat panel
-      vscode.commands.executeCommand('openchamber.focusChat');
+      vscode.commands.executeCommand('aliasAde.focusChat');
     })
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.attachExplorerToChat', async (resource?: vscode.Uri, resources?: vscode.Uri[]) => {
+    vscode.commands.registerCommand('aliasAde.attachExplorerToChat', async (resource?: vscode.Uri, resources?: vscode.Uri[]) => {
       const uriCandidates: vscode.Uri[] = [];
       if (Array.isArray(resources)) {
         uriCandidates.push(...resources.filter((entry): entry is vscode.Uri => entry instanceof vscode.Uri));
@@ -315,25 +315,25 @@ export async function activate(context: vscode.ExtensionContext) {
       }
 
       if (mentionPaths.length === 0) {
-        vscode.window.showWarningMessage('OpenChamber: No file selected to mention');
+        vscode.window.showWarningMessage('ALIAS ADE: No file selected to mention');
         return;
       }
 
-      await vscode.commands.executeCommand('openchamber.openSidebar');
+      await vscode.commands.executeCommand('aliasAde.openSidebar');
       await new Promise((resolve) => setTimeout(resolve, 80));
       chatViewProvider?.addFileMentions(mentionPaths);
 
       if (skippedEntries.length > 0) {
-        vscode.window.showInformationMessage('OpenChamber: Some selected entries were skipped (folders or unsupported resources)');
+        vscode.window.showInformationMessage('ALIAS ADE: Some selected entries were skipped (folders or unsupported resources)');
       }
     })
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.explain', async () => {
+    vscode.commands.registerCommand('aliasAde.explain', async () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor) {
-        vscode.window.showWarningMessage('OpenChamber [Explain]: No active editor');
+        vscode.window.showWarningMessage('ALIAS ADE [Explain]: No active editor');
         return;
       }
 
@@ -357,15 +357,15 @@ export async function activate(context: vscode.ExtensionContext) {
 
       // Create new session and send the prompt
       chatViewProvider?.createNewSessionWithPrompt(prompt);
-      vscode.commands.executeCommand('openchamber.focusChat');
+      vscode.commands.executeCommand('aliasAde.focusChat');
     })
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.improveCode', async () => {
+    vscode.commands.registerCommand('aliasAde.improveCode', async () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor) {
-        vscode.window.showWarningMessage('OpenChamber [Improve Code]: No active editor');
+        vscode.window.showWarningMessage('ALIAS ADE [Improve Code]: No active editor');
         return;
       }
 
@@ -373,7 +373,7 @@ export async function activate(context: vscode.ExtensionContext) {
       const selectedText = editor.document.getText(selection);
 
       if (!selectedText) {
-        vscode.window.showWarningMessage('OpenChamber [Improve Code]: No text selected');
+        vscode.window.showWarningMessage('ALIAS ADE [Improve Code]: No text selected');
         return;
       }
 
@@ -387,25 +387,25 @@ export async function activate(context: vscode.ExtensionContext) {
 
       // Create new session and send the prompt
       chatViewProvider?.createNewSessionWithPrompt(prompt);
-      vscode.commands.executeCommand('openchamber.focusChat');
+      vscode.commands.executeCommand('aliasAde.focusChat');
     })
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.newSession', () => {
+    vscode.commands.registerCommand('aliasAde.newSession', () => {
       chatViewProvider?.createNewSession();
     })
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.showSettings', () => {
+    vscode.commands.registerCommand('aliasAde.showSettings', () => {
       chatViewProvider?.showSettings();
     })
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.showOpenCodeStatus', async () => {
-      const config = vscode.workspace.getConfiguration('openchamber');
+    vscode.commands.registerCommand('aliasAde.showOpenCodeStatus', async () => {
+      const config = vscode.workspace.getConfiguration('alias-ade');
       const configuredApiUrl = (config.get<string>('apiUrl') || '').trim();
 
       const extensionVersion = String(context.extension?.packageJSON?.version || '');
@@ -514,7 +514,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
       const lines = [
         `Time: ${new Date().toISOString()}`,
-        `OpenChamber version: ${extensionVersion || '(unknown)'}`,
+        `ALIAS ADE version: ${extensionVersion || '(unknown)'}`,
         `OpenCode Version: ${debug?.version ?? '(unknown)'}`,
         `VS Code version: ${vscode.version}`,
         `Platform: ${process.platform} ${process.arch}`,
@@ -523,7 +523,7 @@ export async function activate(context: vscode.ExtensionContext) {
         `Working directory: ${workingDirectory}`,
         `Working dir matches workspace: ${workingDirectoryMatchesWorkspace ? 'yes' : 'no'}`,
         `API URL (configured): ${configuredApiUrl || '(none)'}`,
-        `OpenCode binary (configured): ${(vscode.workspace.getConfiguration('openchamber').get<string>('opencodeBinary') || '').trim() || '(none)'}`,
+        `OpenCode binary (configured): ${(vscode.workspace.getConfiguration('alias-ade').get<string>('opencodeBinary') || '').trim() || '(none)'}`,
         `API URL (resolved): ${openCodeManager?.getApiUrl() ?? '(none)'}`,
         `API URL path: ${resolvedApiPath || '(none)'}`,
         debug

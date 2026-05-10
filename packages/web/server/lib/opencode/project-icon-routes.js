@@ -3,7 +3,7 @@ export const registerProjectIconRoutes = (app, dependencies) => {
     fsPromises,
     path,
     crypto,
-    openchamberDataDir,
+    aliasAdeDataDir,
     sanitizeProjects,
     readSettingsFromDiskMigrated,
     persistSettings,
@@ -12,7 +12,7 @@ export const registerProjectIconRoutes = (app, dependencies) => {
     resolveGitBinaryForSpawn,
   } = dependencies;
 
-  const projectIconsDirPath = path.join(openchamberDataDir, 'project-icons');
+  const projectIconsDirPath = path.join(aliasAdeDataDir, 'project-icons');
   const projectIconMimeToExtension = {
     'image/png': 'png',
     'image/jpeg': 'jpg',
@@ -156,7 +156,7 @@ export const registerProjectIconRoutes = (app, dependencies) => {
       return svgMarkup;
     }
 
-    const overrideStyle = `<style data-openchamber-theme-icon="1">:root{color:${color}!important;}</style>`;
+    const overrideStyle = `<style data-alias-ade-theme-icon="1">:root{color:${color}!important;}</style>`;
     return `${svgMarkup.slice(0, svgOpenTagEndIndex + 1)}${overrideStyle}${svgMarkup.slice(svgOpenTagEndIndex + 1)}`;
   };
 

@@ -119,7 +119,7 @@ async function clawdhubFetch(url: string, options?: RequestInit): Promise<Respon
       ...options,
       headers: {
         Accept: 'application/json',
-        'User-Agent': 'OpenChamber-VSCode/1.0',
+        'User-Agent': 'ALIAS ADE-VSCode/1.0',
         ...options?.headers,
       },
     });
@@ -550,7 +550,7 @@ export async function scanSkillsRepository(options: { source: string; subpath?: 
   }
 
   const effectiveSubpath = parsed.effectiveSubpath || options.defaultSubpath || null;
-  const tempBase = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'openchamber-vscode-skills-scan-'));
+  const tempBase = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'alias-ade-vscode-skills-scan-'));
 
   try {
     const cloned = await cloneRepo(parsed.cloneUrlHttps, tempBase);
@@ -776,7 +776,7 @@ export async function installSkillsFromRepository(options: {
     };
   }
 
-  const tempBase = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'openchamber-vscode-skills-install-'));
+  const tempBase = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'alias-ade-vscode-skills-install-'));
 
   try {
     const cloned = await cloneRepo(parsed.cloneUrlHttps, tempBase);

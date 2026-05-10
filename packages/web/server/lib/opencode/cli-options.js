@@ -7,18 +7,18 @@ export const parseServeCliOptions = ({
 }) => {
   const args = Array.isArray(argv) ? [...argv] : [];
   const envPassword =
-    env.OPENCHAMBER_UI_PASSWORD ||
+    env.ALIAS_ADE_UI_PASSWORD ||
     env.OPENCODE_UI_PASSWORD ||
     null;
-  const envCfTunnel = env.OPENCHAMBER_TRY_CF_TUNNEL === 'true';
-  const envTunnelProvider = env.OPENCHAMBER_TUNNEL_PROVIDER || undefined;
-  const envTunnelMode = env.OPENCHAMBER_TUNNEL_MODE || undefined;
-  const envTunnelConfigRaw = env.OPENCHAMBER_TUNNEL_CONFIG;
+  const envCfTunnel = env.ALIAS_ADE_TRY_CF_TUNNEL === 'true';
+  const envTunnelProvider = env.ALIAS_ADE_TUNNEL_PROVIDER || undefined;
+  const envTunnelMode = env.ALIAS_ADE_TUNNEL_MODE || undefined;
+  const envTunnelConfigRaw = env.ALIAS_ADE_TUNNEL_CONFIG;
   const envTunnelConfig = typeof envTunnelConfigRaw === 'string'
     ? (envTunnelConfigRaw.trim().length > 0 ? envTunnelConfigRaw.trim() : null)
     : undefined;
-  const envTunnelToken = env.OPENCHAMBER_TUNNEL_TOKEN || undefined;
-  const envTunnelHostname = env.OPENCHAMBER_TUNNEL_HOSTNAME || undefined;
+  const envTunnelToken = env.ALIAS_ADE_TUNNEL_TOKEN || undefined;
+  const envTunnelHostname = env.ALIAS_ADE_TUNNEL_HOSTNAME || undefined;
 
   const options = {
     port: defaultPort,

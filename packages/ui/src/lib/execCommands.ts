@@ -13,7 +13,7 @@ const getBaseUrl = (): string => {
 
 function getRuntimeFilesAPI(): FilesAPI | null {
   if (typeof window === 'undefined') return null;
-  const apis = (window as typeof window & { __OPENCHAMBER_RUNTIME_APIS__?: RuntimeAPIs }).__OPENCHAMBER_RUNTIME_APIS__;
+  const apis = (window as typeof window & { __ALIAS_ADE_RUNTIME_APIS__?: RuntimeAPIs }).__ALIAS_ADE_RUNTIME_APIS__;
   if (apis?.files) {
     return apis.files;
   }

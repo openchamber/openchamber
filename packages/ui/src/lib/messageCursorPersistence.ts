@@ -1,7 +1,7 @@
-const DB_NAME = 'openchamber-message-cursors';
+const DB_NAME = 'alias-ade-message-cursors';
 const STORE_NAME = 'cursors';
 const DB_VERSION = 1;
-const FALLBACK_KEY = 'openchamber.messageCursors';
+const FALLBACK_KEY = 'aliasAde.messageCursors';
 
 type CursorRecord = {
   messageId: string;

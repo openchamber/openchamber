@@ -84,20 +84,20 @@ fn eval_in_focused_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>, script: 
 }
 
 fn dispatch_menu_action<R: tauri::Runtime>(app: &tauri::AppHandle<R>, action: &str) {
-    let _ = app.emit("openchamber:menu-action", action);
+    let _ = app.emit("aliasAde:menu-action", action);
 
-    let event = serde_json::to_string("openchamber:menu-action")
-        .unwrap_or_else(|_| "\"openchamber:menu-action\"".into());
+    let event = serde_json::to_string("aliasAde:menu-action")
+        .unwrap_or_else(|_| "\"aliasAde:menu-action\"".into());
     let detail = serde_json::to_string(action).unwrap_or_else(|_| "\"\"".into());
     let script = format!("window.dispatchEvent(new CustomEvent({event}, {{ detail: {detail} }}));");
     eval_in_focused_window(app, &script);
 }
 
 fn dispatch_check_for_updates<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
-    let _ = app.emit("openchamber:check-for-updates", ());
+    let _ = app.emit("aliasAde:check-for-updates", ());
 
-    let event = serde_json::to_string("openchamber:check-for-updates")
-        .unwrap_or_else(|_| "\"openchamber:check-for-updates\"".into());
+    let event = serde_json::to_string("aliasAde:check-for-updates")
+        .unwrap_or_else(|_| "\"aliasAde:check-for-updates\"".into());
     let script = format!("window.dispatchEvent(new Event({event}));");
     eval_in_all_windows(app, &script);
 }
@@ -158,10 +158,10 @@ const MENU_ITEM_QUIT_ID: &str = "menu_quit";
 
 #[cfg(target_os = "macos")]
 const GITHUB_BUG_REPORT_URL: &str =
-    "https://github.com/btriapitsyn/openchamber/issues/new?template=bug_report.yml";
+    "https://github.com/btriapitsyn/alias-ade/issues/new?template=bug_report.yml";
 #[cfg(target_os = "macos")]
 const GITHUB_FEATURE_REQUEST_URL: &str =
-    "https://github.com/btriapitsyn/openchamber/issues/new?template=feature_request.yml";
+    "https://github.com/btriapitsyn/alias-ade/issues/new?template=feature_request.yml";
 #[cfg(target_os = "macos")]
 const DISCORD_INVITE_URL: &str = "https://discord.gg/ZYRSdnwwKA";
 
@@ -222,7 +222,7 @@ fn quit_confirmation_message() -> String {
         "Background processes (sidecar, SSH sessions) will be stopped.".to_string()
     } else {
         format!(
-            "OpenChamber detected {}. Quitting now will stop sidecar/background processes and may interrupt pending work.",
+            "ALIAS ADE detected {}. Quitting now will stop sidecar/background processes and may interrupt pending work.",
             reasons.join(", ")
         )
     }
@@ -257,7 +257,7 @@ unsafe extern "C-unwind" fn application_should_terminate_with_confirmation(
     let message = quit_confirmation_message();
     let confirmed = matches!(
         rfd::MessageDialog::new()
-            .set_title("Quit OpenChamber?")
+            .set_title("Quit ALIAS ADE?")
             .set_description(&message)
             .set_level(rfd::MessageLevel::Warning)
             .set_buttons(rfd::MessageButtons::OkCancel)
@@ -345,7 +345,7 @@ fn request_quit_with_confirmation(app: &tauri::AppHandle) {
     let handle = app.clone();
     app.dialog()
         .message(message)
-        .title("Quit OpenChamber?")
+        .title("Quit ALIAS ADE?")
         .buttons(MessageDialogButtons::OkCancel)
         .kind(tauri_plugin_dialog::MessageDialogKind::Warning)
         .show(move |confirmed| {
@@ -1157,7 +1157,7 @@ fn installed_apps_cache_path() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/"));
     home.join(".config")
-        .join("openchamber")
+        .join("alias-ade")
         .join(INSTALLED_APPS_CACHE_FILE)
 }
 
@@ -1212,8 +1212,8 @@ fn build_installed_apps(
 
 #[cfg(target_os = "macos")]
 fn dispatch_installed_apps_update(app: &tauri::AppHandle, apps: &[InstalledAppInfo]) {
-    let event = serde_json::to_string("openchamber:installed-apps-updated")
-        .unwrap_or_else(|_| "\"openchamber:installed-apps-updated\"".into());
+    let event = serde_json::to_string("aliasAde:installed-apps-updated")
+        .unwrap_or_else(|_| "\"aliasAde:installed-apps-updated\"".into());
     let detail = serde_json::to_string(apps).unwrap_or_else(|_| "[]".into());
     let script = format!("window.dispatchEvent(new CustomEvent({event}, {{ detail: {detail} }}));");
     eval_in_all_windows(app, &script);
@@ -1318,7 +1318,7 @@ fn icon_to_data_url(icon_path: &Path, app_name: &str) -> Option<String> {
         .duration_since(UNIX_EPOCH)
         .map(|value| value.as_millis())
         .unwrap_or(0);
-    let tmp_path = env::temp_dir().join(format!("openchamber-icon-{sanitized}-{timestamp}.png"));
+    let tmp_path = env::temp_dir().join(format!("alias-ade-icon-{sanitized}-{timestamp}.png"));
 
     let status = Command::new("sips")
         .args([
@@ -1384,8 +1384,8 @@ fn is_app_bundle_installed(bundle_name: &str) -> bool {
     false
 }
 
-const SIDECAR_NAME: &str = "openchamber-server";
-const SIDECAR_NOTIFY_PREFIX: &str = "[OpenChamberDesktopNotify] ";
+const SIDECAR_NAME: &str = "alias-ade-server";
+const SIDECAR_NOTIFY_PREFIX: &str = "[AliasAdeDesktopNotify] ";
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(20);
 const HEALTH_POLL_INITIAL_INTERVAL: Duration = Duration::from_millis(250);
 const HEALTH_POLL_MAX_INTERVAL: Duration = Duration::from_millis(2000);
@@ -1405,7 +1405,7 @@ const MIN_RESTORE_WINDOW_HEIGHT: u32 = 560;
 const LOCAL_HOST_ID: &str = "local";
 
 /// Synthetic host ID used when the boot target is forced via
-/// `OPENCHAMBER_SERVER_URL` (no config-based host entry).
+/// `ALIAS_ADE_SERVER_URL` (no config-based host entry).
 const ENV_OVERRIDE_HOST_ID: &str = "__env";
 
 /// Synthetic host ID used when a window is opened at an explicit URL
@@ -1414,7 +1414,7 @@ const DIRECT_URL_HOST_ID: &str = "__direct";
 
 /// Compare two URL strings for "same server" identity using normalized
 /// origin + path. This avoids misclassification when one URL has a
-/// trailing slash and the other does not (e.g. `OPENCHAMBER_SERVER_URL`
+/// trailing slash and the other does not (e.g. `ALIAS_ADE_SERVER_URL`
 /// pointing at the local sidecar without a trailing `/`).
 fn same_server_url(a: &str, b: &str) -> bool {
     let parsed_a = url::Url::parse(a);
@@ -1440,7 +1440,7 @@ struct SidecarState {
 #[derive(Default)]
 struct DesktopUiInjectionState {
     /// Init scripts keyed by window label. Each window's script contains
-    /// the correct `__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__` for that window.
+    /// the correct `__ALIAS_ADE_DESKTOP_BOOT_OUTCOME__` for that window.
     scripts: Mutex<std::collections::HashMap<String, String>>,
     /// Local origin — shared across all windows since the sidecar is global.
     local_origin: Mutex<Option<String>>,
@@ -1608,7 +1608,7 @@ fn build_health_url(base_url: &str) -> Option<String> {
 }
 
 fn settings_file_path() -> PathBuf {
-    if let Ok(dir) = env::var("OPENCHAMBER_DATA_DIR") {
+    if let Ok(dir) = env::var("ALIAS_ADE_DATA_DIR") {
         if !dir.trim().is_empty() {
             return PathBuf::from(dir.trim()).join("settings.json");
         }
@@ -1616,7 +1616,7 @@ fn settings_file_path() -> PathBuf {
     let home = env::var("HOME").unwrap_or_default();
     PathBuf::from(home)
         .join(".config")
-        .join("openchamber")
+        .join("alias-ade")
         .join("settings.json")
 }
 
@@ -1805,7 +1805,7 @@ fn write_desktop_hosts_config_to_path(path: &Path, config: &DesktopHostsConfig) 
 // ── Boot outcome resolution ──
 
 /// Authoritative desktop boot outcome injected into the webview as
-/// `window.__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__`.
+/// `window.__ALIAS_ADE_DESKTOP_BOOT_OUTCOME__`.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DesktopBootOutcome {
@@ -2152,8 +2152,8 @@ async fn refresh_quit_risk_flags(local_base_url: &str) {
         Err(_) => return,
     };
 
-    let scheduled_url = format!("{trimmed}/api/openchamber/scheduled-tasks/status");
-    let tunnel_url = format!("{trimmed}/api/openchamber/tunnel/status");
+    let scheduled_url = format!("{trimmed}/api/alias-ade/scheduled-tasks/status");
+    let tunnel_url = format!("{trimmed}/api/alias-ade/tunnel/status");
 
     let scheduled_future = client.get(scheduled_url).send();
     let tunnel_future = client.get(tunnel_url).send();
@@ -2251,7 +2251,7 @@ fn is_nonempty_string(value: &str) -> bool {
 }
 
 const CHANGELOG_URL: &str =
-    "https://raw.githubusercontent.com/btriapitsyn/openchamber/main/CHANGELOG.md";
+    "https://raw.githubusercontent.com/btriapitsyn/alias-ade/main/CHANGELOG.md";
 
 fn parse_semver_num(value: &str) -> Option<u32> {
     let trimmed = value.trim().trim_start_matches('v');
@@ -2369,7 +2369,7 @@ fn maybe_show_sidecar_notification(app: &tauri::AppHandle, payload: SidecarNotif
     let title = payload
         .title
         .filter(|t| is_nonempty_string(t))
-        .unwrap_or_else(|| "OpenChamber".to_string());
+        .unwrap_or_else(|| "ALIAS ADE".to_string());
     let body = payload.body.filter(|b| is_nonempty_string(b));
     let _tag = payload.tag;
 
@@ -2463,14 +2463,14 @@ fn build_local_url(port: u16) -> String {
     format!("http://127.0.0.1:{port}")
 }
 
-/// Kills any stale openchamber-server processes that may be lingering from
+/// Kills any stale alias-ade-server processes that may be lingering from
 /// previous app sessions or incomplete shutdowns. This ensures a clean
 /// startup and prevents port conflicts.
 fn kill_stale_sidecar_processes() {
     let process_name = if cfg!(windows) {
-        "openchamber-server.exe"
+        "alias-ade-server.exe"
     } else {
-        "openchamber-server"
+        "alias-ade-server"
     };
 
     let result = if cfg!(target_os = "macos") {
@@ -2595,8 +2595,8 @@ async fn spawn_local_server(app: &tauri::AppHandle) -> Result<String> {
     }
 
     for var in [
-        "OPENCHAMBER_OPENCODE_PATH",
-        "OPENCHAMBER_OPENCODE_BIN",
+        "ALIAS_ADE_OPENCODE_PATH",
+        "ALIAS_ADE_OPENCODE_BIN",
         "OPENCODE_PATH",
         "OPENCODE_BINARY",
     ] {
@@ -2649,11 +2649,11 @@ async fn spawn_local_server(app: &tauri::AppHandle) -> Result<String> {
             .sidecar(SIDECAR_NAME)
             .map_err(|err| anyhow!("Failed to resolve sidecar '{SIDECAR_NAME}': {err}"))?
             .args(["--port", &port.to_string()])
-            .env("OPENCHAMBER_HOST", sidecar_bind_host)
-            .env("OPENCHAMBER_DIST_DIR", dist_dir.clone())
-            .env("OPENCHAMBER_RUNTIME", "desktop")
-            .env("OPENCHAMBER_DESKTOP_NOTIFY", "true")
-            .env("OPENCHAMBER_SKIP_API_COMPRESSION", "true")
+            .env("ALIAS_ADE_HOST", sidecar_bind_host)
+            .env("ALIAS_ADE_DIST_DIR", dist_dir.clone())
+            .env("ALIAS_ADE_RUNTIME", "desktop")
+            .env("ALIAS_ADE_DESKTOP_NOTIFY", "true")
+            .env("ALIAS_ADE_SKIP_API_COMPRESSION", "true")
             .env("PATH", augmented_path.clone())
             .env("NO_PROXY", no_proxy)
             .env("no_proxy", no_proxy);
@@ -2784,7 +2784,7 @@ fn desktop_notify(
     let mut builder = app
         .notification()
         .builder()
-        .title(payload.title.unwrap_or_else(|| "OpenChamber".to_string()));
+        .title(payload.title.unwrap_or_else(|| "ALIAS ADE".to_string()));
 
     if let Some(body) = payload.body {
         if is_nonempty_string(&body) {
@@ -2864,7 +2864,7 @@ async fn desktop_download_and_install_update(
                 if !started {
                     total = content_length;
                     let _ = app.emit(
-                        "openchamber:update-progress",
+                        "aliasAde:update-progress",
                         UpdateProgressEvent::Started { content_length },
                     );
                     started = true;
@@ -2872,7 +2872,7 @@ async fn desktop_download_and_install_update(
 
                 downloaded = downloaded.saturating_add(chunk_length as u64);
                 let _ = app.emit(
-                    "openchamber:update-progress",
+                    "aliasAde:update-progress",
                     UpdateProgressEvent::Progress {
                         chunk_length,
                         downloaded,
@@ -2881,7 +2881,7 @@ async fn desktop_download_and_install_update(
                 );
             },
             || {
-                let _ = app.emit("openchamber:update-progress", UpdateProgressEvent::Finished);
+                let _ = app.emit("aliasAde:update-progress", UpdateProgressEvent::Finished);
             },
         )
         .await
@@ -3160,7 +3160,7 @@ fn build_init_script(local_origin: &str, boot_outcome: Option<&DesktopBootOutcom
         .unwrap_or_else(|| "undefined".to_string());
 
     let mut init_script = format!(
-        "(function(){{try{{window.__OPENCHAMBER_HOME__={home_json};window.__OPENCHAMBER_MACOS_MAJOR__={macos_major};window.__OPENCHAMBER_LOCAL_ORIGIN__={local_json};window.__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__={boot_outcome_json};}}catch(_e){{}}}})();"
+        "(function(){{try{{window.__ALIAS_ADE_HOME__={home_json};window.__ALIAS_ADE_MACOS_MAJOR__={macos_major};window.__ALIAS_ADE_LOCAL_ORIGIN__={local_json};window.__ALIAS_ADE_DESKTOP_BOOT_OUTCOME__={boot_outcome_json};}}catch(_e){{}}}})();"
     );
 
     // Cleanup: older builds injected a native-ish Instance switcher button into pages.
@@ -3416,7 +3416,7 @@ fn create_window(
     };
 
     let mut builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(parsed))
-        .title("OpenChamber")
+        .title("ALIAS ADE")
         .inner_size(1280.0, 800.0)
         .min_inner_size(MIN_WINDOW_WIDTH as f64, MIN_WINDOW_HEIGHT as f64)
         .decorations(true)
@@ -3468,7 +3468,7 @@ fn create_startup_window(app: &tauri::AppHandle, restore_geometry: bool) -> Resu
     let splash_script = build_startup_splash_script();
 
     let mut builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-        .title("OpenChamber")
+        .title("ALIAS ADE")
         .inner_size(1280.0, 800.0)
         .min_inner_size(MIN_WINDOW_WIDTH as f64, MIN_WINDOW_HEIGHT as f64)
         .decorations(true)
@@ -3668,7 +3668,7 @@ fn open_new_window(app: &tauri::AppHandle) {
         local_url.clone()
     };
 
-    let env_target = std::env::var("OPENCHAMBER_SERVER_URL")
+    let env_target = std::env::var("ALIAS_ADE_SERVER_URL")
         .ok()
         .and_then(|raw| normalize_server_url(&raw))
         .filter(|url| !same_server_url(url, &local_ui_url));
@@ -4106,7 +4106,7 @@ fn main() {
                 // Selected host: env override first, then desktop default host, else local.
                 // If env override points to the local server, ignore it and use
                 // config-based resolution instead.
-                let env_target = std::env::var("OPENCHAMBER_SERVER_URL")
+                let env_target = std::env::var("ALIAS_ADE_SERVER_URL")
                     .ok()
                     .and_then(|raw| normalize_server_url(&raw))
                     .filter(|url| !same_server_url(url, &local_ui_url));
@@ -4259,7 +4259,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("clock drift")
             .as_nanos();
-        std::env::temp_dir().join(format!("openchamber-{test_name}-{nanos}-settings.json"))
+        std::env::temp_dir().join(format!("alias-ade-{test_name}-{nanos}-settings.json"))
     }
 
     #[test]
@@ -4403,7 +4403,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn probe_returns_ok_for_valid_openchamber_health_payload() {
+    async fn probe_returns_ok_for_valid_alias_ade_health_payload() {
         let url = spawn_test_http_server(200, r#"{"openCodeRunning":true}"#).await;
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
@@ -4424,7 +4424,7 @@ mod tests {
         assert_eq!(result.status, "auth");
     }
 
-    async fn spawn_flaky_openchamber_health_server() -> String {
+    async fn spawn_flaky_alias_ade_health_server() -> String {
         use tokio::net::TcpListener;
 
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind flaky test server");
@@ -4462,7 +4462,7 @@ mod tests {
 
     #[tokio::test]
     async fn wait_for_local_opencode_ready_retries_until_health_payload_is_ready() {
-        let url = spawn_flaky_openchamber_health_server().await;
+        let url = spawn_flaky_alias_ade_health_server().await;
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
         let result = wait_for_local_opencode_ready_with(
@@ -4705,10 +4705,10 @@ mod tests {
             script.contains(r#""target":"local""#) && script.contains(r#""status":"unreachable""#),
             "init script should embed the structured boot outcome"
         );
-        // It must also set __OPENCHAMBER_DESKTOP_BOOT_OUTCOME__
+        // It must also set __ALIAS_ADE_DESKTOP_BOOT_OUTCOME__
         assert!(
-            script.contains("__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__"),
-            "init script must set __OPENCHAMBER_DESKTOP_BOOT_OUTCOME__"
+            script.contains("__ALIAS_ADE_DESKTOP_BOOT_OUTCOME__"),
+            "init script must set __ALIAS_ADE_DESKTOP_BOOT_OUTCOME__"
         );
     }
 }

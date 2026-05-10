@@ -55,8 +55,8 @@ if (!compileTarget) {
 }
 
 const sidecarBaseName = process.platform === 'win32'
-  ? `openchamber-server-${targetTriple}.exe`
-  : `openchamber-server-${targetTriple}`;
+  ? `alias-ade-server-${targetTriple}.exe`
+  : `alias-ade-server-${targetTriple}`;
 const sidecarOutPath = path.join(sidecarsDir, sidecarBaseName);
 
 
@@ -110,7 +110,7 @@ await fs.mkdir(resourcesDir, { recursive: true });
 await fs.rm(resourcesWebDistDir, { recursive: true, force: true });
 await copyDir(webDistDir, resourcesWebDistDir);
 
-console.log('[desktop] building openchamber-server sidecar...');
+console.log('[desktop] building alias-ade-server sidecar...');
 await fs.mkdir(sidecarsDir, { recursive: true });
 
 const buildArgs = [

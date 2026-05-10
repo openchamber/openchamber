@@ -85,7 +85,7 @@ jobs:
             exit 1
           fi
 
-          xcrun notarytool store-credentials "openchamber-notarize" \
+          xcrun notarytool store-credentials "alias-ade-notarize" \
             --apple-id "$APPLE_ID" \
             --team-id "$APPLE_TEAM_ID" \
             --password "$APPLE_PASSWORD"
@@ -110,7 +110,7 @@ jobs:
           DMG_PATH="packages/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg"
           if ls $DMG_PATH 1> /dev/null 2>&1; then
             DMG_FILE=$(ls $DMG_PATH | head -n 1)
-            DMG_NAME="OpenChamber_${{ inputs.macos_version }}_arm64.dmg"
+            DMG_NAME="ALIAS_ADE_${{ inputs.macos_version }}_arm64.dmg"
             cp "$DMG_FILE" "artifacts/$DMG_NAME"
           else
             echo "Error: DMG file not found at $DMG_PATH"
@@ -186,7 +186,7 @@ jobs:
           DMG_PATH="packages/electron/dist/*.dmg"
           if ls $DMG_PATH 1> /dev/null 2>&1; then
             DMG_FILE=$(ls $DMG_PATH | head -n 1)
-            DMG_NAME="OpenChamber_Electron_${{ inputs.macos_version }}_arm64.dmg"
+            DMG_NAME="ALIAS_ADE_Electron_${{ inputs.macos_version }}_arm64.dmg"
             cp "$DMG_FILE" "artifacts/$DMG_NAME"
           else
             echo "Error: DMG file not found at $DMG_PATH"

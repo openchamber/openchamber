@@ -1,33 +1,33 @@
 ---
 title: Tunnels
-description: Expose OpenChamber safely for remote and mobile access.
+description: Expose ALIAS ADE safely for remote and mobile access.
 ---
 
 # Tunnels
 
-Use `openchamber tunnel` to expose a running OpenChamber instance.
+Use `alias-ade tunnel` to expose a running ALIAS ADE instance.
 
 ## Quick start (Cloudflare quick mode)
 
-1. Start OpenChamber:
+1. Start ALIAS ADE:
 
 ```bash
-openchamber
+alias-ade
 ```
 
 2. Start a tunnel:
 
 ```bash
-openchamber tunnel start --provider cloudflare --mode quick
+alias-ade tunnel start --provider cloudflare --mode quick
 ```
 
 3. Check status:
 
 ```bash
-openchamber tunnel status
+alias-ade tunnel status
 ```
 
-By default, OpenChamber prints a QR code in interactive TTY sessions. Use `--qr` to force QR output, or `--no-qr` to disable it.
+By default, ALIAS ADE prints a QR code in interactive TTY sessions. Use `--qr` to force QR output, or `--no-qr` to disable it.
 
 ## Managed modes
 
@@ -36,7 +36,7 @@ By default, OpenChamber prints a QR code in interactive TTY sessions. Use `--qr`
 Use a token + hostname managed by Cloudflare:
 
 ```bash
-openchamber tunnel start --provider cloudflare --mode managed-remote --token-file ~/.secrets/cf-token --hostname app.example.com
+alias-ade tunnel start --provider cloudflare --mode managed-remote --token-file ~/.secrets/cf-token --hostname app.example.com
 ```
 
 ### Managed local
@@ -44,7 +44,7 @@ openchamber tunnel start --provider cloudflare --mode managed-remote --token-fil
 Use a local `cloudflared` config:
 
 ```bash
-openchamber tunnel start --provider cloudflare --mode managed-local --config ~/.cloudflared/config.yml
+alias-ade tunnel start --provider cloudflare --mode managed-local --config ~/.cloudflared/config.yml
 ```
 
 ## Profiles (managed-remote)
@@ -52,26 +52,26 @@ openchamber tunnel start --provider cloudflare --mode managed-local --config ~/.
 Save a reusable profile:
 
 ```bash
-openchamber tunnel profile add --provider cloudflare --mode managed-remote --name prod-main --hostname app.example.com --token-file ~/.secrets/cf-token
+alias-ade tunnel profile add --provider cloudflare --mode managed-remote --name prod-main --hostname app.example.com --token-file ~/.secrets/cf-token
 ```
 
 Start using the saved profile:
 
 ```bash
-openchamber tunnel start --profile prod-main
+alias-ade tunnel start --profile prod-main
 ```
 
 ## Useful commands
 
 ```bash
-openchamber tunnel providers
-openchamber tunnel ready --provider cloudflare
-openchamber tunnel doctor --provider cloudflare
-openchamber tunnel stop --port 3000
+alias-ade tunnel providers
+alias-ade tunnel ready --provider cloudflare
+alias-ade tunnel doctor --provider cloudflare
+alias-ade tunnel stop --port 3000
 ```
 
 ## Behavior notes
 
-- one active tunnel per OpenChamber instance (port)
+- one active tunnel per ALIAS ADE instance (port)
 - starting a new mode/provider on same instance replaces previous tunnel
 - generating a new connect link revokes previous unused one

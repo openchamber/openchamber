@@ -455,7 +455,7 @@ function App({ apis }: AppProps) {
       }
 
       const data = event.data as { type?: unknown; payload?: EmbeddedVisibilityPayload };
-      if (data?.type !== 'openchamber:embedded-visibility') {
+      if (data?.type !== 'aliasAde:embedded-visibility') {
         return;
       }
 
@@ -463,16 +463,16 @@ function App({ apis }: AppProps) {
     };
 
     const scopedWindow = window as unknown as {
-      __openchamberSetEmbeddedVisibility?: (payload?: EmbeddedVisibilityPayload) => void;
+      __aliasAdeSetEmbeddedVisibility?: (payload?: EmbeddedVisibilityPayload) => void;
     };
 
-    scopedWindow.__openchamberSetEmbeddedVisibility = applyVisibility;
+    scopedWindow.__aliasAdeSetEmbeddedVisibility = applyVisibility;
     window.addEventListener('message', handleMessage);
 
     return () => {
       window.removeEventListener('message', handleMessage);
-      if (scopedWindow.__openchamberSetEmbeddedVisibility === applyVisibility) {
-        delete scopedWindow.__openchamberSetEmbeddedVisibility;
+      if (scopedWindow.__aliasAdeSetEmbeddedVisibility === applyVisibility) {
+        delete scopedWindow.__aliasAdeSetEmbeddedVisibility;
       }
     };
   }, [embeddedSessionChat]);
@@ -526,8 +526,8 @@ function App({ apis }: AppProps) {
       void useSessionUIStore.getState().setCurrentSession(sessionId, directory);
     };
 
-    window.addEventListener('openchamber:open-session', handler as EventListener);
-    return () => window.removeEventListener('openchamber:open-session', handler as EventListener);
+    window.addEventListener('aliasAde:open-session', handler as EventListener);
+    return () => window.removeEventListener('aliasAde:open-session', handler as EventListener);
   }, []);
 
   React.useEffect(() => {
@@ -550,8 +550,8 @@ function App({ apis }: AppProps) {
       });
     };
 
-    window.addEventListener('openchamber:open-draft-session', handler as EventListener);
-    return () => window.removeEventListener('openchamber:open-draft-session', handler as EventListener);
+    window.addEventListener('aliasAde:open-draft-session', handler as EventListener);
+    return () => window.removeEventListener('aliasAde:open-draft-session', handler as EventListener);
   }, []);
 
   React.useEffect(() => {
@@ -570,8 +570,8 @@ function App({ apis }: AppProps) {
       }
     };
 
-    window.addEventListener('openchamber:open-project', handler as EventListener);
-    return () => window.removeEventListener('openchamber:open-project', handler as EventListener);
+    window.addEventListener('aliasAde:open-project', handler as EventListener);
+    return () => window.removeEventListener('aliasAde:open-project', handler as EventListener);
   }, []);
 
   React.useEffect(() => {
@@ -579,8 +579,8 @@ function App({ apis }: AppProps) {
     if (!isInitialized || isSwitchingDirectory) return;
     if (appReadyDispatchedRef.current) return;
     appReadyDispatchedRef.current = true;
-    (window as unknown as { __openchamberAppReady?: boolean }).__openchamberAppReady = true;
-    window.dispatchEvent(new Event('openchamber:app-ready'));
+    (window as unknown as { __aliasAdeAppReady?: boolean }).__aliasAdeAppReady = true;
+    window.dispatchEvent(new Event('aliasAde:app-ready'));
   }, [isInitialized, isSwitchingDirectory]);
 
   // useEventStream replaced by SyncProvider + SyncBridge
@@ -635,7 +635,7 @@ function App({ apis }: AppProps) {
   }, [clearError, embeddedSessionChat, error]);
 
   // Poll for the injected boot outcome until it becomes available (desktop only).
-  // The Rust backend sets window.__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__ once the
+  // The Rust backend sets window.__ALIAS_ADE_DESKTOP_BOOT_OUTCOME__ once the
   // sidecar reaches a stable state. We poll with exponential backoff to handle
   // potential race conditions during startup and config writes.
   React.useEffect(() => {

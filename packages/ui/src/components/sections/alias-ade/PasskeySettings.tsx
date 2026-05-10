@@ -47,7 +47,7 @@ export const PasskeySettings: React.FC = () => {
       const nextPasskeys = await fetchStoredPasskeys();
       setPasskeys(nextPasskeys);
     } catch (error) {
-      const message = error instanceof Error ? error.message : t('settings.openchamber.passkeys.toast.loadFailed');
+      const message = error instanceof Error ? error.message : t('settings.aliasAde.passkeys.toast.loadFailed');
       setErrorMessage(message);
     } finally {
       setIsLoading(false);
@@ -95,7 +95,7 @@ export const PasskeySettings: React.FC = () => {
 
   const handleRegisterPasskey = React.useCallback(async () => {
     if (!status.enabled) {
-      const message = t('settings.openchamber.passkeys.toast.enableUiPasswordFirst');
+      const message = t('settings.aliasAde.passkeys.toast.enableUiPasswordFirst');
       setErrorMessage(message);
       toast.message(message);
       return;
@@ -120,14 +120,14 @@ export const PasskeySettings: React.FC = () => {
       await registerCurrentDevicePasskey();
       setStatus(await fetchPasskeyStatus());
       await loadPasskeys();
-      toast.success(t('settings.openchamber.passkeys.toast.added'));
+      toast.success(t('settings.aliasAde.passkeys.toast.added'));
     } catch (error) {
       if (isPasskeyCeremonyAbort(error)) {
-        toast.message(t('settings.openchamber.passkeys.toast.setupCanceled'));
+        toast.message(t('settings.aliasAde.passkeys.toast.setupCanceled'));
         return;
       }
 
-      const message = error instanceof Error ? error.message : t('settings.openchamber.passkeys.toast.addFailed');
+      const message = error instanceof Error ? error.message : t('settings.aliasAde.passkeys.toast.addFailed');
       setErrorMessage(message);
       toast.error(message);
     } finally {
@@ -143,9 +143,9 @@ export const PasskeySettings: React.FC = () => {
       await revokeStoredPasskey(id);
       setStatus(await fetchPasskeyStatus());
       await loadPasskeys();
-      toast.success(t('settings.openchamber.passkeys.toast.removed'));
+      toast.success(t('settings.aliasAde.passkeys.toast.removed'));
     } catch (error) {
-      const message = error instanceof Error ? error.message : t('settings.openchamber.passkeys.toast.removeFailed');
+      const message = error instanceof Error ? error.message : t('settings.aliasAde.passkeys.toast.removeFailed');
       setErrorMessage(message);
       toast.error(message);
     } finally {
@@ -161,7 +161,7 @@ export const PasskeySettings: React.FC = () => {
       await resetAllAuth();
       window.location.reload();
     } catch (error) {
-      const message = error instanceof Error ? error.message : t('settings.openchamber.passkeys.toast.clearAuthFailed');
+      const message = error instanceof Error ? error.message : t('settings.aliasAde.passkeys.toast.clearAuthFailed');
       setErrorMessage(message);
       toast.error(message);
       setIsResetting(false);
@@ -171,13 +171,13 @@ export const PasskeySettings: React.FC = () => {
   return (
     <div className="mb-8">
       <div className="mb-1 px-1">
-        <h3 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.passkeys.title')}</h3>
+        <h3 className="typography-ui-header font-medium text-foreground">{t('settings.aliasAde.passkeys.title')}</h3>
       </div>
 
       <section className="px-2 pb-2 pt-0 space-y-2">
         <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
           <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-            <span className="typography-ui-label text-foreground">{t('settings.openchamber.passkeys.field.currentDevice')}</span>
+            <span className="typography-ui-label text-foreground">{t('settings.aliasAde.passkeys.field.currentDevice')}</span>
           </div>
           <div className="flex items-center gap-2 sm:w-fit">
             <Button
@@ -188,7 +188,7 @@ export const PasskeySettings: React.FC = () => {
               disabled={isLoading || isResetting}
               className="!font-normal"
             >
-              {isRegistering ? t('settings.openchamber.passkeys.actions.cancelSetup') : t('settings.openchamber.passkeys.actions.add')}
+              {isRegistering ? t('settings.aliasAde.passkeys.actions.cancelSetup') : t('settings.aliasAde.passkeys.actions.add')}
             </Button>
             <Button
               type="button"
@@ -198,14 +198,14 @@ export const PasskeySettings: React.FC = () => {
               disabled={isLoading || isRegistering || isResetting}
               className="!font-normal text-muted-foreground hover:text-foreground"
             >
-              {isResetting ? t('settings.openchamber.passkeys.actions.signingOut') : t('settings.openchamber.passkeys.actions.signOutEverywhere')}
+              {isResetting ? t('settings.aliasAde.passkeys.actions.signingOut') : t('settings.aliasAde.passkeys.actions.signOutEverywhere')}
             </Button>
           </div>
         </div>
 
         {!status.enabled && (
           <p className="typography-meta text-muted-foreground">
-            {t('settings.openchamber.passkeys.state.uiPasswordRequired')}
+            {t('settings.aliasAde.passkeys.state.uiPasswordRequired')}
           </p>
         )}
 
@@ -216,9 +216,9 @@ export const PasskeySettings: React.FC = () => {
         )}
 
         {isLoading ? (
-          <p className="typography-meta text-muted-foreground">{t('settings.openchamber.passkeys.state.loading')}</p>
+          <p className="typography-meta text-muted-foreground">{t('settings.aliasAde.passkeys.state.loading')}</p>
         ) : passkeys.length === 0 ? (
-          <p className="typography-meta text-muted-foreground">{t('settings.openchamber.passkeys.state.noneSaved')}</p>
+          <p className="typography-meta text-muted-foreground">{t('settings.aliasAde.passkeys.state.noneSaved')}</p>
         ) : (
           <div className="space-y-1 pt-1">
             {passkeys.map((passkey) => (
@@ -229,11 +229,11 @@ export const PasskeySettings: React.FC = () => {
                 <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
                   <span className="typography-meta text-muted-foreground truncate">
                     {passkey.lastUsedAt
-                      ? t('settings.openchamber.passkeys.item.lastUsed', {
-                          time: formatTimestamp(passkey.lastUsedAt, t('settings.openchamber.passkeys.time.neverUsed')),
+                      ? t('settings.aliasAde.passkeys.item.lastUsed', {
+                          time: formatTimestamp(passkey.lastUsedAt, t('settings.aliasAde.passkeys.time.neverUsed')),
                         })
-                      : t('settings.openchamber.passkeys.item.added', {
-                          time: formatTimestamp(passkey.createdAt, t('settings.openchamber.passkeys.time.neverUsed')),
+                      : t('settings.aliasAde.passkeys.item.added', {
+                          time: formatTimestamp(passkey.createdAt, t('settings.aliasAde.passkeys.time.neverUsed')),
                         })}
                   </span>
                   <Button
@@ -244,7 +244,7 @@ export const PasskeySettings: React.FC = () => {
                     disabled={revokingId === passkey.id}
                     className="!font-normal text-muted-foreground hover:text-foreground"
                   >
-                    {revokingId === passkey.id ? t('settings.openchamber.passkeys.actions.removing') : t('settings.common.actions.delete')}
+                    {revokingId === passkey.id ? t('settings.aliasAde.passkeys.actions.removing') : t('settings.common.actions.delete')}
                   </Button>
                 </div>
               </div>

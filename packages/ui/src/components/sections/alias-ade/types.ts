@@ -1,4 +1,4 @@
-export type OpenChamberSection =
+export type AliasAdeSection =
   | 'visual'
   | 'chat'
   | 'shortcuts'

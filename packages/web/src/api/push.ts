@@ -1,4 +1,4 @@
-import type { PushAPI, PushSubscribePayload, PushUnsubscribePayload } from '@openchamber/ui/lib/api/types';
+import type { PushAPI, PushSubscribePayload, PushUnsubscribePayload } from '@alias-ade/ui/lib/api/types';
 
 const fetchJson = async <T>(input: RequestInfo | URL, init?: RequestInit): Promise<T | null> => {
   try {

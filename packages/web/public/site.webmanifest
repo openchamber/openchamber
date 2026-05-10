@@ -1,7 +1,7 @@
 {
-  "name": "OpenChamber - AI Coding Companion",
-  "short_name": "OpenChamber",
-  "description": "OpenChamber desktop companion for the OpenCode AI coding agent",
+  "name": "ALIAS ADE - AI Coding Companion",
+  "short_name": "ALIAS ADE",
+  "description": "ALIAS ADE desktop companion for the OpenCode AI coding agent",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#151313",

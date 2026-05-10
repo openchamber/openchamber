@@ -1,6 +1,6 @@
 ---
 name: locale-ui-patterns
-description: Use when creating or modifying OpenChamber UI text, labels, buttons, placeholders, aria labels, empty states, toasts, dialogs, settings copy, navigation labels, or any user-facing strings.
+description: Use when creating or modifying ALIAS ADE UI text, labels, buttons, placeholders, aria labels, empty states, toasts, dialogs, settings copy, navigation labels, or any user-facing strings.
 ---
 
 # Locale UI Patterns
@@ -42,14 +42,14 @@ Good:
 ```ts
 'settings.appearance.language.label': 'Language'
 'layout.mainTab.chat': 'Chat'
-'chat.input.placeholder': 'Ask OpenChamber...'
+'chat.input.placeholder': 'Ask ALIAS ADE...'
 ```
 
 Bad:
 ```ts
 'Language': 'Language'
 'chatLabel': 'Chat'
-'askOpenChamberDotDotDot': 'Ask OpenChamber...'
+'askALIAS ADEDotDotDot': 'Ask ALIAS ADE...'
 ```
 
 Avoid overly generic keys unless the text is truly global and context-independent. Prefer specific keys when button meaning can vary by surface.
@@ -113,7 +113,7 @@ date
 
 Do not translate:
 
-- Product names: `OpenChamber`, `OpenCode`, `GitHub`
+- Product names: `ALIAS ADE`, `OpenCode`, `GitHub`
 - Protocol/tool acronyms: `MCP`, `SSE`, `WebSocket`, `API`
 - Model/provider names
 - File paths, command names, environment variables

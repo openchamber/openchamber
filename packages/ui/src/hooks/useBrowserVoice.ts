@@ -69,8 +69,8 @@ export interface UseBrowserVoiceReturn {
 const LANGUAGE_STORAGE_KEY = 'browserVoiceLanguage';
 // Storage key for persisting conversation mode preference
 const CONVERSATION_MODE_STORAGE_KEY = 'browserVoiceConversationMode';
-const LANGUAGE_CHANGE_EVENT = 'openchamber:voice-language-changed';
-const CONVERSATION_MODE_CHANGE_EVENT = 'openchamber:voice-conversation-mode-changed';
+const LANGUAGE_CHANGE_EVENT = 'aliasAde:voice-language-changed';
+const CONVERSATION_MODE_CHANGE_EVENT = 'aliasAde:voice-conversation-mode-changed';
 const FINAL_TRANSCRIPT_SETTLE_MS = 1200;
 const DEVICE_CHANGE_RESTART_DELAY_MS = 700;
 const BLOCKED_SPEECH_LANGUAGES = new Set(['ru', 'ru-RU']);

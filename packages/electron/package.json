@@ -1,13 +1,13 @@
 {
-  "name": "@openchamber/electron",
+  "name": "@alias-ade/electron",
   "version": "1.10.4",
   "private": true,
-  "description": "Electron desktop runtime for OpenChamber",
-  "author": "OpenChamber",
+  "description": "Electron desktop runtime for ALIAS ADE",
+  "author": "ALIAS ADE",
   "type": "module",
   "main": "./dist-bundle/main.mjs",
   "dependencies": {
-    "@openchamber/web": "workspace:*",
+    "@alias-ade/web": "workspace:*",
     "electron-context-menu": "^4.1.2",
     "electron-log": "^5.4.3",
     "electron-updater": "^6.8.3"
@@ -34,8 +34,8 @@
     "lint": "node -e \"process.exit(0)\""
   },
   "build": {
-    "appId": "dev.openchamber.desktop",
-    "productName": "OpenChamber",
+    "appId": "dev.aliasAde.desktop",
+    "productName": "ALIAS ADE",
     "files": [
       "dist-bundle/main.mjs",
       "preload.mjs"
@@ -92,7 +92,7 @@
     "publish": {
       "provider": "github",
       "owner": "btriapitsyn",
-      "repo": "openchamber"
+      "repo": "alias-ade"
     }
   }
 }

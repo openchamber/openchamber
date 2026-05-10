@@ -9,7 +9,7 @@ src-tauri/gen/
 
 # Desktop sidecar + bundled web assets (generated)
 src-tauri/resources/web-dist/
-src-tauri/sidecars/openchamber-server-*
+src-tauri/sidecars/alias-ade-server-*
 src-tauri/sidecars/*.exe
 !src-tauri/resources/.gitkeep
 !src-tauri/sidecars/.gitkeep

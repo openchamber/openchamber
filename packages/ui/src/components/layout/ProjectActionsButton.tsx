@@ -28,9 +28,9 @@ import { openExternalUrl } from '@/lib/url';
 import { useI18n } from '@/lib/i18n';
 import {
   getProjectActionsState,
-  type OpenChamberProjectAction,
+  type AliasAdeProjectAction,
   type ProjectRef,
-} from '@/lib/openchamberConfig';
+} from '@/lib/aliasAdeConfig';
 import {
   normalizeProjectActionDirectory,
   PROJECT_ACTIONS_UPDATED_EVENT,
@@ -65,7 +65,7 @@ interface ProjectActionsButtonProps {
 const ANSI_ESCAPE_PREFIX = String.fromCharCode(27);
 const ANSI_ESCAPE_PATTERN = new RegExp(`${ANSI_ESCAPE_PREFIX}\\[[0-9;?]*[ -/]*[@-~]`, 'g');
 const URL_GLOBAL_PATTERN = /https?:\/\/[^\s<>'"`]+/gi;
-const AUTO_DISCOVER_ACTION_ID = '__openchamber_auto_discover_preview__';
+const AUTO_DISCOVER_ACTION_ID = '__aliasAde_auto_discover_preview__';
 const AUTO_DISCOVER_PREVIEW_WAIT_TIMEOUT_MS = 15_000;
 
 const stripControlChars = (value: string): string => {
@@ -208,7 +208,7 @@ export const ProjectActionsButton = ({
   const updateProjectActionRunStatus = useTerminalStore((state) => state.updateProjectActionRunStatus);
   const removeProjectActionRun = useTerminalStore((state) => state.removeProjectActionRun);
 
-  const [actions, setActions] = React.useState<OpenChamberProjectAction[]>([]);
+  const [actions, setActions] = React.useState<AliasAdeProjectAction[]>([]);
   const [selectedActionId, setSelectedActionId] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState(false);
   const tabByKeyRef = React.useRef<Record<string, string>>({});
@@ -286,7 +286,7 @@ export const ProjectActionsButton = ({
     return actions.find((entry) => entry.id === selectedActionId) ?? null;
   }, [actions, selectedActionId]);
 
-  const autoDiscoverAction = React.useMemo<OpenChamberProjectAction>(() => ({
+  const autoDiscoverAction = React.useMemo<AliasAdeProjectAction>(() => ({
     id: AUTO_DISCOVER_ACTION_ID,
     name: t('projectActions.actions.autoDiscover'),
     command: '',
@@ -413,7 +413,7 @@ export const ProjectActionsButton = ({
 
   }, [displayActions, openContextPreview, openExternal, projectActionRuns, setTabPreviewUrl, t, terminalSessions, updateProjectActionRunStatus]);
 
-  const getOrCreateActionTab = React.useCallback(async (action: OpenChamberProjectAction, options: { revealTerminal?: boolean } = {}) => {
+  const getOrCreateActionTab = React.useCallback(async (action: AliasAdeProjectAction, options: { revealTerminal?: boolean } = {}) => {
     if (!normalizedDirectory) {
       throw new Error(t('projectActions.error.noActiveDirectory'));
     }
@@ -460,7 +460,7 @@ export const ProjectActionsButton = ({
     t,
   ]);
 
-  const runAction = React.useCallback(async (action: OpenChamberProjectAction) => {
+  const runAction = React.useCallback(async (action: AliasAdeProjectAction) => {
     if (runtime.isVSCode || (!allowMobile && isMobile)) {
       return;
     }
@@ -478,7 +478,7 @@ export const ProjectActionsButton = ({
 
     try {
       const discovered = action.id === AUTO_DISCOVER_ACTION_ID
-        ? await (async (): Promise<OpenChamberProjectAction> => {
+        ? await (async (): Promise<AliasAdeProjectAction> => {
           const [actionsState, scripts] = await Promise.all([
             getProjectActionsState({ id: stableProjectRef?.id ?? '', path: normalizedDirectory }),
             readPackageJsonScripts(normalizedDirectory),
@@ -632,7 +632,7 @@ export const ProjectActionsButton = ({
     terminal,
   ]);
 
-  const stopAction = React.useCallback(async (action: OpenChamberProjectAction) => {
+  const stopAction = React.useCallback(async (action: AliasAdeProjectAction) => {
     const runKey = toProjectActionRunKey(normalizedDirectory, action.id);
     const activeRun = projectActionRuns[runKey];
     if (!activeRun) {
@@ -698,7 +698,7 @@ export const ProjectActionsButton = ({
     void runAction(action);
   }, [displayActions, normalizedDirectory, runAction, projectActionRuns, selectedAction, stopAction]);
 
-  const handleSelectAction = React.useCallback((action: OpenChamberProjectAction, toggleStopIfRunning = false) => {
+  const handleSelectAction = React.useCallback((action: AliasAdeProjectAction, toggleStopIfRunning = false) => {
     setSelectedActionId(action.id);
 
     if (!toggleStopIfRunning) {

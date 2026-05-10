@@ -1,12 +1,12 @@
 # Scheduled Tasks module
 
-Server-owned scheduled task runtime and routes for OpenChamber-only automation.
+Server-owned scheduled task runtime and routes for ALIAS ADE-only automation.
 
 ## Scope
 
 - Per-project scheduled task persistence is owned by `packages/web/server/lib/projects/project-config.js`.
 - Runtime orchestration and execution is owned by this module.
-- This module is OpenChamber feature logic; it is intentionally separate from OpenCode proxy/runtime internals.
+- This module is ALIAS ADE feature logic; it is intentionally separate from OpenCode proxy/runtime internals.
 
 ## Files
 
@@ -15,12 +15,12 @@ Server-owned scheduled task runtime and routes for OpenChamber-only automation.
   - Timer scheduling and queueing
   - Concurrency controls
   - Session create + prompt_async execution
-  - Emits OpenChamber task-run events
+  - Emits ALIAS ADE task-run events
 
 - `packages/web/server/lib/scheduled-tasks/routes.js`
   - Scheduled task CRUD endpoints
   - Manual run endpoint
-  - OpenChamber events SSE stream endpoint
+  - ALIAS ADE events SSE stream endpoint
 
 ## Public exports (runtime.js)
 
@@ -40,5 +40,5 @@ Server-owned scheduled task runtime and routes for OpenChamber-only automation.
   - `PUT /api/projects/:projectId/scheduled-tasks`
   - `DELETE /api/projects/:projectId/scheduled-tasks/:taskId`
   - `POST /api/projects/:projectId/scheduled-tasks/:taskId/run`
-  - `GET /api/openchamber/scheduled-tasks/status`
-  - `GET /api/openchamber/events`
+  - `GET /api/alias-ade/scheduled-tasks/status`
+  - `GET /api/alias-ade/events`

@@ -3,7 +3,7 @@
  *
  * Captures microphone audio using MediaRecorder, detects utterance boundaries
  * via an AnalyserNode-based silence detector (VAD), then POSTs each utterance
- * as a raw audio blob to the OpenChamber server's /api/stt/transcribe endpoint.
+ * as a raw audio blob to the ALIAS ADE server's /api/stt/transcribe endpoint.
  *
  * Mimics the BrowserVoiceService.startListening interface so useBrowserVoice
  * can swap providers without changing its internal logic.

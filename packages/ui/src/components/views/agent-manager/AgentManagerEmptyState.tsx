@@ -23,9 +23,9 @@ import { AgentSelector } from '@/components/multirun/AgentSelector';
 import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo } from '@/components/chat/CommandAutocomplete';
 import { FileMentionAutocomplete, type FileMentionHandle } from '@/components/chat/FileMentionAutocomplete';
 import { isIMECompositionEvent } from '@/lib/ime';
-import { getWorktreeSetupCommands } from '@/lib/openchamberConfig';
+import { getWorktreeSetupCommands } from '@/lib/aliasAdeConfig';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
-import type { ProjectRef } from '@/lib/openchamberConfig';
+import type { ProjectRef } from '@/lib/aliasAdeConfig';
 import type { CreateMultiRunParams, MultiRunFileAttachment } from '@/types/multirun';
 import { useI18n } from '@/lib/i18n';
 
@@ -93,7 +93,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
     if (typeof window === 'undefined') {
       return false;
     }
-    const apis = (window as unknown as { __OPENCHAMBER_RUNTIME_APIS__?: { runtime?: { isVSCode?: boolean } } }).__OPENCHAMBER_RUNTIME_APIS__;
+    const apis = (window as unknown as { __ALIAS_ADE_RUNTIME_APIS__?: { runtime?: { isVSCode?: boolean } } }).__ALIAS_ADE_RUNTIME_APIS__;
     return Boolean(apis?.runtime?.isVSCode);
   }, []);
 

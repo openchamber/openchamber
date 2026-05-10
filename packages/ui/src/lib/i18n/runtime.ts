@@ -14,7 +14,7 @@ export const LOCALE_LABEL_KEYS: Record<Locale, 'common.language.english' | 'comm
   pl: 'common.language.polish',
 };
 
-export const LOCALE_STORAGE_KEY = 'openchamber.i18n.v1';
+export const LOCALE_STORAGE_KEY = 'aliasAde.i18n.v1';
 
 type StoredLocale = {
   locale?: unknown;

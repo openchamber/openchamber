@@ -34,12 +34,12 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
   }
   if (settings.homeDirectory) {
     localStorage.setItem('homeDirectory', settings.homeDirectory);
-    // Electron's preload exposes __OPENCHAMBER_HOME__ as a read-only
+    // Electron's preload exposes __ALIAS_ADE_HOME__ as a read-only
     // contextBridge property; assignment throws TypeError there. In VSCode
     // webview and plain web runtime the property is writable. Swallow the
     // error in Electron — preload already seeded the value correctly.
     try {
-      window.__OPENCHAMBER_HOME__ = settings.homeDirectory;
+      window.__ALIAS_ADE_HOME__ = settings.homeDirectory;
     } catch {
       /* read-only contextBridge property — leave preload-seeded value */
     }
@@ -88,9 +88,9 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
   if (typeof settings.pwaAppName === 'string') {
     const normalized = settings.pwaAppName.trim().replace(/\s+/g, ' ').slice(0, 64);
     if (normalized.length > 0) {
-      localStorage.setItem('openchamber.pwaName', normalized);
+      localStorage.setItem('aliasAde.pwaName', normalized);
     } else {
-      localStorage.removeItem('openchamber.pwaName');
+      localStorage.removeItem('aliasAde.pwaName');
     }
   }
   if (typeof settings.mobileKeyboardMode === 'string') {
@@ -1088,7 +1088,7 @@ export const syncDesktopSettings = async (): Promise<void> => {
     }
 
     if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent<DesktopSettings>('openchamber:settings-synced', { detail: settings }));
+      window.dispatchEvent(new CustomEvent<DesktopSettings>('aliasAde:settings-synced', { detail: settings }));
     }
   };
 

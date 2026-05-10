@@ -36,12 +36,12 @@ const ZEN_MODELS_URL = 'https://opencode.ai/zen/v1/models';
 const ZEN_MODELS_CACHE_TTL_MS = 5 * 60 * 1000;
 let cachedZenModels: { models: Array<{ id: string; owned_by?: string }>; at: number } | null = null;
 
-const getOpenChamberConfigDir = (): string => {
+const getAliasAdeConfigDir = (): string => {
   if (process.platform === 'win32') {
     const appData = process.env.APPDATA;
-    if (appData) return path.join(appData, 'openchamber');
+    if (appData) return path.join(appData, 'alias-ade');
   }
-  return path.join(os.homedir(), '.config', 'openchamber');
+  return path.join(os.homedir(), '.config', 'alias-ade');
 };
 
 const sanitizeInstallScope = (scope: string): 'desktop-tauri' | 'vscode' | 'web' => {
@@ -50,7 +50,7 @@ const sanitizeInstallScope = (scope: string): 'desktop-tauri' | 'vscode' | 'web'
 };
 
 const getOrCreateInstallId = (scope: string): string => {
-  const configDir = getOpenChamberConfigDir();
+  const configDir = getAliasAdeConfigDir();
   const normalizedScope = sanitizeInstallScope(scope);
   const idPath = path.join(configDir, `install-id-${normalizedScope}`);
 
@@ -86,7 +86,7 @@ type ParsedDiffHunk = {
   newLines: string[];
 };
 
-const VIRTUAL_DIFF_SCHEME = 'openchamber-diff';
+const VIRTUAL_DIFF_SCHEME = 'alias-ade-diff';
 const virtualDiffContents = new Map<string, string>();
 let virtualDiffCounter = 0;
 let virtualDiffProviderDisposable: vscode.Disposable | null = null;
@@ -305,7 +305,7 @@ export async function handleSystemBridgeMessage(
       }
     }
 
-    case 'api:openchamber:update-check': {
+    case 'api:aliasAde:update-check': {
       try {
         const body = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>;
         const currentVersion = typeof body.currentVersion === 'string' && body.currentVersion.trim().length > 0

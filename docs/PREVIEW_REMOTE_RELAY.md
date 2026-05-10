@@ -8,22 +8,22 @@ Audience: contributors planning the next phase of the embedded preview feature.
 
 The current preview implementation (`packages/web/server/lib/preview/proxy-runtime.js`,
 `packages/ui/src/components/layout/ContextPanel.tsx`) terminates inside the
-OpenChamber server process and forwards requests to a **loopback** target
+ALIAS ADE server process and forwards requests to a **loopback** target
 (`localhost`, `127.0.0.1`, `::1`, `0.0.0.0`). It works for these topologies:
 
 | Topology                                                                 | Works today? |
 | ------------------------------------------------------------------------ | ------------ |
-| Web UI in browser, OpenChamber server on same host as dev server         | yes          |
+| Web UI in browser, ALIAS ADE server on same host as dev server         | yes          |
 | Electron desktop, dev server on same host                                | yes          |
 | VS Code extension, dev server on same host                               | yes          |
-| Mobile/tablet hitting OpenChamber over LAN, dev server on host           | yes          |
-| **Remote OpenChamber** (cloud / shared / tunneled), dev server on user's local machine | **no**       |
+| Mobile/tablet hitting ALIAS ADE over LAN, dev server on host           | yes          |
+| **Remote ALIAS ADE** (cloud / shared / tunneled), dev server on user's local machine | **no**       |
 
-The blocked case is real: a user runs `openchamber serve` on a remote box (or a
-hosted OpenChamber instance) but their dev server (`vite`, `next dev`, etc.)
+The blocked case is real: a user runs `alias-ade serve` on a remote box (or a
+hosted ALIAS ADE instance) but their dev server (`vite`, `next dev`, etc.)
 runs on their laptop. The proxy correctly refuses to talk to non-loopback
 targets — that is a deliberate SSRF gate, not a bug. We need a separate path
-that tunnels traffic from the remote OpenChamber back to the user's laptop
+that tunnels traffic from the remote ALIAS ADE back to the user's laptop
 without weakening that gate.
 
 ## Non-goals
@@ -34,18 +34,18 @@ without weakening that gate.
   expose dev servers selected through the preview UI, scoped to the active
   user's session.
 - Providing a hosted relay service. The relay is something the user runs;
-  OpenChamber provides the agent + the server endpoints.
+  ALIAS ADE provides the agent + the server endpoints.
 
 ## Constraints (carried forward from the loopback proxy)
 
-- Same-origin in the browser. The iframe must load from the OpenChamber
+- Same-origin in the browser. The iframe must load from the ALIAS ADE
   origin so HTTPS, cookies, and CSP behave predictably.
 - Per-target cookie auth. A target id must not be guessable, and the cookie
   must be HttpOnly + scoped to that target's path.
 - WebSocket upgrade support (HMR is a hard requirement; without it the
   feature is uninteresting).
 - Strip frame-busting headers on the response.
-- Strip OpenChamber credentials before forwarding to the dev server.
+- Strip ALIAS ADE credentials before forwarding to the dev server.
 - Survive partial failure cleanly: if the agent disconnects, the iframe
   should land on the existing "dev server is not responding" overlay, not a
   zombie hang.
@@ -59,18 +59,18 @@ Three components, in order of where they run.
 A small process the user starts on the same machine as the dev server. Two
 shipping options:
 
-- A subcommand of the existing CLI: `openchamber preview-agent`.
+- A subcommand of the existing CLI: `alias-ade preview-agent`.
 - A standalone single-binary build for users who do not have the full UI
   installed locally.
 
 Responsibilities:
 
 - Open exactly one outbound, authenticated WebSocket to the remote
-  OpenChamber server (`wss://<host>/api/preview/agent`). Outbound-only — no
+  ALIAS ADE server (`wss://<host>/api/preview/agent`). Outbound-only — no
   inbound port on the user's machine, so it works behind NAT, VPN,
   corporate firewall, etc.
 - Authenticate with a short-lived enrollment token issued by the remote
-  OpenChamber server (see "Pairing flow").
+  ALIAS ADE server (see "Pairing flow").
 - Advertise the set of dev servers the user has authorised. Scope is
   loopback-only on the agent side (same allowlist as the existing proxy:
   `localhost`, `127.0.0.1`, `::1`, `0.0.0.0`). The agent never proxies to
@@ -84,11 +84,11 @@ Responsibilities:
 Deliberately out of scope for the agent:
 
 - TLS termination. The agent only talks to loopback over plain HTTP; the
-  outbound link to OpenChamber is TLS via the server's existing cert.
+  outbound link to ALIAS ADE is TLS via the server's existing cert.
 - Anything that mutates the user's filesystem.
 - Acting as a general SOCKS/HTTP proxy. It is dev-server-scoped.
 
-### 2. Remote OpenChamber server (extends `proxy-runtime.js`)
+### 2. Remote ALIAS ADE server (extends `proxy-runtime.js`)
 
 Adds two new surfaces alongside the existing loopback proxy:
 
@@ -139,11 +139,11 @@ server must be able to revoke that proof.
    UI session id, with a single allowed scope: `preview-agent.connect`. UI
    shows the command:
    ```
-   openchamber preview-agent --server https://<host> --token <enrollment-token>
+   alias-ade preview-agent --server https://<host> --token <enrollment-token>
    ```
 3. Agent posts the enrollment token to `POST /api/preview/agent/enroll` and
    receives a long-lived `agentId` + `agentSecret`. Stored in the agent's
-   config dir (`$XDG_CONFIG_HOME/openchamber/agent.json` or platform
+   config dir (`$XDG_CONFIG_HOME/alias-ade/agent.json` or platform
    equivalent).
 4. Agent opens the control WebSocket, authenticating with `agentId` +
    `agentSecret`. The server verifies and registers the agent against the
@@ -226,7 +226,7 @@ against the same threat model:
   the response, identical to the loopback path. Same code path
   (`stripFrameBustingHeaders`) — keep it as a single point of truth.
 - **Dev-server credentials**: the agent strips `cookie`, `authorization`,
-  and `x-openchamber-ui-session` before forwarding to the local dev
+  and `x-alias-ade-ui-session` before forwarding to the local dev
   server, mirroring the existing `proxyReq` handler.
 - **Public-internet exposure**: no inbound port opens on the user's
   machine; no egress to non-loopback addresses; the agent process refuses
@@ -261,8 +261,8 @@ Out-of-scope hardening to revisit later:
 
 These need a decision before implementation, not before the doc lands.
 
-1. **CLI surface.** Is `openchamber preview-agent` the right verb, or should
-   it live under `openchamber agent preview`? Bias: the former; only one
+1. **CLI surface.** Is `alias-ade preview-agent` the right verb, or should
+   it live under `alias-ade agent preview`? Bias: the former; only one
    agent today, and we can rename without breaking anything if we ever ship
    a second.
 2. **Multi-agent UX.** When a user has two agents online (laptop + desktop)
@@ -307,12 +307,12 @@ sequence, not effort.
 ## Why not …?
 
 - **A reverse SSH tunnel from the agent.** Works but requires SSH server
-  on the OpenChamber host, exposes a port, and breaks the same-origin
+  on the ALIAS ADE host, exposes a port, and breaks the same-origin
   guarantee unless we also reverse-proxy that port through the
-  OpenChamber HTTP server. The control-WebSocket design avoids all of
+  ALIAS ADE HTTP server. The control-WebSocket design avoids all of
   that and keeps a single TLS endpoint.
 - **Cloudflare/ngrok-style hosted relay.** Would work but turns
-  OpenChamber into a service that depends on a third party (or on us
+  ALIAS ADE into a service that depends on a third party (or on us
   hosting a relay). The agent design lets users run entirely
   self-hosted.
 - **WebRTC data channels.** Lower latency in theory, much harder to debug

@@ -1,17 +1,17 @@
 # Custom Themes
 
-OpenChamber supports user-defined themes. Drop a JSON file into the themes directory and reload — no app restart required.
+ALIAS ADE supports user-defined themes. Drop a JSON file into the themes directory and reload — no app restart required.
 
 ## Quick Start
 
 1. Create the themes directory:
    ```bash
-   mkdir -p ~/.config/openchamber/themes
+   mkdir -p ~/.config/alias-ade/themes
    ```
 
 2. Create a theme JSON file (e.g., `my-theme.json`) with the format below.
 
-3. In OpenChamber: **Settings → Theme → Reload themes**.
+3. In ALIAS ADE: **Settings → Theme → Reload themes**.
 
 4. Select your theme from the dropdown.
 
@@ -19,7 +19,7 @@ OpenChamber supports user-defined themes. Drop a JSON file into the themes direc
 
 | Platform | Path |
 |----------|------|
-| macOS/Linux | `~/.config/openchamber/themes/` |
+| macOS/Linux | `~/.config/alias-ade/themes/` |
 
 ## Theme Format
 
@@ -28,7 +28,7 @@ OpenChamber supports user-defined themes. Drop a JSON file into the themes direc
   "metadata": {
     "id": "my-custom-theme",
     "name": "My Custom Theme",
-    "description": "A custom theme for OpenChamber",
+    "description": "A custom theme for ALIAS ADE",
     "version": "1.0.0",
     "variant": "dark",
     "tags": ["dark", "custom"]

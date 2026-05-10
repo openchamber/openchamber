@@ -6,7 +6,7 @@
 
 ## What this is
 
-OpenChamber historically shipped as a Tauri app. A parallel Electron shell was
+ALIAS ADE historically shipped as a Tauri app. A parallel Electron shell was
 added on branch `electron-app` (merged to `main` as part of a larger migration).
 Since then, both desktop shells have been released in the same GitHub release
 and each has its own auto-update channel:
@@ -33,7 +33,7 @@ just replaces files.
 
 So: produce a `.tar.gz` of the Electron `.app`, sign it with the existing
 Tauri minisign key, point `latest.json` at it. Tauri users receive the update,
-their `OpenChamber.app` becomes the Electron bundle in-place, and next launch
+their `ALIAS ADE.app` becomes the Electron bundle in-place, and next launch
 starts Electron. Subsequent updates go through `latest-mac.yml`
 (electron-updater). One-way migration, one-shot workflow change.
 
@@ -44,23 +44,23 @@ Check all of these before making any release:
 1. **Electron has shipped stable through its own `latest-mac.yml` path for at
    least 2 releases.** Verify:
    ```
-   gh release list --repo btriapitsyn/openchamber
-   gh release view vX.Y.Z --repo btriapitsyn/openchamber \
-     | grep -E 'OpenChamber-.*\.zip|latest-mac\.yml'
+   gh release list --repo btriapitsyn/alias-ade
+   gh release view vX.Y.Z --repo btriapitsyn/alias-ade \
+     | grep -E 'ALIAS ADE-.*\.zip|latest-mac\.yml'
    ```
    A user on Electron should have successfully auto-updated at least once.
    If not, pause and stabilise that path first — don't stack risk.
 
-2. **`~/.config/openchamber/settings.json` is still the shared state path.**
+2. **`~/.config/alias-ade/settings.json` is still the shared state path.**
    Tauri `src-tauri/src/main.rs:settings_file_path` and Electron
    `packages/electron/main.mjs:settingsFilePath` must both resolve to
-   `$HOME/.config/openchamber/settings.json`. If either has moved, data parity
+   `$HOME/.config/alias-ade/settings.json`. If either has moved, data parity
    breaks and this migration loses user data. Audit both paths, update the
    non-migrated shell to match before proceeding.
 
-3. **Electron `appId` is `dev.openchamber.desktop`** (check
+3. **Electron `appId` is `dev.aliasAde.desktop`** (check
    `packages/electron/package.json` `build.appId`). Tauri identifier is
-   `ai.opencode.openchamber`. These differ intentionally — it means macOS
+   `ai.opencode.aliasAde`. These differ intentionally — it means macOS
    LaunchServices will re-register after the in-place replace. That's fine but
    see "Risks" below.
 
@@ -124,7 +124,7 @@ repackage-electron-as-tauri-update:
     # already produced. Either re-download the dmg and mount+copy the .app, or
     # (cleaner) modify build-desktop-electron-macos to upload the .app itself
     # as an artifact so this job can download it. Prefer the latter — adds one
-    # `actions/upload-artifact@v4` step uploading `packages/electron/dist/mac-<arch>/OpenChamber.app`.
+    # `actions/upload-artifact@v4` step uploading `packages/electron/dist/mac-<arch>/ALIAS ADE.app`.
 
     - name: Download signed Electron .app
       uses: actions/download-artifact@v4
@@ -146,8 +146,8 @@ repackage-electron-as-tauri-update:
         # The tarball name convention Tauri's updater expects. Must end in
         # `.app.tar.gz`. Name stays stable — Tauri updater does not care about
         # the inner .app name.
-        TARBALL="OpenChamber.app.tar.gz"
-        tar -czf "$TARBALL" OpenChamber.app
+        TARBALL="ALIAS ADE.app.tar.gz"
+        tar -czf "$TARBALL" ALIAS ADE.app
 
         # minisign needs the private key written to a file and a non-interactive
         # password via -W (or env). The key in the secret is a minisign secret
@@ -157,20 +157,20 @@ repackage-electron-as-tauri-update:
           -m "$TARBALL" -W
 
         # Rename per platform so the release has distinct names for arm64/x64.
-        mv "$TARBALL" "OpenChamber-${VERSION}-${{ matrix.platform }}.app.tar.gz"
-        mv "${TARBALL}.minisig" "OpenChamber-${VERSION}-${{ matrix.platform }}.app.tar.gz.sig"
+        mv "$TARBALL" "ALIAS ADE-${VERSION}-${{ matrix.platform }}.app.tar.gz"
+        mv "${TARBALL}.minisig" "ALIAS ADE-${VERSION}-${{ matrix.platform }}.app.tar.gz.sig"
 
     - name: Generate Tauri latest-<platform>.json
       env:
         VERSION: ${{ needs.create-release.outputs.version }}
         REPO: ${{ github.repository }}
       run: |
-        SIG=$(cat staged/OpenChamber-${VERSION}-${{ matrix.platform }}.app.tar.gz.sig)
-        TAR=OpenChamber-${VERSION}-${{ matrix.platform }}.app.tar.gz
+        SIG=$(cat staged/ALIAS ADE-${VERSION}-${{ matrix.platform }}.app.tar.gz.sig)
+        TAR=ALIAS ADE-${VERSION}-${{ matrix.platform }}.app.tar.gz
         cat > staged/latest-${{ matrix.platform }}.json <<EOF
         {
           "version": "${VERSION}",
-          "notes": "OpenChamber has moved to Electron. This update replaces the Tauri shell with the Electron build. Subsequent updates will be delivered via the Electron auto-updater.",
+          "notes": "ALIAS ADE has moved to Electron. This update replaces the Tauri shell with the Electron build. Subsequent updates will be delivered via the Electron auto-updater.",
           "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
           "platforms": {
             "${{ matrix.platform }}": {
@@ -258,15 +258,15 @@ makes debugging much harder if the migration misbehaves for a user.
 You must manually validate with a real Tauri install. Do NOT skip this.
 
 1. Have the previous Tauri release installed locally
-   (`/Applications/OpenChamber.app` with `Contents/Info.plist` showing
-   `CFBundleIdentifier = ai.opencode.openchamber`).
+   (`/Applications/ALIAS ADE.app` with `Contents/Info.plist` showing
+   `CFBundleIdentifier = ai.opencode.aliasAde`).
 2. Tag the transition release to a test tag
    (e.g. `v2.0.0-migration-test`) and push.
 3. Let the workflow complete. Do not merge cleanup PR yet.
 4. In the running Tauri app, use the built-in "Check for updates".
 5. Accept the update. The app should download, verify, extract, restart.
-6. After restart, `Info.plist` under `/Applications/OpenChamber.app/` should
-   now show `CFBundleIdentifier = dev.openchamber.desktop`.
+6. After restart, `Info.plist` under `/Applications/ALIAS ADE.app/` should
+   now show `CFBundleIdentifier = dev.aliasAde.desktop`.
 7. Settings should be intact: hosts list, default host, sessions history.
 8. In the new Electron app, "Check for updates" should report no update
    available (it's now at the transition version, which is the latest).
@@ -282,20 +282,20 @@ If any step fails:
 If users report the Tauri → Electron update bricks their install:
 
 1. **Immediately** delete the latest release asset
-   `OpenChamber-*.app.tar.gz` and `latest.json` from the GitHub release
+   `ALIAS ADE-*.app.tar.gz` and `latest.json` from the GitHub release
    (keep the DMGs so manual download still works).
 2. Re-upload the previous version's `latest.json` as the current latest so
    Tauri updaters see "up to date" instead of a broken update on next check.
 3. Post a support note: users who already applied the broken update can
    download a fresh Electron `.dmg` manually and drag-replace. Their
-   `~/.config/openchamber/settings.json` survives.
+   `~/.config/alias-ade/settings.json` survives.
 4. Investigate, fix the workflow, retry with a new version number.
 
 ## Risks & edge cases
 
 ### Different `CFBundleIdentifier` at same path
 macOS LaunchServices caches identifier ↔ path mappings. When we replace
-`ai.opencode.openchamber` with `dev.openchamber.desktop` at the same `.app`
+`ai.opencode.aliasAde` with `dev.aliasAde.desktop` at the same `.app`
 path, LaunchServices will rebuild on next launch (automatic). Usually fine.
 If a user's system is in a weird state, a `killall Dock` or logout/login
 fixes it. Worth noting in the release notes.
@@ -306,10 +306,10 @@ bundle-id, so the first notification will re-prompt the user. Unavoidable.
 Mention in release notes.
 
 ### Deep-link protocol registration
-The `openchamber://` protocol was registered for `ai.opencode.openchamber`.
-After migration, `dev.openchamber.desktop` registers itself on first launch.
+The `aliasAde://` protocol was registered for `ai.opencode.aliasAde`.
+After migration, `dev.aliasAde.desktop` registers itself on first launch.
 LaunchServices updates the handler. Usually seamless. Test with
-`open 'openchamber://session/test'` post-migration.
+`open 'aliasAde://session/test'` post-migration.
 
 ### Gatekeeper "damaged app" dialog
 Rare. Triggered if the replaced `.app` fails a mid-extract codesign check.

@@ -1,6 +1,6 @@
 export type MobileKeyboardMode = 'native' | 'resize-content';
 
-export const MOBILE_KEYBOARD_MODE_STORAGE_KEY = 'openchamber.mobileKeyboardMode';
+export const MOBILE_KEYBOARD_MODE_STORAGE_KEY = 'aliasAde.mobileKeyboardMode';
 export const VIEWPORT_META_SELECTOR = 'meta[name="viewport"]';
 export const VIEWPORT_CONTENT_BASE = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover';
 

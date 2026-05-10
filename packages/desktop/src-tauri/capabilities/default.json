@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capabilities for OpenChamber desktop runtime",
+  "description": "Default capabilities for ALIAS ADE desktop runtime",
   "remote": {
     "urls": [
       "http://127.0.0.1:*/*",

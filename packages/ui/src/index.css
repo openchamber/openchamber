@@ -890,12 +890,12 @@ html:not(.dark) .chat-scroll {
 }
 
 .markdown-content.markdown-reasoning a,
-.markdown-content.markdown-reasoning [data-openchamber-file-link="true"] {
+.markdown-content.markdown-reasoning [data-alias-ade-file-link="true"] {
   color: var(--surface-muted-foreground) !important;
 }
 
 .markdown-content.markdown-reasoning a:hover,
-.markdown-content.markdown-reasoning [data-openchamber-file-link="true"]:hover {
+.markdown-content.markdown-reasoning [data-alias-ade-file-link="true"]:hover {
   color: var(--surface-foreground) !important;
 }
 
@@ -987,7 +987,7 @@ html:not(.dark) .chat-scroll {
   color: var(--markdown-link-hover, var(--primary));
 }
 
-.markdown-content [data-openchamber-file-link="true"] {
+.markdown-content [data-alias-ade-file-link="true"] {
   color: var(--markdown-link, var(--primary));
   cursor: pointer;
   text-decoration: underline;
@@ -996,7 +996,7 @@ html:not(.dark) .chat-scroll {
   -webkit-user-select: text !important;
 }
 
-.markdown-content [data-openchamber-file-link="true"]:hover {
+.markdown-content [data-alias-ade-file-link="true"]:hover {
   color: var(--markdown-link-hover, var(--primary));
 }
 

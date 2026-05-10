@@ -14,7 +14,7 @@ use std::{
 use tauri::{AppHandle, Emitter, State};
 
 const LOCAL_HOST_ID: &str = "local";
-const SSH_STATUS_EVENT: &str = "openchamber:ssh-instance-status";
+const SSH_STATUS_EVENT: &str = "aliasAde:ssh-instance-status";
 const DEFAULT_CONNECTION_TIMEOUT_SEC: u16 = 60;
 const DEFAULT_LOCAL_BIND_HOST: &str = "127.0.0.1";
 const DEFAULT_CONTROL_PERSIST_SEC: u16 = 300;
@@ -79,7 +79,7 @@ impl Default for DesktopSshInstallMethod {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DesktopSshRemoteOpenchamberConfig {
+pub struct DesktopSshRemoteAliasAdeConfig {
     #[serde(default)]
     pub mode: DesktopSshRemoteMode,
     #[serde(default = "default_true")]
@@ -91,7 +91,7 @@ pub struct DesktopSshRemoteOpenchamberConfig {
     pub upload_bundle_over_ssh: bool,
 }
 
-impl Default for DesktopSshRemoteOpenchamberConfig {
+impl Default for DesktopSshRemoteAliasAdeConfig {
     fn default() -> Self {
         Self {
             mode: DesktopSshRemoteMode::Managed,
@@ -147,7 +147,7 @@ pub struct DesktopSshStoredSecret {
 #[serde(rename_all = "camelCase")]
 pub struct DesktopSshAuthConfig {
     pub ssh_password: Option<DesktopSshStoredSecret>,
-    pub openchamber_password: Option<DesktopSshStoredSecret>,
+    pub alias_ade_password: Option<DesktopSshStoredSecret>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -182,7 +182,7 @@ pub struct DesktopSshInstance {
     #[serde(default = "default_connection_timeout")]
     pub connection_timeout_sec: u16,
     #[serde(default)]
-    pub remote_openchamber: DesktopSshRemoteOpenchamberConfig,
+    pub remote_alias_ade: DesktopSshRemoteAliasAdeConfig,
     #[serde(default)]
     pub local_forward: DesktopSshLocalForwardConfig,
     #[serde(default)]
@@ -287,7 +287,7 @@ pub struct DesktopSshManagerState {
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RemoteSystemInfo {
-    openchamber_version: Option<String>,
+    alias_ade_version: Option<String>,
     runtime: Option<String>,
     pid: Option<u64>,
     started_at: Option<String>,
@@ -313,7 +313,7 @@ fn now_millis() -> u64 {
 }
 
 fn settings_file_path() -> PathBuf {
-    if let Ok(dir) = std::env::var("OPENCHAMBER_DATA_DIR") {
+    if let Ok(dir) = std::env::var("ALIAS_ADE_DATA_DIR") {
         if !dir.trim().is_empty() {
             return PathBuf::from(dir.trim()).join("settings.json");
         }
@@ -321,7 +321,7 @@ fn settings_file_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_default();
     PathBuf::from(home)
         .join(".config")
-        .join("openchamber")
+        .join("alias-ade")
         .join("settings.json")
 }
 
@@ -941,9 +941,9 @@ fn askpass_script_content() -> String {
     let script = r#"#!/bin/bash
 PROMPT="$1"
 
-if [[ -n "$OPENCHAMBER_SSH_ASKPASS_VALUE" ]]; then
+if [[ -n "$ALIAS_ADE_SSH_ASKPASS_VALUE" ]]; then
   if [[ "$PROMPT" == *"assword"* || "$PROMPT" == *"passphrase"* ]]; then
-    printf '%s\n' "$OPENCHAMBER_SSH_ASKPASS_VALUE"
+    printf '%s\n' "$ALIAS_ADE_SSH_ASKPASS_VALUE"
     exit 0
   fi
 fi
@@ -1015,7 +1015,7 @@ fn spawn_master_process(
         .env("DISPLAY", "1");
 
     if let Some(secret) = ssh_password.filter(|value| !value.trim().is_empty()) {
-        command.env("OPENCHAMBER_SSH_ASKPASS_VALUE", secret.trim());
+        command.env("ALIAS_ADE_SSH_ASKPASS_VALUE", secret.trim());
     }
 
     command.spawn().with_context(|| {
@@ -1166,21 +1166,21 @@ fn parse_version_token(raw: &str) -> Option<String> {
     None
 }
 
-fn current_remote_openchamber_version(
+fn current_remote_alias_ade_version(
     parsed: &DesktopSshParsedCommand,
     control_path: &Path,
 ) -> Option<String> {
     run_remote_command(
         parsed,
         control_path,
-        "openchamber --version 2>/dev/null || true",
+        "alias-ade --version 2>/dev/null || true",
         DEFAULT_CONNECTION_TIMEOUT_SEC,
     )
     .ok()
     .and_then(|value| parse_version_token(&value))
 }
 
-fn install_openchamber_managed(
+fn install_alias_ade_managed(
     parsed: &DesktopSshParsedCommand,
     control_path: &Path,
     version: &str,
@@ -1194,26 +1194,26 @@ fn install_openchamber_managed(
     match preferred {
         DesktopSshInstallMethod::Bun => {
             if has_bun {
-                commands.push(format!("bun add -g @openchamber/web@{version}"));
+                commands.push(format!("bun add -g @alias-ade/web@{version}"));
             }
             if has_npm {
-                commands.push(format!("npm install -g @openchamber/web@{version}"));
+                commands.push(format!("npm install -g @alias-ade/web@{version}"));
             }
         }
         DesktopSshInstallMethod::Npm => {
             if has_npm {
-                commands.push(format!("npm install -g @openchamber/web@{version}"));
+                commands.push(format!("npm install -g @alias-ade/web@{version}"));
             }
             if has_bun {
-                commands.push(format!("bun add -g @openchamber/web@{version}"));
+                commands.push(format!("bun add -g @alias-ade/web@{version}"));
             }
         }
         DesktopSshInstallMethod::DownloadRelease | DesktopSshInstallMethod::UploadBundle => {
             if has_bun {
-                commands.push(format!("bun add -g @openchamber/web@{version}"));
+                commands.push(format!("bun add -g @alias-ade/web@{version}"));
             }
             if has_npm {
-                commands.push(format!("npm install -g @openchamber/web@{version}"));
+                commands.push(format!("npm install -g @alias-ade/web@{version}"));
             }
         }
     }
@@ -1237,7 +1237,7 @@ fn install_openchamber_managed(
         }
     }
 
-    Err(last_error.unwrap_or_else(|| anyhow!("Failed to install OpenChamber on remote host")))
+    Err(last_error.unwrap_or_else(|| anyhow!("Failed to install ALIAS ADE on remote host")))
 }
 
 fn parse_probe_status_line(line: Option<&str>, prefix: &str) -> Option<u16> {
@@ -1253,10 +1253,10 @@ fn is_liveness_http_status(status: u16) -> bool {
     (200..=299).contains(&status) || is_auth_http_status(status)
 }
 
-fn configured_openchamber_password(instance: &DesktopSshInstance) -> Option<&str> {
+fn configured_alias_ade_password(instance: &DesktopSshInstance) -> Option<&str> {
     instance
         .auth
-        .openchamber_password
+        .alias_ade_password
         .as_ref()
         .and_then(|secret| {
             if secret.enabled {
@@ -1273,15 +1273,15 @@ fn probe_remote_system_info(
     parsed: &DesktopSshParsedCommand,
     control_path: &Path,
     port: u16,
-    openchamber_password: Option<&str>,
+    alias_ade_password: Option<&str>,
 ) -> Result<RemoteSystemInfo> {
-    let auth_payload = if let Some(password) = openchamber_password {
+    let auth_payload = if let Some(password) = alias_ade_password {
         serde_json::to_string(&json!({ "password": password })).unwrap_or_else(|_| "{}".to_string())
     } else {
         "{}".to_string()
     };
 
-    let auth_enabled = if openchamber_password.is_some() {
+    let auth_enabled = if alias_ade_password.is_some() {
         "1"
     } else {
         "0"
@@ -1305,9 +1305,9 @@ fn probe_remote_system_info(
 
     if is_liveness_http_status(info_status) {
         if is_auth_http_status(info_status) {
-            if openchamber_password.is_some() && auth_status != 200 {
+            if alias_ade_password.is_some() && auth_status != 200 {
                 return Err(anyhow!(format!(
-                    "Remote OpenChamber requires UI authentication and configured password was rejected (auth status {auth_status})"
+                    "Remote ALIAS ADE requires UI authentication and configured password was rejected (auth status {auth_status})"
                 )));
             }
 
@@ -1316,22 +1316,22 @@ fn probe_remote_system_info(
             }
 
             return Err(anyhow!(
-                "Remote OpenChamber requires UI authentication on /api/system/info; configure OpenChamber UI password"
+                "Remote ALIAS ADE requires UI authentication on /api/system/info; configure ALIAS ADE UI password"
             ));
         }
     } else if is_liveness_http_status(health_status) {
         return Ok(RemoteSystemInfo::default());
     } else {
         return Err(anyhow!(format!(
-            "Remote OpenChamber probe failed (info status {info_status}, health status {health_status})"
+            "Remote ALIAS ADE probe failed (info status {info_status}, health status {health_status})"
         )));
     }
 
     let mut info = serde_json::from_str::<RemoteSystemInfo>(&body).unwrap_or_default();
-    if info.openchamber_version.is_none() {
+    if info.alias_ade_version.is_none() {
         if let Ok(value) = serde_json::from_str::<Value>(&body) {
-            info.openchamber_version = value
-                .get("openchamberVersion")
+            info.alias_ade_version = value
+                .get("aliasAdeVersion")
                 .and_then(Value::as_str)
                 .map(|v| v.to_string());
             info.runtime = value
@@ -1352,9 +1352,9 @@ fn remote_server_running(
     parsed: &DesktopSshParsedCommand,
     control_path: &Path,
     port: u16,
-    openchamber_password: Option<&str>,
+    alias_ade_password: Option<&str>,
 ) -> bool {
-    probe_remote_system_info(parsed, control_path, port, openchamber_password).is_ok()
+    probe_remote_system_info(parsed, control_path, port, alias_ade_password).is_ok()
 }
 
 fn random_port_candidate(seed: &str) -> u16 {
@@ -1374,21 +1374,21 @@ fn start_remote_server_managed(
     instance: &DesktopSshInstance,
     desired_port: u16,
 ) -> Result<u16> {
-    let mut env_prefix = "OPENCHAMBER_RUNTIME=ssh-remote".to_string();
+    let mut env_prefix = "ALIAS_ADE_RUNTIME=ssh-remote".to_string();
     if let Some(secret) = instance
         .auth
-        .openchamber_password
+        .alias_ade_password
         .as_ref()
         .and_then(|v| if v.enabled { v.value.clone() } else { None })
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
     {
         env_prefix.push(' ');
-        env_prefix.push_str("OPENCHAMBER_UI_PASSWORD=");
+        env_prefix.push_str("ALIAS_ADE_UI_PASSWORD=");
         env_prefix.push_str(&shell_quote(&secret));
     }
     let script = format!(
-        "{env_prefix} openchamber serve --daemon --hostname 127.0.0.1 --port {desired_port}"
+        "{env_prefix} alias-ade serve --daemon --hostname 127.0.0.1 --port {desired_port}"
     );
     let output = run_remote_command(
         parsed,
@@ -1590,7 +1590,7 @@ fn wait_local_forward_ready(local_port: u16) -> Result<()> {
         poll_ms = (poll_ms * 2).min(2000);
     }
     Err(anyhow!(
-        "Timed out waiting for forwarded OpenChamber health"
+        "Timed out waiting for forwarded ALIAS ADE health"
     ))
 }
 
@@ -1902,10 +1902,10 @@ impl DesktopSshManagerInner {
         if let Some(mut session) = self.sessions.lock().expect("ssh sessions mutex").remove(id) {
             if session.started_by_us
                 && matches!(
-                    session.instance.remote_openchamber.mode,
+                    session.instance.remote_alias_ade.mode,
                     DesktopSshRemoteMode::Managed
                 )
-                && !session.instance.remote_openchamber.keep_running
+                && !session.instance.remote_alias_ade.keep_running
             {
                 stop_remote_server_best_effort(
                     &session.parsed,
@@ -1953,18 +1953,18 @@ impl DesktopSshManagerInner {
     ) -> Result<(u16, bool)> {
         let app_version = app.package_info().version.to_string();
 
-        match instance.remote_openchamber.mode {
+        match instance.remote_alias_ade.mode {
             DesktopSshRemoteMode::External => {
-                let Some(port) = instance.remote_openchamber.preferred_port else {
+                let Some(port) = instance.remote_alias_ade.preferred_port else {
                     return Err(anyhow!(
-                        "External mode requires a preferred remote OpenChamber port"
+                        "External mode requires a preferred remote ALIAS ADE port"
                     ));
                 };
                 self.set_status(
                     app,
                     &instance.id,
                     DesktopSshPhase::ServerDetecting,
-                    Some("Probing external OpenChamber server".to_string()),
+                    Some("Probing external ALIAS ADE server".to_string()),
                     None,
                     None,
                     Some(port),
@@ -1976,11 +1976,11 @@ impl DesktopSshManagerInner {
                     parsed,
                     control_path,
                     port,
-                    configured_openchamber_password(instance),
+                    configured_alias_ade_password(instance),
                 )
                 .map_err(|err| {
                     anyhow!(format!(
-                        "External OpenChamber server probe failed on configured remote port: {err}"
+                        "External ALIAS ADE server probe failed on configured remote port: {err}"
                     ))
                 })?;
                 Ok((port, false))
@@ -1990,7 +1990,7 @@ impl DesktopSshManagerInner {
                     app,
                     &instance.id,
                     DesktopSshPhase::RemoteProbe,
-                    Some("Checking remote OpenChamber installation".to_string()),
+                    Some("Checking remote ALIAS ADE installation".to_string()),
                     None,
                     None,
                     None,
@@ -1999,13 +1999,13 @@ impl DesktopSshManagerInner {
                     false,
                 );
 
-                let installed_version = current_remote_openchamber_version(parsed, control_path);
+                let installed_version = current_remote_alias_ade_version(parsed, control_path);
                 if installed_version.is_none() {
                     self.set_status(
                         app,
                         &instance.id,
                         DesktopSshPhase::Installing,
-                        Some("Installing OpenChamber on remote host".to_string()),
+                        Some("Installing ALIAS ADE on remote host".to_string()),
                         None,
                         None,
                         None,
@@ -2013,11 +2013,11 @@ impl DesktopSshManagerInner {
                         0,
                         false,
                     );
-                    install_openchamber_managed(
+                    install_alias_ade_managed(
                         parsed,
                         control_path,
                         &app_version,
-                        &instance.remote_openchamber.install_method,
+                        &instance.remote_alias_ade.install_method,
                     )?;
                 } else if installed_version.as_deref() != Some(app_version.as_str()) {
                     self.set_status(
@@ -2025,7 +2025,7 @@ impl DesktopSshManagerInner {
                         &instance.id,
                         DesktopSshPhase::Updating,
                         Some(format!(
-                            "Updating remote OpenChamber from {} to {}",
+                            "Updating remote ALIAS ADE from {} to {}",
                             installed_version
                                 .clone()
                                 .unwrap_or_else(|| "unknown".to_string()),
@@ -2038,11 +2038,11 @@ impl DesktopSshManagerInner {
                         0,
                         false,
                     );
-                    install_openchamber_managed(
+                    install_alias_ade_managed(
                         parsed,
                         control_path,
                         &app_version,
-                        &instance.remote_openchamber.install_method,
+                        &instance.remote_alias_ade.install_method,
                     )?;
                 }
 
@@ -2050,7 +2050,7 @@ impl DesktopSshManagerInner {
                     app,
                     &instance.id,
                     DesktopSshPhase::ServerDetecting,
-                    Some("Detecting managed OpenChamber server".to_string()),
+                    Some("Detecting managed ALIAS ADE server".to_string()),
                     None,
                     None,
                     None,
@@ -2060,14 +2060,14 @@ impl DesktopSshManagerInner {
                 );
 
                 let mut started_by_us = false;
-                let mut remote_port = instance.remote_openchamber.preferred_port;
+                let mut remote_port = instance.remote_alias_ade.preferred_port;
 
                 if let Some(port) = remote_port {
                     if !remote_server_running(
                         parsed,
                         control_path,
                         port,
-                        configured_openchamber_password(instance),
+                        configured_alias_ade_password(instance),
                     ) {
                         remote_port = None;
                     }
@@ -2078,7 +2078,7 @@ impl DesktopSshManagerInner {
                         app,
                         &instance.id,
                         DesktopSshPhase::ServerStarting,
-                        Some("Starting managed OpenChamber server".to_string()),
+                        Some("Starting managed ALIAS ADE server".to_string()),
                         None,
                         None,
                         None,
@@ -2087,7 +2087,7 @@ impl DesktopSshManagerInner {
                         false,
                     );
                     let desired_port = instance
-                        .remote_openchamber
+                        .remote_alias_ade
                         .preferred_port
                         .unwrap_or_else(|| random_port_candidate(&instance.id));
                     let started_port =
@@ -2097,17 +2097,17 @@ impl DesktopSshManagerInner {
                 }
 
                 let Some(port) = remote_port else {
-                    return Err(anyhow!("Failed to determine remote OpenChamber port"));
+                    return Err(anyhow!("Failed to determine remote ALIAS ADE port"));
                 };
 
                 if !remote_server_running(
                     parsed,
                     control_path,
                     port,
-                    configured_openchamber_password(instance),
+                    configured_alias_ade_password(instance),
                 ) {
                     return Err(anyhow!(
-                        "Managed OpenChamber server failed to become reachable"
+                        "Managed ALIAS ADE server failed to become reachable"
                     ));
                 }
 
@@ -2855,7 +2855,7 @@ mod tests {
             ssh_command: command.to_string(),
             ssh_parsed: None,
             connection_timeout_sec: DEFAULT_CONNECTION_TIMEOUT_SEC,
-            remote_openchamber: DesktopSshRemoteOpenchamberConfig::default(),
+            remote_alias_ade: DesktopSshRemoteAliasAdeConfig::default(),
             local_forward: DesktopSshLocalForwardConfig::default(),
             auth: DesktopSshAuthConfig::default(),
             port_forwards: Vec::new(),
@@ -2937,7 +2937,7 @@ mod tests {
     #[test]
     fn parse_ssh_config_candidates_extracts_host_entries() {
         let temp =
-            std::env::temp_dir().join(format!("openchamber-ssh-import-{}.txt", now_millis()));
+            std::env::temp_dir().join(format!("alias-ade-ssh-import-{}.txt", now_millis()));
         fs::write(
             &temp,
             "\nHost prod\n  HostName 10.0.0.1\nHost *.dev !skip\nHost *\n",

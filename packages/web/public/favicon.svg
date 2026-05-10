@@ -10,7 +10,7 @@
       }
     }
   </style>
-  <!-- OpenChamber logo - simplified for favicon -->
+  <!-- ALIAS ADE logo - simplified for favicon -->
   <g transform="translate(16, 16) scale(0.48)">
     <!-- Left face - with fill -->
     <path d="M0 0 L-26 -15 L-26 15 L0 30 Z" fill="currentColor" fill-opacity="0.25" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/>

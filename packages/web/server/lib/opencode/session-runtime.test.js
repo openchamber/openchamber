@@ -47,7 +47,7 @@ describe('session runtime', () => {
     runtime.markSessionViewed('session-1', 'client-1');
 
     expect(events).toContainEqual({
-      type: 'openchamber:session-status',
+      type: 'aliasAde:session-status',
       properties: expect.objectContaining({
         sessionId: 'session-1',
         status: 'idle',
@@ -55,7 +55,7 @@ describe('session runtime', () => {
       }),
     });
     expect(events.at(-1)).toEqual({
-      type: 'openchamber:session-status',
+      type: 'aliasAde:session-status',
       properties: {
         sessionId: 'session-1',
         status: 'idle',
@@ -90,7 +90,7 @@ describe('session runtime', () => {
     });
 
     expect(events).toContainEqual({
-      type: 'openchamber:session-status',
+      type: 'aliasAde:session-status',
       properties: expect.objectContaining({
         sessionId: 'legacy-session-1',
         status: 'busy',

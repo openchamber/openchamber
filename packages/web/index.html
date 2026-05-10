@@ -24,12 +24,12 @@
     <!-- Web app manifest (endpoint-first with data URL fallback) -->
     <script>
       const baseUrl = location.origin;
-      const defaultAppName = 'OpenChamber - AI Coding Assistant';
-      const defaultShortName = 'OpenChamber';
-      const pwaNameStorageKey = 'openchamber.pwaName';
-      const pwaOrientationStorageKey = 'openchamber.pwaOrientation';
-      const mobileKeyboardModeStorageKey = 'openchamber.mobileKeyboardMode';
-      const pwaRecentSessionsStorageKey = 'openchamber.pwaRecentSessions';
+      const defaultAppName = 'ALIAS ADE - AI Coding Assistant';
+      const defaultShortName = 'ALIAS ADE';
+      const pwaNameStorageKey = 'aliasAde.pwaName';
+      const pwaOrientationStorageKey = 'aliasAde.pwaOrientation';
+      const mobileKeyboardModeStorageKey = 'aliasAde.mobileKeyboardMode';
+      const pwaRecentSessionsStorageKey = 'aliasAde.pwaRecentSessions';
       const viewportBaseContent = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover';
 
       const normalizePwaName = (value, fallback) => {
@@ -376,18 +376,18 @@
       const initialInstallNameOverride = getQueryInstallNameOverride();
       void updateManifest(initialInstallNameOverride);
 
-      window.__OPENCHAMBER_GET_PWA_INSTALL_NAME__ = () => getStoredInstallName();
-      window.__OPENCHAMBER_SET_PWA_INSTALL_NAME__ = (value) => {
+      window.__ALIAS_ADE_GET_PWA_INSTALL_NAME__ = () => getStoredInstallName();
+      window.__ALIAS_ADE_SET_PWA_INSTALL_NAME__ = (value) => {
         const resolvedName = setStoredInstallName(value);
         void updateManifest(resolvedName);
         return resolvedName;
       };
-      window.__OPENCHAMBER_SET_PWA_ORIENTATION__ = (value) => {
+      window.__ALIAS_ADE_SET_PWA_ORIENTATION__ = (value) => {
         const resolvedOrientation = setStoredOrientation(value);
         void updateManifest(null, resolvedOrientation);
         return resolvedOrientation;
       };
-      window.__OPENCHAMBER_UPDATE_PWA_MANIFEST__ = () => {
+      window.__ALIAS_ADE_UPDATE_PWA_MANIFEST__ = () => {
         refreshManifestFromStorage();
       };
     </script>
@@ -445,12 +445,12 @@
     <!-- iOS Safari PWA styling -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="OpenChamber" />
+    <meta name="apple-mobile-web-app-title" content="ALIAS ADE" />
 
-    <title>OpenChamber - AI Coding Assistant</title>
+    <title>ALIAS ADE - AI Coding Assistant</title>
     <meta name="description" content="Web interface companion for OpenCode AI coding agent" />
-    <meta name="application-name" content="OpenChamber" />
-    <meta name="apple-mobile-web-app-title" content="OpenChamber" />
+    <meta name="application-name" content="ALIAS ADE" />
+    <meta name="apple-mobile-web-app-title" content="ALIAS ADE" />
 
     <!-- Inline CSS for loading screen and Nerd Fonts (before Tailwind loads) -->
     <style>
@@ -538,7 +538,7 @@
       <!-- Loading fallback while React initializes -->
       <div id="initial-loading">
         <div style="display: flex; align-items: center; justify-content: center;">
-          <svg width="120" height="120" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="OpenChamber loading icon">
+          <svg width="120" height="120" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ALIAS ADE loading icon">
             <!-- Isometric cube: edge=48, centerY=50 -->
             <!-- Points: top(50,2), left(8.432,26), right(91.568,26), center(50,50), bottomLeft(8.432,74), bottomRight(91.568,74), bottom(50,98) -->
 
@@ -602,7 +602,7 @@
       // Desktop shells manage their own splash via the injected boot outcome;
       // do not force-remove for desktop windows.
       setTimeout(function() {
-        if (typeof window.__OPENCHAMBER_LOCAL_ORIGIN__ === 'string' && window.__OPENCHAMBER_LOCAL_ORIGIN__.length > 0) {
+        if (typeof window.__ALIAS_ADE_LOCAL_ORIGIN__ === 'string' && window.__ALIAS_ADE_LOCAL_ORIGIN__.length > 0) {
           return;
         }
         var loading = document.getElementById('initial-loading');

@@ -47,10 +47,10 @@ export const normalizeCustomOpenAIBaseURL = (value) => {
     return { error: 'Custom server URL must not include credentials' };
   }
 
-  const allowRemote = isEnvFlagEnabled(process.env.OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS);
+  const allowRemote = isEnvFlagEnabled(process.env.ALIAS_ADE_ALLOW_REMOTE_OPENAI_COMPAT_URLS);
   if (!allowRemote && !isAllowedLocalHost(parsed.hostname)) {
     return {
-      error: 'Remote custom server URLs are disabled. Set OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS=true to allow this host.',
+      error: 'Remote custom server URLs are disabled. Set ALIAS_ADE_ALLOW_REMOTE_OPENAI_COMPAT_URLS=true to allow this host.',
     };
   }
 

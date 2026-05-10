@@ -43,7 +43,7 @@ const buildProxyJsonError = (status: number, error: string): ApiProxyResponsePay
 export const tryHandleLocalFsProxy = async (method: string, requestPath: string): Promise<ApiProxyResponsePayload | null> => {
   let parsed: URL;
   try {
-    parsed = new URL(requestPath, 'https://openchamber.local');
+    parsed = new URL(requestPath, 'https://aliasAde.local');
   } catch {
     return buildProxyJsonError(400, 'Invalid request path');
   }

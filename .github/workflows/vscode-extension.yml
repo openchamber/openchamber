@@ -47,7 +47,7 @@ jobs:
       - name: Upload VSIX artifact
         uses: actions/upload-artifact@v4
         with:
-          name: openchamber-vscode-vsix
+          name: alias-ade-vscode-vsix
           path: packages/vscode/*.vsix
 
       - name: Attach VSIX to GitHub Release

@@ -3,7 +3,7 @@ import type {
   FileSearchQuery,
   FileSearchResult,
   FilesAPI,
-} from '@openchamber/ui/lib/api/types';
+} from '@alias-ade/ui/lib/api/types';
 
 const normalizePath = (path: string): string => path.replace(/\\/g, '/');
 

@@ -214,10 +214,10 @@ export type SessionUIState = {
   clearAbortPrompt: () => void
   armAbortPrompt: (durationMs?: number) => number | null
   clearError: () => void
-  markSessionAsOpenChamberCreated: (sessionId: string) => void
-  isOpenChamberCreatedSession: (sessionId: string) => boolean
+  markSessionAsAliasAdeCreated: (sessionId: string) => void
+  isAliasAdeCreatedSession: (sessionId: string) => boolean
   getContextUsage: (contextLimit: number, outputLimit: number) => SessionContextUsage | null
-  initializeNewOpenChamberSession: (sessionId: string, agents: unknown[]) => void
+  initializeNewAliasAdeSession: (sessionId: string, agents: unknown[]) => void
   setWorktreeMetadata: (sessionId: string, metadata: WorktreeMetadata | null) => void
   overrideNewSessionDraftTarget: (options: Record<string, unknown>) => void
   resolvePendingDraftWorktreeTarget: (requestId: string, directory: string | null, options?: Record<string, unknown>) => void
@@ -551,14 +551,14 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
   clearError: () => set({ error: null }),
 
-  markSessionAsOpenChamberCreated: (sessionId) =>
+  markSessionAsAliasAdeCreated: (sessionId) =>
     set((s) => {
       const next = new Set(s.webUICreatedSessions)
       next.add(sessionId)
       return { webUICreatedSessions: next }
     }),
 
-  isOpenChamberCreatedSession: (sessionId) => get().webUICreatedSessions.has(sessionId),
+  isAliasAdeCreatedSession: (sessionId) => get().webUICreatedSessions.has(sessionId),
 
   getContextUsage: (contextLimit: number, outputLimit: number) => {
     if (get().newSessionDraft?.open) return null
@@ -602,7 +602,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     }
   },
 
-  initializeNewOpenChamberSession: () => {
+  initializeNewAliasAdeSession: () => {
     // Stub — was a no-op in old store
   },
 
@@ -745,7 +745,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         }
       }
 
-      get().initializeNewOpenChamberSession(created.id, configState.agents ?? [])
+      get().initializeNewAliasAdeSession(created.id, configState.agents ?? [])
 
       const createdDirectory = normalizePath(draftDirectoryOverride ?? created.directory ?? null)
 

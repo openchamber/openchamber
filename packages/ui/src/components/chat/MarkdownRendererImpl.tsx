@@ -71,7 +71,7 @@ const useExternalLinkInteractions = ({
         return;
       }
 
-      if (anchor.getAttribute('data-openchamber-file-link') === 'true') {
+      if (anchor.getAttribute('data-alias-ade-file-link') === 'true') {
         return;
       }
 
@@ -996,7 +996,7 @@ interface MarkdownRendererProps {
 }
 
 const MERMAID_BLOCK_SELECTOR = '[data-markdown="mermaid-block"]';
-const FILE_LINK_SELECTOR = '[data-openchamber-file-link="true"]';
+const FILE_LINK_SELECTOR = '[data-alias-ade-file-link="true"]';
 const FILE_REFERENCE_STAT_CONCURRENCY = 4;
 const FILE_REFERENCE_STAT_CACHE = new Map<string, Promise<boolean>>();
 let activeFileReferenceStatCount = 0;
@@ -1339,9 +1339,9 @@ const useFileReferenceInteractions = ({
     let cancelled = false;
 
     const clearFileLinkAttributes = (candidate: HTMLElement) => {
-      candidate.removeAttribute('data-openchamber-file-link');
-      candidate.removeAttribute('data-openchamber-file-ref');
-      candidate.removeAttribute('data-openchamber-file-path');
+      candidate.removeAttribute('data-alias-ade-file-link');
+      candidate.removeAttribute('data-alias-ade-file-ref');
+      candidate.removeAttribute('data-alias-ade-file-path');
       if (candidate.getAttribute('title') === 'Open file') {
         candidate.removeAttribute('title');
       }
@@ -1374,9 +1374,9 @@ const useFileReferenceInteractions = ({
             return;
           }
 
-          candidate.setAttribute('data-openchamber-file-link', 'true');
-          candidate.setAttribute('data-openchamber-file-ref', latestRawCandidate);
-          candidate.setAttribute('data-openchamber-file-path', latestResolved.resolvedPath);
+          candidate.setAttribute('data-alias-ade-file-link', 'true');
+          candidate.setAttribute('data-alias-ade-file-ref', latestRawCandidate);
+          candidate.setAttribute('data-alias-ade-file-path', latestResolved.resolvedPath);
           candidate.setAttribute('title', 'Open file');
           if (candidate.tagName.toLowerCase() !== 'a') {
             candidate.setAttribute('role', 'button');
@@ -1387,7 +1387,7 @@ const useFileReferenceInteractions = ({
     };
 
     const openFileReference = (sourceElement: HTMLElement) => {
-      const raw = sourceElement.getAttribute('data-openchamber-file-ref') || extractPathCandidateFromElement(sourceElement);
+      const raw = sourceElement.getAttribute('data-alias-ade-file-ref') || extractPathCandidateFromElement(sourceElement);
       const resolved = getResolvedReference(raw, effectiveDirectory);
       if (!resolved) {
         return;
@@ -1445,7 +1445,7 @@ const useFileReferenceInteractions = ({
       }
 
       const target = event.target;
-      if (!(target instanceof HTMLElement) || target.getAttribute('data-openchamber-file-link') !== 'true') {
+      if (!(target instanceof HTMLElement) || target.getAttribute('data-alias-ade-file-link') !== 'true') {
         return;
       }
 

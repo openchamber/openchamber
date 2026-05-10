@@ -1,7 +1,7 @@
 {
-  "name": "openchamber-monorepo",
+  "name": "alias-ade-monorepo",
   "version": "1.10.4",
-  "description": "OpenChamber monorepo workspace for web, ui, and desktop runtimes",
+  "description": "ALIAS ADE monorepo workspace for web, ui, and desktop runtimes",
   "private": true,
   "type": "module",
   "packageManager": "bun@1.3.5",
@@ -15,13 +15,13 @@
     "opencode",
     "ai",
     "coding",
-    "openchamber",
+    "alias-ade",
     "cli"
   ],
   "author": "Bohdan Triapitsyn",
   "license": "MIT",
   "scripts": {
-    "dev": "OPENCHAMBER_DEV_SHUTDOWN=true concurrently -n \"server,web,ui\" -c \"cyan,magenta,yellow\" \"bun run --cwd packages/web dev:server:watch\" \"bun run --cwd packages/web build:watch\" \"bun run --cwd packages/ui dev\"",
+    "dev": "ALIAS_ADE_DEV_SHUTDOWN=true concurrently -n \"server,web,ui\" -c \"cyan,magenta,yellow\" \"bun run --cwd packages/web dev:server:watch\" \"bun run --cwd packages/web build:watch\" \"bun run --cwd packages/ui dev\"",
     "build": "bun run --filter '*' build",
     "build:web": "bun run --cwd packages/web build",
     "build:ui": "bun run --cwd packages/ui build",

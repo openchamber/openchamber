@@ -103,7 +103,7 @@ export async function handleConfigBridgeMessage(
   switch (type) {
     case 'api:config/opencode-resolution:get': {
       const debugInfo = ctx?.manager?.getDebugInfo();
-      const configuredFromWorkspace = vscode.workspace.getConfiguration('openchamber').get<string>('opencodeBinary');
+      const configuredFromWorkspace = vscode.workspace.getConfiguration('alias-ade').get<string>('opencodeBinary');
       const configured = typeof configuredFromWorkspace === 'string' && configuredFromWorkspace.trim().length > 0
         ? configuredFromWorkspace.trim()
         : null;

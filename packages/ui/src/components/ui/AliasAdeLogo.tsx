@@ -16,7 +16,7 @@ const RIGHT_FACE_CELL_OPACITIES = [
   0.45, 0.25, 0.4, 0.2,
 ];
 
-interface OpenChamberLogoProps {
+interface AliasAdeLogoProps {
   className?: string;
   width?: number;
   height?: number;
@@ -78,7 +78,7 @@ const generateFaceGrid = (
   return cells;
 };
 
-export const OpenChamberLogo: React.FC<OpenChamberLogoProps> = ({
+export const AliasAdeLogo: React.FC<AliasAdeLogoProps> = ({
   className = '',
   width = 70,
   height = 70,
@@ -191,7 +191,7 @@ export const OpenChamberLogo: React.FC<OpenChamberLogoProps> = ({
       xmlns="http://www.w3.org/2000/svg"
       className={className}
       role="img"
-      aria-label={t('openChamberLogo.aria.logo')}
+      aria-label={t('aliasAdeLogo.aria.logo')}
     >
       {/* Left face - base fill */}
       <path

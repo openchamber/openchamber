@@ -1,7 +1,7 @@
 # UI Auth Module Documentation
 
 ## Purpose
-This module owns OpenChamber UI authentication for browser access, including password session auth, WebAuthn passkeys, and trusted-device session handling.
+This module owns ALIAS ADE UI authentication for browser access, including password session auth, WebAuthn passkeys, and trusted-device session handling.
 
 ## Entrypoints and structure
 - `packages/web/server/lib/ui-auth/ui-auth.js`: UI auth controller runtime, cookie/session issuance, rate limiting, and auth route handlers.

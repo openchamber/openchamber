@@ -1,6 +1,6 @@
 
 import { sendBridgeMessage } from './bridge';
-import type { EditorAPI } from '@openchamber/ui/lib/api/types';
+import type { EditorAPI } from '@alias-ade/ui/lib/api/types';
 
 export const createVSCodeEditorAPI = (): EditorAPI => ({
   openFile: async (path: string, line?: number, column?: number) => {

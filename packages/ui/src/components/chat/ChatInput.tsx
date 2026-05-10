@@ -649,7 +649,7 @@ type AutocompleteOverlayPosition = {
 
 // Per-session draft key — preserves in-progress messages across project switches
 const getDraftKey = (sessionId: string | null): string =>
-    `openchamber_chat_input_draft_${sessionId ?? 'new'}`;
+    `aliasAde_chat_input_draft_${sessionId ?? 'new'}`;
 
 // Helper to safely read from localStorage for a given session
 const getStoredDraft = (sessionId: string | null): string => {
@@ -675,7 +675,7 @@ const saveStoredDraft = (sessionId: string | null, draft: string): void => {
 
 // Per-session confirmed mentions key — tracks which @mentions are confirmed (blue) vs plain text
 const getConfirmedMentionsKey = (sessionId: string | null): string =>
-    `openchamber_chat_confirmed_mentions_${sessionId ?? 'new'}`;
+    `aliasAde_chat_confirmed_mentions_${sessionId ?? 'new'}`;
 
 const saveConfirmedMentions = (sessionId: string | null, mentions: Set<string>): void => {
     try {
@@ -2560,7 +2560,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             if (lowerTypes.includes('files')) return true;
             if (lowerTypes.includes('text/uri-list')) return true;
             if (lowerTypes.includes('codefiles')) return true;
-            if (lowerTypes.includes('application/x-openchamber-file-path')) return true;
+            if (lowerTypes.includes('application/x-alias-ade-file-path')) return true;
             if (lowerTypes.some((type) => type.includes('vnd.code.tree'))) return true;
         }
 
@@ -2687,7 +2687,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         e.preventDefault();
         e.stopPropagation();
         dragEnterCountRef.current++;
-        const isInternal = e.dataTransfer.types?.includes('application/x-openchamber-file-path') ?? false;
+        const isInternal = e.dataTransfer.types?.includes('application/x-alias-ade-file-path') ?? false;
         if (isInternal !== isInternalDrag) {
             setIsInternalDrag(isInternal);
         }
@@ -2741,7 +2741,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (!currentSessionId && !newSessionDraftOpen) return;
 
         // Internal drag: file tree → chat input (relative path as @mention)
-        const internalPath = e.dataTransfer.getData('application/x-openchamber-file-path');
+        const internalPath = e.dataTransfer.getData('application/x-alias-ade-file-path');
         if (internalPath && internalPath !== '.') {
             confirmedMentionsRef.current.add(internalPath);
             const mention = `@${internalPath}`;

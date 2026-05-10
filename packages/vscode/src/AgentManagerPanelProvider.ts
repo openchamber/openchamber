@@ -9,7 +9,7 @@ import { resolveWebviewDevServerUrl } from './webviewDevServer';
 import { normalizeWindowsDriveLetter } from './pathUtils';
 
 export class AgentManagerPanelProvider {
-  public static readonly viewType = 'openchamber.agentManager';
+  public static readonly viewType = 'aliasAde.agentManager';
 
   private _panel?: vscode.WebviewPanel;
 

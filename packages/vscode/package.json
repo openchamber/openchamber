@@ -1,13 +1,13 @@
 {
-  "name": "openchamber",
-  "displayName": "OpenChamber",
+  "name": "alias-ade",
+  "displayName": "ALIAS ADE",
   "description": "AI coding assistant powered by OpenCode",
   "version": "1.10.4",
   "publisher": "fedaykindev",
   "private": true,
   "repository": {
     "type": "git",
-    "url": "https://github.com/btriapitsyn/openchamber.git"
+    "url": "https://github.com/btriapitsyn/aliasAde.git"
   },
   "qna": "https://discord.gg/ZYRSdnwwKA",
   "license": "MIT",
@@ -29,38 +29,38 @@
     "groq",
     "assistant",
     "opencode",
-    "openchamber"
+    "alias-ade"
   ],
   "icon": "assets/app-icon.png",
   "main": "./dist/extension.js",
   "activationEvents": [
-    "onCommand:openchamber.openSidebar",
-    "onCommand:openchamber.attachExplorerToChat",
-    "onView:openchamber.chatView"
+    "onCommand:aliasAde.openSidebar",
+    "onCommand:aliasAde.attachExplorerToChat",
+    "onView:aliasAde.chatView"
   ],
   "contributes": {
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "openchamber",
-          "title": "OpenChamber",
+          "id": "alias-ade",
+          "title": "ALIAS ADE",
           "icon": "assets/icon.svg"
         }
       ]
     },
     "views": {
-      "openchamber": [
+      "alias-ade": [
         {
           "type": "webview",
-          "id": "openchamber.chatView",
+          "id": "aliasAde.chatView",
           "name": "Chat"
         }
       ]
     },
     "commands": [
       {
-        "command": "openchamber.openSidebar",
-        "category": "OpenChamber",
+        "command": "aliasAde.openSidebar",
+        "category": "ALIAS ADE",
         "title": "Open Sidebar",
         "icon": {
           "light": "assets/icon.svg",
@@ -68,35 +68,35 @@
         }
       },
       {
-        "command": "openchamber.focusChat",
-        "category": "OpenChamber",
+        "command": "aliasAde.focusChat",
+        "category": "ALIAS ADE",
         "title": "Focus Chat"
       },
       {
-        "command": "openchamber.restartApi",
-        "category": "OpenChamber",
+        "command": "aliasAde.restartApi",
+        "category": "ALIAS ADE",
         "title": "Restart API Connection"
       },
       {
-        "command": "openchamber.showOpenCodeStatus",
-        "category": "OpenChamber",
+        "command": "aliasAde.showOpenCodeStatus",
+        "category": "ALIAS ADE",
         "title": "Show OpenCode Status"
       },
       {
-        "command": "openchamber.openAgentManager",
-        "category": "OpenChamber",
+        "command": "aliasAde.openAgentManager",
+        "category": "ALIAS ADE",
         "title": "Open Agent Manager",
         "icon": "$(circuit-board)"
       },
       {
-        "command": "openchamber.openActiveSessionInEditor",
-        "category": "OpenChamber",
+        "command": "aliasAde.openActiveSessionInEditor",
+        "category": "ALIAS ADE",
         "title": "Open Active Session in Editor",
         "icon": "$(link-external)"
       },
       {
-        "command": "openchamber.openNewSessionInEditor",
-        "category": "OpenChamber",
+        "command": "aliasAde.openNewSessionInEditor",
+        "category": "ALIAS ADE",
         "title": "Open New Session in Editor",
         "icon": {
           "light": "assets/icon.svg",
@@ -104,113 +104,113 @@
         }
       },
       {
-        "command": "openchamber.openCurrentOrNewSessionInEditor",
-        "category": "OpenChamber",
+        "command": "aliasAde.openCurrentOrNewSessionInEditor",
+        "category": "ALIAS ADE",
         "title": "Open Session in Editor",
         "icon": "$(link-external)"
       },
       {
-        "command": "openchamber.addToContext",
-        "category": "OpenChamber",
+        "command": "aliasAde.addToContext",
+        "category": "ALIAS ADE",
         "title": "Add to Context"
       },
       {
-        "command": "openchamber.explain",
-        "category": "OpenChamber",
+        "command": "aliasAde.explain",
+        "category": "ALIAS ADE",
         "title": "Explain"
       },
       {
-        "command": "openchamber.improveCode",
-        "category": "OpenChamber",
+        "command": "aliasAde.improveCode",
+        "category": "ALIAS ADE",
         "title": "Improve Code"
       },
       {
-        "command": "openchamber.newSession",
-        "category": "OpenChamber",
+        "command": "aliasAde.newSession",
+        "category": "ALIAS ADE",
         "title": "New Session",
         "icon": "$(add)"
       },
       {
-        "command": "openchamber.showSettings",
-        "category": "OpenChamber",
+        "command": "aliasAde.showSettings",
+        "category": "ALIAS ADE",
         "title": "Settings",
         "icon": "$(settings-gear)"
       },
       {
-        "command": "openchamber.attachExplorerToChat",
-        "category": "OpenChamber",
-        "title": "Attach to OpenChamber Chat"
+        "command": "aliasAde.attachExplorerToChat",
+        "category": "ALIAS ADE",
+        "title": "Attach to ALIAS ADE Chat"
       }
     ],
     "submenus": [
       {
-        "id": "openchamber.submenu",
-        "label": "OpenChamber"
+        "id": "aliasAde.submenu",
+        "label": "ALIAS ADE"
       }
     ],
     "menus": {
       "editor/context": [
         {
-          "submenu": "openchamber.submenu",
+          "submenu": "aliasAde.submenu",
           "group": "navigation"
         }
       ],
       "explorer/context": [
         {
-          "command": "openchamber.attachExplorerToChat",
+          "command": "aliasAde.attachExplorerToChat",
           "when": "resourceScheme == file && explorerResourceIsFolder == false",
           "group": "navigation@50"
         }
       ],
       "editor/title": [
         {
-          "command": "openchamber.openNewSessionInEditor",
+          "command": "aliasAde.openNewSessionInEditor",
           "group": "navigation@1"
         }
       ],
       "view/title": [
         {
-          "command": "openchamber.newSession",
-          "when": "view == openchamber.chatView",
+          "command": "aliasAde.newSession",
+          "when": "view == aliasAde.chatView",
           "group": "navigation@1"
         },
         {
-          "command": "openchamber.openCurrentOrNewSessionInEditor",
-          "when": "view == openchamber.chatView",
+          "command": "aliasAde.openCurrentOrNewSessionInEditor",
+          "when": "view == aliasAde.chatView",
           "group": "navigation@2"
         },
         {
-          "command": "openchamber.openAgentManager",
-          "when": "view == openchamber.chatView",
+          "command": "aliasAde.openAgentManager",
+          "when": "view == aliasAde.chatView",
           "group": "navigation@3"
         },
         {
-          "command": "openchamber.showSettings",
-          "when": "view == openchamber.chatView",
+          "command": "aliasAde.showSettings",
+          "when": "view == aliasAde.chatView",
           "group": "navigation@4"
         }
       ],
-      "openchamber.submenu": [
+      "aliasAde.submenu": [
         {
-          "command": "openchamber.explain"
+          "command": "aliasAde.explain"
         },
         {
-          "command": "openchamber.improveCode"
+          "command": "aliasAde.improveCode"
         },
         {
-          "command": "openchamber.addToContext"
+          "command": "aliasAde.addToContext"
         }
       ]
     },
     "configuration": {
-      "title": "OpenChamber",
+      "title": "ALIAS ADE",
       "properties": {
-        "openchamber.apiUrl": {
+        "aliasAde.apiUrl": {
           "type": "string",
           "default": "",
           "description": "URL of an external OpenCode API server. Leave empty to auto-start a local instance."
         },
-        "openchamber.opencodeBinary": {
+        "aliasAde.opencodeBinary": {
           "type": "string",
           "default": "",
           "description": "Optional absolute path to the opencode CLI binary. Useful if PATH lookup fails. Requires window reload or API restart to apply."
@@ -242,7 +242,7 @@
     "vite": "^7.1.2"
   },
   "dependencies": {
-    "@openchamber/ui": "workspace:*",
+    "@alias-ade/ui": "workspace:*",
     "@opencode-ai/sdk": "^1.4.41",
     "adm-zip": "^0.5.16",
     "jsonc-parser": "^3.3.1",

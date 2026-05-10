@@ -5,9 +5,9 @@ import * as vscode from 'vscode';
 import { type DiscoveredSkill, type SkillScope, type SkillSource } from './opencodeConfig';
 import type { BridgeContext } from './bridge';
 
-const SETTINGS_KEY = 'openchamber.settings';
-const OPENCHAMBER_SHARED_SETTINGS_PATH = path.join(os.homedir(), '.config', 'openchamber', 'settings.json');
-const OPENCHAMBER_MAGIC_PROMPTS_PATH = path.join(os.homedir(), '.config', 'openchamber', 'magic-prompts.json');
+const SETTINGS_KEY = 'aliasAde.settings';
+const ALIAS_ADE_SHARED_SETTINGS_PATH = path.join(os.homedir(), '.config', 'alias-ade', 'settings.json');
+const ALIAS_ADE_MAGIC_PROMPTS_PATH = path.join(os.homedir(), '.config', 'alias-ade', 'magic-prompts.json');
 const MAGIC_PROMPTS_FILE_VERSION = 1;
 const MAGIC_PROMPT_ID_PATTERN = /^[a-z0-9._-]{1,160}$/;
 const MAGIC_PROMPT_TEXT_MAX_LENGTH = 200_000;
@@ -149,7 +149,7 @@ export const fetchOpenCodeSkillsFromApi = async (
 
 const readSharedSettingsFromDisk = (): Record<string, unknown> => {
   try {
-    const raw = fs.readFileSync(OPENCHAMBER_SHARED_SETTINGS_PATH, 'utf8');
+    const raw = fs.readFileSync(ALIAS_ADE_SHARED_SETTINGS_PATH, 'utf8');
     const parsed = JSON.parse(raw) as unknown;
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       return parsed as Record<string, unknown>;
@@ -162,14 +162,14 @@ const readSharedSettingsFromDisk = (): Record<string, unknown> => {
 
 const writeSharedSettingsToDisk = async (changes: Record<string, unknown>): Promise<void> => {
   try {
-    await fs.promises.mkdir(path.dirname(OPENCHAMBER_SHARED_SETTINGS_PATH), { recursive: true });
+    await fs.promises.mkdir(path.dirname(ALIAS_ADE_SHARED_SETTINGS_PATH), { recursive: true });
     const current = readSharedSettingsFromDisk();
     const next: Record<string, unknown> = { ...current, ...changes };
     // Atomic write: tmp file + rename. Readers never see a partial/truncated
     // JSON that would fail to parse and silently get coerced to {}.
-    const tmp = `${OPENCHAMBER_SHARED_SETTINGS_PATH}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const tmp = `${ALIAS_ADE_SHARED_SETTINGS_PATH}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     await fs.promises.writeFile(tmp, JSON.stringify(next, null, 2), 'utf8');
-    await fs.promises.rename(tmp, OPENCHAMBER_SHARED_SETTINGS_PATH);
+    await fs.promises.rename(tmp, ALIAS_ADE_SHARED_SETTINGS_PATH);
   } catch {
     // ignore
   }
@@ -195,7 +195,7 @@ const sanitizeMagicPromptOverrides = (input: unknown): Record<string, string> =>
 
 const readMagicPromptFile = (): { version: number; overrides: Record<string, string> } => {
   try {
-    const raw = fs.readFileSync(OPENCHAMBER_MAGIC_PROMPTS_PATH, 'utf8');
+    const raw = fs.readFileSync(ALIAS_ADE_MAGIC_PROMPTS_PATH, 'utf8');
     const parsed = JSON.parse(raw) as { overrides?: unknown };
     return {
       version: MAGIC_PROMPTS_FILE_VERSION,
@@ -210,8 +210,8 @@ const readMagicPromptFile = (): { version: number; overrides: Record<string, str
 };
 
 const writeMagicPromptFile = async (state: { version: number; overrides: Record<string, string> }): Promise<void> => {
-  await fs.promises.mkdir(path.dirname(OPENCHAMBER_MAGIC_PROMPTS_PATH), { recursive: true });
-  await fs.promises.writeFile(OPENCHAMBER_MAGIC_PROMPTS_PATH, JSON.stringify(state, null, 2), 'utf8');
+  await fs.promises.mkdir(path.dirname(ALIAS_ADE_MAGIC_PROMPTS_PATH), { recursive: true });
+  await fs.promises.writeFile(ALIAS_ADE_MAGIC_PROMPTS_PATH, JSON.stringify(state, null, 2), 'utf8');
 };
 
 const stripDerived = (source: Record<string, unknown>): Record<string, unknown> => {

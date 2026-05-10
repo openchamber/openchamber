@@ -1,6 +1,6 @@
 ---
 name: settings-ui-patterns
-description: Use when creating or modifying UI components, styling, or visual elements related to Settings in OpenChamber.
+description: Use when creating or modifying UI components, styling, or visual elements related to Settings in ALIAS ADE.
 license: MIT
 compatibility: opencode
 ---
@@ -8,7 +8,7 @@ compatibility: opencode
 # Settings UI Patterns Skill
 
 ## Purpose
-This skill provides instructions for creating or redesigning Settings pages, informational panels, and configuration interfaces within the OpenChamber application.
+This skill provides instructions for creating or redesigning Settings pages, informational panels, and configuration interfaces within the ALIAS ADE application.
 
 ## Current Canonical Look (2026)
 Use this as source of truth for new settings UI work.
@@ -22,7 +22,7 @@ Use this as source of truth for new settings UI work.
 - **Minimal row chrome**: Avoid row hover/background highlighting by default; keep only where explicitly needed.
 
 ## Typography Guidelines
-Always utilize the standard OpenChamber typography classes defined in `packages/ui/src/lib/typography.ts`.
+Always utilize the standard ALIAS ADE typography classes defined in `packages/ui/src/lib/typography.ts`.
 
 - **Page Title**: Use `typography-ui-header font-semibold text-foreground` for the top-most title of a settings page/dialog.
 - **Section Header**: Use `typography-ui-header font-medium text-foreground` for settings sections (e.g. `Notification Events`, `Session Defaults`).
@@ -229,7 +229,7 @@ For dense icon/color pickers in settings:
 ## Best Practices
 - **Density**: Keep options compact; avoid oversized rows/chips in dense settings pages.
 - **Consistency**: Reuse shared controls (`Checkbox`, `Radio`, `ButtonSmall size="xs"`) instead of inline icon logic.
-- **Reuse via composition**: Prefer a single settings component with a `visibleSettings` subset (like `OpenChamberVisualSettings`) for multiple tabs (Appearance/Chat) instead of duplicating markup.
+- **Reuse via composition**: Prefer a single settings component with a `visibleSettings` subset (like `ALIAS ADEVisualSettings`) for multiple tabs (Appearance/Chat) instead of duplicating markup.
 - **Hierarchy**: Page title = `font-semibold`; section header = `font-medium`; control group header = `font-medium` (or `font-normal` if needed); option labels = non-bold.
 - **Subsection depth**: Nested subgroup headings under a section should usually be one step lighter than parent heading weight.
 - **Hierarchy sanity check**: after flattening UI, verify visual grouping by spacing first (not color).

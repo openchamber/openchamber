@@ -138,7 +138,7 @@ const githubFetch = async (
     headers: {
       Accept: 'application/vnd.github+json',
       Authorization: `Bearer ${accessToken}`,
-      'User-Agent': 'OpenChamber',
+      'User-Agent': 'ALIAS ADE',
       ...(init?.headers || {}),
     },
   });
@@ -153,7 +153,7 @@ const githubFetchText = async (
     headers: {
       Accept: accept,
       Authorization: `Bearer ${accessToken}`,
-      'User-Agent': 'OpenChamber',
+      'User-Agent': 'ALIAS ADE',
     },
   });
 };

@@ -11,8 +11,8 @@ const __dirname = path.dirname(__filename);
 const desktopDir = path.resolve(__dirname, '..');
 const stateFile = path.join(desktopDir, '.opencode-cli-state.json');
 const DEFAULT_BIN_CANDIDATES = [
-  process.env.OPENCHAMBER_OPENCODE_PATH,
-  process.env.OPENCHAMBER_OPENCODE_BIN,
+  process.env.ALIAS_ADE_OPENCODE_PATH,
+  process.env.ALIAS_ADE_OPENCODE_BIN,
   process.env.OPENCODE_PATH,
   process.env.OPENCODE_BINARY,
   '/opt/homebrew/bin/opencode',
@@ -20,7 +20,7 @@ const DEFAULT_BIN_CANDIDATES = [
   '/usr/bin/opencode',
   path.join(os.homedir(), '.local/bin/opencode'),
 ].filter(Boolean);
-const CLI_ARGS_ENV = process.env.OPENCHAMBER_OPENCODE_ARGS;
+const CLI_ARGS_ENV = process.env.ALIAS_ADE_OPENCODE_ARGS;
 const DEFAULT_ARGS = CLI_ARGS_ENV
   ? parseArgs(CLI_ARGS_ENV)
   : ['api'];
@@ -70,7 +70,7 @@ async function resolveCliPath() {
     }
   }
 
-  throw new Error('Unable to locate the OpenCode CLI. Set OPENCHAMBER_OPENCODE_PATH to the executable.');
+  throw new Error('Unable to locate the OpenCode CLI. Set ALIAS_ADE_OPENCODE_PATH to the executable.');
 }
 
 async function readState() {
@@ -113,9 +113,9 @@ async function removeStateFile() {
 function spawnCli(cliPath, args) {
   const env = {
     ...process.env,
-    OPENCHAMBER_OPENCODE_PORT: process.env.OPENCHAMBER_OPENCODE_PORT || process.env.OPENCODE_PORT || process.env.OPENCHAMBER_INTERNAL_PORT || '0',
+    ALIAS_ADE_OPENCODE_PORT: process.env.ALIAS_ADE_OPENCODE_PORT || process.env.OPENCODE_PORT || process.env.ALIAS_ADE_INTERNAL_PORT || '0',
   };
-  const cwd = process.env.OPENCHAMBER_OPENCODE_CWD || process.cwd();
+  const cwd = process.env.ALIAS_ADE_OPENCODE_CWD || process.cwd();
 
   const child = spawn(cliPath, args.length > 0 ? args : DEFAULT_ARGS, {
     cwd,

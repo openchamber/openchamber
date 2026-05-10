@@ -1,13 +1,13 @@
-# OpenChamber - AI Agent Reference (verified)
+# ALIAS ADE - AI Agent Reference (verified)
 
 ## Core purpose
 
-OpenChamber provides UI runtimes (web/desktop/VS Code) for interacting with an OpenCode server (local auto-start or remote URL). UI uses HTTP + SSE via `@opencode-ai/sdk`.
+ALIAS ADE provides UI runtimes (web/desktop/VS Code) for interacting with an OpenCode server (local auto-start or remote URL). UI uses HTTP + SSE via `@opencode-ai/sdk`.
 
 ## Runtime architecture (IMPORTANT)
 
 - `Desktop` (Electron) boots the web server **in the same Node process** as the Electron main, then loads the web UI from `http://127.0.0.1:<port>`. No sidecar subprocess.
-- `Desktop` (Tauri, legacy) still spawns `openchamber-server` as a bun-compiled sidecar binary. Kept only for auto-update compatibility with existing Tauri installs.
+- `Desktop` (Tauri, legacy) still spawns `alias-ade-server` as a bun-compiled sidecar binary. Kept only for auto-update compatibility with existing Tauri installs.
 - All backend logic lives in `packages/web/server/*` (and `packages/vscode/*` for the VS Code runtime). The native shell is not a feature backend.
 - The shell is used only for stable native integrations: menu, dialog (open folder), notifications, updater, deep-links, quit confirmation.
 
@@ -16,7 +16,7 @@ OpenChamber provides UI runtimes (web/desktop/VS Code) for interacting with an O
 - **New desktop work goes into `packages/electron/`.** This is the forward path.
 - `packages/desktop/` (Tauri) is kept running in parallel only to preserve auto-update for existing installs until the cutover. Do **not** add features to it; do **not** port bug fixes back unless they actually affect currently-released Tauri users.
 - Desktop-side changes (IPC handlers, native integrations, window/quit/notification behavior) land in `packages/electron/main.mjs` + `packages/electron/preload.mjs`. The `__TAURI__` shim exposed by the preload keeps the shared UI working against both shells, so renderer-side code should not branch on shell type.
-- Electron imports the server via `@openchamber/web/server/index.js` (workspace dep) and calls `startWebUiServer({...})`. The returned handle has `getPort()` / `stop()`. Notifications flow via an `onDesktopNotification` callback injected at startup — no stdout-parsing IPC.
+- Electron imports the server via `@alias-ade/web/server/index.js` (workspace dep) and calls `startWebUiServer({...})`. The returned handle has `getPort()` / `stop()`. Notifications flow via an `onDesktopNotification` callback injected at startup — no stdout-parsing IPC.
 - Build/release: both shells ship in the same GitHub release today (`.github/workflows/release.yml`). The one-shot Tauri → Electron auto-update migration is documented in `docs/TAURI_TO_ELECTRON_CUTOVER.md`; run that when the user decides to flip.
 - After the cutover ships and stabilises, `packages/desktop/` is deleted; this note collapses back to "Desktop is Electron".
 
@@ -47,7 +47,7 @@ Before changing any mapped module, read its module documentation first.
 
 ### web
 
-Web runtime and server implementation for OpenChamber.
+Web runtime and server implementation for ALIAS ADE.
 
 #### lib
 

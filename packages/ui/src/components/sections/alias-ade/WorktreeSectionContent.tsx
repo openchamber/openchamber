@@ -9,7 +9,7 @@ import { useSessions } from '@/sync/sync-context';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useDeviceInfo } from '@/lib/device';
 import { checkIsGitRepository } from '@/lib/gitApi';
-import { getWorktreeSetupCommands, saveWorktreeSetupCommands } from '@/lib/openchamberConfig';
+import { getWorktreeSetupCommands, saveWorktreeSetupCommands } from '@/lib/aliasAdeConfig';
 import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
 import { sessionEvents } from '@/lib/sessionEvents';
 import type { WorktreeMetadata } from '@/types/worktree';
@@ -254,7 +254,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
   if (!projectPath) {
     return (
       <p className="typography-meta text-muted-foreground">
-        {t('settings.openchamber.worktrees.state.selectProject')}
+        {t('settings.aliasAde.worktrees.state.selectProject')}
       </p>
     );
   }
@@ -262,7 +262,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
   if (isGitRepoLocal === false) {
     return (
       <p className="typography-meta text-muted-foreground">
-        {t('settings.openchamber.worktrees.state.gitOnly')}
+        {t('settings.aliasAde.worktrees.state.gitOnly')}
       </p>
     );
   }
@@ -273,24 +273,24 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
       <div className="space-y-2">
         <div className="mb-1 px-1">
           <div className="flex items-center gap-2">
-            <h3 className="typography-ui-header font-normal text-foreground">{t('settings.openchamber.worktrees.setup.title')}</h3>
+            <h3 className="typography-ui-header font-normal text-foreground">{t('settings.aliasAde.worktrees.setup.title')}</h3>
             <Tooltip>
               <TooltipTrigger asChild>
                 <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
               </TooltipTrigger>
               <TooltipContent sideOffset={8} className="max-w-xs">
-                {t('settings.openchamber.worktrees.setup.tooltipPrefix')}
+                {t('settings.aliasAde.worktrees.setup.tooltipPrefix')}
                 {' '}
                 <code className="font-mono text-xs bg-sidebar-accent/50 px-1 rounded">$ROOT_PROJECT_PATH</code>
                 {' '}
-                {t('settings.openchamber.worktrees.setup.tooltipSuffix')}
+                {t('settings.aliasAde.worktrees.setup.tooltipSuffix')}
               </TooltipContent>
             </Tooltip>
           </div>
         </div>
 
         {isLoadingCommands ? (
-          <p className="typography-meta text-muted-foreground px-1">{t('settings.openchamber.worktrees.setup.loading')}</p>
+          <p className="typography-meta text-muted-foreground px-1">{t('settings.aliasAde.worktrees.setup.loading')}</p>
         ) : (
           <div className="space-y-2 px-1">
             {setupCommands.map((command, index) => (
@@ -299,7 +299,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
                   value={command}
                   onChange={(e) => handleSetupCommandChange(index, e.target.value)}
                   onBlur={handleCommandBlur}
-                  placeholder={t('settings.openchamber.worktrees.setup.commandPlaceholder')}
+                  placeholder={t('settings.aliasAde.worktrees.setup.commandPlaceholder')}
                   className="h-7 w-[30rem] max-w-full font-mono text-xs"
                 />
                   <button
@@ -308,7 +308,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
                     handleRemoveCommand(index);
                     }}
                     className="flex-shrink-0 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                    aria-label={t('settings.openchamber.worktrees.setup.removeCommandAria')}
+                    aria-label={t('settings.aliasAde.worktrees.setup.removeCommandAria')}
                   >
                   <RiCloseLine className="h-4 w-4" />
                 </button>
@@ -322,7 +322,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
               onClick={handleAddCommand}
             >
               <RiAddLine className="h-3.5 w-3.5" />
-              {t('settings.openchamber.worktrees.setup.addCommand')}
+              {t('settings.aliasAde.worktrees.setup.addCommand')}
             </Button>
           </div>
         )}
@@ -332,23 +332,23 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
       <div className="space-y-2 border-t border-border/40 pt-4">
         <div className="mb-1 px-1">
           <div className="flex items-center gap-2">
-            <h3 className="typography-ui-header font-normal text-foreground">{t('settings.openchamber.worktrees.list.title')}</h3>
+            <h3 className="typography-ui-header font-normal text-foreground">{t('settings.aliasAde.worktrees.list.title')}</h3>
             <Tooltip>
               <TooltipTrigger asChild>
                 <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
               </TooltipTrigger>
               <TooltipContent sideOffset={8} className="max-w-xs">
-                {t('settings.openchamber.worktrees.list.tooltip')}
+                {t('settings.aliasAde.worktrees.list.tooltip')}
               </TooltipContent>
             </Tooltip>
           </div>
         </div>
 
         {isLoadingWorktrees ? (
-          <p className="typography-meta text-muted-foreground px-1">{t('settings.openchamber.worktrees.list.loading')}</p>
+          <p className="typography-meta text-muted-foreground px-1">{t('settings.aliasAde.worktrees.list.loading')}</p>
         ) : availableWorktrees.length === 0 ? (
           <p className="typography-meta text-muted-foreground/70 px-1">
-            {t('settings.openchamber.worktrees.list.empty')}
+            {t('settings.aliasAde.worktrees.list.empty')}
           </p>
         ) : (
           <div className="space-y-1 px-1 max-w-[32.5rem]">
@@ -360,7 +360,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 min-w-0">
                     <p className="typography-meta text-foreground truncate min-w-0">
-                      {worktree.label || worktree.branch || t('settings.openchamber.worktrees.list.detachedHead')}
+                      {worktree.label || worktree.branch || t('settings.aliasAde.worktrees.list.detachedHead')}
                     </p>
                     <span className="typography-micro text-muted-foreground/60 px-1.5 py-[1px] rounded bg-sidebar-accent/40 flex-shrink-0 self-center leading-none">
                       OpenCode
@@ -377,7 +377,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
                       "flex-shrink-0 flex h-7 w-7 items-center justify-center rounded text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-opacity focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
                       alwaysShowActions ? "opacity-100" : "opacity-0 group-hover:opacity-100"
                     )}
-                    aria-label={t('settings.openchamber.worktrees.list.deleteWorktreeAria', { name: worktree.branch || worktree.label || worktree.path })}
+                    aria-label={t('settings.aliasAde.worktrees.list.deleteWorktreeAria', { name: worktree.branch || worktree.label || worktree.path })}
                 >
                   <RiDeleteBinLine className="h-4 w-4" />
                 </button>

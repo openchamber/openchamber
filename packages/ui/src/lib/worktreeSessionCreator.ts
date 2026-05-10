@@ -14,7 +14,7 @@ import { checkIsGitRepository, previewGitWorktree } from '@/lib/gitApi';
 import { generateBranchName } from '@/lib/git/branchNameGenerator';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
-import { getWorktreeSetupCommands } from '@/lib/openchamberConfig';
+import { getWorktreeSetupCommands } from '@/lib/aliasAdeConfig';
 import {
   removeProjectWorktree,
   type ProjectRef,
@@ -135,7 +135,7 @@ const initializeSessionForWorktree = (sessionId: string, metadata: {
 }) => {
   const sessionStore = useSessionUIStore.getState();
   const configState = useConfigStore.getState();
-  sessionStore.initializeNewOpenChamberSession(sessionId, configState.agents);
+  sessionStore.initializeNewAliasAdeSession(sessionId, configState.agents);
   sessionStore.setSessionDirectory(sessionId, metadata.path);
   sessionStore.setWorktreeMetadata(sessionId, metadata);
   applyDefaultAgentAndModelSelection(sessionId, configState);
@@ -372,7 +372,7 @@ export async function createWorktreeSessionForBranch(
   try {
     const projectRef = resolveProjectRef(projectDirectory);
     if (!projectRef) {
-      throw new Error('Project is not registered in OpenChamber');
+      throw new Error('Project is not registered in ALIAS ADE');
     }
 
     // Check if it's a git repo (root project path)
@@ -475,7 +475,7 @@ export async function createWorktreeSessionForNewBranch(
 
     const projectRef = resolveProjectRef(projectDirectory);
     if (!projectRef) {
-      throw new Error('Project is not registered in OpenChamber');
+      throw new Error('Project is not registered in ALIAS ADE');
     }
 
     let isGitRepo = false;

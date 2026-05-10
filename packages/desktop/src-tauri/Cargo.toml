@@ -1,11 +1,11 @@
 [package]
-name = "openchamber-desktop"
+name = "alias-ade-desktop"
 version = "1.10.4"
 edition = "2021"
 publish = false
 
 [[bin]]
-name = "openchamber-desktop"
+name = "alias-ade-desktop"
 path = "src/main.rs"
 
 [features]

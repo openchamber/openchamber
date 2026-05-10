@@ -80,8 +80,8 @@ async function stopChildTree(child) {
   }
 }
 
-const uiPort = process.env.OPENCHAMBER_HMR_UI_PORT || '5180';
-const backendPort = process.env.OPENCHAMBER_HMR_API_PORT || '3902';
+const uiPort = process.env.ALIAS_ADE_HMR_UI_PORT || '5180';
+const backendPort = process.env.ALIAS_ADE_HMR_API_PORT || '3902';
 
 function clearViteCache() {
   const cacheDirs = [
@@ -98,15 +98,15 @@ function clearViteCache() {
 clearViteCache();
 
 const api = run('api', 'bun', ['run', '--cwd', 'packages/web', 'dev:server:watch'], {
-  OPENCHAMBER_PORT: backendPort,
+  ALIAS_ADE_PORT: backendPort,
 });
 const vite = run(
   'vite',
   'bun',
   ['x', 'vite', '--force', '--host', '127.0.0.1', '--port', uiPort, '--strictPort'],
   {
-    OPENCHAMBER_PORT: backendPort,
-    OPENCHAMBER_DISABLE_PWA_DEV: '1',
+    ALIAS_ADE_PORT: backendPort,
+    ALIAS_ADE_DISABLE_PWA_DEV: '1',
   },
   { cwd: webRoot },
 );

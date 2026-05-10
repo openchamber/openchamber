@@ -6,7 +6,7 @@ title: Adding Themes
 
 ## Custom Themes (User)
 
-Drop a JSON file into `~/.config/openchamber/themes/`. No rebuild needed.
+Drop a JSON file into `~/.config/alias-ade/themes/`. No rebuild needed.
 
 1. Create theme file (e.g., `my-theme.json`)
 2. In app: **Settings → Theme → Reload themes**

@@ -7,8 +7,8 @@ export type ScheduledTaskRanEvent = {
   sessionId?: string;
 };
 
-type OpenChamberEvent = ScheduledTaskRanEvent;
-type Listener = (event: OpenChamberEvent) => void;
+type AliasAdeEvent = ScheduledTaskRanEvent;
+type Listener = (event: AliasAdeEvent) => void;
 
 let eventSource: EventSource | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -77,16 +77,16 @@ const parseEnvelope = (raw: string): { type: string; properties: unknown } | nul
 };
 
 const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) => {
-  if (envelope.type === 'openchamber:event-stream-ready') {
+  if (envelope.type === 'aliasAde:event-stream-ready') {
     reconnectAttempt = 0;
     return;
   }
 
-  if (envelope.type === 'openchamber:heartbeat') {
+  if (envelope.type === 'aliasAde:heartbeat') {
     return;
   }
 
-  if (envelope.type !== 'openchamber:scheduled-task-ran') {
+  if (envelope.type !== 'aliasAde:scheduled-task-ran') {
     return;
   }
 
@@ -129,7 +129,7 @@ const connect = () => {
 
   cleanupSource();
 
-  const source = new EventSource('/api/openchamber/events');
+  const source = new EventSource('/api/alias-ade/events');
   source.onopen = () => {
     resetHeartbeatTimer();
   };
@@ -150,7 +150,7 @@ const connect = () => {
   eventSource = source;
 };
 
-export const subscribeOpenchamberEvents = (listener: Listener): (() => void) => {
+export const subscribeAliasAdeEvents = (listener: Listener): (() => void) => {
   listeners.add(listener);
   connect();
 

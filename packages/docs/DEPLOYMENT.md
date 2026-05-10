@@ -2,7 +2,7 @@
 
 This repo publishes docs **source artifacts**.
 
-Rendering and hosting still happen in `openchamber-website` (`apps/docs`).
+Rendering and hosting still happen in `alias-ade-website` (`apps/docs`).
 
 ## Workflow
 
@@ -17,17 +17,17 @@ Triggers:
 Outputs:
 
 - validates docs (`bun run docs:validate`)
-- creates `openchamber-docs-source-<sha>.tar.gz`
+- creates `alias-ade-docs-source-<sha>.tar.gz`
 - uploads archive as workflow artifact
 - on release/manual with tag, uploads archive to release assets
 
 ## Optional cross-repo sync trigger
 
-The workflow can trigger a `repository_dispatch` event in `openchamber-website`.
+The workflow can trigger a `repository_dispatch` event in `alias-ade-website`.
 
 Set secret in this repo:
 
-- `OPENCHAMBER_WEBSITE_REPO_TOKEN` (token with access to `openchamber/openchamber-website`)
+- `ALIAS_ADE_WEBSITE_REPO_TOKEN` (token with access to `alias-ade/alias-ade-website`)
 
 Event sent:
 
@@ -39,4 +39,4 @@ Payload includes:
 - `source_ref`
 - `archive_name`
 
-`openchamber-website` can listen for this event and pull docs source from release artifacts.
+`alias-ade-website` can listen for this event and pull docs source from release artifacts.

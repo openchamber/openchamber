@@ -17,7 +17,7 @@
     "paths": {
       "@/*": ["../ui/src/*"],
       "@vscode/*": ["./webview/*"],
-      "@openchamber/ui/*": ["../ui/src/*"]
+      "@alias-ade/ui/*": ["../ui/src/*"]
     }
   },
   "include": ["webview/**/*", "../ui/src/**/*"]

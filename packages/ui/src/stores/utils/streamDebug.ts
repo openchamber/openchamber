@@ -1,7 +1,7 @@
 export const streamDebugEnabled = (): boolean => {
     if (typeof window === 'undefined') return false;
     try {
-        return window.localStorage.getItem('openchamber_stream_debug') === '1';
+        return window.localStorage.getItem('aliasAde_stream_debug') === '1';
     } catch {
         return false;
     }
@@ -10,13 +10,13 @@ export const streamDebugEnabled = (): boolean => {
 export const sessionStatusDebugEnabled = (): boolean => {
     if (typeof window === 'undefined') return false;
     try {
-        return window.localStorage.getItem('openchamber_session_status_debug') === '1';
+        return window.localStorage.getItem('aliasAde_session_status_debug') === '1';
     } catch {
         return false;
     }
 };
 
-const STREAM_PERF_STORAGE_KEY = 'openchamber_stream_perf';
+const STREAM_PERF_STORAGE_KEY = 'aliasAde_stream_perf';
 
 type PerfCounter = {
     count: number;
@@ -50,8 +50,8 @@ export type StreamPerfSnapshot = {
 
 declare global {
     interface Window {
-        __openchamberStreamPerfState?: StreamPerfState;
-        __openchamberVsCodeStreamPerfState?: {
+        __aliasAdeStreamPerfState?: StreamPerfState;
+        __aliasAdeVsCodeStreamPerfState?: {
             counters: Map<string, PerfCounter>;
             lastReportAt?: number;
             lastUpdatedAt?: number;
@@ -82,16 +82,16 @@ const ensureStreamPerfState = (): StreamPerfState | null => {
         return null;
     }
 
-    if (!window.__openchamberStreamPerfState) {
+    if (!window.__aliasAdeStreamPerfState) {
         const startedAt = Date.now();
-        window.__openchamberStreamPerfState = {
+        window.__aliasAdeStreamPerfState = {
             counters: new Map<string, PerfCounter>(),
             startedAt,
             lastUpdatedAt: startedAt,
         };
     }
 
-    return window.__openchamberStreamPerfState;
+    return window.__aliasAdeStreamPerfState;
 };
 
 const normalizePerfEntries = (counters: Map<string, PerfCounter>): StreamPerfEntry[] => {
@@ -130,7 +130,7 @@ export const setStreamPerfEnabled = (enabled: boolean): void => {
     try {
         if (enabled) {
             window.localStorage.setItem(STREAM_PERF_STORAGE_KEY, '1');
-            window.__openchamberStreamPerfState = {
+            window.__aliasAdeStreamPerfState = {
                 counters: new Map<string, PerfCounter>(),
                 startedAt: Date.now(),
                 lastUpdatedAt: Date.now(),
@@ -139,8 +139,8 @@ export const setStreamPerfEnabled = (enabled: boolean): void => {
         }
 
         window.localStorage.removeItem(STREAM_PERF_STORAGE_KEY);
-        delete window.__openchamberStreamPerfState;
-        delete window.__openchamberVsCodeStreamPerfState;
+        delete window.__aliasAdeStreamPerfState;
+        delete window.__aliasAdeVsCodeStreamPerfState;
     } catch {
         // ignore storage failures in debug helper
     }
@@ -152,16 +152,16 @@ export const resetStreamPerf = (): void => {
     }
 
     if (streamPerfEnabled()) {
-        window.__openchamberStreamPerfState = {
+        window.__aliasAdeStreamPerfState = {
             counters: new Map<string, PerfCounter>(),
             startedAt: Date.now(),
             lastUpdatedAt: Date.now(),
         };
     }
 
-    if (window.__openchamberVsCodeStreamPerfState) {
-        window.__openchamberVsCodeStreamPerfState = {
-            ...window.__openchamberVsCodeStreamPerfState,
+    if (window.__aliasAdeVsCodeStreamPerfState) {
+        window.__aliasAdeVsCodeStreamPerfState = {
+            ...window.__aliasAdeVsCodeStreamPerfState,
             counters: new Map<string, PerfCounter>(),
             startedAt: Date.now(),
             lastUpdatedAt: Date.now(),
@@ -180,7 +180,7 @@ export const getStreamPerfSnapshot = (): StreamPerfSnapshot => {
         };
     }
 
-    const state = window.__openchamberStreamPerfState;
+    const state = window.__aliasAdeStreamPerfState;
     if (!streamPerfEnabled() || !state) {
         return {
             enabled: false,
@@ -211,7 +211,7 @@ export const getVsCodeStreamPerfSnapshot = (): StreamPerfSnapshot => {
         };
     }
 
-    const state = window.__openchamberVsCodeStreamPerfState;
+    const state = window.__aliasAdeVsCodeStreamPerfState;
     if (!streamPerfEnabled() || !state) {
         return {
             enabled: false,

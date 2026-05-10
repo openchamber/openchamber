@@ -150,7 +150,7 @@ export const DefaultsSettings: React.FC = () => {
 
   const formatVariantLabel = React.useCallback((variant: string) => {
     if (variant === DEFAULT_VARIANT_VALUE) {
-      return t('settings.openchamber.defaults.option.default');
+      return t('settings.aliasAde.defaults.option.default');
     }
     return variant.charAt(0).toUpperCase() + variant.slice(1);
   }, [t]);
@@ -228,21 +228,21 @@ export const DefaultsSettings: React.FC = () => {
     <div className="mb-6">
       <div className="mb-0.5 px-1">
         <div className="flex items-center gap-2">
-          <h3 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.defaults.title')}</h3>
+          <h3 className="typography-ui-header font-medium text-foreground">{t('settings.aliasAde.defaults.title')}</h3>
         </div>
       </div>
 
       <section className="px-2 pb-2 pt-0 space-y-0">
         <div className="mt-0 mb-1 typography-meta text-muted-foreground">
-          {t('settings.openchamber.defaults.summaryPrefix')}
+          {t('settings.aliasAde.defaults.summaryPrefix')}
           {' '}
           {parsedModel.providerId ? (
             <span className="text-foreground">
               {parsedModel.providerId}/{parsedModel.modelId}
-              {supportsVariants ? ` (${defaultVariant ?? t('settings.openchamber.defaults.option.defaultLowercase')})` : ''}
+              {supportsVariants ? ` (${defaultVariant ?? t('settings.aliasAde.defaults.option.defaultLowercase')})` : ''}
             </span>
           ) : (
-            <span className="text-foreground">{t('settings.openchamber.defaults.summaryOpenCodeDefault')}</span>
+            <span className="text-foreground">{t('settings.aliasAde.defaults.summaryOpenCodeDefault')}</span>
           )}
           {defaultAgent && (
             <>
@@ -254,7 +254,7 @@ export const DefaultsSettings: React.FC = () => {
 
         <div className={cn('flex flex-col gap-2 py-1 sm:flex-row sm:items-center sm:gap-8')}>
           <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-            <span className="typography-ui-label text-foreground">{t('settings.openchamber.defaults.field.defaultModel')}</span>
+            <span className="typography-ui-label text-foreground">{t('settings.aliasAde.defaults.field.defaultModel')}</span>
           </div>
           <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
             <ModelSelector providerId={parsedModel.providerId} modelId={parsedModel.modelId} onChange={handleModelChange} />
@@ -263,17 +263,17 @@ export const DefaultsSettings: React.FC = () => {
 
         <div className="flex flex-col gap-2 py-1 sm:flex-row sm:items-center sm:gap-8">
           <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-            <span className="typography-ui-label text-foreground">{t('settings.openchamber.defaults.field.defaultThinking')}</span>
+            <span className="typography-ui-label text-foreground">{t('settings.aliasAde.defaults.field.defaultThinking')}</span>
           </div>
           <div className="flex items-center gap-2 sm:w-fit">
             <Select value={defaultVariant ?? DEFAULT_VARIANT_VALUE} onValueChange={handleVariantChange} disabled={!supportsVariants}>
               <SelectTrigger className="w-fit min-w-[120px]">
-                <SelectValue placeholder={t('settings.openchamber.defaults.field.thinkingPlaceholder')}>
+                <SelectValue placeholder={t('settings.aliasAde.defaults.field.thinkingPlaceholder')}>
                   {formatVariantLabel(defaultVariant ?? DEFAULT_VARIANT_VALUE)}
                 </SelectValue>
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={DEFAULT_VARIANT_VALUE}>{t('settings.openchamber.defaults.option.default')}</SelectItem>
+                <SelectItem value={DEFAULT_VARIANT_VALUE}>{t('settings.aliasAde.defaults.option.default')}</SelectItem>
                 {availableVariants.map((variant) => (
                   <SelectItem key={variant} value={variant}>
                     {formatVariantLabel(variant)}
@@ -286,7 +286,7 @@ export const DefaultsSettings: React.FC = () => {
 
         <div className="flex flex-col gap-2 py-1 sm:flex-row sm:items-center sm:gap-8">
           <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-            <span className="typography-ui-label text-foreground">{t('settings.openchamber.defaults.field.defaultAgent')}</span>
+            <span className="typography-ui-label text-foreground">{t('settings.aliasAde.defaults.field.defaultAgent')}</span>
           </div>
           <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
             <AgentSelector agentName={defaultAgent || ''} onChange={handleAgentChange} />
@@ -306,8 +306,8 @@ export const DefaultsSettings: React.FC = () => {
             }
           }}
         >
-          <Checkbox checked={showDeletionDialog} onChange={setShowDeletionDialog} ariaLabel={t('settings.openchamber.defaults.field.showDeletionDialogAria')} />
-          <span className="typography-ui-label text-foreground">{t('settings.openchamber.defaults.field.showDeletionDialog')}</span>
+          <Checkbox checked={showDeletionDialog} onChange={setShowDeletionDialog} ariaLabel={t('settings.aliasAde.defaults.field.showDeletionDialogAria')} />
+          <span className="typography-ui-label text-foreground">{t('settings.aliasAde.defaults.field.showDeletionDialog')}</span>
         </div>
 
         <div
@@ -323,8 +323,8 @@ export const DefaultsSettings: React.FC = () => {
             }
           }}
         >
-          <Checkbox checked={settingsDefaultFileViewerPreview} onChange={setSettingsDefaultFileViewerPreview} ariaLabel={t('settings.openchamber.defaults.field.openFilesPreviewAria')} />
-          <span className="typography-ui-label text-foreground">{t('settings.openchamber.defaults.field.openFilesPreview')}</span>
+          <Checkbox checked={settingsDefaultFileViewerPreview} onChange={setSettingsDefaultFileViewerPreview} ariaLabel={t('settings.aliasAde.defaults.field.openFilesPreviewAria')} />
+          <span className="typography-ui-label text-foreground">{t('settings.aliasAde.defaults.field.openFilesPreview')}</span>
         </div>
 
       </section>

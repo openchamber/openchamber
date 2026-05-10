@@ -94,7 +94,7 @@ export async function handleFsBridgeMessage(
 
     case 'config:get': {
       const { key } = payload as { key: string };
-      const config = vscode.workspace.getConfiguration('openchamber');
+      const config = vscode.workspace.getConfiguration('alias-ade');
       const value = config.get(key);
       return { id, type, success: true, data: { value } };
     }

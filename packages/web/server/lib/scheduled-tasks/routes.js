@@ -15,7 +15,7 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
     sanitizeProjects,
     projectConfigRuntime,
     scheduledTasksRuntime,
-    getOpenChamberEventClients,
+    getAliasAdeEventClients,
     writeSseEvent,
   } = dependencies;
 
@@ -154,7 +154,7 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
     }
   });
 
-  app.get('/api/openchamber/scheduled-tasks/status', async (_req, res) => {
+  app.get('/api/alias-ade/scheduled-tasks/status', async (_req, res) => {
     try {
       if (typeof scheduledTasksRuntime.getStatus === 'function') {
         return res.json(scheduledTasksRuntime.getStatus());
@@ -193,19 +193,19 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
     }
   });
 
-  app.get('/api/openchamber/events', (req, res) => {
+  app.get('/api/alias-ade/events', (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders?.();
 
-    const clients = getOpenChamberEventClients();
+    const clients = getAliasAdeEventClients();
     clients.add(res);
 
     try {
       writeSseEvent(res, {
-        type: 'openchamber:event-stream-ready',
+        type: 'aliasAde:event-stream-ready',
         properties: {
           connectedAt: Date.now(),
         },
@@ -216,7 +216,7 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
     const heartbeat = setInterval(() => {
       try {
         writeSseEvent(res, {
-          type: 'openchamber:heartbeat',
+          type: 'aliasAde:heartbeat',
           properties: {
             timestamp: Date.now(),
           },

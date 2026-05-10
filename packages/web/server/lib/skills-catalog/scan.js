@@ -80,7 +80,7 @@ export async function scanSkillsRepository({
   const effectiveSubpath = parsed.effectiveSubpath || (typeof defaultSubpath === 'string' && defaultSubpath.trim() ? defaultSubpath.trim() : null);
   const cloneUrl = identity?.sshKey ? parsed.cloneUrlSsh : parsed.cloneUrlHttps;
 
-  const tempBase = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'openchamber-skills-scan-'));
+  const tempBase = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'alias-ade-skills-scan-'));
 
   try {
     const cloned = await cloneRepo({ cloneUrl, identity, tempDir: tempBase });

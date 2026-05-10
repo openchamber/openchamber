@@ -320,7 +320,7 @@ export const registerOpenCodeProxy = (app, deps) => {
         const globalPayload = globalRes.ok ? await globalRes.json().catch(() => []) : [];
         const globalSessions = Array.isArray(globalPayload) ? globalPayload : [];
 
-        const settingsPath = path.join(os.homedir(), '.config', 'openchamber', 'settings.json');
+        const settingsPath = path.join(os.homedir(), '.config', 'alias-ade', 'settings.json');
         let projectDirs = [];
         try {
           const settingsRaw = fs.readFileSync(settingsPath, 'utf8');

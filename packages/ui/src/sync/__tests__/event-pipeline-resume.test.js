@@ -10,7 +10,7 @@ afterEach(() => {
 });
 
 describe('createEventPipeline — system resume reconnect', () => {
-  it('reconnects immediately on openchamber:system-resume event', async () => {
+  it('reconnects immediately on aliasAde:system-resume event', async () => {
     const winListeners = {};
     globalThis.document = {
       visibilityState: 'visible',
@@ -96,7 +96,7 @@ describe('createEventPipeline — system resume reconnect', () => {
       // Wait for first SSE attempt to start and deliver the event, then
       // simulate OS resume by invoking the registered handler directly.
       setTimeout(() => {
-        const handler = winListeners['openchamber:system-resume'];
+        const handler = winListeners['aliasAde:system-resume'];
         if (handler) handler();
       }, 80);
     });

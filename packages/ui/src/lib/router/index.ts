@@ -1,5 +1,5 @@
 /**
- * Router module for URL-based navigation in OpenChamber.
+ * Router module for URL-based navigation in ALIAS ADE.
  *
  * Provides bidirectional sync between URL query parameters and application state.
  * Works across web, desktop (Tauri), and VS Code (state-only mode).

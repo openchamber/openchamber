@@ -3,24 +3,24 @@ import { presetThemes } from './presets';
 import { withPrColors } from './prColors';
 import flexokiLightRaw from './flexoki-light.json';
 import flexokiDarkRaw from './flexoki-dark.json';
-import openchamberLightRaw from './fields-of-the-shire-light.json';
-import openchamberDarkRaw from './fields-of-the-shire-dark.json';
+import aliasAdeLightRaw from './fields-of-the-shire-light.json';
+import aliasAdeDarkRaw from './fields-of-the-shire-dark.json';
 
 export const flexokiLightTheme = withPrColors(flexokiLightRaw as Theme);
 export const flexokiDarkTheme = withPrColors(flexokiDarkRaw as Theme);
-export const openchamberLightTheme = withPrColors(openchamberLightRaw as Theme);
-export const openchamberDarkTheme = withPrColors(openchamberDarkRaw as Theme);
+export const aliasAdeLightTheme = withPrColors(aliasAdeLightRaw as Theme);
+export const aliasAdeDarkTheme = withPrColors(aliasAdeDarkRaw as Theme);
 
 export const DEFAULT_LIGHT_THEME_ID = 'flexoki-light' as const;
 export const DEFAULT_DARK_THEME_ID = 'flexoki-dark' as const;
 
 export const themes: Theme[] = [
-  openchamberLightTheme,
-  openchamberDarkTheme,
+  aliasAdeLightTheme,
+  aliasAdeDarkTheme,
   flexokiLightTheme,
   flexokiDarkTheme,
   ...presetThemes.filter(
-    (theme) => theme.metadata.id !== 'openchamber-light' && theme.metadata.id !== 'openchamber-dark',
+    (theme) => theme.metadata.id !== 'alias-ade-light' && theme.metadata.id !== 'alias-ade-dark',
   ),
 ];
 

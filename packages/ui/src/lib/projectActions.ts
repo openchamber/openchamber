@@ -20,9 +20,9 @@ import {
 } from '@remixicon/react';
 import type { ComponentType } from 'react';
 import type {
-  OpenChamberProjectAction,
-  OpenChamberProjectActionPlatform,
-} from '@/lib/openchamberConfig';
+  AliasAdeProjectAction,
+  AliasAdeProjectActionPlatform,
+} from '@/lib/aliasAdeConfig';
 import type {
   DesktopSshInstance,
   DesktopSshPortForward,
@@ -77,7 +77,7 @@ export const PROJECT_ACTION_ICON_MAP = Object.fromEntries(
   PROJECT_ACTION_ICONS.map((entry) => [entry.key, entry.Icon])
 ) as Record<ProjectActionIconKey, ComponentType<{ className?: string }>>;
 
-export const PROJECT_ACTIONS_UPDATED_EVENT = 'openchamber:project-actions-updated';
+export const PROJECT_ACTIONS_UPDATED_EVENT = 'aliasAde:project-actions-updated';
 
 export const normalizeProjectActionDirectory = (value: string): string => {
   const trimmed = (value || '').trim().replace(/\\/g, '/');
@@ -90,7 +90,7 @@ export const normalizeProjectActionDirectory = (value: string): string => {
   return trimmed.length > 1 ? trimmed.replace(/\/+$/, '') : trimmed;
 };
 
-export const getCurrentProjectActionPlatform = (): OpenChamberProjectActionPlatform => {
+export const getCurrentProjectActionPlatform = (): AliasAdeProjectActionPlatform => {
   if (typeof navigator === 'undefined') {
     return 'macos';
   }
@@ -105,8 +105,8 @@ export const getCurrentProjectActionPlatform = (): OpenChamberProjectActionPlatf
 };
 
 export const isProjectActionEnabledOnPlatform = (
-  action: OpenChamberProjectAction,
-  platform: OpenChamberProjectActionPlatform
+  action: AliasAdeProjectAction,
+  platform: AliasAdeProjectActionPlatform
 ): boolean => {
   if (!Array.isArray(action.platforms) || action.platforms.length === 0) {
     return true;

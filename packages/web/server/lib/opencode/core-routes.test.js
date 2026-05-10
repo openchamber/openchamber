@@ -12,7 +12,7 @@ describe('core-routes', () => {
         shutdownOpts = opts;
       }),
       getHealthSnapshot: () => ({ status: 'ok' }),
-      openchamberVersion: '1.0.0',
+      aliasAdeVersion: '1.0.0',
       runtimeName: 'test',
     };
 

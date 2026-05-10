@@ -21,7 +21,7 @@ import { useMiniChatKeyboardShortcuts } from '@/hooks/useMiniChatKeyboardShortcu
 import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
 import type { WorktreeMetadata } from '@/types/worktree';
 
-const MINI_CHAT_PRESENCE_CHANNEL = 'openchamber:mini-chat-presence';
+const MINI_CHAT_PRESENCE_CHANNEL = 'aliasAde:mini-chat-presence';
 
 type MiniChatMode = 'session' | 'draft';
 

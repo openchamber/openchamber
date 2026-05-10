@@ -16,14 +16,14 @@ import { streamDebugEnabled } from "@/stores/utils/streamDebug";
 import { parseModelIdentifier } from "@/lib/modelIdentifier";
 
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
-const MODELS_DEV_PROXY_URL = "/api/openchamber/models-metadata";
+const MODELS_DEV_PROXY_URL = "/api/alias-ade/models-metadata";
 
 const FALLBACK_PROVIDER_ID = "opencode";
 const FALLBACK_MODEL_ID = "big-pickle";
 const GIT_UTILITY_PROVIDER_ID = "zen";
 const GIT_UTILITY_PREFERRED_MODEL_ID = "big-pickle";
 
-interface OpenChamberDefaults {
+interface AliasAdeDefaults {
     defaultModel?: string;
     defaultVariant?: string;
     defaultAgent?: string;
@@ -34,7 +34,7 @@ interface OpenChamberDefaults {
     messageStreamTransport?: 'auto' | 'ws' | 'sse';
 }
 
-const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
+const fetchAliasAdeDefaults = async (): Promise<AliasAdeDefaults> => {
     try {
         // 1. Runtime settings API (VSCode)
         const runtimeSettings = getRegisteredRuntimeAPIs()?.settings;
@@ -480,7 +480,7 @@ interface ConfigStore {
     lastDisconnectReason: string | null;
     isInitialized: boolean;
     modelsMetadata: Map<string, ModelMetadata>;
-    // OpenChamber settings-based defaults (take precedence over agent preferences)
+    // ALIAS ADE settings-based defaults (take precedence over agent preferences)
     settingsDefaultModel: string | undefined; // format: "provider/model"
     settingsDefaultVariant: string | undefined;
     settingsDefaultAgent: string | undefined;
@@ -1234,10 +1234,10 @@ export const useConfigStore = create<ConfigStore>()(
 
                     for (let attempt = 0; attempt < 3; attempt++) {
                         try {
-                            // Fetch agents and OpenChamber settings in parallel
-                            const [agents, openChamberDefaults] = await Promise.all([
+                            // Fetch agents and ALIAS ADE settings in parallel
+                            const [agents, aliasAdeDefaults] = await Promise.all([
                                 opencodeClient.withDirectory(fromDirectoryKey(directoryKey), () => opencodeClient.listAgents()),
-                                fetchOpenChamberDefaults(),
+                                fetchAliasAdeDefaults(),
                             ]);
 
                             const safeAgents = Array.isArray(agents) ? agents : [];
@@ -1248,7 +1248,7 @@ export const useConfigStore = create<ConfigStore>()(
 
                             const existingZenModel = normalizeOptionalString(get().settingsZenModel);
 
-                            const defaultZenModel = normalizeOptionalString(openChamberDefaults.zenModel);
+                            const defaultZenModel = normalizeOptionalString(aliasAdeDefaults.zenModel);
 
                             const resolvedExistingGitSelection = resolveGitGenerationModelSelection({
                                 providers,
@@ -1283,14 +1283,14 @@ export const useConfigStore = create<ConfigStore>()(
                                 };
 
                                 const nextState: Partial<ConfigStore> = {
-                                    settingsDefaultModel: openChamberDefaults.defaultModel,
-                                    settingsDefaultVariant: openChamberDefaults.defaultVariant,
-                                    settingsDefaultAgent: openChamberDefaults.defaultAgent,
-                                    settingsAutoCreateWorktree: openChamberDefaults.autoCreateWorktree ?? false,
-                                    settingsGitmojiEnabled: openChamberDefaults.gitmojiEnabled ?? false,
-                                    settingsDefaultFileViewerPreview: openChamberDefaults.defaultFileViewerPreview ?? false,
+                                    settingsDefaultModel: aliasAdeDefaults.defaultModel,
+                                    settingsDefaultVariant: aliasAdeDefaults.defaultVariant,
+                                    settingsDefaultAgent: aliasAdeDefaults.defaultAgent,
+                                    settingsAutoCreateWorktree: aliasAdeDefaults.autoCreateWorktree ?? false,
+                                    settingsGitmojiEnabled: aliasAdeDefaults.gitmojiEnabled ?? false,
+                                    settingsDefaultFileViewerPreview: aliasAdeDefaults.defaultFileViewerPreview ?? false,
                                     settingsZenModel: resolvedZenModel,
-                                    settingsMessageStreamTransport: openChamberDefaults.messageStreamTransport ?? state.settingsMessageStreamTransport ?? 'auto',
+                                    settingsMessageStreamTransport: aliasAdeDefaults.messageStreamTransport ?? state.settingsMessageStreamTransport ?? 'auto',
                                     directoryScoped: {
                                         ...state.directoryScoped,
                                         [directoryKey]: nextSnapshot,
@@ -1374,9 +1374,9 @@ export const useConfigStore = create<ConfigStore>()(
                             // Track invalid settings to clear
                              const invalidSettings: { defaultModel?: string; defaultVariant?: string; defaultAgent?: string } = {};
 
-                            // 1. Check OpenChamber settings for default agent
-                            if (openChamberDefaults.defaultAgent) {
-                                const settingsAgent = safeAgents.find((agent) => agent.name === openChamberDefaults.defaultAgent);
+                            // 1. Check ALIAS ADE settings for default agent
+                            if (aliasAdeDefaults.defaultAgent) {
+                                const settingsAgent = safeAgents.find((agent) => agent.name === aliasAdeDefaults.defaultAgent);
                                 if (settingsAgent) {
                                     resolvedAgent = settingsAgent;
                                 } else {
@@ -1391,19 +1391,19 @@ export const useConfigStore = create<ConfigStore>()(
                              let resolvedModelId: string | undefined;
                              let resolvedVariant: string | undefined;
 
-                             // 1. Check OpenChamber settings for default model
-                             if (openChamberDefaults.defaultModel) {
-                                 const parsed = parseModelString(openChamberDefaults.defaultModel);
+                             // 1. Check ALIAS ADE settings for default model
+                             if (aliasAdeDefaults.defaultModel) {
+                                 const parsed = parseModelString(aliasAdeDefaults.defaultModel);
                                  if (parsed && validateModel(parsed.providerId, parsed.modelId)) {
                                      resolvedProviderId = parsed.providerId;
                                      resolvedModelId = parsed.modelId;
 
-                                     if (openChamberDefaults.defaultVariant) {
+                                     if (aliasAdeDefaults.defaultVariant) {
                                          const provider = providers.find((p) => p.id === parsed.providerId);
                                          const model = provider?.models.find((m) => m.id === parsed.modelId) as { variants?: Record<string, unknown> } | undefined;
                                          const variants = model?.variants;
-                                         if (variants && Object.prototype.hasOwnProperty.call(variants, openChamberDefaults.defaultVariant)) {
-                                             resolvedVariant = openChamberDefaults.defaultVariant;
+                                         if (variants && Object.prototype.hasOwnProperty.call(variants, aliasAdeDefaults.defaultVariant)) {
+                                             resolvedVariant = aliasAdeDefaults.defaultVariant;
                                          } else {
                                              invalidSettings.defaultVariant = '';
                                          }
@@ -1596,10 +1596,10 @@ export const useConfigStore = create<ConfigStore>()(
                             selState.saveSessionAgentSelection(currentSessionId, agentName);
                         }
 
-                        if (currentSessionId && useSessionUIStore.getState().isOpenChamberCreatedSession(currentSessionId)) {
+                        if (currentSessionId && useSessionUIStore.getState().isAliasAdeCreatedSession(currentSessionId)) {
                             const existingAgentModel = selState.getAgentModelForSession(currentSessionId, agentName);
                             if (!existingAgentModel) {
-                                useSessionUIStore.getState().initializeNewOpenChamberSession(currentSessionId, agents);
+                                useSessionUIStore.getState().initializeNewAliasAdeSession(currentSessionId, agents);
                             }
                         }
                     }

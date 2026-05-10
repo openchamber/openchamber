@@ -230,7 +230,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
       return null;
     }
 
-    const explicit = [process.env.WSL_BINARY, process.env.OPENCHAMBER_WSL_BINARY]
+    const explicit = [process.env.WSL_BINARY, process.env.ALIAS_ADE_WSL_BINARY]
       .map((v) => (typeof v === 'string' ? v.trim() : ''))
       .filter(Boolean);
 
@@ -345,8 +345,8 @@ export const createOpenCodeEnvRuntime = (deps) => {
     const explicit = [
       process.env.OPENCODE_BINARY,
       process.env.OPENCODE_PATH,
-      process.env.OPENCHAMBER_OPENCODE_PATH,
-      process.env.OPENCHAMBER_OPENCODE_BIN,
+      process.env.ALIAS_ADE_OPENCODE_PATH,
+      process.env.ALIAS_ADE_OPENCODE_BIN,
     ]
       .map((v) => (typeof v === 'string' ? v.trim() : ''))
       .filter(Boolean);
@@ -464,7 +464,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
   };
 
   const resolveNodeCliPath = () => {
-    const explicit = [process.env.NODE_BINARY, process.env.OPENCHAMBER_NODE_BINARY]
+    const explicit = [process.env.NODE_BINARY, process.env.ALIAS_ADE_NODE_BINARY]
       .map((v) => (typeof v === 'string' ? v.trim() : ''))
       .filter(Boolean);
 
@@ -529,7 +529,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
   };
 
   const resolveBunCliPath = () => {
-    const explicit = [process.env.BUN_BINARY, process.env.OPENCHAMBER_BUN_BINARY]
+    const explicit = [process.env.BUN_BINARY, process.env.ALIAS_ADE_BUN_BINARY]
       .map((v) => (typeof v === 'string' ? v.trim() : ''))
       .filter(Boolean);
 
@@ -885,7 +885,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
   const createConfiguredOpencodeBinaryError = (raw, normalized) => {
     const configured = typeof raw === 'string' ? raw.trim() : '';
     const candidate = typeof normalized === 'string' && normalized.trim().length > 0 ? normalized.trim() : configured;
-    const messageSuffix = 'OpenChamber needs the standalone opencode CLI. Install it and set settings.opencodeBinary to the CLI path, for example ~/.opencode/bin/opencode, or leave the setting empty to use PATH lookup.';
+    const messageSuffix = 'ALIAS ADE needs the standalone opencode CLI. Install it and set settings.opencodeBinary to the CLI path, for example ~/.opencode/bin/opencode, or leave the setting empty to use PATH lookup.';
     const error = (() => {
       if (isMacOpenCodeAppBundlePath(candidate) || isMacOpenCodeAppBundlePath(configured)) {
         return new Error(`Configured OpenCode binary points at the macOS desktop app bundle, not the CLI: ${candidate}. ${messageSuffix}`);
@@ -917,7 +917,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
   };
 
   const createConfiguredWslOpencodeError = (raw) => new Error(
-    `Configured settings.opencodeBinary uses WSL but OpenChamber could not resolve a WSL OpenCode command: ${raw}. Ensure WSL is available and opencode is installed in the configured distro.`
+    `Configured settings.opencodeBinary uses WSL but ALIAS ADE could not resolve a WSL OpenCode command: ${raw}. Ensure WSL is available and opencode is installed in the configured distro.`
   );
 
   const normalizeOpencodeBinarySetting = (raw) => {
@@ -1074,7 +1074,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
       return state.resolvedGitBinary;
     }
 
-    const explicit = [process.env.GIT_BINARY, process.env.OPENCHAMBER_GIT_BINARY]
+    const explicit = [process.env.GIT_BINARY, process.env.ALIAS_ADE_GIT_BINARY]
       .map((value) => (typeof value === 'string' ? value.trim() : ''))
       .filter(Boolean);
     for (const candidate of explicit) {

@@ -84,18 +84,18 @@ describe('event stream broadcaster', () => {
       },
     });
 
-    broadcast({ type: 'openchamber:session-status' }, { eventId: 'evt-1', directory: '/tmp/project' });
+    broadcast({ type: 'aliasAde:session-status' }, { eventId: 'evt-1', directory: '/tmp/project' });
 
     expect(sseEvents).toEqual([
       {
         res: sseClient,
-        payload: { type: 'openchamber:session-status' },
+        payload: { type: 'aliasAde:session-status' },
       },
     ]);
     expect(wsPayloads).toEqual([
       {
         type: 'event',
-        payload: { type: 'openchamber:session-status' },
+        payload: { type: 'aliasAde:session-status' },
         eventId: 'evt-1',
         directory: '/tmp/project',
       },
@@ -120,7 +120,7 @@ describe('event stream broadcaster', () => {
       },
     });
 
-    broadcast({ type: 'openchamber:notification' });
+    broadcast({ type: 'aliasAde:notification' });
 
     expect(wsClients.size).toBe(0);
   });
@@ -475,7 +475,7 @@ describe('message stream websocket runtime', () => {
       getOpenCodeAuthHeaders: () => ({}),
       processForwardedEventPayload(payload, emitSynthetic) {
         if (payload.type === 'session.updated') {
-          emitSynthetic({ type: 'openchamber:session-status', sessionID: 'ses_1' });
+          emitSynthetic({ type: 'aliasAde:session-status', sessionID: 'ses_1' });
         }
       },
       wsClients,
@@ -502,7 +502,7 @@ describe('message stream websocket runtime', () => {
     });
     expect(socket.sent).toContainEqual({
       type: 'event',
-      payload: { type: 'openchamber:session-status', sessionID: 'ses_1' },
+      payload: { type: 'aliasAde:session-status', sessionID: 'ses_1' },
       directory: 'global',
     });
 

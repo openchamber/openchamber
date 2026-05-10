@@ -32,7 +32,7 @@ const writeAuthFile = (auth: AuthFile): void => {
     }
 
     if (fs.existsSync(AUTH_FILE)) {
-      const backupFile = `${AUTH_FILE}.openchamber.backup`;
+      const backupFile = `${AUTH_FILE}.aliasAde.backup`;
       fs.copyFileSync(AUTH_FILE, backupFile);
     }
 

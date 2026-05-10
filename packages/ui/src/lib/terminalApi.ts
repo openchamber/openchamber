@@ -78,7 +78,7 @@ const WS_SEND_WAIT_MS = 1200;
 const WS_RECONNECT_JITTER_MS = 250;
 const WS_KEEPALIVE_INTERVAL_MS = 20000;
 const WS_CONNECT_TIMEOUT_MS = 5000;
-const GLOBAL_TERMINAL_TRANSPORT_STATE_KEY = '__openchamberTerminalTransportState';
+const GLOBAL_TERMINAL_TRANSPORT_STATE_KEY = '__aliasAdeTerminalTransportState';
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();

@@ -1,7 +1,7 @@
 # Tunnels Module Documentation
 
 ## Purpose
-This module contains tunnel provider orchestration for OpenChamber, including provider registry/service wiring, managed remote token config lifecycle, and tunnel HTTP route registration.
+This module contains tunnel provider orchestration for ALIAS ADE, including provider registry/service wiring, managed remote token config lifecycle, and tunnel HTTP route registration.
 
 ## Entrypoints and structure
 - `packages/web/server/lib/tunnels/index.js`: tunnel service orchestration.

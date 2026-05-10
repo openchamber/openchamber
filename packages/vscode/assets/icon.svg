@@ -1,5 +1,5 @@
 <svg width="24" height="24" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
-  <!-- OpenChamber logo - simplified for VSCode activity bar -->
+  <!-- ALIAS ADE logo - simplified for VSCode activity bar -->
   <g transform="translate(16, 16) scale(0.48)">
     <!-- Left face - no fill -->
     <path d="M0 0 L-26 -15 L-26 15 L0 30 Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/>

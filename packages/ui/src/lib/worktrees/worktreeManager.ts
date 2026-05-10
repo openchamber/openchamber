@@ -1,4 +1,4 @@
-import { substituteCommandVariables } from '@/lib/openchamberConfig';
+import { substituteCommandVariables } from '@/lib/aliasAdeConfig';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { execCommand } from '@/lib/execCommands';
 import {

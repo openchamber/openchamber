@@ -29,7 +29,7 @@ async function rateLimitedFetch(url, options = {}) {
       ...options,
       headers: {
         Accept: 'application/json',
-        'User-Agent': 'OpenChamber/1.0',
+        'User-Agent': 'ALIAS ADE/1.0',
         ...options.headers,
       },
     });

@@ -16,7 +16,7 @@ const withRuntimeGit = async (git: GitAPI, callback: () => Promise<void>) => {
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: {
-      __OPENCHAMBER_RUNTIME_APIS__: { git },
+      __ALIAS_ADE_RUNTIME_APIS__: { git },
     },
   })
 

@@ -5,8 +5,8 @@ export const resolveOpenCodeEnvConfig = (options = {}) => {
   const configuredOpenCodePort = (() => {
     const raw =
       env.OPENCODE_PORT ||
-      env.OPENCHAMBER_OPENCODE_PORT ||
-      env.OPENCHAMBER_INTERNAL_PORT;
+      env.ALIAS_ADE_OPENCODE_PORT ||
+      env.ALIAS_ADE_INTERNAL_PORT;
     if (!raw) {
       return null;
     }
@@ -49,14 +49,14 @@ export const resolveOpenCodeEnvConfig = (options = {}) => {
   const effectivePort = configuredOpenCodeHost?.port ?? configuredOpenCodePort;
 
   const configuredOpenCodeHostname = (() => {
-    const raw = env.OPENCHAMBER_OPENCODE_HOSTNAME;
+    const raw = env.ALIAS_ADE_OPENCODE_HOSTNAME;
     if (typeof raw !== 'string') {
       return '127.0.0.1';
     }
     const trimmed = raw.trim();
     if (!trimmed) {
       logger.warn(
-        `[config] Ignoring OPENCHAMBER_OPENCODE_HOSTNAME=${JSON.stringify(raw)}: empty after trimming`,
+        `[config] Ignoring ALIAS_ADE_OPENCODE_HOSTNAME=${JSON.stringify(raw)}: empty after trimming`,
       );
       return '127.0.0.1';
     }

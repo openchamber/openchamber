@@ -39,7 +39,7 @@ import { ToolRevealOnMount } from './parts/ToolRevealOnMount';
 import { StaticToolRow } from './parts/ProgressiveGroup';
 import { isExpandableTool, isStandaloneTool } from './parts/toolRenderUtils';
 import TurnActivity from '../components/TurnActivity';
-import { createProjectPlanFile } from '@/lib/openchamberConfig';
+import { createProjectPlanFile } from '@/lib/aliasAdeConfig';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useSessions } from '@/sync/sync-context';
@@ -1215,7 +1215,7 @@ const AssistantMessageBody = React.memo(({
                     toast.error(t('chat.messageBody.toast.savePlanFailed'));
                     return;
                 }
-                window.dispatchEvent(new CustomEvent('openchamber:project-plan-saved', {
+                window.dispatchEvent(new CustomEvent('aliasAde:project-plan-saved', {
                     detail: { projectId: currentProjectRef.id },
                 }));
                 setIsPlanDialogOpen(false);

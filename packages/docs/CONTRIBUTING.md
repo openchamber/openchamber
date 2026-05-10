@@ -1,6 +1,6 @@
 # Docs Authoring Guide
 
-This package is docs content source-of-truth for OpenChamber.
+This package is docs content source-of-truth for ALIAS ADE.
 
 ## Add a new docs page
 
@@ -11,7 +11,7 @@ This package is docs content source-of-truth for OpenChamber.
    ```mdx
    ---
    title: Remote Access
-   description: Access OpenChamber from outside your local network.
+   description: Access ALIAS ADE from outside your local network.
    ---
    ```
 
@@ -44,14 +44,14 @@ Rules:
 - every sidebar link must map to an existing MDX file
 - keep section labels short and task-oriented
 
-## Sync into openchamber-website
+## Sync into alias-ade-website
 
-`openchamber-website` renders/deploys docs via Starlight in `apps/docs`.
+`alias-ade-website` renders/deploys docs via Starlight in `apps/docs`.
 
 After docs content updates here:
 
-1. copy `packages/docs/content/docs/*` -> `openchamber-website/apps/docs/src/content/docs/*`
-2. map `packages/docs/sidebar.config.json` into `openchamber-website/apps/docs/astro.config.mjs` sidebar
+1. copy `packages/docs/content/docs/*` -> `alias-ade-website/apps/docs/src/content/docs/*`
+2. map `packages/docs/sidebar.config.json` into `alias-ade-website/apps/docs/astro.config.mjs` sidebar
 3. run docs checks/build in website repo
 
 Automation support exists in `.github/workflows/docs-source.yml` (release/manual packaging of docs source artifact).

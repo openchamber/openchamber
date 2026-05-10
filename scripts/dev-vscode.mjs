@@ -11,12 +11,12 @@ const repoRoot = path.resolve(__dirname, '..');
 const extensionPath = path.join(repoRoot, 'packages', 'vscode');
 const useDetachedChildren = process.platform === 'darwin';
 
-const codeBin = process.env.OPENCHAMBER_VSCODE_BIN || 'code';
-const workspaceArg = process.argv[2] || process.env.OPENCHAMBER_VSCODE_DEV_WORKSPACE || repoRoot;
+const codeBin = process.env.ALIAS_ADE_VSCODE_BIN || 'code';
+const workspaceArg = process.argv[2] || process.env.ALIAS_ADE_VSCODE_DEV_WORKSPACE || repoRoot;
 const workspacePath = path.resolve(workspaceArg);
 
 const resolveDevServerAddress = () => {
-  const configured = process.env.OPENCHAMBER_VSCODE_WEBVIEW_URL;
+  const configured = process.env.ALIAS_ADE_VSCODE_WEBVIEW_URL;
   if (!configured) {
     return { host: 'localhost', port: 5173 };
   }

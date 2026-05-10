@@ -1,5 +1,5 @@
 import React from 'react';
-import { OpenChamberVisualSettings } from './OpenChamberVisualSettings';
+import { AliasAdeVisualSettings } from './AliasAdeVisualSettings';
 import { AboutSettings } from './AboutSettings';
 import { SessionRetentionSettings } from './SessionRetentionSettings';
 import { PasskeySettings } from './PasskeySettings';
@@ -15,14 +15,14 @@ import { KeyboardShortcutsSettings } from './KeyboardShortcutsSettings';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useDeviceInfo } from '@/lib/device';
 import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
-import type { OpenChamberSection } from './types';
+import type { AliasAdeSection } from './types';
 
-interface OpenChamberPageProps {
+interface AliasAdePageProps {
     /** Which section to display. If undefined, shows all sections (mobile/legacy behavior) */
-    section?: OpenChamberSection;
+    section?: AliasAdeSection;
 }
 
-export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => {
+export const AliasAdePage: React.FC<AliasAdePageProps> = ({ section }) => {
     const { isMobile } = useDeviceInfo();
     const showAbout = isMobile && isWebRuntime();
     const isVSCode = isVSCodeRuntime();
@@ -35,8 +35,8 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
                 outerClassName="h-full"
                 className="w-full"
             >
-                <div className="openchamber-page-body mx-auto max-w-3xl space-y-3 p-3 sm:space-y-6 sm:p-6 sm:pt-8">
-                    <OpenChamberVisualSettings />
+                <div className="alias-ade-page-body mx-auto max-w-3xl space-y-3 p-3 sm:space-y-6 sm:p-6 sm:pt-8">
+                    <AliasAdeVisualSettings />
                     <div className="border-t border-border/40 pt-6">
                         <DefaultsSettings />
                     </div>
@@ -97,7 +97,7 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
             outerClassName="h-full"
             className="w-full"
         >
-            <div className="openchamber-page-body mx-auto max-w-3xl space-y-6 p-3 sm:p-6 sm:pt-8">
+            <div className="alias-ade-page-body mx-auto max-w-3xl space-y-6 p-3 sm:p-6 sm:pt-8">
                 {renderSectionContent()}
             </div>
         </ScrollableOverlay>
@@ -111,7 +111,7 @@ const ShortcutsSectionContent: React.FC = () => {
 // Visual section: Theme Mode, Font Size, Spacing, Input Bar Offset (mobile), Nav Rail
 const VisualSectionContent: React.FC = () => {
     const isVSCode = isVSCodeRuntime();
-    return <OpenChamberVisualSettings visibleSettings={[
+    return <AliasAdeVisualSettings visibleSettings={[
         'theme',
         'pwaInstallName',
         'pwaOrientation',
@@ -129,7 +129,7 @@ const VisualSectionContent: React.FC = () => {
 
 // Chat section: User message rendering, Diff layout, Mobile status bar, Show reasoning traces, Queue mode, Persist draft
 const ChatSectionContent: React.FC = () => {
-    return <OpenChamberVisualSettings visibleSettings={['chatRenderMode', 'messageTransport', 'activityRenderMode', 'userMessageRendering', 'mermaidRendering', 'reasoning', 'showToolFileIcons', 'expandedTools', 'stickyUserHeader', 'wideChatLayout', 'splitAssistantMessageActions', 'diffLayout', 'mobileStatusBar', 'dotfiles', 'queueMode', 'persistDraft', 'inputSpellcheck']} />;
+    return <AliasAdeVisualSettings visibleSettings={['chatRenderMode', 'messageTransport', 'activityRenderMode', 'userMessageRendering', 'mermaidRendering', 'reasoning', 'showToolFileIcons', 'expandedTools', 'stickyUserHeader', 'wideChatLayout', 'splitAssistantMessageActions', 'diffLayout', 'mobileStatusBar', 'dotfiles', 'queueMode', 'persistDraft', 'inputSpellcheck']} />;
 };
 
 // Sessions section: Default model & agent, Session retention
