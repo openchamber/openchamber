@@ -130,7 +130,7 @@ export const registerPwaManifestRoute = (app, dependencies) => {
         } else {
           const globalPayload = await listSessions(null);
           const filteredGlobalPayload = filterSessionsByDirectory(globalPayload, preferredDirectory);
-          payload = filteredGlobalPayload.length > 0 ? filteredGlobalPayload : globalPayload;
+          payload = filteredGlobalPayload;
         }
       } else {
         payload = await listSessions(null);
