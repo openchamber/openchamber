@@ -41,7 +41,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private _cachedStatus: ConnectionStatus = 'connecting';
   private _cachedError?: string;
   private _sseCounter = 0;
-  private _sseStreams = new Map<string, AbortController>();
+  private _sseStreams = new Map<string, { controller: AbortController; view: vscode.WebviewView | undefined }>();
   private readonly _webviewDevServerUrl: string | null;
   private _broadcastSelectionDebounce: ReturnType<typeof setTimeout> | undefined;
   private _clearActiveEditorFileTimer: ReturnType<typeof setTimeout> | undefined;
@@ -103,10 +103,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     void this._broadcastActiveEditorFile();
 
     webviewView.onDidDispose(() => {
-      for (const controller of this._sseStreams.values()) {
-        controller.abort();
+      for (const [streamId, stream] of this._sseStreams) {
+        if (stream.view !== webviewView) continue;
+        stream.controller.abort();
+        this._sseStreams.delete(streamId);
       }
-      this._sseStreams.clear();
+      if (this._view !== webviewView) return;
       if (this._broadcastSelectionDebounce !== undefined) {
         clearTimeout(this._broadcastSelectionDebounce);
         this._broadcastSelectionDebounce = undefined;
@@ -117,9 +119,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       }
       this._lastActiveEditorFilePayload = null;
       this._clearPendingMessages();
-      if (this._view === webviewView) {
-        this._view = undefined;
-      }
+      this._view = undefined;
     });
 
     webviewView.webview.onDidReceiveMessage(async (message: (BridgeRequest & { _msgId?: string }) | { type: 'bridge:ack'; _msgId: string }) => {
@@ -469,7 +469,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         },
       });
 
-      this._sseStreams.set(streamId, controller);
+      this._sseStreams.set(streamId, { controller, view: this._view });
 
       start.run
         .then(() => {
@@ -510,9 +510,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const { id, type, payload } = message;
     const { streamId } = (payload || {}) as { streamId?: string };
     if (typeof streamId === 'string' && streamId.length > 0) {
-      const controller = this._sseStreams.get(streamId);
-      if (controller) {
-        controller.abort();
+      const stream = this._sseStreams.get(streamId);
+      if (stream) {
+        stream.controller.abort();
         this._sseStreams.delete(streamId);
       }
     }
