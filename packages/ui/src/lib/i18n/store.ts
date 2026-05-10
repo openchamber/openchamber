@@ -44,13 +44,13 @@ export const useI18nStore = create<I18nState>()((set, get) => ({
   loadingLocale: null,
   setLocale: (locale) => {
     const current = get();
-    if (current.locale === locale && current.loadingLocale !== locale) {
+    const cached = dictionaries.get(locale);
+    if (current.locale === locale && current.loadingLocale !== locale && cached) {
       return;
     }
 
     writeStoredLocale(locale);
 
-    const cached = dictionaries.get(locale);
     set({
       locale,
       dictionary: cached ?? current.dictionary,
