@@ -15,6 +15,16 @@ const SESSION_COOLDOWN_DURATION_MS = 2000;
 
 let globalEventWatcherAbortController: AbortController | null = null;
 let chatViewProvider: { postMessage: (message: unknown) => void } | null = null;
+let globalEventWatcherRetryTimer: NodeJS.Timeout | null = null;
+let globalEventWatcherStartToken = 0;
+
+const clearGlobalEventWatcherRetry = (): void => {
+  if (!globalEventWatcherRetryTimer) {
+    return;
+  }
+  clearTimeout(globalEventWatcherRetryTimer);
+  globalEventWatcherRetryTimer = null;
+};
 
 const reconcileSessionActivityFromStatus = async (manager: OpenCodeManager): Promise<void> => {
   const baseUrl = manager.getApiUrl();
@@ -171,12 +181,22 @@ export const startGlobalEventWatcher = async (
     return;
   }
 
+  const startToken = ++globalEventWatcherStartToken;
+  clearGlobalEventWatcherRetry();
   chatViewProvider = provider;
 
   const port = await waitForOpenCodePort(manager);
+  if (startToken !== globalEventWatcherStartToken) {
+    return;
+  }
   if (!port) {
     console.warn('[VSCode:Activity] OpenCode port unavailable; will retry');
-    setTimeout(() => startGlobalEventWatcher(manager, provider), 2000);
+    globalEventWatcherRetryTimer = setTimeout(() => {
+      globalEventWatcherRetryTimer = null;
+      if (startToken === globalEventWatcherStartToken) {
+        void startGlobalEventWatcher(manager, provider);
+      }
+    }, 2000);
     return;
   }
 
@@ -246,13 +266,15 @@ export const startGlobalEventWatcher = async (
 };
 
 export const stopGlobalEventWatcher = (): void => {
-  if (!globalEventWatcherAbortController) {
-    return;
-  }
-  try {
-    globalEventWatcherAbortController.abort();
-  } catch {
-    // ignore
+  globalEventWatcherStartToken += 1;
+  clearGlobalEventWatcherRetry();
+
+  if (globalEventWatcherAbortController) {
+    try {
+      globalEventWatcherAbortController.abort();
+    } catch {
+      // ignore
+    }
   }
   globalEventWatcherAbortController = null;
   chatViewProvider = null;
