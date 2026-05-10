@@ -2,9 +2,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { summarizeText } from './summarization.js';
 
+const originalFetch = globalThis.fetch;
+
+function stubFetch(fetchMock) {
+  globalThis.fetch = fetchMock;
+}
+
 describe('text summarization zen requests', () => {
   afterEach(() => {
-    vi.unstubAllGlobals();
+    globalThis.fetch = originalFetch;
   });
 
   it('uses responses endpoint for gpt models', async () => {
@@ -17,7 +23,7 @@ describe('text summarization zen requests', () => {
         }],
       }),
     }));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     const result = await summarizeText({
       text: 'Long text '.repeat(30),
@@ -43,7 +49,7 @@ describe('text summarization zen requests', () => {
         choices: [{ message: { content: 'Chat summary' } }],
       }),
     }));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     const result = await summarizeText({
       text: 'Long text '.repeat(30),
@@ -72,7 +78,7 @@ describe('text summarization zen requests', () => {
         }],
       }),
     }));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     const result = await summarizeText({
       text: 'Long text '.repeat(30),
@@ -96,7 +102,7 @@ describe('text summarization zen requests', () => {
         }],
       }),
     }));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     const result = await summarizeText({
       text: 'Long text '.repeat(30),
