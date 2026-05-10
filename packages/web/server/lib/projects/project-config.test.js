@@ -114,6 +114,37 @@ describe('project-config runtime', () => {
     }
   });
 
+  it('preserves scheduled task state timestamps when listing tasks', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      const projectID = 'timestamp_preserve';
+      const filePath = path.join(runtime.resolveProjectConfigPath(projectID));
+      await writeFile(
+        filePath,
+        JSON.stringify({
+          scheduledTasks: [{
+            id: 'task-existing',
+            name: 'nightly',
+            enabled: true,
+            schedule: { kind: 'daily', times: ['09:00'], timezone: 'UTC' },
+            execution: { prompt: 'run', providerID: 'openai', modelID: 'gpt-4.1' },
+            state: { createdAt: 10, updatedAt: 20, lastStatus: 'idle' },
+          }],
+        }, null, 2),
+        'utf8',
+      );
+
+      const first = await runtime.listScheduledTasks(projectID);
+      const second = await runtime.listScheduledTasks(projectID);
+
+      expect(first[0].state.createdAt).toBe(10);
+      expect(first[0].state.updatedAt).toBe(20);
+      expect(second[0].state.updatedAt).toBe(20);
+    } finally {
+      await cleanup();
+    }
+  });
+
   it('accepts one-time schedule with date and time', async () => {
     const { runtime, cleanup } = await createRuntime();
     try {

@@ -270,6 +270,7 @@ const normalizeTaskForStorage = (value, options) => {
     createId,
     existingTask,
     allowCreate,
+    refreshUpdatedAt = true,
   } = options;
 
   if (!value || typeof value !== 'object') {
@@ -307,7 +308,7 @@ const normalizeTaskForStorage = (value, options) => {
   const state = {
     ...baseState,
     createdAt: existingTask?.state?.createdAt ?? baseState.createdAt ?? nowMs,
-    updatedAt: nowMs,
+    updatedAt: refreshUpdatedAt ? nowMs : baseState.updatedAt ?? nowMs,
   };
 
   return {
@@ -386,6 +387,7 @@ export const createProjectConfigRuntime = (deps) => {
           createId: taskIDFactory,
           existingTask: null,
           allowCreate: true,
+          refreshUpdatedAt: false,
         });
         scheduledTasks.push(normalized);
       } catch {
