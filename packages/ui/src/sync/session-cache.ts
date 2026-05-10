@@ -64,7 +64,7 @@ export function dropSessionCaches(store: SessionCache, sessionIDs: Iterable<stri
   }
 
   for (const messageID of staleMessageIDs) {
-    delete store.part[messageID]
+    if (store.part) delete store.part[messageID]
   }
 
   for (const key of Object.keys(store.part ?? {})) {
