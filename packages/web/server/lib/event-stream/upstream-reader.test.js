@@ -270,6 +270,7 @@ describe('createUpstreamSseReader', () => {
     await reader.start();
 
     expect(attempt).toBe(2);
+    // The top-level stop listener remains; the reconnect-delay listener should be removed.
     expect(tracked.getListenerCount()).toBe(1);
   });
 });
