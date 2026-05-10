@@ -45,7 +45,7 @@ export const registerSessionFoldersRoutes = (app, dependencies) => {
     }
     try {
       await ensureDir();
-      const tmp = `${filePath}.tmp`;
+      const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
       await fsPromises.writeFile(tmp, serialized, 'utf8');
       await fsPromises.rename(tmp, filePath);
       return res.json({ success: true });
