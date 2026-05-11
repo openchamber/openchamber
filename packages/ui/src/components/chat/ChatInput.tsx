@@ -70,6 +70,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { createWorktreeDraft } from '@/lib/worktreeSessionCreator';
 import { buildSessionTargetOptions } from '@/sync/session-worktree-contract';
 import { usePermissionStore } from '@/stores/permissionStore';
+import { useTaskPrefixStore, type TaskType } from '@/stores/useTaskPrefixStore';
 import { extractGitChangedFiles } from './changedFiles';
 import { useI18n } from '@/lib/i18n';
 import { fetchResponseStyleInstruction } from '@/lib/responseStyle';
@@ -730,6 +731,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const [autocompleteTab, setAutocompleteTab] = React.useState<'commands' | 'agents' | 'files'>('commands');
     const [showSkillAutocomplete, setShowSkillAutocomplete] = React.useState(false);
     const [skillQuery, setSkillQuery] = React.useState('');
+    const [activeTask, setActiveTask] = React.useState<'analyze' | 'test' | 'secure' | null>(null);
+    const taskPrefixes = useTaskPrefixStore((s) => s.prefixes);
+    const getPattern = useTaskPrefixStore((s) => s.getPattern);
     const [textareaSize, setTextareaSize] = React.useState<{ height: number; maxHeight: number } | null>(null);
     const [mobileControlsPanel, setMobileControlsPanel] = React.useState<MobileControlsPanel>(null);
     // Message history navigation state (up/down arrow to recall previous messages)
@@ -1248,7 +1252,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     const hasContent = message.trim().length > 0 || sendableAttachedFiles.length > 0 || hasDrafts;
     const hasQueuedMessages = queuedMessages.length > 0;
-    const canSend = hasContent || hasQueuedMessages;
+    const getUserMessage = () => message.replace(getPattern(), '');
+    const canSend = (activeTask !== null && getUserMessage().trim().length > 0) || hasQueuedMessages;
 
     const canAbort = sessionPhase !== 'idle';
 
@@ -1381,7 +1386,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         // Add current input (skip for queued-only auto-send)
         if (!queuedOnly && inputSnapshot.hasContent) {
-            const messageToSend = inputSnapshot.message.replace(/^\n+|\n+$/g, '');
+            let messageToSend = inputSnapshot.message.replace(/^\n+|\n+$/g, '');
+            if (activeTask) {
+                messageToSend = messageToSend.replace(getPattern(), '').trimStart();
+            }
             const { sanitizedText, mention } = parseAgentMentions(messageToSend, agents);
             const { sanitizedText: messageText, attachments: mentionAttachments } = extractInlineFileMentions(sanitizedText);
             const attachmentsToSend = sanitizeAttachmentsForSend(sendableAttachedFiles);
@@ -1588,6 +1596,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             ...additionalParts.flatMap(p => p.attachments ?? []),
         ];
 
+        const taskPrompt = activeTask
+            ? useTaskPrefixStore.getState().systemPrompts[activeTask].replace(/\{toolName\}/g, '')
+            : undefined;
+
         const sendPromise = sendMessage(
             primaryText,
             currentProviderId,
@@ -1597,7 +1609,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             agentMentionName,
             additionalParts.length > 0 ? additionalParts : undefined,
             currentVariant,
-            inputMode
+            inputMode,
+            taskPrompt,
         );
 
         if (typeof window === 'undefined') {
@@ -3682,6 +3695,50 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                 : undefined}
                         />
                     )}
+                    <div className="flex items-center gap-2 px-3 pt-1">
+                        {(Object.entries({ analyze: 'Analyze', test: 'Test & Debug', secure: 'Security Scan' }) as [TaskType, string][]).map(([task, label]) => {
+                            const prefix = taskPrefixes[task];
+                            const isActive = activeTask === task;
+                            const icon = task === 'analyze'
+                                ? <svg viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4"><path d="M6.5 1C3.48 1 1 3.48 1 6.5S3.48 12 6.5 12c1.18 0 2.27-.33 3.2-.9l3.6 3.6 1.6-1.6-3.6-3.6c.57-.93.9-2.02.9-3.2C12 3.48 9.52 1 6.5 1zm0 2.5c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zM5 5h3v1H5V5z"/></svg>
+                                : task === 'test'
+                                    ? <svg viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4"><path d="M8 1a4 4 0 00-4 4v.5c0 .28.22.5.5.5h7c.28 0 .5-.22.5-.5V5a4 4 0 00-4-4zM5.5 7h5c.28 0 .5.22.5.5v3.5a2.5 2.5 0 01-5 0V7.5c0-.28.22-.5.5-.5zM8 2.5A1.5 1.5 0 016.5 4h3A1.5 1.5 0 008 2.5z"/></svg>
+                                    : <svg viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4"><path d="M8 1l6 2v3c0 3-2.5 5.8-6 7-3.5-1.2-6-4-6-7V3l6-2zm0 2.34L3.67 4.9v1.67c0 2.33 1.83 4.58 4.33 5.67 2.5-1.09 4.33-3.34 4.33-5.67V4.9L8 3.34z"/></svg>;
+                            return (
+                                <Tooltip key={task}>
+                                    <TooltipTrigger asChild>
+                                        <button
+                                            type="button"
+                                            className={cn(
+                                                "flex items-center justify-center rounded-lg border transition-colors",
+                                                isActive
+                                                    ? "bg-primary/15 border-primary/40 text-primary"
+                                                    : "border-border/60 hover:bg-[var(--interactive-hover)]",
+                                                "h-8 w-8"
+                                            )}
+                                            onClick={() => {
+                                                if (isActive) {
+                                                    setActiveTask(null);
+                                                    setMessage(prev => prev.replace(new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`), ''));
+                                                } else {
+                                                    setActiveTask(task);
+                                                    setMessage(prev => {
+                                                        const cleaned = prev.replace(getPattern(), '');
+                                                        return cleaned ? `${prefix}${cleaned}` : prefix;
+                                                    });
+                                                }
+                                            }}
+                                        >
+                                            {icon}
+                                        </button>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top" sideOffset={6}>
+                                        {label}
+                                    </TooltipContent>
+                                </Tooltip>
+                            );
+                        })}
+                    </div>
                     <div className={cn("overflow-hidden", isDesktopExpanded && 'flex flex-1 min-h-0 flex-col')}>
                         <div className="flex items-center gap-1 px-3 pt-1 flex-wrap relative z-10">
                             <AttachedVSCodeFileChips />
