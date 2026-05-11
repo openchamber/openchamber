@@ -16,7 +16,8 @@
     "baseUrl": "./src",
     "paths": {
       "@/*": ["./*"],
-      "@openchamber/ui/*": ["./*"]
+      "@openchamber/ui/*": ["./*"],
+      "@openchamber/shared/*": ["../../shared/src/*"]
     }
   },
   "include": ["src"]
