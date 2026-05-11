@@ -121,7 +121,7 @@ export const useOpenInAppsStore = create<OpenInAppsState>()((set, get) => ({
         const shouldRetryEmptyScan = success && !hasCache && installed.length === 0 && retryAttempt < 3;
 
         set({ isCacheStale: hasCache ? isCacheStale : false });
-        applyInstalledApps(installed, !shouldRetryEmptyScan);
+        applyInstalledApps(installed, success ? !shouldRetryEmptyScan : false);
 
         if (success) {
           if (shouldRetryEmptyScan) {
