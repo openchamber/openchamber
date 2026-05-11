@@ -15,6 +15,11 @@ type I18nState = {
 
 const dictionaries = new Map<Locale, I18nDictionary>([[DEFAULT_LOCALE, enDict]]);
 
+export function resetI18nDictionaryCacheForTests(): void {
+  dictionaries.clear();
+  dictionaries.set(DEFAULT_LOCALE, enDict);
+}
+
 async function loadDictionary(locale: Locale): Promise<I18nDictionary> {
   const cached = dictionaries.get(locale);
   if (cached) {
