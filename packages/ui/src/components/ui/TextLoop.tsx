@@ -35,16 +35,20 @@ export function TextLoop({
   const items = Children.toArray(children);
 
   useEffect(() => {
-    setCurrentIndex((current) => {
-      if (items.length === 0) {
-        return current === 0 ? current : 0;
-      }
-      if (!Number.isInteger(current) || current < 0) {
-        return 0;
-      }
-      return current >= items.length ? items.length - 1 : current;
-    });
-  }, [items.length]);
+    let next = currentIndex;
+    if (items.length === 0) {
+      next = 0;
+    } else if (!Number.isInteger(currentIndex) || currentIndex < 0) {
+      next = 0;
+    } else if (currentIndex >= items.length) {
+      next = items.length - 1;
+    }
+
+    if (next !== currentIndex) {
+      setCurrentIndex(next);
+      onIndexChange?.(next);
+    }
+  }, [currentIndex, items.length, onIndexChange]);
 
   useEffect(() => {
     if (!trigger || items.length <= 1) return;
