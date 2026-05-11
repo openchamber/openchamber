@@ -107,9 +107,10 @@ describe('OpenCode env runtime', () => {
     setPlatform('win32');
     const { runtime } = createRuntime({ opencodeBinary: 'wsl:/usr/local/bin/opencode' });
 
-    const error = await runtime.applyOpencodeBinaryFromSettings({ strict: true }).catch((caught) => caught);
+    const rejection = runtime.applyOpencodeBinaryFromSettings({ strict: true });
 
-    expect(error.message).toContain('uses WSL');
+    await expect(rejection).rejects.toThrow('uses WSL');
+    const error = await rejection.catch((caught) => caught);
     expect(error.code).toBeUndefined();
   });
 });
