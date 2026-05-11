@@ -1,16 +1,16 @@
 # Skills Catalog Module Documentation
 
 ## Purpose
-This module provides skill discovery, scanning, and installation capabilities for OpenCode. It supports multiple skill sources including GitHub repositories and the ClawdHub registry, with caching and conflict resolution for skill installation.
+This module provides skill discovery, scanning, and installation capabilities for OpenCode. It supports multiple skill sources including git repositories and the ClawdHub registry, with caching and conflict resolution for skill installation.
 
 ## Entrypoints and structure
 - `packages/web/server/lib/skills-catalog/`: Skills catalog module directory containing all skill-related functionality.
   - `cache.js`: In-memory cache for scan results with TTL support.
   - `curated-sources.js`: Predefined skill sources (Anthropic, ClawdHub).
   - `git.js`: Git operations helpers for cloning and auth error detection.
-  - `install.js`: Skills installation from GitHub repositories.
-  - `scan.js`: Skills scanning from GitHub repositories.
-  - `source.js`: Source string parsing for GitHub repositories.
+  - `install.js`: Skills installation from git repositories.
+  - `scan.js`: Skills scanning from git repositories.
+  - `source.js`: Source string parsing for git repositories.
   - `clawdhub/`: ClawdHub registry integration.
     - `index.js`: Public API exports for ClawdHub.
     - `scan.js`: Scanning ClawdHub registry with pagination.
@@ -32,13 +32,13 @@ The following functions are exported and used by the web server:
 - `CURATED_SKILLS_SOURCES`: Constant array of predefined sources.
 
 ### Source Parsing (`source.js`)
-- `parseSkillRepoSource(source, { subpath })`: Parse GitHub repository source string into structured object with SSH/HTTPS clone URLs, normalized repo, and effective subpath. Supports SSH URLs, HTTPS URLs, and shorthand `owner/repo[/subpath]` format.
+- `parseSkillRepoSource(source, { subpath })`: Parse git repository source string into structured object with SSH/HTTPS clone URLs, normalized repo, and effective subpath. Supports SSH URLs, HTTPS URLs, and shorthand `owner/repo[/subpath]` format.
 
 ### Git Repository Scanning (`scan.js`)
-- `scanSkillsRepository({ source, subpath, defaultSubpath, identity })`: Scan GitHub repository for skills by cloning and analyzing SKILL.md files. Returns array of skill items with metadata.
+- `scanSkillsRepository({ source, subpath, defaultSubpath, identity })`: Scan git repository for skills by cloning and analyzing SKILL.md files. Returns array of skill items with metadata.
 
 ### Git Repository Installation (`install.js`)
-- `installSkillsFromRepository({ source, subpath, defaultSubpath, identity, scope, targetSource, workingDirectory, userSkillDir, selections, conflictPolicy, conflictDecisions })`: Install skills from GitHub repository. Supports user/project scopes, opencode/agents targets, conflict resolution (prompt/skipAll/overwriteAll), and sparse checkout for efficiency.
+- `installSkillsFromRepository({ source, subpath, defaultSubpath, identity, scope, targetSource, workingDirectory, userSkillDir, selections, conflictPolicy, conflictDecisions })`: Install skills from git repository. Supports user/project scopes, opencode/agents targets, conflict resolution (prompt/skipAll/overwriteAll), and sparse checkout for efficiency.
 
 ### ClawdHub Integration (`clawdhub/index.js`)
 - `isClawdHubSource(source)`: Check if source string refers to ClawdHub.
@@ -73,7 +73,7 @@ The following functions are internal helpers used by exported functions:
 - `normalizeUserSkillDir(userSkillDir)`: Normalize user skill directory path (handles legacy `~/.config/opencode/skill` → `~/.config/opencode/skills` migration).
 
 ### Git Clone Helpers (`install.js`, `scan.js`)
-- `cloneRepo({ cloneUrl, identity, tempDir })`: Clone GitHub repository with preferred partial clone (`--filter=blob:none`) and fallback. Uses non-interactive mode.
+- `cloneRepo({ cloneUrl, identity, tempDir })`: Clone git repository with preferred partial clone (`--filter=blob:none`) and fallback. Uses non-interactive mode.
 
 ### SKILL.md Parsing (`scan.js`)
 - `parseSkillMd(content)`: Parse YAML frontmatter from SKILL.md content. Returns `{ ok, frontmatter, warnings }`.
@@ -90,7 +90,7 @@ The following functions are internal helpers used by exported functions:
 
 ### Scan Skills Repository Response
 - `ok`: Boolean indicating success.
-- `normalizedRepo`: Normalized GitHub repo string (`owner/repo`).
+- `normalizedRepo`: Normalized repo string (`owner/repo`).
 - `effectiveSubpath`: Effective subpath used for scanning (may be from source string or defaultSubpath).
 - `items`: Array of skill items with `{ repoSource, repoSubpath, skillDir, skillName, frontmatterName, description, installable, warnings }`.
 - `error`: Error object with `{ kind, message }` on failure.
@@ -109,7 +109,7 @@ The following functions are internal helpers used by exported functions:
 
 ### Parse Source Response
 - `ok`: Boolean indicating success.
-- `host`: GitHub host (`github.com`).
+- `host`: Git host (e.g., `github.com`, `gitlab.com`).
 - `owner`: Repository owner.
 - `repo`: Repository name.
 - `cloneUrlSsh`: SSH clone URL.
@@ -129,7 +129,7 @@ The following functions are internal helpers used by exported functions:
 
 ### Skill Name Validation
 - All skill names must match `/^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/` (1-64 chars).
-- Skill names are derived from directory basenames for GitHub repos and slugs for ClawdHub.
+- Skill names are derived from directory basenames for git repos and slugs for ClawdHub.
 - Invalid names result in non-installable skills with appropriate warnings.
 
 ### Git Cloning Strategy
