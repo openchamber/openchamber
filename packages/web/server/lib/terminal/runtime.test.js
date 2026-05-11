@@ -34,7 +34,6 @@ describe('terminal runtime', () => {
       fs: {
         promises: {
           stat: async () => ({ isDirectory: () => false }),
-          access: async () => {},
         },
       },
       path,
