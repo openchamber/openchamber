@@ -1221,7 +1221,7 @@ export function ScheduledTaskEditorDialog(props: {
                           <button
                             type="button"
                             onClick={() => toggleWeekday(weekday.value, !checked)}
-                            className="hover:text-foreground group-hover:text-foreground"
+                            className="group-hover:text-foreground"
                           >
                             {weekday.label}
                           </button>
