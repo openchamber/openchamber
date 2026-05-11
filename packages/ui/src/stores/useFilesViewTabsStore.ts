@@ -205,12 +205,15 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
               return state;
             }
 
-            if (!current.openPaths.includes(normalizedPath) && current.selectedPath !== normalizedPath) {
+            const comparablePath = toComparablePath(normalizedPath);
+            const isMatchingPath = (candidate: string) => toComparablePath(candidate) === comparablePath;
+            const selectedPathMatches = current.selectedPath ? isMatchingPath(current.selectedPath) : false;
+            if (!current.openPaths.some(isMatchingPath) && !selectedPathMatches) {
               return state;
             }
 
-            const openPaths = current.openPaths.filter((p) => p !== normalizedPath);
-            const selectedPath = current.selectedPath === normalizedPath ? (openPaths[0] ?? null) : current.selectedPath;
+            const openPaths = current.openPaths.filter((p) => !isMatchingPath(p));
+            const selectedPath = selectedPathMatches ? (openPaths[0] ?? null) : current.selectedPath;
 
             const byRoot = {
               ...state.byRoot,
