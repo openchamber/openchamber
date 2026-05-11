@@ -34,14 +34,16 @@ function createFetchMock() {
 
 describe('checkForUpdates', () => {
   let fetchMock;
+  let originalFetch;
 
   beforeEach(() => {
     fetchMock = createFetchMock();
-    vi.stubGlobal('fetch', fetchMock);
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchMock;
   });
 
   afterEach(() => {
-    vi.unstubAllGlobals();
+    globalThis.fetch = originalFetch;
   });
 
   // --- Scenario: API says update available, npm confirms ---
@@ -94,6 +96,21 @@ describe('checkForUpdates', () => {
       });
 
     const result = await checkForUpdates({ currentVersion: '1.9.10' });
+
+    expect(result.available).toBe(false);
+  });
+
+  it('returns available=false when npm only has a prerelease of the current version', async () => {
+    fetchMock
+      .when('api.openchamber.dev', Promise.reject(new Error('Network error')))
+      .when('registry.npmjs.org', {
+        ok: true,
+        json: async () => ({
+          'dist-tags': { latest: '1.10.0-beta.1' },
+        }),
+      });
+
+    const result = await checkForUpdates({ currentVersion: '1.10.0' });
 
     expect(result.available).toBe(false);
   });
