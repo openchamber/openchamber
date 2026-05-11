@@ -4,6 +4,8 @@
  */
 
 import { create } from "zustand"
+import { persist, createJSONStorage } from "zustand/middleware"
+import { getSafeStorage } from "../stores/utils/safeStorage"
 
 export type SelectionState = {
   sessionModelSelections: Map<string, { providerId: string; modelId: string }>
@@ -24,76 +26,106 @@ export type SelectionState = {
 // In-memory variant storage (not persisted)
 const agentModelVariantSelections = new Map<string, Map<string, Map<string, string>>>()
 
-export const useSelectionStore = create<SelectionState>()((set, get) => ({
-  sessionModelSelections: new Map(),
-  sessionAgentSelections: new Map(),
-  sessionAgentModelSelections: new Map(),
-  lastUsedProvider: null,
+export const useSelectionStore = create<SelectionState>()(
+  persist(
+    (set, get) => ({
+      sessionModelSelections: new Map(),
+      sessionAgentSelections: new Map(),
+      sessionAgentModelSelections: new Map(),
+      lastUsedProvider: null,
 
-  saveSessionModelSelection: (sessionId, providerId, modelId) =>
-    set((s) => {
-      const map = new Map(s.sessionModelSelections)
-      map.set(sessionId, { providerId, modelId })
-      return { sessionModelSelections: map, lastUsedProvider: { providerID: providerId, modelID: modelId } }
+      saveSessionModelSelection: (sessionId, providerId, modelId) =>
+        set((s) => {
+          const map = new Map(s.sessionModelSelections)
+          map.set(sessionId, { providerId, modelId })
+          return { sessionModelSelections: map, lastUsedProvider: { providerID: providerId, modelID: modelId } }
+        }),
+
+      getSessionModelSelection: (sessionId) => get().sessionModelSelections.get(sessionId) ?? null,
+
+      saveSessionAgentSelection: (sessionId, agentName) =>
+        set((s) => {
+          if (s.sessionAgentSelections.get(sessionId) === agentName) return s
+          const map = new Map(s.sessionAgentSelections)
+          map.set(sessionId, agentName)
+          return { sessionAgentSelections: map }
+        }),
+
+      getSessionAgentSelection: (sessionId) => get().sessionAgentSelections.get(sessionId) ?? null,
+
+      saveAgentModelForSession: (sessionId, agentName, providerId, modelId) =>
+        set((s) => {
+          const existing = s.sessionAgentModelSelections.get(sessionId)?.get(agentName)
+          if (existing?.providerId === providerId && existing?.modelId === modelId) return s
+          const outer = new Map(s.sessionAgentModelSelections)
+          const inner = new Map(outer.get(sessionId) ?? new Map())
+          inner.set(agentName, { providerId, modelId })
+          outer.set(sessionId, inner)
+          return { sessionAgentModelSelections: outer }
+        }),
+
+      getAgentModelForSession: (sessionId, agentName) =>
+        get().sessionAgentModelSelections.get(sessionId)?.get(agentName) ?? null,
+
+      saveAgentModelVariantForSession: (sessionId, agentName, providerId, modelId, variant) => {
+        const key = `${providerId}/${modelId}`
+        let agentMap = agentModelVariantSelections.get(sessionId)
+        if (!agentMap && variant) {
+          agentMap = new Map()
+          agentModelVariantSelections.set(sessionId, agentMap)
+        }
+        if (!agentMap) return
+        let modelMap = agentMap.get(agentName)
+        if (!modelMap && variant) {
+          modelMap = new Map()
+          agentMap.set(agentName, modelMap)
+        }
+        if (!modelMap) return
+
+        if (!variant) {
+          modelMap.delete(key)
+          if (modelMap.size === 0) {
+            agentMap.delete(agentName)
+          }
+          if (agentMap.size === 0) {
+            agentModelVariantSelections.delete(sessionId)
+          }
+          return
+        }
+
+        modelMap.set(key, variant)
+      },
+
+      getAgentModelVariantForSession: (sessionId, agentName, providerId, modelId) => {
+        const key = `${providerId}/${modelId}`
+        return agentModelVariantSelections.get(sessionId)?.get(agentName)?.get(key)
+      },
     }),
+    {
+      name: "selection-store",
+      storage: createJSONStorage(() => getSafeStorage()),
+      partialize: (state) => ({
+        sessionModelSelections: Array.from(state.sessionModelSelections.entries()),
+        sessionAgentSelections: Array.from(state.sessionAgentSelections.entries()),
+        sessionAgentModelSelections: Array.from(state.sessionAgentModelSelections.entries()).map(([sessionId, agentMap]) => [sessionId, Array.from(agentMap.entries())]),
+        lastUsedProvider: state.lastUsedProvider,
+      }),
+      merge: (persistedState: any, currentState) => {
+        const agentModelSelections = new Map();
+        if (persistedState?.sessionAgentModelSelections) {
+          persistedState.sessionAgentModelSelections.forEach(([sessionId, agentArray]: [string, any[]]) => {
+            agentModelSelections.set(sessionId, new Map(agentArray));
+          });
+        }
 
-  getSessionModelSelection: (sessionId) => get().sessionModelSelections.get(sessionId) ?? null,
-
-  saveSessionAgentSelection: (sessionId, agentName) =>
-    set((s) => {
-      if (s.sessionAgentSelections.get(sessionId) === agentName) return s
-      const map = new Map(s.sessionAgentSelections)
-      map.set(sessionId, agentName)
-      return { sessionAgentSelections: map }
-    }),
-
-  getSessionAgentSelection: (sessionId) => get().sessionAgentSelections.get(sessionId) ?? null,
-
-  saveAgentModelForSession: (sessionId, agentName, providerId, modelId) =>
-    set((s) => {
-      const existing = s.sessionAgentModelSelections.get(sessionId)?.get(agentName)
-      if (existing?.providerId === providerId && existing?.modelId === modelId) return s
-      const outer = new Map(s.sessionAgentModelSelections)
-      const inner = new Map(outer.get(sessionId) ?? new Map())
-      inner.set(agentName, { providerId, modelId })
-      outer.set(sessionId, inner)
-      return { sessionAgentModelSelections: outer }
-    }),
-
-  getAgentModelForSession: (sessionId, agentName) =>
-    get().sessionAgentModelSelections.get(sessionId)?.get(agentName) ?? null,
-
-  saveAgentModelVariantForSession: (sessionId, agentName, providerId, modelId, variant) => {
-    const key = `${providerId}/${modelId}`
-    let agentMap = agentModelVariantSelections.get(sessionId)
-    if (!agentMap && variant) {
-      agentMap = new Map()
-      agentModelVariantSelections.set(sessionId, agentMap)
-    }
-    if (!agentMap) return
-    let modelMap = agentMap.get(agentName)
-    if (!modelMap && variant) {
-      modelMap = new Map()
-      agentMap.set(agentName, modelMap)
-    }
-    if (!modelMap) return
-
-    if (!variant) {
-      modelMap.delete(key)
-      if (modelMap.size === 0) {
-        agentMap.delete(agentName)
+        return {
+          ...currentState,
+          lastUsedProvider: persistedState?.lastUsedProvider ?? currentState.lastUsedProvider,
+          sessionModelSelections: new Map(persistedState?.sessionModelSelections || []),
+          sessionAgentSelections: new Map(persistedState?.sessionAgentSelections || []),
+          sessionAgentModelSelections: agentModelSelections,
+        }
       }
-      if (agentMap.size === 0) {
-        agentModelVariantSelections.delete(sessionId)
-      }
-      return
     }
-
-    modelMap.set(key, variant)
-  },
-
-  getAgentModelVariantForSession: (sessionId, agentName, providerId, modelId) => {
-    const key = `${providerId}/${modelId}`
-    return agentModelVariantSelections.get(sessionId)?.get(agentName)?.get(key)
-  },
-}))
+  )
+)
