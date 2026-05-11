@@ -202,7 +202,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  public createNewSessionWithPrompt(prompt: string) {
+  public createNewSessionWithPrompt(payload: { instruction?: string; text: string }) {
     if (this._view) {
       // Reveal the webview panel
       this._view.show(true);
@@ -210,7 +210,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       this._view.webview.postMessage({
         type: 'command',
         command: 'createSessionWithPrompt',
-        payload: { prompt }
+        payload
       });
     }
   }
