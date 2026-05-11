@@ -69,6 +69,7 @@ function routeMessage(params: {
   inputMode?: "normal" | "shell"
   files?: Array<{ type: "file"; mime: string; url: string; filename: string }>
   additionalParts?: Array<{ text: string; synthetic?: boolean; files?: Array<{ type: "file"; mime: string; url: string; filename: string }> }>
+  prefaceText?: string
 }): Promise<void> {
   if (params.inputMode === "shell") {
     const sdk = opencodeClient.getSdkClient()
@@ -130,6 +131,7 @@ function routeMessage(params: {
       providerID: params.providerID,
       modelID: params.modelID,
       text: params.content,
+      prefaceText: params.prefaceText,
       agent: params.agent,
       variant: params.variant,
       files: params.files,
@@ -235,6 +237,7 @@ export type SessionUIState = {
     additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }>,
     variant?: string,
     inputMode?: "normal" | "shell",
+    prefaceText?: string,
   ) => Promise<void>
 
   createSession: (title?: string, directoryOverride?: string | null, parentID?: string | null) => Promise<Session | null>
@@ -694,6 +697,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }>,
     variant?: string,
     inputMode?: "normal" | "shell",
+    prefaceText?: string,
   ) => {
     // Clear non-Git changed-files bar on new user message for current session
     const sid = get().currentSessionId;
@@ -786,6 +790,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         variant,
         inputMode,
         files,
+        prefaceText,
         additionalParts: mergedAdditionalParts?.map((p) => ({
           text: p.text,
           synthetic: p.synthetic,
@@ -861,6 +866,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       variant,
       inputMode,
       files,
+      prefaceText,
       additionalParts: additionalParts?.map((p) => ({
         text: p.text,
         synthetic: p.synthetic,
