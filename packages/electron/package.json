@@ -91,7 +91,7 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "btriapitsyn",
+      "owner": "openchamber",
       "repo": "openchamber"
     }
   }
