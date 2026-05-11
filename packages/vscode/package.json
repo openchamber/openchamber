@@ -137,9 +137,31 @@
         "icon": "$(settings-gear)"
       },
       {
-        "command": "openchamber.attachExplorerToChat",
-        "category": "OpenChamber",
-        "title": "Attach to OpenChamber Chat"
+        "command": "liitmus.testAndDebug",
+        "category": "Liitmus",
+        "title": "Test & Debug"
+      },
+      {
+        "command": "liitmus.analyze",
+        "category": "Liitmus",
+        "title": "Analyze Code"
+      },
+      {
+        "command": "liitmus.secure",
+        "category": "Liitmus",
+        "title": "Security Check"
+      },
+      {
+        "command": "liitmus.openNewIntegrationSessionInEditor",
+        "category": "Liitmus",
+        "title": "Integrate External Code",
+        "icon": "$(insert)"
+      },
+      {
+        "command": "liitmus.openNewInteractionSessionInEditor",
+        "category": "Liitmus",
+        "title": "Deploy On Forked Chain",
+        "icon": "$(symbol-event)"
       }
     ],
     "submenus": [
@@ -180,14 +202,19 @@
           "group": "navigation@2"
         },
         {
-          "command": "openchamber.openAgentManager",
+          "command": "liitmus.openNewIntegrationSessionInEditor",
           "when": "view == openchamber.chatView",
           "group": "navigation@3"
         },
         {
-          "command": "openchamber.showSettings",
+          "command": "liitmus.openNewInteractionSessionInEditor",
           "when": "view == openchamber.chatView",
           "group": "navigation@4"
+        },
+        {
+          "command": "openchamber.showSettings",
+          "when": "view == openchamber.chatView",
+          "group": "navigation@5"
         }
       ],
       "openchamber.submenu": [
