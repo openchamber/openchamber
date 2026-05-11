@@ -1191,7 +1191,7 @@ onCommand('addFileMentions', (payload) => {
 
 // Listen for createSessionWithPrompt command from extension (Explain, Improve Code)
 onCommand('createSessionWithPrompt', (payload) => {
-  const { prompt } = payload as { prompt: string };
+  const { instruction, text } = (payload || {}) as { instruction?: string; text: string };
 
   Promise.all([
     import('@/sync/session-ui-store'),
@@ -1208,21 +1208,24 @@ onCommand('createSessionWithPrompt', (payload) => {
     const { currentProviderId, currentModelId, currentAgentName } = configStore;
 
     if (currentProviderId && currentModelId) {
-      // Send the message - this will create the session from the draft and send
+      // Send the message - instruction is passed as prefaceText (hidden from chat history)
       sessionStore.sendMessage(
-        prompt,
+        text,
         currentProviderId,
         currentModelId,
         currentAgentName ?? undefined,
         undefined, // attachments
         undefined, // agentMentionName
-        undefined  // additionalParts
+        undefined,  // additionalParts
+        undefined, // variant
+        undefined, // inputMode
+        instruction, // prefaceText - hidden system prompt
       ).catch((error: unknown) => {
         console.error('[OpenChamber] Failed to send prompt:', error);
       });
     } else {
       // If no provider/model configured, just set the text and let user send manually
-      useInputStore.getState().setPendingInputText(prompt);
+      useInputStore.getState().setPendingInputText(text);
     }
   });
 });
