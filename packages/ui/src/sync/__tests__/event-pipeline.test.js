@@ -654,8 +654,6 @@ describe('createEventPipeline', () => {
         wsReadyTimeoutMs: 20,
         onEvent: (directory, payload) => {
           received.push({ directory, payload });
-          cleanup();
-          releaseStream();
           resolve();
         },
       });
