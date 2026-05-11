@@ -81,6 +81,26 @@ export class SessionEditorPanelProvider {
     this._createPanel(sessionId, sessionTitle, sessionId);
   }
 
+  public createOrShowNewIntegrationSession(): void {
+    // Generate unique panel ID for new integration session drafts
+    const panelId = `integration_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    // this._createPanel(panelId, 'New Integration Session', null);
+  }
+
+  public createOrShowIntegrationSession(sessionId: string, title?: string): void {
+    // TODO: Implement integration session logic
+  }
+
+  public createOrShowNewInteractionSession(): void {
+    // Generate unique panel ID for new interaction session drafts
+    const panelId = `interaction_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    // this._createPanel(panelId, 'New Interaction Session', null);
+  }
+
+  public createOrShowInteractionSession(sessionId: string, title?: string): void {
+    // TODO: Implement interaction session logic
+  }
+
   private _createPanel(panelId: string, title: string, initialSessionId: string | null): void {
     const distUri = vscode.Uri.joinPath(this._extensionUri, 'dist');
 
