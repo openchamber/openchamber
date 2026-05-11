@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { ChatViewProvider } from './ChatViewProvider';
+import { getSystemPrompt } from '../../shared/src/taskPrompts';
 import { AgentManagerPanelProvider } from './AgentManagerPanelProvider';
 import { SessionEditorPanelProvider } from './SessionEditorPanelProvider';
 import { createOpenCodeManager, type OpenCodeManager } from './opencode';
@@ -236,107 +237,139 @@ export async function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.addToContext', async () => {
-      const editor = vscode.window.activeTextEditor;
-      if (!editor) {
-        vscode.window.showWarningMessage('OpenChamber [Add to Context]:No active editor');
-        return;
-      }
+  // context.subscriptions.push(
+  //   vscode.commands.registerCommand('openchamber.addToContext', async () => {
+  //     const editor = vscode.window.activeTextEditor;
+  //     if (!editor) {
+  //       vscode.window.showWarningMessage('OpenChamber [Add to Context]:No active editor');
+  //       return;
+  //     }
 
-      const selection = editor.selection;
-      const selectedText = editor.document.getText(selection);
+  //     const selection = editor.selection;
+  //     const selectedText = editor.document.getText(selection);
 
-      if (!selectedText) {
-        vscode.window.showWarningMessage('OpenChamber [Add to Context]: No text selected');
-        return;
-      }
+  //     if (!selectedText) {
+  //       vscode.window.showWarningMessage('OpenChamber [Add to Context]: No text selected');
+  //       return;
+  //     }
 
-      // Get file info for context
-      const filePath = vscode.workspace.asRelativePath(editor.document.uri);
-      const languageId = editor.document.languageId;
+  //     // Get file info for context
+  //     const filePath = vscode.workspace.asRelativePath(editor.document.uri);
+  //     const languageId = editor.document.languageId;
       
-      // Get line numbers (1-based for display)
-      const startLine = selection.start.line + 1;
-      const endLine = selection.end.line + 1;
-      const lineRange = startLine === endLine ? `${startLine}` : `${startLine}-${endLine}`;
+  //     // Get line numbers (1-based for display)
+  //     const startLine = selection.start.line + 1;
+  //     const endLine = selection.end.line + 1;
+  //     const lineRange = startLine === endLine ? `${startLine}` : `${startLine}-${endLine}`;
 
-      // Format as file path with line numbers, followed by markdown code block
-      const contextText = `${filePath}:${lineRange}\n\`\`\`${languageId}\n${selectedText}\n\`\`\``;
+  //     // Format as file path with line numbers, followed by markdown code block
+  //     const contextText = `${filePath}:${lineRange}\n\`\`\`${languageId}\n${selectedText}\n\`\`\``;
 
-      // Send to webview and reveal the panel
-      chatViewProvider?.addTextToInput(contextText);
+  //     // Send to webview and reveal the panel
+  //     chatViewProvider?.addTextToInput(contextText);
 
-      // Focus the chat panel
-      vscode.commands.executeCommand('openchamber.focusChat');
-    })
-  );
+  //     // Focus the chat panel
+  //     vscode.commands.executeCommand('openchamber.focusChat');
+  //   })
+  // );
 
-  context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.attachExplorerToChat', async (resource?: vscode.Uri, resources?: vscode.Uri[]) => {
-      const uriCandidates: vscode.Uri[] = [];
-      if (Array.isArray(resources)) {
-        uriCandidates.push(...resources.filter((entry): entry is vscode.Uri => entry instanceof vscode.Uri));
-      }
-      if (resource instanceof vscode.Uri) {
-        uriCandidates.push(resource);
-      }
-      if (uriCandidates.length === 0) {
-        const activeEditorUri = vscode.window.activeTextEditor?.document.uri;
-        if (activeEditorUri) {
-          uriCandidates.push(activeEditorUri);
-        }
-      }
+  // context.subscriptions.push(
+  //   vscode.commands.registerCommand('openchamber.attachExplorerToChat', async (resource?: vscode.Uri, resources?: vscode.Uri[]) => {
+  //     const uriCandidates: vscode.Uri[] = [];
+  //     if (Array.isArray(resources)) {
+  //       uriCandidates.push(...resources.filter((entry): entry is vscode.Uri => entry instanceof vscode.Uri));
+  //     }
+  //     if (resource instanceof vscode.Uri) {
+  //       uriCandidates.push(resource);
+  //     }
+  //     if (uriCandidates.length === 0) {
+  //       const activeEditorUri = vscode.window.activeTextEditor?.document.uri;
+  //       if (activeEditorUri) {
+  //         uriCandidates.push(activeEditorUri);
+  //       }
+  //     }
 
-      const uniqueUris = Array.from(new Map(uriCandidates.map((uri) => [uri.toString(), uri])).values());
-      const mentionPaths: string[] = [];
-      const skippedEntries: string[] = [];
+  //     const uniqueUris = Array.from(new Map(uriCandidates.map((uri) => [uri.toString(), uri])).values());
+  //     const mentionPaths: string[] = [];
+  //     const skippedEntries: string[] = [];
 
-      for (const uri of uniqueUris) {
-        if (uri.scheme !== 'file') {
-          skippedEntries.push(uri.toString());
-          continue;
-        }
+  //     for (const uri of uniqueUris) {
+  //       if (uri.scheme !== 'file') {
+  //         skippedEntries.push(uri.toString());
+  //         continue;
+  //       }
 
-        try {
-          const stat = await vscode.workspace.fs.stat(uri);
-          if ((stat.type & vscode.FileType.Directory) !== 0) {
-            skippedEntries.push(vscode.workspace.asRelativePath(uri, false));
-            continue;
-          }
-        } catch {
-          skippedEntries.push(vscode.workspace.asRelativePath(uri, false));
-          continue;
-        }
+  //       try {
+  //         const stat = await vscode.workspace.fs.stat(uri);
+  //         if ((stat.type & vscode.FileType.Directory) !== 0) {
+  //           skippedEntries.push(vscode.workspace.asRelativePath(uri, false));
+  //           continue;
+  //         }
+  //       } catch {
+  //         skippedEntries.push(vscode.workspace.asRelativePath(uri, false));
+  //         continue;
+  //       }
 
-        const relativePath = vscode.workspace.asRelativePath(uri, false).replace(/\\/g, '/').trim();
-        if (!relativePath) {
-          skippedEntries.push(uri.fsPath || uri.toString());
-          continue;
-        }
-        mentionPaths.push(relativePath);
-      }
+  //       const relativePath = vscode.workspace.asRelativePath(uri, false).replace(/\\/g, '/').trim();
+  //       if (!relativePath) {
+  //         skippedEntries.push(uri.fsPath || uri.toString());
+  //         continue;
+  //       }
+  //       mentionPaths.push(relativePath);
+  //     }
 
-      if (mentionPaths.length === 0) {
-        vscode.window.showWarningMessage('OpenChamber: No file selected to mention');
-        return;
-      }
+  //     if (mentionPaths.length === 0) {
+  //       vscode.window.showWarningMessage('OpenChamber: No file selected to mention');
+  //       return;
+  //     }
 
-      await vscode.commands.executeCommand('openchamber.openSidebar');
-      await new Promise((resolve) => setTimeout(resolve, 80));
-      chatViewProvider?.addFileMentions(mentionPaths);
+  //     await vscode.commands.executeCommand('openchamber.openSidebar');
+  //     await new Promise((resolve) => setTimeout(resolve, 80));
+  //     chatViewProvider?.addFileMentions(mentionPaths);
 
-      if (skippedEntries.length > 0) {
-        vscode.window.showInformationMessage('OpenChamber: Some selected entries were skipped (folders or unsupported resources)');
-      }
-    })
-  );
+  //     if (skippedEntries.length > 0) {
+  //       vscode.window.showInformationMessage('OpenChamber: Some selected entries were skipped (folders or unsupported resources)');
+  //     }
+  //   })
+  // );
 
-  context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.explain', async () => {
+  // context.subscriptions.push(
+  //   vscode.commands.registerCommand('openchamber.explain', async () => {
+  //     const editor = vscode.window.activeTextEditor;
+  //     if (!editor) {
+  //       vscode.window.showWarningMessage('OpenChamber [Explain]: No active editor');
+  //       return;
+  //     }
+
+  //     const selection = editor.selection;
+  //     const selectedText = editor.document.getText(selection);
+  //     const filePath = vscode.workspace.asRelativePath(editor.document.uri);
+  //     const languageId = editor.document.languageId;
+
+  //     let prompt: string;
+
+  //     if (selectedText) {
+  //       // Selection exists - explain the selected code
+  //       const startLine = selection.start.line + 1;
+  //       const endLine = selection.end.line + 1;
+  //       const lineRange = startLine === endLine ? `${startLine}` : `${startLine}-${endLine}`;
+  //       prompt = `Explain the following Code / Text:\n\n${filePath}:${lineRange}\n\`\`\`${languageId}\n${selectedText}\n\`\`\``;
+  //     } else {
+  //       // No selection - explain the entire file
+  //       prompt = `Explain the following Code / Text:\n\n${filePath}`;
+  //     }
+
+  //     // Create new session and send the prompt
+  //     chatViewProvider?.createNewSessionWithPrompt(prompt);
+  //     vscode.commands.executeCommand('openchamber.focusChat');
+  //   })
+  // );
+
+  context.subscriptions.push( // TEST & DEBUG
+    vscode.commands.registerCommand('liitmus.testAndDebug', async () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor) {
-        vscode.window.showWarningMessage('OpenChamber [Explain]: No active editor');
+        vscode.window.showWarningMessage('Liitmus [Test & Debug]: No active editor');
         return;
       }
 
@@ -345,54 +378,115 @@ export async function activate(context: vscode.ExtensionContext) {
       const filePath = vscode.workspace.asRelativePath(editor.document.uri);
       const languageId = editor.document.languageId;
 
-      let prompt: string;
+      const toolName = 'get_guide'; // Replace with actual tool name if needed
 
-      if (selectedText) {
-        // Selection exists - explain the selected code
-        const startLine = selection.start.line + 1;
-        const endLine = selection.end.line + 1;
-        const lineRange = startLine === endLine ? `${startLine}` : `${startLine}-${endLine}`;
-        prompt = `Explain the following Code / Text:\n\n${filePath}:${lineRange}\n\`\`\`${languageId}\n${selectedText}\n\`\`\``;
-      } else {
-        // No selection - explain the entire file
-        prompt = `Explain the following Code / Text:\n\n${filePath}`;
-      }
+      const instruction = getSystemPrompt('test', toolName);
 
-      // Create new session and send the prompt
-      chatViewProvider?.createNewSessionWithPrompt(prompt);
+      const startLine = selection.start.line + 1;
+      const endLine = selection.end.line + 1;
+      const lineRange = startLine === endLine ? `${startLine}` : `${startLine}-${endLine}`;
+
+      const text = selectedText
+        ? `Text:\n\n${filePath}:${lineRange}\n\`\`\`${languageId}\n${selectedText}\n\`\`\``
+        : `Text:\n\n${filePath}`;
+
+      // Create new session and send the instruction as hidden system prompt + user code as visible text
+      chatViewProvider?.createNewSessionWithPrompt({ instruction, text });
       vscode.commands.executeCommand('openchamber.focusChat');
     })
   );
 
-  context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.improveCode', async () => {
+  context.subscriptions.push( // ANALYZE
+    vscode.commands.registerCommand('liitmus.analyze', async () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor) {
-        vscode.window.showWarningMessage('OpenChamber [Improve Code]: No active editor');
+        vscode.window.showWarningMessage('Liitmus [Analyze]: No active editor');
         return;
       }
 
       const selection = editor.selection;
       const selectedText = editor.document.getText(selection);
-
-      if (!selectedText) {
-        vscode.window.showWarningMessage('OpenChamber [Improve Code]: No text selected');
-        return;
-      }
-
       const filePath = vscode.workspace.asRelativePath(editor.document.uri);
       const languageId = editor.document.languageId;
+
+      const toolName = 'get_guide'; // Replace with actual tool name if needed
+
+      const instruction = getSystemPrompt('analyze', toolName);
+
       const startLine = selection.start.line + 1;
       const endLine = selection.end.line + 1;
       const lineRange = startLine === endLine ? `${startLine}` : `${startLine}-${endLine}`;
 
-      const prompt = `Improve the following Code:\n\n${filePath}:${lineRange}\n\`\`\`${languageId}\n${selectedText}\n\`\`\``;
+      const text = selectedText
+        ? `Text:\n\n${filePath}:${lineRange}\n\`\`\`${languageId}\n${selectedText}\n\`\`\``
+        : `Text:\n\n${filePath}`;
 
-      // Create new session and send the prompt
-      chatViewProvider?.createNewSessionWithPrompt(prompt);
+      // Create new session and send the instruction as hidden system prompt + user code as visible text
+      chatViewProvider?.createNewSessionWithPrompt({ instruction, text });
       vscode.commands.executeCommand('openchamber.focusChat');
     })
   );
+
+  context.subscriptions.push( // SECURE
+    vscode.commands.registerCommand('liitmus.secure', async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) {
+        vscode.window.showWarningMessage('Liitmus [Secure]: No active editor');
+        return;
+      }
+
+      const selection = editor.selection;
+      const selectedText = editor.document.getText(selection);
+      const filePath = vscode.workspace.asRelativePath(editor.document.uri);
+      const languageId = editor.document.languageId;
+
+      const toolName = 'get_guide'; // Replace with actual tool name if needed
+
+      const instruction = getSystemPrompt('secure', toolName);
+
+      const startLine = selection.start.line + 1;
+      const endLine = selection.end.line + 1;
+      const lineRange = startLine === endLine ? `${startLine}` : `${startLine}-${endLine}`;
+
+      const text = selectedText
+        ? `Text:\n\n${filePath}:${lineRange}\n\`\`\`${languageId}\n${selectedText}\n\`\`\``
+        : `Text:\n\n${filePath}`;
+
+      // Create new session and send the instruction as hidden system prompt + user code as visible text
+      chatViewProvider?.createNewSessionWithPrompt({ instruction, text });
+      vscode.commands.executeCommand('openchamber.focusChat');
+    })
+  );
+
+  // context.subscriptions.push(
+  //   vscode.commands.registerCommand('openchamber.improveCode', async () => {
+  //     const editor = vscode.window.activeTextEditor;
+  //     if (!editor) {
+  //       vscode.window.showWarningMessage('OpenChamber [Improve Code]: No active editor');
+  //       return;
+  //     }
+
+  //     const selection = editor.selection;
+  //     const selectedText = editor.document.getText(selection);
+
+  //     if (!selectedText) {
+  //       vscode.window.showWarningMessage('OpenChamber [Improve Code]: No text selected');
+  //       return;
+  //     }
+
+  //     const filePath = vscode.workspace.asRelativePath(editor.document.uri);
+  //     const languageId = editor.document.languageId;
+  //     const startLine = selection.start.line + 1;
+  //     const endLine = selection.end.line + 1;
+  //     const lineRange = startLine === endLine ? `${startLine}` : `${startLine}-${endLine}`;
+
+  //     let prompt = `Improve the following Code:\n\n${filePath}:${lineRange}\n\`\`\`${languageId}\n${selectedText}\n\`\`\``;
+
+  //     // Create new session and send the prompt
+  //     chatViewProvider?.createNewSessionWithPrompt(prompt);
+  //     vscode.commands.executeCommand('openchamber.focusChat');
+  //   })
+  // );
 
   context.subscriptions.push(
     vscode.commands.registerCommand('openchamber.newSession', () => {
@@ -586,6 +680,18 @@ export async function activate(context: vscode.ExtensionContext) {
 
       outputChannel?.appendLine(lines.join('\n'));
       outputChannel?.show(true);
+    })
+  );
+
+  context.subscriptions.push( // INTEGRATE
+    vscode.commands.registerCommand('liitmus.openNewIntegrationSessionInEditor', () => {
+      sessionEditorProvider?.createOrShowNewIntegrationSession();
+    })
+  );
+
+  context.subscriptions.push( // INTERACT
+    vscode.commands.registerCommand('liitmus.openNewInteractionSessionInEditor', () => {
+      sessionEditorProvider?.createOrShowNewInteractionSession();
     })
   );
 
