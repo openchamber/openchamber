@@ -1213,7 +1213,7 @@ export function ScheduledTaskEditorDialog(props: {
                         <div
                           key={weekday.value}
                           className={[
-                            'inline-flex items-center gap-1.5 px-0.5 py-0.5 typography-meta',
+                            'group inline-flex items-center gap-1.5 px-0.5 py-0.5 typography-meta',
                             checked ? 'text-foreground' : 'text-muted-foreground',
                           ].join(' ')}
                         >
@@ -1221,7 +1221,7 @@ export function ScheduledTaskEditorDialog(props: {
                           <button
                             type="button"
                             onClick={() => toggleWeekday(weekday.value, !checked)}
-                            className="hover:text-foreground"
+                            className="hover:text-foreground group-hover:text-foreground"
                           >
                             {weekday.label}
                           </button>
