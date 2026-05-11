@@ -245,6 +245,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
                         const toolName = getToolDisplayName(part);
                         if (editingTools.has(toolName)) {
                             activePartType = 'editing';
+                            activeToolName = toolName;
                         } else {
                             activePartType = 'tool';
                             activeToolName = toolName;
@@ -317,7 +318,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
 
         const isGenericStatus = activePartType === undefined;
         const statusText = (() => {
-            if (activePartType === 'editing') return 'editing file';
+            if (activePartType === 'editing') return activeToolName === 'multiedit' ? getToolStatusPhrase(activeToolName) : 'editing file';
             if (activePartType === 'tool' && activeToolName) return getToolStatusPhrase(activeToolName);
             if (activePartType === 'reasoning') return 'thinking';
             if (activePartType === 'text') return 'composing';
