@@ -32,17 +32,17 @@ const generateCatalogId = () => `custom:${Date.now()}-${Math.random().toString(1
 
 const guessLabelFromSource = (value: string) => {
   const trimmed = value.trim();
-  const urlFormat = value.startsWith("https://")
+  const urlFormat = trimmed.startsWith("https://")
     ? "https"
-    : value.startsWith("git@")
+    : trimmed.startsWith("git@")
       ? "ssh"
       : "shorthand";
   
   if (urlFormat === 'ssh') {
-    return `${value.split(":")[1].replace(/\.git$/i, '')}`;
+    return `${trimmed.split(":")[1].replace(/\.git$/i, '')}`;
   }
   if (urlFormat === 'https') {
-    return value.split('/').slice(3).filter(Boolean).join('/').replace(/\.git$/i, '');
+    return trimmed.split('/').slice(3).filter(Boolean).join('/').replace(/\.git$/i, '');
   }
   const shorthand = trimmed.match(/^([^/\s]+)\/([^/\s]+)(?:\/.+)?$/);
   if (shorthand) {

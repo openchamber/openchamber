@@ -448,7 +448,7 @@ function parseSkillRepoSource(input: string, subpath?: string) {
   const pathSegments = urlFormat === 'https'
     ? raw.split('/').slice(3).filter(Boolean)
     : urlFormat === 'ssh'
-      ? raw.split('@')[1].split(':')[1].split('/').filter(Boolean)
+      ? (raw.split('@')[1].split(':')[1] ?? '').split('/').filter(Boolean)
       : null;
     
   const repoName = pathSegments && pathSegments.length > 0
