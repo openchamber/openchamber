@@ -28,7 +28,7 @@ export const formatResetTime = (timestamp) => {
 };
 
 export const calculateResetAfterSeconds = (resetAt) => {
-  if (!resetAt) return null;
+  if (resetAt === null || resetAt === undefined || resetAt === '') return null;
   const resetAtTime = new Date(resetAt).getTime();
   if (!Number.isFinite(resetAtTime)) return null;
   const delta = Math.floor((resetAtTime - Date.now()) / 1000);

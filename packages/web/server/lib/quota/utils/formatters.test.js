@@ -12,6 +12,10 @@ describe('formatResetTime', () => {
 });
 
 describe('calculateResetAfterSeconds', () => {
+  it('accepts an epoch reset timestamp', () => {
+    expect(calculateResetAfterSeconds(0)).toBe(0);
+  });
+
   it('returns null for invalid timestamps', () => {
     expect(calculateResetAfterSeconds('not-a-date')).toBeNull();
     expect(calculateResetAfterSeconds(NaN)).toBeNull();
