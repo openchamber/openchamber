@@ -48,6 +48,8 @@ const sleep = (ms: number, signal: AbortSignal) => new Promise<void>((resolve) =
   signal.addEventListener('abort', handleAbort, { once: true });
 });
 
+const getAbortReason = (signal: AbortSignal) => signal.reason ?? new DOMException('Aborted', 'AbortError');
+
 const serializeSseEventBlock = (event: StreamEvent<unknown>): string => {
   const lines: string[] = [];
   if (typeof event.id === 'string' && event.id.length > 0) {
@@ -172,7 +174,7 @@ export const openSseProxy = async ({
 
         await sleep(delay, signal);
         if (signal.aborted) {
-          throw error;
+          throw getAbortReason(signal);
         }
         return connect(); // Recursive retry
       }
