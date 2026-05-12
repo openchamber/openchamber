@@ -39,6 +39,7 @@ interface BridgeResponse {
 const pendingRequests = new Map<string, {
   resolve: (value: unknown) => void;
   reject: (reason: Error) => void;
+  timeout?: ReturnType<typeof setTimeout>;
 }>();
 
 let requestIdCounter = 0;
@@ -55,6 +56,9 @@ window.addEventListener('message', (event: MessageEvent<BridgeResponse>) => {
   const pending = pendingRequests.get(response.id);
   if (pending) {
     pendingRequests.delete(response.id);
+    if (pending.timeout) {
+      clearTimeout(pending.timeout);
+    }
     if (response.success) {
       pending.resolve(response.data);
     } else {
@@ -76,14 +80,19 @@ export function sendBridgeMessageWithOptions<T = unknown>(
     const id = `req_${++requestIdCounter}_${Date.now()}`;
     const request: BridgeRequest = { id, type, payload };
 
-    pendingRequests.set(id, {
+    const pending: {
+      resolve: (value: unknown) => void;
+      reject: (reason: Error) => void;
+      timeout?: ReturnType<typeof setTimeout>;
+    } = {
       resolve: resolve as (value: unknown) => void,
       reject,
-    });
+    };
+    pendingRequests.set(id, pending);
 
     const timeoutMs = typeof options?.timeoutMs === 'number' ? options.timeoutMs : 30000;
     if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
-      setTimeout(() => {
+      pending.timeout = setTimeout(() => {
         if (pendingRequests.has(id)) {
           pendingRequests.delete(id);
           reject(new Error(`Request ${type} timed out`));
