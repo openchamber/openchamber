@@ -97,6 +97,10 @@ export class AgentManagerPanelProvider {
         context: this._context,
       });
       this._panel?.webview.postMessage(response);
+
+      if (message.type === 'api:config/settings:save' && response.success) {
+        void vscode.commands.executeCommand('openchamber.internal.settingsSynced', response.data);
+      }
     }, null, this._context.subscriptions);
   }
 
