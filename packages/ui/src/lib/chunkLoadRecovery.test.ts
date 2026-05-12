@@ -37,8 +37,8 @@ describe('importWithChunkRecovery', () => {
         caught = error;
       }
 
-      expect(caught instanceof Error).toBe(true);
-      expect(storedMarker === null).toBe(false);
+      expect(caught).toBeInstanceOf(Error);
+      expect(storedMarker).not.toBeNull();
       expect(reloadCount).toBe(1);
     } finally {
       if (previousWindow === undefined) {

@@ -15,10 +15,12 @@ declare module "bun:test" {
     toBeGreaterThan(expected: number): void;
     toBeLessThan(expected: number): void;
     toHaveLength(expected: number): void;
+    toBeInstanceOf(expected: unknown): void;
     not: {
       toEqual(expected: unknown): void;
       toBe(expected: unknown): void;
       toContain(expected: unknown): void;
+      toBeNull(): void;
     };
   };
   export function beforeEach(fn: () => void | Promise<void>): void;
