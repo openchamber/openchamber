@@ -261,11 +261,10 @@ export async function activate(context: vscode.ExtensionContext) {
       // Format as file path with line numbers, followed by markdown code block
       const contextText = `${filePath}:${lineRange}\n\`\`\`${languageId}\n${selectedText}\n\`\`\``;
 
-      // Send to webview and reveal the panel
+      // Reveal the panel before sending so the webview is resolved.
+      await vscode.commands.executeCommand('openchamber.openSidebar');
+      await new Promise((resolve) => setTimeout(resolve, 80));
       chatViewProvider?.addTextToInput(contextText);
-
-      // Focus the chat panel
-      vscode.commands.executeCommand('openchamber.focusChat');
     })
   );
 
@@ -355,9 +354,10 @@ export async function activate(context: vscode.ExtensionContext) {
         prompt = `Explain the following Code / Text:\n\n${filePath}`;
       }
 
-      // Create new session and send the prompt
+      // Reveal the panel before sending so the webview is resolved.
+      await vscode.commands.executeCommand('openchamber.openSidebar');
+      await new Promise((resolve) => setTimeout(resolve, 80));
       chatViewProvider?.createNewSessionWithPrompt(prompt);
-      vscode.commands.executeCommand('openchamber.focusChat');
     })
   );
 
@@ -385,9 +385,10 @@ export async function activate(context: vscode.ExtensionContext) {
 
       const prompt = `Improve the following Code:\n\n${filePath}:${lineRange}\n\`\`\`${languageId}\n${selectedText}\n\`\`\``;
 
-      // Create new session and send the prompt
+      // Reveal the panel before sending so the webview is resolved.
+      await vscode.commands.executeCommand('openchamber.openSidebar');
+      await new Promise((resolve) => setTimeout(resolve, 80));
       chatViewProvider?.createNewSessionWithPrompt(prompt);
-      vscode.commands.executeCommand('openchamber.focusChat');
     })
   );
 
