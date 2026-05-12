@@ -75,6 +75,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.project.actions.closeProject': 'Zamknij projekt',
   'sessions.sidebar.project.actions.newDraftSession': 'Nowa sesja robocza',
   'sessions.sidebar.session.menu.rename': 'Zmień nazwę',
+  'sessions.sidebar.session.rename.save': 'Zapisz nazwę sesji',
+  'sessions.sidebar.session.rename.cancel': 'Anuluj zmianę nazwy sesji',
   'sessions.sidebar.session.menu.unpin': 'Odepnij sesję',
   'sessions.sidebar.session.menu.pin': 'Przypnij sesję',
   'sessions.sidebar.session.menu.share': 'Udostępnij',

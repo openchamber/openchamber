@@ -232,6 +232,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.project.actions.closeProject': '关闭项目',
   'sessions.sidebar.project.actions.newDraftSession': '新建草稿会话',
   'sessions.sidebar.session.menu.rename': '重命名',
+  'sessions.sidebar.session.rename.save': '保存会话名称',
+  'sessions.sidebar.session.rename.cancel': '取消重命名会话',
   'sessions.sidebar.session.menu.unpin': '取消置顶会话',
   'sessions.sidebar.session.menu.pin': '置顶会话',
   'sessions.sidebar.session.menu.share': '分享',

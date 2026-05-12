@@ -473,8 +473,23 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                 }
               }}
             />
-            <button type="submit" className="shrink-0 text-muted-foreground hover:text-foreground"><RiCheckLine className="size-4" /></button>
-            <button type="button" onClick={handleCancelEdit} className="shrink-0 text-muted-foreground hover:text-foreground"><RiCloseLine className="size-4" /></button>
+            <button
+              type="submit"
+              aria-label={t('sessions.sidebar.session.rename.save')}
+              title={t('sessions.sidebar.session.rename.save')}
+              className="shrink-0 text-muted-foreground hover:text-foreground"
+            >
+              <RiCheckLine className="size-4" />
+            </button>
+            <button
+              type="button"
+              onClick={handleCancelEdit}
+              aria-label={t('sessions.sidebar.session.rename.cancel')}
+              title={t('sessions.sidebar.session.rename.cancel')}
+              className="shrink-0 text-muted-foreground hover:text-foreground"
+            >
+              <RiCloseLine className="size-4" />
+            </button>
           </form>
           {!isMinimalMode ? (
             <div className="flex items-center justify-between gap-3 text-muted-foreground/60 min-w-0 overflow-hidden leading-tight" style={{ fontSize: 'calc(var(--text-ui-label) * 0.85)' }}>

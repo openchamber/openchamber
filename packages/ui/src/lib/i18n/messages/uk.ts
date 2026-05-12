@@ -232,6 +232,8 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.project.actions.closeProject": "Закрити проєкт",
   "sessions.sidebar.project.actions.newDraftSession": "Нова чернетка сесії",
   "sessions.sidebar.session.menu.rename": "Перейменувати",
+  "sessions.sidebar.session.rename.save": "Зберегти назву сесії",
+  "sessions.sidebar.session.rename.cancel": "Скасувати перейменування сесії",
   "sessions.sidebar.session.menu.unpin": "Відкріпити сесія",
   "sessions.sidebar.session.menu.pin": "Закріпити сесія",
   "sessions.sidebar.session.menu.share": "Поділитися",

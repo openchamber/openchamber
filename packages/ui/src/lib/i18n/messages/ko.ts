@@ -232,6 +232,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.project.actions.closeProject': '프로젝트 닫기',
   'sessions.sidebar.project.actions.newDraftSession': '새 드래프트 세션',
   'sessions.sidebar.session.menu.rename': '이름 변경',
+  'sessions.sidebar.session.rename.save': '세션 이름 저장',
+  'sessions.sidebar.session.rename.cancel': '세션 이름 변경 취소',
   'sessions.sidebar.session.menu.unpin': '세션 고정 해제',
   'sessions.sidebar.session.menu.pin': '세션 고정',
   'sessions.sidebar.session.menu.share': '공유',

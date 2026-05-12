@@ -231,6 +231,8 @@ export const dict = {
   'sessions.sidebar.project.actions.closeProject': 'Close project',
   'sessions.sidebar.project.actions.newDraftSession': 'New draft session',
   'sessions.sidebar.session.menu.rename': 'Rename',
+  'sessions.sidebar.session.rename.save': 'Save session name',
+  'sessions.sidebar.session.rename.cancel': 'Cancel renaming session',
   'sessions.sidebar.session.menu.unpin': 'Unpin session',
   'sessions.sidebar.session.menu.pin': 'Pin session',
   'sessions.sidebar.session.menu.share': 'Share',
