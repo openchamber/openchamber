@@ -24,7 +24,12 @@ export function createGlobalMessageStreamHub({
 
   const notifySubscriber = (kind, subscriber, payload) => {
     try {
-      subscriber(payload);
+      const result = subscriber(payload);
+      if (result && typeof result.catch === 'function') {
+        result.catch((error) => {
+          console.warn(`Global message stream ${kind} subscriber failed:`, error);
+        });
+      }
     } catch (error) {
       console.warn(`Global message stream ${kind} subscriber failed:`, error);
     }
