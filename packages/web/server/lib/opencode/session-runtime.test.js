@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createSessionRuntime } from './session-runtime.js';
 
@@ -96,5 +96,56 @@ describe('session runtime', () => {
         status: 'busy',
       }),
     });
+  });
+
+  it('broadcasts idle activity when cooldown expires', () => {
+    vi.useFakeTimers();
+    const events = [];
+    const runtime = createSessionRuntime({
+      writeSseEvent() {
+        throw new Error('SSE fallback should not be used when broadcastEvent is provided');
+      },
+      getNotificationClients: () => new Set(),
+      broadcastEvent: (payload) => {
+        events.push(payload);
+      },
+    });
+
+    try {
+      runtime.processOpenCodeSsePayload({
+        type: 'session.status',
+        properties: {
+          sessionID: 'session-activity-1',
+          status: {
+            type: 'busy',
+          },
+        },
+      });
+      runtime.processOpenCodeSsePayload({
+        type: 'session.status',
+        properties: {
+          sessionID: 'session-activity-1',
+          status: {
+            type: 'idle',
+          },
+        },
+      });
+
+      const activityPhases = () => events
+        .filter((event) => event.type === 'openchamber:session-activity')
+        .map((event) => event.properties.phase);
+
+      expect(activityPhases()).toEqual(['busy', 'cooldown']);
+
+      vi.advanceTimersByTime(1999);
+      expect(activityPhases()).toEqual(['busy', 'cooldown']);
+
+      vi.advanceTimersByTime(1);
+
+      expect(activityPhases()).toEqual(['busy', 'cooldown', 'idle']);
+    } finally {
+      runtime.dispose();
+      vi.useRealTimers();
+    }
   });
 });
