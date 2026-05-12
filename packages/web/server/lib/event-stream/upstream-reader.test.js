@@ -37,6 +37,28 @@ function createSseResponse({ blocks = [], signal, holdOpen = false }) {
   };
 }
 
+function createTrackedSignal() {
+  const listeners = new Set();
+  return {
+    signal: {
+      aborted: false,
+      addEventListener(type, listener) {
+        if (type === 'abort') {
+          listeners.add(listener);
+        }
+      },
+      removeEventListener(type, listener) {
+        if (type === 'abort') {
+          listeners.delete(listener);
+        }
+      },
+    },
+    getListenerCount() {
+      return listeners.size;
+    },
+  };
+}
+
 describe('createUpstreamSseReader', () => {
   it('emits parsed events and tracks the latest event id', async () => {
     const events = [];
@@ -210,5 +232,45 @@ describe('createUpstreamSseReader', () => {
     ]);
     expect(unavailableBodyCanceled).toBe(true);
     expect(attempt).toBe(2);
+  });
+
+  it('removes reconnect delay abort listeners after normal timeout completion', async () => {
+    const tracked = createTrackedSignal();
+    let attempt = 0;
+    let reader;
+
+    reader = createUpstreamSseReader({
+      buildUrl: () => 'http://127.0.0.1:4096/global/event',
+      reconnectDelayMs: 1,
+      signal: tracked.signal,
+      fetchImpl: async (_url, options) => {
+        attempt += 1;
+        if (attempt === 1) {
+          return {
+            ok: false,
+            status: 503,
+            body: {
+              cancel: async () => {},
+            },
+          };
+        }
+
+        return createSseResponse({
+          signal: options.signal,
+          blocks: [
+            'id: evt-1\ndata: {"type":"server.connected","properties":{}}\n\n',
+          ],
+        });
+      },
+      onEvent() {
+        reader.stop();
+      },
+    });
+
+    await reader.start();
+
+    expect(attempt).toBe(2);
+    // The top-level stop listener remains; the reconnect-delay listener should be removed.
+    expect(tracked.getListenerCount()).toBe(1);
   });
 });

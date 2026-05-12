@@ -1669,7 +1669,7 @@ export function useSidebarSessions(directory?: string): Session[] {
       const wasStreaming = cached?.streamingById.get(session.id) ?? false
       const stableUpdatedAt = isStreaming
         ? (wasStreaming ? cachedUpdatedAt : Math.max(rawUpdatedAt, cachedUpdatedAt, Date.now()))
-        : cachedUpdatedAt
+        : Math.max(rawUpdatedAt, cachedUpdatedAt)
       const signature = getSidebarSessionSignature(session, stableUpdatedAt)
       signatures.set(session.id, signature)
       stableUpdatedAtById.set(session.id, stableUpdatedAt)

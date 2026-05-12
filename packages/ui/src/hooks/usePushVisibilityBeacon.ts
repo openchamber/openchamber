@@ -40,13 +40,17 @@ export const usePushVisibilityBeacon = (options?: { enabled?: boolean }) => {
       }
     };
 
+    const reportPageHidden = () => {
+      sendVisibility(false);
+    };
+
     report();
 
     // Heartbeat while visible so server TTL (30s) never expires.
     const interval = window.setInterval(reportVisibleOnly, HEARTBEAT_MS);
 
     document.addEventListener('visibilitychange', report);
-    window.addEventListener('pagehide', report);
+    window.addEventListener('pagehide', reportPageHidden);
     window.addEventListener('pageshow', report);
     window.addEventListener('focus', report);
     window.addEventListener('blur', report);
@@ -54,7 +58,7 @@ export const usePushVisibilityBeacon = (options?: { enabled?: boolean }) => {
     return () => {
       window.clearInterval(interval);
       document.removeEventListener('visibilitychange', report);
-      window.removeEventListener('pagehide', report);
+      window.removeEventListener('pagehide', reportPageHidden);
       window.removeEventListener('pageshow', report);
       window.removeEventListener('focus', report);
       window.removeEventListener('blur', report);

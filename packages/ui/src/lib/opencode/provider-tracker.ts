@@ -41,7 +41,8 @@ function evictStaleProviders(): void {
 }
 
 if (typeof setInterval !== 'undefined') {
-  setInterval(evictStaleProviders, PROVIDER_EVICTION_INTERVAL_MS)
+  const interval = setInterval(evictStaleProviders, PROVIDER_EVICTION_INTERVAL_MS)
+  ;(interval as unknown as { unref?: () => void }).unref?.()
 }
 
 function getOrCreateProvider(providerID: string): ProviderState {

@@ -187,7 +187,7 @@ export const StashesDialog: React.FC<StashesDialogProps> = ({
 const StashIconButton: React.FC<{ label: string; loading: boolean; disabled: boolean; destructive?: boolean; onClick: () => void; children: React.ReactNode }> = ({ label, loading, disabled, destructive, onClick, children }) => (
   <Tooltip>
     <TooltipTrigger asChild>
-      <button type="button" className={cn('flex h-6 w-6 items-center justify-center transition-colors disabled:opacity-50', destructive ? 'text-[var(--status-error)] hover:text-[var(--status-error)]' : 'text-muted-foreground hover:text-foreground')} onClick={onClick} disabled={disabled}>
+      <button type="button" aria-label={label} aria-busy={loading || undefined} className={cn('flex h-6 w-6 items-center justify-center transition-colors disabled:opacity-50', destructive ? 'text-[var(--status-error)] hover:text-[var(--status-error)]' : 'text-muted-foreground hover:text-foreground')} onClick={onClick} disabled={disabled}>
         {loading ? <RiLoader4Line className="size-4 animate-spin" /> : children}
       </button>
     </TooltipTrigger>

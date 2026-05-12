@@ -204,7 +204,9 @@ export const registerProjectIconRoutes = (app, dependencies) => {
         try {
           const data = await fsPromises.readFile(iconPath);
           const ext = path.extname(iconPath).slice(1).toLowerCase();
-          const resolvedMime = metadataMime || projectIconExtensionToMime[ext] || 'application/octet-stream';
+          const resolvedMime = iconPath === preferredPath && metadataMime
+            ? metadataMime
+            : projectIconExtensionToMime[ext] || 'application/octet-stream';
           const contentType = resolvedMime === 'image/svg+xml' ? 'image/svg+xml; charset=utf-8' : resolvedMime;
 
           if (resolvedMime === 'image/svg+xml' && requestedThemeVariant) {

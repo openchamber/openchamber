@@ -385,7 +385,7 @@ export function createTerminalRuntime({
     });
   });
 
-  server.on('upgrade', (req, socket, head) => {
+  const upgradeHandler = (req, socket, head) => {
     const pathname = parseRequestPathname(req.url);
     if (pathname !== TERMINAL_INPUT_WS_PATH) {
       return;
@@ -422,7 +422,9 @@ export function createTerminalRuntime({
     };
 
     void handleUpgrade();
-  });
+  };
+
+  server.on('upgrade', upgradeHandler);
 
   const wireTerminalSession = (sessionId, session) => {
     session.ptyProcess.onData((data) => {
@@ -573,6 +575,34 @@ export function createTerminalRuntime({
       }
     }, 15000);
 
+    let cleanedUp = false;
+    let dataDisposable = null;
+    let exitDisposable = null;
+    const cleanup = () => {
+      if (cleanedUp) {
+        return;
+      }
+
+      cleanedUp = true;
+      clearInterval(heartbeatInterval);
+      session.clients.delete(clientId);
+
+      if (dataDisposable && typeof dataDisposable.dispose === 'function') {
+        dataDisposable.dispose();
+      }
+      if (exitDisposable && typeof exitDisposable.dispose === 'function') {
+        exitDisposable.dispose();
+      }
+
+      try {
+        res.end();
+      } catch (error) {
+
+      }
+
+      console.log(`Client ${clientId} disconnected from terminal session ${sessionId}`);
+    };
+
     const dataHandler = (data) => {
       try {
         session.lastActivity = Date.now();
@@ -601,28 +631,15 @@ export function createTerminalRuntime({
       cleanup();
     };
 
-    const dataDisposable = session.ptyProcess.onData(dataHandler);
-    const exitDisposable = session.ptyProcess.onExit(exitHandler);
+    dataDisposable = session.ptyProcess.onData(dataHandler);
+    if (cleanedUp && dataDisposable && typeof dataDisposable.dispose === 'function') {
+      dataDisposable.dispose();
+    }
 
-    const cleanup = () => {
-      clearInterval(heartbeatInterval);
-      session.clients.delete(clientId);
-
-      if (dataDisposable && typeof dataDisposable.dispose === 'function') {
-        dataDisposable.dispose();
-      }
-      if (exitDisposable && typeof exitDisposable.dispose === 'function') {
-        exitDisposable.dispose();
-      }
-
-      try {
-        res.end();
-      } catch (error) {
-
-      }
-
-      console.log(`Client ${clientId} disconnected from terminal session ${sessionId}`);
-    };
+    exitDisposable = session.ptyProcess.onExit(exitHandler);
+    if (cleanedUp && exitDisposable && typeof exitDisposable.dispose === 'function') {
+      exitDisposable.dispose();
+    }
 
     req.on('close', cleanup);
     req.on('error', cleanup);
@@ -794,6 +811,8 @@ export function createTerminalRuntime({
   });
 
   const shutdown = async () => {
+    server.off('upgrade', upgradeHandler);
+
     if (idleSweepInterval) {
       clearInterval(idleSweepInterval);
     }

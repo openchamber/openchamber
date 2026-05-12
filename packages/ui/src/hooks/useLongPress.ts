@@ -26,6 +26,7 @@ export function useLongPress({
   }, []);
 
   const onPointerDown = useCallback((e: React.PointerEvent | React.TouchEvent) => {
+    clear();
     isLongPressRef.current = false;
     
     // Store start position to detect movement
@@ -44,7 +45,7 @@ export function useLongPress({
       }
       onLongPress();
     }, delay);
-  }, [delay, onLongPress, enableHaptic]);
+  }, [clear, delay, onLongPress, enableHaptic]);
 
   const onPointerMove = useCallback((e: React.PointerEvent | React.TouchEvent) => {
     if (!startPosRef.current || !timerRef.current) return;
@@ -95,6 +96,7 @@ export function useLongPress({
     onTouchStart: onPointerDown, // Add touch handlers for better mobile support
     onTouchMove: onPointerMove,
     onTouchEnd: onPointerUp,
+    onTouchCancel: clear,
     onContextMenu,
   };
 }

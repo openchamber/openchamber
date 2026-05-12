@@ -56,6 +56,17 @@ export function dropSessionCaches(store: SessionCache, sessionIDs: Iterable<stri
   const stale = new Set(Array.from(sessionIDs).filter(Boolean))
   if (stale.size === 0) return
 
+  const staleMessageIDs = new Set<string>()
+  for (const sessionID of stale) {
+    for (const message of store.message?.[sessionID] ?? []) {
+      if (message?.id) staleMessageIDs.add(message.id)
+    }
+  }
+
+  for (const messageID of staleMessageIDs) {
+    if (store.part) delete store.part[messageID]
+  }
+
   for (const key of Object.keys(store.part ?? {})) {
     const parts = store.part[key]
     if (!parts?.some((part) => stale.has((part as { sessionID?: string })?.sessionID ?? "")))

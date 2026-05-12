@@ -74,6 +74,14 @@ function createSdkWithSingleEvent(event, hold) {
   };
 }
 
+function withTimeout(promise, ms, message) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
+}
+
 // Helper to create an SDK that yields multiple events in sequence, then holds.
 function createSdkWithEvents(events, hold) {
   return {
@@ -638,25 +646,30 @@ describe('createEventPipeline', () => {
       },
     }, hold);
 
+    let cleanup;
     const delivered = new Promise((resolve) => {
-      const { cleanup } = createEventPipeline({
+      const pipeline = createEventPipeline({
         sdk,
         transport: 'auto',
+        wsReadyTimeoutMs: 20,
         onEvent: (directory, payload) => {
           received.push({ directory, payload });
-          cleanup();
-          releaseStream();
           resolve();
         },
       });
+      cleanup = pipeline.cleanup;
     });
 
     await Promise.resolve();
     const socket = FakeWebSocket.instances[0];
     socket.emitOpen();
 
-    await new Promise((resolve) => setTimeout(resolve, 2300));
-    await delivered;
+    try {
+      await withTimeout(delivered, 500, 'timed out waiting for websocket-ready SSE fallback');
+    } finally {
+      cleanup?.();
+      releaseStream();
+    }
 
     expect(received).toEqual([
       {

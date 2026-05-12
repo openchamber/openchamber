@@ -15,6 +15,9 @@ let activeSessionId: string | null = null;
 let activeSessionTitle: string | null = null;
 
 const SETTINGS_KEY = 'openchamber.settings';
+const CHAT_VIEW_BOOTSTRAP_DELAY_MS = 80;
+
+const waitForChatViewBootstrap = () => new Promise<void>((resolve) => setTimeout(resolve, CHAT_VIEW_BOOTSTRAP_DELAY_MS));
 
 const formatIso = (value: number | null | undefined) => {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '(none)';
@@ -145,9 +148,34 @@ export async function activate(context: vscode.ExtensionContext) {
       } catch (e) {
         outputChannel?.appendLine(`[OpenChamber] openchamber.chatView.focus failed: ${e}`);
         vscode.window.showErrorMessage(`OpenChamber: Failed to open sidebar - ${e}`);
+        return false;
       }
+
+      if (!chatViewProvider?.hasResolvedView()) {
+        outputChannel?.appendLine('[OpenChamber] Chat sidebar focus completed before the webview was resolved');
+        vscode.window.showWarningMessage('OpenChamber: Chat sidebar is not ready');
+        return false;
+      }
+
+      return true;
     })
   );
+
+  const revealChatViewForPayload = async () => {
+    const opened = await vscode.commands.executeCommand<boolean>('openchamber.openSidebar');
+    if (!opened) {
+      return false;
+    }
+
+    await waitForChatViewBootstrap();
+    if (!chatViewProvider?.hasResolvedView()) {
+      outputChannel?.appendLine('[OpenChamber] Chat sidebar webview was disposed before payload delivery');
+      vscode.window.showWarningMessage('OpenChamber: Chat sidebar is not ready');
+      return false;
+    }
+
+    return true;
+  };
 
   context.subscriptions.push(
     vscode.commands.registerCommand('openchamber.focusChat', async () => {
@@ -261,11 +289,10 @@ export async function activate(context: vscode.ExtensionContext) {
       // Format as file path with line numbers, followed by markdown code block
       const contextText = `${filePath}:${lineRange}\n\`\`\`${languageId}\n${selectedText}\n\`\`\``;
 
-      // Send to webview and reveal the panel
+      if (!(await revealChatViewForPayload())) {
+        return;
+      }
       chatViewProvider?.addTextToInput(contextText);
-
-      // Focus the chat panel
-      vscode.commands.executeCommand('openchamber.focusChat');
     })
   );
 
@@ -319,8 +346,9 @@ export async function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      await vscode.commands.executeCommand('openchamber.openSidebar');
-      await new Promise((resolve) => setTimeout(resolve, 80));
+      if (!(await revealChatViewForPayload())) {
+        return;
+      }
       chatViewProvider?.addFileMentions(mentionPaths);
 
       if (skippedEntries.length > 0) {
@@ -355,9 +383,10 @@ export async function activate(context: vscode.ExtensionContext) {
         prompt = `Explain the following Code / Text:\n\n${filePath}`;
       }
 
-      // Create new session and send the prompt
+      if (!(await revealChatViewForPayload())) {
+        return;
+      }
       chatViewProvider?.createNewSessionWithPrompt(prompt);
-      vscode.commands.executeCommand('openchamber.focusChat');
     })
   );
 
@@ -385,9 +414,10 @@ export async function activate(context: vscode.ExtensionContext) {
 
       const prompt = `Improve the following Code:\n\n${filePath}:${lineRange}\n\`\`\`${languageId}\n${selectedText}\n\`\`\``;
 
-      // Create new session and send the prompt
+      if (!(await revealChatViewForPayload())) {
+        return;
+      }
       chatViewProvider?.createNewSessionWithPrompt(prompt);
-      vscode.commands.executeCommand('openchamber.focusChat');
     })
   );
 

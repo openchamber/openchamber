@@ -1210,19 +1210,22 @@ export function ScheduledTaskEditorDialog(props: {
                     {orderedWeekdays.map((weekday) => {
                       const checked = draft.schedule.weekdays.includes(weekday.value);
                       return (
-                        <button
+                        <div
                           key={weekday.value}
-                          type="button"
-                          onClick={() => toggleWeekday(weekday.value, !checked)}
                           className={[
-                            'inline-flex items-center gap-1.5 px-0.5 py-0.5 typography-meta',
+                            'group inline-flex items-center gap-1.5 px-0.5 py-0.5 typography-meta',
                             checked ? 'text-foreground' : 'text-muted-foreground',
-                            'hover:text-foreground',
                           ].join(' ')}
                         >
                           <Checkbox checked={checked} onChange={(next) => toggleWeekday(weekday.value, next)} ariaLabel={weekday.label} />
-                          <span>{weekday.label}</span>
-                        </button>
+                          <button
+                            type="button"
+                            onClick={() => toggleWeekday(weekday.value, !checked)}
+                            className="group-hover:text-foreground"
+                          >
+                            {weekday.label}
+                          </button>
+                        </div>
                       );
                     })}
                   </div>

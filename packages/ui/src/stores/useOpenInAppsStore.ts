@@ -64,9 +64,9 @@ export const useOpenInAppsStore = create<OpenInAppsState>()((set, get) => ({
     }
     initialized = true;
 
-    const applyInstalledApps = (installed: InstalledDesktopAppInfo[]) => {
+    const applyInstalledApps = (installed: InstalledDesktopAppInfo[], hasLoadedApps = true) => {
       if (!Array.isArray(installed) || installed.length === 0) {
-        set({ availableApps: getAlwaysAvailableApps(), hasLoadedApps: false });
+        set({ availableApps: getAlwaysAvailableApps(), hasLoadedApps });
         return;
       }
 
@@ -118,11 +118,13 @@ export const useOpenInAppsStore = create<OpenInAppsState>()((set, get) => ({
           isCacheStale,
         } = await fetchDesktopInstalledApps(appNames, force);
 
+        const shouldRetryEmptyScan = success && !hasCache && installed.length === 0 && retryAttempt < 3;
+
         set({ isCacheStale: hasCache ? isCacheStale : false });
-        applyInstalledApps(installed);
+        applyInstalledApps(installed, success ? !shouldRetryEmptyScan : false);
 
         if (success) {
-          if (!hasCache && installed.length === 0 && retryAttempt < 3) {
+          if (shouldRetryEmptyScan) {
             const delays = [800, 1600, 3200];
             const delay = delays[retryAttempt] ?? 3200;
             retryAttempt += 1;

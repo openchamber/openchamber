@@ -2,9 +2,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { summarizeText } from './summarization.js';
 
+const originalFetch = globalThis.fetch;
+
+function stubFetch(fetchMock) {
+  globalThis.fetch = fetchMock;
+}
+
 describe('text summarization zen requests', () => {
   afterEach(() => {
-    vi.unstubAllGlobals();
+    globalThis.fetch = originalFetch;
   });
 
   it('uses responses endpoint for gpt models', async () => {
@@ -17,7 +23,7 @@ describe('text summarization zen requests', () => {
         }],
       }),
     }));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     const result = await summarizeText({
       text: 'Long text '.repeat(30),
@@ -43,7 +49,7 @@ describe('text summarization zen requests', () => {
         choices: [{ message: { content: 'Chat summary' } }],
       }),
     }));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     const result = await summarizeText({
       text: 'Long text '.repeat(30),
@@ -60,5 +66,53 @@ describe('text summarization zen requests', () => {
       }),
     );
     expect(result.summary).toBe('Chat summary');
+  });
+
+  it('clamps successful model summaries to the requested max length', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        output: [{
+          type: 'message',
+          content: [{ type: 'output_text', text: 'This response is too long' }],
+        }],
+      }),
+    }));
+    stubFetch(fetchMock);
+
+    const result = await summarizeText({
+      text: 'Long text '.repeat(30),
+      threshold: 0,
+      maxLength: 12,
+      zenModel: 'gpt-5-nano',
+      mode: 'notification',
+    });
+
+    expect(result.summary).toBe('This respons');
+    expect(result.summaryLength).toBe(12);
+  });
+
+  it('does not clamp successful model summaries for non-finite max lengths', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        output: [{
+          type: 'message',
+          content: [{ type: 'output_text', text: 'Full response' }],
+        }],
+      }),
+    }));
+    stubFetch(fetchMock);
+
+    const result = await summarizeText({
+      text: 'Long text '.repeat(30),
+      threshold: 0,
+      maxLength: Infinity,
+      zenModel: 'gpt-5-nano',
+      mode: 'notification',
+    });
+
+    expect(result.summary).toBe('Full response');
+    expect(result.summaryLength).toBe(13);
   });
 });
