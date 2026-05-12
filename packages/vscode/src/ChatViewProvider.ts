@@ -389,28 +389,36 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
+    const view = this._view;
     const editor = vscode.window.activeTextEditor;
     if (!editor || editor.document.uri.scheme !== 'file') {
       this._scheduleClearActiveEditorFile();
       return;
     }
 
+    const editorUri = editor.document.uri;
+    const editorUriKey = editorUri.toString();
+
     if (this._clearActiveEditorFileTimer !== undefined) {
       clearTimeout(this._clearActiveEditorFileTimer);
       this._clearActiveEditorFileTimer = undefined;
     }
 
-    const filePath = normalizeWindowsDriveLetter(editor.document.uri.fsPath);
-    const rawFileName = editor.document.uri.fsPath;
+    const filePath = normalizeWindowsDriveLetter(editorUri.fsPath);
+    const rawFileName = editorUri.fsPath;
     const fileName = rawFileName.replace(/\\/g, '/').split('/').pop() || '';
-    const relativePath = vscode.workspace.asRelativePath(editor.document.uri, false);
+    const relativePath = vscode.workspace.asRelativePath(editorUri, false);
 
     let fileSize: number | null = null;
     try {
-      const stat = await vscode.workspace.fs.stat(editor.document.uri);
+      const stat = await vscode.workspace.fs.stat(editorUri);
       fileSize = stat.size;
     } catch {
       // File may not be saved yet or inaccessible
+    }
+
+    if (this._view !== view || vscode.window.activeTextEditor?.document.uri.toString() !== editorUriKey) {
+      return;
     }
 
     let selection: { startLine: number; endLine: number; text: string } | null = null;
@@ -428,7 +436,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
     this._lastActiveEditorFilePayload = payload;
 
-    this._view.webview.postMessage({
+    view.webview.postMessage({
       type: 'command',
       command: 'activeEditorFile',
       payload,
