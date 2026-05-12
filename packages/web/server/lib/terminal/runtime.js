@@ -385,7 +385,7 @@ export function createTerminalRuntime({
     });
   });
 
-  server.on('upgrade', (req, socket, head) => {
+  const upgradeHandler = (req, socket, head) => {
     const pathname = parseRequestPathname(req.url);
     if (pathname !== TERMINAL_INPUT_WS_PATH) {
       return;
@@ -422,7 +422,9 @@ export function createTerminalRuntime({
     };
 
     void handleUpgrade();
-  });
+  };
+
+  server.on('upgrade', upgradeHandler);
 
   const wireTerminalSession = (sessionId, session) => {
     session.ptyProcess.onData((data) => {
@@ -791,6 +793,8 @@ export function createTerminalRuntime({
   });
 
   const shutdown = async () => {
+    server.off('upgrade', upgradeHandler);
+
     if (idleSweepInterval) {
       clearInterval(idleSweepInterval);
     }
