@@ -125,6 +125,18 @@ export class AgentManagerPanelProvider {
     this._sendCachedState();
   }
 
+  public notifySettingsSynced(settings: unknown): void {
+    if (!this._panel) {
+      return;
+    }
+
+    this._panel.webview.postMessage({
+      type: 'command',
+      command: 'settingsSynced',
+      payload: settings,
+    });
+  }
+
   private _sendCachedState() {
     if (!this._panel) {
       return;
