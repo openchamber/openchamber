@@ -189,7 +189,7 @@ export function useSync() {
   const fetchMessages = useCallback(
     async (sessionID: string, limit: number, before?: string) => {
       const result = await retry(() =>
-        sdk.session.messages({ sessionID, limit, before }),
+        sdk.session.messages({ sessionID, directory, limit, before }),
       )
       const items = (result.data ?? []).filter((x: { info?: { id?: string } }) => !!x?.info?.id)
       const session = items
@@ -202,7 +202,7 @@ export function useSync() {
       const cursor = result.response?.headers?.get?.("x-next-cursor") ?? undefined
       return { session, part, cursor, complete: !cursor }
     },
-    [sdk],
+    [sdk, directory],
   )
 
   // Load messages for a session
@@ -286,7 +286,7 @@ export function useSync() {
         // Fetch session info if needed
         if (!hasSession || force) {
           try {
-            const result = await retry(() => sdk.session.get({ sessionID }))
+            const result = await retry(() => sdk.session.get({ sessionID, directory }))
             if (result.data) {
               const s = store.getState()
               const sessions = [...s.session]
