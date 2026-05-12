@@ -1,6 +1,5 @@
 import React from 'react';
 
-import { EditorSelection } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 
 import { Input } from '@/components/ui/input';
@@ -18,7 +17,7 @@ type GoToLineDialogProps = {
 type CursorSnapshot = {
   character: number;
   lineNumber: number;
-  selection: EditorSelection;
+  selection: EditorView['state']['selection'];
 };
 
 const resolveLineNumber = (rawValue: string, view: EditorView | null): number | null => {
@@ -34,7 +33,7 @@ const resolveLineNumber = (rawValue: string, view: EditorView | null): number | 
   return Math.min(parsed, view.state.doc.lines);
 };
 
-const getCursorSnapshot = (view: EditorView, selection: EditorSelection): CursorSnapshot => {
+const getCursorSnapshot = (view: EditorView, selection: EditorView['state']['selection']): CursorSnapshot => {
   const line = view.state.doc.lineAt(selection.main.head);
   return {
     lineNumber: line.number,
@@ -49,7 +48,7 @@ const moveSelectionToLine = (view: EditorView, lineNumber: number, preferredChar
   const position = line.from + nextCharacter - 1;
 
   view.dispatch({
-    selection: EditorSelection.cursor(position),
+    selection: { anchor: position },
     effects: EditorView.scrollIntoView(position, { y: 'center' }),
   });
 };

@@ -15,7 +15,10 @@ import { AgentSelector } from '@/components/sections/commands/AgentSelector';
 import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
 import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo } from '@/components/chat/CommandAutocomplete';
 import { FileMentionAutocomplete, type FileMentionHandle } from '@/components/chat/FileMentionAutocomplete';
+import { opencodeClient } from '@/lib/opencode/client';
+import type { BackendControlSurface } from '@/lib/api/types';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useBackendsStore } from '@/stores/useBackendsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import type { ScheduledTask } from '@/lib/scheduledTasksApi';
 import { useI18n } from '@/lib/i18n';
@@ -459,6 +462,7 @@ type ScheduledTaskDraft = {
   };
   execution: {
     prompt: string;
+    backendId: string;
     providerID: string;
     modelID: string;
     variant: string;
@@ -486,6 +490,7 @@ const normalizeDraftTimes = (task: ScheduledTask | null): string[] => {
 const toDraft = (
   task: ScheduledTask | null,
   defaults: {
+    backendId: string;
     providerID: string;
     modelID: string;
     variant: string;
@@ -507,6 +512,7 @@ const toDraft = (
       },
       execution: {
         prompt: '',
+        backendId: defaults.backendId,
         providerID: defaults.providerID,
         modelID: defaults.modelID,
         variant: defaults.variant,
@@ -535,6 +541,7 @@ const toDraft = (
     },
     execution: {
       prompt: task.execution.prompt,
+      backendId: task.execution.backendId || defaults.backendId,
       providerID: task.execution.providerID,
       modelID: task.execution.modelID,
       variant: task.execution.variant || '',
@@ -550,6 +557,9 @@ const validateDraft = (draft: ScheduledTaskDraft, t: ReturnType<typeof useI18n>[
   }
   if (!draft.execution.prompt.trim()) {
     return t('sessions.scheduledTasks.editor.validation.promptRequired');
+  }
+  if (!draft.execution.backendId.trim()) {
+    return 'Backend is required';
   }
   if (!draft.execution.providerID.trim() || !draft.execution.modelID.trim()) {
     return t('sessions.scheduledTasks.editor.validation.modelRequired');
@@ -603,9 +613,14 @@ export function ScheduledTaskEditorDialog(props: {
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const weekStartPreference = useUIStore((state) => state.weekStartPreference);
   const isMobile = useUIStore((state) => state.isMobile);
+  const backends = useBackendsStore((state) => state.backends);
+  const defaultBackendId = useBackendsStore((state) => state.defaultBackendId);
+  const loadBackends = useBackendsStore((state) => state.loadBackends);
+  const [backendSurface, setBackendSurface] = React.useState<BackendControlSurface | null>(null);
 
   const [draft, setDraft] = React.useState<ScheduledTaskDraft>(() =>
     toDraft(task, {
+      backendId: defaultBackendId || 'opencode',
       providerID: currentProviderID,
       modelID: currentModelID,
       variant: currentVariant,
@@ -658,9 +673,91 @@ export function ScheduledTaskEditorDialog(props: {
     if (!open) {
       return;
     }
-    void loadProviders();
-    void loadAgents();
-  }, [open, loadProviders, loadAgents]);
+    void loadBackends();
+    if ((task?.execution?.backendId || defaultBackendId || 'opencode') === 'opencode') {
+      void loadProviders({ backendId: 'opencode' });
+      void loadAgents({ backendId: 'opencode' });
+    }
+  }, [defaultBackendId, loadAgents, loadBackends, loadProviders, open, task?.execution?.backendId]);
+
+  React.useEffect(() => {
+    if (!open || !draft.execution.backendId) {
+      setBackendSurface(null);
+      return;
+    }
+
+    let cancelled = false;
+    void opencodeClient.getHarnessControlSurface({
+      backendId: draft.execution.backendId,
+      ...(draft.execution.providerID ? { providerId: draft.execution.providerID } : {}),
+      ...(draft.execution.modelID ? { modelId: draft.execution.modelID } : {}),
+    }).then((surface) => {
+      if (!cancelled) {
+        setBackendSurface(surface);
+      }
+    }).catch(() => {
+      if (!cancelled) {
+        setBackendSurface(null);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [draft.execution.backendId, draft.execution.modelID, draft.execution.providerID, open]);
+
+  React.useEffect(() => {
+    if (!open || draft.execution.backendId !== 'opencode') {
+      return;
+    }
+    void loadProviders({ backendId: 'opencode' });
+    void loadAgents({ backendId: 'opencode' });
+  }, [draft.execution.backendId, loadAgents, loadProviders, open]);
+
+  React.useEffect(() => {
+    if (!open || !backendSurface || task) {
+      return;
+    }
+
+    setDraft((prev) => {
+      if (prev.execution.backendId !== backendSurface.backendId) {
+        return prev;
+      }
+
+      const nextAgent = prev.execution.agent.trim().length > 0
+        ? prev.execution.agent
+        : (backendSurface.modeSelector?.items.find((item) => item.id === 'build')?.id || backendSurface.modeSelector?.items[0]?.id || '');
+      const nextProviderID = prev.execution.providerID.trim().length > 0
+        ? prev.execution.providerID
+        : (backendSurface.modelSelector?.providerId || prev.execution.backendId);
+      const nextModelID = prev.execution.modelID.trim().length > 0
+        ? prev.execution.modelID
+        : (backendSurface.modelSelector?.defaultOptionId || backendSurface.modelSelector?.options?.[0]?.id || '');
+      const nextVariant = prev.execution.variant.trim().length > 0
+        ? prev.execution.variant
+        : (backendSurface.effortSelector?.defaultOptionId || backendSurface.effortSelector?.options?.[0]?.id || '');
+
+      if (
+        nextAgent === prev.execution.agent
+        && nextProviderID === prev.execution.providerID
+        && nextModelID === prev.execution.modelID
+        && nextVariant === prev.execution.variant
+      ) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        execution: {
+          ...prev.execution,
+          agent: nextAgent,
+          providerID: nextProviderID,
+          modelID: nextModelID,
+          variant: nextVariant,
+        },
+      };
+    });
+  }, [backendSurface, open, task]);
 
   React.useEffect(() => {
     if (!open) {
@@ -668,6 +765,7 @@ export function ScheduledTaskEditorDialog(props: {
     }
     setDraft(
       toDraft(task, {
+        backendId: task?.execution?.backendId || defaultBackendId || 'opencode',
         providerID: currentProviderID,
         modelID: currentModelID,
         variant: currentVariant,
@@ -681,7 +779,7 @@ export function ScheduledTaskEditorDialog(props: {
     setShowFileMention(false);
     setCommandQuery('');
     setMentionQuery('');
-  }, [open, task, currentProviderID, currentModelID, currentVariant, currentAgentName]);
+  }, [open, task, currentProviderID, currentModelID, currentVariant, currentAgentName, defaultBackendId]);
 
   React.useEffect(() => {
     if (!isDatePickerOpen) {
@@ -702,10 +800,13 @@ export function ScheduledTaskEditorDialog(props: {
 
 
   const variantOptions = React.useMemo(() => {
+    if (backendSurface?.effortSelector?.options?.length) {
+      return backendSurface.effortSelector.options.map((option) => option.id);
+    }
     const provider = providers.find((item) => item.id === draft.execution.providerID);
     const model = provider?.models?.find((item) => item.id === draft.execution.modelID) as { variants?: Record<string, unknown> } | undefined;
     return model?.variants ? Object.keys(model.variants) : [];
-  }, [providers, draft.execution.providerID, draft.execution.modelID]);
+  }, [backendSurface, providers, draft.execution.providerID, draft.execution.modelID]);
   const hasVariantOptions = variantOptions.length > 0;
   const selectedVariantValue = React.useMemo(() => {
     if (!hasVariantOptions) {
@@ -978,6 +1079,7 @@ export function ScheduledTaskEditorDialog(props: {
       },
       execution: {
         prompt: draft.execution.prompt,
+        backendId: draft.execution.backendId,
         providerID: draft.execution.providerID,
         modelID: draft.execution.modelID,
         ...(draft.execution.variant.trim() ? { variant: draft.execution.variant.trim() } : {}),
@@ -1007,6 +1109,10 @@ export function ScheduledTaskEditorDialog(props: {
     );
   }, []);
 
+  const backendModeItems = backendSurface?.modeSelector?.items ?? [];
+  const backendModelItems = backendSurface?.modelSelector?.options ?? [];
+  const usesBackendModelCatalog = backendSurface?.modelSelector?.source === 'backend' && backendModelItems.length > 0;
+  const selectableBackends = React.useMemo(() => backends.filter((backend) => backend.available && backend.capabilities.chat), [backends]);
   const title = task ? t('sessions.scheduledTasks.editor.title.edit') : t('sessions.scheduledTasks.editor.title.new');
   const description = t('sessions.scheduledTasks.editor.description');
 
@@ -1289,22 +1395,99 @@ export function ScheduledTaskEditorDialog(props: {
 
           <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
             <div className="flex min-w-0 flex-col gap-1">
-              <FieldLabel required>{t('sessions.scheduledTasks.editor.model.label')}</FieldLabel>
-              <ModelSelector
-                providerId={draft.execution.providerID}
-                modelId={draft.execution.modelID}
-                onChange={(providerID, modelID) => {
+              <FieldLabel required>Backend</FieldLabel>
+              <Select
+                value={draft.execution.backendId}
+                onValueChange={(backendId) => {
                   setDraft((prev) => ({
                     ...prev,
                     execution: {
                       ...prev.execution,
-                      providerID,
-                      modelID,
-                      variant: '',
+                      backendId,
+                      providerID: backendId === 'opencode' ? currentProviderID : backendId,
+                      modelID: backendId === 'opencode' ? currentModelID : '',
+                      variant: backendId === 'opencode' ? currentVariant : '',
+                      agent: backendId === 'opencode' ? currentAgentName : '',
                     },
                   }));
                 }}
-              />
+              >
+                <SelectTrigger className="w-fit max-w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {selectableBackends.map((backend) => (
+                    <SelectItem key={backend.id} value={backend.id}>{backend.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {backendModeItems.length > 0 ? (
+              <div className="flex min-w-0 flex-col gap-1">
+                <FieldLabel>{backendSurface?.modeSelector?.label || 'Agent'}</FieldLabel>
+                <Select
+                  value={draft.execution.agent || '__default'}
+                  onValueChange={(value) => {
+                    setDraft((prev) => ({
+                      ...prev,
+                      execution: {
+                        ...prev.execution,
+                        agent: value === '__default' ? '' : value,
+                      },
+                    }));
+                  }}
+                >
+                  <SelectTrigger className="w-fit max-w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__default">Default</SelectItem>
+                    {backendModeItems.map((item) => (
+                      <SelectItem key={item.id} value={item.id}>{item.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
+
+            <div className="flex min-w-0 flex-col gap-1">
+              <FieldLabel required>Model</FieldLabel>
+              {usesBackendModelCatalog ? (
+                <Select
+                  value={draft.execution.modelID || '__none'}
+                  onValueChange={(modelID) => {
+                    setDraft((prev) => ({
+                      ...prev,
+                      execution: {
+                        ...prev.execution,
+                        providerID: backendSurface?.modelSelector?.providerId || prev.execution.backendId,
+                        modelID: modelID === '__none' ? '' : modelID,
+                        variant: '',
+                      },
+                    }));
+                  }}
+                >
+                  <SelectTrigger className="w-fit max-w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {backendModelItems.map((item) => (
+                      <SelectItem key={item.id} value={item.id}>{item.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <ModelSelector
+                  providerId={draft.execution.providerID}
+                  modelId={draft.execution.modelID}
+                  onChange={(providerID, modelID) => {
+                    setDraft((prev) => ({
+                      ...prev,
+                      execution: {
+                        ...prev.execution,
+                        providerID,
+                        modelID,
+                        variant: '',
+                      },
+                    }));
+                  }}
+                />
+              )}
             </div>
 
             <div className="flex min-w-0 flex-col gap-1">
@@ -1339,6 +1522,22 @@ export function ScheduledTaskEditorDialog(props: {
             </div>
           </div>
 
+          {draft.execution.backendId === 'opencode' && backendModeItems.length === 0 ? (
+            <div className="flex min-w-0 flex-col gap-1">
+              <FieldLabel>Agent</FieldLabel>
+              <AgentSelector
+                agentName={draft.execution.agent}
+                filter={(agent) => isPrimaryMode(agent.mode)}
+                onChange={(agent) => setDraft((prev) => ({
+                  ...prev,
+                  execution: {
+                    ...prev.execution,
+                    agent,
+                  },
+                }))}
+              />
+            </div>
+          ) : null}
           <div className="flex min-w-0 flex-col gap-1">
             <FieldLabel>{t('sessions.scheduledTasks.editor.agent.label')}</FieldLabel>
             <AgentSelector

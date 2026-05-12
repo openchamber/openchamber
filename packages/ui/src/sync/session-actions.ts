@@ -3,50 +3,56 @@
  * Replaces the action methods from the old useSessionStore.
  */
 
-import type { OpencodeClient, Session, Message, Part } from "@opencode-ai/sdk/v2/client"
+import type { Message, Part, Session } from "@opencode-ai/sdk/v2/client"
+import type { HarnessMessage, HarnessPart, HarnessRunConfig, HarnessSession } from "@openchamber/harness-contracts"
 import { Binary } from "./binary"
 import { useSessionUIStore } from "./session-ui-store"
 import { useInputStore } from "./input-store"
 import type { ChildStoreManager } from "./child-store"
-import { opencodeClient } from "@/lib/opencode/client"
-import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
+import type { HarnessClient } from "@/lib/harness/client"
+import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { useConfigStore } from "@/stores/useConfigStore"
+import { useBackendsStore } from "@/stores/useBackendsStore"
 import { registerSessionDirectory } from "./sync-refs"
+import { useSelectionStore } from "./selection-store"
 import { isSyntheticPart } from "@/lib/messages/synthetic"
+import { toOpenCodeCompatiblePart, toOpenCodeCompatibleSession } from "./compat"
+import type { OptimisticAddInput, OptimisticRemoveInput } from "./optimistic"
 import { materializeSessionSnapshots } from "./materialization"
 import { stripMessageDiffSnapshots } from "./sanitize"
+import { fromOpenCodeMessage, fromOpenCodePart } from "./adapters/opencode"
 
 const MESSAGE_REFETCH_LIMIT = 200
 const MESSAGE_REFETCH_SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 
 // Reference set by SyncProvider — allows actions to access SDK and stores
-let _sdk: OpencodeClient | null = null
+let _harness: HarnessClient | null = null
 let _childStores: ChildStoreManager | null = null
 let _getDirectory: () => string = () => ""
-let _optimisticAdd: ((input: { sessionID: string; message: Message; parts: Part[] }) => void) | null = null
-let _optimisticRemove: ((input: { sessionID: string; messageID: string }) => void) | null = null
+let _optimisticAdd: ((input: OptimisticAddInput) => void) | null = null
+let _optimisticRemove: ((input: OptimisticRemoveInput) => void) | null = null
 
 export function setActionRefs(
-  sdk: OpencodeClient,
+  harness: HarnessClient,
   childStores: ChildStoreManager,
   getDirectory: () => string,
 ) {
-  _sdk = sdk
+  _harness = harness
   _childStores = childStores
   _getDirectory = getDirectory
 }
 
 export function setOptimisticRefs(
-  add: (input: { sessionID: string; message: Message; parts: Part[] }) => void,
-  remove: (input: { sessionID: string; messageID: string }) => void,
+  add: (input: OptimisticAddInput) => void,
+  remove: (input: OptimisticRemoveInput) => void,
 ) {
   _optimisticAdd = add
   _optimisticRemove = remove
 }
 
-function sdk() {
-  if (!_sdk) throw new Error("SDK not initialized — is SyncProvider mounted?")
-  return _sdk
+function harness() {
+  if (!_harness) throw new Error("Harness client not initialized — is SyncProvider mounted?")
+  return _harness
 }
 
 function dirStore() {
@@ -58,6 +64,23 @@ function dirStore() {
 
 function dir() {
   return _getDirectory() || undefined
+}
+
+function findGlobalSessionDirectory(sessionId: string): string | undefined {
+  const { activeSessions, archivedSessions } = useGlobalSessionsStore.getState()
+  for (const session of activeSessions) {
+    if (session.id !== sessionId) {
+      continue
+    }
+    return resolveGlobalSessionDirectory(session) ?? undefined
+  }
+  for (const session of archivedSessions) {
+    if (session.id !== sessionId) {
+      continue
+    }
+    return resolveGlobalSessionDirectory(session) ?? undefined
+  }
+  return undefined
 }
 
 function connectionLostError(): Error {
@@ -92,7 +115,11 @@ export async function waitForConnectionOrThrow(): Promise<void> {
 }
 
 function getSessionDirectory(sessionId: string): string | undefined {
-  return useSessionUIStore.getState().getDirectoryForSession(sessionId) || dir()
+  return (
+    useSessionUIStore.getState().getDirectoryForSession(sessionId)
+    || findGlobalSessionDirectory(sessionId)
+    || dir()
+  )
 }
 
 function getDirectoryStore(directory?: string) {
@@ -100,16 +127,6 @@ function getDirectoryStore(directory?: string) {
   const resolvedDirectory = directory || _getDirectory()
   if (!resolvedDirectory) throw new Error("No current directory")
   return _childStores.ensureChild(resolvedDirectory)
-}
-
-function getSessionReplyClient(sessionId?: string): OpencodeClient {
-  const directory = sessionId
-    ? useSessionUIStore.getState().getDirectoryForSession(sessionId)
-    : null
-  if (directory) {
-    return opencodeClient.getScopedSdkClient(directory)
-  }
-  return sdk()
 }
 
 function resolveDirectoryForBlockingRequest(
@@ -153,18 +170,6 @@ function resolveDirectoryForBlockingRequest(
   return null
 }
 
-function getRequestReplyClient(
-  type: "permission" | "question",
-  sessionId: string,
-  requestId: string,
-): OpencodeClient {
-  const requestDirectory = resolveDirectoryForBlockingRequest(type, sessionId, requestId)
-  if (requestDirectory) {
-    return opencodeClient.getScopedSdkClient(requestDirectory)
-  }
-  return getSessionReplyClient(sessionId)
-}
-
 // ---------------------------------------------------------------------------
 // Session CRUD
 // ---------------------------------------------------------------------------
@@ -173,22 +178,30 @@ export async function createSession(
   title?: string,
   directoryOverride?: string | null,
   parentID?: string | null,
+  backendId?: string | null,
 ): Promise<Session | null> {
   try {
-    const result = await sdk().session.create({
-      directory: directoryOverride ?? dir(),
+    const neutralSession = await harness().createSession({
+      directory: directoryOverride ?? dir() ?? null,
       title,
-      parentID: parentID ?? undefined,
+      parentId: parentID ?? null,
+      backendId: backendId ?? undefined,
     })
-    const session = result.data
+    const session = toOpenCodeCompatibleSession(neutralSession)
     if (!session) return null
 
-      const sessionDirectory = (session as { directory?: string }).directory ?? directoryOverride ?? null
+      const sessionDirectory = neutralSession.directory ?? directoryOverride ?? null
+      const sessionBackendId =
+        neutralSession.backendId
+        ?? backendId
+        ?? useBackendsStore.getState().defaultBackendId
+        ?? 'opencode'
       // Pre-populate routing index so SSE events arriving before session.created
       // can be routed to the correct child store
       if (sessionDirectory) {
         registerSessionDirectory(session.id, sessionDirectory)
       }
+      useSelectionStore.getState().saveSessionBackendSelection(session.id, sessionBackendId)
       useSessionUIStore.getState().setCurrentSession(session.id, sessionDirectory)
       useSessionUIStore.getState().markSessionAsOpenChamberCreated(session.id)
       useGlobalSessionsStore.getState().upsertSession(session)
@@ -200,7 +213,7 @@ export async function createSession(
 }
 
 /** Optimistically remove a session from the child store list. Returns previous list for rollback. */
-function optimisticRemoveSession(sessionId: string, directory?: string): Session[] | null {
+function optimisticRemoveSession(sessionId: string, directory?: string): HarnessSession[] | null {
   const store = getDirectoryStore(directory)
   const current = store.getState()
   const sessions = [...current.session]
@@ -243,7 +256,7 @@ export async function deleteSession(sessionId: string, _options?: Record<string,
     ui.setCurrentSession(null)
   }
   try {
-    await sdk().session.delete({ sessionID: sessionId, directory: sessionDirectory })
+    await harness().deleteSession({ sessionId, directory: sessionDirectory })
     useGlobalSessionsStore.getState().removeSessions([sessionId])
     return true
   } catch (error) {
@@ -266,7 +279,7 @@ export async function deleteSessionInDirectory(sessionId: string, directory: str
   const current = store.getState()
   const sessions = [...current.session]
   const result = Binary.search(sessions, sessionId, (s) => s.id)
-  let snapshot: Session[] | null = null
+  let snapshot: HarnessSession[] | null = null
   if (result.found) {
     snapshot = current.session
     sessions.splice(result.index, 1)
@@ -275,7 +288,7 @@ export async function deleteSessionInDirectory(sessionId: string, directory: str
   const ui = useSessionUIStore.getState()
   if (ui.currentSessionId === sessionId) ui.setCurrentSession(null)
   try {
-    await sdk().session.delete({ sessionID: sessionId, directory })
+    await harness().deleteSession({ sessionId, directory })
     useGlobalSessionsStore.getState().removeSessions([sessionId])
     return true
   } catch (error) {
@@ -294,7 +307,7 @@ export async function archiveSession(sessionId: string): Promise<boolean> {
   }
   try {
     const archivedAt = Date.now()
-    await sdk().session.update({ sessionID: sessionId, directory: sessionDirectory, time: { archived: archivedAt } })
+    await harness().archiveSession(sessionId, archivedAt, sessionDirectory)
     useGlobalSessionsStore.getState().archiveSessions([sessionId], archivedAt)
     return true
   } catch (error) {
@@ -306,28 +319,24 @@ export async function archiveSession(sessionId: string): Promise<boolean> {
 
 export async function updateSessionTitle(sessionId: string, title: string): Promise<void> {
   const sessionDirectory = getSessionDirectory(sessionId)
-  const result = await sdk().session.update({ sessionID: sessionId, directory: sessionDirectory, title })
-  if (result.data) {
-    useGlobalSessionsStore.getState().upsertSession(result.data)
-  }
+  const session = await harness().updateSession({ sessionId, directory: sessionDirectory, title })
+  useGlobalSessionsStore.getState().upsertSession(toOpenCodeCompatibleSession(session))
 }
 
 export async function shareSession(sessionId: string): Promise<Session | null> {
   const sessionDirectory = getSessionDirectory(sessionId)
-  const result = await sdk().session.share({ sessionID: sessionId, directory: sessionDirectory })
-  if (result.data) {
-    useGlobalSessionsStore.getState().upsertSession(result.data)
-  }
-  return result.data ?? null
+  const session = await harness().shareSession(sessionId, sessionDirectory)
+  const compatible = toOpenCodeCompatibleSession(session)
+  useGlobalSessionsStore.getState().upsertSession(compatible)
+  return compatible
 }
 
 export async function unshareSession(sessionId: string): Promise<Session | null> {
   const sessionDirectory = getSessionDirectory(sessionId)
-  const result = await sdk().session.unshare({ sessionID: sessionId, directory: sessionDirectory })
-  if (result.data) {
-    useGlobalSessionsStore.getState().upsertSession(result.data)
-  }
-  return result.data ?? null
+  const session = await harness().unshareSession(sessionId, sessionDirectory)
+  const compatible = toOpenCodeCompatibleSession(session)
+  useGlobalSessionsStore.getState().upsertSession(compatible)
+  return compatible
 }
 
 // ---------------------------------------------------------------------------
@@ -377,9 +386,7 @@ function ascendingId(prefix: string): string {
 export async function optimisticSend(input: {
   sessionId: string
   content: string
-  providerID: string
-  modelID: string
-  agent?: string
+  runConfig: HarnessRunConfig
   files?: Array<{ type: "file"; mime: string; url: string; filename: string }>
   /** The actual API call — receives the optimistic messageID so the server can use the same ID */
   send: (messageID: string) => Promise<void>
@@ -394,28 +401,43 @@ export async function optimisticSend(input: {
   const messageID = ascendingId("msg")
   const textPartId = ascendingId("prt")
 
-  const optimisticParts: Part[] = [
-    { id: textPartId, type: "text", text: input.content } as Part,
+  const optimisticParts: HarnessPart[] = [
+    {
+      id: textPartId,
+      sessionId: input.sessionId,
+      messageId: messageID,
+      kind: "text",
+      text: input.content,
+    },
   ]
   if (input.files) {
     for (const f of input.files) {
-      optimisticParts.push({ id: ascendingId("prt"), type: "file", mime: f.mime, url: f.url, filename: f.filename } as Part)
+      optimisticParts.push({
+        id: ascendingId("prt"),
+        sessionId: input.sessionId,
+        messageId: messageID,
+        kind: "attachment",
+        attachment: {
+          mimeType: f.mime,
+          url: f.url,
+          name: f.filename,
+        },
+      })
     }
   }
 
-  const optimisticMessage = {
+  const optimisticMessage: HarnessMessage = {
     id: messageID,
     role: "user" as const,
-    sessionID: input.sessionId,
-    parentID: "",
-    modelID: input.modelID,
-    providerID: input.providerID,
-    system: "",
-    agent: input.agent ?? "",
-    model: `${input.providerID}/${input.modelID}`,
-    metadata: {} as Record<string, unknown>,
+    sessionId: input.sessionId,
     time: { created: Date.now(), completed: 0 },
-  } as unknown as Message
+    attribution: {
+      backendId: input.runConfig.backendId ?? useBackendsStore.getState().defaultBackendId ?? "opencode",
+      providerId: input.runConfig.model?.backendId,
+      modelId: input.runConfig.model?.modelId,
+      modeId: input.runConfig.interactionMode,
+    },
+  }
 
   // Insert into store + register in shadow Map (for mergeOptimisticPage cleanup)
   _optimisticAdd({
@@ -458,7 +480,8 @@ export async function optimisticSend(input: {
 
 export async function abortCurrentOperation(sessionId: string): Promise<void> {
   try {
-    await sdk().session.abort({ sessionID: sessionId, directory: dir() })
+    const nextDirectory = getSessionDirectory(sessionId)
+    await harness().abortSession({ sessionId, directory: nextDirectory })
   } catch (error) {
     console.error("[session-actions] abort failed", error)
   }
@@ -477,14 +500,13 @@ export async function respondToPermission(
   const directory = resolveDirectoryForBlockingRequest("permission", sessionId, requestId)
     || getSessionDirectory(sessionId)
     || dir()
-  const result = await getRequestReplyClient("permission", sessionId, requestId).permission.reply({
-    requestID: requestId,
+  await harness().replyToBlockingRequest({
+    sessionId,
+    requestId,
+    kind: "permission",
     reply: response,
-    ...(directory ? { directory } : {}),
+    directory,
   })
-  if (!result.data) {
-    throw new Error("Permission reply failed")
-  }
 }
 
 export async function dismissPermission(
@@ -495,14 +517,12 @@ export async function dismissPermission(
   const directory = resolveDirectoryForBlockingRequest("permission", sessionId, requestId)
     || getSessionDirectory(sessionId)
     || dir()
-  const result = await getRequestReplyClient("permission", sessionId, requestId).permission.reply({
-    requestID: requestId,
-    reply: "reject",
-    ...(directory ? { directory } : {}),
+  await harness().rejectBlockingRequest({
+    sessionId,
+    requestId,
+    kind: "permission",
+    directory,
   })
-  if (!result.data) {
-    throw new Error("Permission dismissal failed")
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -518,14 +538,13 @@ export async function respondToQuestion(
   const directory = resolveDirectoryForBlockingRequest("question", sessionId, requestId)
     || getSessionDirectory(sessionId)
     || dir()
-  const result = await getRequestReplyClient("question", sessionId, requestId).question.reply({
-    requestID: requestId,
+  await harness().replyToBlockingRequest({
+    sessionId,
+    requestId,
+    kind: "question",
     answers: answers as Array<Array<string>>,
-    ...(directory ? { directory } : {}),
+    directory,
   })
-  if (!result.data) {
-    throw new Error("Question reply failed")
-  }
 }
 
 export async function rejectQuestion(
@@ -536,13 +555,12 @@ export async function rejectQuestion(
   const directory = resolveDirectoryForBlockingRequest("question", sessionId, requestId)
     || getSessionDirectory(sessionId)
     || dir()
-  const result = await getRequestReplyClient("question", sessionId, requestId).question.reject({
-    requestID: requestId,
-    ...(directory ? { directory } : {}),
+  await harness().rejectBlockingRequest({
+    sessionId,
+    requestId,
+    kind: "question",
+    directory,
   })
-  if (!result.data) {
-    throw new Error("Question rejection failed")
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -555,7 +573,7 @@ export async function rejectQuestion(
  * 1. Abort if session is busy
  * 2. Extract text from the target message for prompt restoration
  * 3. Optimistically set revert marker so messages hide immediately
- * 4. Call SDK session.revert() and merge returned session
+ * 4. Call harness session revert and merge returned session
  * 5. Set pendingInputText so the reverted message text appears in the input
  */
 export async function revertToMessage(sessionId: string, messageId: string): Promise<void> {
@@ -566,7 +584,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   const status = state.session_status[sessionId]
   if (status && status.type !== "idle") {
     try {
-      await sdk().session.abort({ sessionID: sessionId, directory: dir() })
+      await harness().abortSession({ sessionId, directory: dir() })
     } catch {
       // ignore abort errors
     }
@@ -579,7 +597,9 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   let messageText = ""
   if (targetMsg && targetMsg.role === "user") {
     const parts = state.part[messageId] ?? []
-    const textParts = parts.filter((p) => p.type === "text" && !isSyntheticPart(p))
+    const textParts = parts
+      .map((part) => toOpenCodeCompatiblePart(part))
+      .filter((p) => p.type === "text" && !isSyntheticPart(p))
     messageText = textParts
       .map((p: Record<string, unknown>) => (p as { text?: string }).text || (p as { content?: string }).content || "")
       .join("\n")
@@ -589,7 +609,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   // Optimistically remove reverted messages + set marker
   const prevRevert = (() => {
     const s = state.session.find((s) => s.id === sessionId)
-    return (s as Session & { revert?: unknown })?.revert
+    return (s as unknown as { revert?: unknown })?.revert
   })()
   const sessions = [...state.session]
   const sessionIdx = sessions.findIndex((s) => s.id === sessionId)
@@ -609,7 +629,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   }
 
   if (sessionIdx >= 0) {
-    sessions[sessionIdx] = { ...sessions[sessionIdx], revert: { messageID: messageId } } as Session
+    sessions[sessionIdx] = { ...sessions[sessionIdx], revert: { messageID: messageId } } as HarnessSession
     patch.session = sessions
   }
 
@@ -623,17 +643,15 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
     })
   }
 
-  // Call SDK and merge authoritative result into store
+  // Call harness API and merge authoritative result into store
   try {
-    const result = await sdk().session.revert({ sessionID: sessionId, directory: dir(), messageID: messageId })
-    if (result.data) {
-      const current = store.getState()
-      const updated = [...current.session]
-      const idx = updated.findIndex((s) => s.id === sessionId)
-      if (idx >= 0) {
-        updated[idx] = result.data
-        store.setState({ session: updated })
-      }
+    const result = await harness().revertSession({ sessionId, directory: dir(), messageId })
+    const current = store.getState()
+    const updated = [...current.session]
+    const idx = updated.findIndex((s) => s.id === sessionId)
+    if (idx >= 0) {
+      updated[idx] = result
+      store.setState({ session: updated })
     }
   } catch (err) {
     // Rollback: restore removed messages + revert marker
@@ -641,7 +659,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
     const rollback = [...current.session]
     const idx = rollback.findIndex((s) => s.id === sessionId)
     if (idx >= 0) {
-      rollback[idx] = { ...rollback[idx], revert: prevRevert } as Session
+      rollback[idx] = { ...rollback[idx], revert: prevRevert } as HarnessSession
     }
     store.setState({
       session: rollback,
@@ -654,8 +672,8 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
 
 export async function refetchSessionMessages(sessionId: string): Promise<void> {
   const store = dirStore()
-  const result = await sdk().session.messages({ sessionID: sessionId, directory: dir(), limit: MESSAGE_REFETCH_LIMIT })
-  const records = (result.data ?? []).filter((record: { info?: { id?: string } }) => !!record?.info?.id)
+  const records = (await harness().getMessages({ sessionId, directory: dir(), limit: MESSAGE_REFETCH_LIMIT }))
+    .filter((record: { info?: { id?: string } }) => !!record?.info?.id)
   if (records.length === 0) return
 
   store.setState((state) => {
@@ -663,8 +681,8 @@ export async function refetchSessionMessages(sessionId: string): Promise<void> {
       state,
       sessionId,
       records.map((record: { info: Message; parts?: Part[] }) => ({
-        info: stripMessageDiffSnapshots(record.info),
-        parts: record.parts ?? [],
+        info: fromOpenCodeMessage(stripMessageDiffSnapshots(record.info)),
+        parts: (record.parts ?? []).map((part) => fromOpenCodePart(part)),
       })),
       { skipPartTypes: MESSAGE_REFETCH_SKIP_PARTS },
     )
@@ -684,21 +702,19 @@ export async function unrevertSession(sessionId: string): Promise<void> {
   const status = state.session_status[sessionId]
   if (status && status.type !== "idle") {
     try {
-      await sdk().session.abort({ sessionID: sessionId, directory: dir() })
+      await harness().abortSession({ sessionId, directory: dir() })
     } catch {
       // ignore
     }
   }
 
-  const result = await sdk().session.unrevert({ sessionID: sessionId, directory: dir() })
-  if (result.data) {
-    const current = store.getState()
-    const sessions = [...current.session]
-    const idx = sessions.findIndex((s) => s.id === sessionId)
-    if (idx >= 0) {
-      sessions[idx] = result.data
-      store.setState({ session: sessions })
-    }
+  const result = await harness().unrevertSession({ sessionId, directory: dir() })
+  const current = store.getState()
+  const sessions = [...current.session]
+  const idx = sessions.findIndex((s) => s.id === sessionId)
+  if (idx >= 0) {
+    sessions[idx] = result
+    store.setState({ session: sessions })
   }
   await refetchSessionMessages(sessionId)
 }
@@ -719,16 +735,17 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
   // the server adds file content as synthetic text parts that should not be restored)
   const parts = state.part[messageId] ?? []
   let messageText = ""
-  const textParts = parts.filter((p) => p.type === "text" && !isSyntheticPart(p))
+  const textParts = parts
+    .map((part) => toOpenCodeCompatiblePart(part))
+    .filter((p) => p.type === "text" && !isSyntheticPart(p))
   messageText = textParts
-    .map((p: Part) => ((p as Record<string, unknown>).text as string) || ((p as Record<string, unknown>).content as string) || "")
+    .map((p) => ((p as Record<string, unknown>).text as string) || ((p as Record<string, unknown>).content as string) || "")
     .join("\n")
     .trim()
 
-  const result = await sdk().session.fork({ sessionID: sessionId, directory: dir(), messageID: messageId })
-  if (!result.data) return
-
-  const forkedSession = result.data
+  const sessionDirectory = getSessionDirectory(sessionId) ?? dir() ?? null
+  const forkedSession = await harness().forkSession({ sessionId, messageId, directory: sessionDirectory })
+  if (!forkedSession) return
 
   // Insert new session into child store so sidebar updates immediately
   const current = store.getState()
@@ -740,6 +757,10 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
   }
 
   // Switch to new session
+  const forkedBackendId = forkedSession.backendId;
+  if (typeof forkedBackendId === 'string' && forkedBackendId.trim().length > 0) {
+    useSelectionStore.getState().saveSessionBackendSelection(forkedSession.id, forkedBackendId.trim());
+  }
   useSessionUIStore.getState().setCurrentSession(forkedSession.id)
 
   // Restore forked message text to input

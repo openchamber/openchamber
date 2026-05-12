@@ -1,6 +1,7 @@
 import React from 'react';
 import { useSessionMessages } from '@/sync/sync-context';
 import { getSyncParts } from '@/sync/sync-refs';
+import { getCompatibleMessageId, getCompatibleMessageRole, getCompatiblePartKind, getCompatiblePartText } from '@/sync/compat';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 
@@ -30,12 +31,12 @@ export const usePlanDetection = (sessionId: string, directory?: string) => {
     // Scan messages for plan references
     for (const message of messages) {
       // Only check assistant messages for plan references
-      if (message.role !== 'assistant') continue;
+      if (getCompatibleMessageRole(message) !== 'assistant') continue;
 
-      const parts = getSyncParts(message.id, directory);
+      const parts = getSyncParts(getCompatibleMessageId(message), directory);
       for (const part of parts) {
-        if (part.type !== 'text') continue;
-        const text = (part as { text?: string }).text || '';
+        if (getCompatiblePartKind(part) !== 'text') continue;
+        const text = getCompatiblePartText(part) || '';
 
         // Check for plan file reference in synthetic messages
         if (text.includes('The plan at ') || text.includes('User has requested to enter plan mode')) {

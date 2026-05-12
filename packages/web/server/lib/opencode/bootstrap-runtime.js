@@ -48,6 +48,8 @@ export const createBootstrapRuntime = (dependencies) => {
       modelsMetadataCacheTtl,
       fetchFreeZenModels,
       getCachedZenModels,
+      backendRegistry,
+      sessionBindingsRuntime,
       setAutoAcceptSession,
     } = options;
 
@@ -119,6 +121,8 @@ export const createBootstrapRuntime = (dependencies) => {
       readSettingsFromDiskMigrated,
       fetchFreeZenModels,
       getCachedZenModels,
+      backendRegistry,
+      sessionBindingsRuntime,
     });
 
     return {

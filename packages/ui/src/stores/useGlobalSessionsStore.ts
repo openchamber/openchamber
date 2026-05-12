@@ -2,6 +2,12 @@ import { create } from 'zustand';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { opencodeClient } from '@/lib/opencode/client';
 import { listGlobalSessionPages } from '@/stores/globalSessions';
+import {
+  getCompatibleSessionArchivedAt,
+  getCompatibleSessionDirectory,
+  getCompatibleSessionProjectWorktree,
+  getCompatibleSessionShareUrl,
+} from '@/sync/compat';
 
 type GlobalSessionsStatus = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -43,13 +49,8 @@ const normalizePath = (value?: string | null): string | null => {
 };
 
 export const resolveGlobalSessionDirectory = (session: Session): string | null => {
-  const record = session as Session & {
-    directory?: string | null;
-    project?: { worktree?: string | null } | null;
-  };
-
-  return normalizePath(record.directory ?? null)
-    ?? normalizePath(record.project?.worktree ?? null);
+  return normalizePath(getCompatibleSessionDirectory(session))
+    ?? normalizePath(getCompatibleSessionProjectWorktree(session));
 };
 
 const buildSessionsByDirectory = (sessions: Session[]): Map<string, Session[]> => {
@@ -75,8 +76,8 @@ const getSessionSignature = (session: Session): string => {
     session.title ?? '',
     session.time?.created ?? 0,
     session.time?.updated ?? 0,
-    session.time?.archived ?? 0,
-    session.share ? 1 : 0,
+    getCompatibleSessionArchivedAt(session) ?? 0,
+    getCompatibleSessionShareUrl(session) ? 1 : 0,
     resolveGlobalSessionDirectory(session) ?? '',
   ].join(':');
 };
@@ -245,7 +246,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
 
   upsertSession: (session) => {
     set((state) => {
-      const isArchived = Boolean(session.time?.archived);
+      const isArchived = Boolean(getCompatibleSessionArchivedAt(session));
       const nextActiveSessions = isArchived
         ? state.activeSessions.filter((candidate) => candidate.id !== session.id)
         : upsertSessionIntoList(state.activeSessions, session);

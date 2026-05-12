@@ -1,7 +1,7 @@
 import { create } from 'zustand';
-import { createJSONStorage, persist } from 'zustand/middleware';
+import { persist } from 'zustand/middleware';
+import { createDebouncedJSONStorage } from './utils/debouncedStorage';
 import type { GitHubPullRequestStatus, RuntimeAPIs } from '@/lib/api/types';
-import { getSafeStorage } from './utils/safeStorage';
 
 const PR_REVALIDATE_TTL_MS = 90_000;
 const PR_REVALIDATE_INTERVAL_MS = 15_000;
@@ -602,7 +602,7 @@ export const useGitHubPrStatusStore = create<GitHubPrStatusStore>()(
     }),
     {
       name: PR_STATUS_STORAGE_KEY,
-      storage: createJSONStorage(() => getSafeStorage()),
+      storage: createDebouncedJSONStorage(),
       partialize: (state) => ({
         entries: Object.fromEntries(
           Object.entries(state.entries)

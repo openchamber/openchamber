@@ -1,5 +1,5 @@
 import { createOpencodeClient, OpencodeClient } from "@opencode-ai/sdk/v2";
-import type { FilesAPI, RuntimeAPIs } from "../api/types";
+import type { BackendControlSurface, BackendDescriptor, FilesAPI, RuntimeAPIs } from "../api/types";
 import { getDesktopHomeDirectory } from "../desktop";
 import type {
   Session,
@@ -181,6 +181,10 @@ const getDesktopFilesApi = (): FilesAPI | null => {
     return apis.files;
   }
   return null;
+};
+
+const isDirectoryNotFoundError = (error: unknown): boolean => {
+  return error instanceof Error && /directory not found/i.test(error.message);
 };
 
 class OpencodeService {
@@ -419,29 +423,63 @@ class OpencodeService {
 
   // Session Management
   async listSessions(): Promise<Session[]> {
-    const response = await this.client.session.list(
-      this.currentDirectory ? { directory: this.currentDirectory } : undefined
-    );
-    return Array.isArray(response.data) ? response.data : [];
+    const base = this.baseUrl.replace(/\/+$/, '');
+    const url = new URL(`${base}/openchamber/harness/sessions`);
+    if (this.currentDirectory) {
+      url.searchParams.set('directory', this.currentDirectory);
+    }
+    const response = await fetch(url, { headers: { accept: 'application/json' } });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null) as { error?: unknown } | null;
+      const message = typeof payload?.error === 'string' ? payload.error : `Failed to list sessions (status ${response.status})`;
+      throw new Error(message);
+    }
+    const payload = await response.json().catch(() => null);
+    return Array.isArray(payload) ? payload as Session[] : [];
   }
 
-  async createSession(params?: { parentID?: string; title?: string }): Promise<Session> {
-    const response = await this.client.session.create({
-      ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
-      parentID: params?.parentID,
-      title: params?.title
+  async createSession(params?: { parentID?: string; title?: string; backendId?: string }): Promise<Session> {
+    const base = this.baseUrl.replace(/\/+$/, '');
+    const response = await fetch(`${base}/openchamber/harness/session`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json',
+      },
+      body: JSON.stringify({
+        ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
+        ...(params?.parentID ? { parentID: params.parentID } : {}),
+        ...(params?.title ? { title: params.title } : {}),
+        ...(params?.backendId ? { backendId: params.backendId } : {}),
+      }),
     });
-    if (!response.data) throw new Error('Failed to create session');
-    return response.data;
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null) as { error?: unknown } | null;
+      const message = typeof payload?.error === 'string' ? payload.error : `Failed to create session (status ${response.status})`;
+      throw new Error(message);
+    }
+    const payload = await response.json().catch(() => null);
+    if (!payload || typeof payload !== 'object') {
+      throw new Error('Failed to create session');
+    }
+    return payload as Session;
   }
 
   async getSession(id: string): Promise<Session> {
-    const response = await this.client.session.get({
-      sessionID: id,
-      ...(this.currentDirectory ? { directory: this.currentDirectory } : {})
-    });
-    if (!response.data) throw new Error('Session not found');
-    return response.data;
+    const base = this.baseUrl.replace(/\/+$/, '');
+    const url = new URL(`${base}/openchamber/harness/session/${encodeURIComponent(id)}`);
+    if (this.currentDirectory) {
+      url.searchParams.set('directory', this.currentDirectory);
+    }
+    const response = await fetch(url, { headers: { accept: 'application/json' } });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null) as { error?: unknown } | null;
+      const message = typeof payload?.error === 'string' ? payload.error : `Failed to read session (status ${response.status})`;
+      throw new Error(message);
+    }
+    const payload = await response.json().catch(() => null);
+    if (!payload || typeof payload !== 'object') throw new Error('Session not found');
+    return payload as Session;
   }
 
   async deleteSession(id: string): Promise<boolean> {
@@ -453,22 +491,68 @@ class OpencodeService {
   }
 
   async updateSession(id: string, title?: string): Promise<Session> {
-    const response = await this.client.session.update({
-      sessionID: id,
-      ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
-      title
+    const base = this.baseUrl.replace(/\/+$/, '');
+    const response = await fetch(`${base}/openchamber/harness/session/${encodeURIComponent(id)}/update`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json',
+      },
+      body: JSON.stringify({
+        ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
+        ...(typeof title === 'string' ? { title } : {}),
+      }),
     });
-    if (!response.data) throw new Error('Failed to update session');
-    return response.data;
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null) as { error?: unknown } | null;
+      const message = typeof payload?.error === 'string' ? payload.error : `Failed to update session (${response.status})`;
+      throw new Error(message);
+    }
+    const payload = await response.json().catch(() => null);
+    if (!payload || typeof payload !== 'object') throw new Error('Failed to update session');
+    return payload as Session;
+  }
+
+  async archiveSession(id: string, archivedAt: number): Promise<Session> {
+    const base = this.baseUrl.replace(/\/+$/, '');
+    const response = await fetch(`${base}/openchamber/harness/session/${encodeURIComponent(id)}/update`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json',
+      },
+      body: JSON.stringify({
+        ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
+        time: { archived: archivedAt },
+      }),
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null) as { error?: unknown } | null;
+      const message = typeof payload?.error === 'string' ? payload.error : `Failed to archive session (${response.status})`;
+      throw new Error(message);
+    }
+    const payload = await response.json().catch(() => null);
+    if (!payload || typeof payload !== 'object') throw new Error('Failed to archive session');
+    return payload as Session;
   }
 
   async getSessionMessages(id: string, limit?: number): Promise<{ info: Message; parts: Part[] }[]> {
-    const response = await this.client.session.messages({
-      sessionID: id,
-      ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
-      ...(typeof limit === 'number' ? { limit } : {}),
-    });
-    return response.data || [];
+    const base = this.baseUrl.replace(/\/+$/, '');
+    const url = new URL(`${base}/openchamber/harness/session/${encodeURIComponent(id)}/messages`);
+    if (this.currentDirectory) {
+      url.searchParams.set('directory', this.currentDirectory);
+    }
+    if (typeof limit === 'number') {
+      url.searchParams.set('limit', String(limit));
+    }
+    const response = await fetch(url, { headers: { accept: 'application/json' } });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null) as { error?: unknown } | null;
+      const message = typeof payload?.error === 'string' ? payload.error : `Failed to read session messages (status ${response.status})`;
+      throw new Error(message);
+    }
+    const payload = await response.json().catch(() => null);
+    return Array.isArray(payload) ? payload as { info: Message; parts: Part[] }[] : [];
   }
 
   async getSessionTodos(sessionId: string): Promise<Array<{ id: string; content: string; status: string; priority: string }>> {
@@ -669,6 +753,7 @@ class OpencodeService {
       schema: Record<string, unknown>;
       retryCount?: number;
     };
+    sandboxOverride?: string;
   }): Promise<string> {
     // Reuse one client-side message ID across retries. The server accepts this
     // as the real user message ID, making ambiguous network retries idempotent.
@@ -741,28 +826,6 @@ class OpencodeService {
       await waitForWorktreeBootstrap(this.currentDirectory);
     }
 
-    // Use async prompt endpoint so the client doesn't block waiting
-    // for model work (SSE will deliver output/status).
-    // This avoids 504s from proxy timeouts on long-running turns.
-    const base = this.baseUrl.replace(/\/+$/, '');
-    let url: URL;
-    try {
-      url = new URL(`${base}/session/${encodeURIComponent(params.id)}/prompt_async`);
-      if (this.currentDirectory) {
-        url.searchParams.set('directory', this.currentDirectory);
-      }
-    } catch (error) {
-      console.error('[git-generation][browser] failed to build prompt_async URL', {
-        baseUrl: this.baseUrl,
-        normalizedBase: base,
-        sessionId: params.id,
-        directory: this.currentDirectory,
-        message: error instanceof Error ? error.message : String(error),
-        error,
-      });
-      throw error;
-    }
-
     if (params.format) {
       console.info('[git-generation][browser] send structured message', {
         sessionId: params.id,
@@ -778,17 +841,20 @@ class OpencodeService {
 
     assertProviderCircuitClosed(params.providerID);
 
+    const base = this.baseUrl.replace(/\/+$/, '');
+    const url = `${base}/openchamber/harness/session/${encodeURIComponent(params.id)}/message`;
     let response!: Response;
 
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        response = await fetch(url.toString(), {
+        response = await fetch(url, {
           method: 'POST',
           headers: {
             'content-type': 'application/json',
             accept: 'application/json',
           },
           body: JSON.stringify({
+            ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
             model: {
               providerID: params.providerID,
               modelID: params.modelID,
@@ -797,6 +863,7 @@ class OpencodeService {
             variant: params.variant,
             messageID: messageId,
             ...(params.format ? { format: params.format } : {}),
+            ...(params.sandboxOverride ? { sandboxOverride: params.sandboxOverride } : {}),
             parts,
           }),
         });
@@ -864,23 +931,19 @@ class OpencodeService {
       }
     }
 
-    const base = this.baseUrl.replace(/\/+$/, '');
-    const url = new URL(`${base}/session/${encodeURIComponent(params.id)}/command`);
-    if (this.currentDirectory) {
-      url.searchParams.set('directory', this.currentDirectory);
-    }
-
     const payload: Record<string, unknown> = {
       command: params.command,
       arguments: params.arguments ?? '',
       model: `${params.providerID}/${params.modelID}`,
+      ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
       ...(params.agent ? { agent: params.agent } : {}),
       ...(params.variant ? { variant: params.variant } : {}),
       ...(parts.length > 0 ? { parts } : {}),
       messageID: tempMessageId,
     };
 
-    const response = await fetch(url.toString(), {
+    const base = this.baseUrl.replace(/\/+$/, '');
+    const response = await fetch(`${base}/openchamber/harness/session/${encodeURIComponent(params.id)}/command`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -904,14 +967,24 @@ class OpencodeService {
   }
 
   async abortSession(id: string): Promise<boolean> {
-    const response = await this.client.session.abort(
-      {
-        sessionID: id,
-        ...(this.currentDirectory ? { directory: this.currentDirectory } : {})
+    const base = this.baseUrl.replace(/\/+$/, '');
+    const response = await fetch(`${base}/openchamber/harness/session/${encodeURIComponent(id)}/abort`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json',
       },
-      { throwOnError: true }
-    );
-    return Boolean(response.data);
+      body: JSON.stringify({
+        ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
+      }),
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null) as { error?: unknown } | null;
+      const message = typeof payload?.error === 'string' ? payload.error : `Failed to abort session (${response.status})`;
+      throw new Error(message);
+    }
+    const payload = await response.json().catch(() => null) as { ok?: unknown } | null;
+    return Boolean(payload?.ok);
   }
 
   async revertSession(sessionId: string, messageId: string, partId?: string): Promise<Session> {
@@ -935,17 +1008,35 @@ class OpencodeService {
   }
 
   async forkSession(sessionId: string, messageId?: string): Promise<Session> {
-    const response = await this.client.session.fork({
-      sessionID: sessionId,
-      ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
-      messageID: messageId
+    const base = this.baseUrl.replace(/\/$/, "");
+    const response = await fetch(`${base}/openchamber/harness/session/${encodeURIComponent(sessionId)}/fork`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({
+        ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
+        ...(messageId ? { messageID: messageId } : {}),
+      }),
     });
+    if (!response.ok) {
+      let bodyText = '';
+      try {
+        bodyText = await response.text();
+      } catch (error) {
+        console.warn('[opencodeClient] Failed to read fork session error body:', error);
+      }
+      throw new Error(bodyText || `Failed to fork session (status ${response.status})`);
+    }
 
-    if (!response.data) {
+    const payload = await response.json().catch(() => null) as Session | { error?: string } | null;
+
+    if (!payload || ('error' in payload && typeof payload.error === 'string')) {
       throw new Error('Failed to fork session');
     }
 
-    return response.data;
+    return payload as Session;
   }
 
   async getSessionStatus(): Promise<
@@ -1247,6 +1338,61 @@ class OpencodeService {
     };
   }
 
+  async getHarnessBackends(): Promise<{ defaultBackend: string; backends: BackendDescriptor[] }> {
+    const response = await fetch('/api/openchamber/backends', {
+      headers: {
+        accept: 'application/json',
+      },
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to load harness backends (status ${response.status})`);
+    }
+    const payload = await response.json().catch(() => null) as { defaultBackend?: unknown; backends?: unknown } | null;
+    return {
+      defaultBackend: typeof payload?.defaultBackend === 'string' ? payload.defaultBackend : 'opencode',
+      backends: Array.isArray(payload?.backends) ? payload.backends as BackendDescriptor[] : [],
+    };
+  }
+
+  async getHarnessControlSurface(params?: {
+    backendId?: string;
+    sessionId?: string;
+    providerId?: string;
+    modelId?: string;
+  }): Promise<BackendControlSurface> {
+    const searchParams = new URLSearchParams();
+    if (this.currentDirectory) {
+      searchParams.set('directory', this.currentDirectory);
+    }
+    if (params?.backendId) {
+      searchParams.set('backendId', params.backendId);
+    }
+    if (params?.sessionId) {
+      searchParams.set('sessionId', params.sessionId);
+    }
+    if (params?.providerId) {
+      searchParams.set('providerId', params.providerId);
+    }
+    if (params?.modelId) {
+      searchParams.set('modelId', params.modelId);
+    }
+
+    const query = searchParams.toString();
+    const response = await fetch(`/api/openchamber/harness/control-surface${query ? `?${query}` : ''}`, {
+      headers: {
+        accept: 'application/json',
+      },
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to load harness control surface (status ${response.status})`);
+    }
+    const payload = await response.json().catch(() => null);
+    if (!payload || typeof payload !== 'object') {
+      throw new Error('Failed to load harness control surface');
+    }
+    return payload as BackendControlSurface;
+  }
+
   async initApp(): Promise<boolean> {
     try {
       // Just check if we can connect since there's no init endpoint
@@ -1505,7 +1651,9 @@ class OpencodeService {
         });
         return entries;
       } catch (error) {
-        console.error('Failed to list directory contents:', error);
+        if (!isDirectoryNotFoundError(error)) {
+          console.error('Failed to list directory contents:', error);
+        }
         throw error;
       }
     }
@@ -1538,7 +1686,9 @@ class OpencodeService {
       });
       return entries;
     } catch (error) {
-      console.error('Failed to list directory contents:', error);
+      if (!isDirectoryNotFoundError(error)) {
+        console.error('Failed to list directory contents:', error);
+      }
       throw error;
     }
     })();

@@ -4,19 +4,17 @@ import type {
   Config,
   LspStatus,
   McpStatus,
-  Message,
-  Part,
   Path,
   PermissionRequest,
   Project,
   ProviderAuthResponse,
   ProviderListResponse,
   QuestionRequest,
-  Session,
   SessionStatus,
   Todo,
   VcsInfo,
 } from "@opencode-ai/sdk/v2/client"
+import type { HarnessMessage, HarnessPart, HarnessSession } from "@openchamber/harness-contracts"
 
 export type FileDiff = {
   file?: string
@@ -49,7 +47,7 @@ export type State = {
   provider: ProviderListResponse
   config: Config
   path: Path
-  session: Session[]
+  session: HarnessSession[]
   sessionTotal: number
   session_status: Record<string, SessionStatus>
   session_diff: Record<string, FileDiff[]>
@@ -60,8 +58,8 @@ export type State = {
   lsp: LspStatus[]
   vcs: VcsInfo | undefined
   limit: number
-  message: Record<string, Message[]>
-  part: Record<string, Part[]>
+  message: Record<string, HarnessMessage[]>
+  part: Record<string, HarnessPart[]>
 }
 
 /** Global store state */

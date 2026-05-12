@@ -1,30 +1,29 @@
 import { describe, expect, test } from "bun:test"
-import type { Message, Part, SessionStatus } from "@opencode-ai/sdk/v2/client"
-import type { Session } from "@opencode-ai/sdk/v2"
+import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
+import type { HarnessMessage, HarnessPart, HarnessSession } from "@openchamber/harness-contracts"
 import { getReconnectCandidateSessionIds } from "./reconnect-recovery"
 
-function createSession(id: string, overrides: Partial<Session> = {}): Session {
+function createSession(id: string, overrides: Partial<HarnessSession> = {}): HarnessSession {
   return {
     id,
+    backendId: "opencode",
     title: id,
     time: { created: 1, updated: 1 },
-    version: "1",
     ...overrides,
-  } as Session
+  }
 }
 
-function createAssistantMessage(id: string, sessionID: string, completed?: number): Message {
+function createAssistantMessage(id: string, sessionID: string, completed?: number): HarnessMessage {
   return {
     id,
-    sessionID,
+    sessionId: sessionID,
     role: "assistant",
-    time: completed ? { created: 1, updated: 1, completed } : { created: 1, updated: 1 },
-    parts: [],
-  } as unknown as Message
+    time: completed ? { created: 1, completed } : { created: 1 },
+  }
 }
 
-function createPart(id: string, messageID: string): Part {
-  return { id, messageID, sessionID: "active", type: "text", text: "done" } as Part
+function createPart(id: string, messageID: string): HarnessPart {
+  return { id, messageId: messageID, sessionId: "active", kind: "text", text: "done" }
 }
 
 describe("getReconnectCandidateSessionIds", () => {
@@ -34,7 +33,7 @@ describe("getReconnectCandidateSessionIds", () => {
     expect(getReconnectCandidateSessionIds({
       session: [
         createSession("busy"),
-        createSession("child", { parentID: "parent" }),
+        createSession("child", { parentId: "parent" }),
         createSession("parent"),
         createSession("incomplete"),
       ],

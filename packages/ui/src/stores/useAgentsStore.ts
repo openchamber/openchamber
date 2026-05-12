@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { StoreApi, UseBoundStore } from "zustand";
-import { devtools, persist, createJSONStorage } from "zustand/middleware";
+import { devtools, persist } from "zustand/middleware";
+import { createDebouncedJSONStorage } from "./utils/debouncedStorage";
 import type { Agent, PermissionConfig } from "@opencode-ai/sdk/v2";
 import { opencodeClient } from "@/lib/opencode/client";
 import { emitConfigChange, scopeMatches, subscribeToConfigChanges, type ConfigChangeScope } from "@/lib/configSync";
@@ -9,7 +10,6 @@ import {
   finishConfigUpdate,
   updateConfigUpdateMessage,
 } from "@/lib/configUpdate";
-import { getSafeStorage } from "./utils/safeStorage";
 import { useConfigStore } from "@/stores/useConfigStore";
 import { useCommandsStore } from "@/stores/useCommandsStore";
 import { useProjectsStore } from "@/stores/useProjectsStore";
@@ -242,7 +242,7 @@ export const useAgentsStore = create<AgentsStore>()(
                       const response = await fetch(`/api/config/agents/${encodeURIComponent(agent.name)}${queryParams}`, {
                         headers: {
                           'Cache-Control': 'no-cache',
-                          ...(configDirectory ? { 'x-opencode-directory': configDirectory } : {}),
+                          ...(configDirectory ? { 'x-openchamber-directory': configDirectory, 'x-opencode-directory': configDirectory } : {}),
                         }
                       });
 
@@ -332,7 +332,7 @@ export const useAgentsStore = create<AgentsStore>()(
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
-                ...(configDirectory ? { 'x-opencode-directory': configDirectory } : {}),
+                ...(configDirectory ? { 'x-openchamber-directory': configDirectory, 'x-opencode-directory': configDirectory } : {}),
               },
               body: JSON.stringify(agentConfig)
             });
@@ -393,7 +393,7 @@ export const useAgentsStore = create<AgentsStore>()(
               method: 'PATCH',
               headers: {
                 'Content-Type': 'application/json',
-                ...(configDirectory ? { 'x-opencode-directory': configDirectory } : {}),
+                ...(configDirectory ? { 'x-openchamber-directory': configDirectory, 'x-opencode-directory': configDirectory } : {}),
               },
               body: JSON.stringify(agentConfig)
             });
@@ -441,7 +441,7 @@ export const useAgentsStore = create<AgentsStore>()(
 
             const response = await fetch(`/api/config/agents/${encodeURIComponent(name)}${queryParams}`, {
               method: 'DELETE',
-              headers: configDirectory ? { 'x-opencode-directory': configDirectory } : undefined,
+              headers: configDirectory ? { 'x-openchamber-directory': configDirectory, 'x-opencode-directory': configDirectory } : undefined,
             });
 
             const payload = await response.json().catch(() => null);
@@ -493,7 +493,7 @@ export const useAgentsStore = create<AgentsStore>()(
       }),
       {
         name: "agents-store",
-        storage: createJSONStorage(() => getSafeStorage()),
+        storage: createDebouncedJSONStorage(),
         partialize: (state) => ({
           selectedAgentName: state.selectedAgentName,
         }),

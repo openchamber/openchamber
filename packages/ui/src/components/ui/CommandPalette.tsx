@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/dialog';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useShallow } from 'zustand/react/shallow';
 import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useGitAllBranches, useGitStore } from '@/stores/useGitStore';
@@ -76,23 +77,34 @@ const normalizePath = (value: string): string => {
 };
 
 export const CommandPalette: React.FC = () => {
+  const {
+    isCommandPaletteOpen, setCommandPaletteOpen,
+    setActiveMainTab, setSettingsDialogOpen, setSettingsPage,
+    setSessionSwitcherOpen, toggleSidebar, toggleRightSidebar,
+    toggleBottomTerminal, openContextOverview, openContextFile,
+    shortcutOverrides,
+  } = useUIStore(useShallow((s) => ({
+    isCommandPaletteOpen: s.isCommandPaletteOpen,
+    setCommandPaletteOpen: s.setCommandPaletteOpen,
+    setActiveMainTab: s.setActiveMainTab,
+    setSettingsDialogOpen: s.setSettingsDialogOpen,
+    setSettingsPage: s.setSettingsPage,
+    setSessionSwitcherOpen: s.setSessionSwitcherOpen,
+    toggleSidebar: s.toggleSidebar,
+    toggleRightSidebar: s.toggleRightSidebar,
+    toggleBottomTerminal: s.toggleBottomTerminal,
+    openContextOverview: s.openContextOverview,
+    openContextFile: s.openContextFile,
+    shortcutOverrides: s.shortcutOverrides,
+  })));
   const { t } = useI18n();
 
-  const isCommandPaletteOpen = useUIStore((s) => s.isCommandPaletteOpen);
-  const setCommandPaletteOpen = useUIStore((s) => s.setCommandPaletteOpen);
-  const setActiveMainTab = useUIStore((s) => s.setActiveMainTab);
-  const setSettingsDialogOpen = useUIStore((s) => s.setSettingsDialogOpen);
-  const setSettingsPage = useUIStore((s) => s.setSettingsPage);
-  const setSessionSwitcherOpen = useUIStore((s) => s.setSessionSwitcherOpen);
-  const toggleSidebar = useUIStore((s) => s.toggleSidebar);
-  const toggleRightSidebar = useUIStore((s) => s.toggleRightSidebar);
-  const toggleBottomTerminal = useUIStore((s) => s.toggleBottomTerminal);
-  const openContextOverview = useUIStore((s) => s.openContextOverview);
-  const openContextFile = useUIStore((s) => s.openContextFile);
-  const shortcutOverrides = useUIStore((s) => s.shortcutOverrides);
-
-  const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
-  const setCurrentSession = useSessionUIStore((s) => s.setCurrentSession);
+  const { openNewSessionDraft, setCurrentSession } = useSessionUIStore(
+    useShallow((s) => ({
+      openNewSessionDraft: s.openNewSessionDraft,
+      setCurrentSession: s.setCurrentSession,
+    })),
+  );
 
   const activeSessions = useGlobalSessionsStore((s) => s.activeSessions);
   const currentDirectory = useDirectoryStore((s) => s.currentDirectory);

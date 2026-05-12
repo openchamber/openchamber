@@ -7,10 +7,14 @@ import { pickSessionCacheEvictions } from "./session-cache"
 import {
   mergeOptimisticPage,
   type OptimisticItem,
+  type OptimisticAddInput,
+  type OptimisticRemoveInput,
 } from "./optimistic"
 import { useDirectoryStore, useSyncSDK, useSyncDirectory, useChildStoreManager } from "./sync-context"
 import { dropSessionCaches, getProtectedSessionCacheIds } from "./session-cache"
 import { stripMessageDiffSnapshots } from "./sanitize"
+import { fromOpenCodeMessage, fromOpenCodePart, fromOpenCodeSession } from "./adapters/opencode"
+import type { HarnessPart } from "@openchamber/harness-contracts"
 import {
   shouldSkipSessionPrefetch,
   getSessionPrefetch,
@@ -25,6 +29,10 @@ const MAX_SEEN_DIRS = 30
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 
 function sortParts(parts: Part[]) {
+  return parts.filter((p) => !!p?.id).sort((a, b) => cmp(a.id, b.id))
+}
+
+function sortHarnessParts(parts: HarnessPart[]) {
   return parts.filter((p) => !!p?.id).sort((a, b) => cmp(a.id, b.id))
 }
 
@@ -160,7 +168,7 @@ export function useSync() {
     (sessionID: string, item: OptimisticItem) => {
       const key = `${directory}\n${sessionID}`
       const list = optimistic.current.get(key)
-      const sorted: OptimisticItem = { message: item.message, parts: sortParts(item.parts) }
+      const sorted: OptimisticItem = { message: item.message, parts: sortHarnessParts(item.parts) }
       if (list) {
         list.set(item.message.id, sorted)
       } else {
@@ -194,10 +202,11 @@ export function useSync() {
       const items = (result.data ?? []).filter((x: { info?: { id?: string } }) => !!x?.info?.id)
       const session = items
         .map((x: { info: Message }) => stripMessageDiffSnapshots(x.info))
-        .sort((a: Message, b: Message) => cmp(a.id, b.id))
+        .map((message) => fromOpenCodeMessage(message))
+        .sort((a, b) => cmp(a.id, b.id))
       const part = items.map((x: { info: { id: string }; parts: Part[] }) => ({
         id: x.info.id,
-        part: sortParts(x.parts),
+        part: sortHarnessParts(sortParts(x.parts).map((part) => fromOpenCodePart(part))),
       }))
       const cursor = result.response?.headers?.get?.("x-next-cursor") ?? undefined
       return { session, part, cursor, complete: !cursor }
@@ -292,9 +301,9 @@ export function useSync() {
               const sessions = [...s.session]
               const idx = Binary.search(sessions, sessionID, (s) => s.id)
               if (idx.found) {
-                sessions[idx.index] = result.data
+                sessions[idx.index] = fromOpenCodeSession(result.data)
               } else {
-                sessions.splice(idx.index, 0, result.data)
+                sessions.splice(idx.index, 0, fromOpenCodeSession(result.data))
               }
               store.setState({ session: sessions })
             }
@@ -342,8 +351,8 @@ export function useSync() {
 
   // Optimistic add (for prompt submission)
   const optimisticAdd = useCallback(
-    (input: { sessionID: string; message: Message; parts: Part[] }) => {
-      setOptimistic(input.sessionID, { message: input.message, parts: input.parts })
+    (input: OptimisticAddInput) => {
+      setOptimistic(input.sessionID, { message: input.message, parts: sortHarnessParts(input.parts) })
       const current = store.getState()
       const message = { ...current.message }
       const part = { ...current.part }
@@ -355,7 +364,7 @@ export function useSync() {
       message[input.sessionID] = messages
 
       // Insert parts
-      part[input.message.id] = sortParts(input.parts)
+      part[input.message.id] = sortHarnessParts(input.parts)
 
       store.setState({ message, part })
     },
@@ -364,7 +373,7 @@ export function useSync() {
 
   // Optimistic remove (for rollback on error)
   const optimisticRemove = useCallback(
-    (input: { sessionID: string; messageID: string }) => {
+    (input: OptimisticRemoveInput) => {
       clearOptimistic(input.sessionID, input.messageID)
       const current = store.getState()
       const message = { ...current.message }

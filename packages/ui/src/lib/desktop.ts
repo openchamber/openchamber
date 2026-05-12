@@ -108,6 +108,7 @@ export type DesktopSettings = {
   managedRemoteTunnelPresets?: ManagedRemoteTunnelPreset[];
   managedRemoteTunnelSelectedPresetId?: string;
   managedRemoteTunnelPresetTokens?: Record<string, string>;
+  defaultBackend?: string;
   defaultModel?: string; // format: "provider/model"
   defaultVariant?: string;
   defaultAgent?: string;

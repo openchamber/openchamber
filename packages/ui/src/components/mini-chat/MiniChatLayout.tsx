@@ -158,7 +158,7 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
       return null;
     }
 
-    type AssistantTokens = { input: number; output: number; reasoning: number; cache: { read: number; write: number } };
+    type AssistantTokens = { input: number; output: number; reasoning: number; cache: { read: number; write: number }; total?: number; contextWindow?: number };
     let lastTokens: AssistantTokens | undefined;
     let lastMessageId: string | undefined;
 
@@ -167,7 +167,9 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
       if (message.role !== 'assistant') continue;
       const tokens = (message as { tokens?: AssistantTokens }).tokens;
       if (!tokens) continue;
-      const total = tokens.input + tokens.output + tokens.reasoning + (tokens.cache?.read ?? 0) + (tokens.cache?.write ?? 0);
+      const total = typeof tokens.total === 'number' && tokens.total > 0
+        ? tokens.total
+        : tokens.input + tokens.output + tokens.reasoning + (tokens.cache?.write ?? 0);
       if (total > 0) {
         lastTokens = tokens;
         lastMessageId = message.id;
@@ -179,15 +181,21 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
       return null;
     }
 
-    const totalTokens = lastTokens.input + lastTokens.output + lastTokens.reasoning + (lastTokens.cache?.read ?? 0) + (lastTokens.cache?.write ?? 0);
-    const thresholdLimit = contextLimit > 0 ? contextLimit : 200000;
-    const percentage = contextLimit > 0 ? Math.round((totalTokens / contextLimit) * 100) : 0;
+    const totalTokens = typeof lastTokens.total === 'number' && lastTokens.total > 0
+      ? lastTokens.total
+      : lastTokens.input + lastTokens.output + lastTokens.reasoning + (lastTokens.cache?.write ?? 0);
+    const tokenContextWindow = typeof lastTokens.contextWindow === 'number' && lastTokens.contextWindow > 0
+      ? lastTokens.contextWindow
+      : 0;
+    const effectiveContextLimit = tokenContextWindow > 0 ? tokenContextWindow : contextLimit;
+    const thresholdLimit = effectiveContextLimit > 0 ? effectiveContextLimit : 200000;
+    const percentage = effectiveContextLimit > 0 ? Math.round((totalTokens / effectiveContextLimit) * 100) : 0;
     const normalizedOutput = outputLimit > 0 ? Math.round((lastTokens.output / outputLimit) * 100) : undefined;
 
     return {
       totalTokens,
       percentage,
-      contextLimit: contextLimit || 0,
+      contextLimit: effectiveContextLimit || 0,
       outputLimit: outputLimit || undefined,
       normalizedOutput,
       thresholdLimit,

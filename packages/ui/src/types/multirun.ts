@@ -10,6 +10,7 @@ export interface MultiRunModelSelection {
   modelID: string;
   displayName?: string;
   variant?: string;
+  backendId?: string;
 }
 
 export interface MultiRunFileAttachment {
@@ -22,6 +23,8 @@ export interface MultiRunFileAttachment {
 }
 
 export interface CreateMultiRunParams {
+  /** Default backend to use when a selected model does not specify one. */
+  backendId?: string;
   /** Group name used for worktree directory and branch naming */
   name: string;
   /** Prompt sent to all sessions */

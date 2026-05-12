@@ -130,6 +130,7 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
         sanitizeForwardHeaders,
         collectHeaders,
         base64EncodeUtf8,
+        readSettings,
       },
     );
     if (proxyResponse) {

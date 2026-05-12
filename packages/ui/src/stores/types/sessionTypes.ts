@@ -1,4 +1,5 @@
 import type { Session, Message, Part } from "@opencode-ai/sdk/v2";
+import type { HarnessRunConfig } from "@openchamber/harness-contracts";
 import type { PermissionRequest, PermissionResponse } from "@/types/permission";
 import type { QuestionRequest } from "@/types/question";
 
@@ -129,9 +130,10 @@ export interface SyntheticContextPart {
 }
 
 export type NewSessionDraftState = {
-    open: boolean;
-    selectedProjectId?: string | null;
-    directoryOverride: string | null;
+  open: boolean;
+  selectedProjectId?: string | null;
+  backendId?: string | null;
+  directoryOverride: string | null;
     pendingWorktreeRequestId?: string | null;
     bootstrapPendingDirectory?: string | null;
     preserveDirectoryOverride?: boolean;
@@ -225,8 +227,8 @@ export interface SessionStore {
     setSessionAgentEditMode: (sessionId: string, agentName: string | undefined, mode: EditPermissionMode, defaultMode?: EditPermissionMode) => void;
     loadSessions: () => Promise<void>;
 
-    openNewSessionDraft: (options?: { projectId?: string | null; directoryOverride?: string | null; pendingWorktreeRequestId?: string | null; bootstrapPendingDirectory?: string | null; preserveDirectoryOverride?: boolean; parentID?: string | null; title?: string; initialPrompt?: string; syntheticParts?: SyntheticContextPart[]; targetFolderId?: string }) => void;
-    overrideNewSessionDraftTarget: (options: { projectId?: string | null; directoryOverride?: string | null; pendingWorktreeRequestId?: string | null; bootstrapPendingDirectory?: string | null; preserveDirectoryOverride?: boolean; title?: string; initialPrompt?: string }) => void;
+    openNewSessionDraft: (options?: { projectId?: string | null; backendId?: string | null; directoryOverride?: string | null; pendingWorktreeRequestId?: string | null; bootstrapPendingDirectory?: string | null; preserveDirectoryOverride?: boolean; parentID?: string | null; title?: string; initialPrompt?: string; syntheticParts?: SyntheticContextPart[]; targetFolderId?: string }) => void;
+    overrideNewSessionDraftTarget: (options: { projectId?: string | null; backendId?: string | null; directoryOverride?: string | null; pendingWorktreeRequestId?: string | null; bootstrapPendingDirectory?: string | null; preserveDirectoryOverride?: boolean; title?: string; initialPrompt?: string }) => void;
     setNewSessionDraftTarget: (target: { projectId?: string | null; directoryOverride?: string | null }, options?: { force?: boolean }) => void;
     setPendingDraftWorktreeRequest: (requestId: string | null) => void;
     resolvePendingDraftWorktreeTarget: (requestId: string, directory: string | null, options?: { projectId?: string | null; bootstrapPendingDirectory?: string | null; preserveDirectoryOverride?: boolean }) => void;
@@ -246,7 +248,7 @@ export interface SessionStore {
     unshareSession: (id: string) => Promise<Session | null>;
     setCurrentSession: (id: string | null) => void;
     loadMessages: (sessionId: string, limit?: number) => Promise<void>;
-    sendMessage: (content: string, providerID: string, modelID: string, agent?: string, attachments?: AttachedFile[], agentMentionName?: string, additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }>, variant?: string, inputMode?: 'normal' | 'shell') => Promise<void>;
+    sendMessage: (content: string, runConfigOrProviderID: HarnessRunConfig | string, modelIDOrAttachments?: string | AttachedFile[], agentOrMentionName?: string, attachmentsOrAdditionalParts?: AttachedFile[] | Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }>, agentMentionNameOrInputMode?: string, additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }>, variant?: string, inputMode?: 'normal' | 'shell') => Promise<void>;
     abortCurrentOperation: (sessionIdOverride?: string) => Promise<void>;
     acknowledgeSessionAbort: (sessionId: string) => void;
     armAbortPrompt: (durationMs?: number) => number | null;

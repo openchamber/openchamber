@@ -592,6 +592,230 @@ const buildMcpRuntimeActionKey = (name: string | null, directory?: string | null
 // ─────────────────────────────────────────────────────────────
 // McpPage
 // ─────────────────────────────────────────────────────────────
+const CodexMcpEditor: React.FC<{ serverName: string }> = ({ serverName }) => {
+  const [name, setName] = React.useState(serverName);
+  const [mcpType, setMcpType] = React.useState<'local' | 'remote'>('local');
+  const [command, setCommand] = React.useState<string[]>([]);
+  const [url, setUrl] = React.useState('');
+  const [envEntries, setEnvEntries] = React.useState<Array<{ key: string; value: string }>>([]);
+  const [enabled, setEnabled] = React.useState(true);
+  const [isLoading, setIsLoading] = React.useState(true);
+  const [isSaving, setIsSaving] = React.useState(false);
+
+  const initialRef = React.useRef<{
+    name: string;
+    mcpType: 'local' | 'remote'; command: string[]; url: string;
+    envEntries: Array<{ key: string; value: string }>; enabled: boolean;
+  } | null>(null);
+
+  React.useEffect(() => {
+    setIsLoading(true);
+    setName(serverName);
+    void (async () => {
+      try {
+        const response = await fetch('/api/openchamber/codex/mcp', { headers: { Accept: 'application/json' } });
+        if (!response.ok) return;
+        const data = await response.json();
+        const servers = Array.isArray(data?.servers) ? data.servers : [];
+        const server = servers.find((s: { name: string }) => s.name === serverName);
+        if (server) {
+          const t = server.type === 'remote' ? 'remote' as const : 'local' as const;
+          const cmd = Array.isArray(server.command) ? server.command : [];
+          const u = typeof server.url === 'string' ? server.url : '';
+          const env = Array.isArray(server.environment) ? server.environment : [];
+          setMcpType(t);
+          setCommand(cmd);
+          setUrl(u);
+          setEnvEntries(env);
+          setEnabled(server.enabled !== false);
+          initialRef.current = { name: serverName, mcpType: t, command: cmd, url: u, envEntries: env, enabled: server.enabled !== false };
+        } else {
+          // New server with no config yet
+          initialRef.current = { name: serverName, mcpType: 'local', command: [], url: '', envEntries: [], enabled: true };
+        }
+      } catch { /* ignore */ }
+      finally { setIsLoading(false); }
+    })();
+  }, [serverName]);
+
+  const isRenamed = name.trim() !== '' && name.trim() !== (initialRef.current?.name ?? serverName);
+  const isDirty = React.useMemo(() => {
+    const init = initialRef.current;
+    if (!init) return false;
+    return name !== init.name || mcpType !== init.mcpType || enabled !== init.enabled
+      || JSON.stringify(command) !== JSON.stringify(init.command)
+      || url !== init.url
+      || JSON.stringify(envEntries) !== JSON.stringify(init.envEntries);
+  }, [name, mcpType, command, url, envEntries, enabled]);
+
+  const handleSave = async () => {
+    const trimmedName = name.trim();
+    if (!trimmedName) { toast.error('Server name is required'); return; }
+
+    setIsSaving(true);
+    try {
+      // If renamed, delete the old entry first
+      if (isRenamed) {
+        await fetch(`/api/openchamber/codex/mcp/${encodeURIComponent(serverName)}`, { method: 'DELETE' });
+      }
+      const response = await fetch(`/api/openchamber/codex/mcp/${encodeURIComponent(trimmedName)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: mcpType, command, url, environment: envEntries, enabled }),
+      });
+      if (response.ok) {
+        initialRef.current = { name: trimmedName, mcpType, command, url, envEntries, enabled };
+        toast.success('Codex MCP server saved');
+        window.dispatchEvent(new Event('codex-mcp-changed'));
+        // Update sidebar selection to the new name
+        if (isRenamed) {
+          useMcpConfigStore.getState().setSelectedMcp(trimmedName);
+        }
+      } else {
+        toast.error('Failed to save');
+      }
+    } catch { toast.error('Failed to save'); }
+    finally { setIsSaving(false); }
+  };
+
+  const handleDelete = async () => {
+    try {
+      const response = await fetch(`/api/openchamber/codex/mcp/${encodeURIComponent(serverName)}`, { method: 'DELETE' });
+      if (response.ok) {
+        toast.success(`"${serverName}" deleted from Codex config`);
+        useMcpConfigStore.getState().setSelectedMcp(null);
+        window.dispatchEvent(new Event('codex-mcp-changed'));
+      } else {
+        toast.error('Failed to delete');
+      }
+    } catch { toast.error('Failed to delete'); }
+  };
+
+  if (isLoading) {
+    return <div className="flex h-full items-center justify-center"><p className="typography-meta text-muted-foreground">Loading...</p></div>;
+  }
+
+  return (
+    <ScrollableOverlay outerClassName="h-full" className="w-full">
+      <div className="mx-auto w-full max-w-3xl p-3 sm:p-6 sm:pt-8">
+        <div className="mb-4">
+          <p className="typography-meta text-muted-foreground">Codex MCP server &middot; configured in <code className="font-mono text-xs">~/.codex/config.toml</code></p>
+        </div>
+
+        {/* Identity */}
+        <div className="mb-8">
+          <div className="mb-1 px-1">
+            <h3 className="typography-ui-header font-medium text-foreground">Identity</h3>
+          </div>
+          <section className="px-2 pb-2 pt-0 space-y-0">
+            <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
+              <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
+                <span className="typography-ui-label text-foreground">Server Name</span>
+              </div>
+              <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
+                <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="my-mcp-server" className="h-7 flex-1 font-mono text-xs" />
+              </div>
+            </div>
+          </section>
+        </div>
+
+        {/* Server Configuration */}
+        <div className="mb-8">
+          <div className="mb-1 px-1">
+            <h3 className="typography-ui-header font-medium text-foreground">Server Configuration</h3>
+          </div>
+          <section className="px-2 pb-2 pt-0 space-y-0">
+            <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
+              <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
+                <span className="typography-ui-label text-foreground">Type</span>
+              </div>
+              <div className="flex items-center gap-2 sm:w-fit">
+                <Select value={mcpType} onValueChange={(v) => setMcpType(v as 'local' | 'remote')}>
+                  <SelectTrigger className="w-fit min-w-[120px]"><span>{mcpType === 'local' ? 'Local (stdio)' : 'Remote (SSE)'}</span></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="local">Local (stdio)</SelectItem>
+                    <SelectItem value="remote">Remote (SSE)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {mcpType === 'local' ? (
+              <div className="py-1.5">
+                <span className="typography-ui-label text-foreground">Command</span>
+                <div className="mt-1.5">
+                  <CommandTextarea
+                    value={command}
+                    onChange={setCommand}
+                    pasteCommandTitle="Paste command"
+                    pasteCommandLabel="Paste command"
+                    pasteSuccess={(count) => `Pasted ${count} arguments`}
+                    clipboardReadFailed="Could not read clipboard"
+                    preview={(count) => `${count} arguments`}
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
+                <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
+                  <span className="typography-ui-label text-foreground">URL</span>
+                </div>
+                <div className="flex min-w-0 flex-1">
+                  <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://..." className="h-7 flex-1 font-mono text-xs" />
+                </div>
+              </div>
+            )}
+
+            <div className="group flex cursor-pointer items-center gap-2 py-1.5"
+              role="button" tabIndex={0}
+              onClick={() => setEnabled(!enabled)}
+              onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setEnabled(!enabled); } }}
+            >
+              <Checkbox checked={enabled} onChange={setEnabled} ariaLabel="Enabled" />
+              <span className="typography-ui-label text-foreground">Enabled</span>
+            </div>
+          </section>
+        </div>
+
+        {/* Environment Variables */}
+        <div className="mb-8">
+          <div className="mb-1 px-1 flex items-center justify-between">
+            <h3 className="typography-ui-header font-medium text-foreground">Environment Variables</h3>
+            <Button size="xs" variant="ghost" className="h-6 px-1.5" onClick={() => setEnvEntries([...envEntries, { key: '', value: '' }])}>
+              <RiAddLine className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+          <section className="px-2 pb-2 pt-0 space-y-1">
+            {envEntries.length === 0 ? (
+              <p className="typography-meta text-muted-foreground/60 py-2">No environment variables configured.</p>
+            ) : envEntries.map((entry, idx) => (
+              <div key={idx} className="flex items-center gap-2">
+                <Input value={entry.key} onChange={(e) => { const next = [...envEntries]; next[idx] = { ...entry, key: e.target.value }; setEnvEntries(next); }}
+                  placeholder="KEY" className="h-7 w-32 font-mono text-xs" />
+                <Input value={entry.value} onChange={(e) => { const next = [...envEntries]; next[idx] = { ...entry, value: e.target.value }; setEnvEntries(next); }}
+                  placeholder="value" className="h-7 flex-1 font-mono text-xs" />
+                <Button size="xs" variant="ghost" className="h-6 w-6 p-0 text-muted-foreground" onClick={() => setEnvEntries(envEntries.filter((_, i) => i !== idx))}>
+                  <RiDeleteBinLine className="h-3 w-3" />
+                </Button>
+              </div>
+            ))}
+          </section>
+        </div>
+
+        {/* Actions */}
+        <div className="px-2 py-1 flex items-center gap-3">
+          <Button onClick={handleSave} disabled={isSaving || !isDirty} size="xs" className="!font-normal">
+            {isSaving ? 'Saving...' : 'Save Changes'}
+          </Button>
+          <Button variant="ghost" size="xs" className="!font-normal text-destructive" onClick={handleDelete}>
+            Delete
+          </Button>
+        </div>
+      </div>
+    </ScrollableOverlay>
+  );
+};
+
 export const McpPage: React.FC = () => {
   const { t } = useI18n();
   const tUnsafe = React.useCallback(
@@ -634,6 +858,8 @@ export const McpPage: React.FC = () => {
 
   const selectedServer = selectedMcpName ? getMcpByName(selectedMcpName) : null;
   const isNewServer = Boolean(mcpDraft && mcpDraft.name === selectedMcpName && !selectedServer);
+  // If the selected server isn't in the OpenCode store and it's not a new draft, it's a Codex server
+  const isCodexServer = Boolean(selectedMcpName && !selectedServer && !isNewServer);
 
   // ── form state ──
   const [draftName, setDraftName] = React.useState('');
@@ -1293,6 +1519,11 @@ export const McpPage: React.FC = () => {
       window.clearInterval(intervalId);
     };
   }, [currentDirectory, isAuthPolling, refreshStatus, selectedMcpName, t]);
+
+  // Route to Codex editor if the server isn't in the OpenCode store.
+  if (isCodexServer && selectedMcpName) {
+    return <CodexMcpEditor serverName={selectedMcpName} />;
+  }
 
   // ── Empty state ──
   if (!selectedMcpName) {

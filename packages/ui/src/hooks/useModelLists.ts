@@ -15,9 +15,21 @@ export interface ModelListItem {
 
 export const useModelLists = () => {
   const providers = useConfigStore((state) => state.providers);
+  const virtualProviders = useConfigStore((state) => state.virtualProviders);
   const favoriteModels = useUIStore((state) => state.favoriteModels);
   const recentModels = useUIStore((state) => state.recentModels);
   const hiddenModels = useUIStore((state) => state.hiddenModels);
+
+  const effectiveProviders = React.useMemo(() => {
+    if (!Array.isArray(virtualProviders) || virtualProviders.length === 0) {
+      return providers;
+    }
+    const virtualIds = new Set(virtualProviders.map((provider) => provider.id));
+    return [
+      ...virtualProviders,
+      ...providers.filter((provider) => !virtualIds.has(provider.id)),
+    ];
+  }, [providers, virtualProviders]);
 
   const isHidden = React.useCallback((providerID: string, modelID: string) => {
     return hiddenModels.some((item) => item.providerID === providerID && item.modelID === modelID);
@@ -26,7 +38,7 @@ export const useModelLists = () => {
   const favoriteModelsList = React.useMemo(() => {
     return favoriteModels
       .map(({ providerID, modelID }) => {
-        const provider = providers.find((p) => p.id === providerID);
+        const provider = effectiveProviders.find((p) => p.id === providerID);
         if (!provider) return null;
         const providerModels = Array.isArray(provider.models) ? provider.models : [];
         const model = providerModels.find((m: ProviderModel) => m.id === modelID);
@@ -35,12 +47,12 @@ export const useModelLists = () => {
         return { provider, model, providerID, modelID };
       })
       .filter((item): item is ModelListItem => item !== null);
-  }, [favoriteModels, providers, isHidden]);
+  }, [favoriteModels, effectiveProviders, isHidden]);
 
   const recentModelsList = React.useMemo(() => {
     return recentModels
       .map(({ providerID, modelID }) => {
-        const provider = providers.find((p) => p.id === providerID);
+        const provider = effectiveProviders.find((p) => p.id === providerID);
         if (!provider) return null;
         const providerModels = Array.isArray(provider.models) ? provider.models : [];
         const model = providerModels.find((m: ProviderModel) => m.id === modelID);
@@ -52,7 +64,7 @@ export const useModelLists = () => {
       .filter(({ providerID, modelID }) =>
         !favoriteModels.some(fav => fav.providerID === providerID && fav.modelID === modelID)
       );
-  }, [recentModels, providers, favoriteModels, isHidden]);
+  }, [recentModels, effectiveProviders, favoriteModels, isHidden]);
 
   return { favoriteModelsList, recentModelsList };
 };

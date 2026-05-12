@@ -4,12 +4,18 @@
  */
 
 import { create } from "zustand"
+import type { HarnessRunConfig } from "@openchamber/harness-contracts"
 
 export type SelectionState = {
   sessionModelSelections: Map<string, { providerId: string; modelId: string }>
   sessionAgentSelections: Map<string, string>
   sessionAgentModelSelections: Map<string, Map<string, { providerId: string; modelId: string }>>
+  sessionRunConfigs: Map<string, HarnessRunConfig>
+  sessionBackendSelections: Map<string, string>
   lastUsedProvider: { providerID: string; modelID: string } | null
+  lastUsedProviderByBackend: Map<string, { providerId: string; modelId: string }>
+  draftBackendId: string | null
+  lastUsedBackendId: string | null
 
   saveSessionModelSelection: (sessionId: string, providerId: string, modelId: string) => void
   getSessionModelSelection: (sessionId: string) => { providerId: string; modelId: string } | null
@@ -19,6 +25,13 @@ export type SelectionState = {
   getAgentModelForSession: (sessionId: string, agentName: string) => { providerId: string; modelId: string } | null
   saveAgentModelVariantForSession: (sessionId: string, agentName: string, providerId: string, modelId: string, variant: string | undefined) => void
   getAgentModelVariantForSession: (sessionId: string, agentName: string, providerId: string, modelId: string) => string | undefined
+  saveSessionBackendSelection: (sessionId: string, backendId: string) => void
+  getSessionBackendSelection: (sessionId: string) => string | null
+  saveSessionRunConfig: (sessionId: string, runConfig: HarnessRunConfig) => void
+  getSessionRunConfig: (sessionId: string) => HarnessRunConfig | null
+  setDraftBackendId: (backendId: string | null) => void
+  saveBackendModelSelection: (backendId: string, providerId: string, modelId: string) => void
+  getBackendModelSelection: (backendId: string) => { providerId: string; modelId: string } | null
 }
 
 // In-memory variant storage (not persisted)
@@ -28,7 +41,12 @@ export const useSelectionStore = create<SelectionState>()((set, get) => ({
   sessionModelSelections: new Map(),
   sessionAgentSelections: new Map(),
   sessionAgentModelSelections: new Map(),
+  sessionRunConfigs: new Map(),
+  sessionBackendSelections: new Map(),
   lastUsedProvider: null,
+  lastUsedProviderByBackend: new Map(),
+  draftBackendId: null,
+  lastUsedBackendId: null,
 
   saveSessionModelSelection: (sessionId, providerId, modelId) =>
     set((s) => {
@@ -96,4 +114,45 @@ export const useSelectionStore = create<SelectionState>()((set, get) => ({
     const key = `${providerId}/${modelId}`
     return agentModelVariantSelections.get(sessionId)?.get(agentName)?.get(key)
   },
+
+  saveSessionBackendSelection: (sessionId, backendId) =>
+    set((s) => {
+      if (!backendId || s.sessionBackendSelections.get(sessionId) === backendId) {
+        return s
+      }
+      const map = new Map(s.sessionBackendSelections)
+      map.set(sessionId, backendId)
+      return { sessionBackendSelections: map, lastUsedBackendId: backendId }
+    }),
+
+  getSessionBackendSelection: (sessionId) => get().sessionBackendSelections.get(sessionId) ?? null,
+
+  saveSessionRunConfig: (sessionId, runConfig) =>
+    set((s) => {
+      const existing = s.sessionRunConfigs.get(sessionId)
+      if (JSON.stringify(existing) === JSON.stringify(runConfig)) return s
+      const map = new Map(s.sessionRunConfigs)
+      map.set(sessionId, runConfig)
+      return { sessionRunConfigs: map }
+    }),
+
+  getSessionRunConfig: (sessionId) => get().sessionRunConfigs.get(sessionId) ?? null,
+
+  setDraftBackendId: (backendId) =>
+    set(() => ({
+      draftBackendId: backendId,
+      lastUsedBackendId: backendId,
+    })),
+
+  saveBackendModelSelection: (backendId, providerId, modelId) =>
+    set((s) => {
+      if (!backendId || !providerId || !modelId) return s
+      const existing = s.lastUsedProviderByBackend.get(backendId)
+      if (existing?.providerId === providerId && existing?.modelId === modelId) return s
+      const map = new Map(s.lastUsedProviderByBackend)
+      map.set(backendId, { providerId, modelId })
+      return { lastUsedProviderByBackend: map }
+    }),
+
+  getBackendModelSelection: (backendId) => get().lastUsedProviderByBackend.get(backendId) ?? null,
 }))

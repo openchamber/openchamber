@@ -33,12 +33,14 @@ type TokenBreakdown = {
   cacheRead: number;
   cacheWrite: number;
   total: number;
+  contextWindow: number;
 };
 
 type ContextBuckets = {
   user: number;
   assistant: number;
   tool: number;
+  cache: number;
   other: number;
 };
 
@@ -49,12 +51,14 @@ const EMPTY_BREAKDOWN: TokenBreakdown = {
   cacheRead: 0,
   cacheWrite: 0,
   total: 0,
+  contextWindow: 0,
 };
 
 const EMPTY_BUCKETS: ContextBuckets = {
   user: 0,
   assistant: 0,
   tool: 0,
+  cache: 0,
   other: 0,
 };
 
@@ -88,6 +92,8 @@ const extractTokenBreakdown = (message: SessionMessage): TokenBreakdown => {
     output?: unknown;
     reasoning?: unknown;
     cache?: { read?: unknown; write?: unknown };
+    total?: unknown;
+    contextWindow?: unknown;
   };
 
   const input = toNonNegativeNumber(breakdown.input);
@@ -95,6 +101,8 @@ const extractTokenBreakdown = (message: SessionMessage): TokenBreakdown => {
   const reasoning = toNonNegativeNumber(breakdown.reasoning);
   const cacheRead = toNonNegativeNumber(breakdown.cache?.read);
   const cacheWrite = toNonNegativeNumber(breakdown.cache?.write);
+  const calculatedTotal = input + output + reasoning + cacheWrite;
+  const total = toNonNegativeNumber(breakdown.total) || calculatedTotal;
 
   return {
     input,
@@ -102,7 +110,8 @@ const extractTokenBreakdown = (message: SessionMessage): TokenBreakdown => {
     reasoning,
     cacheRead,
     cacheWrite,
-    total: input + output + reasoning + cacheRead + cacheWrite,
+    total,
+    contextWindow: toNonNegativeNumber(breakdown.contextWindow),
   };
 };
 
@@ -165,24 +174,25 @@ const estimatePartChars = (part: Part, role: 'user' | 'assistant' | 'tool' | 'ot
       + Math.round(estimateTextLength(partRecord.metadata) * 0.25)
       + Math.round(estimateTextLength(partRecord.state) * 0.1);
 
-    return { user: 0, assistant: 0, tool: toolPayloadLength, other: 0 };
+    return { user: 0, assistant: 0, tool: toolPayloadLength, cache: 0, other: 0 };
   }
 
   if (role === 'user') {
-    return { user: directText.length, assistant: 0, tool: 0, other: 0 };
+    return { user: directText.length, assistant: 0, tool: 0, cache: 0, other: 0 };
   }
 
   if (role === 'assistant') {
-    return { user: 0, assistant: directText.length, tool: 0, other: 0 };
+    return { user: 0, assistant: directText.length, tool: 0, cache: 0, other: 0 };
   }
 
-  return { user: 0, assistant: 0, tool: 0, other: directText.length };
+  return { user: 0, assistant: 0, tool: 0, cache: 0, other: directText.length };
 };
 
 const addBuckets = (target: ContextBuckets, value: ContextBuckets): ContextBuckets => ({
   user: target.user + value.user,
   assistant: target.assistant + value.assistant,
   tool: target.tool + value.tool,
+  cache: target.cache + value.cache,
   other: target.other + value.other,
 });
 
@@ -217,6 +227,7 @@ const computeContextBreakdown = (
     user: Math.ceil(totalChars.user / 4),
     assistant: Math.ceil(totalChars.assistant / 4),
     tool: Math.ceil(totalChars.tool / 4),
+    cache: 0,
     other: Math.ceil(totalChars.other / 4),
   };
 };
@@ -281,6 +292,10 @@ export const ContextPanelContent: React.FC = () => {
   const sessions = useSessions();
   const sessionMessages = useSessionMessageRecords(currentSessionId ?? '');
   const providers = useConfigStore((state) => state.providers);
+  const virtualProviders = useConfigStore((state) => state.virtualProviders);
+  const getModelMetadata = useConfigStore((state) => state.getModelMetadata);
+  const modelsMetadataSize = useConfigStore((state) => state.modelsMetadata.size);
+  void modelsMetadataSize;
 
   React.useEffect(() => {
     if (copyResetTimeoutRef.current !== null) {
@@ -340,12 +355,20 @@ export const ContextPanelContent: React.FC = () => {
 
     const latestAssistantInfo = (contextMessage?.info ?? null) as (Message & { providerID?: string; modelID?: string }) | null;
     const providerModel = resolveProviderAndModel(
-      providers as ProviderLike[],
+      [...virtualProviders, ...providers] as ProviderLike[],
       latestAssistantInfo?.providerID || '',
       latestAssistantInfo?.modelID || '',
     );
 
-    const contextLimit = providerModel.contextLimit;
+    const metadata = latestAssistantInfo?.providerID && latestAssistantInfo?.modelID
+      ? getModelMetadata(latestAssistantInfo.providerID, latestAssistantInfo.modelID)
+      : undefined;
+    const metadataContextLimit = typeof metadata?.limit?.context === 'number' ? metadata.limit.context : null;
+    const isOpenCodeSession = (currentSession as { backendId?: string | null } | null)?.backendId === 'opencode';
+    const fallbackContextLimit = isOpenCodeSession
+      ? (providerModel.contextLimit || metadataContextLimit)
+      : (metadataContextLimit || providerModel.contextLimit);
+    const contextLimit = tokenBreakdown.contextWindow || fallbackContextLimit;
     const usagePercent = contextLimit && contextLimit > 0
       ? Math.min(999, (tokenBreakdown.total / contextLimit) * 100)
       : 0;
@@ -356,11 +379,20 @@ export const ContextPanelContent: React.FC = () => {
 
     const computedBreakdown = computeContextBreakdown(sessionMessages, systemPrompt);
 
-    const userTokens = computedBreakdown.user;
-    const assistantTokens = computedBreakdown.assistant;
-    const toolTokens = computedBreakdown.tool;
-    const otherTokens = Math.max(0, tokenBreakdown.input - userTokens - assistantTokens - toolTokens);
-    const breakdownTotal = userTokens + assistantTokens + toolTokens + otherTokens;
+    const estimatedInputTokens = computedBreakdown.user + computedBreakdown.assistant + computedBreakdown.tool + computedBreakdown.other;
+    const nonCachedInputTokens = Math.max(0, tokenBreakdown.input - tokenBreakdown.cacheRead);
+    const inputScale = estimatedInputTokens > 0 && nonCachedInputTokens > 0
+      ? nonCachedInputTokens / estimatedInputTokens
+      : 1;
+    const userTokens = Math.round(computedBreakdown.user * inputScale);
+    const historicalAssistantTokens = Math.round(computedBreakdown.assistant * inputScale);
+    const toolTokens = Math.round(computedBreakdown.tool * inputScale);
+    const knownInputTokens = userTokens + historicalAssistantTokens + toolTokens;
+    const uncategorizedInputTokens = Math.max(0, nonCachedInputTokens - knownInputTokens);
+    const assistantTokens = historicalAssistantTokens + tokenBreakdown.output + tokenBreakdown.reasoning;
+    const cacheTokens = tokenBreakdown.cacheRead + tokenBreakdown.cacheWrite;
+    const otherTokens = uncategorizedInputTokens;
+    const breakdownTotal = userTokens + assistantTokens + toolTokens + cacheTokens + otherTokens;
 
     const firstMessageTs = sessionMessages[0]?.info?.time?.created;
     const lastMessageTs = sessionMessages.length > 0
@@ -383,11 +415,12 @@ export const ContextPanelContent: React.FC = () => {
         user: userTokens,
         assistant: assistantTokens,
         tool: toolTokens,
+        cache: cacheTokens,
         other: otherTokens,
       },
       breakdownTotal,
     };
-  }, [currentSessionId, providers, sessionMessages, sessions, t]);
+  }, [currentSessionId, getModelMetadata, providers, sessionMessages, sessions, t, virtualProviders]);
 
   if (!currentSessionId) {
     return (
@@ -401,6 +434,7 @@ export const ContextPanelContent: React.FC = () => {
     { key: 'user', label: t('contextSidebar.breakdown.user'), value: viewModel.breakdown.user, color: 'var(--status-success)' },
     { key: 'assistant', label: t('contextSidebar.breakdown.assistant'), value: viewModel.breakdown.assistant, color: 'var(--primary-base)' },
     { key: 'tool', label: t('contextSidebar.breakdown.toolCalls'), value: viewModel.breakdown.tool, color: 'var(--status-warning)' },
+    { key: 'cache', label: t('contextSidebar.tokens.cacheRead'), value: viewModel.breakdown.cache, color: 'var(--status-info)' },
     { key: 'other', label: t('contextSidebar.breakdown.other'), value: viewModel.breakdown.other, color: 'var(--surface-muted-foreground)' },
   ];
 

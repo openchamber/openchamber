@@ -17,6 +17,7 @@
     "paths": {
       "@/*": ["../ui/src/*"],
       "@vscode/*": ["./webview/*"],
+      "@openchamber/harness-contracts": ["../harness-contracts/src/index.ts"],
       "@openchamber/ui/*": ["../ui/src/*"]
     }
   },

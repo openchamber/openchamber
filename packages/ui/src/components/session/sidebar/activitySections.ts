@@ -1,5 +1,6 @@
 import type { Session } from '@opencode-ai/sdk/v2';
 import type { SessionStatus } from '@opencode-ai/sdk/v2/client';
+import { getCompatibleSessionArchivedAt, getCompatibleSessionParentId } from '@/sync/compat';
 
 export const ACTIVE_NOW_STORAGE_KEY = 'oc.sessions.activeNow';
 export const ACTIVE_NOW_MAX_AGE_MS = 36 * 60 * 60 * 1000;
@@ -9,11 +10,11 @@ export type ActiveNowEntry = {
 };
 
 const isSubtaskSession = (session: Session): boolean => {
-  return Boolean((session as Session & { parentID?: string | null }).parentID);
+  return Boolean(getCompatibleSessionParentId(session));
 };
 
 const isArchivedSession = (session: Session): boolean => {
-  return Boolean(session.time?.archived);
+  return Boolean(getCompatibleSessionArchivedAt(session));
 };
 
 const getSessionUpdatedAt = (session: Session): number => {

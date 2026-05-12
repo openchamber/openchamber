@@ -7,6 +7,21 @@ import { useStore } from "zustand"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
 import { createEventPipeline } from "./event-pipeline"
 import { reduceGlobalEvent, applyGlobalProject, applyDirectoryEvent } from "./event-reducer"
+import type { DirectorySyncEvent } from "./event-reducer"
+import { fromOpenCodeEvent, fromOpenCodeMessage, fromOpenCodePart, fromOpenCodeSession } from "./adapters/opencode"
+import {
+  getOpenCodeCompatibleMessages,
+  getOpenCodeCompatibleMessageList,
+  getOpenCodeCompatibleParts,
+  getOpenCodeCompatiblePartList,
+  getOpenCodeCompatibleSession,
+  getOpenCodeCompatibleSessionList,
+  getOpenCodeCompatibleSessions,
+  getCompatibleSessionDirectory,
+  getCompatibleSessionParentId,
+  getCompatibleSessionProjectWorktree,
+  getCompatibleSessionShareUrl,
+} from "./compat"
 import { useGlobalSyncStore, type GlobalSyncStore } from "./global-sync-store"
 import { ChildStoreManager, type DirectoryStore } from "./child-store"
 import {
@@ -26,6 +41,7 @@ import { stripMessageDiffSnapshots, stripSessionDiffSnapshots } from "./sanitize
 import { syncDebug } from "./debug"
 import { getReconnectCandidateSessionIds } from "./reconnect-recovery"
 import { opencodeClient } from "@/lib/opencode/client"
+import { harnessClient, type HarnessClient } from "@/lib/harness/client"
 import { usePermissionStore } from "@/stores/permissionStore"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
@@ -34,6 +50,7 @@ import { appendNotification } from "./notification-store"
 import type { State } from "./types"
 import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
 import type { PermissionRequest } from "@/types/permission"
+import { EMPTY_MESSAGES, EMPTY_PARTS, EMPTY_PERMISSION_REQUESTS, EMPTY_QUESTION_REQUESTS } from "@/constants/empty"
 import type { QuestionRequest } from "@/types/question"
 import * as sessionActions from "./session-actions"
 import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./materialization"
@@ -45,6 +62,7 @@ import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./
 type SyncSystem = {
   childStores: ChildStoreManager
   sdk: OpencodeClient
+  harness: HarnessClient
   directory: string
 }
 
@@ -136,7 +154,6 @@ const requestSignature = (items: Array<{ id: string }> | undefined): string => {
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 
 const syncSnapshotSignature = (value: unknown): string => JSON.stringify(value)
-
 function haveEquivalentSyncSnapshots(left: unknown, right: unknown): boolean {
   return syncSnapshotSignature(left) === syncSnapshotSignature(right)
 }
@@ -200,8 +217,8 @@ async function materializeSessionFromServer(
       state,
       sessionID,
       records.map((record: { info: Message; parts?: Part[] }) => ({
-        info: stripMessageDiffSnapshots(record.info),
-        parts: record.parts ?? [],
+        info: fromOpenCodeMessage(stripMessageDiffSnapshots(record.info)),
+        parts: (record.parts ?? []).map((part) => fromOpenCodePart(part)),
       })),
       { skipPartTypes: RECONNECT_SKIP_PARTS },
     )
@@ -421,7 +438,7 @@ const setIndexedSessionMessages = (
   routingIndex: EventRoutingIndex,
   sessionID: string,
   directory: string,
-  messages: Message[],
+  messages: Array<{ id: string }>,
 ) => {
   if (!sessionID) {
     return
@@ -928,10 +945,10 @@ async function resyncDirectoryAfterReconnect(
     const records = messageResponse?.data
     if (!session || !records) return
 
-    const nextSession = stripSessionDiffSnapshots(session)
+    const nextSession = fromOpenCodeSession(stripSessionDiffSnapshots(session))
     const nextMessages = records
       .filter((record) => !!record?.info?.id)
-      .map((record) => stripMessageDiffSnapshots(record.info))
+      .map((record) => fromOpenCodeMessage(stripMessageDiffSnapshots(record.info)))
       .sort((a, b) => cmp(a.id, b.id))
 
     store.setState((state: DirectoryStore) => {
@@ -950,7 +967,7 @@ async function resyncDirectoryAfterReconnect(
         sessions = [...state.session]
         sessions.push(nextSession)
         sessions.sort((a, b) => cmp(a.id, b.id))
-        if (!nextSession.parentID) sessionTotal += 1
+        if (!nextSession.parentId) sessionTotal += 1
         sessionChanged = true
       }
 
@@ -958,8 +975,8 @@ async function resyncDirectoryAfterReconnect(
         state,
         sessionId,
         records.map((record) => ({
-          info: stripMessageDiffSnapshots(record.info),
-          parts: record.parts ?? [],
+          info: fromOpenCodeMessage(stripMessageDiffSnapshots(record.info)),
+          parts: (record.parts ?? []).map((part) => fromOpenCodePart(part)),
         })),
         { skipPartTypes: RECONNECT_SKIP_PARTS },
       )
@@ -1134,7 +1151,7 @@ function handleEvent(
     // Skip subtask sessions — only top-level sessions generate notifications
     const storeState = store.getState()
     const session = storeState.session.find((s) => s.id === sessionID)
-    if (session && (session as { parentID?: string }).parentID) {
+    if (session && getCompatibleSessionParentId(session)) {
       // subtask — skip notification
     } else if (sessionID) {
       appendNotification({
@@ -1158,9 +1175,7 @@ function handleEvent(
     if (idleSessionId && resolvedDirectory && resolvedDirectory !== "global") {
       const sessionState = store.getState()
       const idleSession = sessionState.session.find((s) => s.id === idleSessionId)
-      const parentID = idleSession
-        ? (idleSession as Session & { parentID?: string | null }).parentID
-        : null
+      const parentID = idleSession ? idleSession.parentId : null
       if (parentID) {
         enqueueSessionMaterialization(resolvedDirectory, parentID, childStores)
       }
@@ -1172,11 +1187,11 @@ function handleEvent(
   // so Zustand selectors skip re-renders for unrelated subscribers.
   const current = store.getState()
   const draft: State = { ...current }
+  const syncEvent = fromOpenCodeEvent(payload) ?? payload
 
-  switch (payload.type) {
-    case "session.created":
-    case "session.updated":
-    case "session.deleted":
+  switch (syncEvent.type) {
+    case "session.upserted":
+    case "session.removed":
       draft.session = [...current.session]
       draft.permission = { ...current.permission }
       draft.todo = { ...current.todo }
@@ -1185,24 +1200,22 @@ function handleEvent(
     case "session.diff":
       draft.session_diff = { ...current.session_diff }
       break
-    case "session.status":
-    case "session.idle":
-    case "session.error":
+    case "session.status.updated":
       draft.session_status = { ...(current.session_status ?? {}) }
       break
     case "todo.updated":
       draft.todo = { ...current.todo }
       break
-    case "message.updated":
+    case "message.upserted":
       draft.message = { ...current.message }
       break
     case "message.removed":
       draft.message = { ...current.message }
       draft.part = { ...current.part }
       break
-    case "message.part.updated":
-    case "message.part.removed":
-    case "message.part.delta":
+    case "part.upserted":
+    case "part.removed":
+    case "part.delta":
       draft.part = { ...current.part }
       break
     case "vcs.branch.updated":
@@ -1223,7 +1236,7 @@ function handleEvent(
       break
   }
 
-  const reducerResult = applyDirectoryEvent(draft, payload, {
+  const reducerResult = applyDirectoryEvent(draft, syncEvent as DirectorySyncEvent, {
     onSetSessionTodo: (sessionID, todos) => {
       useTodosPersistStore.getState().setSessionTodos(sessionID, todos)
     },
@@ -1235,7 +1248,7 @@ function handleEvent(
     store.setState(draft)
     const sessionID = getSessionIdFromPayload(payload) ?? undefined
     const messageID = getMessageIdFromPayload(payload) ?? undefined
-    syncDebug.dispatch.eventApplied(payload.type, sessionID, messageID)
+    syncDebug.dispatch.eventApplied(syncEvent.type, sessionID, messageID)
 
     // Snapshot materialization on message.updated: if the message was inserted or
     // replaced but draft.part[messageID] is empty, the parts were lost or
@@ -1250,7 +1263,7 @@ function handleEvent(
   } else {
     const sessionID = getSessionIdFromPayload(payload) ?? undefined
     const messageID = getMessageIdFromPayload(payload) ?? undefined
-    syncDebug.dispatch.eventNoChange(payload.type, sessionID, messageID)
+    syncDebug.dispatch.eventNoChange(syncEvent.type, sessionID, messageID)
 
   }
 
@@ -1287,6 +1300,7 @@ export function SyncProvider(props: {
     () => ({
       childStores,
       sdk: props.sdk,
+      harness: harnessClient,
       directory: props.directory,
     }),
     [childStores, props.sdk, props.directory],
@@ -1344,6 +1358,7 @@ export function SyncProvider(props: {
               }
               const sessions = (result.data ?? [])
                 .filter((s) => !!s?.id)
+                .map((session) => fromOpenCodeSession(stripSessionDiffSnapshots(session)))
                 .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
               // Race guard: if the list came back empty but event pipeline
               // already populated the store, don't clobber. OpenCode can
@@ -1478,7 +1493,7 @@ export function SyncProvider(props: {
       setIndexedSessionDirectory(routingIndex, sessionID, dir)
     })
     setActionRefs(
-      props.sdk,
+      harnessClient,
       childStores,
       () => opencodeClient.getDirectory() || props.directory,
     )
@@ -1538,10 +1553,11 @@ export function useSessionRevertMessageID(sessionID: string, directory?: string)
 
 /** Get session messages for a specific session */
 export function useSessionMessages(sessionID: string, directory?: string) {
-  return useDirectorySync(
-    useCallback((state: State) => state.message[sessionID] ?? EMPTY_MESSAGES, [sessionID]),
+  const messages = useDirectorySync(
+    useCallback((state: State) => state.message[sessionID], [sessionID]),
     directory,
   )
+  return useMemo(() => getOpenCodeCompatibleMessageList(messages), [messages])
 }
 
 /**
@@ -1570,10 +1586,11 @@ export function useSessionMessagesResolved(sessionID: string, directory?: string
 
 /** Get parts for a specific message */
 export function useSessionParts(messageID: string, directory?: string) {
-  return useDirectorySync(
-    useCallback((state: State) => state.part[messageID] ?? EMPTY_PARTS, [messageID]),
+  const parts = useDirectorySync(
+    useCallback((state: State) => state.part[messageID], [messageID]),
     directory,
   )
+  return useMemo(() => getOpenCodeCompatiblePartList(parts), [parts])
 }
 
 /** Get status for a specific session */
@@ -1602,17 +1619,15 @@ export function useSessionQuestions(sessionID: string, directory?: string) {
 
 /** Get sessions list for a directory */
 export function useSessions(directory?: string) {
-  return useDirectorySync(
-    useCallback((state: State) => state.session, []),
-    directory,
-  )
+  const sessions = useDirectorySync(useCallback((state: State) => state.session, []), directory)
+  return useMemo(() => getOpenCodeCompatibleSessionList(sessions), [sessions])
 }
 
 const getSidebarSessionSignature = (session: Session, stableUpdatedAt: number): string => {
-  const directory = (session as Session & { directory?: string | null }).directory ?? ''
-  const parentID = (session as Session & { parentID?: string | null }).parentID ?? ''
-  const projectWorktree = (session as Session & { project?: { worktree?: string | null } | null }).project?.worktree ?? ''
-  const shared = session.share?.url ?? ''
+  const directory = getCompatibleSessionDirectory(session) ?? ''
+  const parentID = getCompatibleSessionParentId(session) ?? ''
+  const projectWorktree = getCompatibleSessionProjectWorktree(session) ?? ''
+  const shared = getCompatibleSessionShareUrl(session) ?? ''
   return [
     session.id,
     session.title ?? '',
@@ -1641,7 +1656,7 @@ export function useSidebarSessions(directory?: string): Session[] {
 
   const getSnapshot = React.useCallback(() => {
     const state = store.getState()
-    const source = state.session
+    const source = getOpenCodeCompatibleSessions(state)
     const cached = cacheRef.current
     const streamingSignature = source
       .map((session) => {
@@ -1669,7 +1684,7 @@ export function useSidebarSessions(directory?: string): Session[] {
       const wasStreaming = cached?.streamingById.get(session.id) ?? false
       const stableUpdatedAt = isStreaming
         ? (wasStreaming ? cachedUpdatedAt : Math.max(rawUpdatedAt, cachedUpdatedAt, Date.now()))
-        : cachedUpdatedAt
+        : (wasStreaming ? Math.max(rawUpdatedAt, cachedUpdatedAt) : rawUpdatedAt)
       const signature = getSidebarSessionSignature(session, stableUpdatedAt)
       signatures.set(session.id, signature)
       stableUpdatedAtById.set(session.id, stableUpdatedAt)
@@ -1721,11 +1736,24 @@ export function useSidebarSessions(directory?: string): Session[] {
 /** Get one session by id for a directory */
 export function useSession(sessionID?: string | null, directory?: string) {
   const { childStores } = useSyncSystem()
+  const cacheRef = React.useRef<Session | undefined>(undefined)
+  const initializedRef = React.useRef(false)
   const getSnapshot = useCallback(() => {
-    if (directory) {
-      return childStores.getChild(directory)?.getState().session.find((session) => session.id === sessionID)
+    const next = (() => {
+      if (directory) {
+        const state = childStores.getChild(directory)?.getState()
+        return state ? getOpenCodeCompatibleSession(state, sessionID) : undefined
+      }
+      return findLiveSession(getLiveStates(childStores), sessionID)
+    })()
+
+    if (initializedRef.current && haveEquivalentSyncSnapshots(cacheRef.current, next)) {
+      return cacheRef.current
     }
-    return findLiveSession(getLiveStates(childStores), sessionID)
+
+    cacheRef.current = next
+    initializedRef.current = true
+    return next
   }, [childStores, directory, sessionID])
 
   const subscribe = useCallback((notify: () => void) => {
@@ -1803,7 +1831,7 @@ function getVisibleMessagesForSession(state: State, sessionID: string, previous?
   visibleMessages: Message[]
   revertMessageID?: string
 } {
-  const sourceMessages = state.message[sessionID] ?? EMPTY_MESSAGES
+  const sourceMessages = getOpenCodeCompatibleMessages(state, sessionID)
   const session = state.session.find((candidate) => candidate.id === sessionID)
   const revertMessageID = (session as { revert?: { messageID?: string } } | undefined)?.revert?.messageID
 
@@ -1838,7 +1866,7 @@ export function buildSessionMessageRecordsSnapshot(
     const previousRecord = previous?.byId.get(message.id)
     const parts = suspendPartUpdates && previousRecord
       ? previousRecord.parts
-      : (state.part[message.id] ?? EMPTY_PARTS)
+      : getOpenCodeCompatibleParts(state, message.id)
 
     const nextRecord = previousRecord && previousRecord.info === message && previousRecord.parts === parts
       ? previousRecord
@@ -2023,7 +2051,5 @@ export function useIsSessionWorking(sessionID: string, directory?: string): bool
   }, [status, permissions, messages])
 }
 
-const EMPTY_MESSAGES: Message[] = []
-const EMPTY_PARTS: Part[] = []
-const EMPTY_PERMISSION_REQUESTS: PermissionRequest[] = []
-const EMPTY_QUESTION_REQUESTS: QuestionRequest[] = []
+// Re-exported from centralized constants for consumers that import from this file.
+export { EMPTY_MESSAGES, EMPTY_PARTS, EMPTY_PERMISSION_REQUESTS, EMPTY_QUESTION_REQUESTS }

@@ -1,26 +1,26 @@
-import type { Message, Part } from "@opencode-ai/sdk/v2/client"
+import type { HarnessMessage, HarnessPart } from "@openchamber/harness-contracts"
 import { Binary } from "./binary"
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 
-function sortParts(parts: Part[]) {
+function sortParts(parts: HarnessPart[]) {
   return parts.filter((part) => !!part?.id).sort((a, b) => cmp(a.id, b.id))
 }
 
 export type OptimisticStore = {
-  message: Record<string, Message[] | undefined>
-  part: Record<string, Part[] | undefined>
+  message: Record<string, HarnessMessage[] | undefined>
+  part: Record<string, HarnessPart[] | undefined>
 }
 
 export type OptimisticItem = {
-  message: Message
-  parts: Part[]
+  message: HarnessMessage
+  parts: HarnessPart[]
 }
 
 export type OptimisticAddInput = {
   sessionID: string
-  message: Message
-  parts: Part[]
+  message: HarnessMessage
+  parts: HarnessPart[]
 }
 
 export type OptimisticRemoveInput = {
@@ -29,18 +29,18 @@ export type OptimisticRemoveInput = {
 }
 
 export type MessagePage = {
-  session: Message[]
-  part: { id: string; part: Part[] }[]
+  session: HarnessMessage[]
+  part: { id: string; part: HarnessPart[] }[]
   cursor?: string
   complete: boolean
 }
 
-const hasParts = (parts: Part[] | undefined, want: Part[]) => {
+const hasParts = (parts: HarnessPart[] | undefined, want: HarnessPart[]) => {
   if (!parts) return want.length === 0
   return want.every((part) => Binary.search(parts, part.id, (item) => item.id).found)
 }
 
-const mergeParts = (parts: Part[] | undefined, want: Part[]) => {
+const mergeParts = (parts: HarnessPart[] | undefined, want: HarnessPart[]) => {
   if (!parts) return sortParts(want)
   const next = [...parts]
   let changed = false

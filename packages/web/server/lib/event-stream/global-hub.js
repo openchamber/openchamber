@@ -28,6 +28,19 @@ export function createGlobalMessageStreamHub({
     }
   };
 
+  const publishEvent = (normalized) => {
+    if (normalized.eventId) {
+      replay.push(normalized);
+      if (replay.length > replayLimit) {
+        replay.splice(0, replay.length - replayLimit);
+      }
+    }
+
+    for (const subscriber of Array.from(eventSubscribers)) {
+      subscriber(normalized);
+    }
+  };
+
   const normalizeEvent = ({ envelope, payload }) => {
     const directory =
       typeof envelope?.directory === 'string' && envelope.directory.length > 0 ? envelope.directory : 'global';
@@ -72,17 +85,7 @@ export function createGlobalMessageStreamHub({
         notifyStatus({ type: 'disconnect', reason });
       },
       onEvent(event) {
-        const normalized = normalizeEvent(event);
-        if (normalized.eventId) {
-          replay.push(normalized);
-          if (replay.length > replayLimit) {
-            replay.splice(0, replay.length - replayLimit);
-          }
-        }
-
-        for (const subscriber of Array.from(eventSubscribers)) {
-          subscriber(normalized);
-        }
+        publishEvent(normalizeEvent(event));
       },
       onError(error) {
         if (controller?.signal.aborted) {
@@ -120,6 +123,14 @@ export function createGlobalMessageStreamHub({
     },
     hasConnected() {
       return everConnected;
+    },
+    publishLocalEvent({ payload, directory = 'global', eventId }) {
+      publishEvent({
+        envelope: { directory, eventId },
+        payload,
+        directory,
+        eventId,
+      });
     },
     subscribeEvent(subscriber) {
       eventSubscribers.add(subscriber);

@@ -1,6 +1,7 @@
 import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import type { OpenCodeManager } from './opencode';
 import { waitForApiUrl } from './opencode-ready';
+import { subscribeCodexHarnessEvents } from './bridge-proxy-runtime';
 
 type StreamEvent<TData = unknown> = {
   data: TData;
@@ -167,6 +168,16 @@ export const openSseProxy = async ({
   const result = await connect();
 
   const run = (async () => {
+    const unsubscribeCodexEvents = subscribeCodexHarnessEvents((event) => {
+      const eventDirectory = typeof event.directory === 'string' && event.directory.trim().length > 0 ? event.directory.trim() : 'global';
+      if (pathname !== '/global/event' && eventDirectory !== resolvedDirectory) {
+        return;
+      }
+      const payload = pathname === '/global/event'
+        ? { directory: eventDirectory, payload: event.payload }
+        : event.payload;
+      onChunk(`${serializeSseEventBlock({ id: event.eventId, data: payload })}\n\n`);
+    });
     try {
       for await (const _ of result.stream) {
         void _;
@@ -204,6 +215,8 @@ export const openSseProxy = async ({
         // Re-throw if we couldn't recover
         throw error;
       }
+    } finally {
+      unsubscribeCodexEvents();
     }
   })();
 

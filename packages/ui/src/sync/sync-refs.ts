@@ -9,6 +9,12 @@ import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
 import type { ChildStoreManager } from "./child-store"
 import { getSessionMaterializationStatus } from "./materialization"
 import type { State } from "./types"
+import {
+  getOpenCodeCompatibleMessages,
+  getOpenCodeCompatibleParts,
+  getOpenCodeCompatibleSessions,
+  toOpenCodeCompatibleSession,
+} from "./compat"
 
 let _sdk: OpencodeClient | null = null
 let _childStores: ChildStoreManager | null = null
@@ -61,7 +67,8 @@ export function getDirectoryState(directory?: string): State | undefined {
 
 /** Read sessions from current directory's child store */
 export function getSyncSessions(directory?: string) {
-  return getDirectoryState(directory)?.session ?? []
+  const state = getDirectoryState(directory)
+  return state ? getOpenCodeCompatibleSessions(state) : []
 }
 
 /** Read sessions across all initialized child stores */
@@ -69,11 +76,11 @@ export function getAllSyncSessions() {
   const stores = _childStores
   if (!stores) return []
 
-  const deduped = new Map<string, State["session"][number]>()
+  const deduped = new Map<string, ReturnType<typeof toOpenCodeCompatibleSession>>()
   for (const store of stores.children.values()) {
     for (const session of store.getState().session) {
       if (!session?.id) continue
-      deduped.set(session.id, session)
+      deduped.set(session.id, toOpenCodeCompatibleSession(session))
     }
   }
   return Array.from(deduped.values())
@@ -81,7 +88,8 @@ export function getAllSyncSessions() {
 
 /** Read messages for a session from current directory's child store */
 export function getSyncMessages(sessionId: string, directory?: string) {
-  return getDirectoryState(directory)?.message[sessionId] ?? []
+  const state = getDirectoryState(directory)
+  return state ? getOpenCodeCompatibleMessages(state, sessionId) : []
 }
 
 /** Read renderability of a session snapshot from current directory's child store */
@@ -93,7 +101,8 @@ export function getSyncSessionMaterializationStatus(sessionId: string, directory
 
 /** Read parts for a message from current directory's child store */
 export function getSyncParts(messageId: string, directory?: string) {
-  return getDirectoryState(directory)?.part[messageId] ?? []
+  const state = getDirectoryState(directory)
+  return state ? getOpenCodeCompatibleParts(state, messageId) : []
 }
 
 /** Read session status from current directory's child store */

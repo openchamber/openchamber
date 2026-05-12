@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import type { Message, PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2/client"
+import type { PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2/client"
+import type { HarnessMessage } from "@openchamber/harness-contracts"
 import {
   canDisposeDirectory,
   hasPendingBlockingRequests,
@@ -145,7 +146,7 @@ describe("session cache eviction", () => {
       session_diff: {},
       todo: {},
       message: {
-        ses_streaming: [{ id: "msg_1", role: "assistant", time: { created: 1 } } as Message],
+        ses_streaming: [{ id: "msg_1", sessionId: "ses_streaming", role: "assistant", time: { created: 1 } } satisfies HarnessMessage],
       },
       part: {},
       permission: {

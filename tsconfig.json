@@ -14,6 +14,7 @@
     "resolveJsonModule": true,
     "paths": {
       "@openchamber/ui/*": ["./packages/ui/src/*"],
+      "@openchamber/harness-contracts": ["./packages/harness-contracts/src/index.ts"],
       "@openchamber/web/*": ["./packages/web/src/*"],
       "@openchamber/desktop/*": ["./packages/desktop/src/*"]
     }

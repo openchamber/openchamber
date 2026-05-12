@@ -37,6 +37,8 @@ import {
 } from '@remixicon/react';
 import type { EditPermissionMode } from '@/stores/types/sessionTypes';
 import type { ModelMetadata } from '@/types';
+import type { Provider } from '@opencode-ai/sdk/v2';
+import type { HarnessProviderModel, HarnessProviderOptionDescriptor } from '@openchamber/harness-contracts';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -46,13 +48,17 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
+import { BackendIcon } from '@/components/ui/BackendIcon';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
 import { TextLoop } from '@/components/ui/TextLoop';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useIsVSCodeRuntime } from '@/hooks/useRuntimeAPIs';
 import { isDesktopShell } from '@/lib/desktop';
+import { opencodeClient } from '@/lib/opencode/client';
+import { toOpenCodeHarnessRunConfig } from '@/lib/harness/client';
 import { getAgentColor } from '@/lib/agentColors';
 import { useDeviceInfo } from '@/lib/device';
 import { getEditModeColors } from '@/lib/permissions/editModeColors';
@@ -61,12 +67,13 @@ import { useContextStore } from '@/stores/contextStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
-import { useDirectorySync, useSessionMessages } from '@/sync/sync-context';
+import { useDirectorySync, useSession, useSessionMessages } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
 import { getSessionMaterializationStatus } from '@/sync/materialization';
 import { useUIStore } from '@/stores/useUIStore';
 import { useModelLists } from '@/hooks/useModelLists';
 import { useIsTextTruncated } from '@/hooks/useIsTextTruncated';
+import type { BackendControlSurface, BackendControlSurfaceOption, BackendDescriptor } from '@/lib/api/types';
 import { formatEffortLabel, getCycledPrimaryAgentName, type MobileControlsPanel } from './mobileControlsUtils';
 import { useI18n } from '@/lib/i18n';
 import { useOpenCodeReadiness } from '@/hooks/useOpenCodeReadiness';
@@ -74,7 +81,8 @@ import { useOpenCodeReadiness } from '@/hooks/useOpenCodeReadiness';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type IconComponent = ComponentType<any>;
 
-type ProviderModel = Record<string, unknown> & { id?: string; name?: string };
+type ProviderModel = Provider["models"][string];
+type SnapshotProviderModel = HarnessProviderModel & { providerId?: string; raw?: { providerId?: string } | unknown };
 
 type PermissionAction = 'allow' | 'ask' | 'deny';
 type PermissionRule = { permission: string; pattern: string; action: PermissionAction };
@@ -168,6 +176,13 @@ interface CapabilityDefinition {
     label: string;
     isActive: (metadata?: ModelMetadata) => boolean;
 }
+
+const BackendMenuLogo: React.FC<{
+    backendId: string;
+    className?: string;
+}> = ({ backendId, className }) => {
+    return <BackendIcon backendId={backendId} className={className} />;
+};
 
 const CAPABILITY_DEFINITIONS: CapabilityDefinition[] = [
     {
@@ -356,11 +371,14 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const setProvider = useConfigStore((state) => state.setProvider);
     const setSelectedProvider = useConfigStore((state) => state.setSelectedProvider);
     const setModel = useConfigStore((state) => state.setModel);
+    const setVirtualProviders = useConfigStore((state) => state.setVirtualProviders);
     const setCurrentVariant = useConfigStore((state) => state.setCurrentVariant);
     const getCurrentModelVariants = useConfigStore((state) => state.getCurrentModelVariants);
     const setAgent = useConfigStore((state) => state.setAgent);
-    const getCurrentProvider = useConfigStore((state) => state.getCurrentProvider);
+    const setCurrentAgentName = useConfigStore((state) => state.setCurrentAgentName);
     const getModelMetadata = useConfigStore((state) => state.getModelMetadata);
+    const modelsMetadataSize = useConfigStore((state) => state.modelsMetadata.size);
+    void modelsMetadataSize;
     const getCurrentAgent = useConfigStore((state) => state.getCurrentAgent);
     const getVisibleAgents = useConfigStore((state) => state.getVisibleAgents);
 
@@ -370,6 +388,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
     const getDirectoryForSession = useSessionUIStore((s) => s.getDirectoryForSession);
+    const currentSessionDirectory = currentSessionId ? getDirectoryForSession(currentSessionId) : undefined;
     const sync = useSync();
 
     const getSessionModelSelection = useSelectionStore((state) => state.getSessionModelSelection);
@@ -379,12 +398,23 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const getAgentModelForSession = useSelectionStore((state) => state.getAgentModelForSession);
     const saveAgentModelVariantForSession = useSelectionStore((state) => state.saveAgentModelVariantForSession);
     const getAgentModelVariantForSession = useSelectionStore((state) => state.getAgentModelVariantForSession);
+    const saveSessionBackendSelection = useSelectionStore((state) => state.saveSessionBackendSelection);
+    const saveSessionRunConfig = useSelectionStore((state) => state.saveSessionRunConfig);
+    const saveBackendModelSelection = useSelectionStore((state) => state.saveBackendModelSelection);
+    const getBackendModelSelection = useSelectionStore((state) => state.getBackendModelSelection);
+    const draftBackendId = useSelectionStore((state) => state.draftBackendId);
+    const lastUsedBackendId = useSelectionStore((state) => state.lastUsedBackendId);
+    const setDraftBackendId = useSelectionStore((state) => state.setDraftBackendId);
 
     const contextHydrated = useContextStore((state) => state.hasHydrated);
 
     const sessionSavedAgentName = useSelectionStore((state) =>
         currentSessionId ? state.sessionAgentSelections.get(currentSessionId) ?? null : null
     );
+    const sessionSavedBackendId = useSelectionStore((state) =>
+        currentSessionId ? state.sessionBackendSelections.get(currentSessionId) ?? null : null
+    );
+    const currentSession = useSession(currentSessionId ?? undefined, currentSessionDirectory ?? undefined);
 
     const stickySessionAgentRef = React.useRef<string | null>(null);
     React.useEffect(() => {
@@ -425,6 +455,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
     // Separate state for agent selector to avoid conflict with model selector
     const [isAgentSelectorOpen, setIsAgentSelectorOpen] = React.useState(false);
+    const [availableBackends, setAvailableBackends] = React.useState<BackendDescriptor[]>([]);
+    const [backendControlSurface, setBackendControlSurface] = React.useState<BackendControlSurface | null>(null);
+    const [defaultBackendId, setDefaultBackendId] = React.useState('');
     const { favoriteModelsList, recentModelsList } = useModelLists();
 
     const { isMobile, isTablet } = useDeviceInfo();
@@ -434,6 +467,13 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     // Only use mobile panels on actual mobile devices, VSCode uses desktop dropdowns
     const isCompact = isMobile;
     const [localMobilePanel, setLocalMobilePanel] = React.useState<MobileControlsPanel>(null);
+    const authoritativeSessionBackendId =
+        (currentSession as { backendId?: string | null } | undefined)?.backendId
+        ?? backendControlSurface?.backendId
+        ?? null;
+    const currentBackendId = currentSessionId
+        ? (authoritativeSessionBackendId || sessionSavedBackendId || defaultBackendId || '')
+        : (draftBackendId || lastUsedBackendId || defaultBackendId || '');
     const usingExternalMobilePanel = mobilePanel !== undefined && typeof onMobilePanelChange === 'function';
     const activeMobilePanel = usingExternalMobilePanel ? mobilePanel : localMobilePanel;
     const setActiveMobilePanel = usingExternalMobilePanel ? onMobilePanelChange : setLocalMobilePanel;
@@ -472,6 +512,64 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const favoriteRowSensors = useSensors(
         useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     );
+
+    React.useEffect(() => {
+        let cancelled = false;
+
+        void opencodeClient.getHarnessBackends()
+            .then((payload: { defaultBackend: string; backends: BackendDescriptor[] }) => {
+                if (cancelled) {
+                    return;
+                }
+                setAvailableBackends(payload.backends);
+                setDefaultBackendId(payload.defaultBackend || '');
+                if (!currentSessionId && !draftBackendId && payload.defaultBackend) {
+                    setDraftBackendId(payload.defaultBackend);
+                }
+            })
+            .catch((error: unknown) => {
+                console.warn('[ModelControls] Failed to load harness backends:', error);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [currentSessionId, draftBackendId, setDraftBackendId]);
+
+    React.useEffect(() => {
+        let cancelled = false;
+
+        void opencodeClient.getHarnessControlSurface({
+            ...(currentSessionId ? { sessionId: currentSessionId } : { backendId: currentBackendId }),
+            ...(currentProviderId ? { providerId: currentProviderId } : {}),
+            ...(currentModelId ? { modelId: currentModelId } : {}),
+        })
+            .then((payload) => {
+                if (!cancelled) {
+                    setBackendControlSurface(payload);
+                }
+            })
+            .catch((error: unknown) => {
+                if (!cancelled) {
+                    console.warn('[ModelControls] Failed to load harness control surface:', error);
+                    setBackendControlSurface(null);
+                }
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [currentBackendId, currentModelId, currentProviderId, currentSessionId, currentSessionDirectory]);
+
+    React.useEffect(() => {
+        if (!currentSessionId || !authoritativeSessionBackendId) {
+            return;
+        }
+        if (sessionSavedBackendId === authoritativeSessionBackendId) {
+            return;
+        }
+        saveSessionBackendSelection(currentSessionId, authoritativeSessionBackendId);
+    }, [authoritativeSessionBackendId, currentSessionId, saveSessionBackendSelection, sessionSavedBackendId]);
 
     React.useEffect(() => {
         if (activeMobilePanel === 'model') {
@@ -546,26 +644,207 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         return agents.filter((agent) => agent.mode !== 'subagent');
     }, [agents]);
 
+    const backendModeSelector = backendControlSurface?.modeSelector ?? null;
+    const backendModelSelector = backendControlSurface?.modelSelector ?? null;
+    const backendEffortSelector = backendControlSurface?.effortSelector ?? null;
+    const providerSnapshot = backendControlSurface?.providerSnapshot ?? null;
+    const catalogBackendId = backendControlSurface?.backendId || currentBackendId;
+    const catalogBackend = React.useMemo(
+        () => availableBackends.find((backend) => backend.id === catalogBackendId) || null,
+        [availableBackends, catalogBackendId],
+    );
+    const primarySelectorKind = backendModeSelector?.kind ?? (catalogBackendId === 'opencode' ? 'agent' : 'mode');
+    const primarySelectorLabel = backendModeSelector?.label ?? (primarySelectorKind === 'agent' ? 'Agent' : 'Mode');
+    const effortSelectorLabel = backendEffortSelector?.label ?? 'Thinking';
+    const backendModelProviderId = backendModelSelector?.providerId || catalogBackendId || 'backend';
+    const backendModeItems = React.useMemo<BackendControlSurfaceOption[]>(() => {
+        if (backendModeSelector?.items?.length) {
+            return backendModeSelector.items;
+        }
+        if (primarySelectorKind !== 'agent') {
+            return [];
+        }
+        return selectableDesktopAgents.map((agent) => ({
+            id: agent.name,
+            label: agent.name.charAt(0).toUpperCase() + agent.name.slice(1),
+            ...(agent.description ? { description: agent.description } : {}),
+            ...(agent.color ? { color: agent.color } : {}),
+        }));
+    }, [backendModeSelector, primarySelectorKind, selectableDesktopAgents]);
+    const getSnapshotModelOptionDescriptor = React.useCallback((model: HarnessProviderModel): HarnessProviderOptionDescriptor | undefined => {
+        const descriptors = Array.isArray(model.optionDescriptors) ? model.optionDescriptors : [];
+        const selectorOptionId = backendEffortSelector?.optionId;
+        const descriptor = selectorOptionId
+            ? descriptors.find((entry) => entry.id === selectorOptionId)
+            : descriptors.find((entry) => entry.type === 'select');
+        return descriptor?.type === 'select' ? descriptor : undefined;
+    }, [backendEffortSelector?.optionId]);
+
+    const backendSnapshotProviders = React.useMemo(() => {
+        if (backendModelSelector?.source !== 'provider-snapshot') {
+            return [];
+        }
+        const models = (providerSnapshot?.models ?? []) as SnapshotProviderModel[];
+        const byProvider = new Map<string, ProviderModel[]>();
+        for (const option of models) {
+            const raw = option.raw && typeof option.raw === 'object' ? option.raw as { providerId?: string } : null;
+            const providerId = option.providerId || raw?.providerId || backendModelProviderId;
+            const optionDescriptor = getSnapshotModelOptionDescriptor(option);
+            const optionChoices = optionDescriptor?.type === 'select' ? optionDescriptor.options : backendEffortSelector?.options;
+            const variants = optionChoices?.length ? Object.fromEntries(optionChoices.map((choice) => [choice.id, {}])) : undefined;
+            const list = byProvider.get(providerId) ?? [];
+            list.push({
+                id: option.id,
+                providerID: providerId,
+                api: { id: catalogBackendId || 'backend', url: '', npm: '' },
+                name: option.label,
+                family: undefined,
+                capabilities: {
+                    temperature: false,
+                    reasoning: Boolean(variants),
+                    attachment: true,
+                    toolcall: false,
+                    input: { text: true, audio: false, image: true, video: false, pdf: true },
+                    output: { text: true, audio: false, image: false, video: false, pdf: false },
+                    interleaved: false,
+                },
+                cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+                limit: { context: 0, output: 0 },
+                status: 'active',
+                options: {},
+                headers: {},
+                release_date: '',
+                ...(variants ? { variants } : {}),
+            });
+            byProvider.set(providerId, list);
+        }
+        return Array.from(byProvider.entries()).map(([providerId, models]) => ({
+            id: providerId,
+            name: providerId,
+            source: 'custom' as const,
+            env: [],
+            options: {},
+            models,
+        }));
+    }, [backendEffortSelector?.options, backendModelProviderId, backendModelSelector?.source, catalogBackendId, getSnapshotModelOptionDescriptor, providerSnapshot?.models]);
+
+    const backendModelOptions = React.useMemo<ProviderModel[]>(() => {
+        if (
+            backendModelSelector?.source !== 'backend'
+        ) {
+            return [];
+        }
+
+        const selectorModels = backendModelSelector?.source === 'backend'
+            ? (backendModelSelector.options ?? [])
+            : [];
+        if (selectorModels.length === 0) {
+            return [];
+        }
+
+        return selectorModels.map((option) => {
+            const optionChoices = backendEffortSelector?.options;
+            const variants = optionChoices?.length
+                ? Object.fromEntries(optionChoices.map((choice) => [choice.id, {}]))
+                : undefined;
+
+            return {
+                id: option.id,
+            providerID: backendModelProviderId,
+            api: {
+                id: catalogBackendId || 'backend',
+                url: '',
+                npm: '',
+            },
+            name: option.label,
+            family: undefined,
+            capabilities: {
+                temperature: false,
+                reasoning: Boolean(variants),
+                attachment: true,
+                toolcall: false,
+                input: {
+                    text: true,
+                    audio: false,
+                    image: true,
+                    video: false,
+                    pdf: true,
+                },
+                output: {
+                    text: true,
+                    audio: false,
+                    image: false,
+                    video: false,
+                    pdf: false,
+                },
+                interleaved: false,
+            },
+            cost: {
+                input: 0,
+                output: 0,
+                cache: {
+                    read: 0,
+                    write: 0,
+                },
+            },
+            limit: {
+                context: 0,
+                output: 0,
+            },
+            status: 'active',
+            options: {},
+            headers: {},
+            release_date: '',
+            ...(variants ? { variants } : {}),
+            };
+        });
+    }, [backendEffortSelector?.options, backendModelProviderId, backendModelSelector, catalogBackendId]);
+    const usesBackendModelCatalog = backendModelSelector?.source === 'backend'
+        ? backendModelOptions.length > 0
+        : catalogBackendId !== 'opencode' && backendModelSelector?.source === 'provider-snapshot' && backendSnapshotProviders.length > 0;
+    const effectiveProviders = React.useMemo(() => {
+        if (!usesBackendModelCatalog) {
+            return providers;
+        }
+
+        if (backendModelSelector?.source === 'provider-snapshot' && backendSnapshotProviders.length > 0) {
+            return backendSnapshotProviders;
+        }
+
+        return [{
+            id: backendModelProviderId,
+            name: catalogBackend?.label || catalogBackendId || 'Backend',
+            source: 'custom' as const,
+            env: [],
+            options: {},
+            models: backendModelOptions,
+        }];
+    }, [backendModelOptions, backendModelProviderId, backendModelSelector?.source, backendSnapshotProviders, catalogBackend, catalogBackendId, providers, usesBackendModelCatalog]);
+
+    React.useEffect(() => {
+        setVirtualProviders(usesBackendModelCatalog ? effectiveProviders : []);
+    }, [effectiveProviders, setVirtualProviders, usesBackendModelCatalog]);
+
     const sortedAndFilteredAgents = React.useMemo(() => {
-        const sorted = [...selectableDesktopAgents].sort((a, b) => a.name.localeCompare(b.name));
+        const sorted = [...backendModeItems].sort((a, b) => a.label.localeCompare(b.label));
         if (!agentSearchQuery.trim()) {
             return sorted;
         }
         return sorted.filter((agent) =>
-            fuzzyMatch(agent.name, agentSearchQuery) ||
+            fuzzyMatch(agent.label, agentSearchQuery) ||
             (agent.description && fuzzyMatch(agent.description, agentSearchQuery))
         );
-    }, [selectableDesktopAgents, agentSearchQuery]);
+    }, [agentSearchQuery, backendModeItems]);
 
     const defaultAgentName = React.useMemo(() => {
-        if (settingsDefaultAgent) {
-            const found = selectableDesktopAgents.find(a => a.name === settingsDefaultAgent);
-            if (found) return found.name;
+        if (primarySelectorKind === 'agent' && settingsDefaultAgent) {
+            const found = backendModeItems.find((item) => item.id === settingsDefaultAgent);
+            if (found) return found.id;
         }
-        const buildAgent = selectableDesktopAgents.find(a => a.name === 'build');
-        if (buildAgent) return buildAgent.name;
-        return selectableDesktopAgents[0]?.name;
-    }, [settingsDefaultAgent, selectableDesktopAgents]);
+        const buildAgent = backendModeItems.find((item) => item.id === 'build');
+        if (buildAgent) return buildAgent.id;
+        return backendModeItems[0]?.id;
+    }, [backendModeItems, primarySelectorKind, settingsDefaultAgent]);
 
     const currentAgent = React.useMemo(() => {
         if (uiAgentName) {
@@ -598,11 +877,16 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         return <RiQuestionLine className={combinedClassName} style={iconStyle} />;
     }, [editToggleIconClass]);
 
-    const currentProvider = getCurrentProvider();
+    const currentProvider = React.useMemo(() => {
+        if (!currentProviderId) {
+            return null;
+        }
+        return effectiveProviders.find((provider) => String(provider.id) === currentProviderId) || null;
+    }, [currentProviderId, effectiveProviders]);
     const models = Array.isArray(currentProvider?.models) ? currentProvider.models : [];
 
     const visibleProviders = React.useMemo(() => {
-        return providers
+        return effectiveProviders
             .map((provider) => {
                 const providerModels = Array.isArray(provider.models) ? provider.models : [];
                 const visibleModels = providerModels.filter((model: ProviderModel) => {
@@ -614,7 +898,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 return { ...provider, models: visibleModels };
             })
             .filter((provider) => provider.models.length > 0);
-    }, [providers, hiddenModels]);
+    }, [effectiveProviders, hiddenModels]);
 
     const normalizeModelSearchValue = React.useCallback((value: string) => {
         const lower = value.toLowerCase().trim();
@@ -659,8 +943,16 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
         let flatIndex = 0;
 
-        for (const { model, providerID, modelID } of favoriteModelsList) {
-            const provider = providers.find((entry) => entry.id === providerID);
+        const visibleProviderIds = new Set(visibleProviders.map((provider) => String(provider.id)));
+        const candidateFavorites = usesBackendModelCatalog
+            ? favoriteModelsList.filter(({ providerID }) => visibleProviderIds.has(providerID))
+            : favoriteModelsList;
+        const candidateRecents = usesBackendModelCatalog
+            ? recentModelsList.filter(({ providerID }) => visibleProviderIds.has(providerID))
+            : recentModelsList;
+
+        for (const { model, providerID, modelID } of candidateFavorites) {
+            const provider = effectiveProviders.find((entry) => entry.id === providerID);
             const providerName = provider?.name || providerID;
             const modelName = getModelDisplayName(model);
             if (!matchesQuery(modelName, providerName)) {
@@ -672,8 +964,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             flatIndex += 1;
         }
 
-        for (const { model, providerID, modelID } of recentModelsList) {
-            const provider = providers.find((entry) => entry.id === providerID);
+        for (const { model, providerID, modelID } of candidateRecents) {
+            const provider = effectiveProviders.find((entry) => entry.id === providerID);
             const providerName = provider?.name || providerID;
             const modelName = getModelDisplayName(model);
             if (!matchesQuery(modelName, providerName)) {
@@ -708,10 +1000,11 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         collapsedProviderSet,
         currentModelId,
         currentProviderId,
+        effectiveProviders,
         favoriteModelsList,
         matchesModelSearch,
-        providers,
         recentModelsList,
+        usesBackendModelCatalog,
         visibleProviders,
     ]);
 
@@ -750,7 +1043,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
     // Compute from current model each render to avoid stale variants
     // in draft/session transitions.
-    const availableVariants = getCurrentModelVariants();
+    const availableVariants = backendEffortSelector?.options?.length
+        ? backendEffortSelector.options.map((option) => option.id)
+        : getCurrentModelVariants();
     const hasVariants = availableVariants.length > 0;
 
     const costRows = [
@@ -767,8 +1062,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
     const prevAgentNameRef = React.useRef<string | undefined>(undefined);
     const latestLoadedUserChoiceRestoreRef = React.useRef<string | null>(null);
+    const backendModelRestoreRef = React.useRef<string | null>(null);
 
-    const currentSessionDirectory = currentSessionId ? getDirectoryForSession(currentSessionId) : undefined;
     const hasRenderableCurrentSessionSnapshot = useDirectorySync(
         React.useCallback(
             (state) => (currentSessionId ? getSessionMaterializationStatus(state, currentSessionId).renderable : false),
@@ -815,7 +1110,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 return 'model-missing';
             }
 
-            const provider = providers.find(p => p.id === providerId);
+            const provider = effectiveProviders.find(p => p.id === providerId);
             if (!provider) {
                 return 'provider-missing';
             }
@@ -837,22 +1132,24 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
             if (currentSessionId) {
                 saveSessionModelSelection(currentSessionId, providerId, modelId);
+                saveSessionRunConfig(currentSessionId, toOpenCodeHarnessRunConfig({ backendId: currentBackendId || 'opencode', providerID: providerId, modelID: modelId, agent: agentName }));
                 if (agentName) {
                     saveAgentModelForSession(currentSessionId, agentName, providerId, modelId);
                 }
             }
+            saveBackendModelSelection(currentBackendId || 'opencode', providerId, modelId);
 
             return 'applied';
         },
-        [providers, currentProviderId, currentModelId, setProvider, setModel, currentSessionId, saveAgentModelForSession, saveSessionModelSelection],
+        [effectiveProviders, currentProviderId, currentModelId, setProvider, setModel, currentSessionId, currentBackendId, saveAgentModelForSession, saveBackendModelSelection, saveSessionModelSelection, saveSessionRunConfig],
     );
 
     const getModelVariantOptions = React.useCallback((providerId: string, modelId: string) => {
-        const provider = providers.find((entry) => entry.id === providerId);
+        const provider = effectiveProviders.find((entry) => entry.id === providerId);
         const model = provider?.models.find((entry) => entry.id === modelId) as { variants?: Record<string, unknown> } | undefined;
         const variants = model?.variants;
         return variants ? Object.keys(variants) : [];
-    }, [providers]);
+    }, [effectiveProviders]);
 
     const resolveModelVariantSelection = React.useCallback((providerId: string, modelId: string) => {
         const variantOptions = getModelVariantOptions(providerId, modelId);
@@ -900,6 +1197,36 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         return liveConfigAgentName || currentAgentName;
     }, [currentAgentName, currentSessionId]);
 
+    React.useEffect(() => {
+        const backendId = currentBackendId || 'opencode';
+        const saved = getBackendModelSelection(backendId);
+        if (!saved || effectiveProviders.length === 0) {
+            return;
+        }
+
+        const provider = effectiveProviders.find((entry) => entry.id === saved.providerId);
+        const modelExists = provider?.models.some((model) => model.id === saved.modelId) ?? false;
+        if (!modelExists) {
+            return;
+        }
+
+        const currentProvider = effectiveProviders.find((entry) => entry.id === currentProviderId);
+        const currentModelExists = currentProvider?.models.some((model) => model.id === currentModelId) ?? false;
+        if (currentModelExists) {
+            return;
+        }
+
+        const restoreKey = `${backendId}:${saved.providerId}:${saved.modelId}`;
+        if (backendModelRestoreRef.current === restoreKey) {
+            return;
+        }
+
+        const result = tryApplyModelSelection(saved.providerId, saved.modelId, resolveLiveAgentName() ?? undefined);
+        if (result === 'applied') {
+            backendModelRestoreRef.current = restoreKey;
+        }
+    }, [currentBackendId, currentModelId, currentProviderId, effectiveProviders, getBackendModelSelection, resolveLiveAgentName, tryApplyModelSelection]);
+
     const commitVariantSelectionForModel = React.useCallback((providerId: string, modelId: string, variant: string | undefined, agentNameOverride?: string | null) => {
         const variantOptions = getModelVariantOptions(providerId, modelId);
         if (variantOptions.length === 0) {
@@ -915,13 +1242,16 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         const effectiveAgentName = agentNameOverride ?? resolveLiveAgentName();
         if (currentSessionId && effectiveAgentName) {
             saveAgentModelVariantForSession(currentSessionId, effectiveAgentName, providerId, modelId, variant);
+            saveSessionRunConfig(currentSessionId, toOpenCodeHarnessRunConfig({ backendId: currentBackendId || 'opencode', providerID: providerId, modelID: modelId, agent: effectiveAgentName, variant }));
         }
     }, [
         addRecentEffort,
         currentSessionId,
+        currentBackendId,
         getModelVariantOptions,
         resolveLiveAgentName,
         saveAgentModelVariantForSession,
+        saveSessionRunConfig,
         setCurrentVariant,
     ]);
 
@@ -943,7 +1273,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             return;
         }
 
-        if (!contextHydrated || providers.length === 0 || !hasRenderableCurrentSessionSnapshot || !latestLoadedUserChoice?.providerID || !latestLoadedUserChoice.modelID) {
+        if (!contextHydrated || effectiveProviders.length === 0 || !hasRenderableCurrentSessionSnapshot || !latestLoadedUserChoice?.providerID || !latestLoadedUserChoice.modelID) {
             return;
         }
 
@@ -984,13 +1314,20 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             );
         }
         saveSessionModelSelection(currentSessionId, latestLoadedUserChoice.providerID, latestLoadedUserChoice.modelID);
+        saveSessionRunConfig(currentSessionId, toOpenCodeHarnessRunConfig({
+            backendId: currentBackendId || 'opencode',
+            providerID: latestLoadedUserChoice.providerID,
+            modelID: latestLoadedUserChoice.modelID,
+            agent: latestLoadedUserChoice.agent || currentAgentName || undefined,
+            variant: latestLoadedUserChoice.variant,
+        }));
         latestLoadedUserChoiceRestoreRef.current = restoreKey;
 
     }, [
         currentSessionId,
         currentAgentName,
         contextHydrated,
-        providers,
+        effectiveProviders,
         hasRenderableCurrentSessionSnapshot,
         latestLoadedUserChoice,
         setAgent,
@@ -998,6 +1335,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         saveSessionAgentSelection,
         saveAgentModelVariantForSession,
         saveSessionModelSelection,
+        saveSessionRunConfig,
+        currentBackendId,
     ]);
 
     React.useEffect(() => {
@@ -1006,7 +1345,11 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             return;
         }
 
-        if (!contextHydrated || providers.length === 0 || agents.length === 0) {
+        if (primarySelectorKind !== 'agent') {
+            return;
+        }
+
+        if (!contextHydrated || effectiveProviders.length === 0 || agents.length === 0) {
             return;
         }
 
@@ -1128,6 +1471,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         applyFallbackAgent();
     }, [
         currentSessionId,
+        primarySelectorKind,
         hasRenderableCurrentSessionSnapshot,
         latestLoadedUserChoice,
         agents,
@@ -1139,8 +1483,58 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         tryApplyModelSelection,
         saveSessionAgentSelection,
         contextHydrated,
-        providers,
+        effectiveProviders,
         sync,
+    ]);
+
+    React.useEffect(() => {
+        if (backendModelSelector?.source !== 'backend' || backendModelOptions.length === 0) {
+            return;
+        }
+
+        const desiredProviderId = backendModelProviderId;
+        const desiredModelId = backendModelOptions.some((model) => model.id === currentModelId)
+            ? currentModelId
+            : (backendModelSelector.defaultOptionId || String(backendModelOptions[0]?.id || ''));
+
+        if (currentProviderId !== desiredProviderId) {
+            setProvider(desiredProviderId);
+        }
+
+        if (desiredModelId && currentModelId !== desiredModelId) {
+            setModel(desiredModelId);
+        }
+    }, [
+        backendModelOptions,
+        backendModelProviderId,
+        backendModelSelector,
+        currentModelId,
+        currentProviderId,
+        setModel,
+        setProvider,
+    ]);
+
+    React.useEffect(() => {
+        if (primarySelectorKind !== 'mode' || backendModeItems.length === 0) {
+            return;
+        }
+
+        const desiredModeId = backendModeItems.some((item) => item.id === uiAgentName)
+            ? uiAgentName
+            : defaultAgentName;
+
+        if (!desiredModeId || currentAgentName === desiredModeId) {
+            return;
+        }
+
+        setCurrentAgentName(desiredModeId);
+    }, [
+        backendModeItems,
+        currentAgentName,
+        defaultAgentName,
+        primarySelectorKind,
+        setCurrentAgentName,
+        uiAgentName,
     ]);
 
     React.useEffect(() => {
@@ -1277,6 +1671,57 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         setAgentMenuOpen,
     ]);
 
+    const handlePrimarySelectorChange = React.useCallback((itemId: string) => {
+        if (primarySelectorKind === 'mode') {
+            setCurrentAgentName(itemId);
+            addRecentAgent(itemId);
+            setAgentMenuOpen(false);
+
+            if (currentSessionId) {
+                saveSessionAgentSelection(currentSessionId, itemId);
+            }
+            if (isCompact) {
+                closeMobilePanel();
+            }
+            return;
+        }
+        handleAgentChange(itemId);
+    }, [
+        addRecentAgent,
+        closeMobilePanel,
+        currentSessionId,
+        handleAgentChange,
+        isCompact,
+        primarySelectorKind,
+        saveSessionAgentSelection,
+        setAgentMenuOpen,
+        setCurrentAgentName,
+    ]);
+
+    const handleBackendChange = React.useCallback((backendId: string) => {
+        const descriptor = availableBackends.find((backend) => backend.id === backendId);
+        if (!descriptor || !descriptor.available) {
+            return;
+        }
+
+        if (currentSessionId) {
+            saveSessionBackendSelection(currentSessionId, backendId);
+        } else {
+            setDraftBackendId(backendId);
+        }
+
+        if (isCompact) {
+            closeMobilePanel();
+        }
+    }, [
+        availableBackends,
+        closeMobilePanel,
+        currentSessionId,
+        isCompact,
+        saveSessionBackendSelection,
+        setDraftBackendId,
+    ]);
+
     const handleCycleAgentFromModelPicker = React.useCallback((direction: 1 | -1) => {
         const nextAgentName = getCycledPrimaryAgentName(agents, currentAgentName, direction);
         if (!nextAgentName) {
@@ -1330,7 +1775,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     };
 
     const getProviderDisplayName = () => {
-        const provider = providers.find(p => p.id === currentProviderId);
+        const provider = effectiveProviders.find(p => p.id === currentProviderId);
         return provider?.name || currentProviderId;
     };
 
@@ -1346,10 +1791,16 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const isModelLabelTruncated = useIsTextTruncated(modelLabelRef, [currentModelDisplayName, isCompact]);
 
     const getAgentDisplayName = () => {
+        const selectedMode = uiAgentName
+            ? backendModeItems.find((item) => item.id === uiAgentName)
+            : null;
+        if (selectedMode) {
+            return selectedMode.label;
+        }
         if (!uiAgentName) {
-            const buildAgent = primaryAgents.find(agent => agent.name === 'build');
-            const defaultAgent = buildAgent || primaryAgents[0];
-            return defaultAgent ? capitalizeAgentName(defaultAgent.name) : 'Select Agent';
+            const buildAgent = backendModeItems.find((item) => item.id === 'build');
+            const defaultAgent = buildAgent || backendModeItems[0];
+            return defaultAgent ? defaultAgent.label : `Select ${primarySelectorLabel}`;
         }
         const agent = agents.find(a => a.name === uiAgentName);
         return agent ? capitalizeAgentName(agent.name) : capitalizeAgentName(uiAgentName);
@@ -1626,12 +2077,66 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         );
     };
 
+    const backendTabItems = React.useMemo<SortableTabsStripItem[]>(() => {
+        const backends = availableBackends.length > 0 ? availableBackends : [{
+            id: defaultBackendId || 'default',
+            label: defaultBackendId ? (defaultBackendId.charAt(0).toUpperCase() + defaultBackendId.slice(1)) : 'Backend',
+            available: true,
+            capabilities: {
+                chat: true,
+                sessions: true,
+                models: true,
+                agents: true,
+                providers: true,
+                commands: true,
+                config: true,
+                skills: true,
+            },
+        } satisfies BackendDescriptor];
+
+        return backends.map((backend) => ({
+            id: backend.id,
+            label: backend.label,
+            icon: <BackendMenuLogo backendId={backend.id} className={cn('h-3.5 w-3.5', !backend.available && 'opacity-50')} />,
+            title: backend.comingSoon ? `${backend.label} · Coming soon` : backend.label,
+            disabled: !backend.available || (Boolean(currentSessionId) && backend.id !== currentBackendId),
+        }));
+    }, [availableBackends, currentBackendId, currentSessionId, defaultBackendId]);
+
+    const renderBackendTabsFooter = () => {
+        if (backendTabItems.length <= 1) {
+            return null;
+        }
+
+        return (
+            <div className="h-8 min-w-0 px-px">
+                <SortableTabsStrip
+                    items={backendTabItems}
+                    activeId={currentBackendId || defaultBackendId || null}
+                    onSelect={handleBackendChange}
+                    layoutMode="scrollable"
+                    variant="active-pill"
+                    activePillButtonClassName="h-6 typography-micro"
+                    activePillLowercase={false}
+                    className="h-full"
+                />
+            </div>
+        );
+    };
+
     const renderMobileModelPanel = () => {
         if (!isCompact) return null;
 
         const normalizedQuery = mobileModelQuery.trim();
-        const filteredFavorites = favoriteModelsList.filter(({ model, providerID }) => {
-            const provider = providers.find((entry) => entry.id === providerID);
+        const visibleProviderIds = new Set(visibleProviders.map((provider) => String(provider.id)));
+        const candidateFavorites = usesBackendModelCatalog
+            ? favoriteModelsList.filter(({ providerID }) => visibleProviderIds.has(providerID))
+            : favoriteModelsList;
+        const candidateRecents = usesBackendModelCatalog
+            ? recentModelsList.filter(({ providerID }) => visibleProviderIds.has(providerID))
+            : recentModelsList;
+        const filteredFavorites = candidateFavorites.filter(({ model, providerID }) => {
+            const provider = effectiveProviders.find((entry) => entry.id === providerID);
             const providerName = provider?.name || providerID;
             const modelName = getModelDisplayName(model);
             return normalizedQuery.length === 0
@@ -1639,8 +2144,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 || matchesModelSearch(providerName, normalizedQuery);
         });
 
-        const filteredRecents = recentModelsList.filter(({ model, providerID }) => {
-            const provider = providers.find((entry) => entry.id === providerID);
+        const filteredRecents = candidateRecents.filter(({ model, providerID }) => {
+            const provider = effectiveProviders.find((entry) => entry.id === providerID);
             const providerName = provider?.name || providerID;
             const modelName = getModelDisplayName(model);
             return normalizedQuery.length === 0
@@ -2095,12 +2600,12 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 contentMaxHeightClassName="max-h-[min(52dvh,360px)]"
             >
                 <div className="flex flex-col gap-2">
-                    {selectableDesktopAgents.map((agent) => {
-                        const isSelected = agent.name === uiAgentName;
-                        const agentColor = getAgentColor(agent.name);
+                    {backendModeItems.map((agent) => {
+                        const isSelected = agent.id === uiAgentName;
+                        const agentColor = primarySelectorKind === 'agent' ? getAgentColor(agent.id) : null;
                         return (
                             <button
-                                key={agent.name}
+                                key={agent.id}
                                 type="button"
                                 className={cn(
                                     'flex w-full flex-col gap-1.5 rounded-xl border px-3 py-2.5 text-left',
@@ -2111,15 +2616,15 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                         ? 'border-primary/50 bg-interactive-selection/20' 
                                         : 'border-border/40 hover:bg-interactive-hover/50'
                                 )}
-                                onClick={() => handleAgentChange(agent.name)}
+                                onClick={() => handlePrimarySelectorChange(agent.id)}
                             >
                                 <div className="flex items-center gap-2">
-                                    <div className={cn('h-2.5 w-2.5 rounded-full flex-shrink-0', agentColor.class)} />
+                                    {agentColor ? <div className={cn('h-2.5 w-2.5 rounded-full flex-shrink-0', agentColor.class)} /> : null}
                                     <span
                                         className="typography-ui-label font-semibold"
-                                        style={isSelected ? { color: `var(${agentColor.var})` } : undefined}
+                                        style={isSelected && agentColor ? { color: `var(${agentColor.var})` } : undefined}
                                     >
-                                        {capitalizeAgentName(agent.name)}
+                                        {agent.label}
                                     </span>
                                     {isSelected && (
                                         <RiCheckLine className="h-4 w-4 text-primary ml-auto flex-shrink-0" />
@@ -2267,7 +2772,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 : 'Default';
             thinkingDisplay = (
                 <span key="thinking" className="typography-micro text-muted-foreground whitespace-nowrap">
-                    Thinking: {displayLabel}
+                    {effortSelectorLabel}: {displayLabel}
                 </span>
             );
         }
@@ -2438,20 +2943,29 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
         const normalizedDesktopQuery = desktopModelQuery.trim();
         const forceExpandProviders = normalizedDesktopQuery.length > 0;
+        const visibleProviderIds = new Set(visibleProviders.map((provider) => String(provider.id)));
 
-        const filteredFavorites = favoriteModelsList.filter(({ model, providerID }) => {
-            const provider = providers.find(p => p.id === providerID);
+        // Filter favorites
+        const filteredFavorites = usesBackendModelCatalog
+            ? favoriteModelsList.filter(({ providerID }) => visibleProviderIds.has(providerID))
+            : favoriteModelsList;
+        const searchableFavorites = filteredFavorites.filter(({ model, providerID }) => {
+            const provider = effectiveProviders.find(p => p.id === providerID);
             const providerName = provider?.name || providerID;
             const modelName = getModelDisplayName(model);
-            return filterByQuery(modelName, providerName, desktopModelQuery);
+            return filterByQuery(modelName, providerName, normalizedDesktopQuery);
         });
         const favoriteSortingEnabled = normalizedDesktopQuery.length === 0 && filteredFavorites.length > 1;
 
-        const filteredRecents = recentModelsList.filter(({ model, providerID }) => {
-            const provider = providers.find(p => p.id === providerID);
+        // Filter recents
+        const filteredRecents = usesBackendModelCatalog
+            ? recentModelsList.filter(({ providerID }) => visibleProviderIds.has(providerID))
+            : recentModelsList;
+        const searchableRecents = filteredRecents.filter(({ model, providerID }) => {
+            const provider = effectiveProviders.find(p => p.id === providerID);
             const providerName = provider?.name || providerID;
             const modelName = getModelDisplayName(model);
-            return filterByQuery(modelName, providerName, desktopModelQuery);
+            return filterByQuery(modelName, providerName, normalizedDesktopQuery);
         });
 
         const filteredProviders = visibleProviders
@@ -2478,8 +2992,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         });
 
         const hasResults =
-            filteredFavorites.length > 0 ||
-            filteredRecents.length > 0 ||
+            searchableFavorites.length > 0 ||
+            searchableRecents.length > 0 ||
             filteredProviders.length > 0;
 
         const filteredProviderIds = filteredProviders
@@ -2491,10 +3005,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         );
         const flatModelList: FlatModelItem[] = [];
 
-        filteredFavorites.forEach(({ model, providerID, modelID }) => {
+        searchableFavorites.forEach(({ model, providerID, modelID }) => {
             flatModelList.push({ model, providerID, modelID, section: 'fav' });
         });
-        filteredRecents.forEach(({ model, providerID, modelID }) => {
+        searchableRecents.forEach(({ model, providerID, modelID }) => {
             flatModelList.push({ model, providerID, modelID, section: 'recent' });
         });
         providerSections.forEach(({ provider, visibleModels }) => {
@@ -2504,8 +3018,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         });
 
         return {
-            filteredFavorites,
-            filteredRecents,
+            searchableFavorites,
+            searchableRecents,
             filteredProviders,
             providerSections,
             flatModelList,
@@ -2515,12 +3029,12 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             filteredProviderIds,
             favoriteModelLookup,
         };
-    }, [desktopModelQuery, favoriteModelsList, recentModelsList, visibleProviders, providers, collapsedProviderSet, matchesModelSearch]);
+    }, [desktopModelQuery, favoriteModelsList, recentModelsList, visibleProviders, effectiveProviders, usesBackendModelCatalog, collapsedProviderSet, matchesModelSearch]);
 
     const renderModelSelector = () => {
         const {
-            filteredFavorites,
-            filteredRecents,
+            searchableFavorites,
+            searchableRecents,
             filteredProviders,
             providerSections,
             flatModelList,
@@ -2731,25 +3245,29 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 className="overlay-scrollbar-target--no-gutter"
                             >
                                 <div className="p-1">
-                                    <div
-                                        role="button"
-                                        tabIndex={0}
-                                        onClick={openAddProviderSettings}
-                                        onKeyDown={(e) => {
-                                            if (e.key === 'Enter' || e.key === ' ') {
-                                                e.preventDefault();
-                                                openAddProviderSettings();
-                                            }
-                                        }}
-                                        className="typography-meta group flex items-center gap-1 rounded-md px-2 py-1.5 cursor-pointer hover:bg-interactive-hover/50"
-                                    >
-                                        <span className="flex h-4 w-4 items-center justify-center text-muted-foreground">
-                                            <RiAddLine className="h-4 w-4 -mr-0.5" />
-                                        </span>
-                                        <span className="font-medium text-foreground">{t('chat.modelControls.addNewProvider')}</span>
-                                    </div>
+                                    {!usesBackendModelCatalog && (
+                                        <>
+                                            <div
+                                                role="button"
+                                                tabIndex={0}
+                                                onClick={openAddProviderSettings}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter' || e.key === ' ') {
+                                                        e.preventDefault();
+                                                        openAddProviderSettings();
+                                                    }
+                                                }}
+                                                className="typography-meta group flex items-center gap-1 rounded-md px-2 py-1.5 cursor-pointer hover:bg-interactive-hover/50"
+                                            >
+                                                <span className="flex h-4 w-4 items-center justify-center text-muted-foreground">
+                                                    <RiAddLine className="h-4 w-4 -mr-0.5" />
+                                                </span>
+                                                <span className="font-medium text-foreground">{t('chat.modelControls.addNewProvider')}</span>
+                                            </div>
 
-                                    <DropdownMenuSeparator />
+                                            <DropdownMenuSeparator />
+                                        </>
+                                    )}
 
                                     {!hasResults && (
                                         <div className="px-2 py-4 text-center typography-meta text-muted-foreground">
@@ -2758,7 +3276,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                     )}
 
                                     {/* Favorites Section */}
-                                    {filteredFavorites.length > 0 && (
+                                    {searchableFavorites.length > 0 && (
                                         <div>
                                             <DropdownMenuLabel
                                                 className="typography-micro font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2 -mx-1 px-3 py-1.5 border-b border-border/30"
@@ -2773,10 +3291,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                                     onDragEnd={handleFavoriteDragEnd}
                                                 >
                                                     <SortableContext
-                                                        items={filteredFavorites.map(({ providerID, modelID }) => buildModelRefKey(providerID, modelID))}
+                                                        items={searchableFavorites.map(({ providerID, modelID }) => buildModelRefKey(providerID, modelID))}
                                                         strategy={verticalListSortingStrategy}
                                                     >
-                                                        {filteredFavorites.map(({ model, providerID, modelID }) => {
+                                                        {searchableFavorites.map(({ model, providerID, modelID }) => {
                                                             const idx = currentFlatIndex++;
                                                             return (
                                                                 <SortableFavoriteModelRow
@@ -2798,7 +3316,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                                     </SortableContext>
                                                 </DndContext>
                                             ) : (
-                                                filteredFavorites.map(({ model, providerID, modelID }) => {
+                                                searchableFavorites.map(({ model, providerID, modelID }) => {
                                                     const idx = currentFlatIndex++;
                                                     return renderModelRow(model, providerID, modelID, 'fav', idx, modelSelectedIndex === idx);
                                                 })
@@ -2807,16 +3325,16 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                     )}
 
                                     {/* Recents Section */}
-                                    {filteredRecents.length > 0 && (
+                                    {searchableRecents.length > 0 && (
                                         <div>
-                                            {filteredFavorites.length > 0 && <DropdownMenuSeparator />}
+                                            {searchableFavorites.length > 0 && <DropdownMenuSeparator />}
                                             <DropdownMenuLabel
                                                 className="typography-micro font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2 -mx-1 px-3 py-1.5 border-b border-border/30"
                                             >
                                                 <RiTimeLine className="h-4 w-4" />
                                                 {t('chat.modelControls.recent')}
                                             </DropdownMenuLabel>
-                                            {filteredRecents.map(({ model, providerID, modelID }) => {
+                                            {searchableRecents.map(({ model, providerID, modelID }) => {
                                                 const idx = currentFlatIndex++;
                                                 return renderModelRow(model, providerID, modelID, 'recent', idx, modelSelectedIndex === idx);
                                             })}
@@ -2824,7 +3342,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                     )}
 
                                     {/* Separator before providers */}
-                                    {(filteredFavorites.length > 0 || filteredRecents.length > 0) && filteredProviders.length > 0 && (
+                                    {(searchableFavorites.length > 0 || searchableRecents.length > 0) && filteredProviders.length > 0 && (
                                         <DropdownMenuSeparator />
                                     )}
 
@@ -2896,8 +3414,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                             </ScrollableOverlay>
 
                             {/* Keyboard hints footer */}
-                            <div className="px-3 pt-1 pb-1.5 border-t border-border/40 typography-micro text-muted-foreground">
-                                <div className="flex items-center gap-x-2 whitespace-nowrap overflow-hidden">
+                            <div className="pt-1.5 pb-1.5 border-t border-border/40 typography-micro text-muted-foreground space-y-1.5">
+                                {renderBackendTabsFooter()}
+                                <div className="flex items-center gap-x-2 whitespace-nowrap overflow-hidden px-3">
                                     <span>{t('chat.modelControls.keyboardHintNavigate')}</span>
                                     <span>{t('chat.modelControls.keyboardHintSwitchAgent')}</span>
                                     <span className={cn(!highlightedSupportsThinking && 'invisible')}>
@@ -3093,7 +3612,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
         const displayVariant = currentVariant ?? t('chat.modelControls.default');
         const isDefault = !currentVariant;
-        const colorClass = isDefault ? 'text-muted-foreground' : 'text-[color:var(--status-info)]';
+        const colorClass = isDefault ? 'text-foreground' : 'text-[color:var(--status-info)]';
 
         if (isCompact) {
             return (
@@ -3147,6 +3666,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         </DropdownMenuTrigger>
                     </TooltipTrigger>
                     <DropdownMenuContent align="end" alignOffset={-40} className="w-[min(180px,calc(100vw-2rem))]">
+                        <DropdownMenuLabel className="typography-ui-header font-semibold text-foreground">{effortSelectorLabel}</DropdownMenuLabel>
                         <DropdownMenuLabel className="typography-ui-header font-semibold text-foreground">{t('chat.modelControls.thinking')}</DropdownMenuLabel>
                         <DropdownMenuItem className="typography-meta" onSelect={() => handleVariantSelect(undefined)}>
                             <div className="flex items-center justify-between gap-2 w-full min-w-0">
@@ -3174,7 +3694,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     </DropdownMenuContent>
                 </DropdownMenu>
                 <TooltipContent side="top">
-                    <p className="typography-meta">Thinking: {displayVariant}</p>
+                    <p className="typography-meta">{effortSelectorLabel}: {displayVariant}</p>
                 </TooltipContent>
             </Tooltip>
         );
@@ -3216,9 +3736,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                                     className={cn(
                                                         controlIconSize,
                                                         'flex-shrink-0',
-                                                        uiAgentName ? '' : 'text-muted-foreground'
+                                                        uiAgentName && primarySelectorKind === 'agent' ? '' : 'text-muted-foreground'
                                                     )}
-                                                    style={uiAgentName ? { color: `var(${getAgentColor(uiAgentName).var})` } : undefined}
+                                                    style={uiAgentName && primarySelectorKind === 'agent' ? { color: `var(${getAgentColor(uiAgentName).var})` } : undefined}
                                                 />
                                                 <span
                                                     className={cn(
@@ -3227,7 +3747,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                                         'font-medium min-w-0 truncate',
                                                         isDesktop ? 'max-w-[220px]' : undefined
                                                     )}
-                                                    style={uiAgentName ? { color: `var(${getAgentColor(uiAgentName).var})` } : undefined}
+                                                    style={uiAgentName && primarySelectorKind === 'agent' ? { color: `var(${getAgentColor(uiAgentName).var})` } : undefined}
                                                 >
                                                     {getAgentDisplayName()}
                                                 </span>
@@ -3259,7 +3779,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                             <>
                                                 <DropdownMenuItem
                                                     className="typography-meta"
-                                                    onSelect={() => handleAgentChange(defaultAgentName)}
+                                                    onSelect={() => handlePrimarySelectorChange(defaultAgentName)}
                                                 >
                                                     <div className="flex items-center gap-1.5">
                                                         <RiArrowGoBackLine className="h-3.5 w-3.5 text-muted-foreground" />
@@ -3271,22 +3791,24 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                         )}
                                         {sortedAndFilteredAgents.length === 0 ? (
                                             <div className="px-2 py-4 text-center typography-meta text-muted-foreground">
-                                                No agents found
+                                                No {primarySelectorLabel.toLowerCase()}s found
                                             </div>
                                         ) : (
                                             sortedAndFilteredAgents.map((agent) => (
                                                 <DropdownMenuItem
-                                                    key={agent.name}
+                                                    key={agent.id}
                                                     className="typography-meta"
-                                                    onSelect={() => handleAgentChange(agent.name)}
+                                                    onSelect={() => handlePrimarySelectorChange(agent.id)}
                                                 >
                                                     <div className="flex flex-col gap-0.5">
                                                         <div className="flex items-center gap-1.5">
-                                                            <div className={cn(
-                                                                'h-1 w-1 rounded-full agent-dot',
-                                                                getAgentColor(agent.name).class
-                                                            )} />
-                                                            <span className="font-medium">{capitalizeAgentName(agent.name)}</span>
+                                                            {primarySelectorKind === 'agent' ? (
+                                                                <div className={cn(
+                                                                    'h-1 w-1 rounded-full agent-dot',
+                                                                    getAgentColor(agent.id).class
+                                                                )} />
+                                                            ) : null}
+                                                            <span className="font-medium">{agent.label}</span>
                                                         </div>
                                                         {agent.description && (
                                                             <span className="typography-meta text-muted-foreground max-w-[200px] ml-2.5 break-words">
@@ -3301,7 +3823,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 </ScrollableOverlay>
                             </DropdownMenuContent>
                         </DropdownMenu>
-                        {renderAgentTooltipContent()}
+                        {primarySelectorKind === 'agent' ? renderAgentTooltipContent() : null}
                     </Tooltip>
                 </div>
             );
@@ -3345,9 +3867,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                             className={cn(
                                 controlIconSize,
                                 'flex-shrink-0',
-                                uiAgentName ? '' : 'text-muted-foreground'
+                                uiAgentName && primarySelectorKind === 'agent' ? '' : 'text-muted-foreground'
                             )}
-                            style={uiAgentName ? { color: `var(${getAgentColor(uiAgentName).var})` } : undefined}
+                            style={uiAgentName && primarySelectorKind === 'agent' ? { color: `var(${getAgentColor(uiAgentName).var})` } : undefined}
                         />
                         <span
                             className={cn(
@@ -3356,7 +3878,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 'font-medium truncate min-w-0',
                                 isMobile && 'max-w-[60px]'
                             )}
-                            style={uiAgentName ? { color: `var(${getAgentColor(uiAgentName).var})` } : undefined}
+                            style={uiAgentName && primarySelectorKind === 'agent' ? { color: `var(${getAgentColor(uiAgentName).var})` } : undefined}
                         >
                             {getAgentDisplayName()}
                         </span>
@@ -3394,7 +3916,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             {renderMobileVariantPanel()}
             {renderMobileAgentPanel()}
             {renderMobileModelTooltip()}
-            {renderMobileAgentTooltip()}
+            {primarySelectorKind === 'agent' ? renderMobileAgentTooltip() : null}
         </>
     );
 

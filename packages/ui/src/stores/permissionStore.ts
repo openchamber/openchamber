@@ -2,14 +2,20 @@ import { create } from "zustand";
 import { devtools, persist, createJSONStorage } from "zustand/middleware";
 import type { Session } from "@opencode-ai/sdk/v2/client";
 import {
-    autoRespondsPermission,
+    getPermissionLevel,
+    isAutoAcceptingLevel,
+    normalizeDirectory,
+    resolvePermissionLevel,
+    sessionAcceptKey,
     type PermissionAutoAcceptMap,
+    type PermissionLevel,
 } from "./utils/permissionAutoAccept";
 import { getSafeStorage } from "./utils/safeStorage";
 import { getAllSyncSessions, getSyncChildStores } from "@/sync/sync-refs";
 import { opencodeClient } from "@/lib/opencode/client";
 import { respondToPermission } from "@/sync/session-actions";
 import { useSessionUIStore } from "@/sync/session-ui-store";
+import { getCompatibleSessionDirectory, getCompatibleSessionParentId } from "@/sync/compat";
 
 interface PermissionState {
     autoAccept: PermissionAutoAcceptMap;
@@ -17,7 +23,9 @@ interface PermissionState {
 
 interface PermissionActions {
     isSessionAutoAccepting: (sessionId: string) => boolean;
+    getSessionPermissionLevel: (sessionId: string) => PermissionLevel;
     setSessionAutoAccept: (sessionId: string, enabled: boolean) => Promise<void>;
+    setSessionPermissionLevel: (sessionId: string, level: PermissionLevel) => Promise<void>;
 }
 
 type PermissionStore = PermissionState & PermissionActions;
@@ -58,17 +66,36 @@ const extractSessionIdFromLegacyKey = (key: string): string | null => {
     return trimmed.slice(lastSlash + 1);
 };
 
+const resolveLineage = (sessionID: string, sessions: Session[]): string[] => {
+    const map = new Map<string, Session>();
+    for (const session of sessions) {
+        map.set(session.id, session);
+    }
+
+    const result: string[] = [];
+    const seen = new Set<string>();
+    let current: string | undefined = sessionID;
+    while (current && !seen.has(current)) {
+        seen.add(current);
+        result.push(current);
+        const parentId = map.get(current)
+        current = parentId ? getCompatibleSessionParentId(parentId) ?? undefined : undefined;
+    }
+    return result;
+};
+
 const resolveSessionScope = (sessionID: string, sessions: Session[]): Set<string> => {
     const map = new Map<string, Session>();
     const children = new Map<string, string[]>();
     for (const session of sessions) {
         map.set(session.id, session);
-        if (session.parentID) {
-            const list = children.get(session.parentID);
+        const parentId = getCompatibleSessionParentId(session);
+        if (parentId) {
+            const list = children.get(parentId);
             if (list) {
                 list.push(session.id);
             } else {
-                children.set(session.parentID, [session.id]);
+                children.set(parentId, [session.id]);
             }
         }
     }
@@ -99,6 +126,35 @@ const resolveSessionScope = (sessionID: string, sessions: Session[]): Set<string
     }
 
     return result;
+};
+
+const resolveSessionDirectory = (sessionID: string, sessions: Session[]): string | null => {
+    const targetSession = sessions.find((session) => session.id === sessionID);
+    const mappedDirectory = useSessionUIStore.getState().getDirectoryForSession(sessionID);
+    return normalizeDirectory(mappedDirectory ?? (targetSession ? getCompatibleSessionDirectory(targetSession) : null));
+};
+
+const getPermissionLevelBySession = (
+    autoAccept: PermissionAutoAcceptMap,
+    sessions: Session[],
+    sessionID: string,
+): PermissionLevel => {
+    const directory = resolveSessionDirectory(sessionID, sessions);
+    if (!directory) {
+        for (const id of resolveLineage(sessionID, sessions)) {
+            if (id in autoAccept) {
+                return resolvePermissionLevel(autoAccept[id]);
+            }
+        }
+        return "manual";
+    }
+
+    return getPermissionLevel({
+        autoAccept,
+        sessions,
+        sessionID,
+        directory,
+    });
 };
 
 const normalizeDirectoryCandidate = (value: unknown): string | null => {
@@ -132,11 +188,7 @@ const autoRespondsPermissionBySession = (
     sessions: Session[],
     sessionID: string,
 ): boolean => {
-    return autoRespondsPermission({
-        autoAccept,
-        sessionID,
-        sessions,
-    });
+    return isAutoAcceptingLevel(getPermissionLevelBySession(autoAccept, sessions, sessionID));
 };
 
 const getStorage = () => createJSONStorage(() => getSafeStorage());
@@ -156,19 +208,85 @@ export const usePermissionStore = create<PermissionStore>()(
                     return autoRespondsPermissionBySession(get().autoAccept, sessions, sessionId);
                 },
 
+                getSessionPermissionLevel: (sessionId: string): PermissionLevel => {
+                    if (!sessionId) {
+                        return "manual";
+                    }
+
+                    const sessions = getAllSyncSessions();
+                    return getPermissionLevelBySession(get().autoAccept, sessions, sessionId);
+                },
+
+                setSessionPermissionLevel: async (sessionId: string, level: PermissionLevel) => {
+                    if (!sessionId) {
+                        return;
+                    }
+
+                    const sessions = getAllSyncSessions();
+                    const directory = resolveSessionDirectory(sessionId, sessions);
+                    const key = directory ? sessionAcceptKey(sessionId, directory) : sessionId;
+
+                    set((state) => {
+                        const autoAccept = { ...state.autoAccept };
+                        if (directory) {
+                            delete autoAccept[sessionId];
+                        }
+                        autoAccept[key] = level;
+                        return { autoAccept };
+                    });
+
+                    if (!isAutoAcceptingLevel(level)) {
+                        return;
+                    }
+
+                    const sessionScope = resolveSessionScope(sessionId, sessions);
+                    const directories = new Set<string>();
+                    if (directory) {
+                        directories.add(directory);
+                    }
+                    const currentDirectory = normalizeDirectoryCandidate(opencodeClient.getDirectory());
+                    if (currentDirectory) {
+                        directories.add(currentDirectory);
+                    }
+                    for (const scopedSessionId of sessionScope) {
+                        const mapped = normalizeDirectoryCandidate(useSessionUIStore.getState().getDirectoryForSession(scopedSessionId));
+                        if (mapped) {
+                            directories.add(mapped);
+                        }
+                    }
+
+                    const pendingFromStores = collectPendingFromSyncStores(sessionScope);
+                    const pendingFromApi = directories.size > 0
+                        ? await opencodeClient.listPendingPermissions({ directories: Array.from(directories) })
+                        : [];
+                    const mergedPending = new Map<string, { id: string; sessionID: string }>();
+
+                    for (const permission of pendingFromStores) {
+                        mergedPending.set(permission.id, permission);
+                    }
+                    for (const permission of pendingFromApi) {
+                        if (!permission?.id || !permission?.sessionID) {
+                            continue;
+                        }
+                        if (!sessionScope.has(permission.sessionID)) {
+                            continue;
+                        }
+                        mergedPending.set(permission.id, { id: permission.id, sessionID: permission.sessionID });
+                    }
+
+                    await Promise.all(
+                        Array.from(mergedPending.values())
+                            .map((permission) => respondToPermission(permission.sessionID, permission.id, "once").catch(() => undefined)),
+                    );
+                },
+
                 setSessionAutoAccept: async (sessionId: string, enabled: boolean) => {
                     if (!sessionId) {
                         return;
                     }
 
                     const sessions = getAllSyncSessions();
-
-                    set((state) => {
-                        const autoAccept = { ...state.autoAccept };
-                        autoAccept[sessionId] = enabled;
-                        return { autoAccept };
-                    });
-
+                    await get().setSessionPermissionLevel(sessionId, enabled ? "auto-accept" : "manual");
                     const sessionScope = resolveSessionScope(sessionId, sessions);
 
                     // Mirror inherited state to the server so it can suppress
@@ -187,7 +305,7 @@ export const usePermissionStore = create<PermissionStore>()(
                         return;
                     }
 
-                    const sessionDirectory = useSessionUIStore.getState().getDirectoryForSession(sessionId);
+                    const sessionDirectory = resolveSessionDirectory(sessionId, sessions);
                     const directories = new Set<string>();
                     const currentDirectory = normalizeDirectoryCandidate(opencodeClient.getDirectory());
                     if (currentDirectory) {
@@ -205,7 +323,9 @@ export const usePermissionStore = create<PermissionStore>()(
                     }
 
                     const pendingFromStores = collectPendingFromSyncStores(sessionScope);
-                    const pendingFromApi = await opencodeClient.listPendingPermissions({ directories: Array.from(directories) });
+                    const pendingFromApi = directories.size > 0
+                        ? await opencodeClient.listPendingPermissions({ directories: Array.from(directories) })
+                        : [];
                     const mergedPending = new Map<string, { id: string; sessionID: string }>();
 
                     for (const permission of pendingFromStores) {
@@ -240,18 +360,15 @@ export const usePermissionStore = create<PermissionStore>()(
                     const persisted = Object.entries(merged.autoAccept || {});
                     const nextAutoAccept: PermissionAutoAcceptMap = {};
 
-                    for (const [rawKey, rawEnabled] of persisted) {
+                    for (const [rawKey, rawValue] of persisted) {
                         if (rawKey.includes("/") || isLegacyDirectoryAutoAcceptKey(rawKey)) {
                             continue;
                         }
-                        nextAutoAccept[rawKey] = coerceAutoAcceptValue(rawEnabled);
+                        nextAutoAccept[rawKey] = resolvePermissionLevel(coerceAutoAcceptValue(rawValue));
                     }
 
-                    for (const [rawKey, rawEnabled] of persisted) {
-                        if (isLegacyDirectoryAutoAcceptKey(rawKey)) {
-                            continue;
-                        }
-                        if (!rawKey.includes("/")) {
+                    for (const [rawKey, rawValue] of persisted) {
+                        if (isLegacyDirectoryAutoAcceptKey(rawKey) || !rawKey.includes("/")) {
                             continue;
                         }
 
@@ -263,9 +380,7 @@ export const usePermissionStore = create<PermissionStore>()(
                             continue;
                         }
 
-                        const normalized = coerceAutoAcceptValue(rawEnabled);
-                        const existing = nextAutoAccept[sessionId];
-                        nextAutoAccept[sessionId] = existing === true ? true : normalized;
+                        nextAutoAccept[sessionId] = resolvePermissionLevel(coerceAutoAcceptValue(rawValue));
                     }
 
                     return {

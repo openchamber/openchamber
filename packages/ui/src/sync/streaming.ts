@@ -7,7 +7,8 @@
  */
 
 import { create } from "zustand"
-import type { Message, SessionStatus } from "@opencode-ai/sdk/v2/client"
+import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
+import type { HarnessMessage } from "@openchamber/harness-contracts"
 import type { State } from "./types"
 
 export type StreamPhase = "streaming" | "cooldown" | "completed"
@@ -74,9 +75,9 @@ export function updateStreamingState(state: State) {
     const messages = state.message[sessionID]
     if (!messages || messages.length === 0) continue
 
+    let streamingMsg: HarnessMessage | null = null
     // Only the trailing assistant turn can be streaming. If a new user turn is
     // last, the next assistant message has not arrived yet.
-    let streamingMsg: Message | null = null
     for (let i = messages.length - 1; i >= 0; i--) {
       if (messages[i].role === "user") {
         break

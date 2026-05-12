@@ -1,12 +1,12 @@
-import type { SessionStatus, Message, Part } from "@opencode-ai/sdk/v2/client"
-import type { Session } from "@opencode-ai/sdk/v2"
+import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
+import type { HarnessMessage, HarnessPart, HarnessSession } from "@openchamber/harness-contracts"
 import { getSessionMaterializationStatus } from "./materialization"
 
 type ReconnectMaterializationState = {
-  session: Session[]
+  session: HarnessSession[]
   session_status?: Record<string, SessionStatus>
-  message?: Record<string, Message[]>
-  part?: Record<string, Part[]>
+  message?: Record<string, HarnessMessage[]>
+  part?: Record<string, HarnessPart[]>
 }
 
 export type ViewedSessionMaterializationTarget = {
@@ -41,7 +41,7 @@ export function getReconnectCandidateSessionIds(state: ReconnectMaterializationS
 
   const parentIds = new Set<string>()
   for (const session of state.session) {
-    const parentId = (session as Session & { parentID?: string | null }).parentID
+    const parentId = session.parentId
     if (parentId) {
       parentIds.add(parentId)
     }

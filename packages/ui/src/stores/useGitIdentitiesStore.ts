@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { StoreApi, UseBoundStore } from "zustand";
-import { devtools, persist, createJSONStorage } from "zustand/middleware";
-import { getSafeStorage } from "./utils/safeStorage";
+import { devtools, persist } from "zustand/middleware";
+import { createDebouncedJSONStorage } from "./utils/debouncedStorage";
 import {
   getGitIdentities,
   createGitIdentity,
@@ -268,7 +268,7 @@ export const useGitIdentitiesStore = create<GitIdentitiesStore>()(
       }),
       {
         name: "git-identities-store",
-        storage: createJSONStorage(() => getSafeStorage()),
+        storage: createDebouncedJSONStorage(),
         partialize: (state) => ({
           selectedProfileId: state.selectedProfileId,
         }),

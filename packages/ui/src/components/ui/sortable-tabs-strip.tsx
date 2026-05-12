@@ -27,6 +27,7 @@ export type SortableTabsStripItem = {
   label: string;
   icon?: React.ReactNode;
   title?: string;
+  disabled?: boolean;
   closable?: boolean;
   closeLabel?: string;
 };
@@ -367,6 +368,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
         ) : null}
         {items.map((item) => {
           const isActive = item.id === activeId;
+          const isDisabled = item.disabled === true;
           const showInactiveIconOnly = inactiveTabsIconOnly && usesActivePillIndicator && !isActive && Boolean(item.icon);
           const shouldShowLabel = !showInactiveIconOnly;
           const shouldShowIcon = Boolean(item.icon) && (!iconOnlyActiveTab || isActive);
@@ -393,17 +395,23 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                       : 'w-full min-w-0',
                   usesActivePillIndicator
                     ? 'relative z-10 bg-transparent'
-                    : isActive
-                      ? 'relative z-10 bg-transparent text-foreground'
-                      : 'relative z-10 bg-transparent text-muted-foreground hover:text-foreground'
+                      : isActive
+                        ? 'relative z-10 bg-transparent text-foreground'
+                        : cn('relative z-10 bg-transparent text-muted-foreground', !isDisabled && 'hover:text-foreground')
                 )}
               >
                 <button
                   type="button"
                   role="tab"
                   aria-selected={isActive}
+                  aria-disabled={isDisabled || undefined}
+                  disabled={isDisabled}
                   aria-label={showInactiveIconOnly ? (item.title ?? item.label) : undefined}
-                  onClick={() => onSelect(item.id)}
+                  onClick={() => {
+                    if (!isDisabled) {
+                      onSelect(item.id);
+                    }
+                  }}
                   className={cn(
                     usesActivePillIndicator
                       ? 'animated-tabs__button pill-tabs__button relative z-10 flex flex-1 min-w-0 flex-nowrap items-center justify-center rounded-[9px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] text-sm font-medium transition-colors duration-150 !min-h-0'
@@ -429,8 +437,9 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                     usesActivePillIndicator
                       ? isActive
                         ? 'text-foreground'
-                        : 'text-muted-foreground hover:text-foreground'
+                        : cn('text-muted-foreground', !isDisabled && 'hover:text-foreground')
                       : null,
+                    isDisabled ? 'cursor-not-allowed opacity-45' : null,
                     usesActivePillIndicator
                       ? 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)] focus-visible:ring-offset-1 focus-visible:ring-offset-background'
                       : null

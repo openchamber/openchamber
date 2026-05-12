@@ -1,4 +1,8 @@
 import type { WorktreeMetadata } from '@/types/worktree';
+import type {
+  HarnessProviderSnapshot,
+  HarnessProviderOptionChoice,
+} from '@openchamber/harness-contracts';
 
 export type RuntimePlatform = 'web' | 'desktop' | 'vscode';
 
@@ -11,6 +15,84 @@ export interface RuntimeDescriptor {
 
   label?: string;
 }
+
+export interface BackendCapabilities {
+  chat: boolean;
+  sessions: boolean;
+  models: boolean;
+  shell?: boolean;
+  share?: boolean;
+  delete?: boolean;
+  auth?: boolean;
+  agents: boolean;
+  providers: boolean;
+  commands: boolean;
+  config: boolean;
+  skills: boolean;
+}
+
+export interface BackendDescriptor {
+  id: string;
+  label: string;
+  available: boolean;
+  comingSoon?: boolean;
+  capabilities: BackendCapabilities;
+}
+
+export interface BackendControlSurfaceOption {
+  id: string;
+  label: string;
+  description?: string;
+  available?: boolean;
+  color?: string;
+}
+
+export interface BackendModeSelectorSurface {
+  kind: 'agent' | 'mode';
+  label: string;
+  items: BackendControlSurfaceOption[];
+}
+
+export interface BackendModelSelectorSurface {
+  label: string;
+  source: 'providers' | 'backend' | 'provider-snapshot';
+  options?: BackendControlSurfaceOption[];
+  providerId?: string;
+  defaultOptionId?: string | null;
+}
+
+export interface BackendEffortSelectorSurface {
+  label: string;
+  source: 'model-variants' | 'backend' | 'provider-option';
+  optionId?: string;
+  options: BackendControlSurfaceOption[];
+  defaultOptionId?: string | null;
+}
+
+export interface BackendCommandSurfaceItem {
+  name: string;
+  description?: string;
+  agent?: string;
+  model?: string;
+  template?: string;
+  executionMode?: 'session-command' | 'prompt-text';
+}
+
+export interface BackendCommandSelectorSurface {
+  source: 'config' | 'backend';
+  items: BackendCommandSurfaceItem[];
+}
+
+export interface BackendControlSurface {
+  backendId: string;
+  providerSnapshot?: HarnessProviderSnapshot | null;
+  modeSelector?: BackendModeSelectorSurface | null;
+  modelSelector?: BackendModelSelectorSurface | null;
+  effortSelector?: BackendEffortSelectorSurface | null;
+  commandSelector?: BackendCommandSelectorSurface | null;
+}
+
+export type HarnessControlSurfaceOption = HarnessProviderOptionChoice;
 
 export interface ApiError {
   message: string;

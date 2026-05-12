@@ -1,4 +1,3 @@
-import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import { DateTime } from 'luxon';
 import parser from 'cron-parser';
 
@@ -220,9 +219,8 @@ export const createScheduledTasksRuntime = (deps) => {
   const {
     projectConfigRuntime,
     listProjects,
-    buildOpenCodeUrl,
-    getOpenCodeAuthHeaders,
-    waitForOpenCodeReady,
+    backendRegistry,
+    sessionBindingsRuntime,
     emitTaskRunEvent,
     logger = console,
     maxGlobalConcurrency = DEFAULT_GLOBAL_CONCURRENCY,
@@ -416,45 +414,98 @@ export const createScheduledTasksRuntime = (deps) => {
     ],
   });
 
-  const runPromptAsync = async ({ baseUrl, authHeaders, sessionID, projectPath, task }) => {
-    const promptUrl = new URL(`${baseUrl}/session/${encodeURIComponent(sessionID)}/prompt_async`);
-    promptUrl.searchParams.set('directory', projectPath);
-    const response = await fetch(promptUrl.toString(), {
-      method: 'POST',
-      headers: {
-        ...authHeaders,
-        'content-type': 'application/json',
-        accept: 'application/json',
-      },
-      body: JSON.stringify(buildPromptAsyncPayload(task)),
-    });
-
-    if (!response.ok) {
-      const body = await response.text().catch(() => '');
-      throw new Error(`prompt_async failed (${response.status})${body ? `: ${body}` : ''}`);
-    }
+  const getTaskBackendId = (task) => {
+    const backendId = typeof task?.execution?.backendId === 'string' ? task.execution.backendId.trim() : '';
+    return backendId || 'opencode';
   };
 
-  const runScheduledCommandIfApplicable = async ({ client, projectPath, sessionID, task }) => {
+  const getTaskRuntime = (task) => {
+    const backendId = getTaskBackendId(task);
+    if (!backendRegistry?.isBackendSelectable?.(backendId)) {
+      throw new Error(`Backend "${backendId}" is not available for scheduled tasks`);
+    }
+
+    const runtime = backendRegistry.getRuntime(backendId);
+    if (!runtime?.createSession || !runtime?.promptAsync) {
+      throw new Error(`Backend "${backendId}" does not support scheduled task execution`);
+    }
+
+    return { backendId, runtime };
+  };
+
+  const createScheduledSession = async ({ projectID, projectPath, task, title }) => {
+    const { backendId, runtime } = getTaskRuntime(task);
+    const session = await runtime.createSession({
+      directory: projectPath,
+      title,
+      ...(task.execution.agent ? { mode: task.execution.agent } : {}),
+      ...(task.execution.modelID ? { modelId: task.execution.modelID } : {}),
+      ...(task.execution.variant ? { effort: task.execution.variant } : {}),
+    });
+
+    const sessionID = typeof session?.id === 'string' ? session.id : '';
+    if (!sessionID) {
+      throw new Error('failed to create session');
+    }
+
+    await sessionBindingsRuntime?.upsertBinding?.({
+      sessionId: sessionID,
+      backendId,
+      backendSessionId: sessionID,
+      directory: typeof session?.directory === 'string' && session.directory.trim().length > 0 ? session.directory.trim() : projectPath,
+    });
+
+    try {
+      emitTaskRunEvent?.({
+        projectID,
+        taskID: task.id,
+        ranAt: Date.now(),
+        status: 'running',
+        sessionID,
+      });
+    } catch {
+    }
+
+    return { backendId, runtime, sessionID };
+  };
+
+  const runPromptAsync = async ({ runtime, sessionID, projectPath, task }) => {
+    await runtime.promptAsync({
+      sessionID,
+      directory: projectPath,
+      ...buildPromptAsyncPayload(task),
+    });
+  };
+
+  const runScheduledCommandIfApplicable = async ({ runtime, projectPath, sessionID, task }) => {
     const parsed = parseScheduledCommandPrompt(task?.execution?.prompt);
     if (!parsed) {
       return false;
     }
 
-    let commands = [];
+    if (!runtime?.getControlSurface) {
+      return false;
+    }
+
+    let surface = null;
     try {
-      const response = await client.command.list({ directory: projectPath });
-      commands = Array.isArray(response?.data) ? response.data : [];
+      surface = await runtime.getControlSurface({
+        directory: projectPath,
+        providerId: task.execution.providerID,
+        modelId: task.execution.modelID,
+      });
     } catch {
       return false;
     }
 
-    const hasMatchingCommand = commands.some((command) => command?.name === parsed.command);
-    if (!hasMatchingCommand) {
+    const commandItem = Array.isArray(surface?.commandSelector?.items)
+      ? surface.commandSelector.items.find((command) => command?.name === parsed.command)
+      : null;
+    if (!commandItem || commandItem.executionMode !== 'session-command' || !runtime?.command) {
       return false;
     }
 
-    await client.session.command({
+    await runtime.command({
       sessionID,
       directory: projectPath,
       command: parsed.command,
@@ -475,47 +526,17 @@ export const createScheduledTasksRuntime = (deps) => {
       throw new Error('project path is unavailable');
     }
 
-    if (typeof waitForOpenCodeReady === 'function') {
-      await waitForOpenCodeReady(10_000, 250);
-    }
-
-    const baseUrl = buildOpenCodeUrl('/', '').replace(/\/$/, '');
-    const authHeaders = getOpenCodeAuthHeaders();
-    const client = createOpencodeClient({
-      baseUrl,
-      headers: authHeaders,
-    });
-
-    const sessionResponse = await client.session.create({
-      directory: projectPath,
-      title,
-    });
-    const sessionID = sessionResponse?.data?.id;
-    if (!sessionID) {
-      throw new Error('failed to create session');
-    }
-
-    try {
-      emitTaskRunEvent?.({
-        projectID,
-        taskID: task.id,
-        ranAt: startedAt,
-        status: 'running',
-        sessionID,
-      });
-    } catch {
-    }
+    const { runtime, sessionID } = await createScheduledSession({ projectID, projectPath, task, title });
 
     const executedAsCommand = await runScheduledCommandIfApplicable({
-      client,
+      runtime,
       projectPath,
       sessionID,
       task,
     });
     if (!executedAsCommand) {
       await runPromptAsync({
-        baseUrl,
-        authHeaders,
+        runtime,
         sessionID,
         projectPath,
         task,

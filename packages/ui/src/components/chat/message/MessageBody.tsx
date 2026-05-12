@@ -1,5 +1,4 @@
 import React from 'react';
-import type { Part } from '@opencode-ai/sdk/v2';
 
 import UserTextPart from './parts/UserTextPart';
 import ToolPart from './parts/ToolPart';
@@ -7,7 +6,6 @@ import AssistantTextPart from './parts/AssistantTextPart';
 import ReasoningPart from './parts/ReasoningPart';
 import { MessageFilesDisplay } from '../FileAttachment';
 import { TurnChangedFilesDropdown } from '../TurnChangedFilesDropdown';
-import type { ToolPart as ToolPartType } from '@opencode-ai/sdk/v2';
 import type { StreamPhase, ToolPopupContent, AgentMentionInfo } from './types';
 import type { TurnGroupingContext } from '../lib/turns/types';
 import { cn } from '@/lib/utils';
@@ -18,6 +16,8 @@ import { SaveProjectPlanDialog } from '@/components/session/SaveProjectPlanDialo
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { RiCheckLine, RiFileCopyLine, RiChatNewLine, RiArrowGoBackLine, RiGitBranchLine, RiHourglassLine, RiTimeLine, RiVolumeUpLine, RiStopLine, RiImageDownloadLine, RiLoader4Line, RiErrorWarningLine, RiBookletLine, RiGlobalLine, RiInformationLine } from '@remixicon/react';
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
+import type { RenderablePart, RenderableToolPart } from './renderable';
+import { toRenderableToolActivity } from './renderable';
 import type { ContentChangeReason } from '@/hooks/useChatAutoFollow';
 
 import { SimpleMarkdownRenderer } from '../MarkdownRenderer';
@@ -50,7 +50,7 @@ const CONTAIN_LAYOUT_STYLE = { contain: 'layout' as const, transform: 'translate
 const MESSAGE_FOOTER_CONTAINER_STYLE = { containerType: 'inline-size' as const, containerName: 'message-footer' };
 const INLINE_MESSAGE_ACTIONS_CLASS_NAME = 'mt-2 mb-1 flex items-center justify-start gap-1.5';
 
-type SubtaskPartLike = Part & {
+type SubtaskPartLike = RenderablePart & {
     type: 'subtask';
     description?: unknown;
     command?: unknown;
@@ -63,7 +63,7 @@ type SubtaskPartLike = Part & {
     };
 };
 
-type ShellActionPartLike = Part & {
+type ShellActionPartLike = RenderablePart & {
     type: 'text';
     shellAction?: {
         command?: unknown;
@@ -72,11 +72,11 @@ type ShellActionPartLike = Part & {
     };
 };
 
-const isSubtaskPart = (part: Part): part is SubtaskPartLike => {
+const isSubtaskPart = (part: RenderablePart): part is SubtaskPartLike => {
     return part.type === 'subtask';
 };
 
-const isShellActionPart = (part: Part): part is ShellActionPartLike => {
+const isShellActionPart = (part: RenderablePart): part is ShellActionPartLike => {
     const textPart = part as unknown as { type?: unknown; shellAction?: unknown };
     return textPart.type === 'text' && typeof textPart.shellAction === 'object' && textPart.shellAction !== null;
 };
@@ -273,7 +273,7 @@ const formatTurnDuration = (durationMs: number): string => {
 interface MessageBodyProps {
     sessionId?: string;
     messageId: string;
-    parts: Part[];
+    parts: RenderablePart[];
     isUser: boolean;
     isMessageCompleted: boolean;
     messageFinish?: string;
@@ -330,7 +330,7 @@ const writeRevealedToolIds = (messageId: string, value: Set<string>): void => {
 
 const UserMessageBody = React.memo(({ messageId, parts, isMobile, alwaysShowActions = isMobile, hasTouchInput, hasTextContent, onCopyMessage, copiedMessage, onShowPopup, agentMention, onRevert, onFork, userActionsMode = 'inline', stickyUserHeaderEnabled = true }: {
     messageId: string;
-    parts: Part[];
+    parts: RenderablePart[];
     isMobile: boolean;
     alwaysShowActions?: boolean;
     hasTouchInput?: boolean;
@@ -887,7 +887,7 @@ const AssistantMessageBody = React.memo(({
     }, [parts]);
 
     const toolParts = React.useMemo(() => {
-        return visibleParts.filter((part): part is ToolPartType => part.type === 'tool');
+        return visibleParts.filter((part): part is RenderableToolPart => part.type === 'tool');
     }, [visibleParts]);
 
     const toolRevealStateRef = React.useRef<{
@@ -1044,13 +1044,13 @@ const AssistantMessageBody = React.memo(({
         });
     }, [toolParts]);
 
-    const isActiveTool = React.useCallback((toolPart: ToolPartType): boolean => {
+    const isActiveTool = React.useCallback((toolPart: RenderableToolPart): boolean => {
         const state = (toolPart as Record<string, unknown>).state as Record<string, unknown> | undefined ?? {};
         const status = state?.status;
         return status === 'pending' || status === 'running' || status === 'started';
     }, []);
 
-    const isToolFinalized = React.useCallback((toolPart: ToolPartType) => {
+    const isToolFinalized = React.useCallback((toolPart: RenderableToolPart) => {
         const state = (toolPart as Record<string, unknown>).state as Record<string, unknown> | undefined ?? {};
         const status = state?.status;
         if (status === 'pending' || status === 'running' || status === 'started') {
@@ -1068,7 +1068,7 @@ const AssistantMessageBody = React.memo(({
         return true;
     }, []);
 
-    const shouldShowTool = React.useCallback((toolPart: ToolPartType): boolean => {
+    const shouldShowTool = React.useCallback((toolPart: RenderableToolPart): boolean => {
         return isActiveTool(toolPart) || isToolFinalized(toolPart);
     }, [isActiveTool, isToolFinalized]);
 
@@ -1360,7 +1360,7 @@ const AssistantMessageBody = React.memo(({
     const hasAnchoredActivitySegments = activityGroupSegmentsForMessage.length > 0;
 
     const activityByPart = React.useMemo(() => {
-        const byRef = new Map<Part, (typeof activityPartsForTurn)[number]>();
+        const byRef = new Map<RenderablePart, (typeof activityPartsForTurn)[number]>();
         const byId = new Map<string, (typeof activityPartsForTurn)[number]>();
         activityPartsForTurn.forEach((activity) => {
             byRef.set(activity.part, activity);
@@ -1371,7 +1371,7 @@ const AssistantMessageBody = React.memo(({
         });
 
         return {
-            get: (part: Part) => {
+            get: (part: RenderablePart) => {
                 const direct = byRef.get(part);
                 if (direct) {
                     return direct;
@@ -1582,7 +1582,7 @@ const AssistantMessageBody = React.memo(({
             }
 
             if (part.type === 'tool') {
-                const toolPart = part as ToolPartType;
+                const toolPart = part as RenderableToolPart;
                 const toolName = toolPart.tool?.toLowerCase() ?? '';
 
                 if (isSortedRenderMode && !isActivityOwnerMessage) {
@@ -1608,6 +1608,7 @@ const AssistantMessageBody = React.memo(({
                             <ToolRevealOnMount animate={animatedToolIdsLookup.has(toolPart.id)} wipe>
                                 <ToolPart
                                     part={toolPart}
+                                    activity={toRenderableToolActivity(toolPart)}
                                     isExpanded={expandedTools.has(toolPart.id)}
                                     onToggle={onToggleTool}
                                     syntaxTheme={syntaxTheme}

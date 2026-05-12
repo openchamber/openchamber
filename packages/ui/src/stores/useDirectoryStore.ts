@@ -221,6 +221,20 @@ const initializeHomeDirectory = async () => {
   return fallback;
 };
 
+const ensureDirectoryExists = async (directory: string): Promise<boolean> => {
+  const trimmed = normalizeDirectoryPath(directory);
+  if (!trimmed) {
+    return false;
+  }
+
+  try {
+    await opencodeClient.listLocalDirectory(trimmed);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const getVsCodeWorkspaceFolder = (): string | null => {
   if (!isVSCodeRuntime()) {
     return null;
@@ -436,5 +450,23 @@ export const useDirectoryStore = create<DirectoryStore>()(
 if (typeof window !== 'undefined') {
   initializeHomeDirectory().then((home) => {
     useDirectoryStore.getState().synchronizeHomeDirectory(home);
+
+    const restoredDirectory = normalizeDirectoryPath(useDirectoryStore.getState().currentDirectory);
+    if (!restoredDirectory || restoredDirectory === home) {
+      return;
+    }
+
+    void ensureDirectoryExists(restoredDirectory).then((exists) => {
+      if (exists) {
+        return;
+      }
+
+      const state = useDirectoryStore.getState();
+      if (normalizeDirectoryPath(state.currentDirectory) !== restoredDirectory) {
+        return;
+      }
+
+      state.setDirectory(home, { showOverlay: false });
+    });
   });
 }

@@ -7,6 +7,7 @@ import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useSkillsCatalogStore } from '@/stores/useSkillsCatalogStore';
+import { useBackendsStore } from '@/stores/useBackendsStore';
 import {
   RiAiAgentLine,
   RiAiGenerate2,
@@ -89,6 +90,13 @@ interface SettingsViewProps {
   isWindowed?: boolean;
 }
 
+type BackendCapabilityKey = 'agents' | 'commands' | 'providers' | 'config' | 'skills';
+
+type BackendCapabilityRequirement = {
+  capability: BackendCapabilityKey;
+  backendIds?: string[];
+};
+
 const pageOrder: SettingsPageSlug[] = [
   'appearance',
   'chat',
@@ -122,6 +130,38 @@ function isPageAvailable(page: SettingsPageMeta, ctx: SettingsRuntimeContext): b
     return true;
   }
   return page.isAvailable(ctx);
+}
+
+function getPageCapability(slug: SettingsPageSlug): BackendCapabilityRequirement | null {
+  switch (slug) {
+    case 'providers':
+      return { capability: 'providers', backendIds: ['opencode'] };
+    case 'agents':
+      return { capability: 'agents', backendIds: ['opencode'] };
+    case 'commands':
+      return { capability: 'commands' };
+    case 'mcp':
+      return { capability: 'config' };
+    case 'skills.installed':
+    case 'skills.catalog':
+      return { capability: 'skills' };
+    default:
+      return null;
+  }
+}
+
+function hasBackendCapability(
+  backends: ReturnType<typeof useBackendsStore.getState>['backends'],
+  defaultBackendId: string | null,
+  requirement: BackendCapabilityRequirement,
+): boolean {
+  if (requirement.backendIds && defaultBackendId && !requirement.backendIds.includes(defaultBackendId)) {
+    return false;
+  }
+  const candidateBackends = requirement.backendIds && requirement.backendIds.length > 0
+    ? backends.filter((backend) => requirement.backendIds?.includes(backend.id))
+    : backends.filter((backend) => !defaultBackendId || backend.id === defaultBackendId);
+  return candidateBackends.some((backend) => backend.available && Boolean(backend.capabilities[requirement.capability]));
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
@@ -261,6 +301,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   const isSettingsDialogOpen = useUIStore((state) => state.isSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const settingsSlug = resolveSettingsSlug(settingsPageRaw);
+  const backends = useBackendsStore((state) => state.backends);
+  const backendsLoaded = useBackendsStore((state) => state.isLoaded);
+  const defaultBackendId = useBackendsStore((state) => state.defaultBackendId);
 
   const [mobileStage, setMobileStage] = React.useState<MobileStage>('nav');
   const autoNavSlugRef = React.useRef<string | null>(null);
@@ -281,12 +324,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   const runtimeCtx = React.useMemo(() => buildRuntimeContext(isDesktopApp), [isDesktopApp]);
 
   const visiblePages = React.useMemo(() => {
+    const hasCapability = (requirement: BackendCapabilityRequirement) => !backendsLoaded || hasBackendCapability(backends, defaultBackendId, requirement);
+
     return SETTINGS_PAGE_METADATA
       .filter((page) => page.slug !== 'home')
       .filter((page) => isPageAvailable(page, runtimeCtx))
+      .filter((page) => {
+        const capability = getPageCapability(page.slug);
+        return capability ? hasCapability(capability) : true;
+      })
       .filter((page) => !(runtimeCtx.isVSCode && page.slug === 'projects'))
       .filter((page) => !(isMobile && page.slug === 'shortcuts'));
-  }, [runtimeCtx, isMobile]);
+  }, [backends, backendsLoaded, defaultBackendId, runtimeCtx, isMobile]);
 
   const sortedFilteredPages = React.useMemo(() => {
     const rank = new Map<SettingsPageSlug, number>(pageOrder.map((s, i) => [s, i]));
@@ -358,6 +407,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     setNavWidth(clampSettingsNavWidth(nextWidth));
     setHasManuallyResized(true);
   };
+
+  // Load backends store when settings open.
+  React.useEffect(() => {
+    if (isSettingsDialogOpen || runtimeCtx.isVSCode) {
+      void useBackendsStore.getState().loadBackends();
+    }
+  }, [isSettingsDialogOpen, runtimeCtx.isVSCode]);
 
   // Load stores when project changes or when a page becomes active.
   React.useEffect(() => {
@@ -500,6 +556,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     if (meta && !isPageAvailable(meta, runtimeCtx)) {
       return renderUnavailable();
     }
+    const capability = getPageCapability(slug);
+    if (capability && backendsLoaded && !hasBackendCapability(backends, defaultBackendId, capability)) {
+      return renderUnavailable();
+    }
 
     switch (slug) {
       case 'home':
@@ -541,7 +601,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       default:
         return <SettingsHome onOpen={openPage} />;
     }
-  }, [openChamberSectionBySlug, openPage, renderUnavailable, runtimeCtx]);
+  }, [backends, backendsLoaded, defaultBackendId, openChamberSectionBySlug, openPage, renderUnavailable, runtimeCtx]);
 
   // Mobile: if opened via deep-link / palette to a non-home page, jump into it once.
   React.useEffect(() => {
@@ -631,14 +691,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                       'text-sm font-semibold text-sidebar-foreground/90',
                       'hover:text-sidebar-foreground hover:bg-interactive-hover',
                     )}
-                    onClick={() => void reloadOpenCodeConfiguration({ message: 'Restarting OpenCode…', mode: 'projects', scopes: ['all'] })}
+                    onClick={() => void reloadOpenCodeConfiguration({ message: 'Restarting backend\u2026', mode: 'projects', scopes: ['all'] })}
                   >
                     <RiRestartLine className="h-4 w-4 shrink-0" />
-                    <span>{t('settings.view.actions.reloadOpenCode')}</span>
+                    <span>Reload Backend</span>
                   </button>
                 </TooltipTrigger>
                 <TooltipContent>
-                  {t('settings.view.actions.reloadOpenCodeTooltip')}
+                  Restart the active backend and reload its configuration.
                 </TooltipContent>
               </Tooltip>
             )}

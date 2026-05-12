@@ -16,6 +16,7 @@
     "types": ["vite/client", "@types/dom-speech-recognition"],
     "paths": {
       "@/*": ["../ui/src/*", "./src/*"],
+      "@openchamber/harness-contracts": ["../harness-contracts/src/index.ts"],
       "@web/*": ["./src/*"],
       "@openchamber/ui/*": ["../ui/src/*"],
       "@openchamber/web/*": ["./src/*"]

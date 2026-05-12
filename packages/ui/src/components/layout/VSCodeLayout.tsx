@@ -6,6 +6,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useViewportStore } from '@/sync/viewport-store';
 import { useSessions, useDirectorySync, useSessionMessages, useSessionMessagesResolved } from '@/sync/sync-context';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useBackendsStore } from '@/stores/useBackendsStore';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { McpDropdown } from '@/components/mcp/McpDropdown';
 import { cn } from '@/lib/utils';
@@ -26,6 +27,7 @@ import { formatQuotaValueLabel, formatWindowLabel, QUOTA_PROVIDERS, calculatePac
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { updateDesktopSettings } from '@/lib/persistence';
+import { useSelectionStore } from '@/sync/selection-store';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import type { UsageWindow } from '@/types';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
@@ -133,7 +135,20 @@ export const VSCodeLayout: React.FC = () => {
   const expandedSidebarResizeStartWidthRef = React.useRef(SESSIONS_SIDEBAR_WIDTH);
   const expandedSidebarResizePointerIdRef = React.useRef<number | null>(null);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const draftBackendId = useSelectionStore((state) => state.draftBackendId);
+  const lastUsedBackendId = useSelectionStore((state) => state.lastUsedBackendId);
+  const sessionBackendSelections = useSelectionStore((state) => state.sessionBackendSelections);
+  const defaultBackendId = useBackendsStore((state) => state.defaultBackendId);
   const sessions = useSessions();
+  const activeBackendId = React.useMemo(() => {
+    if (currentSessionId) {
+      const selectedBackendId = sessionBackendSelections.get(currentSessionId);
+      const liveSession = sessions.find((session) => session.id === currentSessionId) as { backendId?: string | null } | undefined;
+      return selectedBackendId || liveSession?.backendId?.trim() || defaultBackendId || 'opencode';
+    }
+    return draftBackendId || lastUsedBackendId || defaultBackendId || 'opencode';
+  }, [currentSessionId, defaultBackendId, draftBackendId, lastUsedBackendId, sessionBackendSelections, sessions]);
+  const requiresOpenCodeConfig = activeBackendId === 'opencode';
 
   const activeSessionTitle = React.useMemo(() => {
     if (!currentSessionId) {
@@ -289,7 +304,7 @@ export const VSCodeLayout: React.FC = () => {
         const configStore = useConfigStore.getState();
 
         // Keep trying to fetch core datasets on cold starts.
-        if (configStore.isConnected) {
+        if (configStore.isConnected && requiresOpenCodeConfig) {
           if (configStore.providers.length === 0) {
             await configStore.loadProviders();
           }
@@ -301,7 +316,10 @@ export const VSCodeLayout: React.FC = () => {
         const configState = useConfigStore.getState();
         // If OpenCode is still warming up, the initial provider/agent loads can fail and be swallowed by retries.
         // Only mark bootstrap complete when core datasets are present so we keep retrying on cold starts.
-        if (!configState.isInitialized || !configState.isConnected || configState.providers.length === 0 || configState.agents.length === 0) {
+        if (!configState.isInitialized || !configState.isConnected) {
+          return;
+        }
+        if (requiresOpenCodeConfig && (configState.providers.length === 0 || configState.agents.length === 0)) {
           return;
         }
         if (debugEnabled) console.log('[OpenChamber][VSCode][bootstrap] post-load', {
@@ -316,7 +334,7 @@ export const VSCodeLayout: React.FC = () => {
       }
     };
     void runBootstrap();
-  }, [connectionStatus, configInitialized, hasInitializedOnce, initializeConfig, isInitializing]);
+  }, [connectionStatus, configInitialized, hasInitializedOnce, initializeConfig, isInitializing, requiresOpenCodeConfig]);
 
   React.useEffect(() => {
     if (viewMode !== 'editor') {

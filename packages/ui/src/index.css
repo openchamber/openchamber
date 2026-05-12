@@ -363,8 +363,8 @@ textarea[data-chat-input="true"]:focus-visible {
 /* Remixicon puts fill="currentColor" on root SVG which WebKit renders as background */
 button svg.remixicon,
 [role="button"] svg.remixicon,
-button svg,
-[role="button"] svg {
+button svg:not([data-preserve-fill="true"]),
+[role="button"] svg:not([data-preserve-fill="true"]) {
   background: none !important;
   background-color: transparent !important;
   /* Override inline fill attribute on SVG root */
@@ -381,10 +381,10 @@ button svg:not(.animate-spin),
 }
 
 /* Fix SVG elements inside buttons - remove any rect/circle backgrounds */
-button svg rect,
-button svg circle,
-[role="button"] svg rect,
-[role="button"] svg circle {
+button svg:not([data-preserve-fill="true"]) rect,
+button svg:not([data-preserve-fill="true"]) circle,
+[role="button"] svg:not([data-preserve-fill="true"]) rect,
+[role="button"] svg:not([data-preserve-fill="true"]) circle {
   fill: none !important;
 }
 
@@ -393,8 +393,8 @@ button svg.remixicon path,
 button svg.remixicon circle[fill],
 [role="button"] svg.remixicon path,
 [role="button"] svg.remixicon circle[fill],
-button svg path,
-[role="button"] svg path {
+button svg:not([data-preserve-fill="true"]) path,
+[role="button"] svg:not([data-preserve-fill="true"]) path {
   fill: currentColor !important;
 }
 
@@ -903,9 +903,8 @@ html:not(.dark) .chat-scroll {
 .markdown-content.markdown-reasoning b,
 .markdown-content.markdown-reasoning [data-markdown="strong"],
 .markdown-content.markdown-reasoning [data-markdown="bold"] {
-  font-weight: inherit !important;
+  font-weight: 600 !important;
   color: inherit !important;
-  font-style: inherit !important;
 }
 
 .markdown-content.markdown-tool code,

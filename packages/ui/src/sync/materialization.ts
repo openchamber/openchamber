@@ -1,17 +1,19 @@
-import type { Message, Part } from "@opencode-ai/sdk/v2/client"
 import { mergeMessages } from "./optimistic"
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 const STREAMING_PART_FIELDS = ["text", "output"] as const
 
-export type MaterializedMessageRecord = {
-  info: Message
-  parts: Part[]
+type MaterializableMessage = { id: string; role: string }
+type MaterializablePart = { id: string; type?: string; kind?: string; raw?: unknown }
+
+export type MaterializedMessageRecord<TMessage extends MaterializableMessage = MaterializableMessage, TPart extends MaterializablePart = MaterializablePart> = {
+  info: TMessage
+  parts: TPart[]
 }
 
-export type MaterializedState = {
-  message: Record<string, Message[]>
-  part: Record<string, Part[]>
+export type MaterializedState<TMessage extends MaterializableMessage = MaterializableMessage, TPart extends MaterializablePart = MaterializablePart> = {
+  message: Record<string, TMessage[]>
+  part: Record<string, TPart[]>
 }
 
 export type MaterializeSessionSnapshotsOptions = {
@@ -19,10 +21,10 @@ export type MaterializeSessionSnapshotsOptions = {
   mode?: "merge" | "prepend"
 }
 
-export type MaterializeSessionSnapshotsResult = {
-  message: Record<string, Message[]>
-  part: Record<string, Part[]>
-  messages: Message[]
+export type MaterializeSessionSnapshotsResult<TMessage extends MaterializableMessage = MaterializableMessage, TPart extends MaterializablePart = MaterializablePart> = {
+  message: Record<string, TMessage[]>
+  part: Record<string, TPart[]>
+  messages: TMessage[]
   messagesChanged: boolean
   partsChanged: boolean
 }
@@ -33,13 +35,20 @@ export type SessionMaterializationStatus = {
   missingPartMessageIDs: string[]
 }
 
-function sortParts(parts: Part[], skipPartTypes: ReadonlySet<string>) {
+function getPartType(part: MaterializablePart): string {
+  const rawType = typeof (part.raw as { type?: unknown } | undefined)?.type === "string"
+    ? (part.raw as { type: string }).type
+    : undefined
+  return rawType ?? part.kind ?? ""
+}
+
+function sortParts<TPart extends MaterializablePart>(parts: TPart[], skipPartTypes: ReadonlySet<string>) {
   return parts
-    .filter((part) => !!part?.id && !skipPartTypes.has(part.type))
+    .filter((part) => !!part?.id && !skipPartTypes.has(getPartType(part)))
     .sort((a, b) => cmp(a.id, b.id))
 }
 
-function haveEquivalentPartSnapshots(left: Part[] | undefined, right: Part[]): boolean {
+function haveEquivalentPartSnapshots<TPart extends MaterializablePart>(left: TPart[] | undefined, right: TPart[]): boolean {
   if (!left) return right.length === 0
   if (left.length !== right.length) return false
 
@@ -54,22 +63,29 @@ function haveEquivalentPartSnapshots(left: Part[] | undefined, right: Part[]): b
   return true
 }
 
-function getPartEndTime(part: Part): number | undefined {
+function getPartEndTime(part: MaterializablePart): number | undefined {
+  const toolEndedAt = (part as { tool?: { endedAt?: unknown } }).tool?.endedAt
+  if (part.kind === "tool" && typeof toolEndedAt === "number") return toolEndedAt
   const stateEnd = (part as { state?: { time?: { end?: unknown } } }).state?.time?.end
+    ?? (part.raw as { state?: { time?: { end?: unknown } } } | undefined)?.state?.time?.end
   if (typeof stateEnd === "number") {
     return stateEnd
   }
 
-  const timeEnd = (part as { time?: { end?: unknown } }).time?.end
+  const timeEnd = (part.raw as { time?: { end?: unknown } } | undefined)?.time?.end
   return typeof timeEnd === "number" ? timeEnd : undefined
 }
 
-function getStringField(part: Part, field: "text" | "output"): string | undefined {
-  const value = (part as Record<string, unknown>)[field]
+function getStringField(part: MaterializablePart, field: "text" | "output"): string | undefined {
+  const value = field === "text" && (part.kind === "text" || part.kind === "reasoning")
+    ? (part as { text?: unknown }).text
+    : field === "output" && part.kind === "tool"
+      ? (part as { tool?: { output?: unknown } }).tool?.output
+      : (part.raw as Record<string, unknown> | undefined)?.[field]
   return typeof value === "string" ? value : undefined
 }
 
-function hasLiveStreamingField(part: Part): boolean {
+function hasLiveStreamingField(part: MaterializablePart): boolean {
   if (getPartEndTime(part) !== undefined) return false
   return STREAMING_PART_FIELDS.some((field) => {
     const value = getStringField(part, field)
@@ -77,10 +93,21 @@ function hasLiveStreamingField(part: Part): boolean {
   })
 }
 
-function mergeMaterializedPart(existing: Part | undefined, next: Part): Part {
+function withStringField<TPart extends MaterializablePart>(part: TPart, field: "text" | "output", value: string): TPart {
+  const raw = part.raw && typeof part.raw === "object" ? { ...part.raw, [field]: value } : part.raw
+  if (field === "text" && (part.kind === "text" || part.kind === "reasoning")) {
+    return { ...part, text: value, raw } as TPart
+  }
+  if (field === "output" && part.kind === "tool") {
+    return { ...part, tool: { ...(part as { tool?: object }).tool, output: value }, raw } as TPart
+  }
+  return { ...part, raw } as TPart
+}
+
+function mergeMaterializedPart<TPart extends MaterializablePart>(existing: TPart | undefined, next: TPart): TPart {
   if (!existing || getPartEndTime(next) !== undefined) return next
 
-  let merged: Part = next
+  let merged: TPart = next
   for (const field of STREAMING_PART_FIELDS) {
     const existingValue = getStringField(existing, field)
     if (!existingValue) continue
@@ -89,20 +116,18 @@ function mergeMaterializedPart(existing: Part | undefined, next: Part): Part {
     if (typeof nextValue === "string" && nextValue.length >= existingValue.length) continue
     if (typeof nextValue === "string" && nextValue.length > 0 && !existingValue.startsWith(nextValue)) continue
 
-    if (merged === next) merged = { ...next }
-    const mergedRecord = merged as Record<string, unknown>
-    mergedRecord[field] = existingValue
+    merged = withStringField(merged, field, existingValue)
   }
 
   return merged
 }
 
-function mergeMaterializedParts(
-  existing: Part[] | undefined,
-  nextParts: Part[],
+function mergeMaterializedParts<TPart extends MaterializablePart>(
+  existing: TPart[] | undefined,
+  nextParts: TPart[],
   skipPartTypes: ReadonlySet<string>,
   preserveLiveStreamingParts: boolean,
-): Part[] {
+): TPart[] {
   if (!existing || existing.length === 0) return nextParts
   if (!preserveLiveStreamingParts) return nextParts
 
@@ -121,19 +146,19 @@ function mergeMaterializedParts(
 
   const snapshotIDs = new Set(nextParts.map((part) => part.id))
   const missingLiveParts = existing.filter(
-    (part) => !!part?.id && !snapshotIDs.has(part.id) && !skipPartTypes.has(part.type) && hasLiveStreamingField(part),
+    (part) => !!part?.id && !snapshotIDs.has(part.id) && !skipPartTypes.has(getPartType(part)) && hasLiveStreamingField(part),
   )
   if (missingLiveParts.length === 0) return mergedParts
 
   return [...mergedParts, ...missingLiveParts].sort((a, b) => cmp(a.id, b.id))
 }
 
-export function materializeSessionSnapshots(
-  state: MaterializedState,
+export function materializeSessionSnapshots<TMessage extends MaterializableMessage, TPart extends MaterializablePart>(
+  state: MaterializedState<TMessage, TPart>,
   sessionID: string,
-  records: MaterializedMessageRecord[],
+  records: MaterializedMessageRecord<TMessage, TPart>[],
   options: MaterializeSessionSnapshotsOptions = {},
-): MaterializeSessionSnapshotsResult {
+): MaterializeSessionSnapshotsResult<TMessage, TPart> {
   const skipPartTypes = options.skipPartTypes ?? new Set<string>()
   const snapshots = records
     .filter((record) => !!record?.info?.id)
