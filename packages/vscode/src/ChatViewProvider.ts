@@ -37,6 +37,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     return this._view?.visible ?? false;
   }
 
+  public hasResolvedView() {
+    return this._view !== undefined;
+  }
+
   // Cache latest status/URL for when webview is resolved after connection is ready
   private _cachedStatus: ConnectionStatus = 'connecting';
   private _cachedError?: string;
