@@ -86,7 +86,7 @@ export const registerPwaManifestRoute = (app, dependencies) => {
         if (!sessionDirectory) {
           return false;
         }
-        return sessionDirectory === normalizedDirectory || (prefix !== '/' && sessionDirectory.startsWith(prefix));
+        return sessionDirectory === normalizedDirectory || sessionDirectory.startsWith(prefix);
       });
     };
 
