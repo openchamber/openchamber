@@ -171,7 +171,7 @@ export const registerSkillRoutes = (app, dependencies) => {
     ]);
     // Merge both sources — local skills take precedence, dedup by name
     const skillMap = new Map();
-    for (const skill of (localSkills || [])) {
+    for (const skill of localSkills) {
       skillMap.set(skill.name, skill);
     }
     for (const skill of (openCodeSkills || [])) {
