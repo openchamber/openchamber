@@ -1113,9 +1113,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const sessions = getAllSyncSessions()
     const session = sessions.find((s) => s.id === sessionId)
     if (session) return resolveDirectoryKey(session)
-    // Fallback: search global sessions store for archived sessions whose live
-    // child store may have been disposed. Without this, bulk delete/archive of
-    // archived sessions silently fails because SDK receives the wrong directory.
     const globalStore = useGlobalSessionsStore.getState()
     const globalSession = [...globalStore.activeSessions, ...globalStore.archivedSessions]
       .find((s) => s.id === sessionId)
