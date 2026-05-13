@@ -171,7 +171,7 @@ export const registerSkillRoutes = (app, dependencies) => {
     ]);
     // Merge both sources — local skills take precedence, dedup by name
     const skillMap = new Map();
-    for (const skill of localSkills) {
+    for (const skill of (localSkills || [])) {
       skillMap.set(skill.name, skill);
     }
     for (const skill of (openCodeSkills || [])) {
@@ -526,7 +526,7 @@ export const registerSkillRoutes = (app, dependencies) => {
       if (!directory) {
         return res.status(400).json({ error });
       }
-      const discoveredSkill = ((await fetchOpenCodeDiscoveredSkills(directory)) || [])
+      const discoveredSkill = (await mergeDiscoveredSkills(directory))
         .find((skill) => skill.name === skillName) || null;
       const sources = getSkillSources(skillName, directory, discoveredSkill);
 
@@ -555,7 +555,7 @@ export const registerSkillRoutes = (app, dependencies) => {
         return res.status(400).json({ error });
       }
 
-      const discoveredSkill = ((await fetchOpenCodeDiscoveredSkills(directory)) || [])
+      const discoveredSkill = (await mergeDiscoveredSkills(directory))
         .find((skill) => skill.name === skillName) || null;
       const sources = getSkillSources(skillName, directory, discoveredSkill);
       if (!sources.md.exists || !sources.md.dir) {
@@ -644,7 +644,7 @@ export const registerSkillRoutes = (app, dependencies) => {
         return res.status(400).json({ error });
       }
 
-      const discoveredSkill = ((await fetchOpenCodeDiscoveredSkills(directory)) || [])
+      const discoveredSkill = (await mergeDiscoveredSkills(directory))
         .find((skill) => skill.name === skillName) || null;
       const sources = getSkillSources(skillName, directory, discoveredSkill);
       if (!sources.md.exists || !sources.md.dir) {
@@ -678,7 +678,7 @@ export const registerSkillRoutes = (app, dependencies) => {
         return res.status(400).json({ error });
       }
 
-      const discoveredSkill = ((await fetchOpenCodeDiscoveredSkills(directory)) || [])
+      const discoveredSkill = (await mergeDiscoveredSkills(directory))
         .find((skill) => skill.name === skillName) || null;
       const sources = getSkillSources(skillName, directory, discoveredSkill);
       if (!sources.md.exists || !sources.md.dir) {
