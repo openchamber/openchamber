@@ -185,15 +185,15 @@ export const SessionDialogs: React.FC = () => {
         if (failedIds.length > 0) {
             toast.error(failedIds.length === 1
                 ? t('sessions.sidebar.bulkActions.failedDeleteSingle', { count: failedIds.length })
-                : t('sessions.sidebar.bulkActions.failedDeletePlural', { count: failedIds.length }), {
-                description: renderToastDescription(t('sessions.sidebar.dialogs.deleteResult.tryAgain')),
-            });
-        }
-    }, [deleteSessions, t]);
+            : t('sessions.sidebar.bulkActions.failedDeletePlural', { count: failedIds.length }), {
+            description: renderToastDescription(t('sessions.sidebar.dialogs.deleteResult.tryAgain')),
+        });
+    }
+}, [deleteSession, deleteSessions, t]);
 
-    React.useEffect(() => {
-        return sessionEvents.onDeleteRequest((payload) => {
-            if (!showDeletionDialog && (payload.mode ?? 'session') === 'session') {
+React.useEffect(() => {
+    return sessionEvents.onDeleteRequest((payload) => {
+        if (!showDeletionDialog && (payload.mode ?? 'session') === 'session') {
                 void deleteSessionsWithoutDialog(payload);
                 return;
             }
