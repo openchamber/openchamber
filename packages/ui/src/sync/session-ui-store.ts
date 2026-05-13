@@ -19,6 +19,7 @@ import type { WorktreeMetadata } from "@/types/worktree"
 import { opencodeClient } from "@/lib/opencode/client"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { useProjectsStore } from "@/stores/useProjectsStore"
+import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from "@/stores/useGlobalSessionsStore"
 import { useDirectoryStore } from "@/stores/useDirectoryStore"
 import { useSessionFoldersStore } from "@/stores/useSessionFoldersStore"
 import { useCommandsStore } from "@/stores/useCommandsStore"
@@ -1111,8 +1112,15 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     if (attachmentDirectory) return attachmentDirectory
     const sessions = getAllSyncSessions()
     const session = sessions.find((s) => s.id === sessionId)
-    if (!session) return null
-    return resolveDirectoryKey(session)
+    if (session) return resolveDirectoryKey(session)
+    // Fallback: search global sessions store for archived sessions whose live
+    // child store may have been disposed. Without this, bulk delete/archive of
+    // archived sessions silently fails because SDK receives the wrong directory.
+    const globalStore = useGlobalSessionsStore.getState()
+    const globalSession = [...globalStore.activeSessions, ...globalStore.archivedSessions]
+      .find((s) => s.id === sessionId)
+    if (globalSession) return resolveGlobalSessionDirectory(globalSession)
+    return null
   },
 
   getLastUserChoice: (sessionId) => {

@@ -189,7 +189,7 @@ export const SessionDialogs: React.FC = () => {
                 description: renderToastDescription(t('sessions.sidebar.dialogs.deleteResult.tryAgain')),
             });
         }
-    }, [deleteSession, deleteSessions, t]);
+    }, [deleteSessions, t]);
 
     React.useEffect(() => {
         return sessionEvents.onDeleteRequest((payload) => {
@@ -442,11 +442,7 @@ export const SessionDialogs: React.FC = () => {
                     deletedIds = result.archivedIds;
                     failedIds = result.failedIds;
                 } else {
-                    const result = await deleteSessions(ids, {
-                        archiveWorktree: false,
-                        deleteRemoteBranch: removeRemoteBranch,
-                        deleteLocalBranch,
-                    });
+                    const result = await deleteSessions(ids);
                     deletedIds = result.deletedIds;
                     failedIds = result.failedIds;
                 }

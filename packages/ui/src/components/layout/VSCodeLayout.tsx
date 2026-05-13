@@ -1,6 +1,7 @@
 import React from 'react';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { SessionSidebar } from '@/components/session/SessionSidebar';
+import { SessionDialogs } from '@/components/session/SessionDialogs';
 import { ChatView } from '@/components/views/ChatView';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useViewportStore } from '@/sync/viewport-store';
@@ -520,6 +521,7 @@ export const VSCodeLayout: React.FC = () => {
           </div>
         </>
       )}
+      <SessionDialogs />
     </div>
   );
 };
