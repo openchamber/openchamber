@@ -5,13 +5,23 @@
 
 import { create } from "zustand"
 import { persist, createJSONStorage } from "zustand/middleware"
-import { getSafeStorage } from "../utils/safeStorage"
+import { getSafeStorage } from "@/stores/utils/safeStorage"
+
+type ModelSelection = { providerId: string; modelId: string }
+type LastUsedProvider = { providerID: string; modelID: string }
+type AgentModelSelectionEntries = [string, [string, ModelSelection][]][]
+type PersistedSelectionState = {
+  sessionModelSelections?: [string, ModelSelection][]
+  sessionAgentSelections?: [string, string][]
+  sessionAgentModelSelections?: AgentModelSelectionEntries
+  lastUsedProvider?: LastUsedProvider | null
+}
 
 export type SelectionState = {
-  sessionModelSelections: Map<string, { providerId: string; modelId: string }>
+  sessionModelSelections: Map<string, ModelSelection>
   sessionAgentSelections: Map<string, string>
-  sessionAgentModelSelections: Map<string, Map<string, { providerId: string; modelId: string }>>
-  lastUsedProvider: { providerID: string; modelID: string } | null
+  sessionAgentModelSelections: Map<string, Map<string, ModelSelection>>
+  lastUsedProvider: LastUsedProvider | null
 
   saveSessionModelSelection: (sessionId: string, providerId: string, modelId: string) => void
   getSessionModelSelection: (sessionId: string) => { providerId: string; modelId: string } | null
@@ -22,6 +32,10 @@ export type SelectionState = {
   saveAgentModelVariantForSession: (sessionId: string, agentName: string, providerId: string, modelId: string, variant: string | undefined) => void
   getAgentModelVariantForSession: (sessionId: string, agentName: string, providerId: string, modelId: string) => string | undefined
 }
+
+const isPersistedSelectionState = (state: unknown): state is PersistedSelectionState => (
+  typeof state === "object" && state !== null
+)
 
 // In-memory variant storage (not persisted)
 const agentModelVariantSelections = new Map<string, Map<string, Map<string, string>>>()
@@ -64,11 +78,11 @@ export const useSelectionStore = create<SelectionState>()(
           if (existing?.providerId === providerId && existing?.modelId === modelId) return s
           const outer = new Map(s.sessionAgentModelSelections)
           const inner = new Map(outer.get(sessionId) ?? new Map())
-          
+
           outer.delete(sessionId) // Delete first to ensure it moves to the end of insertion order (MRU)
           inner.set(agentName, { providerId, modelId })
           outer.set(sessionId, inner)
-          
+
           return { sessionAgentModelSelections: outer }
         }),
 
@@ -128,25 +142,26 @@ export const useSelectionStore = create<SelectionState>()(
           lastUsedProvider: state.lastUsedProvider,
         }
       },
-      merge: (persistedState: any, currentState) => {
-        const agentModelSelections = new Map();
-        if (persistedState?.sessionAgentModelSelections) {
-          persistedState.sessionAgentModelSelections.forEach(([sessionId, agentArray]: [string, any[]]) => {
-            agentModelSelections.set(sessionId, new Map(agentArray));
-          });
+      merge: (persistedState: unknown, currentState) => {
+        const persisted = isPersistedSelectionState(persistedState) ? persistedState : undefined
+        const agentModelSelections = new Map<string, Map<string, ModelSelection>>()
+        if (Array.isArray(persisted?.sessionAgentModelSelections)) {
+          persisted.sessionAgentModelSelections.forEach(([sessionId, agentArray]) => {
+            agentModelSelections.set(sessionId, new Map(agentArray))
+          })
         }
 
         return {
           ...currentState,
-          lastUsedProvider: persistedState?.lastUsedProvider ?? currentState.lastUsedProvider,
-          sessionModelSelections: new Map(persistedState?.sessionModelSelections || []),
-          sessionAgentSelections: new Map(persistedState?.sessionAgentSelections || []),
+          lastUsedProvider: persisted?.lastUsedProvider ?? currentState.lastUsedProvider,
+          sessionModelSelections: new Map(persisted?.sessionModelSelections ?? []),
+          sessionAgentSelections: new Map(persisted?.sessionAgentSelections ?? []),
           sessionAgentModelSelections: agentModelSelections,
         }
       },
-      migrate: (persistedState: any, version) => {
+      migrate: (persistedState: unknown) => {
         // Scaffold for future schema migrations
-        return persistedState;
+        return persistedState
       }
     }
   )
