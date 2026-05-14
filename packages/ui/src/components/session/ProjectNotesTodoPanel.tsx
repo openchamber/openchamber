@@ -523,7 +523,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
           onChange={(event) => setNotes(event.target.value.slice(0, OPENCHAMBER_PROJECT_NOTES_MAX_LENGTH))}
           onBlur={handleNotesBlur}
           placeholder={t('rightSidebar.contextNotesTodo.notes.placeholder')}
-          className="min-h-28 max-h-80 resize-none"
+          className="min-h-28 resize-none"
           useScrollShadow
           scrollShadowSize={56}
           disabled={isLoading}
