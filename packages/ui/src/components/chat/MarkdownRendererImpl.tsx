@@ -972,9 +972,10 @@ const buildMarkdownComponents = ({
   },
   img({ src, alt }) {
     if (!src) return null;
-    const resolvedSrc = src.startsWith('/') || src.startsWith('http')
-      ? src
-      : `${effectiveDirectory}/${src}`;
+    const rawSrc = src.includes('%') ? decodeURIComponent(src) : src;
+    const resolvedSrc = rawSrc.startsWith('/') || rawSrc.startsWith('http')
+      ? rawSrc
+      : `${effectiveDirectory}/${rawSrc}`;
     const apiSrc = resolvedSrc.startsWith('http')
       ? resolvedSrc
       : `/api/fs/raw?path=${encodeURIComponent(resolvedSrc)}&allowOutsideWorkspace=true`;
