@@ -1253,7 +1253,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const hasContent = message.trim().length > 0 || sendableAttachedFiles.length > 0 || hasDrafts;
     const hasQueuedMessages = queuedMessages.length > 0;
     const getUserMessage = () => message.replace(getPattern(), '');
-    const canSend = (activeTask !== null && getUserMessage().trim().length > 0) || hasQueuedMessages;
+    const canSend = (activeTask !== null && hasContent) || hasQueuedMessages;
 
     const canAbort = sessionPhase !== 'idle';
 
@@ -1458,7 +1458,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             });
         }
 
-        if (!primaryText && additionalParts.length === 0) return;
+        if (!primaryText && additionalParts.length === 0 && !activeTask) return;
 
         // Clear queue and input
         if (currentSessionId && hasQueuedMessages) {
