@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-05-14
+
+- Updates/OpenCode: added in-app OpenCode update checks and upgrade actions, making it easier to keep the bundled OpenCode runtime current without leaving OpenChamber.
+- Voice: added local Whisper speech-to-text, giving voice input a private on-device transcription option.
+- Voice: synced speech recognition settings across devices and let server transcription finish processing audio when voice input stops for more reliable dictation (thanks to @kostazol).
+- Chat/Permissions: restored `@agent` mentions in sent messages and parent-session auto-accept for child-session permissions, reducing missed routing and approval friction in delegated work.
+- Chat/Input: queued messages now auto-send one at a time in FIFO order, and model/agent selections persist across reloads so draft context is less likely to reset unexpectedly (thanks to @lyxxx708, @chutastic).
+- Chat/Performance: virtualized more timeline content, deferred heavy tool output, and improved scroll-to-bottom behavior so long sessions stay smoother.
+- VSCode: improved chat sidebar command handoff, active-editor context updates, SSE cleanup, Agent Manager settings sync, and archived-session bulk delete reliability in the extension (thanks to @isanchez404, @jjdubski).
+- Git: generalized repository provider handling beyond GitHub and made commit/PR generation more tolerant of JSON wrapped in assistant text, improving Git workflows across more hosts (thanks to @kjhq).
+- Terminal: rejected file paths as terminal working directories, preserved UTF-8 replay chunks, and cleaned up WebSocket/SSE listeners more reliably during shutdown and reconnects (thanks to @isanchez404).
+- Usage/Reliability: guarded quota percentages and reset timestamps more defensively, reducing misleading usage displays with incomplete provider data (thanks to @isanchez404).
+- UI/Reliability: added smaller fixes for chunk-load recovery, locale retry behavior, stale attachment reads, scheduled tasks, session folders, and accessible Git/session controls (thanks to @isanchez404).
+
 ## [1.10.4] - 2026-05-09
 
 - Desktop/Mini Chat: improved Mini Chat session controls with current context usage in the compact header and a single header action that opens either the active session or current draft in Mini Chat.

@@ -1,8 +1,8 @@
 import React from 'react';
-import { RiFolderLine, RiRefreshLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { opencodeClient, type FilesystemEntry } from '@/lib/opencode/client';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+import { Icon } from "@/components/icon/Icon";
 
 interface DirectoryAutocompleteProps {
   inputValue: string;
@@ -280,7 +280,7 @@ export const DirectoryAutocomplete = React.forwardRef<DirectoryAutocompleteHandl
     >
       {loading ? (
         <div className="flex items-center justify-center py-3">
-          <RiRefreshLine className="h-4 w-4 animate-spin text-muted-foreground" />
+          <Icon name="refresh" className="h-4 w-4 animate-spin text-muted-foreground" />
         </div>
       ) : (
         <div className="overflow-y-auto py-1">
@@ -297,7 +297,7 @@ export const DirectoryAutocomplete = React.forwardRef<DirectoryAutocompleteHandl
                 onClick={() => { handleSelectSuggestion(entry); onClose(); }}
                 onMouseEnter={() => setSelectedIndex(index)}
               >
-                <RiFolderLine className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                <Icon name="folder" className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                 <span className="truncate">{entry.name}</span>
               </div>
             );

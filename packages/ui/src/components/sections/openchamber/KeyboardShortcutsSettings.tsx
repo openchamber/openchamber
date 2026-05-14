@@ -2,7 +2,7 @@ import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { RiInformationLine } from '@remixicon/react';
+import { Icon } from "@/components/icon/Icon";
 import { useUIStore } from '@/stores/useUIStore';
 import { cn } from '@/lib/utils';
 import {
@@ -155,7 +155,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
           </Button>
           <Tooltip>
             <TooltipTrigger asChild>
-              <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+              <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
             </TooltipTrigger>
             <TooltipContent sideOffset={8} className="max-w-xs">
               {t('settings.openchamber.keyboardShortcuts.tooltip')}

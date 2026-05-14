@@ -11,12 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { toast } from '@/components/ui';
-import {
-  RiGithubLine,
-  RiLoader4Line,
-  RiSearchLine,
-  RiExternalLinkLine,
-} from '@remixicon/react';
+import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -269,7 +264,7 @@ export function GitHubPrPickerDialog({
     <>
       <div className="mt-2 flex items-center gap-3">
         <div className="relative flex-1 min-w-0">
-          <RiSearchLine className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Icon name="search" className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder={t('session.githubPrPicker.searchPlaceholder')}
             value={query}
@@ -306,7 +301,7 @@ export function GitHubPrPickerDialog({
 
           {isLoading ? (
             <div className="text-center text-muted-foreground py-8 flex items-center justify-center gap-2">
-              <RiLoader4Line className="h-4 w-4 animate-spin" />
+              <Icon name="loader-4" className="h-4 w-4 animate-spin" />
               {t('session.githubPrPicker.loading.pullRequests')}
             </div>
           ) : null}
@@ -340,7 +335,7 @@ export function GitHubPrPickerDialog({
               </p>
               <div className="flex-shrink-0 h-5 flex items-center mr-2">
                 {loadingPrNumber === directNumber ? (
-                  <RiLoader4Line className="h-4 w-4 animate-spin text-muted-foreground" />
+                  <Icon name="loader-4" className="h-4 w-4 animate-spin text-muted-foreground" />
                 ) : null}
               </div>
             </div>
@@ -374,7 +369,7 @@ export function GitHubPrPickerDialog({
 
               <div className="flex-shrink-0 h-5 flex items-center mr-2">
                 {loadingPrNumber === pr.number ? (
-                  <RiLoader4Line className="h-4 w-4 animate-spin text-muted-foreground" />
+                  <Icon name="loader-4" className="h-4 w-4 animate-spin text-muted-foreground" />
                 ) : (
                   <a
                     href={pr.url}
@@ -387,7 +382,7 @@ export function GitHubPrPickerDialog({
                     onClick={(e) => e.stopPropagation()}
                     aria-label={t('session.githubPrPicker.actions.openInGitHubAria')}
                   >
-                    <RiExternalLinkLine className="h-4 w-4" />
+                    <Icon name="external-link" className="h-4 w-4" />
                   </a>
                 )}
               </div>
@@ -407,7 +402,7 @@ export function GitHubPrPickerDialog({
               >
                 {isLoadingMore ? (
                   <span className="inline-flex items-center gap-2">
-                    <RiLoader4Line className="h-4 w-4 animate-spin" />
+                    <Icon name="loader-4" className="h-4 w-4 animate-spin" />
                     {t('session.githubPrPicker.loading.more')}
                   </span>
                 ) : (
@@ -446,7 +441,7 @@ export function GitHubPrPickerDialog({
       <DialogContent className="max-w-2xl max-h-[70vh] flex flex-col">
         <DialogHeader className="flex-shrink-0">
           <DialogTitle className="flex items-center gap-2">
-            <RiGithubLine className="h-5 w-5" />
+            <Icon name="github" className="h-5 w-5" />
             {title}
           </DialogTitle>
           <DialogDescription>

@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/web",
-  "version": "1.10.4",
+  "version": "1.11.0",
   "private": false,
   "type": "module",
   "main": "./server/index.js",
@@ -25,7 +25,7 @@
   "dependencies": {
     "@clack/prompts": "^1.1.0",
     "@octokit/rest": "^22.0.1",
-    "@opencode-ai/sdk": "^1.4.41",
+    "@opencode-ai/sdk": "^1.4.49",
     "@simplewebauthn/server": "13.3.0",
     "adm-zip": "^0.5.16",
     "better-sqlite3": "^11.7.0",

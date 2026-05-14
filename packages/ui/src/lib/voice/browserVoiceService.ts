@@ -282,8 +282,10 @@ class BrowserVoiceService {
       const errorMessage = this.getErrorMessage(event.error);
       this.onErrorCallback?.(errorMessage);
 
-      // Don't restart on certain errors
-      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+      // Don't restart on fatal / unrecoverable errors.
+      // "network" in Electron/Chromium means Google's speech servers are unreachable;
+      // auto-restarting immediately creates an infinite error → end → start → error loop.
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed' || event.error === 'network') {
         this.restartOnEnd = false;
         this.isListening = false;
       }
@@ -292,12 +294,13 @@ class BrowserVoiceService {
     this.recognition.onend = () => {
       this.isListening = false;
       
-      // Auto-restart if still supposed to be listening and not speaking
+      // Auto-restart if still supposed to be listening and not speaking.
+      // Only restart when we have a valid recognition instance and restartOnEnd is set.
       if (this.restartOnEnd && this.recognition && !this.isSpeaking) {
         try {
           this.recognition.start();
         } catch {
-          // Ignore restart errors
+          // Ignore restart errors — onerror / onend will fire if it's fatal.
         }
       }
     };

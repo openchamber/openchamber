@@ -115,6 +115,13 @@ function sanitizeByMode(text, mode) {
   return sanitizeForTTS(text);
 }
 
+function clampToMaxLength(text, maxLength) {
+  if (!text) return '';
+  const limit = Number.isFinite(maxLength) ? Math.max(0, Math.floor(maxLength)) : Infinity;
+  if (text.length <= limit) return text;
+  return text.slice(0, limit).trim();
+}
+
 function extractZenOutputText(data) {
   if (!data || typeof data !== 'object') return null;
   const output = data.output;
@@ -252,11 +259,12 @@ export async function summarizeText({ text, threshold = 200, maxLength = 500, ze
       const finalSummary = mode === 'note'
         ? (sanitized && sanitized !== sanitizeForNote(text) ? sanitized : distillNoteFallback(text, maxLength))
         : sanitized;
+      const clippedSummary = clampToMaxLength(finalSummary, maxLength);
       return {
-        summary: finalSummary,
+        summary: clippedSummary,
         summarized: true,
         originalLength: text.length,
-        summaryLength: finalSummary.length,
+        summaryLength: clippedSummary.length,
       };
     }
 

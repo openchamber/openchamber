@@ -2,7 +2,7 @@ import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { RiFolderLine, RiInformationLine } from '@remixicon/react';
+import { Icon } from "@/components/icon/Icon";
 import { isDesktopShell, isTauriShell } from '@/lib/desktop';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
@@ -96,7 +96,7 @@ export const OpenCodeCliSettings: React.FC = () => {
           </h3>
           <Tooltip>
             <TooltipTrigger asChild>
-              <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+              <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
             </TooltipTrigger>
             <TooltipContent sideOffset={8} className="max-w-xs">
               {t('settings.openchamber.opencodeCli.tooltipPrefix')}
@@ -131,7 +131,7 @@ export const OpenCodeCliSettings: React.FC = () => {
               aria-label={t('settings.openchamber.opencodeCli.actions.browseAria')}
               title={t('settings.openchamber.opencodeCli.actions.browse')}
             >
-              <RiFolderLine className="h-4 w-4" />
+              <Icon name="folder" className="h-4 w-4" />
             </Button>
           </div>
         </div>

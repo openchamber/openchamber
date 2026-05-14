@@ -1,51 +1,33 @@
 import React from 'react';
-import {
-    RiAiAgentLine,
-    RiBookLine,
-    RiFileEditLine,
-    RiFileList2Line,
-    RiFileSearchLine,
-    RiFileTextLine,
-    RiFolder6Line,
-    RiGitBranchLine,
-    RiGlobalLine,
-    RiListCheck2,
-    RiListCheck3,
-    RiMenuSearchLine,
-    RiPencilLine,
-    RiSurveyLine,
-    RiTaskLine,
-    RiTerminalBoxLine,
-    RiToolsLine,
-} from '@remixicon/react';
+import { Icon } from "@/components/icon/Icon";
 
 export const getToolIcon = (toolName: string) => {
     const iconClass = 'h-3.5 w-3.5 flex-shrink-0';
     const tool = toolName.toLowerCase();
 
     if (tool === 'edit' || tool === 'multiedit' || tool === 'apply_patch' || tool === 'str_replace' || tool === 'str_replace_based_edit_tool') {
-        return <RiPencilLine className={iconClass} />;
+        return <Icon name="pencil" className={iconClass} />;
     }
     if (tool === 'write' || tool === 'create' || tool === 'file_write') {
-        return <RiFileEditLine className={iconClass} />;
+        return <Icon name="file-edit" className={iconClass} />;
     }
     if (tool === 'read' || tool === 'view' || tool === 'file_read' || tool === 'cat') {
-        return <RiFileTextLine className={iconClass} />;
+        return <Icon name="file-text" className={iconClass} />;
     }
     if (tool === 'bash' || tool === 'shell' || tool === 'cmd' || tool === 'terminal') {
-        return <RiTerminalBoxLine className={iconClass} />;
+        return <Icon name="terminal-box" className={iconClass} />;
     }
     if (tool === 'list' || tool === 'ls' || tool === 'dir' || tool === 'list_files') {
-        return <RiFolder6Line className={iconClass} />;
+        return <Icon name="folder-6" className={iconClass} />;
     }
     if (tool === 'search' || tool === 'grep' || tool === 'find' || tool === 'ripgrep') {
-        return <RiMenuSearchLine className={iconClass} />;
+        return <Icon name="menu-search" className={iconClass} />;
     }
     if (tool === 'glob') {
-        return <RiFileSearchLine className={iconClass} />;
+        return <Icon name="file-search" className={iconClass} />;
     }
     if (tool === 'fetch' || tool === 'curl' || tool === 'wget' || tool === 'webfetch') {
-        return <RiGlobalLine className={iconClass} />;
+        return <Icon name="global" className={iconClass} />;
     }
     if (
         tool === 'web-search' ||
@@ -57,31 +39,31 @@ export const getToolIcon = (toolName: string) => {
         tool === 'duckduckgo' ||
         tool === 'perplexity'
     ) {
-        return <RiGlobalLine className={iconClass} />;
+        return <Icon name="global" className={iconClass} />;
     }
     if (tool === 'todowrite' || tool === 'todoread') {
-        return <RiListCheck3 className={iconClass} />;
+        return <Icon name="list-check-3" className={iconClass} />;
     }
     if (tool === 'structuredoutput' || tool === 'structured_output') {
-        return <RiListCheck2 className={iconClass} />;
+        return <Icon name="list-check-2" className={iconClass} />;
     }
     if (tool === 'skill') {
-        return <RiBookLine className={iconClass} />;
+        return <Icon name="book" className={iconClass} />;
     }
     if (tool === 'task') {
-        return <RiAiAgentLine className={iconClass} />;
+        return <Icon name="ai-agent" className={iconClass} />;
     }
     if (tool === 'question') {
-        return <RiSurveyLine className={iconClass} />;
+        return <Icon name="survey" className={iconClass} />;
     }
     if (tool === 'plan_enter') {
-        return <RiFileList2Line className={iconClass} />;
+        return <Icon name="file-list-2" className={iconClass} />;
     }
     if (tool === 'plan_exit') {
-        return <RiTaskLine className={iconClass} />;
+        return <Icon name="task" className={iconClass} />;
     }
     if (tool.startsWith('git')) {
-        return <RiGitBranchLine className={iconClass} />;
+        return <Icon name="git-branch" className={iconClass} />;
     }
-    return <RiToolsLine className={iconClass} />;
+    return <Icon name="tools" className={iconClass} />;
 };

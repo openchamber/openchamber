@@ -1,14 +1,5 @@
 import React from "react";
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import {
-  RiArrowDownSLine,
-  RiArrowUpDoubleLine,
-  RiArrowUpSLine,
-  RiCheckboxCircleLine,
-  RiCloseCircleLine,
-  RiRecordCircleLine,
-  RiTimeLine,
-} from "@remixicon/react";
 import { cn } from "@/lib/utils";
 import { useDirectorySync } from "@/sync/sync-context";
 import type { Todo } from "@opencode-ai/sdk/v2/client";
@@ -22,6 +13,7 @@ import { useTodosPersistStore } from "@/stores/useTodosPersistStore";
 import { WorkingPlaceholder } from "./message/parts/WorkingPlaceholder";
 import { isVSCodeRuntime } from "@/lib/desktop";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Icon } from "@/components/icon/Icon";
 import { useI18n } from "@/lib/i18n";
 
 const STATUS_ROW_CONTAINER_STYLE = { containerType: "inline-size" as const, containerName: "status-row" };
@@ -48,9 +40,9 @@ const priorityClassName: Record<TodoPriority, string> = {
 };
 
 const priorityIcon: Record<TodoPriority, React.ReactNode> = {
-  high: <RiArrowUpDoubleLine className="h-3.5 w-3.5" aria-hidden="true" />,
-  medium: <RiArrowUpSLine className="h-3.5 w-3.5" aria-hidden="true" />,
-  low: <RiArrowDownSLine className="h-3.5 w-3.5" aria-hidden="true" />,
+  high: <Icon name="arrow-up-double" className="h-3.5 w-3.5"  aria-hidden="true"/>,
+  medium: <Icon name="arrow-up-s" className="h-3.5 w-3.5"  aria-hidden="true"/>,
+  low: <Icon name="arrow-down-s" className="h-3.5 w-3.5"  aria-hidden="true"/>,
 };
 
 const statusLabelKey: Record<TodoStatus, string> = {
@@ -78,11 +70,11 @@ const TodoItemRow: React.FC<TodoItemRowProps> = ({ todo }) => {
 
   const statusIcon =
     todo.status === "in_progress" ? (
-      <RiRecordCircleLine className="h-3.5 w-3.5 text-[var(--status-info)]" aria-hidden="true" />
+      <Icon name="record-circle" className="h-3.5 w-3.5 text-[var(--status-info)]"  aria-hidden="true"/>
     ) : todo.status === "completed" ? (
-      <RiCheckboxCircleLine className="h-3.5 w-3.5 text-[var(--status-success)]" aria-hidden="true" />
+      <Icon name="checkbox-circle" className="h-3.5 w-3.5 text-[var(--status-success)]"  aria-hidden="true"/>
     ) : (
-      <RiTimeLine className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+      <Icon name="time" className="h-3.5 w-3.5 text-muted-foreground"  aria-hidden="true"/>
     );
 
   return (
@@ -248,7 +240,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
       className="flex items-center justify-center h-[1.2rem] w-[1.2rem] text-[var(--status-error)] transition-opacity hover:opacity-80 focus-visible:outline-none flex-shrink-0"
       aria-label={t('chat.statusRow.actions.stopGeneratingAria')}
     >
-      <RiCloseCircleLine size={18} aria-hidden="true" />
+      <Icon name="close-circle" aria-hidden="true"/>
     </button>
   ) : null;
 
@@ -271,19 +263,19 @@ export const StatusRow: React.FC<StatusRowProps> = ({
       )}
       <span className="typography-meta flex items-center gap-1 tabular-nums" aria-hidden="true">
         <span className="flex items-center gap-0.5">
-          <RiRecordCircleLine className="h-3.5 w-3.5 text-[var(--status-info)]" />
+          <Icon name="record-circle" className="h-3.5 w-3.5 text-[var(--status-info)]" />
           {statusSummary.active}
         </span>
         <span>·</span>
         <span className="flex items-center gap-0.5">
-          <RiTimeLine className="h-3.5 w-3.5" />
+          <Icon name="time" className="h-3.5 w-3.5" />
           {statusSummary.left}
         </span>
       </span>
       {isExpanded ? (
-        <RiArrowUpSLine className="h-3.5 w-3.5" />
+        <Icon name="arrow-up-s" className="h-3.5 w-3.5" />
       ) : (
-        <RiArrowDownSLine className="h-3.5 w-3.5" />
+        <Icon name="arrow-down-s" className="h-3.5 w-3.5" />
       )}
     </button>
   ) : null;
@@ -301,7 +293,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
           {showAssistantStatus && showAbortStatus ? (
             <div className="flex h-full items-center text-[var(--status-error)] pl-0.5">
               <span className="flex items-center gap-1.5 typography-ui-label">
-                <RiCloseCircleLine size={16} aria-hidden="true" />
+                <Icon name="close-circle" aria-hidden="true"/>
                 {t('chat.statusRow.aborted')}
               </span>
             </div>

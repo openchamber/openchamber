@@ -1,3 +1,15 @@
+## [1.11.0] - 2026-05-14
+
+- Chat/Permissions: restored `@agent` mentions in sent messages and parent-session auto-accept for child-session permissions, reducing missed routing and approval friction in delegated work.
+- Chat/Input: queued messages now auto-send one at a time in FIFO order, and model/agent selections persist across reloads so draft context is less likely to reset unexpectedly (thanks to @lyxxx708, @chutastic).
+- Chat/Performance: virtualized more timeline content, deferred heavy tool output, and improved scroll-to-bottom behavior so long sessions stay smoother.
+- Editor Integration: chat commands now wait for the sidebar webview before sending selections, file mentions, explain prompts, or improve prompts, reducing dropped context when the panel is still opening.
+- Editor Integration: active-editor context updates now ignore stale broadcasts, keeping chat context aligned with the file you are actually viewing (thanks to @isanchez404).
+- Reliability/Streaming: extension SSE reconnect delays now abort cleanly and disposed chat webviews clean up their live streams, reducing stuck reconnects and leaked activity after panels close (thanks to @isanchez404).
+- Agent Manager: settings changes now sync into Agent Manager views immediately, keeping extension panels consistent after configuration updates (thanks to @isanchez404).
+- Sessions: archived-session bulk delete now works more reliably from the extension sidebar (thanks to @jjdubski).
+- UI/Reliability: added smaller fixes for chunk-load recovery, locale retry behavior, stale attachment reads, and accessible session controls (thanks to @isanchez404).
+
 ## [1.10.4] - 2026-05-09
 
 - Chat/Input: collapsed model, variant, and agent labels more gracefully on narrow widths, keeping prompt controls usable in compact editor panels.

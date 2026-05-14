@@ -1,9 +1,9 @@
 import React from 'react';
 import type { Message, Part } from '@opencode-ai/sdk/v2';
-import { RiCheckLine, RiFileCopyLine } from '@remixicon/react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 
 import { deriveMessageRole } from '@/components/chat/message/messageRole';
+import { Icon } from "@/components/icon/Icon";
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { generateSyntaxTheme } from '@/lib/theme/syntaxThemeGenerator';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -565,7 +565,7 @@ export const ContextPanelContent: React.FC = () => {
                             aria-label={isCopied ? t('contextSidebar.actions.copied') : t('contextSidebar.actions.copyJson')}
                             title={isCopied ? t('contextSidebar.actions.copied') : t('contextSidebar.actions.copy')}
                           >
-                            {isCopied ? <RiCheckLine className="size-3.5" /> : <RiFileCopyLine className="size-3.5" />}
+                            {isCopied ? <Icon name="check" className="size-3.5" /> : <Icon name="file-copy" className="size-3.5" />}
                           </button>
                         </div>
                         <SyntaxHighlighter

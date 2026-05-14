@@ -276,23 +276,23 @@ export const MainLayout: React.FC = () => {
             const width = window.innerWidth;
             const height = window.innerHeight;
 
-            const shouldCloseRightSidebar = width < RIGHT_SIDEBAR_AUTO_CLOSE_WIDTH;
-            const canAutoOpenRightSidebar = width >= RIGHT_SIDEBAR_AUTO_OPEN_WIDTH;
-
-            if (shouldCloseRightSidebar) {
-                if (state.isRightSidebarOpen) {
-                    setRightSidebarOpen(false);
-                    rightSidebarAutoClosedRef.current = true;
-                }
-            } else if (canAutoOpenRightSidebar && rightSidebarAutoClosedRef.current) {
-                setRightSidebarOpen(true);
-                rightSidebarAutoClosedRef.current = false;
-            }
-
             // Touch devices frequently resize when the on-screen keyboard opens.
-            // Treat bottom-terminal auto-collapse/restore as desktop-only so
-            // keyboard viewport changes do not churn terminal layout state.
+            // Treat panel auto-collapse/restore as desktop-only so keyboard
+            // viewport changes do not churn drawer or terminal layout state.
             if (!isMobile && !isTablet) {
+                const shouldCloseRightSidebar = width < RIGHT_SIDEBAR_AUTO_CLOSE_WIDTH;
+                const canAutoOpenRightSidebar = width >= RIGHT_SIDEBAR_AUTO_OPEN_WIDTH;
+
+                if (shouldCloseRightSidebar) {
+                    if (state.isRightSidebarOpen) {
+                        setRightSidebarOpen(false);
+                        rightSidebarAutoClosedRef.current = true;
+                    }
+                } else if (canAutoOpenRightSidebar && rightSidebarAutoClosedRef.current) {
+                    setRightSidebarOpen(true);
+                    rightSidebarAutoClosedRef.current = false;
+                }
+
                 const shouldCloseBottomTerminal =
                     height < BOTTOM_TERMINAL_AUTO_CLOSE_HEIGHT;
                 const canAutoOpenBottomTerminal =

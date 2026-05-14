@@ -3,10 +3,10 @@
 import * as React from "react"
 import { Select as BaseSelect } from "@base-ui/react/select"
 import type { SelectRootChangeEventDetails } from "@base-ui/react/select";
-import { RiArrowDownSLine, RiArrowUpSLine, RiCheckLine } from '@remixicon/react';
 
 import { cn } from "@/lib/utils"
 import { ScrollableOverlay } from "@/components/ui/ScrollableOverlay";
+import { Icon } from "@/components/icon/Icon";
 
 type AsChildProps = { asChild?: boolean };
 type AsChildRenderProps = {
@@ -145,7 +145,7 @@ function SelectTrigger({
       {asChildRender ? undefined : (<>
         {children}
         <BaseSelect.Icon>
-          <RiArrowDownSLine className="size-4 opacity-50" />
+          <Icon name="arrow-down-s" className="size-4 opacity-50" />
         </BaseSelect.Icon>
       </>)}
     </BaseSelect.Trigger>
@@ -249,7 +249,7 @@ function SelectItem({
     >
       <span className="absolute right-2 flex size-3.5 items-center justify-center">
         <BaseSelect.ItemIndicator>
-          <RiCheckLine className="size-4"/>
+          <Icon name="check" className="size-4" />
         </BaseSelect.ItemIndicator>
       </span>
       <BaseSelect.ItemText>{children}</BaseSelect.ItemText>
@@ -283,7 +283,7 @@ function SelectScrollUpButton({
       )}
       {...props}
     >
-      <RiArrowUpSLine className="size-4" />
+      <Icon name="arrow-up-s" className="size-4" />
     </BaseSelect.ScrollUpArrow>
   )
 }
@@ -301,7 +301,7 @@ function SelectScrollDownButton({
       )}
       {...props}
     >
-      <RiArrowDownSLine className="size-4" />
+      <Icon name="arrow-down-s" className="size-4" />
     </BaseSelect.ScrollDownArrow>
   )
 }

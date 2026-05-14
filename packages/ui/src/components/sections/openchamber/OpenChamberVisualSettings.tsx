@@ -1,5 +1,4 @@
 import React from 'react';
-import { RiRestartLine, RiInformationLine } from '@remixicon/react';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -20,6 +19,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
+import { Icon } from "@/components/icon/Icon";
 import { isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
 import { useDeviceInfo } from '@/lib/device';
 import { usePwaDetection } from '@/hooks/usePwaDetection';
@@ -725,7 +725,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 className="flex items-center justify-center rounded-md p-1 text-muted-foreground/70 hover:text-foreground"
                                                 aria-label={t('settings.openchamber.visual.field.themeImportInfoAria')}
                                             >
-                                                <RiInformationLine className="h-3.5 w-3.5" />
+                                                <Icon name="information" className="h-3.5 w-3.5" />
                                             </button>
                                         </TooltipTrigger>
                                         <TooltipContent sideOffset={8}>
@@ -836,7 +836,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             aria-label={t('settings.openchamber.visual.actions.resetInstallAppNameAria')}
                                             title={t('settings.common.actions.reset')}
                                         >
-                                            <RiRestartLine className="h-3.5 w-3.5" />
+                                            <Icon name="restart" className="h-3.5 w-3.5" />
                                         </Button>
                                     </div>
                                 </div>
@@ -882,7 +882,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             aria-label={t('settings.openchamber.visual.actions.resetInstallOrientationAria')}
                                             title={t('settings.common.actions.reset')}
                                         >
-                                            <RiRestartLine className="h-3.5 w-3.5" />
+                                            <Icon name="restart" className="h-3.5 w-3.5" />
                                         </Button>
                                     </div>
                                 </div>
@@ -928,7 +928,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             aria-label={t('settings.openchamber.visual.actions.resetMobileKeyboardModeAria')}
                                             title={t('settings.common.actions.reset')}
                                         >
-                                            <RiRestartLine className="h-3.5 w-3.5" />
+                                            <Icon name="restart" className="h-3.5 w-3.5" />
                                         </Button>
                                     </div>
                                 </div>
@@ -972,7 +972,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             aria-label={t('settings.openchamber.visual.actions.resetInterfaceFontAria')}
                                             title={t('settings.common.actions.reset')}
                                         >
-                                            <RiRestartLine className="h-3.5 w-3.5" />
+                                            <Icon name="restart" className="h-3.5 w-3.5" />
                                         </Button>
                                     </div>
                                 </div>
@@ -1005,7 +1005,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             aria-label={t('settings.openchamber.visual.actions.resetCodeFontAria')}
                                             title={t('settings.common.actions.reset')}
                                         >
-                                            <RiRestartLine className="h-3.5 w-3.5" />
+                                            <Icon name="restart" className="h-3.5 w-3.5" />
                                         </Button>
                                     </div>
                                 </div>
@@ -1035,7 +1035,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             aria-label={t('settings.openchamber.visual.actions.resetFontSizeAria')}
                                             title={t('settings.common.actions.reset')}
                                         >
-                                            <RiRestartLine className="h-3.5 w-3.5" />
+                                            <Icon name="restart" className="h-3.5 w-3.5" />
                                         </Button>
                                     </div>
                                 </div>
@@ -1064,7 +1064,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             aria-label={t('settings.openchamber.visual.actions.resetTerminalFontSizeAria')}
                                             title={t('settings.common.actions.reset')}
                                         >
-                                            <RiRestartLine className="h-3.5 w-3.5" />
+                                            <Icon name="restart" className="h-3.5 w-3.5" />
                                         </Button>
                                     </div>
                                 </div>
@@ -1093,7 +1093,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             aria-label={t('settings.openchamber.visual.actions.resetSpacingAria')}
                                             title={t('settings.common.actions.reset')}
                                         >
-                                            <RiRestartLine className="h-3.5 w-3.5" />
+                                            <Icon name="restart" className="h-3.5 w-3.5" />
                                         </Button>
                                     </div>
                                 </div>
@@ -1106,7 +1106,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.inputBarOffset')}</span>
                                             <Tooltip>
                                                 <TooltipTrigger asChild>
-                                                    <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                                                    <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                                                 </TooltipTrigger>
                                                 <TooltipContent sideOffset={8} className="max-w-xs">
                                                     {t('settings.openchamber.visual.field.inputBarOffsetTooltip')}
@@ -1132,7 +1132,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             aria-label={t('settings.openchamber.visual.actions.resetInputBarOffsetAria')}
                                             title={t('settings.common.actions.reset')}
                                         >
-                                            <RiRestartLine className="h-3.5 w-3.5" />
+                                            <Icon name="restart" className="h-3.5 w-3.5" />
                                         </Button>
                                     </div>
                                 </div>
@@ -1172,7 +1172,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.terminalQuickKeys')}</span>
                                         <Tooltip>
                                             <TooltipTrigger asChild>
-                                                <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                                                <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                                             </TooltipTrigger>
                                             <TooltipContent sideOffset={8} className="max-w-xs">
                                                 {t('settings.openchamber.visual.field.terminalQuickKeysTooltip')}
@@ -1187,8 +1187,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
                 {hasBehaviorSettings && (
                     <div className="space-y-3">
-
-
 
                             {(shouldShow('userMessageRendering') || shouldShow('mermaidRendering') || shouldShow('chatRenderMode') || shouldShow('messageTransport') || (shouldShow('activityRenderMode') && chatRenderMode === 'sorted') || (shouldShow('diffLayout') && !isVSCode)) && (
                                 <div className="grid grid-cols-1 gap-y-2 md:grid-cols-[minmax(0,16rem)_minmax(0,16rem)] md:justify-start md:gap-x-2">
@@ -1628,7 +1626,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.showSplitAssistantMessageActions')}</span>
                                                 <Tooltip>
                                                     <TooltipTrigger asChild>
-                                                        <RiInformationLine className="h-3.5 w-3.5 cursor-help text-muted-foreground/60" />
+                                                        <Icon name="information" className="h-3.5 w-3.5 cursor-help text-muted-foreground/60" />
                                                     </TooltipTrigger>
                                                     <TooltipContent sideOffset={8} className="max-w-xs">
                                                         {t('settings.openchamber.visual.field.showSplitAssistantMessageActionsTooltip')}
@@ -1730,7 +1728,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.queueMessagesByDefault')}</span>
                                                 <Tooltip>
                                                     <TooltipTrigger asChild>
-                                                        <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                                                        <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                                                     </TooltipTrigger>
                                                     <TooltipContent sideOffset={8} className="max-w-xs">
                                                         {t('settings.openchamber.visual.field.queueMessagesByDefaultTooltip', { modifier: getModifierLabel() })}

@@ -1,8 +1,8 @@
 import React from 'react';
-import { RiDonutChartFill, RiDonutChartLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 
 interface ContextUsageDisplayProps {
@@ -69,11 +69,11 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
 
   const contextContent = (
     <>
-      {!isMobile && !hideIcon && <RiDonutChartLine className="h-4 w-4 flex-shrink-0" />}
+      {!isMobile && !hideIcon && <Icon name="donut-chart" className="h-4 w-4 flex-shrink-0" />}
       <span className={cn('font-medium inline-flex items-center gap-1.5', valueClassName)}>
         {showPercentIcon ? (
           <>
-            <RiDonutChartFill
+            <Icon name="donut-chart-fill"
               className={cn('h-3.5 w-3.5', percentIconClassName, getPercentageColor(colorPct))}
               aria-hidden="true"
             />

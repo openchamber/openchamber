@@ -1,14 +1,5 @@
 import React from 'react';
 import {
-  RiAddLine,
-  RiArrowDownSLine,
-  RiGlobalLine,
-  RiLoader4Line,
-  RiPlayLine,
-  RiSearchLine,
-  RiStopLine,
-} from '@remixicon/react';
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -17,6 +8,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from '@/components/ui';
+import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useDeviceInfo } from '@/lib/device';
@@ -737,9 +729,9 @@ export const ProjectActionsButton = ({
   }
 
   const selectedIconKey = (resolvedSelected.icon || 'play') as keyof typeof PROJECT_ACTION_ICON_MAP;
-  const SelectedIcon = resolvedSelected.id === AUTO_DISCOVER_ACTION_ID
-    ? RiSearchLine
-    : PROJECT_ACTION_ICON_MAP[selectedIconKey] || RiPlayLine;
+  const selectedIconName = resolvedSelected.id === AUTO_DISCOVER_ACTION_ID
+    ? 'search'
+    : PROJECT_ACTION_ICON_MAP[selectedIconKey] || 'play';
   const selectedButtonLabel = formatActionButtonLabel(
     resolvedSelected.name,
     t('projectActions.label.fallbackAction'),
@@ -778,10 +770,10 @@ export const ProjectActionsButton = ({
             : t('projectActions.actions.runNamedAria', { name: resolvedSelected.name })}
         >
           {isStoppingSelected || isWaitingForSelectedPreview
-            ? <RiLoader4Line className="h-5 w-5 animate-spin text-[var(--status-warning)]" />
+            ? <Icon name="loader-4" className="h-5 w-5 animate-spin text-[var(--status-warning)]" />
             : selectedRunning
-              ? <RiStopLine className="h-5 w-5 text-[var(--status-warning)]" />
-              : <SelectedIcon className="h-5 w-5" />}
+              ? <Icon name="stop" className="h-5 w-5 text-[var(--status-warning)]" />
+              : <Icon name={selectedIconName} className="h-5 w-5" />}
         </button>
         {showSelectedPreviewButton ? (
           <Tooltip>
@@ -792,7 +784,7 @@ export const ProjectActionsButton = ({
                 aria-label={t('projectActions.actions.openPreview')}
                 onClick={handleOpenSelectedPreview}
               >
-                <RiGlobalLine className="h-4 w-4" />
+                <Icon name="global" className="h-4 w-4" />
               </button>
             </TooltipTrigger>
             <TooltipContent sideOffset={6}>{t('projectActions.actions.openPreview')}</TooltipContent>
@@ -805,20 +797,20 @@ export const ProjectActionsButton = ({
               className="app-region-no-drag -ml-1 inline-flex h-9 w-5 items-center justify-center rounded-[10px] text-muted-foreground hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               aria-label={t('projectActions.actions.chooseActionAria')}
             >
-              <RiArrowDownSLine className="h-3.5 w-3.5" />
+              <Icon name="arrow-down-s" className="h-3.5 w-3.5" />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-52 max-h-[70vh] overflow-y-auto">
             <DropdownMenuItem className="flex items-center gap-2" onClick={openProjectActionsSettings}>
-              <RiAddLine className="h-4 w-4" />
+              <Icon name="add" className="h-4 w-4" />
               <span className="typography-ui-label text-foreground">{t('projectActions.actions.addNewAction')}</span>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             {displayActions.map((entry) => {
               const iconKey = (entry.icon || 'play') as keyof typeof PROJECT_ACTION_ICON_MAP;
-              const Icon = entry.id === AUTO_DISCOVER_ACTION_ID
-                ? RiSearchLine
-                : PROJECT_ACTION_ICON_MAP[iconKey] || RiPlayLine;
+              const iconName = entry.id === AUTO_DISCOVER_ACTION_ID
+                ? 'search'
+                : PROJECT_ACTION_ICON_MAP[iconKey] || 'play';
               const runKey = toProjectActionRunKey(normalizedDirectory, entry.id);
               const runState = projectActionRuns[runKey];
               const isRunning = Boolean(runState);
@@ -832,12 +824,12 @@ export const ProjectActionsButton = ({
                     handleSelectAction(entry, true);
                   }}
                 >
-                  <Icon className="h-4 w-4" />
+                  <Icon name={iconName} className="h-4 w-4" />
                   <span className="typography-ui-label text-foreground truncate">{entry.name}</span>
                   {isStopping || runState?.status === 'waiting-for-preview'
-                    ? <RiLoader4Line className="ml-auto h-4 w-4 animate-spin text-[var(--status-warning)]" />
+                    ? <Icon name="loader-4" className="ml-auto h-4 w-4 animate-spin text-[var(--status-warning)]" />
                     : isRunning
-                      ? <RiStopLine className="ml-auto h-4 w-4 text-[var(--status-warning)]" />
+                      ? <Icon name="stop" className="ml-auto h-4 w-4 text-[var(--status-warning)]" />
                       : null}
                 </DropdownMenuItem>
               );
@@ -873,10 +865,10 @@ export const ProjectActionsButton = ({
       >
         <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center">
           {isStoppingSelected || isWaitingForSelectedPreview
-            ? <RiLoader4Line className="h-4 w-4 animate-spin text-[var(--status-warning)]" />
+            ? <Icon name="loader-4" className="h-4 w-4 animate-spin text-[var(--status-warning)]" />
             : selectedRunning
-              ? <RiStopLine className="h-4 w-4 text-[var(--status-warning)]" />
-              : <SelectedIcon className="h-4 w-4" />}
+              ? <Icon name="stop" className="h-4 w-4 text-[var(--status-warning)]" />
+              : <Icon name={selectedIconName} className="h-4 w-4" />}
         </span>
         {!compact ? <span className="header-open-label whitespace-nowrap">{selectedButtonLabel}</span> : null}
       </button>
@@ -894,7 +886,7 @@ export const ProjectActionsButton = ({
               )}
               aria-label={t('projectActions.actions.openPreview')}
             >
-              <RiGlobalLine className="h-4 w-4" />
+              <Icon name="global" className="h-4 w-4" />
             </button>
           </TooltipTrigger>
           <TooltipContent sideOffset={6}>{t('projectActions.actions.openPreview')}</TooltipContent>
@@ -912,20 +904,20 @@ export const ProjectActionsButton = ({
             )}
             aria-label={t('projectActions.actions.chooseActionAria')}
           >
-            <RiArrowDownSLine className="h-4 w-4" />
+            <Icon name="arrow-down-s" className="h-4 w-4" />
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="center" className="w-52 max-h-[70vh] overflow-y-auto" style={{ translate: '-30px 0' }}>
           <DropdownMenuItem className="flex items-center gap-2" onClick={openProjectActionsSettings}>
-            <RiAddLine className="h-4 w-4" />
+            <Icon name="add" className="h-4 w-4" />
             <span className="typography-ui-label text-foreground">{t('projectActions.actions.addNewAction')}</span>
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           {displayActions.map((entry) => {
             const iconKey = (entry.icon || 'play') as keyof typeof PROJECT_ACTION_ICON_MAP;
-            const Icon = entry.id === AUTO_DISCOVER_ACTION_ID
-              ? RiSearchLine
-              : PROJECT_ACTION_ICON_MAP[iconKey] || RiPlayLine;
+            const iconName = entry.id === AUTO_DISCOVER_ACTION_ID
+              ? 'search'
+              : PROJECT_ACTION_ICON_MAP[iconKey] || 'play';
             const runKey = toProjectActionRunKey(normalizedDirectory, entry.id);
             const runState = projectActionRuns[runKey];
             const isRunning = Boolean(runState);
@@ -939,12 +931,12 @@ export const ProjectActionsButton = ({
                   handleSelectAction(entry);
                 }}
               >
-                <Icon className="h-4 w-4" />
+                <Icon name={iconName} className="h-4 w-4" />
                 <span className="typography-ui-label text-foreground truncate">{entry.name}</span>
                 {isStopping || runState?.status === 'waiting-for-preview'
-                  ? <RiLoader4Line className="ml-auto h-4 w-4 animate-spin text-[var(--status-warning)]" />
+                  ? <Icon name="loader-4" className="ml-auto h-4 w-4 animate-spin text-[var(--status-warning)]" />
                   : isRunning
-                    ? <RiStopLine className="ml-auto h-4 w-4 text-[var(--status-warning)]" />
+                    ? <Icon name="stop" className="ml-auto h-4 w-4 text-[var(--status-warning)]" />
                     : null}
               </DropdownMenuItem>
             );

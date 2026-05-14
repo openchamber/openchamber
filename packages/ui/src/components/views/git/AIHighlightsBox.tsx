@@ -1,7 +1,7 @@
 import React from 'react';
-import { RiArrowDownLine } from '@remixicon/react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 
 interface AIHighlightsBoxProps {
@@ -35,7 +35,7 @@ export const AIHighlightsBox: React.FC<AIHighlightsBoxProps> = ({
               onClick={handleInsert}
               aria-label={t('gitView.commit.aiHighlights.insertAria')}
             >
-              <RiArrowDownLine className="size-4" />
+              <Icon name="arrow-down" className="size-4" />
             </Button>
           </TooltipTrigger>
           <TooltipContent sideOffset={8}>

@@ -1,6 +1,5 @@
 import React from 'react';
 import { Popover } from '@base-ui/react/popover';
-import { RiFileEditLine, RiArrowDownSLine, RiArrowUpSLine } from '@remixicon/react';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useGitStore, useIsGitRepo } from '@/stores/useGitStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -8,6 +7,7 @@ import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { useMobileAppActions } from '@/apps/mobileAppContext';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { normalizePath } from '@/components/session/sidebar/utils';
+import { Icon } from "@/components/icon/Icon";
 import {
     type ChangedFileEntry,
     type GitChangedFile,
@@ -112,7 +112,7 @@ export const PendingChangesBar: React.FC = React.memo(() => {
                         type="button"
                         className="flex min-w-0 max-w-full items-center gap-1 text-left text-muted-foreground"
                     >
-                        <RiFileEditLine className="h-3.5 w-3.5 flex-shrink-0 text-[var(--status-warning)]" />
+                        <Icon name="file-edit" className="h-3.5 w-3.5 flex-shrink-0 text-[var(--status-warning)]" />
                         <span className="min-w-0 typography-ui-label text-foreground flex-shrink-0">{labelHead}</span>
                         <span className="status-row__changed-label min-w-0 typography-ui-label text-foreground truncate">
                             {t('chat.pendingChanges.changedInWorkspace')}
@@ -122,9 +122,9 @@ export const PendingChangesBar: React.FC = React.memo(() => {
                             {totalRemoved > 0 ? <span style={{ color: 'var(--status-error)' }}>-{totalRemoved}</span> : null}
                         </span>
                         {isExpanded ? (
-                            <RiArrowUpSLine className="h-3.5 w-3.5 flex-shrink-0" />
+                            <Icon name="arrow-up-s" className="h-3.5 w-3.5 flex-shrink-0" />
                         ) : (
-                            <RiArrowDownSLine className="h-3.5 w-3.5 flex-shrink-0" />
+                            <Icon name="arrow-down-s" className="h-3.5 w-3.5 flex-shrink-0" />
                         )}
                     </button>
                 }

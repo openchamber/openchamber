@@ -1,5 +1,4 @@
 import React from 'react';
-import { RiArrowLeftRightLine, RiChat4Line, RiCloseLine, RiDonutChartFill, RiFileTextLine, RiFullscreenExitLine, RiFullscreenLine, RiGlobalLine, RiRefreshLine, RiExternalLinkLine, RiTerminalBoxLine, RiCursorLine } from '@remixicon/react';
 
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Button } from '@/components/ui/button';
@@ -14,7 +13,7 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
-import { useUIStore } from '@/stores/useUIStore';
+import { useUIStore, type ContextPanelMode } from '@/stores/useUIStore';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
@@ -23,6 +22,9 @@ import { toast } from '@/components/ui';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { Icon } from "@/components/icon/Icon";
+import { OpenChamberLogo } from "@/components/ui/OpenChamberLogo";
+import { invokeDesktopCommand } from '@/lib/desktopNative';
 
 const CONTEXT_PANEL_MIN_WIDTH = 360;
 const CONTEXT_PANEL_MAX_WIDTH = 1400;
@@ -234,7 +236,7 @@ const getRelativePathLabel = (filePath: string | null, directory: string): strin
 };
 
 const getModeLabel = (
-  mode: 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview',
+  mode: ContextPanelMode,
   t: TranslateFn
 ): string => {
   if (mode === 'chat') return t('contextPanel.mode.chat');
@@ -242,6 +244,7 @@ const getModeLabel = (
   if (mode === 'diff') return t('contextPanel.mode.diff');
   if (mode === 'plan') return t('contextPanel.mode.plan');
   if (mode === 'preview') return t('contextPanel.mode.preview');
+  if (mode === 'browser') return t('contextPanel.mode.browser');
   return t('contextPanel.mode.context');
 };
 
@@ -264,7 +267,7 @@ const getFileNameFromPath = (path: string | null): string | null => {
 };
 
 const getTabLabel = (
-  tab: { mode: 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview'; label: string | null; targetPath: string | null },
+  tab: { mode: ContextPanelMode; label: string | null; targetPath: string | null },
   t: TranslateFn
 ): string => {
   if (tab.label) {
@@ -291,7 +294,7 @@ const getTabLabel = (
   return getModeLabel(tab.mode, t);
 };
 
-const getTabIcon = (tab: { mode: 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview'; targetPath: string | null }): React.ReactNode | undefined => {
+const getTabIcon = (tab: { mode: ContextPanelMode; targetPath: string | null }): React.ReactNode | undefined => {
   if (tab.mode === 'file') {
     return tab.targetPath
       ? <FileTypeIcon filePath={tab.targetPath} className="h-3.5 w-3.5" />
@@ -299,23 +302,27 @@ const getTabIcon = (tab: { mode: 'diff' | 'file' | 'context' | 'plan' | 'chat' |
   }
 
   if (tab.mode === 'diff') {
-    return <RiArrowLeftRightLine className="h-3.5 w-3.5" />;
+    return <Icon name="arrow-left-right" className="h-3.5 w-3.5" />;
   }
 
   if (tab.mode === 'plan') {
-    return <RiFileTextLine className="h-3.5 w-3.5" />;
+    return <Icon name="file-text" className="h-3.5 w-3.5" />;
   }
 
   if (tab.mode === 'context') {
-    return <RiDonutChartFill className="h-3.5 w-3.5" />;
+    return <Icon name="donut-chart-fill" className="h-3.5 w-3.5" />;
   }
 
   if (tab.mode === 'chat') {
-    return <RiChat4Line className="h-3.5 w-3.5" />;
+    return <Icon name="chat-4" className="h-3.5 w-3.5" />;
   }
 
   if (tab.mode === 'preview') {
-    return <RiGlobalLine className="h-3.5 w-3.5 text-[var(--status-info)]" />;
+    return <Icon name="global" className="h-3.5 w-3.5 text-[var(--status-info)]" />;
+  }
+
+  if (tab.mode === 'browser') {
+    return <Icon name="global" className="h-3.5 w-3.5" />;
   }
 
   return undefined;
@@ -328,6 +335,158 @@ const getSessionIDFromDedupeKey = (dedupeKey: string | undefined): string | null
 
   const sessionID = dedupeKey.slice('session:'.length).trim();
   return sessionID || null;
+};
+
+const DESKTOP_BROWSER_INSPECT_SCRIPT = `new Promise((resolve) => {
+  const existing = document.getElementById('__openchamber_desktop_browser_overlay');
+  if (existing) existing.remove();
+  if (typeof window.__openchamberDesktopBrowserCancelInspect === 'function') {
+    try { window.__openchamberDesktopBrowserCancelInspect(); } catch { /* webview not ready */ }
+  }
+  const overlay = document.createElement('div');
+  overlay.id = '__openchamber_desktop_browser_overlay';
+  overlay.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:none;border:2px solid #60a5fa;background:rgba(96,165,250,.24);border-radius:3px;display:none;box-sizing:border-box;';
+  document.documentElement.appendChild(overlay);
+  const cssEscape = (value) => {
+    try { return CSS.escape(value); } catch { return String(value).replace(/[^a-zA-Z0-9_-]/g, '\\\\$&'); }
+  };
+  const selectorPart = (element) => {
+    const tag = element.tagName.toLowerCase();
+    if (element.id) return tag + '#' + cssEscape(element.id);
+    const className = String(element.className || '').trim().split(/\\s+/).filter(Boolean).slice(0, 3).map((part) => '.' + cssEscape(part)).join('');
+    return tag + className;
+  };
+  const metadata = (element) => {
+    const rect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    const ancestry = [];
+    let current = element;
+    while (current && current.nodeType === Node.ELEMENT_NODE && ancestry.length < 8) {
+      ancestry.unshift({ tag: current.tagName.toLowerCase(), id: current.id || undefined, className: typeof current.className === 'string' ? current.className : undefined, selectorPart: selectorPart(current) });
+      current = current.parentElement;
+    }
+    const attrs = {};
+    for (const attr of Array.from(element.attributes || []).slice(0, 16)) attrs[attr.name] = attr.value.slice(0, 300);
+    const path = ancestry.map((entry) => entry.selectorPart).join(' > ');
+    return {
+      frame: 'top',
+      tag: element.tagName.toLowerCase(),
+      text: String(element.innerText || element.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 500),
+      selector: element.id ? '#' + cssEscape(element.id) : path,
+      path,
+      bounds: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+      center: { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 },
+      attributes: attrs,
+      computedStyle: { display: style.display, position: style.position, fontWeight: style.fontWeight, fontSize: style.fontSize, lineHeight: style.lineHeight, fontFamily: style.fontFamily, color: style.color, backgroundColor: style.backgroundColor, zIndex: style.zIndex },
+      ancestry,
+    };
+  };
+  const move = (event) => {
+    const element = document.elementFromPoint(event.clientX, event.clientY);
+    if (!element || element === overlay || element === document.documentElement || element === document.body) return;
+    const rect = element.getBoundingClientRect();
+    overlay.style.display = 'block';
+    overlay.style.left = rect.left + 'px';
+    overlay.style.top = rect.top + 'px';
+    overlay.style.width = rect.width + 'px';
+    overlay.style.height = rect.height + 'px';
+  };
+  const cleanup = () => {
+    window.removeEventListener('mousemove', move, true);
+    window.removeEventListener('click', click, true);
+    window.removeEventListener('keydown', keydown, true);
+    if (window.__openchamberDesktopBrowserCancelInspect === cancel) {
+      delete window.__openchamberDesktopBrowserCancelInspect;
+    }
+  };
+  const cancel = () => {
+    cleanup();
+    overlay.remove();
+    resolve(null);
+  };
+  const click = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const element = document.elementFromPoint(event.clientX, event.clientY);
+    const result = element ? metadata(element) : null;
+    cleanup();
+    overlay.remove();
+    resolve(result);
+  };
+  const keydown = (event) => {
+    if (event.key !== 'Escape') return;
+    cancel();
+  };
+  window.__openchamberDesktopBrowserCancelInspect = cancel;
+  window.addEventListener('mousemove', move, true);
+  window.addEventListener('click', click, true);
+  window.addEventListener('keydown', keydown, true);
+});`;
+
+const DESKTOP_BROWSER_CANCEL_INSPECT_SCRIPT = `(() => {
+  if (typeof window.__openchamberDesktopBrowserCancelInspect === 'function') {
+    window.__openchamberDesktopBrowserCancelInspect();
+    return;
+  }
+  const overlay = document.getElementById('__openchamber_desktop_browser_overlay');
+  if (overlay) overlay.remove();
+})()`;
+
+const normalizeBrowserUrl = (value: string): string => {
+  const trimmed = value.trim();
+  if (!trimmed) return 'about:blank';
+  try {
+    const parsed = new URL(trimmed.includes('://') ? trimmed : `https://${trimmed}`);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return 'about:blank';
+    return parsed.toString();
+  } catch {
+    return 'about:blank';
+  }
+};
+
+const desktopAnnotationToFile = async (
+  base64: string,
+  screenshotWidth: number,
+  screenshotHeight: number,
+  cssWidth: number,
+  cssHeight: number,
+  target: PreviewElementMetadata,
+): Promise<File | null> => {
+  if (!base64) return null;
+  try {
+    const image = new Image();
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error('Failed to load desktop browser screenshot'));
+      image.src = `data:image/jpeg;base64,${base64}`;
+    });
+
+    const width = Math.max(1, image.naturalWidth || screenshotWidth);
+    const height = Math.max(1, image.naturalHeight || screenshotHeight);
+    const maxOutputWidth = 1200;
+    const outputScale = Math.min(1, maxOutputWidth / width);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.floor(width * outputScale);
+    canvas.height = Math.floor(height * outputScale);
+    const context = canvas.getContext('2d');
+    if (!context) return null;
+
+    context.scale(outputScale, outputScale);
+    context.drawImage(image, 0, 0, width, height);
+    const xScale = width / Math.max(1, cssWidth || width);
+    const yScale = height / Math.max(1, cssHeight || height);
+    context.fillStyle = 'rgba(37, 99, 235, 0.14)';
+    context.strokeStyle = 'rgb(37, 99, 235)';
+    context.lineWidth = Math.max(2, 2 * xScale);
+    context.fillRect(target.bounds.x * xScale, target.bounds.y * yScale, target.bounds.width * xScale, target.bounds.height * yScale);
+    context.strokeRect(target.bounds.x * xScale, target.bounds.y * yScale, target.bounds.width * xScale, target.bounds.height * yScale);
+
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.82));
+    if (!blob) return null;
+    return new File([blob], `browser-annotation-${Date.now()}.jpg`, { type: 'image/jpeg' });
+  } catch {
+    return null;
+  }
 };
 
 const buildEmbeddedSessionChatURL = (sessionID: string, directory: string | null): string => {
@@ -955,7 +1114,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
           aria-label={t('contextPanel.preview.actions.reload')}
           disabled={!effectiveSrc}
         >
-          <RiRefreshLine className="h-3.5 w-3.5" />
+          <Icon name="refresh" className="h-3.5 w-3.5" />
         </Button>
         <Button
           type="button"
@@ -970,7 +1129,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
           aria-label={t('contextPanel.preview.actions.openExternal')}
           disabled={!directSrc}
         >
-          <RiExternalLinkLine className="h-3.5 w-3.5" />
+          <Icon name="external-link" className="h-3.5 w-3.5" />
         </Button>
         {isLoopback ? (
           <Button
@@ -983,7 +1142,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
             aria-label={t('contextPanel.preview.inspect.toggle')}
             disabled={!bridgeReady}
           >
-            <RiCursorLine className="h-3.5 w-3.5" />
+            <Icon name="cursor" className="h-3.5 w-3.5" />
           </Button>
         ) : null}
         {isLoopback ? (
@@ -997,7 +1156,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
             aria-label={bridgeReady ? t('contextPanel.preview.console.open') : t('contextPanel.preview.console.waiting')}
             disabled={!bridgeReady && consoleEvents.length === 0}
           >
-            <RiTerminalBoxLine className="h-3.5 w-3.5" />
+            <Icon name="terminal-box" className="h-3.5 w-3.5" />
             {consoleErrorCount > 0 ? (
               <span className="typography-micro text-status-error">{consoleErrorCount}</span>
             ) : null}
@@ -1145,6 +1304,268 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
                 </div>
               ))}
             </div>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+};
+
+type DesktopBrowserPaneProps = {
+  initialUrl: string;
+  directory: string;
+  tabID: string;
+};
+
+const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, directory, tabID }) => {
+  const { t } = useI18n();
+  const webviewRef = React.useRef<WebviewElement | null>(null);
+  const setContextPanelTabTargetPath = useUIStore((state) => state.setContextPanelTabTargetPath);
+  const normalized = normalizeBrowserUrl(initialUrl);
+  const startUrl = normalized !== 'about:blank' ? normalized : '';
+  const [urlInput, setUrlInput] = React.useState(startUrl);
+  const [currentUrl, setCurrentUrl] = React.useState(startUrl);
+  const [isInspecting, setIsInspecting] = React.useState(false);
+  const [isLoading, setIsLoading] = React.useState(true);
+  const loadingTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showLoading = isLoading;
+
+  const persistUrl = React.useCallback((url: string) => {
+    if (!url || url === 'about:blank' || !directory || !tabID) return;
+    setContextPanelTabTargetPath(directory, tabID, url);
+  }, [directory, tabID, setContextPanelTabTargetPath]);
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const newSessionDraftOpen = useSessionUIStore((state) => state.newSessionDraft?.open);
+  const addInlineCommentDraft = useInlineCommentDraftStore((state) => state.addDraft);
+  const addAttachedFile = useInputStore((state) => state.addAttachedFile);
+
+  // Listen to webview navigation events
+  React.useEffect(() => {
+    const webview = webviewRef.current;
+    if (!webview) return;
+
+    const syncUrl = () => {
+      try {
+        const url = webview.getURL();
+        if (url && url !== 'about:blank') {
+          setCurrentUrl(url);
+          setUrlInput(url);
+          persistUrl(url);
+        }
+      } catch { /* webview not ready */ }
+    };
+
+    const onNavigate = (event: Event) => {
+      const detail = (event as CustomEvent<{ url: string }>).detail;
+      if (typeof detail?.url === 'string' && detail.url) {
+        setCurrentUrl(detail.url);
+        setUrlInput(detail.url);
+        persistUrl(detail.url);
+      }
+    };
+
+    const onStartLoading = () => {
+      if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
+      loadingTimerRef.current = setTimeout(() => setIsLoading(true), 200);
+    };
+    const onStopLoading = () => {
+      if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
+      setIsLoading(false);
+      syncUrl();
+    };
+
+    const onNewWindow = (event: Event) => {
+      const detail = (event as CustomEvent<{ url: string; disposition: string }>).detail;
+      if (detail?.disposition === 'new-window' || detail?.disposition === 'foreground-tab' || detail?.disposition === 'background-tab') {
+        event.preventDefault();
+        const w = webviewRef.current;
+        if (typeof w?.loadURL === 'function' && detail.url) {
+          w.loadURL(detail.url);
+        }
+      }
+    };
+
+    webview.addEventListener('did-navigate', onNavigate);
+    webview.addEventListener('did-navigate-in-page', onNavigate);
+    webview.addEventListener('did-start-loading', onStartLoading);
+    webview.addEventListener('did-stop-loading', onStopLoading);
+    webview.addEventListener('new-window', onNewWindow);
+
+    // Check current loading state imperatively — we may have missed the event
+    try {
+      if (!webview.isLoading()) {
+        setIsLoading(false);
+        syncUrl();
+      }
+    } catch { /* webview not ready */ }
+
+    return () => {
+      if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
+      webview.removeEventListener('did-navigate', onNavigate);
+      webview.removeEventListener('did-navigate-in-page', onNavigate);
+      webview.removeEventListener('did-start-loading', onStartLoading);
+      webview.removeEventListener('did-stop-loading', onStopLoading);
+      webview.removeEventListener('new-window', onNewWindow);
+    };
+  }, [persistUrl]);
+
+  // Safety timeout: hide loading overlay after 30s even if events fire late
+  React.useEffect(() => {
+    const safety = setTimeout(() => setIsLoading(false), 30_000);
+    return () => clearTimeout(safety);
+  }, []);
+
+  // Escape key cancels inspect mode
+  React.useEffect(() => {
+    if (!isInspecting) return;
+    const handler = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      setIsInspecting(false);
+      const webview = webviewRef.current;
+      try { webview?.executeJavaScript?.(DESKTOP_BROWSER_CANCEL_INSPECT_SCRIPT).catch(() => {}); } catch { /* webview not ready */ }
+    };
+    window.addEventListener('keydown', handler, true);
+    return () => window.removeEventListener('keydown', handler, true);
+  }, [isInspecting]);
+
+  // Cancel inspect on unmount
+  React.useEffect(() => {
+    const webview = webviewRef.current;
+    return () => {
+      try {
+        const url = webview?.getURL?.();
+        if (url && url !== 'about:blank') {
+          setContextPanelTabTargetPath(directory, tabID, url);
+        }
+      } catch { /* webview not ready */ }
+      try { webview?.executeJavaScript?.(DESKTOP_BROWSER_CANCEL_INSPECT_SCRIPT).catch(() => {}); } catch { /* webview not ready */ }
+    };
+  }, [directory, tabID, setContextPanelTabTargetPath]);
+
+  const loadUrl = React.useCallback((value: string) => {
+    const webview = webviewRef.current;
+    if (typeof webview?.loadURL !== 'function') return;
+    const nextUrl = normalizeBrowserUrl(value);
+    try { webview.loadURL(nextUrl); } catch { /* webview may not be ready */ }
+  }, []);
+
+  const handleInspect = React.useCallback(() => {
+    const webview = webviewRef.current;
+    if (!webview) return;
+
+    if (isInspecting) {
+      setIsInspecting(false);
+      try { webview.executeJavaScript?.(DESKTOP_BROWSER_CANCEL_INSPECT_SCRIPT).catch(() => {}); } catch { /* webview not ready */ }
+      return;
+    }
+
+    setIsInspecting(true);
+    webview.executeJavaScript?.(DESKTOP_BROWSER_INSPECT_SCRIPT, true)
+      .then(async (target: unknown) => {
+        setIsInspecting(false);
+        if (!target || !isPreviewElementMetadata(target)) return;
+
+        const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : null);
+        if (!sessionKey) {
+          toast.error(t('contextPanel.preview.inspect.attachNoSession'));
+          return;
+        }
+
+        const wcId = typeof webview.getWebContentsId === 'function' ? webview.getWebContentsId() : null;
+        if (wcId === null || wcId === undefined) return;
+
+        const capture = await invokeDesktopCommand<{ mime: string; base64: string; width: number; height: number }>(
+          'desktop_browser_capture_page', { webContentsId: wcId }
+        );
+
+        const cssViewport = await webview.executeJavaScript?.(
+          '({ width: window.innerWidth, height: window.innerHeight })', true
+        ).catch(() => null) as { width: number; height: number } | null | undefined;
+
+        const cssWidth = Number.isFinite(cssViewport?.width) ? (cssViewport as { width: number }).width : capture.width;
+        const cssHeight = Number.isFinite(cssViewport?.height) ? (cssViewport as { height: number }).height : capture.height;
+
+        const file = await desktopAnnotationToFile(capture.base64, capture.width, capture.height, cssWidth, cssHeight, target);
+        const screenshotAttached = Boolean(file);
+        if (file) {
+          await addAttachedFile(file);
+        }
+
+        addInlineCommentDraft({
+          sessionKey,
+          source: 'preview-annotation',
+          fileLabel: currentUrl || 'browser',
+          startLine: 1,
+          endLine: 1,
+          code: formatPreviewAnnotationMarkdown({
+            pageUrl: currentUrl,
+            viewport: { width: cssWidth, height: cssHeight },
+            devicePixelRatio: window.devicePixelRatio || 1,
+            target,
+            screenshotAttached,
+            intro: t('contextPanel.preview.inspect.attachAnnotationWithScreenshot'),
+          }),
+          language: 'markdown',
+          text: '',
+        });
+        toast.success(t('contextPanel.preview.inspect.attached'));
+      })
+      .catch(() => setIsInspecting(false));
+  }, [addAttachedFile, addInlineCommentDraft, currentSessionId, currentUrl, isInspecting, newSessionDraftOpen, t]);
+
+  return (
+    <div className="absolute inset-0 flex flex-col bg-background">
+      <div className="flex items-center gap-1 border-b border-border/40 bg-[var(--surface-background)] px-2 py-1">
+        <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { try { webviewRef.current?.goBack?.(); } catch { /* webview not ready */ } }}>
+          <Icon name="arrow-left" className="h-3.5 w-3.5" />
+        </Button>
+        <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { try { webviewRef.current?.goForward?.(); } catch { /* webview not ready */ } }}>
+          <Icon name="arrow-right" className="h-3.5 w-3.5" />
+        </Button>
+        <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { try { webviewRef.current?.reload?.(); } catch { /* webview not ready */ } }}>
+          <Icon name="refresh" className="h-3.5 w-3.5" />
+        </Button>
+        <form className="min-w-0 flex-1" onSubmit={(event) => { event.preventDefault(); loadUrl(urlInput); }}>
+          <input
+            value={urlInput}
+            onChange={(event) => setUrlInput(event.target.value)}
+            className="h-7 w-full rounded-md border border-border/50 bg-[var(--surface-elevated)] px-2 typography-micro text-foreground outline-none focus:border-[var(--interactive-focus-ring)]"
+            aria-label={t('contextPanel.browser.addressAria')}
+          />
+        </form>
+        <Button
+          type="button"
+          variant={isInspecting ? 'secondary' : 'ghost'}
+          size="sm"
+          className="h-7 w-7 p-0"
+          onClick={handleInspect}
+          title={t('contextPanel.preview.inspect.toggle')}
+          aria-label={t('contextPanel.preview.inspect.toggle')}
+        >
+          <Icon name="cursor" className="h-3.5 w-3.5" />
+        </Button>
+        <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => void openExternalUrl(currentUrl)}>
+          <Icon name="external-link" className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+      <div className="relative min-h-0 flex-1 bg-background">
+        <webview
+          ref={webviewRef}
+          src={normalizeBrowserUrl(initialUrl)}
+          partition="persist:openchamber-browser"
+          style={{ width: '100%', height: '100%', border: 'none' }}
+        />
+        {(!currentUrl || currentUrl === 'about:blank') && !isLoading ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 bg-background p-6 text-center">
+            <OpenChamberLogo width={140} height={140} className="opacity-20" />
+            <span className="typography-ui-header text-muted-foreground">{t('contextPanel.browser.empty')}</span>
+          </div>
+        ) : null}
+        {showLoading ? (
+          <div className="absolute inset-0 flex items-center justify-center bg-background/70 typography-micro text-muted-foreground">
+            {t('common.loading')}
           </div>
         ) : null}
       </div>
@@ -1416,7 +1837,7 @@ export const ContextPanel: React.FC = () => {
                 ? <PreviewPane rawUrl={activeTab.targetPath ?? ''} onNavigate={(url) => openContextPreview(effectiveDirectory, url)} />
                 : (
                   <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
-                    <RiGlobalLine className="h-12 w-12 text-muted-foreground/50" />
+                    <Icon name="global" className="h-12 w-12 text-muted-foreground/50" />
                     <div className="typography-ui-header text-foreground">{t('contextPanel.preview.title')}</div>
                     <div className="max-w-sm typography-micro text-muted-foreground">{t('contextPanel.preview.description')}</div>
                   </div>
@@ -1424,6 +1845,10 @@ export const ContextPanel: React.FC = () => {
 
   const chatTabs = React.useMemo(
     () => tabs.filter((tab) => tab.mode === 'chat'),
+    [tabs],
+  );
+  const browserTabs = React.useMemo(
+    () => tabs.filter((tab) => tab.mode === 'browser'),
     [tabs],
   );
   const hasFileTabs = React.useMemo(
@@ -1469,7 +1894,7 @@ export const ContextPanel: React.FC = () => {
           title={isExpanded ? t('contextPanel.actions.collapsePanel') : t('contextPanel.actions.expandPanel')}
           aria-label={isExpanded ? t('contextPanel.actions.collapsePanel') : t('contextPanel.actions.expandPanel')}
         >
-          {isExpanded ? <RiFullscreenExitLine className="h-3.5 w-3.5" /> : <RiFullscreenLine className="h-3.5 w-3.5" />}
+          {isExpanded ? <Icon name="fullscreen-exit" className="h-3.5 w-3.5" /> : <Icon name="fullscreen" className="h-3.5 w-3.5" />}
         </Button>
         <Button
           type="button"
@@ -1480,7 +1905,7 @@ export const ContextPanel: React.FC = () => {
           title={t('contextPanel.actions.closePanel')}
           aria-label={t('contextPanel.actions.closePanel')}
         >
-          <RiCloseLine className="h-3.5 w-3.5" />
+          <Icon name="close" className="h-3.5 w-3.5" />
         </Button>
       </div>
     </header>
@@ -1576,7 +2001,18 @@ export const ContextPanel: React.FC = () => {
             />
           );
         })}
-        {activeTab?.mode !== 'chat' && !isFileTabActive ? activeNonChatContent : null}
+        {browserTabs.map((tab) => (
+          <div
+            key={tab.id}
+            className={cn(
+              'absolute inset-0',
+              activeTab?.mode !== 'browser' && 'hidden'
+            )}
+          >
+            <DesktopBrowserPane initialUrl={tab.targetPath ?? ''} directory={directoryKey} tabID={tab.id} />
+          </div>
+        ))}
+        {activeTab?.mode !== 'chat' && !isFileTabActive && activeTab?.mode !== 'browser' ? activeNonChatContent : null}
       </div>
     </aside>
   );

@@ -5,10 +5,10 @@ import { useSessions } from '@/sync/sync-context';
 import { useInputStore } from '@/sync/input-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { RiBookletLine, RiChatNewLine, RiAddLine, RiFileCopyLine, RiLoader4Line } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { toast } from '@/components/ui';
+import { Icon } from "@/components/icon/Icon";
 import { getProjectNotesAndTodos, saveProjectNotesAndTodos } from '@/lib/openchamberConfig';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
@@ -31,7 +31,6 @@ interface SelectionPayload {
   markdownText: string;
   rect: DOMRect;
 }
-
 
 const appendDistilledInsightToNotes = (existingNotes: string, insight: string): string => {
   const trimmedInsight = insight.trim().replace(/^[-*+]\s+/, '');
@@ -592,7 +591,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
             title={t('chat.textSelection.title.addToCurrentChat')}
             type="button"
           >
-            <RiAddLine className="h-5 w-5 flex-shrink-0" />
+            <Icon name="add" className="h-5 w-5 flex-shrink-0" />
             <span className="min-w-0 whitespace-normal">{t('chat.textSelection.actions.addToChat')}</span>
           </button>
 
@@ -608,7 +607,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
             title={t('chat.textSelection.title.newSessionWithSelection')}
             type="button"
           >
-            <RiChatNewLine className="h-5 w-5 flex-shrink-0" />
+            <Icon name="chat-new" className="h-5 w-5 flex-shrink-0" />
             <span className="min-w-0 whitespace-normal">{t('chat.textSelection.actions.newSession')}</span>
           </button>
 
@@ -624,7 +623,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
             title={t('chat.textSelection.actions.copy')}
             type="button"
           >
-            <RiFileCopyLine className="h-5 w-5 flex-shrink-0" />
+            <Icon name="file-copy" className="h-5 w-5 flex-shrink-0" />
             <span className="min-w-0 whitespace-normal">{t('chat.textSelection.actions.copy')}</span>
           </button>
 
@@ -642,7 +641,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
               title={t('chat.textSelection.title.saveInsightToNotes')}
               type="button"
             >
-              {isAddingToNotes ? <RiLoader4Line className="h-5 w-5 flex-shrink-0 animate-spin" /> : <RiBookletLine className="h-5 w-5 flex-shrink-0" />}
+              {isAddingToNotes ? <Icon name="loader-4" className="h-5 w-5 flex-shrink-0 animate-spin" /> : <Icon name="booklet" className="h-5 w-5 flex-shrink-0" />}
               <span className="min-w-0 whitespace-normal">{t('chat.textSelection.actions.addToNotes')}</span>
             </button>
           ) : null}
@@ -685,7 +684,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
           title={t('chat.textSelection.title.addToCurrentChat')}
           type="button"
         >
-          <RiAddLine className="h-4 w-4" />
+          <Icon name="add" className="h-4 w-4" />
           <span className="whitespace-nowrap">{t('chat.textSelection.actions.addToChat')}</span>
         </button>
       
@@ -703,7 +702,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
           title={t('chat.textSelection.title.newSessionWithSelection')}
           type="button"
         >
-          <RiChatNewLine className="h-4 w-4" />
+          <Icon name="chat-new" className="h-4 w-4" />
           <span className="whitespace-nowrap">{t('chat.textSelection.actions.newSession')}</span>
         </button>
 
@@ -724,7 +723,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
               title={t('chat.textSelection.title.saveInsightToNotes')}
               type="button"
             >
-              {isAddingToNotes ? <RiLoader4Line className="h-4 w-4 animate-spin" /> : <RiBookletLine className="h-4 w-4" />}
+              {isAddingToNotes ? <Icon name="loader-4" className="h-4 w-4 animate-spin" /> : <Icon name="booklet" className="h-4 w-4" />}
               <span className="whitespace-nowrap">{t('chat.textSelection.actions.addToNotes')}</span>
             </button>
           </>

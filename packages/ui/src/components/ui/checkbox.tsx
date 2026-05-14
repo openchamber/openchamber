@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { Checkbox as BaseCheckbox } from '@base-ui/react/checkbox';
-import { RiCheckLine, RiSubtractLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
+import { Icon } from "@/components/icon/Icon";
 
 interface CheckboxProps {
   checked: boolean;
@@ -14,7 +14,6 @@ interface CheckboxProps {
   /** @deprecated size is fixed; prop retained for backwards compatibility */
   size?: 'sm' | 'default';
 }
-
 
 export const Checkbox = React.memo<CheckboxProps>(function Checkbox({
   checked,
@@ -62,9 +61,9 @@ export const Checkbox = React.memo<CheckboxProps>(function Checkbox({
         )}
       >
         {indeterminate ? (
-          <RiSubtractLine className={cn(iconSize, 'text-[var(--primary-base)]')} />
+          <Icon name="subtract" className={cn(iconSize, 'text-[var(--primary-base)]')} />
         ) : (
-          <RiCheckLine className={cn(iconSize, 'text-[var(--primary-base)]')} />
+          <Icon name="check" className={cn(iconSize, 'text-[var(--primary-base)]')} />
         )}
       </BaseCheckbox.Indicator>
     </BaseCheckbox.Root>

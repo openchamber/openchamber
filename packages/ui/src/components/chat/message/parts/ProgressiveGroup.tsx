@@ -1,5 +1,4 @@
 import React from 'react';
-import { RiStackLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import type { TurnActivityRecord as TurnActivityPart } from '../../lib/turns/types';
 import type { ToolPart as ToolPartType } from '@opencode-ai/sdk/v2';
@@ -11,6 +10,7 @@ import { MinDurationShineText } from './MinDurationShineText';
 import { ToolRevealOnMount } from './ToolRevealOnMount';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Text } from '@/components/ui/text';
+import { Icon } from "@/components/icon/Icon";
 import { FadeInOnReveal } from '../FadeInOnReveal';
 import { getToolIcon } from './toolPresentation';
 import { getToolMetadata } from '@/lib/toolHelpers';
@@ -927,7 +927,7 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                     onClick={onToggle}
                 >
                     <span className="inline-flex h-5 items-center flex-shrink-0" style={{ color: 'var(--tools-icon)' }}>
-                        <RiStackLine className="h-3.5 w-3.5" />
+                        <Icon name="stack" className="h-3.5 w-3.5" />
                     </span>
                     <span
                         className="leading-5 font-semibold inline-flex h-5 items-center flex-shrink-0"

@@ -1,6 +1,5 @@
 import React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { RiArchiveStackLine, RiFolder3Fill, RiFolderOpenFill } from '@remixicon/react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import {
@@ -13,6 +12,7 @@ import {
 } from '@/components/ui/dialog';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
+import { Icon } from "@/components/icon/Icon";
 import { ChangeRow } from './ChangeRow';
 import type { GitStatus } from '@/lib/api/types';
 import { cn } from '@/lib/utils';
@@ -405,9 +405,9 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
             : t('gitView.changes.expandDirectoryAria', { path: directory.path })}
         >
           {isExpanded ? (
-            <RiFolderOpenFill className="h-4 w-4 flex-shrink-0 text-primary/60" />
+            <Icon name="folder-open-fill" className="h-4 w-4 flex-shrink-0 text-primary/60" />
           ) : (
-            <RiFolder3Fill className="h-4 w-4 flex-shrink-0 text-primary/60" />
+            <Icon name="folder-3-fill" className="h-4 w-4 flex-shrink-0 text-primary/60" />
           )}
           <span className="min-w-0 flex-1 truncate typography-ui-label text-foreground" title={directory.path}>
             {directory.name}
@@ -475,7 +475,7 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
                 aria-label={t('gitView.stashes.title')}
                 title={t('gitView.stashes.title')}
               >
-                <RiArchiveStackLine className="size-4" />
+                <Icon name="archive-stack" className="size-4" />
               </Button>
             ) : null}
           </div>

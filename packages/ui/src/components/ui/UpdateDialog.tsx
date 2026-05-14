@@ -6,7 +6,7 @@ import {
 } from '@/components/ui/dialog';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
-import { RiCheckLine, RiClipboardLine, RiDownloadCloudLine, RiDownloadLine, RiExternalLinkLine, RiLoaderLine, RiRestartLine, RiTerminalLine } from '@remixicon/react';
+import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
 import type { UpdateInfo, UpdateProgress } from '@/lib/desktop';
 import { copyTextToClipboard } from '@/lib/clipboard';
@@ -110,7 +110,6 @@ function parseChangelogSections(body: string): ChangelogSection[] {
     return { version: match.version, date: match.date, start: match.start, end, raw };
   });
 }
-
 
 type InstallWebUpdateResult = {
   success: boolean;
@@ -307,7 +306,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
         {/* Header Section */}
         <div className="flex items-center mb-1">
           <DialogTitle className="flex items-center gap-2.5">
-            <RiDownloadCloudLine className="h-5 w-5 text-[var(--primary-base)]" />
+            <Icon name="download-cloud" className="h-5 w-5 text-[var(--primary-base)]" />
             <span className="text-lg font-semibold text-foreground">
               {webUpdateState === 'restarting' || webUpdateState === 'reconnecting'
                 ? t('updateDialog.header.updating')
@@ -338,7 +337,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
           {isWebRuntime && isWebUpdating && (
             <div className="rounded-lg bg-[var(--surface-elevated)]/30 p-5 border border-[var(--surface-subtle)]">
               <div className="flex items-center gap-3">
-                <RiLoaderLine className="h-5 w-5 animate-spin text-[var(--primary-base)]" />
+                <Icon name="loader" className="h-5 w-5 animate-spin text-[var(--primary-base)]" />
                 <div className="typography-ui-label text-foreground">
                   {webUpdateState === 'updating' && t('updateDialog.status.installingUpdate')}
                   {webUpdateState === 'restarting' && t('updateDialog.status.serverRestarting')}
@@ -411,7 +410,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
           {isWebRuntime && webUpdateState === 'error' && (
             <div className="space-y-2 mt-4">
               <div className="flex items-center gap-2 typography-meta text-muted-foreground">
-                <RiTerminalLine className="h-4 w-4" />
+                <Icon name="terminal" className="h-4 w-4" />
                 <span>{t('updateDialog.fallback.updateViaTerminal')}</span>
               </div>
               <div className="flex items-center gap-2 p-1 pl-3 bg-[var(--surface-elevated)]/50 rounded-md border border-[var(--surface-subtle)]">
@@ -429,9 +428,9 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                   title={copied ? t('updateDialog.actions.copied') : t('updateDialog.actions.copyCommand')}
                 >
                   {copied ? (
-                    <RiCheckLine className="h-4 w-4" />
+                    <Icon name="check" className="h-4 w-4" />
                   ) : (
-                    <RiClipboardLine className="h-4 w-4" />
+                    <Icon name="clipboard" className="h-4 w-4" />
                   )}
                 </button>
               </div>
@@ -470,7 +469,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
             rel="noopener noreferrer"
             className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0"
           >
-            <RiExternalLinkLine className="h-4 w-4" />
+            <Icon name="external-link" className="h-4 w-4" />
             GitHub
           </a>
 
@@ -481,7 +480,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                 onClick={onDownload}
                 className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium bg-[var(--primary-base)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity"
               >
-                <RiDownloadLine className="h-4 w-4" />
+                <Icon name="download" className="h-4 w-4" />
                 {t('updateDialog.actions.downloadUpdate')}
               </button>
             )}
@@ -491,7 +490,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                 disabled
                 className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium bg-[var(--primary-base)]/50 text-[var(--primary-foreground)] cursor-not-allowed"
               >
-                <RiLoaderLine className="h-4 w-4 animate-spin" />
+                <Icon name="loader" className="h-4 w-4 animate-spin" />
                 {t('updateDialog.status.downloading')}
               </button>
             )}
@@ -501,7 +500,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                 onClick={onRestart}
                 className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium bg-[var(--status-success)] text-white hover:opacity-90 transition-opacity"
               >
-                <RiRestartLine className="h-4 w-4" />
+                <Icon name="restart" className="h-4 w-4" />
                 {t('updateDialog.actions.restartToUpdate')}
               </button>
             )}
@@ -512,7 +511,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                 onClick={handleWebUpdate}
                 className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium bg-[var(--primary-base)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity"
               >
-                <RiDownloadLine className="h-4 w-4" />
+                <Icon name="download" className="h-4 w-4" />
                 {t('updateDialog.actions.updateNow')}
               </button>
             )}
@@ -522,7 +521,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                 disabled
                 className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium bg-[var(--primary-base)]/50 text-[var(--primary-foreground)] cursor-not-allowed"
               >
-                <RiLoaderLine className="h-4 w-4 animate-spin" />
+                <Icon name="loader" className="h-4 w-4 animate-spin" />
                 {t('updateDialog.status.updating')}
               </button>
             )}

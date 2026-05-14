@@ -16,6 +16,14 @@ export const createNotificationTriggerRuntime = (deps) => {
     getOpenCodeAuthHeaders,
   } = deps;
 
+  let getIsWindowFocused = typeof deps.getIsWindowFocused === 'function'
+    ? deps.getIsWindowFocused
+    : null;
+
+  const setGetIsWindowFocused = (cb) => {
+    getIsWindowFocused = typeof cb === 'function' ? cb : null;
+  };
+
   const PUSH_READY_COOLDOWN_MS = 5000;
   const PUSH_QUESTION_DEBOUNCE_MS = 500;
   const PUSH_PERMISSION_DEBOUNCE_MS = 500;
@@ -221,6 +229,10 @@ export const createNotificationTriggerRuntime = (deps) => {
           return;
         }
 
+        if (settings.notificationMode !== 'always' && getIsWindowFocused?.()) {
+          return;
+        }
+
         const now = Date.now();
         const lastAt = lastReadyNotificationAt.get(sessionId) ?? 0;
         if (now - lastAt < PUSH_READY_COOLDOWN_MS) {
@@ -294,6 +306,10 @@ export const createNotificationTriggerRuntime = (deps) => {
         const settings = await readSettingsFromDisk();
         if (settings.notifyOnError === false) return;
 
+        if (settings.notificationMode !== 'always' && getIsWindowFocused?.()) {
+          return;
+        }
+
         let title = 'Tool error';
         let body = 'An error occurred';
 
@@ -364,6 +380,10 @@ export const createNotificationTriggerRuntime = (deps) => {
 
         const settings = await readSettingsFromDisk();
         if (settings.notifyOnQuestion === false) {
+          return;
+        }
+
+        if (settings.notificationMode !== 'always' && getIsWindowFocused?.()) {
           return;
         }
 
@@ -487,6 +507,10 @@ export const createNotificationTriggerRuntime = (deps) => {
           return;
         }
 
+        if (settings.notificationMode !== 'always' && getIsWindowFocused?.()) {
+          return;
+        }
+
         const sessionTitle = payload.properties?.sessionTitle;
         const permissionText = typeof permission === 'string' && permission.length > 0 ? permission : '';
         const fallbackMessage = typeof sessionTitle === 'string' && sessionTitle.trim().length > 0
@@ -559,5 +583,6 @@ export const createNotificationTriggerRuntime = (deps) => {
   return {
     maybeSendPushForTrigger,
     setAutoAcceptSession,
+    setGetIsWindowFocused,
   };
 };

@@ -7,31 +7,6 @@ import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useSkillsCatalogStore } from '@/stores/useSkillsCatalogStore';
-import {
-  RiAiAgentLine,
-  RiAiGenerate2,
-  RiArrowLeftSLine,
-  RiBarChart2Line,
-  RiBookLine,
-  RiBookOpenLine,
-  RiChatAi3Line,
-  RiChatHistoryLine,
-  RiCloseLine,
-  RiCommandLine,
-  RiCloudLine,
-  RiFoldersLine,
-  RiGitBranchLine,
-  RiGlobalLine,
-  RiMicLine,
-  RiListUnordered,
-  RiNotification3Line,
-  RiPaletteLine,
-  RiRobot2Line,
-  RiRestartLine,
-  RiServerLine,
-  RiSlashCommands2,
-  RiBrainLine,
-} from '@remixicon/react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { AgentsSidebar } from '@/components/sections/agents/AgentsSidebar';
@@ -55,10 +30,11 @@ import { MagicPromptsPage } from '@/components/sections/magic-prompts/MagicPromp
 import { GitPage } from '@/components/sections/git-identities/GitPage';
 import type { OpenChamberSection } from '@/components/sections/openchamber/types';
 import { OpenChamberPage } from '@/components/sections/openchamber/OpenChamberPage';
-import { McpIcon } from '@/components/icons/McpIcon';
 import { useDeviceInfo } from '@/lib/device';
 import { isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
+import { Icon } from "@/components/icon/Icon";
+import type { IconName } from "@/components/icon/icons";
 import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
 import {
   SETTINGS_PAGE_METADATA,
@@ -126,54 +102,54 @@ function isPageAvailable(page: SettingsPageMeta, ctx: SettingsRuntimeContext): b
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
-export function getSettingsNavIcon(slug: SettingsPageSlug): React.ComponentType<{ className?: string }> | null {
+export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
   switch (slug) {
     case 'projects':
-      return RiFoldersLine;
+      return 'folders';
     case 'remote-instances':
-      return RiServerLine;
+      return 'server';
     case 'appearance':
-      return RiPaletteLine;
+      return 'palette';
     case 'chat':
-      return RiChatAi3Line;
+      return 'chat-ai-3';
     case 'magic-prompts':
-      return RiAiGenerate2;
+      return 'ai-generate-2';
     case 'notifications':
-      return RiNotification3Line;
+      return 'notification-3';
     case 'shortcuts':
-      return RiCommandLine;
+      return 'command';
     case 'sessions':
-      return RiChatHistoryLine;
+      return 'chat-history';
 
     case 'providers':
-      return RiCloudLine;
+      return 'cloud';
     case 'agents':
-      return RiAiAgentLine;
+      return 'ai-agent';
     case 'behavior':
-      return RiBrainLine;
+      return 'brain';
     case 'commands':
-      return RiSlashCommands2;
+      return 'slash-commands-2';
     case 'mcp':
-      return McpIcon;
+      return 'plug-2';
 
     case 'skills.installed':
-      return RiBookOpenLine;
+      return 'book-open';
     case 'skills.catalog':
-      return RiBookLine;
+      return 'book';
 
     case 'git':
-      return RiGitBranchLine;
+      return 'git-branch';
 
     case 'usage':
-      return RiBarChart2Line;
+      return 'bar-chart-2';
     case 'voice':
-      return RiMicLine;
+      return 'mic';
     case 'tunnel':
-      return RiGlobalLine;
+      return 'global';
     case 'home':
       return null;
     default:
-      return RiRobot2Line;
+      return 'robot-2';
   }
 }
 
@@ -585,8 +561,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
           <div className="flex flex-col gap-0.5 pt-4 pb-2 px-2">
             {sortedFilteredPages.map((page) => {
               const selected = settingsSlug === page.slug;
-              const Icon = getSettingsNavIcon(page.slug);
-              if (!Icon) return null;
+              const iconName = getSettingsNavIcon(page.slug);
+              if (!iconName) return null;
 
               return (
                 <Tooltip key={page.slug}>
@@ -602,7 +578,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                           : 'text-foreground hover:bg-interactive-hover'
                       )}
                     >
-                      <Icon className="h-4 w-4 shrink-0" />
+                      <Icon name={iconName} className="h-4 w-4 shrink-0" />
                       <span className="flex items-center gap-1.5 whitespace-nowrap overflow-hidden transition-opacity duration-150 opacity-100">
                         <span className="typography-ui-label font-normal truncate">{getPageTitle(page.slug)}</span>
                         {(page.slug === 'voice' || page.slug === 'tunnel') && (
@@ -634,7 +610,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                     )}
                     onClick={() => void reloadOpenCodeConfiguration({ message: 'Restarting OpenCode…', mode: 'projects', scopes: ['all'] })}
                   >
-                    <RiRestartLine className="h-4 w-4 shrink-0" />
+                    <Icon name="restart" className="h-4 w-4 shrink-0" />
                     <span>{t('settings.view.actions.reloadOpenCode')}</span>
                   </button>
                 </TooltipTrigger>
@@ -736,7 +712,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
               aria-label={showBackButton ? t('settings.view.actions.backToSettings') : t('settings.view.actions.closeSettings')}
               className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
-              <RiArrowLeftSLine className="h-5 w-5" />
+              <Icon name="arrow-left-s" className="h-5 w-5" />
             </button>
           ) : null}
 
@@ -753,7 +729,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
               aria-label={t('settings.view.actions.openSectionList')}
               className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
-              <RiListUnordered className="h-5 w-5" />
+              <Icon name="list-unordered" className="h-5 w-5" />
             </button>
           )}
 
@@ -765,7 +741,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
               title={t('settings.view.actions.closeSettingsWithShortcut', { shortcut: shortcutKey })}
               className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
-              <RiCloseLine className="h-5 w-5" />
+              <Icon name="close" className="h-5 w-5" />
             </button>
           )}
         </div>
@@ -779,7 +755,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                 aria-label={t('settings.view.actions.back')}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
-                <RiArrowLeftSLine className="h-5 w-5" />
+                <Icon name="arrow-left-s" className="h-5 w-5" />
               </button>
             </div>
           )}
@@ -793,7 +769,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
             title={t('settings.view.actions.closeSettingsWithShortcut', { shortcut: shortcutKey })}
             className="inline-flex h-7 w-7 items-center justify-center rounded-md p-0.5 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           >
-            <RiCloseLine className="h-5 w-5" />
+            <Icon name="close" className="h-5 w-5" />
           </button>
         </div>
       )}

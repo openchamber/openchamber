@@ -4,9 +4,9 @@ import { useUIStore } from '@/stores/useUIStore';
 import { Button } from '@/components/ui/button';
 import { SettingsSidebarLayout } from '@/components/sections/shared/SettingsSidebarLayout';
 import { SettingsSidebarItem } from '@/components/sections/shared/SettingsSidebarItem';
+import { Icon } from "@/components/icon/Icon";
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
 import { cn } from '@/lib/utils';
-import { RiAddLine, RiFolderLine } from '@remixicon/react';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
@@ -56,7 +56,7 @@ export const ProjectsSidebar: React.FC<{ onItemSelect?: () => void }> = ({ onIte
                 onClick={handleAddProject}
                 aria-label={t('settings.projects.sidebar.actions.addProject')}
               >
-                <RiAddLine className="size-4" />
+                <Icon name="add" className="size-4" />
               </Button>
             )}
           </div>
@@ -65,7 +65,7 @@ export const ProjectsSidebar: React.FC<{ onItemSelect?: () => void }> = ({ onIte
     >
       {projects.map((project) => {
         const selected = project.id === selectedId;
-        const Icon = project.icon ? PROJECT_ICON_MAP[project.icon] : null;
+        const iconName = project.icon ? PROJECT_ICON_MAP[project.icon] : null;
         const imageFailureKey = `${project.id}:${project.iconImage?.updatedAt ?? 0}`;
         const imageUrl = brokenIconIds.has(imageFailureKey)
           ? null
@@ -98,12 +98,12 @@ export const ProjectsSidebar: React.FC<{ onItemSelect?: () => void }> = ({ onIte
               />
             </span>
           )
-          : Icon
+          : iconName
           ? (
-            <Icon className={cn('h-4 w-4', selected ? 'text-foreground' : 'text-muted-foreground/70')} style={color ? { color } : undefined} />
+            <Icon name={iconName} className={cn('h-4 w-4', selected ? 'text-foreground' : 'text-muted-foreground/70')} style={color ? { color } : undefined} />
           )
           : (
-            <RiFolderLine className={cn('h-4 w-4', selected ? 'text-foreground' : 'text-muted-foreground/70')} style={color ? { color } : undefined} />
+            <Icon name="folder" className={cn('h-4 w-4', selected ? 'text-foreground' : 'text-muted-foreground/70')} style={color ? { color } : undefined} />
           );
 
         return (

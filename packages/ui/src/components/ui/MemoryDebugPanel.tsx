@@ -1,5 +1,4 @@
 import React from 'react';
-import { RiBarChartBoxLine, RiCloseLine, RiDatabase2Line, RiFileCopyLine, RiPulseLine, RiRefreshLine } from '@remixicon/react';
 
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useViewportStore } from '@/sync/viewport-store';
@@ -12,6 +11,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 
 interface DebugPanelProps {
@@ -198,9 +198,9 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
       <div className="mb-3 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           {activeTab === 'memory' ? (
-            <RiDatabase2Line className="h-4 w-4 text-[var(--surface-foreground)]" />
+            <Icon name="database-2" className="h-4 w-4 text-[var(--surface-foreground)]" />
           ) : (
-            <RiBarChartBoxLine className="h-4 w-4 text-[var(--surface-foreground)]" />
+            <Icon name="bar-chart-box" className="h-4 w-4 text-[var(--surface-foreground)]" />
           )}
           <h3 className="typography-ui-label font-semibold text-[var(--surface-foreground)]">{t('memoryDebugPanel.title')}</h3>
         </div>
@@ -208,7 +208,7 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
           {activeTab === 'streaming' ? (
             <>
               <Button size="xs" variant="ghost" onClick={handleCopyStreamingDebug}>
-                <RiFileCopyLine className="h-3.5 w-3.5" />
+                <Icon name="file-copy" className="h-3.5 w-3.5" />
               </Button>
               <Button
                 size="xs"
@@ -219,13 +219,13 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
                   setVsCodeStreamSnapshot(getVsCodeStreamPerfSnapshot());
                 }}
               >
-                <RiRefreshLine className="h-3.5 w-3.5" />
+                <Icon name="refresh" className="h-3.5 w-3.5" />
               </Button>
             </>
           ) : null}
           {onClose ? (
             <Button size="icon" variant="ghost" className="h-6 w-6" onClick={onClose}>
-              <RiCloseLine className="h-4 w-4" />
+              <Icon name="close" className="h-4 w-4" />
             </Button>
           ) : null}
         </div>
@@ -290,7 +290,7 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
                 >
                   <div className="flex min-w-0 flex-1 items-center gap-2">
                     <span className="truncate text-[var(--surface-foreground)]">{stat.title}</span>
-                    {stat.isStreaming ? <RiPulseLine className="h-3 w-3 animate-pulse text-[var(--status-info)]" /> : null}
+                    {stat.isStreaming ? <Icon name="pulse" className="h-3 w-3 animate-pulse text-[var(--status-info)]" /> : null}
                     {stat.isZombie ? <span className="text-[var(--status-warning)]">!</span> : null}
                   </div>
                   <div className="flex items-center gap-2">

@@ -1,9 +1,9 @@
 import React from 'react';
-import { RiCheckLine, RiCloseLine, RiTimeLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import type { PermissionRequest as PermissionRequestPayload, PermissionResponse } from '@/types/permission';
 import * as sessionActions from '@/sync/session-actions';
 import { useI18n } from '@/lib/i18n';
+import { Icon } from "@/components/icon/Icon";
 
 interface PermissionRequestProps {
   permission: PermissionRequestPayload;
@@ -73,7 +73,7 @@ export const PermissionRequest: React.FC<PermissionRequestProps> = ({
             e.currentTarget.style.backgroundColor = 'transparent';
           }}
         >
-          <RiCheckLine className="h-3 w-3" />
+          <Icon name="check" className="h-3 w-3" />
           {t('chat.permissionRequest.actions.once')}
         </button>
 
@@ -95,7 +95,7 @@ export const PermissionRequest: React.FC<PermissionRequestProps> = ({
             e.currentTarget.style.backgroundColor = 'transparent';
           }}
         >
-          <RiTimeLine className="h-3 w-3" />
+          <Icon name="time" className="h-3 w-3" />
           {t('chat.permissionRequest.actions.always')}
         </button>
 
@@ -117,7 +117,7 @@ export const PermissionRequest: React.FC<PermissionRequestProps> = ({
             e.currentTarget.style.backgroundColor = 'transparent';
           }}
         >
-          <RiCloseLine className="h-3 w-3" />
+          <Icon name="close" className="h-3 w-3" />
           {t('chat.permissionRequest.actions.reject')}
         </button>
 

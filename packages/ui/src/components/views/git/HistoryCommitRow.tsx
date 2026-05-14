@@ -1,7 +1,7 @@
 import React from 'react';
-import { RiLoader4Line, RiFileCopyLine } from '@remixicon/react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
 import type { GitLogEntry, CommitFileEntry } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
@@ -99,7 +99,7 @@ export const HistoryCommitRow = React.memo(({
                     onCopyHash(entry.hash);
                   }}
                 >
-                  <RiFileCopyLine className="size-3" />
+                  <Icon name="file-copy" className="size-3" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent sideOffset={8}>{t('gitView.history.copySha')}</TooltipContent>
@@ -112,7 +112,7 @@ export const HistoryCommitRow = React.memo(({
         <div className="px-3 pb-2 pl-8 border-t border-border/40">
           {isLoadingFiles ? (
             <div className="flex items-center gap-2 py-2">
-              <RiLoader4Line className="size-4 animate-spin text-muted-foreground" />
+              <Icon name="loader-4" className="size-4 animate-spin text-muted-foreground" />
               <span className="typography-micro text-muted-foreground">{t('gitView.history.loadingFiles')}</span>
             </div>
           ) : files.length === 0 ? (

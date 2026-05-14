@@ -1,12 +1,4 @@
 import React from 'react';
-import {
-  RiAddLine,
-  RiArrowDownSLine,
-  RiMore2Line,
-  RiSearchLine,
-  RiGitBranchLine,
-  RiLoader4Line,
-} from '@remixicon/react';
 import { toast } from '@/components/ui';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -25,6 +17,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
 import { useAgentGroupsStore, type AgentGroup } from '@/stores/useAgentGroupsStore';
 import { useAllSessionStatuses } from '@/sync/sync-context';
@@ -92,11 +85,11 @@ const AgentGroupItem: React.FC<AgentGroupItemProps> = ({ group, isSelected, isBu
               <span className="truncate typography-ui-label font-normal text-foreground">
                 {group.name}
               </span>
-              {isBusy && <RiLoader4Line className="h-3 w-3 animate-spin text-amber-500 flex-shrink-0" />}
+              {isBusy && <Icon name="loader-4" className="h-3 w-3 animate-spin text-amber-500 flex-shrink-0" />}
             </div>
             <div className="flex items-center gap-2">
                 <span className="typography-micro text-muted-foreground/60 flex items-center gap-1">
-                  <RiGitBranchLine className="h-3 w-3" />
+                  <Icon name="git-branch" className="h-3 w-3" />
                   {group.sessionCount === 1
                     ? t('agentManager.sidebar.item.modelCountSingle', { count: group.sessionCount })
                     : t('agentManager.sidebar.item.modelCountPlural', { count: group.sessionCount })}
@@ -126,7 +119,7 @@ const AgentGroupItem: React.FC<AgentGroupItemProps> = ({ group, isSelected, isBu
                   aria-label={t('agentManager.sidebar.item.groupMenuAria')}
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <RiMore2Line className="h-3.5 w-3.5" />
+                  <Icon name="more-2" className="h-3.5 w-3.5" />
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-[140px]">
@@ -218,7 +211,7 @@ export const AgentManagerSidebar: React.FC<AgentManagerSidebarProps> = ({
       {/* Search Input */}
       <div className="px-2.5 pt-3 pb-2">
         <div className="relative">
-          <RiSearchLine className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Icon name="search" className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
@@ -235,14 +228,14 @@ export const AgentManagerSidebar: React.FC<AgentManagerSidebarProps> = ({
           className="w-full justify-start gap-2 h-8"
           onClick={onNewAgent}
         >
-          <RiAddLine className="h-4 w-4" />
+          <Icon name="add" className="h-4 w-4" />
           <span className="typography-ui-label">{t('agentManager.sidebar.actions.newAgentGroup')}</span>
         </Button>
       </div>
 
       {/* Agent Groups Section Header */}
       <div className="px-2.5 py-1.5 flex items-center gap-1">
-        <RiArrowDownSLine className="h-4 w-4 text-muted-foreground" />
+        <Icon name="arrow-down-s" className="h-4 w-4 text-muted-foreground" />
         <span className="typography-micro font-medium text-muted-foreground uppercase tracking-wider">
           {t('agentManager.sidebar.section.agentGroups')}
         </span>

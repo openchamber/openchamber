@@ -16,9 +16,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
 
-import { RiArrowLeftSLine, RiChat4Line, RiChatNewLine, RiCheckLine, RiCloseLine, RiCommandLine, RiFileTextLine, RiFolder6Line, RiGitBranchLine, RiGithubFill, RiLayoutLeftLine, RiLayoutRightLine, RiPictureInPicture2Line, RiPlayListAddLine, RiRefreshLine, RiServerLine, RiStackLine, RiTerminalBoxLine, RiTimerLine, RiAlertLine, type RemixiconComponentType } from '@remixicon/react';
 import { DiffIcon } from '@/components/icons/DiffIcon';
-import { useUIStore, type MainTab } from '@/stores/useUIStore';
+import { useUIStore, type ContextPanelMode, type MainTab } from '@/stores/useUIStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionWorktreeStore } from '@/sync/session-worktree-store';
@@ -57,7 +56,6 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
-import { RiArrowDownSLine, RiArrowRightSLine } from '@remixicon/react';
 import type { UsageWindow } from '@/types';
 import type { GitHubAuthStatus } from '@/lib/api/types';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
@@ -69,11 +67,13 @@ import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { canUseElectronDesktopIPC, invokeDesktop, isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag, type UpdateInfo } from '@/lib/desktop';
 import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { resolveSessionDiffStats } from '@/components/session/sidebar/utils';
+import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeBearerTokenSync } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import type { Session } from '@opencode-ai/sdk/v2/client';
+import type { IconName } from "@/components/icon/icons";
 
 const DESKTOP_HEADER_ICON_BUTTON_CLASS = 'app-region-no-drag inline-flex h-8 w-8 items-center justify-center gap-2 rounded-md typography-ui-label font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50 hover:bg-interactive-hover transition-colors';
 const MOBILE_HEADER_ICON_BUTTON_CLASS = 'app-region-no-drag inline-flex h-9 w-9 items-center justify-center gap-2 p-2 rounded-md typography-ui-label font-medium text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50 hover:text-foreground hover:bg-interactive-hover transition-colors';
@@ -84,7 +84,7 @@ type HeaderIconActionButtonProps = {
   ariaLabel: string;
   onClick: () => void;
   className?: string;
-  Icon: RemixiconComponentType;
+  Icon: IconName;
   iconClassName?: string;
 };
 
@@ -94,7 +94,7 @@ const HeaderIconActionButton = React.memo(function HeaderIconActionButton({
   ariaLabel,
   onClick,
   className,
-  Icon,
+  Icon: iconName,
   iconClassName,
 }: HeaderIconActionButtonProps) {
   if (!visible) {
@@ -110,7 +110,7 @@ const HeaderIconActionButton = React.memo(function HeaderIconActionButton({
           aria-label={ariaLabel}
           className={className ?? DESKTOP_HEADER_ICON_BUTTON_CLASS}
         >
-          <Icon className={iconClassName ?? 'h-[18px] w-[18px]'} />
+          <Icon name={iconName} className={iconClassName ?? 'h-[18px] w-[18px]'} />
         </button>
       </TooltipTrigger>
       <TooltipContent>
@@ -166,7 +166,7 @@ const DesktopGitHubControl = React.memo(function DesktopGitHubControl({
                 referrerPolicy="no-referrer"
               />
             ) : (
-              <RiGithubFill className="h-3.5 w-3.5 text-foreground" />
+              <Icon name="github-fill" className="h-3.5 w-3.5 text-foreground" />
             )}
           </button>
         </DropdownMenuTrigger>
@@ -199,7 +199,7 @@ const DesktopGitHubControl = React.memo(function DesktopGitHubControl({
                   />
                 ) : (
                   <div className="flex h-6 w-6 items-center justify-center rounded-full border border-border/60 bg-muted">
-                    <RiGithubFill className="h-3 w-3 text-muted-foreground" />
+                    <Icon name="github-fill" className="h-3 w-3 text-muted-foreground" />
                   </div>
                 )}
                 <span className="flex min-w-0 flex-1 flex-col">
@@ -212,7 +212,7 @@ const DesktopGitHubControl = React.memo(function DesktopGitHubControl({
                     </span>
                   ) : null}
                 </span>
-                {isCurrent ? <RiCheckLine className="h-4 w-4 text-primary" /> : null}
+                {isCurrent ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
               </DropdownMenuItem>
             );
           })}
@@ -235,7 +235,7 @@ const DesktopGitHubControl = React.memo(function DesktopGitHubControl({
           referrerPolicy="no-referrer"
         />
       ) : (
-        <RiGithubFill className="h-3.5 w-3.5 text-foreground" />
+        <Icon name="github-fill" className="h-3.5 w-3.5 text-foreground" />
       )}
     </div>
   );
@@ -335,7 +335,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
                 isDesktopApp ? 'w-auto max-w-[14rem] justify-start gap-1.5 px-2.5' : 'h-8 w-8'
               )}
             >
-              <RiStackLine className="h-[18px] w-[18px]" />
+              <Icon name="stack" className="h-[18px] w-[18px]" />
               {isDesktopApp ? (
                 <span className="truncate typography-ui-label font-medium text-foreground">{compactCurrentInstanceLabel}</span>
               ) : null}
@@ -452,7 +452,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
                   disabled={isQuotaLoading || isUsageRefreshSpinning}
                   aria-label={t('header.services.refreshRateLimitsAria')}
                 >
-                  <RiRefreshLine className={cn('h-4 w-4', isUsageRefreshSpinning && 'animate-spin')} />
+                  <Icon name="refresh" className={cn('h-4 w-4', isUsageRefreshSpinning && 'animate-spin')} />
                 </button>
               </div>
             </div>
@@ -526,7 +526,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
                                 >
                                   <CollapsibleTrigger className="flex w-full items-center justify-between rounded-md px-1 py-1.5 text-left hover:bg-[var(--interactive-hover)]/50 transition-colors">
                                     <span className="typography-ui-label font-medium text-foreground">{family.familyLabel}</span>
-                                    {isExpanded ? <RiArrowDownSLine className="h-4 w-4 text-muted-foreground" /> : <RiArrowRightSLine className="h-4 w-4 text-muted-foreground" />}
+                                    {isExpanded ? <Icon name="arrow-down-s" className="h-4 w-4 text-muted-foreground" /> : <Icon name="arrow-right-s" className="h-4 w-4 text-muted-foreground" />}
                                   </CollapsibleTrigger>
                                   <CollapsibleContent>
                                     <div className="space-y-2.5 pb-1 pl-1 pt-1">
@@ -593,7 +593,6 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
   );
 });
 
-
 const isSameContextUsage = (
   a: SessionContextUsage | null,
   b: SessionContextUsage | null,
@@ -651,8 +650,8 @@ const normalize = (value: string): string => {
 const getActiveContextMode = (panelState: {
   isOpen: boolean;
   activeTabId: string | null;
-  tabs: Array<{ id: string; mode: 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview' }>;
-} | undefined): 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview' | null => {
+  tabs: Array<{ id: string; mode: ContextPanelMode }>;
+} | undefined): ContextPanelMode | null => {
   if (!panelState?.isOpen || !Array.isArray(panelState.tabs) || panelState.tabs.length === 0) {
     return null;
   }
@@ -664,7 +663,7 @@ const getActiveContextMode = (panelState: {
 interface TabConfig {
   id: MainTab;
   label: string;
-  icon: RemixiconComponentType | 'diff';
+  icon: IconName | 'diff';
   badge?: number;
   showDot?: boolean;
 }
@@ -705,6 +704,7 @@ export const Header: React.FC<HeaderProps> = ({
   const toggleRightSidebar = useUIStore((state) => state.toggleRightSidebar);
   const openContextOverview = useUIStore((state) => state.openContextOverview);
   const openContextPlan = useUIStore((state) => state.openContextPlan);
+  const openContextBrowser = useUIStore((state) => state.openContextBrowser);
   const closeContextPanel = useUIStore((state) => state.closeContextPanel);
   const contextPanelByDirectory = useUIStore((state) => state.contextPanelByDirectory);
   const activeMainTab = useUIStore((state) => state.activeMainTab);
@@ -1319,7 +1319,6 @@ export const Header: React.FC<HeaderProps> = ({
     return lastProjectActionsContextRef.current;
   }, [actionDirectory, activeProjectRef]);
 
-
   const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
   const isSessionPlanAvailable = useSessionUIStore((state) => state.isSessionPlanAvailable);
   const planTabAvailable = planModeEnabled && currentSessionId ? isSessionPlanAvailable(currentSessionId) : false;
@@ -1489,6 +1488,14 @@ export const Header: React.FC<HeaderProps> = ({
     openContextPlan(directory);
   }, [closeContextPanel, contextPanelByDirectory, openContextPlan, openDirectory]);
 
+  const handleOpenContextBrowser = React.useCallback(() => {
+    const directory = normalize(openDirectory || '');
+    if (!directory) {
+      return;
+    }
+    openContextBrowser(directory);
+  }, [openContextBrowser, openDirectory]);
+
   const isContextPlanActive = React.useMemo(() => {
     const directory = normalize(openDirectory || '');
     if (!directory) {
@@ -1652,17 +1659,17 @@ export const Header: React.FC<HeaderProps> = ({
   const tabs: TabConfig[] = React.useMemo(() => {
     if (isMobile) {
       const base: TabConfig[] = [
-        { id: 'chat', label: t('layout.mainTab.chat'), icon: RiChat4Line },
+        { id: 'chat', label: t('layout.mainTab.chat'), icon: "chat-4" },
       ];
 
       if (showPlanTab) {
-        base.push({ id: 'plan', label: t('layout.mainTab.plan'), icon: RiFileTextLine });
+        base.push({ id: 'plan', label: t('layout.mainTab.plan'), icon: "file-text" });
       }
 
       base.push(
         { id: 'diff', label: t('layout.mainTab.diff'), icon: 'diff' },
-        { id: 'files', label: t('layout.mainTab.files'), icon: RiFolder6Line },
-        { id: 'terminal', label: t('layout.mainTab.terminal'), icon: RiTerminalBoxLine },
+        { id: 'files', label: t('layout.mainTab.files'), icon: "folder-6" },
+        { id: 'terminal', label: t('layout.mainTab.terminal'), icon: "terminal-box" },
       );
 
       return base;
@@ -1683,13 +1690,13 @@ export const Header: React.FC<HeaderProps> = ({
   }, [activeMainTab, isMobile, setActiveMainTab]);
 
   const servicesTabs = React.useMemo(() => {
-    const base: Array<{ value: 'instance' | 'usage' | 'mcp'; label: string; icon: RemixiconComponentType }> = [];
+    const base: Array<{ value: 'instance' | 'usage' | 'mcp'; label: string; icon: IconName }> = [];
     if (isDesktopApp) {
-      base.push({ value: 'instance', label: t('layout.services.instance'), icon: RiServerLine });
+      base.push({ value: 'instance', label: t('layout.services.instance'), icon: "server" });
     }
     base.push(
-      { value: 'usage', label: t('layout.services.usage'), icon: RiTimerLine },
-      { value: 'mcp', label: 'MCP', icon: McpIcon as unknown as RemixiconComponentType }
+      { value: 'usage', label: t('layout.services.usage'), icon: "timer" },
+      { value: 'mcp', label: 'MCP', icon: McpIcon as unknown as IconName }
     );
     return base;
   }, [isDesktopApp, t]);
@@ -1698,7 +1705,7 @@ export const Header: React.FC<HeaderProps> = ({
     return servicesTabs.map((tab) => ({
       id: tab.value,
       label: tab.label,
-      icon: <tab.icon className="h-3.5 w-3.5" />,
+      icon: <Icon name={tab.icon} className="h-3.5 w-3.5" />,
     }));
   }, [servicesTabs]);
 
@@ -1772,8 +1779,8 @@ export const Header: React.FC<HeaderProps> = ({
 
   const mobileServicesTabItems = React.useMemo<SortableTabsStripItem[]>(() => {
     return [
-      { id: 'usage', label: t('layout.services.usage'), icon: <RiTimerLine className="h-3.5 w-3.5" /> },
-      { id: 'mcp', label: 'MCP', icon: <RiCommandLine className="h-3.5 w-3.5" /> },
+      { id: 'usage', label: t('layout.services.usage'), icon: <Icon name="timer" className="h-3.5 w-3.5" /> },
+      { id: 'mcp', label: 'MCP', icon: <Icon name="command" className="h-3.5 w-3.5" /> },
     ];
   }, [t]);
 
@@ -1853,14 +1860,14 @@ export const Header: React.FC<HeaderProps> = ({
   const renderTab = (tab: TabConfig) => {
     const isActive = activeMainTab === tab.id;
     const isDiffTab = tab.icon === 'diff';
-    const Icon = isDiffTab ? null : (tab.icon as RemixiconComponentType);
+    const tabIconName = isDiffTab ? null : (tab.icon as IconName);
     const isChatTab = tab.id === 'chat';
 
     const renderIcon = (iconSize: number) => {
       if (isDiffTab) {
         return <DiffIcon size={iconSize} />;
       }
-      return Icon ? <Icon size={iconSize} /> : null;
+      return tabIconName ? <Icon name={tabIconName} className={`h-${iconSize/4} w-${iconSize/4}`} /> : null;
     };
 
     const tabButton = (
@@ -1910,13 +1917,13 @@ export const Header: React.FC<HeaderProps> = ({
                 onClick={handleOpenContextPlan}
                 className={cn(desktopHeaderIconButtonClass, isContextPlanActive && 'bg-[var(--interactive-hover)]')}
               >
-              <RiFileTextLine className="h-[18px] w-[18px]" />
+              <Icon name="file-text" className="h-[18px] w-[18px]" />
             </button>
           </TooltipTrigger>
           <TooltipContent>
             <p>{t('header.actions.planWithShortcut', { shortcut: shortcutLabel('toggle_context_plan') })}</p>
           </TooltipContent>
-        </Tooltip>
+          </Tooltip>
       )}
       <OpenInAppButton directory={actionDirectory} className="mr-1" />
       <DesktopServicesMenu
@@ -1956,13 +1963,21 @@ export const Header: React.FC<HeaderProps> = ({
         title={t('header.actions.terminalPanelWithShortcut', { shortcut: shortcutLabel('toggle_terminal') })}
         ariaLabel={t('header.actions.toggleTerminalPanelAria')}
         onClick={toggleBottomTerminal}
-        Icon={RiTerminalBoxLine}
+        Icon={'terminal-box'}
       />
+      {hasElectronDesktopIPC ? (
+        <HeaderIconActionButton
+          title={t('contextPanel.browser.open')}
+          ariaLabel={t('contextPanel.browser.open')}
+          onClick={handleOpenContextBrowser}
+          Icon={'global'}
+        />
+      ) : null}
       <HeaderIconActionButton
         title={t('header.actions.rightSidebarWithShortcut', { shortcut: shortcutLabel('toggle_right_sidebar') })}
         ariaLabel={t('header.actions.toggleRightSidebarAria')}
         onClick={toggleRightSidebar}
-        Icon={RiLayoutRightLine}
+        Icon={'layout-right'}
       />
       <DesktopGitHubControl
         isMobile={isMobile}
@@ -1997,7 +2012,7 @@ export const Header: React.FC<HeaderProps> = ({
         ariaLabel={t('header.actions.openSessionsAria')}
         onClick={handleOpenSessionSwitcher}
         className={`${desktopHeaderIconButtonClass} shrink-0`}
-        Icon={RiLayoutLeftLine}
+        Icon={'layout-left'}
       />
 
       <div className={cn('flex min-w-0 flex-1 items-center', !isSidebarOpen && 'pl-3')}>
@@ -2010,7 +2025,7 @@ export const Header: React.FC<HeaderProps> = ({
                 onClick={handleHeaderNewSession}
                 className={cn(desktopHeaderIconButtonClass, 'mr-6 shrink-0')}
               >
-                <RiChatNewLine className="h-[18px] w-[18px]" />
+                <Icon name="chat-new" className="h-[18px] w-[18px]" />
               </button>
             </TooltipTrigger>
             <TooltipContent>
@@ -2035,7 +2050,7 @@ export const Header: React.FC<HeaderProps> = ({
                 {activeProjectLabel ? <span className="truncate">{activeProjectLabel}</span> : null}
                 {currentBranchLabel ? (
                   <span className="inline-flex min-w-0 items-center gap-0.5">
-                    <RiGitBranchLine className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
+                    <Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
                     <span className="truncate">{currentBranchLabel}</span>
                   </span>
                 ) : null}
@@ -2051,7 +2066,7 @@ export const Header: React.FC<HeaderProps> = ({
                     "inline-flex min-w-0 items-center gap-0.5",
                     worktreeBadgeKind === 'attention' || worktreeBadgeKind === 'invalid' || worktreeBadgeKind === 'missing' ? 'text-status-warning' : 'text-muted-foreground/60'
                   )}>
-                    <RiAlertLine className="h-3 w-3 flex-shrink-0" />
+                    <Icon name="alert" className="h-3 w-3 flex-shrink-0" />
                     <span className="truncate">{worktreeBadge}</span>
                   </span>
                 ) : null}
@@ -2092,7 +2107,7 @@ export const Header: React.FC<HeaderProps> = ({
             ariaLabel={isNewSessionDraftOpen ? t('header.actions.newMiniChatAria') : t('header.actions.openSessionMiniChatAria')}
             onClick={handleOpenCurrentMiniChat}
             className={cn(desktopHeaderIconButtonClass, desktopSidebarActionsInline && showDesktopHeaderContextUsage ? 'mr-3.5' : 'mr-1')}
-            Icon={RiPictureInPicture2Line}
+            Icon={'picture-in-picture-2'}
           />
           {desktopSidebarActionsInline ? desktopSidebarActions : null}
           {!desktopSidebarActionsInline && desktopRightSidebarActionsHost
@@ -2117,7 +2132,7 @@ export const Header: React.FC<HeaderProps> = ({
             )}
             aria-label={leftDrawerOpen ? t('header.actions.closeSessionsAria') : t('header.actions.openSessionsAria')}
           >
-            <RiLayoutLeftLine className="h-5 w-5" />
+            <Icon name="layout-left" className="h-5 w-5" />
           </button>
         ) : isSessionSwitcherOpen ? (
           <button
@@ -2126,7 +2141,7 @@ export const Header: React.FC<HeaderProps> = ({
             className="app-region-no-drag h-9 w-9 p-2 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-md active:bg-interactive-active"
             aria-label={t('header.actions.backAria')}
           >
-            <RiArrowLeftSLine className="h-5 w-5" />
+            <Icon name="arrow-left-s" className="h-5 w-5" />
           </button>
         ) : (
           <button
@@ -2135,7 +2150,7 @@ export const Header: React.FC<HeaderProps> = ({
             className="app-region-no-drag h-9 w-9 p-2 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-md active:bg-interactive-active"
             aria-label={t('header.actions.openSessionsAria')}
           >
-            <RiPlayListAddLine className="h-5 w-5" />
+            <Icon name="play-list-add" className="h-5 w-5" />
           </button>
         )}
 
@@ -2158,7 +2173,7 @@ export const Header: React.FC<HeaderProps> = ({
                   {tabs.map((tab) => {
                     const isActive = activeMainTab === tab.id;
                     const isDiffTab = tab.icon === 'diff';
-                    const Icon = isDiffTab ? null : (tab.icon as RemixiconComponentType);
+                    const tabIconName = isDiffTab ? null : (tab.icon as IconName);
                     return (
                       <Tooltip key={tab.id}>
                         <TooltipTrigger asChild>
@@ -2181,8 +2196,8 @@ export const Header: React.FC<HeaderProps> = ({
                           >
                             {isDiffTab ? (
                               <DiffIcon className="h-5 w-5" />
-                            ) : Icon ? (
-                              <Icon className="h-5 w-5" />
+                            ) : tabIconName ? (
+                              <Icon name={tabIconName} className="h-5 w-5" />
                             ) : null}
                             {tab.badge !== undefined && tab.badge > 0 && (
                               <span className="absolute -top-1 -right-1 text-[10px] font-semibold text-primary">
@@ -2237,7 +2252,7 @@ export const Header: React.FC<HeaderProps> = ({
                       aria-label={t('header.services.viewAria')}
                       className={mobileHeaderIconButtonClass}
                     >
-                      <RiStackLine className="h-5 w-5" />
+                      <Icon name="stack" className="h-5 w-5" />
                     </button>
                   </DropdownMenuTrigger>
                 </TooltipTrigger>
@@ -2277,7 +2292,7 @@ export const Header: React.FC<HeaderProps> = ({
                         className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover"
                         aria-label={t('header.services.closeAria')}
                       >
-                        <RiCloseLine className="h-5 w-5" />
+                        <Icon name="close" className="h-5 w-5" />
                       </button>
                     </div>
                   </div>
@@ -2336,7 +2351,7 @@ export const Header: React.FC<HeaderProps> = ({
                               disabled={isQuotaLoading || isUsageRefreshSpinning}
                               aria-label={t('header.services.refreshRateLimitsAria')}
                             >
-                              <RiRefreshLine className={cn('h-4 w-4', isUsageRefreshSpinning && 'animate-spin')} />
+                              <Icon name="refresh" className={cn('h-4 w-4', isUsageRefreshSpinning && 'animate-spin')} />
                             </button>
                           </div>
                         </div>
@@ -2428,9 +2443,9 @@ export const Header: React.FC<HeaderProps> = ({
                                               {family.familyLabel}
                                             </span>
                                             {isExpanded ? (
-                                              <RiArrowDownSLine className="h-4 w-4 text-muted-foreground" />
+                                              <Icon name="arrow-down-s" className="h-4 w-4 text-muted-foreground" />
                                             ) : (
-                                              <RiArrowRightSLine className="h-4 w-4 text-muted-foreground" />
+                                              <Icon name="arrow-right-s" className="h-4 w-4 text-muted-foreground" />
                                             )}
                                           </CollapsibleTrigger>
                                           <CollapsibleContent>
@@ -2497,7 +2512,7 @@ export const Header: React.FC<HeaderProps> = ({
                     )}
                     aria-label={rightDrawerOpen ? 'Close git sidebar' : 'Open git sidebar'}
                   >
-                    <RiLayoutRightLine className="h-5 w-5" />
+                    <Icon name="layout-right" className="h-5 w-5" />
                   </button>
                 </TooltipTrigger>
                 <TooltipContent>

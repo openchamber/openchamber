@@ -1,6 +1,10 @@
 export const formatResetTime = (timestamp) => {
   try {
     const resetDate = new Date(timestamp);
+    if (!Number.isFinite(resetDate.getTime())) {
+      return null;
+    }
+
     const now = new Date();
     const isToday = resetDate.toDateString() === now.toDateString();
     
@@ -23,18 +27,23 @@ export const formatResetTime = (timestamp) => {
   }
 };
 
+const hasResetTimestamp = (resetAt) => resetAt !== null && resetAt !== undefined && resetAt !== '';
+
 export const calculateResetAfterSeconds = (resetAt) => {
-  if (!resetAt) return null;
-  const delta = Math.floor((resetAt - Date.now()) / 1000);
+  if (!hasResetTimestamp(resetAt)) return null;
+  const resetAtTime = new Date(resetAt).getTime();
+  if (!Number.isFinite(resetAtTime)) return null;
+  const delta = Math.floor((resetAtTime - Date.now()) / 1000);
   return delta < 0 ? 0 : delta;
 };
 
 export const toUsageWindow = ({ usedPercent, windowSeconds, resetAt, valueLabel }) => {
   const resetAfterSeconds = calculateResetAfterSeconds(resetAt);
-  const resetFormatted = resetAt ? formatResetTime(resetAt) : null;
+  const resetFormatted = hasResetTimestamp(resetAt) ? formatResetTime(resetAt) : null;
+  const hasFiniteUsedPercent = typeof usedPercent === 'number' && Number.isFinite(usedPercent);
   return {
     usedPercent,
-    remainingPercent: usedPercent !== null ? Math.max(0, 100 - usedPercent) : null,
+    remainingPercent: hasFiniteUsedPercent ? Math.max(0, 100 - usedPercent) : null,
     windowSeconds: windowSeconds ?? null,
     resetAfterSeconds,
     resetAt,

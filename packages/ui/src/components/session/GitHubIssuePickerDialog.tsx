@@ -10,14 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { toast } from '@/components/ui';
-import {
-  RiCheckboxBlankLine,
-  RiCheckboxLine,
-  RiExternalLinkLine,
-  RiGithubLine,
-  RiLoader4Line,
-  RiSearchLine,
-} from '@remixicon/react';
+import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -499,7 +492,7 @@ export function GitHubIssuePickerDialog({
   const content = (
     <>
       <div className="relative mt-2">
-        <RiSearchLine className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Icon name="search" className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
           placeholder={t('session.githubIssuePicker.searchPlaceholder')}
           value={query}
@@ -519,7 +512,7 @@ export function GitHubIssuePickerDialog({
 
           {isLoading ? (
             <div className="text-center text-muted-foreground py-8 flex items-center justify-center gap-2">
-              <RiLoader4Line className="h-4 w-4 animate-spin" />
+              <Icon name="loader-4" className="h-4 w-4 animate-spin" />
               {t('session.githubIssuePicker.loading.issues')}
             </div>
           ) : null}
@@ -553,7 +546,7 @@ export function GitHubIssuePickerDialog({
               </p>
               <div className="flex-shrink-0 h-5 flex items-center mr-2">
                 {startingIssueNumber === directNumber ? (
-                  <RiLoader4Line className="h-4 w-4 animate-spin text-muted-foreground" />
+                  <Icon name="loader-4" className="h-4 w-4 animate-spin text-muted-foreground" />
                 ) : null}
               </div>
             </div>
@@ -588,7 +581,7 @@ export function GitHubIssuePickerDialog({
 
               <div className="flex-shrink-0 h-5 flex items-center mr-2">
                 {startingIssueNumber === issue.number ? (
-                  <RiLoader4Line className="h-4 w-4 animate-spin text-muted-foreground" />
+                  <Icon name="loader-4" className="h-4 w-4 animate-spin text-muted-foreground" />
                 ) : (
                   <a
                     href={issue.url}
@@ -601,7 +594,7 @@ export function GitHubIssuePickerDialog({
                     onClick={(e) => e.stopPropagation()}
                     aria-label={t('session.githubIssuePicker.actions.openInGitHubAria')}
                   >
-                    <RiExternalLinkLine className="h-4 w-4" />
+                    <Icon name="external-link" className="h-4 w-4" />
                   </a>
                 )}
               </div>
@@ -621,7 +614,7 @@ export function GitHubIssuePickerDialog({
               >
                 {isLoadingMore ? (
                   <span className="inline-flex items-center gap-2">
-                    <RiLoader4Line className="h-4 w-4 animate-spin" />
+                    <Icon name="loader-4" className="h-4 w-4 animate-spin" />
                     {t('session.githubIssuePicker.loading.more')}
                   </span>
                 ) : (
@@ -660,9 +653,9 @@ export function GitHubIssuePickerDialog({
                 className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
                 {createInWorktree ? (
-                  <RiCheckboxLine className="h-4 w-4 text-primary" />
+                  <Icon name="checkbox" className="h-4 w-4 text-primary" />
                 ) : (
-                  <RiCheckboxBlankLine className="h-4 w-4" />
+                  <Icon name="checkbox-blank" className="h-4 w-4" />
                 )}
               </button>
               <span className="typography-meta text-muted-foreground">{t('session.githubIssuePicker.actions.createInWorktree')}</span>
@@ -673,7 +666,7 @@ export function GitHubIssuePickerDialog({
               {repoUrl ? (
                 <Button variant="outline" size="sm" asChild>
                   <a href={repoUrl} target="_blank" rel="noopener noreferrer">
-                    <RiExternalLinkLine className="size-4" />
+                    <Icon name="external-link" className="size-4" />
                     {t('session.githubIssuePicker.actions.openRepo')}
                   </a>
                 </Button>
@@ -714,7 +707,7 @@ export function GitHubIssuePickerDialog({
       <DialogContent className="max-w-2xl max-h-[70vh] flex flex-col">
         <DialogHeader className="flex-shrink-0">
           <DialogTitle className="flex items-center gap-2">
-            <RiGithubLine className="h-5 w-5" />
+            <Icon name="github" className="h-5 w-5" />
             {title}
           </DialogTitle>
           <DialogDescription>

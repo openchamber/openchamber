@@ -5,7 +5,6 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
 import { useCommandsStore, type CommandConfig, type CommandScope } from '@/stores/useCommandsStore';
 import { useShallow } from 'zustand/react/shallow';
-import { RiTerminalBoxLine, RiUser3Line, RiFolderLine } from '@remixicon/react';
 import { ModelSelector } from '../agents/ModelSelector';
 import { AgentSelector } from './AgentSelector';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
@@ -16,6 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
 
@@ -180,7 +180,7 @@ export const CommandsPage: React.FC = () => {
     return (
       <div className="flex h-full items-center justify-center">
         <div className="text-center text-muted-foreground">
-          <RiTerminalBoxLine className="mx-auto mb-3 h-12 w-12 opacity-50" />
+          <Icon name="terminal-box" className="mx-auto mb-3 h-12 w-12 opacity-50" />
           <p className="typography-body">{t('settings.commands.page.empty.title')}</p>
           <p className="typography-meta mt-1 opacity-75">{t('settings.commands.page.empty.description')}</p>
         </div>
@@ -236,13 +236,13 @@ export const CommandsPage: React.FC = () => {
                     <SelectContent align="end">
                       <SelectItem value="user">
                         <div className="flex items-center gap-2">
-                          <RiUser3Line className="h-3.5 w-3.5" />
+                          <Icon name="user-3" className="h-3.5 w-3.5" />
                           <span>{t('settings.common.scope.global')}</span>
                         </div>
                       </SelectItem>
                       <SelectItem value="project">
                         <div className="flex items-center gap-2">
-                          <RiFolderLine className="h-3.5 w-3.5" />
+                          <Icon name="folder" className="h-3.5 w-3.5" />
                           <span>{t('settings.common.scope.project')}</span>
                         </div>
                       </SelectItem>

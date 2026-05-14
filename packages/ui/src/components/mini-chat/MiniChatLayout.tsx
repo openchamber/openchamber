@@ -1,5 +1,4 @@
 import React from 'react';
-import { RiExternalLinkLine, RiGitBranchLine, RiPushpin2Fill, RiPushpin2Line } from '@remixicon/react';
 import { Button } from '@/components/ui/button';
 import { ChatContainer } from '@/components/chat/ChatContainer';
 import { ChatSurfaceProvider } from '@/components/chat/ChatSurfaceContext';
@@ -15,6 +14,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useGitBranchLabel, useGitStore } from '@/stores/useGitStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { resolveSessionDiffStats } from '@/components/session/sidebar/utils';
+import { Icon } from "@/components/icon/Icon";
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
 
@@ -266,7 +266,7 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
           <span className="truncate">{projectLabel}</span>
           {branchLabel ? (
             <span className="inline-flex min-w-0 items-center gap-0.5">
-              <RiGitBranchLine className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
+              <Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
               <span className="truncate">{branchLabel}</span>
             </span>
           ) : null}
@@ -302,7 +302,7 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
         title={pinned ? t('miniChat.actions.unpin') : t('miniChat.actions.pin')}
         style={noDragRegionStyle}
       >
-        {pinned ? <RiPushpin2Fill className="h-4 w-4" /> : <RiPushpin2Line className="h-4 w-4" />}
+        {pinned ? <Icon name="pushpin-2-fill" className="h-4 w-4" /> : <Icon name="pushpin-2" className="h-4 w-4" />}
       </Button>
       <Button
         type="button"
@@ -313,7 +313,7 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
         title={t('miniChat.actions.openMain')}
         style={noDragRegionStyle}
       >
-        <RiExternalLinkLine className="h-4 w-4" />
+        <Icon name="external-link" className="h-4 w-4" />
       </Button>
     </header>
   );

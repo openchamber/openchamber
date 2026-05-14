@@ -9,16 +9,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from '@/components/ui';
-import {
-  RiCheckLine,
-  RiCloseLine,
-  RiDeleteBinLine,
-  RiGitBranchLine,
-  RiLoader4Line,
-  RiPencilLine,
-  RiSearchLine,
-  RiSplitCellsHorizontal,
-} from '@remixicon/react';
+import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
 import { deleteGitBranch, getGitBranches, git, renameBranch } from '@/lib/gitApi';
 import type { GitBranch, GitWorktreeInfo } from '@/lib/api/types';
@@ -304,7 +295,7 @@ export function BranchPickerDialog({ open, onOpenChange, project }: BranchPicker
       <DialogContent className="max-w-2xl max-h-[70vh] flex flex-col overflow-hidden gap-3">
         <DialogHeader className="flex-shrink-0">
           <DialogTitle className="flex items-center gap-2">
-            <RiGitBranchLine className="h-5 w-5" />
+            <Icon name="git-branch" className="h-5 w-5" />
             {t('branchPickerDialog.title')}
           </DialogTitle>
           <DialogDescription>
@@ -313,7 +304,7 @@ export function BranchPickerDialog({ open, onOpenChange, project }: BranchPicker
         </DialogHeader>
 
         <div className="relative flex-shrink-0">
-          <RiSearchLine className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Icon name="search" className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder={t('branchPickerDialog.search.placeholder')}
             value={searchQuery}
@@ -371,7 +362,7 @@ export function BranchPickerDialog({ open, onOpenChange, project }: BranchPicker
                     key={branchName}
                     className="flex items-center gap-2 px-2.5 py-1.5 hover:bg-interactive-hover/30 rounded-md overflow-hidden"
                   >
-                    <RiGitBranchLine className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                    <Icon name="git-branch" className="h-4 w-4 text-muted-foreground flex-shrink-0" />
 
                     <div className="flex-1 min-w-0 overflow-hidden">
                       <div className="flex items-center gap-1.5 min-w-0">
@@ -445,9 +436,9 @@ export function BranchPickerDialog({ open, onOpenChange, project }: BranchPicker
                               aria-label={t('branchPickerDialog.actions.createWorktreeAria')}
                             >
                               {isCreatingWorktree ? (
-                                <RiLoader4Line className="h-4 w-4 animate-spin" />
+                                <Icon name="loader-4" className="h-4 w-4 animate-spin" />
                               ) : (
-                                <RiSplitCellsHorizontal className="h-4 w-4" />
+                                <Icon name="split-cells-horizontal" className="h-4 w-4" />
                               )}
                             </button>
                           </TooltipTrigger>
@@ -465,7 +456,7 @@ export function BranchPickerDialog({ open, onOpenChange, project }: BranchPicker
                               className="inline-flex h-7 w-7 items-center justify-center rounded-md hover:bg-interactive-hover/40 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
                               aria-label={t('branchPickerDialog.actions.renameAria')}
                             >
-                              <RiPencilLine className="h-4 w-4" />
+                              <Icon name="pencil" className="h-4 w-4" />
                             </button>
                           </TooltipTrigger>
                           <TooltipContent side="left">
@@ -489,9 +480,9 @@ export function BranchPickerDialog({ open, onOpenChange, project }: BranchPicker
                               aria-label={hasAttachedWorktree ? t('branchPickerDialog.actions.deleteWorktreeAria') : t('branchPickerDialog.actions.deleteAria')}
                             >
                               {isDeleting ? (
-                                <RiLoader4Line className="h-4 w-4 animate-spin" />
+                                <Icon name="loader-4" className="h-4 w-4 animate-spin" />
                               ) : (
-                                <RiDeleteBinLine className="h-4 w-4" />
+                                <Icon name="delete-bin" className="h-4 w-4" />
                               )}
                             </button>
                           </TooltipTrigger>
@@ -520,9 +511,9 @@ export function BranchPickerDialog({ open, onOpenChange, project }: BranchPicker
                           aria-label={t('branchPickerDialog.actions.confirmRenameAria')}
                         >
                           {isRenaming ? (
-                            <RiLoader4Line className="h-4 w-4 animate-spin" />
+                            <Icon name="loader-4" className="h-4 w-4 animate-spin" />
                           ) : (
-                            <RiCheckLine className="h-4 w-4" />
+                            <Icon name="check" className="h-4 w-4" />
                           )}
                         </button>
                         <button
@@ -531,7 +522,7 @@ export function BranchPickerDialog({ open, onOpenChange, project }: BranchPicker
                           className="inline-flex h-7 w-7 items-center justify-center rounded-md hover:bg-interactive-hover/40 text-muted-foreground hover:text-foreground transition-colors"
                           aria-label={t('branchPickerDialog.actions.cancelRenameAria')}
                         >
-                          <RiCloseLine className="h-4 w-4" />
+                          <Icon name="close" className="h-4 w-4" />
                         </button>
                       </div>
                     ) : null}
@@ -557,9 +548,9 @@ export function BranchPickerDialog({ open, onOpenChange, project }: BranchPicker
                           aria-label={t('branchPickerDialog.actions.confirmDeleteAria')}
                         >
                           {isDeleting ? (
-                            <RiLoader4Line className="h-4 w-4 animate-spin" />
+                            <Icon name="loader-4" className="h-4 w-4 animate-spin" />
                           ) : (
-                            <RiCheckLine className="h-4 w-4" />
+                            <Icon name="check" className="h-4 w-4" />
                           )}
                         </button>
                         <button
@@ -568,7 +559,7 @@ export function BranchPickerDialog({ open, onOpenChange, project }: BranchPicker
                           className="inline-flex h-7 w-7 items-center justify-center rounded-md hover:bg-interactive-hover/40 text-muted-foreground hover:text-foreground transition-colors"
                           aria-label={t('branchPickerDialog.actions.cancelDeleteAria')}
                         >
-                          <RiCloseLine className="h-4 w-4" />
+                          <Icon name="close" className="h-4 w-4" />
                         </button>
                       </div>
                     ) : null}

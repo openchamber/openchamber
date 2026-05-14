@@ -19,13 +19,6 @@ import {
 } from '@/stores/useGitStore';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
-import {
-  RiGitBranchLine,
-  RiGitMergeLine,
-  RiGitCommitLine,
-  RiGitPullRequestLine,
-  RiLoader4Line,
-} from '@remixicon/react';
 import { toast } from '@/components/ui';
 import {
   Dialog,
@@ -43,6 +36,7 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command';
+import { Icon } from "@/components/icon/Icon";
 
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useUIStore } from '@/stores/useUIStore';
@@ -83,7 +77,6 @@ const GIT_ACTION_TAB_STORAGE_KEY = 'oc.git.actionTab';
 
 const isActionTab = (value: unknown): value is ActionTab =>
   value === 'commit' || value === 'branch' || value === 'pr';
-
 
 type GitViewSnapshot = {
   directory?: string;
@@ -521,9 +514,9 @@ export const GitView: React.FC = () => {
   const [isHistoryDialogOpen, setIsHistoryDialogOpen] = React.useState(false);
 
   const actionTabItems = React.useMemo(() => [
-    { id: 'commit', label: t('gitView.tabs.commit'), icon: <RiGitCommitLine className="h-3.5 w-3.5" /> },
-    { id: 'branch', label: t('gitView.tabs.update'), icon: <RiGitMergeLine className="h-3.5 w-3.5" /> },
-    { id: 'pr', label: t('gitView.tabs.pr'), icon: <RiGitPullRequestLine className="h-3.5 w-3.5" /> },
+    { id: 'commit', label: t('gitView.tabs.commit'), icon: <Icon name="git-commit" className="h-3.5 w-3.5" /> },
+    { id: 'branch', label: t('gitView.tabs.update'), icon: <Icon name="git-merge" className="h-3.5 w-3.5" /> },
+    { id: 'pr', label: t('gitView.tabs.pr'), icon: <Icon name="git-pull-request" className="h-3.5 w-3.5" /> },
   ], [t]);
   const [actionTab, setActionTab] = React.useState<ActionTab>(() => {
     if (typeof window === 'undefined') {
@@ -883,7 +876,6 @@ export const GitView: React.FC = () => {
       window.clearTimeout(timeoutId);
     };
   }, [changeEntries, currentDirectory, git, prefetchDiffs, selectedPaths, visibleChangePaths]);
-
 
   React.useEffect(() => {
     if (!status || changeEntries.length === 0) {
@@ -2101,7 +2093,7 @@ export const GitView: React.FC = () => {
     return (
       <div className="flex h-full items-center justify-center">
         <div className="flex items-center gap-2 text-muted-foreground">
-          <RiLoader4Line className="size-4 animate-spin" />
+          <Icon name="loader-4" className="size-4 animate-spin" />
           <span className="typography-ui-label">{t('gitView.loading.checkingRepository')}</span>
         </div>
       </div>
@@ -2112,7 +2104,7 @@ export const GitView: React.FC = () => {
     if (shouldHideNotGitState) {
       return (
         <div className="flex h-full flex-col items-center justify-center px-4 text-center">
-          <RiLoader4Line className="mb-3 size-6 animate-spin text-muted-foreground" />
+          <Icon name="loader-4" className="mb-3 size-6 animate-spin text-muted-foreground" />
           <p className="typography-ui-label font-semibold text-foreground">
             {t('gitView.empty.worktreeSetupInProgress')}
           </p>
@@ -2125,7 +2117,7 @@ export const GitView: React.FC = () => {
 
     return (
       <div className="flex h-full flex-col items-center justify-center px-4 text-center">
-        <RiGitBranchLine className="mb-3 size-6 text-muted-foreground" />
+        <Icon name="git-branch" className="mb-3 size-6 text-muted-foreground" />
         <p className="typography-ui-label font-semibold text-foreground">
           {t('gitView.empty.notGitRepository')}
         </p>

@@ -1,7 +1,7 @@
 import React from 'react';
-import { RiArrowDownSLine, RiArrowUpSLine } from '@remixicon/react';
 
 import { Button } from '@/components/ui/button';
+import { Icon } from "@/components/icon/Icon";
 import { JsonTreeViewer } from './JsonTreeViewer';
 import { useI18n } from '@/lib/i18n';
 
@@ -70,7 +70,7 @@ const JsonTreeView = React.memo(function JsonTreeView({
           onClick={handleExpandAll}
           className="gap-1 text-xs text-muted-foreground"
         >
-          <RiArrowDownSLine className="h-3 w-3" />
+          <Icon name="arrow-down-s" className="h-3 w-3" />
           {t('jsonTreeView.actions.expandAll')}
         </Button>
         <Button
@@ -79,7 +79,7 @@ const JsonTreeView = React.memo(function JsonTreeView({
           onClick={handleCollapseAll}
           className="gap-1 text-xs text-muted-foreground"
         >
-          <RiArrowUpSLine className="h-3 w-3" />
+          <Icon name="arrow-up-s" className="h-3 w-3" />
           {t('jsonTreeView.actions.collapseAll')}
         </Button>
       </div>

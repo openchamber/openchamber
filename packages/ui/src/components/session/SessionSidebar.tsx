@@ -1,6 +1,5 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
-import { RiLayoutLeftLine } from '@remixicon/react';
 import { toast } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
@@ -38,6 +37,7 @@ import { useStickyProjectHeaders } from './sidebar/hooks/useStickyProjectHeaders
 import { getGitHubPrStatusKey, usePrVisualSummaryByKeys, useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
 import { ProjectEditDialog } from '@/components/layout/ProjectEditDialog';
 import { UpdateDialog } from '@/components/ui/UpdateDialog';
+import { Icon } from "@/components/icon/Icon";
 import { SessionGroupSection } from './sidebar/SessionGroupSection';
 import { SidebarHeader } from './sidebar/SidebarHeader';
 import { SidebarActivitySections } from './sidebar/SidebarActivitySections';
@@ -1648,7 +1648,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                 className={desktopSidebarToggleButtonClass}
                 aria-label={t('sessions.sidebar.header.actions.closeSessions')}
               >
-                <RiLayoutLeftLine className="h-[18px] w-[18px]" />
+                <Icon name="layout-left" className="h-[18px] w-[18px]" />
               </button>
             </TooltipTrigger>
             <TooltipContent>

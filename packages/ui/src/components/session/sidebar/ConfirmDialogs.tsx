@@ -1,6 +1,6 @@
 import React from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { RiCheckboxBlankLine, RiCheckboxLine } from '@remixicon/react';
+import { Icon } from "@/components/icon/Icon";
 import type { Session } from '@opencode-ai/sdk/v2';
 import { useI18n } from '@/lib/i18n';
 
@@ -65,7 +65,7 @@ export function SessionDeleteConfirmDialog(props: {
             className="inline-flex items-center gap-1.5 typography-ui-label text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
             aria-pressed={!showDeletionDialog}
           >
-            {!showDeletionDialog ? <RiCheckboxLine className="h-4 w-4 text-primary" /> : <RiCheckboxBlankLine className="h-4 w-4" />}
+            {!showDeletionDialog ? <Icon name="checkbox" className="h-4 w-4 text-primary" /> : <Icon name="checkbox-blank" className="h-4 w-4" />}
             {t('sessions.sidebar.dialogs.neverAsk')}
           </button>
           <div className="flex items-center gap-2">
@@ -135,7 +135,7 @@ export function BulkSessionDeleteConfirmDialog(props: {
             className="inline-flex items-center gap-1.5 typography-ui-label text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
             aria-pressed={!showDeletionDialog}
           >
-            {!showDeletionDialog ? <RiCheckboxLine className="h-4 w-4 text-primary" /> : <RiCheckboxBlankLine className="h-4 w-4" />}
+            {!showDeletionDialog ? <Icon name="checkbox" className="h-4 w-4 text-primary" /> : <Icon name="checkbox-blank" className="h-4 w-4" />}
             {t('sessions.sidebar.dialogs.neverAsk')}
           </button>
           <div className="flex items-center gap-2">

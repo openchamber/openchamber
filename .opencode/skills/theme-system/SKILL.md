@@ -1,6 +1,6 @@
 ---
 name: theme-system
-description: Use when creating or modifying UI components, styling, or visual elements in OpenChamber. All UI colors must use theme tokens - never hardcoded values or Tailwind color classes.
+description: Use when creating or modifying UI components, styling, visual elements, or icons in OpenChamber. All UI colors must use theme tokens - never hardcoded values or Tailwind color classes. All icons must use the shared Icon component from the SVG sprite system - never import from @remixicon/react directly.
 license: MIT
 compatibility: opencode
 ---
@@ -15,6 +15,7 @@ OpenChamber uses a JSON-based theme system. Themes are defined in `packages/ui/s
 
 - Creating or modifying UI components
 - Working with colors, backgrounds, borders, or text
+- **Working with icons — adding, changing, or creating icon usages**
 
 ## Quick Decision Tree
 
@@ -188,12 +189,110 @@ const { currentTheme } = useThemeSystem();
 </div>
 ```
 
+## Icon System (MANDATORY)
+
+OpenChamber uses an SVG sprite-based icon system. **Never import from `@remixicon/react`.** Always use the shared `Icon` component.
+
+### Import
+
+```tsx
+import { Icon } from "@/components/icon/Icon";
+import type { IconName } from "@/components/icon/icons";
+```
+
+### Usage
+
+```tsx
+<Icon name="arrow-down-s" className="h-4 w-4" />
+<Icon name="loader-4" className="size-4 animate-spin" />
+```
+
+### Naming Convention
+
+Convert Remixicon component names to kebab-case sprite names:
+
+1. Strip `Ri` prefix
+2. Strip `Line` suffix
+3. Convert PascalCase to kebab-case
+4. Lowercase everything
+
+| Remixicon | Sprite name |
+|-----------|-------------|
+| `RiArrowDownSLine` | `arrow-down-s` |
+| `RiCheckLine` | `check` |
+| `RiLoader4Line` | `loader-4` |
+| `RiGithubFill` | `github-fill` |
+| `RiBrainAi3Line` | `brain-ai-3` |
+
+### Fill Variants
+
+For filled (solid) icon variants, append `-fill` explicitly. The generator tries `Line` suffix first, then `Fill`, then bare name.
+
+```tsx
+<Icon name="github-fill" />   {/* RiGithubFill */}
+<Icon name="github" />        {/* RiGithubLine (default) */}
+```
+
+### Sizing
+
+The `Icon` component has **no `size` prop**. Use Tailwind classes:
+
+```tsx
+<Icon name="check" className="h-4 w-4" />     {/* 16px - most common */}
+<Icon name="check" className="size-5" />        {/* 20px */}
+<Icon name="check" className="h-3 w-3" />       {/* 12px */}
+```
+
+### Adding a New Icon (Workflow)
+
+**In order:**
+
+1. Use the icon in code with the correct kebab-case name:
+   ```tsx
+   <Icon name="new-icon-name" className="h-4 w-4" />
+   ```
+
+2. If used as a value (not JSX), use `IconName` type:
+   ```tsx
+   const config = { icon: "new-icon-name" as const };
+   ```
+
+3. Regenerate the sprite:
+   ```bash
+   bun run icons:generate
+   ```
+
+4. The script scans all source files, reverse-maps to Remixicon names, extracts SVG paths, and regenerates `sprite.ts`.
+
+5. Verify: `bun run type-check`
+
+**Do NOT manually edit `sprite.ts`.** Always regenerate.
+
+### Type Safety for Icon Values
+
+When icons are stored in objects/arrays, change the type from `ComponentType` to `IconName` and render via `<Icon name={value} />`:
+
+```tsx
+// ❌ Old: component reference
+const items = [{ icon: RiStackLine }];
+return <items[0].icon className="h-4 w-4" />;
+
+// ✅ New: IconName string
+import type { IconName } from "@/components/icon/icons";
+const items: { icon: IconName }[] = [{ icon: "stack" }];
+return <Icon name={items[0].icon} className="h-4 w-4" />;
+```
+
 ## Wrong vs Right
 
 ### Wrong
 
 ```tsx
-// Hardcoded colors
+// ❌ Importing from @remixicon/react
+import { RiArrowDownSLine } from "@remixicon/react";
+<RiArrowDownSLine className="h-4 w-4" />
+
+// ❌ Hardcoded colors
 <div style={{ backgroundColor: '#F2F0E5' }}>
 <button className="bg-blue-500">
 
@@ -213,6 +312,10 @@ const { currentTheme } = useThemeSystem();
 ### Right
 
 ```tsx
+// ✅ Using the Icon component
+import { Icon } from "@/components/icon/Icon";
+<Icon name="arrow-down-s" className="h-4 w-4" />
+
 // Theme tokens
 <div style={{ backgroundColor: currentTheme.colors.surface.elevated }}>
 <button style={{ backgroundColor: currentTheme.colors.primary.base }}>
@@ -240,3 +343,8 @@ const { currentTheme } = useThemeSystem();
 - Theme hook: `packages/ui/src/contexts/useThemeSystem.ts`
 - CSS generator: `packages/ui/src/lib/theme/cssGenerator.ts`
 - Built-in themes: `packages/ui/src/lib/theme/themes/`
+- Icon component: `packages/ui/src/components/icon/Icon.tsx`
+- Icon sprite data: `packages/ui/src/components/icon/sprite.ts` (auto-generated)
+- Icon types: `packages/ui/src/components/icon/icons.ts`
+- Icon sprite generator: `scripts/generate-icon-sprite.mjs`
+- Icon docs: `packages/ui/src/components/icon/README.md`

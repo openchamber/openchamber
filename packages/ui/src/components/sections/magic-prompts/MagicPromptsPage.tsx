@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { RiInformationLine } from '@remixicon/react';
+import { Icon } from "@/components/icon/Icon";
 import {
   fetchMagicPromptOverrides,
   getDefaultMagicPromptTemplate,
@@ -269,7 +269,7 @@ export const MagicPromptsPage: React.FC = () => {
               <h2 className="typography-ui-header font-semibold text-foreground">{tUnsafe(pageConfig.titleKey)}</h2>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                  <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                 </TooltipTrigger>
                 <TooltipContent sideOffset={8} className="max-w-xs">
                   {tUnsafe(pageConfig.descriptionKey)}
@@ -306,7 +306,7 @@ export const MagicPromptsPage: React.FC = () => {
                   <h3 className="typography-ui-label text-foreground">{tUnsafe(block.titleKey)}</h3>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                      <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                     </TooltipTrigger>
                     <TooltipContent sideOffset={8} className="max-w-xs">
                       {definition.description}

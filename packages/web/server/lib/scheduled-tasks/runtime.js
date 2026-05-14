@@ -272,6 +272,10 @@ export const createScheduledTasksRuntime = (deps) => {
     const taskKey = buildTaskKey(projectID, taskID);
     clearTimerForKey(taskKey);
 
+    if (!started) {
+      return;
+    }
+
     if (!Number.isFinite(nextRunAt) || nextRunAt <= 0) {
       return;
     }

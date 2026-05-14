@@ -20,6 +20,7 @@ import { opencodeClient } from "@/lib/opencode/client"
 import { runtimeFetch } from "@/lib/runtime-fetch"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { useProjectsStore } from "@/stores/useProjectsStore"
+import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from "@/stores/useGlobalSessionsStore"
 import { useDirectoryStore } from "@/stores/useDirectoryStore"
 import { useSessionFoldersStore } from "@/stores/useSessionFoldersStore"
 import { useCommandsStore } from "@/stores/useCommandsStore"
@@ -73,6 +74,7 @@ function routeMessage(params: {
   providerID: string
   modelID: string
   agent?: string
+  agentMentionName?: string
   variant?: string
   inputMode?: "normal" | "shell"
   files?: Array<{ type: "file"; mime: string; url: string; filename: string }>
@@ -139,6 +141,7 @@ function routeMessage(params: {
       modelID: params.modelID,
       text: params.content,
       agent: params.agent,
+      agentMentions: params.agentMentionName ? [{ name: params.agentMentionName }] : undefined,
       variant: params.variant,
       files: params.files,
       additionalParts: params.additionalParts,
@@ -874,6 +877,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         providerID,
         modelID,
         agent: effectiveDraftAgent,
+        agentMentionName,
         variant,
         inputMode,
         files,
@@ -949,6 +953,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       providerID,
       modelID,
       agent: effectiveAgent,
+      agentMentionName,
       variant,
       inputMode,
       files,
@@ -1198,8 +1203,12 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     if (attachmentDirectory) return attachmentDirectory
     const sessions = getAllSyncSessions()
     const session = sessions.find((s) => s.id === sessionId)
-    if (!session) return null
-    return resolveDirectoryKey(session)
+    if (session) return resolveDirectoryKey(session)
+    const globalStore = useGlobalSessionsStore.getState()
+    const globalSession = [...globalStore.activeSessions, ...globalStore.archivedSessions]
+      .find((s) => s.id === sessionId)
+    if (globalSession) return resolveGlobalSessionDirectory(globalSession)
+    return null
   },
 
   getLastUserChoice: (sessionId) => {

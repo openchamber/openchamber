@@ -8,7 +8,6 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
-import { RiAddLine, RiArrowDownSLine, RiArrowRightSLine, RiCheckLine, RiCloseLine, RiFolder6Line, RiPushpin2Line, RiPushpinLine } from '@remixicon/react';
 import { cn, formatPathForDisplay } from '@/lib/utils';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useDeviceInfo } from '@/lib/device';
@@ -16,6 +15,7 @@ import type { DesktopSettings } from '@/lib/desktop';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useFileSystemAccess } from '@/hooks/useFileSystemAccess';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
@@ -696,9 +696,9 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
             className={cn("hover:bg-interactive-hover rounded", isMobile ? "p-0.5" : "p-0.5")}
           >
             {isExpanded ? (
-              <RiArrowDownSLine className={isMobile ? "h-3.5 w-3.5" : "h-3 w-3"} />
+              <Icon name="arrow-down-s" className={isMobile ? "h-3.5 w-3.5" : "h-3 w-3"} />
             ) : (
-              <RiArrowRightSLine className={isMobile ? "h-3.5 w-3.5" : "h-3 w-3"} />
+              <Icon name="arrow-right-s" className={isMobile ? "h-3.5 w-3.5" : "h-3 w-3"} />
             )}
           </button>
         )}
@@ -729,7 +729,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
             isInlineVariant ? (isSelected ? 'text-primary' : 'text-foreground') : 'text-foreground'
           )}
         >
-          <RiFolder6Line
+          <Icon name="folder-6"
             className={cn(
               'text-muted-foreground flex-shrink-0',
               isMobile ? 'h-4 w-4' : 'h-3.5 w-3.5',
@@ -761,7 +761,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
           )}
           title={t('directoryTree.actions.createNewDirectory')}
         >
-          <RiAddLine className={cn("text-muted-foreground", isMobile ? "h-3.5 w-3.5" : "h-3 w-3")} />
+          <Icon name="add" className={cn("text-muted-foreground", isMobile ? "h-3.5 w-3.5" : "h-3 w-3")} />
         </button>
 
         <button
@@ -777,9 +777,9 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
           title={isPinned ? t('directoryTree.actions.unpinDirectory') : t('directoryTree.actions.pinDirectory')}
         >
           {isPinned ? (
-            <RiPushpin2Line className={cn("text-primary", isMobile ? "h-3.5 w-3.5" : "h-3 w-3")} />
+            <Icon name="pushpin-2" className={cn("text-primary", isMobile ? "h-3.5 w-3.5" : "h-3 w-3")} />
           ) : (
-            <RiPushpinLine className={cn("text-muted-foreground", isMobile ? "h-3.5 w-3.5" : "h-3 w-3")} />
+            <Icon name="pushpin" className={cn("text-muted-foreground", isMobile ? "h-3.5 w-3.5" : "h-3 w-3")} />
           )}
         </button>
       </>
@@ -810,7 +810,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
                   style={{ paddingLeft: `${(level + 1) * 14 + 6}px` }}
                 >
                   <div className="w-4" />
-                  <RiFolder6Line className="h-3.5 w-3.5 text-muted-foreground" />
+                  <Icon name="folder-6" className="h-3.5 w-3.5 text-muted-foreground" />
                   <Input
                     ref={inputRef}
                     value={newDirName}
@@ -839,7 +839,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
                     className="p-1 hover:bg-interactive-hover rounded"
                     title={t('directoryTree.actions.createDirectory')}
                   >
-                    <RiCheckLine className="h-3 w-3 text-green-600" />
+                    <Icon name="check" className="h-3 w-3 text-green-600" />
                   </button>
                   <button
                     onClick={(e) => {
@@ -850,7 +850,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
                     className="p-1 hover:bg-interactive-hover rounded"
                     title={t('directoryTree.actions.cancel')}
                   >
-                    <RiCloseLine className="h-3 w-3 text-muted-foreground" />
+                    <Icon name="close" className="h-3 w-3 text-muted-foreground" />
                   </button>
                 </div>
               )}
@@ -882,9 +882,9 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
               className="p-0.5 hover:bg-interactive-hover rounded"
             >
               {isExpanded ? (
-                <RiArrowDownSLine className="h-3 w-3" />
+                <Icon name="arrow-down-s" className="h-3 w-3" />
               ) : (
-                <RiArrowRightSLine className="h-3 w-3" />
+                <Icon name="arrow-right-s" className="h-3 w-3" />
               )}
             </button>
           )}
@@ -899,7 +899,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
                 style={{ paddingLeft: `${(level + 1) * 12 + 8}px` }}
               >
                 <div className="w-4" />
-                <RiFolder6Line className="h-3.5 w-3.5 text-muted-foreground" />
+                <Icon name="folder-6" className="h-3.5 w-3.5 text-muted-foreground" />
                 <Input
                   ref={inputRef}
                   value={newDirName}
@@ -928,7 +928,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
                   className="p-1 hover:bg-interactive-hover rounded"
                   title={t('directoryTree.actions.createDirectory')}
                 >
-                  <RiCheckLine className="h-3 w-3 text-green-600" />
+                  <Icon name="check" className="h-3 w-3 text-green-600" />
                 </button>
                 <button
                   onClick={(e) => {
@@ -939,7 +939,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
                   className="p-1 hover:bg-interactive-hover rounded"
                   title={t('directoryTree.actions.cancel')}
                 >
-                  <RiCloseLine className="h-3 w-3 text-muted-foreground" />
+                  <Icon name="close" className="h-3 w-3 text-muted-foreground" />
                 </button>
               </div>
             )}
@@ -969,9 +969,9 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
             className={cn("hover:bg-interactive-hover rounded", isMobile ? "p-0.5" : "p-0.5")}
           >
             {isExpanded ? (
-              <RiArrowDownSLine className={isMobile ? "h-3.5 w-3.5" : "h-3 w-3"} />
+              <Icon name="arrow-down-s" className={isMobile ? "h-3.5 w-3.5" : "h-3 w-3"} />
             ) : (
-              <RiArrowRightSLine className={isMobile ? "h-3.5 w-3.5" : "h-3 w-3"} />
+              <Icon name="arrow-right-s" className={isMobile ? "h-3.5 w-3.5" : "h-3 w-3"} />
             )}
           </button>
         )}
@@ -997,7 +997,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
             isInlineVariant ? (isSelected ? 'text-primary' : 'text-foreground') : 'text-foreground'
           )}
         >
-          <RiFolder6Line
+          <Icon name="folder-6"
             className={cn(
               'text-muted-foreground flex-shrink-0',
               isMobile ? 'h-4 w-4' : 'h-3.5 w-3.5',
@@ -1028,9 +1028,9 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
           title={isPinned ? t('directoryTree.actions.unpinDirectory') : t('directoryTree.actions.pinDirectory')}
         >
           {isPinned ? (
-            <RiPushpin2Line className={cn("text-primary", isMobile ? "h-3.5 w-3.5" : "h-3 w-3")} />
+            <Icon name="pushpin-2" className={cn("text-primary", isMobile ? "h-3.5 w-3.5" : "h-3 w-3")} />
           ) : (
-            <RiPushpinLine className={cn("text-muted-foreground", isMobile ? "h-3.5 w-3.5" : "h-3 w-3")} />
+            <Icon name="pushpin" className={cn("text-muted-foreground", isMobile ? "h-3.5 w-3.5" : "h-3 w-3")} />
           )}
         </button>
       </>
@@ -1106,9 +1106,9 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
               className={cn("hover:bg-interactive-hover rounded flex-shrink-0", isMobile ? "p-0.5" : "p-0.5")}
             >
               {isExpanded ? (
-                <RiArrowDownSLine className={isMobile ? "h-3.5 w-3.5" : "h-3 w-3"} />
+                <Icon name="arrow-down-s" className={isMobile ? "h-3.5 w-3.5" : "h-3 w-3"} />
               ) : (
-                <RiArrowRightSLine className={isMobile ? "h-3.5 w-3.5" : "h-3 w-3"} />
+                <Icon name="arrow-right-s" className={isMobile ? "h-3.5 w-3.5" : "h-3 w-3"} />
               )}
             </button>
 
@@ -1125,7 +1125,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
                 isSelected ? 'text-primary' : 'text-foreground'
               )}
             >
-              <RiFolder6Line
+              <Icon name="folder-6"
                 className={cn(
                   'flex-shrink-0',
                   isMobile ? 'h-4 w-4' : 'h-3.5 w-3.5',
@@ -1152,7 +1152,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
               )}
               title={t('directoryTree.actions.unpinDirectory')}
             >
-              <RiPushpin2Line className={cn("text-primary", isMobile ? "h-3.5 w-3.5" : "h-3.5 w-3.5")} />
+              <Icon name="pushpin-2" className={cn("text-primary", isMobile ? "h-3.5 w-3.5" : "h-3.5 w-3.5")} />
             </button>
           </div>
           {isExpanded && children && children.map((child) => renderPinnedTreeItem(child, 1))}
@@ -1184,12 +1184,12 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
             className="p-0.5 hover:bg-interactive-hover rounded flex-shrink-0"
           >
             {isExpanded ? (
-              <RiArrowDownSLine className="h-3 w-3" />
+              <Icon name="arrow-down-s" className="h-3 w-3" />
             ) : (
-              <RiArrowRightSLine className="h-3 w-3" />
+              <Icon name="arrow-right-s" className="h-3 w-3" />
             )}
           </button>
-          <RiFolder6Line className="h-3.5 w-3.5 text-muted-foreground mt-0.5 flex-shrink-0" />
+          <Icon name="folder-6" className="h-3.5 w-3.5 text-muted-foreground mt-0.5 flex-shrink-0" />
           <div className="flex-1 min-w-0">
             <div className="typography-ui-label font-medium">{name}</div>
             <div className="typography-meta text-muted-foreground">
@@ -1208,7 +1208,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
             )}
             title={t('directoryTree.actions.unpinDirectory')}
           >
-            <RiPushpin2Line className="h-3 w-3 text-primary" />
+            <Icon name="pushpin-2" className="h-3 w-3 text-primary" />
           </button>
         </DropdownMenuItem>
         {isExpanded && children && (
@@ -1239,9 +1239,9 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
                 )}
               >
                 {isPinnedExpanded ? (
-                  <RiArrowDownSLine className={isMobile ? "h-3.5 w-3.5" : "h-3 w-3"} />
+                  <Icon name="arrow-down-s" className={isMobile ? "h-3.5 w-3.5" : "h-3 w-3"} />
                 ) : (
-                  <RiArrowRightSLine className={isMobile ? "h-3.5 w-3.5" : "h-3 w-3"} />
+                  <Icon name="arrow-right-s" className={isMobile ? "h-3.5 w-3.5" : "h-3 w-3"} />
                 )}
                 <span>{t('directoryTree.section.pinned')}</span>
                 <span className="ml-auto typography-micro text-muted-foreground/60 normal-case tracking-normal">
@@ -1303,12 +1303,12 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
           aria-label={t('directoryTree.actions.selectWorkingDirectoryAria')}
         >
           <span className="flex items-center gap-1.5 min-w-0 flex-1">
-            <RiFolder6Line className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
+            <Icon name="folder-6" className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
             <span className="truncate" title={currentPath}>
               {formatPathForDisplay(currentPath, homeDirectory)}
             </span>
           </span>
-          <RiArrowDownSLine className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
+          <Icon name="arrow-down-s" className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-[350px]">

@@ -11,11 +11,11 @@ import { Input } from '@/components/ui/input';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDeviceInfo } from '@/lib/device';
-import { RiArrowDownSLine, RiArrowRightSLine, RiCheckLine, RiCloseLine, RiLoader4Line, RiPencilAiLine, RiSearchLine, RiStarFill, RiStarLine, RiTimeLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { Icon } from "@/components/icon/Icon";
 import { useModelLists } from '@/hooks/useModelLists';
 import type { ModelMetadata } from '@/types';
 import { useI18n } from '@/lib/i18n';
@@ -204,7 +204,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0">
                     {isSelected && (
-                        <RiCheckLine className="h-4 w-4 text-primary" />
+                        <Icon name="check" className="h-4 w-4 text-primary" />
                     )}
                     <button
                         onClick={(e) => {
@@ -220,9 +220,9 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                         title={isFavorite ? t('settings.agents.modelSelector.actions.removeFromFavorites') : t('settings.agents.modelSelector.actions.addToFavorites')}
                     >
                         {isFavorite ? (
-                            <RiStarFill className="h-3.5 w-3.5" />
+                            <Icon name="star-fill" className="h-3.5 w-3.5" />
                         ) : (
-                            <RiStarLine className="h-3.5 w-3.5" />
+                            <Icon name="star" className="h-3.5 w-3.5" />
                         )}
                     </button>
                 </div>
@@ -319,7 +319,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                                                 className="model-favorite-button flex h-8 w-8 items-center justify-center text-primary hover:text-primary/80 active:scale-95 touch-manipulation"
                                                 aria-label={t('settings.agents.modelSelector.actions.unfavorite')}
                                             >
-                                                <RiStarFill className="h-4 w-4" />
+                                                <Icon name="star-fill" className="h-4 w-4" />
                                             </button>
                                         </div>
                                     );
@@ -373,7 +373,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                                                 className="model-favorite-button flex h-8 w-8 items-center justify-center text-muted-foreground/50 hover:text-primary/80 active:scale-95 touch-manipulation"
                                                 aria-label={t('settings.agents.modelSelector.actions.favorite')}
                                             >
-                                                <RiStarLine className="h-4 w-4" />
+                                                <Icon name="star" className="h-4 w-4" />
                                             </button>
                                         </div>
                                     );
@@ -409,9 +409,9 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                                         )}
                                     </div>
                                     {isExpanded ? (
-                                        <RiArrowDownSLine className="h-3 w-3 text-muted-foreground" />
+                                        <Icon name="arrow-down-s" className="h-3 w-3 text-muted-foreground" />
                                     ) : (
-                                        <RiArrowRightSLine className="h-3 w-3 text-muted-foreground" />
+                                        <Icon name="arrow-right-s" className="h-3 w-3 text-muted-foreground" />
                                     )}
                                 </button>
 
@@ -458,9 +458,9 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                                                                 : t('settings.agents.modelSelector.actions.favorite')}
                                                         >
                                                             {isFavoriteModel(provider.id as string, modelItem.id as string) ? (
-                                                                <RiStarFill className="h-4 w-4" />
+                                                                <Icon name="star-fill" className="h-4 w-4" />
                                                             ) : (
-                                                                <RiStarLine className="h-4 w-4" />
+                                                                <Icon name="star" className="h-4 w-4" />
                                                             )}
                                                         </button>
                                                         
@@ -508,7 +508,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                     <div className="flex items-center gap-2">
                         {!isReady ? (
                             <>
-                                <RiLoader4Line className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                                <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
                                 <span className="typography-meta text-muted-foreground">{isUnavailable ? t('common.unavailable') : t('common.loading')}</span>
                             </>
                         ) : providerId ? (
@@ -517,7 +517,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                                 className="h-3.5 w-3.5"
                             />
                         ) : (
-                            <RiPencilAiLine className="h-3 w-3 text-muted-foreground" />
+                            <Icon name="pencil-ai" className="h-3 w-3 text-muted-foreground" />
                         )}
                         {isReady && (
                             <span className="typography-meta font-medium text-foreground">
@@ -525,7 +525,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                             </span>
                         )}
                     </div>
-                    <RiArrowDownSLine className="h-3 w-3 text-muted-foreground" />
+                    <Icon name="arrow-down-s" className="h-3 w-3 text-muted-foreground" />
                 </button>
             ) : (
                 <DropdownMenu open={isReady && isDropdownOpen} onOpenChange={isReady ? setIsDropdownOpen : undefined}>
@@ -536,7 +536,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                         )}>
                             {!isReady ? (
                                 <>
-                                    <RiLoader4Line className="h-3.5 w-3.5 animate-spin text-muted-foreground flex-shrink-0" />
+                                    <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin text-muted-foreground flex-shrink-0" />
                                     <span className="typography-ui-label font-normal whitespace-nowrap text-muted-foreground">
                                         {isUnavailable ? t('common.unavailable') : t('common.loading')}
                                     </span>
@@ -549,17 +549,17 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                                                 providerId={providerId}
                                                 className="h-3.5 w-3.5 flex-shrink-0"
                                             />
-                                            <RiPencilAiLine className="h-3 w-3 text-primary/60 hidden" />
+                                            <Icon name="pencil-ai" className="h-3 w-3 text-primary/60 hidden" />
                                         </>
                                     ) : (
-                                        <RiPencilAiLine className="h-3.5 w-3.5 text-muted-foreground" />
+                                        <Icon name="pencil-ai" className="h-3.5 w-3.5 text-muted-foreground" />
                                     )}
                                     <span className="typography-ui-label font-normal whitespace-nowrap text-foreground">
                                         {providerId && modelId ? `${providerId}/${modelId}` : (placeholder || t('settings.agents.modelSelector.notSelected'))}
                                     </span>
                                 </>
                             )}
-                            <RiArrowDownSLine className="h-4 w-4 flex-shrink-0 text-muted-foreground/50" />
+                            <Icon name="arrow-down-s" className="h-4 w-4 flex-shrink-0 text-muted-foreground/50" />
                         </div>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent className="w-[min(380px,calc(100vw-2rem))] p-0 flex flex-col" align="start">
@@ -619,7 +619,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                                     {/* Search Input */}
                                     <div className="p-2 border-b border-border/40">
                                         <div className="relative">
-                                            <RiSearchLine className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                                            <Icon name="search" className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                                             <Input
                                                 type="text"
                                                 placeholder={t('settings.agents.modelSelector.searchPlaceholder')}
@@ -642,10 +642,10 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                                                 )}
                                                 onSelect={() => handleProviderAndModelChange('', '')}
                                             >
-                                                <RiCloseLine className="h-3.5 w-3.5 text-muted-foreground" />
+                                                <Icon name="close" className="h-3.5 w-3.5 text-muted-foreground" />
                                                 <span className="text-muted-foreground">{placeholder || t('settings.agents.modelSelector.notSelected')}</span>
                                                 {!providerId && !modelId && (
-                                                    <RiCheckLine className="h-4 w-4 text-primary ml-auto" />
+                                                    <Icon name="check" className="h-4 w-4 text-primary ml-auto" />
                                                 )}
                                             </DropdownMenuItem>
 
@@ -661,7 +661,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                                             {filteredFavorites.length > 0 && (
                                                 <div>
                                                     <DropdownMenuLabel className="typography-micro font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2 -mx-1 px-3 py-1.5 border-b border-border/30">
-                                                        <RiStarFill className="h-4 w-4 text-primary" />
+                                                        <Icon name="star-fill" className="h-4 w-4 text-primary" />
                                                         {t('settings.agents.modelSelector.section.favorites')}
                                                     </DropdownMenuLabel>
                                                     {filteredFavorites.map(({ model, providerID, modelID }) => {
@@ -676,7 +676,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                                                 <div>
                                                     {filteredFavorites.length > 0 && <DropdownMenuSeparator />}
                                                     <DropdownMenuLabel className="typography-micro font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2 -mx-1 px-3 py-1.5 border-b border-border/30">
-                                                        <RiTimeLine className="h-4 w-4" />
+                                                        <Icon name="time" className="h-4 w-4" />
                                                         {t('settings.agents.modelSelector.section.recent')}
                                                     </DropdownMenuLabel>
                                                     {filteredRecents.map(({ model, providerID, modelID }) => {

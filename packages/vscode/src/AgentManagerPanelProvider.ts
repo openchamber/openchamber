@@ -97,6 +97,10 @@ export class AgentManagerPanelProvider {
         context: this._context,
       });
       this._panel?.webview.postMessage(response);
+
+      if (message.type === 'api:config/settings:save' && response.success) {
+        void vscode.commands.executeCommand('openchamber.internal.settingsSynced', response.data);
+      }
     }, null, this._context.subscriptions);
   }
 
@@ -119,6 +123,18 @@ export class AgentManagerPanelProvider {
 
     // Send to webview if it exists
     this._sendCachedState();
+  }
+
+  public notifySettingsSynced(settings: unknown): void {
+    if (!this._panel) {
+      return;
+    }
+
+    this._panel.webview.postMessage({
+      type: 'command',
+      command: 'settingsSynced',
+      payload: settings,
+    });
   }
 
   private _sendCachedState() {

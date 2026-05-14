@@ -35,7 +35,23 @@ export function TextLoop({
   const items = Children.toArray(children);
 
   useEffect(() => {
-    if (!trigger) return;
+    let next = currentIndex;
+    if (items.length === 0) {
+      next = 0;
+    } else if (!Number.isInteger(currentIndex) || currentIndex < 0) {
+      next = 0;
+    } else if (currentIndex >= items.length) {
+      next = items.length - 1;
+    }
+
+    if (next !== currentIndex) {
+      setCurrentIndex(next);
+      onIndexChange?.(next);
+    }
+  }, [currentIndex, items.length, onIndexChange]);
+
+  useEffect(() => {
+    if (!trigger || items.length <= 1) return;
 
     const intervalMs = interval * 1000;
     const timer = setInterval(() => {

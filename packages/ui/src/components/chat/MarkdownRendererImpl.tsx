@@ -11,9 +11,9 @@ import remend from 'remend';
 import { FadeInOnReveal } from './message/FadeInOnReveal';
 import type { Part } from '@opencode-ai/sdk/v2';
 import { cn } from '@/lib/utils';
-import { RiFileCopyLine, RiCheckLine, RiDownloadLine, RiEyeLine, RiCodeLine } from '@remixicon/react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { toast } from '@/components/ui';
+import { Icon } from "@/components/icon/Icon";
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
@@ -229,7 +229,7 @@ const TableCopyButton: React.FC<{ tableRef: React.RefObject<HTMLDivElement | nul
         className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
         title={t('markdownRenderer.table.actions.copyTitle')}
       >
-        {copied ? <RiCheckLine className="size-3.5" /> : <RiFileCopyLine className="size-3.5" />}
+        {copied ? <Icon name="check" className="size-3.5" /> : <Icon name="file-copy" className="size-3.5" />}
       </button>
       {showMenu && (
         <div className="absolute top-full right-0 z-10 mt-1 min-w-[100px] overflow-hidden rounded-md border border-border bg-background shadow-none">
@@ -287,7 +287,7 @@ const TableDownloadButton: React.FC<{ tableRef: React.RefObject<HTMLDivElement |
         className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
         title={t('markdownRenderer.table.actions.downloadTitle')}
       >
-        <RiDownloadLine className="size-3.5" />
+        <Icon name="download" className="size-3.5" />
       </button>
       {showMenu && (
         <div className="absolute top-full right-0 z-10 mt-1 min-w-[100px] overflow-hidden rounded-md border border-border bg-background shadow-none">
@@ -426,7 +426,7 @@ const MermaidBlock: React.FC<{ source: string; mode: 'svg' | 'ascii' }> = ({ sou
             className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
             title={t('markdownRenderer.mermaid.actions.copyTitle')}
           >
-            {copied ? <RiCheckLine className="size-3.5" /> : <RiFileCopyLine className="size-3.5" />}
+            {copied ? <Icon name="check" className="size-3.5" /> : <Icon name="file-copy" className="size-3.5" />}
           </button>
         </div>
       </div>
@@ -450,7 +450,7 @@ const MermaidBlock: React.FC<{ source: string; mode: 'svg' | 'ascii' }> = ({ sou
             className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
             title={t('markdownRenderer.mermaid.actions.copyTitle')}
           >
-            {copied ? <RiCheckLine className="size-3.5" /> : <RiFileCopyLine className="size-3.5" />}
+            {copied ? <Icon name="check" className="size-3.5" /> : <Icon name="file-copy" className="size-3.5" />}
           </button>
         </div>
       </div>
@@ -473,14 +473,14 @@ const MermaidBlock: React.FC<{ source: string; mode: 'svg' | 'ascii' }> = ({ sou
           className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
           title={t('markdownRenderer.mermaid.actions.copySourceTitle')}
         >
-          {copied ? <RiCheckLine className="size-3.5" /> : <RiFileCopyLine className="size-3.5" />}
+          {copied ? <Icon name="check" className="size-3.5" /> : <Icon name="file-copy" className="size-3.5" />}
         </button>
         <button
           onClick={handleDownloadSvg}
           className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
           title={t('markdownRenderer.mermaid.actions.downloadSvgTitle')}
         >
-          {downloaded ? <RiCheckLine className="size-3.5" /> : <RiDownloadLine className="size-3.5" />}
+          {downloaded ? <Icon name="check" className="size-3.5" /> : <Icon name="download" className="size-3.5" />}
         </button>
       </div>
     </div>
@@ -794,7 +794,7 @@ const MarkdownCodeBlock: React.FC<{
               aria-pressed={viewMode === 'preview'}
               aria-label={viewMode === 'preview' ? 'Show code' : 'Preview HTML'}
             >
-              {viewMode === 'preview' ? <RiCodeLine className="size-3.5" /> : <RiEyeLine className="size-3.5" />}
+              {viewMode === 'preview' ? <Icon name="code" className="size-3.5" /> : <Icon name="eye" className="size-3.5" />}
             </button>
           ) : null}
           {canPreview ? (
@@ -805,7 +805,7 @@ const MarkdownCodeBlock: React.FC<{
               title="Download HTML"
               aria-label="Download HTML"
             >
-              <RiDownloadLine className="size-3.5" />
+              <Icon name="download" className="size-3.5" />
             </button>
           ) : null}
           <button
@@ -815,7 +815,7 @@ const MarkdownCodeBlock: React.FC<{
             title={copied ? 'Copied' : 'Copy code'}
             aria-label={copied ? 'Copied' : 'Copy code'}
           >
-            {copied ? <RiCheckLine className="size-3.5" /> : <RiFileCopyLine className="size-3.5" />}
+            {copied ? <Icon name="check" className="size-3.5" /> : <Icon name="file-copy" className="size-3.5" />}
           </button>
         </div>
       </div>
@@ -960,7 +960,7 @@ const buildMarkdownComponents = ({
             title={previewTitle ?? previewLabel ?? 'Open preview pane'}
             data-loopback-preview-trigger="true"
           >
-            <RiEyeLine className="size-3" aria-hidden="true" />
+            <Icon name="eye" className="size-3"  aria-hidden="true"/>
             <span className="font-medium">{previewLabel ?? 'Preview'}</span>
           </button>
         ) : null}

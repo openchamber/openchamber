@@ -17,8 +17,8 @@ import { AgentSelector } from '@/components/sections/commands/AgentSelector';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useAgentsStore } from '@/stores/useAgentsStore';
 import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
+import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
-import { RiArrowDownSLine } from '@remixicon/react';
 import { useI18n } from '@/lib/i18n';
 
 type TodoSendTarget = 'session' | 'worktree';
@@ -70,7 +70,7 @@ const ThinkingPill = ({ value, options, disabled, onChange }: ThinkingPillProps)
       )}
     >
       <span className="typography-micro whitespace-nowrap font-medium capitalize">{label}</span>
-      <RiArrowDownSLine className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
+      <Icon name="arrow-down-s" className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
     </div>
   );
 

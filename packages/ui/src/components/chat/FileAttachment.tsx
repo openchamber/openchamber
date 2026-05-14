@@ -1,5 +1,4 @@
 import React, { useRef, memo } from 'react';
-import { RiAttachment2, RiCloseLine, RiFileImageLine, RiFileLine, RiFilePdfLine, RiGithubLine, RiGitPullRequestLine, RiAddLine, RiPushpin2Line } from '@remixicon/react';
 import { useInputStore } from '@/sync/input-store';
 import type { AttachedFile } from '@/sync/session-ui-store';
 import { useUIStore } from '@/stores/useUIStore';
@@ -9,6 +8,7 @@ import { openExternalUrl } from '@/lib/url';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
+import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { useDeviceInfo } from '@/lib/device';
 
@@ -111,7 +111,7 @@ export const FileAttachmentButton = memo(() => {
             )}
             aria-label={t('chat.fileAttachment.actions.attachAria')}
           >
-            <RiAttachment2 className={iconSizeClass} />
+            <Icon name="attachment-2" className={iconSizeClass} />
           </button>
         </TooltipTrigger>
         <TooltipContent side="top">
@@ -174,7 +174,7 @@ const ImagePreview = memo(({ file, onRemove }: ImagePreviewProps) => {
           className="flex items-center justify-center h-5 w-5 flex-shrink-0 hover:bg-[var(--interactive-hover)] rounded-full transition-colors cursor-pointer"
           aria-label={t('chat.fileAttachment.actions.removeNamed', { name: displayName })}
         >
-          <RiCloseLine className="h-4 w-4 text-muted-foreground" />
+          <Icon name="close" className="h-4 w-4 text-muted-foreground" />
         </span>
       </button>
     );
@@ -197,7 +197,7 @@ const ImagePreview = memo(({ file, onRemove }: ImagePreviewProps) => {
         title={t('chat.fileAttachment.actions.removeImage')}
         aria-label={t('chat.fileAttachment.actions.removeNamed', { name: displayName })}
       >
-        <RiCloseLine className="h-2.5 w-2.5" />
+        <Icon name="close" className="h-2.5 w-2.5" />
       </button>
     </div>
   );
@@ -266,7 +266,7 @@ const FileChip = memo(({ file, onRemove }: FileChipProps) => {
         className="flex items-center justify-center h-5 w-5 flex-shrink-0 hover:bg-[var(--interactive-hover)] rounded-full transition-colors cursor-pointer"
         aria-label={t('chat.fileAttachment.actions.removeNamed', { name: displayName })}
       >
-        <RiCloseLine className="h-4 w-4 text-muted-foreground" />
+        <Icon name="close" className="h-4 w-4 text-muted-foreground" />
       </span>
     </button>
   );
@@ -304,7 +304,7 @@ const VSCodeFileChip = memo(({ file, onRemove }: FileChipProps) => {
         aria-label={t('chat.fileAttachment.activeEditor.remove')}
         title={t('chat.fileAttachment.activeEditor.remove')}
       >
-        <RiCloseLine className="h-4 w-4 text-muted-foreground" />
+        <Icon name="close" className="h-4 w-4 text-muted-foreground" />
       </span>
         <FileTypeIcon filePath={file.filename} extension={extension} className="h-4 w-4" />
         <span className={cn('text-foreground', isSelectionAttachment ? 'whitespace-nowrap' : 'truncate max-w-[200px]')}>
@@ -453,7 +453,7 @@ export const ActiveEditorFileSuggestion = memo(() => {
             onClick={() => { void handlePinSelection(); }}
             className="flex items-center justify-center h-5 w-5 flex-shrink-0 hover:bg-[var(--interactive-hover)] rounded-full transition-colors cursor-pointer"
           >
-            <RiPushpin2Line className="h-4 w-4" />
+            <Icon name="pushpin-2" className="h-4 w-4" />
           </button>
           <FileTypeIcon filePath={fileName} extension={ext} className="h-4 w-4 flex-shrink-0" />
           <span className="text-xs whitespace-nowrap">{`${displayName}:${selectionRange}`}</span>
@@ -472,7 +472,7 @@ export const ActiveEditorFileSuggestion = memo(() => {
             onClick={handleAddFile}
             className="flex items-center justify-center h-5 w-5 flex-shrink-0 hover:bg-[var(--interactive-hover)] rounded-full transition-colors cursor-pointer"
           >
-            <RiAddLine className="h-4 w-4" />
+            <Icon name="add" className="h-4 w-4" />
           </button>
           <FileTypeIcon filePath={fileName} extension={ext} className="h-4 w-4 flex-shrink-0" />
           <span className="text-xs truncate max-w-[220px]">{displayName}</span>
@@ -613,9 +613,9 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
                         className="inline-flex items-center bg-muted/30 border border-border/30 typography-meta gap-1 px-2 py-0.5 rounded-lg text-foreground hover:text-primary transition-colors"
                       >
                         {githubLinkKind === 'pr' ? (
-                          <RiGitPullRequestLine className="text-muted-foreground h-3.5 w-3.5" />
+                          <Icon name="git-pull-request" className="text-muted-foreground h-3.5 w-3.5" />
                         ) : (
-                          <RiGithubLine className="text-muted-foreground h-3.5 w-3.5" />
+                          <Icon name="github" className="text-muted-foreground h-3.5 w-3.5" />
                         )}
                         <div className="overflow-hidden max-w-[220px]">
                           <span className="truncate block" title={fileName}>{fileName}</span>
@@ -624,7 +624,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
                     ) : (
                       <div className="inline-flex items-center bg-muted/30 border border-border/30 typography-meta gap-1 px-2 py-0.5 rounded-lg">
                         {file.mime?.includes('pdf') ? (
-                          <RiFilePdfLine className="text-muted-foreground h-3.5 w-3.5" />
+                          <Icon name="file-pdf" className="text-muted-foreground h-3.5 w-3.5" />
                         ) : (
                           <FileTypeIcon filePath={fileName} extension={ext} className="text-muted-foreground h-3.5 w-3.5" />
                         )}
@@ -671,7 +671,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
                           />
                         ) : (
                           <div className="h-full w-full flex items-center justify-center bg-muted/30 text-muted-foreground">
-                            <RiFileImageLine className="h-6 w-6" />
+                            <Icon name="file-image" className="h-6 w-6" />
                           </div>
                         )}
                         <span className="sr-only">{filename}</span>
@@ -738,9 +738,9 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
                 >
                   <div className="flex-shrink-0">
                     {githubLinkKind === 'pr' ? (
-                      <RiGitPullRequestLine className={cn("text-muted-foreground", compact ? "h-3.5 w-3.5" : "h-4 w-4")} />
+                      <Icon name="git-pull-request" className={cn("text-muted-foreground", compact ? "h-3.5 w-3.5" : "h-4 w-4")} />
                     ) : (
-                      <RiGithubLine className={cn("text-muted-foreground", compact ? "h-3.5 w-3.5" : "h-4 w-4")} />
+                      <Icon name="github" className={cn("text-muted-foreground", compact ? "h-3.5 w-3.5" : "h-4 w-4")} />
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -782,11 +782,11 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
               >
                 <div className="flex-shrink-0">
                   {file.mime?.startsWith('image/') ? (
-                    <RiFileImageLine className={cn("text-muted-foreground", compact ? "h-3.5 w-3.5" : "h-4 w-4")} />
+                    <Icon name="file-image" className={cn("text-muted-foreground", compact ? "h-3.5 w-3.5" : "h-4 w-4")} />
                   ) : file.mime?.includes('pdf') ? (
-                    <RiFilePdfLine className={cn("text-muted-foreground", compact ? "h-3.5 w-3.5" : "h-4 w-4")} />
+                    <Icon name="file-pdf" className={cn("text-muted-foreground", compact ? "h-3.5 w-3.5" : "h-4 w-4")} />
                   ) : (
-                    <RiFileLine className={cn("text-muted-foreground", compact ? "h-3.5 w-3.5" : "h-4 w-4")} />
+                    <Icon name="file" className={cn("text-muted-foreground", compact ? "h-3.5 w-3.5" : "h-4 w-4")} />
                   )}
                 </div>
                 <div className="flex-1 min-w-0">

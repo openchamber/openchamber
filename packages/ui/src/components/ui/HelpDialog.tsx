@@ -6,25 +6,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Icon } from "@/components/icon/Icon";
 import { useUIStore } from "@/stores/useUIStore";
-import {
-  RiAddLine,
-  RiAiAgentLine,
-  RiAiGenerate2,
-  RiBrainAi3Line,
-  RiCloseCircleLine,
-  RiCommandLine,
-  RiGitBranchLine,
-  RiLayoutLeftLine,
-  RiLayoutRightLine,
-  RiPaletteLine,
-  RiQuestionLine,
-  RiSettings3Line,
-  RiStackLine,
-  RiText,
-  RiTimeLine,
-  RiWindowLine,
-} from "@remixicon/react";
 import {
   getEffectiveShortcutCombo,
   getShortcutAction,
@@ -32,14 +15,13 @@ import {
   formatShortcutForDisplay,
 } from "@/lib/shortcuts";
 import { useI18n, type I18nKey } from "@/lib/i18n";
-
-type ShortcutIcon = React.ComponentType<{ className?: string }>;
+import type { IconName } from "@/components/icon/icons";
 
 type ShortcutItem = {
   id?: string;
   keys: string | string[];
   descriptionKey: I18nKey;
-  icon: ShortcutIcon | null;
+  icon: IconName | null;
 };
 
 type ShortcutSection = {
@@ -66,52 +48,52 @@ export const HelpDialog: React.FC = () => {
         {
           id: 'open_command_palette',
           descriptionKey: "helpDialog.item.openCommandPalette",
-          icon: RiCommandLine,
+          icon: "command",
           keys: '',
         },
         {
           id: 'open_help',
           descriptionKey: "helpDialog.item.showKeyboardShortcuts",
-          icon: RiQuestionLine,
+          icon: "question",
           keys: '',
         },
         {
           id: 'toggle_sidebar',
           descriptionKey: "helpDialog.item.toggleSessionSidebar",
-          icon: RiLayoutLeftLine,
+          icon: "layout-left",
           keys: '',
         },
         {
           keys: ["Tab"],
           descriptionKey: "helpDialog.item.cycleAgent",
-          icon: RiAiAgentLine,
+          icon: "ai-agent",
         },
         {
           id: 'open_model_selector',
           descriptionKey: "helpDialog.item.openModelSelector",
-          icon: RiAiGenerate2,
+          icon: "ai-generate-2",
           keys: '',
         },
         {
           keys: ["↑↓"],
           descriptionKey: "helpDialog.item.navigateModels",
-          icon: RiAiGenerate2,
+          icon: "ai-generate-2",
         },
         {
           keys: ["←→"],
           descriptionKey: "helpDialog.item.adjustThinkingMode",
-          icon: RiBrainAi3Line,
+          icon: "brain-ai-3",
         },
         {
           id: 'cycle_thinking_variant',
           descriptionKey: "helpDialog.item.cycleThinkingVariant",
-          icon: RiBrainAi3Line,
+          icon: "brain-ai-3",
           keys: '',
         },
         {
           keys: [`Shift + Alt + ${mod} + N`],
           descriptionKey: "helpDialog.item.newWindow",
-          icon: RiWindowLine,
+          icon: "window",
         },
       ],
     },
@@ -121,20 +103,20 @@ export const HelpDialog: React.FC = () => {
         {
           id: 'new_chat',
           descriptionKey: "helpDialog.item.createNewSession",
-          icon: RiAddLine,
+          icon: "add",
           keys: '',
         },
         {
           id: 'new_chat_worktree',
           descriptionKey: "helpDialog.item.createNewWorktreeDraft",
-          icon: RiGitBranchLine,
+          icon: "git-branch",
           keys: '',
         },
-        { id: 'focus_input', descriptionKey: "helpDialog.item.focusChatInput", icon: RiText, keys: '' },
+        { id: 'focus_input', descriptionKey: "helpDialog.item.focusChatInput", icon: "text", keys: '' },
         {
           id: 'abort_run',
           descriptionKey: "helpDialog.item.abortActiveRun",
-          icon: RiCloseCircleLine,
+          icon: "close-circle",
           keys: '',
         },
       ],
@@ -145,43 +127,43 @@ export const HelpDialog: React.FC = () => {
         {
           id: 'toggle_right_sidebar',
           descriptionKey: 'helpDialog.item.toggleRightSidebar',
-          icon: RiLayoutRightLine,
+          icon: "layout-right",
           keys: '',
         },
         {
           id: 'open_right_sidebar_git',
           descriptionKey: 'helpDialog.item.openRightSidebarGitTab',
-          icon: RiGitBranchLine,
+          icon: "git-branch",
           keys: '',
         },
         {
           id: 'open_right_sidebar_files',
           descriptionKey: 'helpDialog.item.openRightSidebarFilesTab',
-          icon: RiLayoutRightLine,
+          icon: "layout-right",
           keys: '',
         },
         {
           id: 'cycle_right_sidebar_tab',
           descriptionKey: 'helpDialog.item.cycleRightSidebarTab',
-          icon: RiLayoutRightLine,
+          icon: "layout-right",
           keys: '',
         },
         {
           id: 'toggle_terminal',
           descriptionKey: 'helpDialog.item.toggleTerminalDock',
-          icon: RiWindowLine,
+          icon: "window",
           keys: '',
         },
         {
           id: 'toggle_terminal_expanded',
           descriptionKey: 'helpDialog.item.toggleTerminalExpanded',
-          icon: RiWindowLine,
+          icon: "window",
           keys: '',
         },
         {
           id: 'toggle_context_plan',
           descriptionKey: 'helpDialog.item.togglePlanContextPanel',
-          icon: RiTimeLine,
+          icon: "time",
           keys: '',
         },
       ],
@@ -192,30 +174,30 @@ export const HelpDialog: React.FC = () => {
         {
           id: 'cycle_theme',
           descriptionKey: "helpDialog.item.cycleTheme",
-          icon: RiPaletteLine,
+          icon: "palette",
           keys: '',
         },
         {
           keys: [`${mod} + 1...9`],
           descriptionKey: "helpDialog.item.switchProject",
-          icon: RiLayoutLeftLine,
+          icon: "layout-left",
         },
         {
           id: 'toggle_services_menu',
           descriptionKey: 'helpDialog.item.toggleServicesMenu',
-          icon: RiStackLine,
+          icon: "stack",
           keys: '',
         },
         {
           id: 'cycle_services_tab',
           descriptionKey: 'helpDialog.item.cycleServicesTab',
-          icon: RiStackLine,
+          icon: "stack",
           keys: '',
         },
         {
           id: 'open_settings',
           descriptionKey: "helpDialog.item.openSettings",
-          icon: RiSettings3Line,
+          icon: "settings-3",
           keys: '',
         },
       ],
@@ -227,7 +209,7 @@ export const HelpDialog: React.FC = () => {
       <DialogContent className="max-w-2xl w-[min(42rem,calc(100vw-1.5rem))] max-h-[calc(100dvh-2rem)] flex flex-col overflow-hidden">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <RiSettings3Line className="h-5 w-5" />
+            <Icon name="settings-3" className="h-5 w-5" />
             {t('helpDialog.title')}
           </DialogTitle>
           <DialogDescription>
@@ -255,7 +237,7 @@ export const HelpDialog: React.FC = () => {
                       >
                         <div className="flex items-center gap-2">
                           {shortcut.icon && (
-                            <shortcut.icon className="h-3.5 w-3.5 text-muted-foreground" />
+                            <Icon name={shortcut.icon} className="h-3.5 w-3.5 text-muted-foreground" />
                           )}
                           <span className="typography-meta">
                             {t(shortcut.descriptionKey)}
@@ -285,7 +267,7 @@ export const HelpDialog: React.FC = () => {
 
           <div className="mt-4 p-2 bg-muted/30 rounded-xl">
             <div className="flex items-start gap-2">
-              <RiQuestionLine className="h-3.5 w-3.5 text-muted-foreground mt-0.5" />
+              <Icon name="question" className="h-3.5 w-3.5 text-muted-foreground mt-0.5" />
               <div className="typography-meta text-muted-foreground">
                 <p className="font-medium mb-1">{t('helpDialog.proTips.title')}</p>
                 <ul className="space-y-0.5 typography-meta">

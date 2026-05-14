@@ -1,6 +1,6 @@
 import React from 'react';
-import { RiArchiveStackLine, RiGitCommitLine } from '@remixicon/react';
 import { Button } from '@/components/ui/button';
+import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 
 interface GitEmptyStateProps {
@@ -11,7 +11,7 @@ export const GitEmptyState: React.FC<GitEmptyStateProps> = ({ onOpenStashes }) =
   const { t } = useI18n();
   return (
     <div className="flex flex-col items-center justify-center py-10 px-4 text-center">
-      <RiGitCommitLine className="size-10 text-muted-foreground/70 mb-4" />
+      <Icon name="git-commit" className="size-10 text-muted-foreground/70 mb-4" />
       <p className="typography-ui-label font-semibold text-foreground mb-1">
         {t('gitView.empty.cleanTitle')}
       </p>
@@ -27,7 +27,7 @@ export const GitEmptyState: React.FC<GitEmptyStateProps> = ({ onOpenStashes }) =
           onClick={onOpenStashes}
           className="gap-1.5"
         >
-          <RiArchiveStackLine className="size-4" />
+          <Icon name="archive-stack" className="size-4" />
           {t('gitView.stashes.title')}
         </Button>
       ) : null}

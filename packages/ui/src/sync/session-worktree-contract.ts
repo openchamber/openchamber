@@ -104,7 +104,7 @@ export function resolveSessionWorktreeState(
       branch: runtimeResolution.branch ?? metadata?.branch ?? null,
       headState: runtimeResolution.headState ?? 'branch',
       worktreeStatus: runtimeResolution.worktreeStatus ?? 'ready',
-      worktreeSource: runtimeResolution.worktreeSource ?? metadata?.source === 'sdk' ? 'created-for-session' : 'existing',
+      worktreeSource: runtimeResolution.worktreeSource ?? (metadata?.source === 'sdk' ? 'created-for-session' : 'existing'),
       legacy: false,
       degraded: runtimeResolution.degraded,
       attentionReason: runtimeResolution.attentionReason ?? null,

@@ -1,9 +1,8 @@
 import React from 'react';
 
-import { RiEyeLine, RiEyeOffLine } from '@remixicon/react';
-
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
+import { Icon } from "@/components/icon/Icon";
 
 export type PreviewToggleButtonProps = {
   /** Current mode - determines which icon is displayed */
@@ -37,9 +36,9 @@ export const PreviewToggleButton: React.FC<PreviewToggleButtonProps> = ({
           className="h-5 w-5 p-0"
         >
           {isPreview ? (
-            <RiEyeLine className="size-4" aria-hidden="true" />
+            <Icon name="eye" className="size-4"  aria-hidden="true"/>
           ) : (
-            <RiEyeOffLine className="size-4" aria-hidden="true" />
+            <Icon name="eye-off" className="size-4"  aria-hidden="true"/>
           )}
         </Button>
       </TooltipTrigger>

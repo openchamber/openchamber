@@ -9,8 +9,8 @@ import {
 import { Input } from '@/components/ui/input';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionMessageRecords } from '@/sync/sync-context';
-import { RiLoader4Line, RiSearchLine, RiTimeLine, RiGitBranchLine, RiArrowGoBackLine } from '@remixicon/react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Icon } from "@/components/icon/Icon";
 import type { Part } from '@opencode-ai/sdk/v2';
 import { useI18n } from '@/lib/i18n';
 import { useDeviceInfo } from '@/lib/device';
@@ -151,7 +151,7 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
             <DialogContent className="max-w-2xl max-h-[70vh] flex flex-col">
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
-                        <RiTimeLine className="h-5 w-5" />
+                        <Icon name="time" className="h-5 w-5" />
                         {t('chat.timeline.title')}
                     </DialogTitle>
                     <DialogDescription>
@@ -160,7 +160,7 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                 </DialogHeader>
 
                 <div className="relative mt-2">
-                    <RiSearchLine className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Icon name="search" className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
                         autoFocus
                         placeholder={t('chat.timeline.searchPlaceholder')}
@@ -235,7 +235,7 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                                                             onOpenChange(false);
                                                         }}
                                                     >
-                                                        <RiArrowGoBackLine className="h-4 w-4" />
+                                                        <Icon name="arrow-go-back" className="h-4 w-4" />
                                                     </button>
                                                 </TooltipTrigger>
                                                 <TooltipContent sideOffset={6}>{t('chat.timeline.actions.revertFromHere')}</TooltipContent>
@@ -253,9 +253,9 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                                                         disabled={forkingMessageId === message.info.id}
                                                     >
                                                         {forkingMessageId === message.info.id ? (
-                                                            <RiLoader4Line className="h-4 w-4 animate-spin" />
+                                                            <Icon name="loader-4" className="h-4 w-4 animate-spin" />
                                                         ) : (
-                                                            <RiGitBranchLine className="h-4 w-4" />
+                                                            <Icon name="git-branch" className="h-4 w-4" />
                                                         )}
                                                     </button>
                                                 </TooltipTrigger>
@@ -299,11 +299,11 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                             <span>{t('chat.timeline.help.clickMessage')}</span>
                         </div>
                         <div className="flex items-center gap-2">
-                            <RiArrowGoBackLine className="h-4 w-4 flex-shrink-0" />
+                            <Icon name="arrow-go-back" className="h-4 w-4 flex-shrink-0" />
                             <span>{t('chat.timeline.help.undoToPoint')}</span>
                         </div>
                         <div className="flex items-center gap-2">
-                            <RiGitBranchLine className="h-4 w-4 flex-shrink-0" />
+                            <Icon name="git-branch" className="h-4 w-4 flex-shrink-0" />
                             <span>{t('chat.timeline.help.createSessionFromHere')}</span>
                         </div>
                     </div>

@@ -17,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { RiFolderLine, RiRobot2Line, RiUser3Line } from '@remixicon/react';
+import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 
 import type { SkillsCatalogItem } from '@/lib/api/types';
@@ -208,8 +208,8 @@ export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, on
                 }}
               >
                 <SelectTrigger className="w-fit gap-1.5">
-                  {scope === 'user' ? <RiUser3Line className="h-3.5 w-3.5" /> : <RiFolderLine className="h-3.5 w-3.5" />}
-                  {targetSource === 'agents' ? <RiRobot2Line className="h-3.5 w-3.5" /> : null}
+                  {scope === 'user' ? <Icon name="user-3" className="h-3.5 w-3.5" /> : <Icon name="folder" className="h-3.5 w-3.5" />}
+                  {targetSource === 'agents' ? <Icon name="robot-2" className="h-3.5 w-3.5" /> : null}
                   <span>{locationLabelText(locationValueFrom(scope, targetSource))}</span>
                 </SelectTrigger>
                 <SelectContent align="start">
@@ -217,8 +217,8 @@ export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, on
                     <SelectItem key={option.value} value={option.value} className="pr-2 [&>span:first-child]:hidden">
                       <div className="flex flex-col gap-0.5">
                         <div className="flex items-center gap-2">
-                          {option.scope === 'user' ? <RiUser3Line className="h-3.5 w-3.5" /> : <RiFolderLine className="h-3.5 w-3.5" />}
-                          {option.source === 'agents' ? <RiRobot2Line className="h-3.5 w-3.5" /> : null}
+                          {option.scope === 'user' ? <Icon name="user-3" className="h-3.5 w-3.5" /> : <Icon name="folder" className="h-3.5 w-3.5" />}
+                          {option.source === 'agents' ? <Icon name="robot-2" className="h-3.5 w-3.5" /> : null}
                           <span>{locationLabelText(option.value)}</span>
                         </div>
                         <span className="typography-micro text-muted-foreground ml-5">{locationDescriptionText(option.value)}</span>

@@ -7,6 +7,7 @@ import { createOpenCodeEnvRuntime } from './env-runtime.js';
 const originalOpencodeBinary = process.env.OPENCODE_BINARY;
 const originalPlatform = process.platform;
 const tempDirs = [];
+const itIf = (condition) => condition ? it : it.skip;
 
 const createTempDir = (prefix) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -93,7 +94,7 @@ describe('OpenCode env runtime', () => {
     expect(state.resolvedOpencodeBinarySource).toBe('settings');
   });
 
-  it.runIf(process.platform === 'darwin')('rejects known macOS OpenCode app bundle executable paths', async () => {
+  itIf(process.platform === 'darwin')('rejects known macOS OpenCode app bundle executable paths', async () => {
     const { runtime } = createRuntime({ opencodeBinary: '/Applications/OpenCode.app/Contents/MacOS/OpenCode' });
 
     await expect(runtime.applyOpencodeBinaryFromSettings({ strict: true })).rejects.toMatchObject({
@@ -106,9 +107,10 @@ describe('OpenCode env runtime', () => {
     setPlatform('win32');
     const { runtime } = createRuntime({ opencodeBinary: 'wsl:/usr/local/bin/opencode' });
 
-    await expect(runtime.applyOpencodeBinaryFromSettings({ strict: true })).rejects.toThrow('uses WSL');
-    await runtime.applyOpencodeBinaryFromSettings({ strict: true }).catch((error) => {
-      expect(error.code).toBeUndefined();
-    });
+    const rejection = runtime.applyOpencodeBinaryFromSettings({ strict: true });
+
+    await expect(rejection).rejects.toThrow('uses WSL');
+    const error = await rejection.catch((caught) => caught);
+    expect(error.code).toBeUndefined();
   });
 });

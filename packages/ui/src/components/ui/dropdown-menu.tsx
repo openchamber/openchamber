@@ -1,8 +1,8 @@
 import * as React from "react"
 import { Menu as BaseMenu } from "@base-ui/react/menu"
-import { RiArrowRightSLine, RiCheckLine } from '@remixicon/react';
 
 import { cn } from "@/lib/utils"
+import { Icon } from "@/components/icon/Icon";
 
 type AsChildProps = { asChild?: boolean };
 type AsChildRenderProps = {
@@ -203,7 +203,7 @@ function DropdownMenuCheckboxItem({
     >
       <span className="pointer-events-none absolute right-2 flex size-3.5 items-center justify-center">
         <BaseMenu.CheckboxItemIndicator>
-          <RiCheckLine className="size-3"/>
+          <Icon name="check" className="size-3" />
         </BaseMenu.CheckboxItemIndicator>
       </span>
       {children}
@@ -233,7 +233,7 @@ function DropdownMenuRadioItem({
     >
       <span className="pointer-events-none absolute right-2 flex size-3.5 items-center justify-center text-primary">
         <BaseMenu.RadioItemIndicator>
-          <RiCheckLine className="size-3" />
+          <Icon name="check" className="size-3" />
         </BaseMenu.RadioItemIndicator>
       </span>
       {children}
@@ -315,7 +315,7 @@ function DropdownMenuSubTrigger({
       {...props}
     >
       {children}
-      <RiArrowRightSLine className="ml-auto size-3.5" />
+      <Icon name="arrow-right-s" className="ml-auto size-3.5" />
     </BaseMenu.SubmenuTrigger>
   )
 }

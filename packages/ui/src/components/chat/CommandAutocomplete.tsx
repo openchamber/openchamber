@@ -1,11 +1,11 @@
 import React from 'react';
-import { RiCommandLine, RiFileLine, RiFlashlightLine, RiRefreshLine, RiScissorsLine, RiTerminalBoxLine, RiArrowGoBackLine, RiArrowGoForwardLine, RiSearchEyeLine, RiTimeLine } from '@remixicon/react';
 import { cn, fuzzyMatch } from '@/lib/utils';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionMessages } from '@/sync/sync-context';
 import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 
 type CommandSource = 'openchamber' | 'opencode';
@@ -243,26 +243,26 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
 
     switch (command.name) {
       case 'init':
-        return <RiFileLine className="h-3.5 w-3.5 text-green-500" />;
+        return <Icon name="file" className="h-3.5 w-3.5 text-green-500" />;
       case 'undo':
-        return <RiArrowGoBackLine className="h-3.5 w-3.5 text-orange-500" />;
+        return <Icon name="arrow-go-back" className="h-3.5 w-3.5 text-orange-500" />;
       case 'redo':
-        return <RiArrowGoForwardLine className="h-3.5 w-3.5 text-orange-500" />;
+        return <Icon name="arrow-go-forward" className="h-3.5 w-3.5 text-orange-500" />;
       case 'timeline':
-        return <RiTimeLine className="h-3.5 w-3.5" />;
+        return <Icon name="time" className="h-3.5 w-3.5" />;
       case 'compact':
-        return <RiScissorsLine className="h-3.5 w-3.5 text-purple-500" />;
+        return <Icon name="scissors" className="h-3.5 w-3.5 text-purple-500" />;
       case 'review':
-        return <RiSearchEyeLine className="h-3.5 w-3.5 text-blue-500" />;
+        return <Icon name="search-eye" className="h-3.5 w-3.5 text-blue-500" />;
       case 'test':
       case 'build':
       case 'run':
-        return <RiTerminalBoxLine className="h-3.5 w-3.5 text-cyan-500" />;
+        return <Icon name="terminal-box" className="h-3.5 w-3.5 text-cyan-500" />;
       default:
         if (command.isBuiltIn) {
-          return <RiFlashlightLine className="h-3.5 w-3.5 text-yellow-500" />;
+          return <Icon name="flashlight" className="h-3.5 w-3.5 text-yellow-500" />;
         }
-        return <RiCommandLine className="h-3.5 w-3.5 text-muted-foreground" />;
+        return <Icon name="command" className="h-3.5 w-3.5 text-muted-foreground" />;
     }
   };
 
@@ -315,7 +315,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
       <ScrollableOverlay outerClassName="flex-1 min-h-0" className="px-0 pb-2">
         {loading ? (
           <div className="flex items-center justify-center py-4">
-            <RiRefreshLine className="h-4 w-4 animate-spin text-muted-foreground" />
+            <Icon name="refresh" className="h-4 w-4 animate-spin text-muted-foreground" />
           </div>
         ) : (
           <div>

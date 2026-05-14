@@ -1,9 +1,9 @@
 import React, { memo } from 'react';
-import { RiCloseLine, RiMessage2Line } from '@remixicon/react';
 import { useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
 import { useI18n } from '@/lib/i18n';
+import { Icon } from "@/components/icon/Icon";
 
 interface QueuedMessageChipProps {
     message: QueuedMessage;
@@ -35,9 +35,8 @@ const QueuedMessageChip = memo(({ message, sessionId, onEdit }: QueuedMessageChi
                 onClick={() => onEdit(message)}
                 className="flex min-w-0 flex-1 items-center gap-1.5 text-left hover:opacity-80 transition-opacity"
             >
-                <RiMessage2Line
-                    className="h-4 w-4 flex-shrink-0 text-muted-foreground"
-                />
+                <Icon name="message-2" className="h-4 w-4 flex-shrink-0 text-muted-foreground"
+                    />
                 <span className="text-muted-foreground flex-shrink-0">
                     Queued
                     {attachmentCount > 0 && (
@@ -54,7 +53,7 @@ const QueuedMessageChip = memo(({ message, sessionId, onEdit }: QueuedMessageChi
                 className="flex items-center justify-center h-6 w-6 flex-shrink-0 hover:bg-[var(--interactive-hover)] rounded-full transition-colors"
                 aria-label={t('chat.queuedMessage.removeAria')}
             >
-                <RiCloseLine className="h-4 w-4 text-muted-foreground" />
+                <Icon name="close" className="h-4 w-4 text-muted-foreground" />
             </button>
         </div>
     );

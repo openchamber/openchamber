@@ -1082,6 +1082,9 @@ async function main(options = {}) {
   if (typeof options.onDesktopNotification === 'function') {
     notificationEmitterRuntime.setOnDesktopNotification(options.onDesktopNotification);
   }
+  if (typeof options.getIsWindowFocused === 'function') {
+    notificationTriggerRuntime.setGetIsWindowFocused(options.getIsWindowFocused);
+  }
 
   console.log(`Starting OpenChamber on port ${port === 0 ? 'auto' : port}`);
 

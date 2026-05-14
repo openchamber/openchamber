@@ -33,6 +33,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 
 import { DirectoryExplorerDialog } from '@/components/session/DirectoryExplorerDialog';
+import { Icon } from '@/components/icon/Icon';
 import { NewWorktreeDialog } from '@/components/session/NewWorktreeDialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -183,7 +184,7 @@ const MobileProjectIcon: React.FC<{
           onError={() => setImageFailed(true)}
         />
       ) : ProjectIcon ? (
-        <ProjectIcon className={innerClasses} style={iconColor ? { color: iconColor } : undefined} />
+        <Icon name={ProjectIcon} className={innerClasses} style={iconColor ? { color: iconColor } : undefined} />
       ) : (
         <RiFolder6Line className={innerClasses} style={iconColor ? { color: iconColor } : undefined} />
       )}
@@ -1126,4 +1127,3 @@ const MobileSessionsEmpty: React.FC<{
     {action ? <div className="pt-2">{action}</div> : null}
   </div>
 );
-
