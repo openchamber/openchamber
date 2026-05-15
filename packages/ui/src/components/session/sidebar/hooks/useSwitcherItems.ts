@@ -7,7 +7,7 @@ import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { useGitAllBranches, useGitStore } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { SessionNode } from '../types';
-import { compareSessionsByPinnedAndTime } from '../utils';
+import { compareSessionsByPinnedAndTime, isPathWithinProject } from '../utils';
 
 export type SwitcherItem = {
   node: SessionNode;
@@ -60,7 +60,7 @@ export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions
     (directory: string | null) => {
       if (!directory) return null;
       const matches = normalizedProjects
-        .filter((project) => directory === project.normalizedPath || directory.startsWith(`${project.normalizedPath}/`))
+        .filter((project) => isPathWithinProject(directory, project.normalizedPath))
         .sort((a, b) => (b.normalizedPath?.length ?? 0) - (a.normalizedPath?.length ?? 0));
       return matches[0] ?? null;
     },
