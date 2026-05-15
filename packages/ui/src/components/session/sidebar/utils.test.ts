@@ -14,4 +14,16 @@ describe('isPathWithinProject', () => {
   test('does not match sibling directory prefixes', () => {
     expect(isPathWithinProject('/workspace/app2', '/workspace/app')).toBe(false);
   });
+
+  test('returns false when directory is null', () => {
+    expect(isPathWithinProject(null, '/workspace/app')).toBe(false);
+  });
+
+  test('returns false when projectPath is null', () => {
+    expect(isPathWithinProject('/workspace/app', null)).toBe(false);
+  });
+
+  test('matches deep child directories', () => {
+    expect(isPathWithinProject('/workspace/app/sub/dir', '/workspace/app')).toBe(true);
+  });
 });
