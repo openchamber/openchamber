@@ -822,10 +822,12 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       toggleRowSelected(session.id, sessionDirectory ?? null, collectNodeDescendantIds(node));
       return;
     }
-    if (isMissingDirectory) {
-      return;
-    }
-    if (!isActive) {
+    // Skip the click-feedback animation for missing-directory rows (nothing
+    // visibly responds to the click on those), but still call
+    // handleSessionSelect with isMissingDirectory=true so the receiver can
+    // surface its own feedback (toast/dialog) — silently swallowing the click
+    // here would leave the user with no signal that the row is unreachable.
+    if (!isActive && !isMissingDirectory) {
       setIsClickFeedbackVisible(true);
       if (clickFeedbackTimerRef.current !== null) {
         window.clearTimeout(clickFeedbackTimerRef.current);

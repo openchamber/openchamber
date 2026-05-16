@@ -22,7 +22,11 @@ type Args = {
 
 export const useSessionGrouping = (args: Args) => {
   const { t } = useI18n();
-  const nodeCacheRef = React.useRef<Map<string, SessionNode>>(new Map());
+  // WeakMap keyed by the Session object itself: when a session is removed
+  // from the store and no longer referenced, its cached SessionNode becomes
+  // eligible for garbage collection. A plain Map keyed by session.id would
+  // accumulate forever as sessions are deleted.
+  const nodeCacheRef = React.useRef<WeakMap<Session, SessionNode>>(new WeakMap());
   const buildGroupSearchText = React.useCallback((group: SessionGroup): string => {
     return [group.label, group.branch ?? '', group.description ?? '', group.directory ?? ''].join(' ').toLowerCase();
   }, []);
@@ -109,10 +113,9 @@ export const useSessionGrouping = (args: Args) => {
         const children = childrenMap.get(session.id) ?? [];
         const childNodes = children.map((child) => buildProjectNode(child));
         const worktree = getSessionWorktree(session);
-        const cached = nodeCache.get(session.id);
+        const cached = nodeCache.get(session);
         if (
           cached
-          && cached.session === session
           && cached.worktree === worktree
           && cached.children.length === childNodes.length
           && cached.children.every((c, i) => c === childNodes[i])
@@ -120,7 +123,7 @@ export const useSessionGrouping = (args: Args) => {
           return cached;
         }
         const node: SessionNode = { session, children: childNodes, worktree };
-        nodeCache.set(session.id, node);
+        nodeCache.set(session, node);
         return node;
       };
 
