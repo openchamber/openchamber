@@ -15,10 +15,11 @@ import { registerSessionDirectory } from "./sync-refs"
 import { isSyntheticPart } from "@/lib/messages/synthetic"
 import { materializeSessionSnapshots } from "./materialization"
 import { stripMessageDiffSnapshots } from "./sanitize"
-import type { AttachedFile } from "@/stores/types/sessionTypes"
 
 const MESSAGE_REFETCH_LIMIT = 200
 const MESSAGE_REFETCH_SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
+const UNREVERT_REFETCH_ATTEMPTS = 3
+const UNREVERT_REFETCH_RETRY_MS = 150
 
 // Reference set by SyncProvider — allows actions to access SDK and stores
 let _sdk: OpencodeClient | null = null
@@ -26,6 +27,8 @@ let _childStores: ChildStoreManager | null = null
 let _getDirectory: () => string = () => ""
 let _optimisticAdd: ((input: { sessionID: string; message: Message; parts: Part[] }) => void) | null = null
 let _optimisticRemove: ((input: { sessionID: string; messageID: string }) => void) | null = null
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 export function setActionRefs(
   sdk: OpencodeClient,
@@ -164,45 +167,6 @@ function getRequestReplyClient(
     return opencodeClient.getScopedSdkClient(requestDirectory)
   }
   return getSessionReplyClient(sessionId)
-}
-
-// ---------------------------------------------------------------------------
-// Attachment helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Convert raw file parts from a stored message into AttachedFile objects
- * suitable for restoring to the input store.
- * Only non-synthetic file parts are included.
- * Size is derived from base64 data URLs when available; otherwise 0 (which
- * suppresses the size label in the chip rather than showing "0 B").
- */
-function filePartsToAttachments(parts: Part[]): AttachedFile[] {
-  return parts
-    .filter((p) => p.type === "file" && !isSyntheticPart(p))
-    .map((p) => {
-      const fp = p as Record<string, unknown>
-      const url = (fp.url as string) ?? ""
-      const mime = (fp.mime as string) ?? ""
-      const filename = (fp.filename as string) ?? ""
-      let size = 0
-      if (url.startsWith("data:")) {
-        const base64 = url.split(",")[1] ?? ""
-        const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0
-        size = Math.max(0, Math.floor(base64.length * 3 / 4) - padding)
-      }
-      return {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        file: new File([], filename, { type: mime }),
-        dataUrl: url,
-        mimeType: mime,
-        filename,
-        size,
-        // Always use "local" so restored attachments are visible and
-        // removable in the composer attachment list regardless of URL scheme.
-        source: "local" as const,
-      }
-    })
 }
 
 // ---------------------------------------------------------------------------
@@ -612,14 +576,12 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
     }
   }
 
-  // Extract message text and file attachments for prompt restoration.
-  // Only non-synthetic text parts — the server adds file content as synthetic
-  // text parts that should not be restored. File parts (images, pasted
-  // screenshots) are user-originated and must be restored.
+  // Extract message text for prompt restoration (only non-synthetic text parts —
+  // the server adds file content as synthetic text parts that should not be restored)
   const messages = state.message[sessionId] ?? []
   const targetMsg = messages.find((m) => m.id === messageId)
   let messageText = ""
-  let messageAttachments: AttachedFile[] = []
+  let submittedFileParts: Array<Record<string, unknown>> = []
   if (targetMsg && targetMsg.role === "user") {
     const parts = state.part[messageId] ?? []
     const textParts = parts.filter((p) => p.type === "text" && !isSyntheticPart(p))
@@ -627,10 +589,18 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
       .map((p: Record<string, unknown>) => (p as { text?: string }).text || (p as { content?: string }).content || "")
       .join("\n")
       .trim()
-    messageAttachments = filePartsToAttachments(parts)
+    // Snapshot file parts for later restoration to the input (line ~626).
+    // File parts (type="file") contain url/mime/filename — the file already
+    // exists on the server so we record it as a "server" source attachment.
+    // Exclude synthetic file parts (server-generated file content that should
+    // not be restored to the composer).
+    submittedFileParts = parts.filter((p) => p.type === "file" && !isSyntheticPart(p)) as Array<Record<string, unknown>>
   }
 
-  // Optimistically remove reverted messages + set marker
+  // Optimistically set only the revert marker. Keep messages and parts in the
+  // local store; visible-message selectors derive the displayed timeline from
+  // session.revert. This matches the server model and preserves reverted
+  // messages for the restore dock without maintaining a separate shadow copy.
   const prevRevert = (() => {
     const s = state.session.find((s) => s.id === sessionId)
     return (s as Session & { revert?: unknown })?.revert
@@ -638,19 +608,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   const sessions = [...state.session]
   const sessionIdx = sessions.findIndex((s) => s.id === sessionId)
 
-  // Remove messages at and after the revert point from the store
-  const prevMessages = state.message[sessionId] ?? []
-  const prevPart = { ...state.part }
-  const keptMessages = prevMessages.filter((m) => m.id < messageId)
-  const removedMessages = prevMessages.filter((m) => m.id >= messageId)
-  for (const m of removedMessages) {
-    delete prevPart[m.id]
-  }
-
-  const patch: Record<string, unknown> = {
-    message: { ...state.message, [sessionId]: keptMessages },
-    part: prevPart,
-  }
+  const patch: Record<string, unknown> = {}
 
   if (sessionIdx >= 0) {
     sessions[sessionIdx] = { ...sessions[sessionIdx], revert: { messageID: messageId } } as Session
@@ -659,18 +617,33 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
 
   store.setState(patch)
 
-  // Snapshot composer attachments before mutating — needed for rollback
-  const prevAttachedFiles = useInputStore.getState().attachedFiles
+  // Save input store state before mutations — if the API fails we need to
+  // roll back both text and attachments to their previous values.
+  const prevInputAttachments = [...useInputStore.getState().attachedFiles]
+  const prevInputText = useInputStore.getState().pendingInputText
+  const prevInputMode = useInputStore.getState().pendingInputMode
 
-  // Restore reverted message text and attachments to input
+  // Restore reverted message text and file attachments to input
   if (messageText) {
     useInputStore.setState({
       pendingInputText: messageText,
       pendingInputMode: "replace" as const,
     })
   }
-  // Always restore attachments (clear if the reverted message had none)
-  useInputStore.getState().setAttachedFiles(messageAttachments)
+
+  // Restore file/image attachments from the target message.
+  // Clear existing attachments first — previous revert's attachments
+  // must not carry over, even when the current message has no files.
+  useInputStore.getState().clearAttachedFiles()
+  for (const fp of submittedFileParts) {
+      const f = fp as Record<string, unknown>
+      const url = typeof f.url === "string" ? f.url : ""
+      const mime = typeof f.mime === "string" ? f.mime : "application/octet-stream"
+      const filename = typeof f.filename === "string" ? f.filename : "attachment"
+      if (url) {
+        useInputStore.getState().addRestoredAttachment({ url, mimeType: mime, filename })
+      }
+    }
 
   // Call SDK and merge authoritative result into store
   try {
@@ -685,7 +658,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
       }
     }
   } catch (err) {
-    // Rollback: restore removed messages + revert marker + composer attachments
+    // Rollback: restore removed messages + revert marker
     const current = store.getState()
     const rollback = [...current.session]
     const idx = rollback.findIndex((s) => s.id === sessionId)
@@ -694,10 +667,13 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
     }
     store.setState({
       session: rollback,
-      message: { ...current.message, [sessionId]: prevMessages },
-      part: { ...current.part, ...Object.fromEntries(removedMessages.map((m) => [m.id, state.part[m.id] ?? []])) },
     })
-    useInputStore.getState().setAttachedFiles(prevAttachedFiles)
+    // Rollback input store: restore previous text and attachments
+    useInputStore.setState({
+      pendingInputText: prevInputText,
+      pendingInputMode: prevInputMode,
+      attachedFiles: prevInputAttachments,
+    })
     throw err
   }
 }
@@ -729,6 +705,7 @@ export async function refetchSessionMessages(sessionId: string): Promise<void> {
 export async function unrevertSession(sessionId: string): Promise<void> {
   const store = dirStore()
   const state = store.getState()
+  const previousMessageCount = state.message[sessionId]?.length ?? 0
 
   // Abort if busy
   const status = state.session_status[sessionId]
@@ -750,7 +727,12 @@ export async function unrevertSession(sessionId: string): Promise<void> {
       store.setState({ session: sessions })
     }
   }
-  await refetchSessionMessages(sessionId)
+  for (let attempt = 0; attempt < UNREVERT_REFETCH_ATTEMPTS; attempt += 1) {
+    if (attempt > 0) await wait(UNREVERT_REFETCH_RETRY_MS)
+    await refetchSessionMessages(sessionId)
+    const nextMessageCount = store.getState().message[sessionId]?.length ?? 0
+    if (nextMessageCount > previousMessageCount) return
+  }
 }
 
 /**
@@ -776,7 +758,7 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
     .map((p: Part) => ((p as Record<string, unknown>).text as string) || ((p as Record<string, unknown>).content as string) || "")
     .join("\n")
     .trim()
-  const messageAttachments = filePartsToAttachments(parts)
+  const fileParts = parts.filter((p) => p.type === "file" && !isSyntheticPart(p)) as Array<Record<string, unknown>>
 
   const result = await sdk().session.fork({ sessionID: sessionId, directory: dir(), messageID: messageId })
   if (!result.data) return
@@ -795,13 +777,21 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
   // Switch to new session
   useSessionUIStore.getState().setCurrentSession(forkedSession.id)
 
-  // Restore forked message text and attachments to input
+  // Restore forked message text and file attachments to input
   if (messageText) {
     useInputStore.setState({
       pendingInputText: messageText,
       pendingInputMode: "replace" as const,
     })
   }
-  // Always restore attachments (clear if the forked message had none)
-  useInputStore.getState().setAttachedFiles(messageAttachments)
+  // Clear existing attachments and restore file parts from the forked message.
+  useInputStore.getState().clearAttachedFiles()
+  for (const fp of fileParts) {
+    const url = typeof fp.url === "string" ? fp.url : ""
+    const mime = typeof fp.mime === "string" ? fp.mime : "application/octet-stream"
+    const filename = typeof fp.filename === "string" ? fp.filename : "attachment"
+    if (url) {
+      useInputStore.getState().addRestoredAttachment({ url, mimeType: mime, filename })
+    }
+  }
 }
