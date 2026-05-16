@@ -215,7 +215,15 @@ export const HistoryCommitRow = React.memo(({
                           return <div className="px-3 py-2 text-sm text-muted-foreground">{t('gitView.history.loadingDiff')}</div>;
                         }
                         if (cached === 'error') {
-                          return <div className="px-3 py-2 text-sm text-muted-foreground">{t('gitView.history.diffError')}</div>;
+                          return (
+                            <button
+                              type="button"
+                              onClick={() => toggleFileDiff(file)}
+                              className="w-full text-left px-3 py-2 text-sm text-muted-foreground hover:bg-[var(--interactive-hover)] transition-colors"
+                            >
+                              {t('gitView.history.diffError')}
+                            </button>
+                          );
                         }
                         return (
                           <PierreDiffViewer

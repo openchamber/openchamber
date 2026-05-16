@@ -2594,25 +2594,54 @@ export async function getCommitFiles(
   directory: string,
   hash: string
 ): Promise<{ files: Array<{ path: string; insertions: number; deletions: number; isBinary: boolean; changeType: string }> }> {
-  const result = await execGit(['show', '--numstat', '--format=', hash], directory);
-  
-  if (result.exitCode !== 0) {
+  const numstatResult = await execGit(['show', '--numstat', '--format=', hash], directory);
+
+  if (numstatResult.exitCode !== 0) {
     return { files: [] };
   }
 
   const files: Array<{ path: string; insertions: number; deletions: number; isBinary: boolean; changeType: string }> = [];
-  
-  for (const line of result.stdout.trim().split('\n').filter(Boolean)) {
+  const lines = numstatResult.stdout.trim().split('\n').filter(Boolean);
+
+  for (const line of lines) {
     const parts = line.split('\t');
-    if (parts.length >= 3) {
-      const isBinary = parts[0] === '-' && parts[1] === '-';
-      files.push({
-        path: parts[2] || '',
-        insertions: isBinary ? 0 : parseInt(parts[0] || '0', 10),
-        deletions: isBinary ? 0 : parseInt(parts[1] || '0', 10),
-        isBinary,
-        changeType: 'M', // Would need additional parsing for actual change type
-      });
+    if (parts.length < 3) continue;
+
+    const [insertionsRaw, deletionsRaw, ...pathParts] = parts;
+    const filePath = pathParts.join('\t');
+    if (!filePath) continue;
+
+    const isBinary = insertionsRaw === '-' && deletionsRaw === '-';
+    const insertions = isBinary ? 0 : (parseInt(insertionsRaw, 10) || 0);
+    const deletions = isBinary ? 0 : (parseInt(deletionsRaw, 10) || 0);
+
+    let changeType = 'M';
+    if (filePath.includes(' => ')) {
+      changeType = 'R';
+    }
+
+    files.push({ path: filePath, insertions, deletions, isBinary, changeType });
+  }
+
+  // Get accurate change types from --name-status
+  const nameStatusResult = await execGit(['show', '--name-status', '--format=', hash], directory);
+  if (nameStatusResult.exitCode === 0) {
+    const statusMap = new Map<string, string>();
+    for (const line of nameStatusResult.stdout.trim().split('\n').filter(Boolean)) {
+      const match = line.match(/^([AMDRC])\d*\t(.+)$/);
+      if (match) {
+        const [, status, path] = match;
+        statusMap.set(path, status);
+      }
+    }
+    for (const file of files) {
+      const basePath = file.path.includes(' => ')
+        ? file.path.split(' => ').pop()?.replace(/[{}]/g, '') ?? file.path
+        : file.path;
+      const status = statusMap.get(basePath) ?? statusMap.get(file.path);
+      if (status) {
+        file.changeType = status;
+      }
     }
   }
 
