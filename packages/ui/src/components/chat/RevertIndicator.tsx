@@ -165,7 +165,7 @@ export const RevertIndicator: React.FC<RevertIndicatorProps> = ({ sessionId }) =
       // Don't close if clicking inside the popover or the anchor button
       if (anchorRef.current?.contains(event.target as Node)) return;
       // Check if click is inside the portal popover
-      const popoverEl = document.getElementById("revert-popover-portal");
+      const popoverEl = document.getElementById(`revert-popover-portal-${sessionId}`);
       if (popoverEl?.contains(event.target as Node)) return;
       if (mountedRef.current) {
         setIsExpanded(false);
@@ -224,7 +224,7 @@ export const RevertIndicator: React.FC<RevertIndicatorProps> = ({ sessionId }) =
       {/* Popover rendered via portal to escape overflow clipping */}
       {isExpanded && popoverPos && createPortal(
         <div
-          id="revert-popover-portal"
+          id={`revert-popover-portal-${sessionId}`}
           style={{
             position: "fixed",
             bottom: popoverPos.bottom,

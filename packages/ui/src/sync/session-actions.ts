@@ -620,6 +620,12 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
 
   store.setState(patch)
 
+  // Save input store state before mutations — if the API fails we need to
+  // roll back both text and attachments to their previous values.
+  const prevInputAttachments = [...useInputStore.getState().attachedFiles]
+  const prevInputText = useInputStore.getState().pendingInputText
+  const prevInputMode = useInputStore.getState().pendingInputMode
+
   // Restore reverted message text and file attachments to input
   if (messageText) {
     useInputStore.setState({
@@ -666,6 +672,12 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
       session: rollback,
       message: { ...current.message, [sessionId]: prevMessages },
       part: { ...current.part, ...Object.fromEntries(removedMessages.map((m) => [m.id, state.part[m.id] ?? []])) },
+    })
+    // Rollback input store: restore previous text and attachments
+    useInputStore.setState({
+      pendingInputText: prevInputText,
+      pendingInputMode: prevInputMode,
+      attachedFiles: prevInputAttachments,
     })
     throw err
   }
