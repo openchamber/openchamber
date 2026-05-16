@@ -1375,6 +1375,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.revertPopover.forkFromHere": "Розгалуження тут",
   "chat.revertPopover.forkFromMessage": "Розгалуження від цього повідомлення",
   "chat.revertPopover.restoreAll": "Відновити всі",
+  "chat.revertPopover.restore": "Відновити",
   "chat.revertPopover.revert": "Відкотити",
   "chat.revertPopover.fork": "Розгалуження",
   "chat.revert.toast.undo": "Відкочено до {preview}",

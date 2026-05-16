@@ -1,9 +1,8 @@
 import React from "react";
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { cn } from "@/lib/utils";
-import { useDirectorySync, useSessionRevertMessageID, useSessionMessagesResolved } from "@/sync/sync-context";
+import { useDirectorySync } from "@/sync/sync-context";
 import type { Todo } from "@opencode-ai/sdk/v2/client";
-import { RevertIndicator } from "./RevertIndicator";
 
 // Compat aliases for old TodoItem shape
 type TodoItem = Todo & { id?: string };
@@ -133,7 +132,6 @@ interface StatusRowProps {
   showAbortStatus?: boolean;
   showAssistantStatus?: boolean;
   showTodos?: boolean;
-  showRevertIndicator?: boolean;
   agentName?: string;
   leftAccessory?: React.ReactNode;
 }
@@ -151,7 +149,6 @@ export const StatusRow: React.FC<StatusRowProps> = ({
   showAbortStatus,
   showAssistantStatus = true,
   showTodos = true,
-  showRevertIndicator = false,
   agentName,
   leftAccessory,
 }) => {
@@ -212,16 +209,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
   // Original logic from ChatInput
   const shouldRenderPlaceholder = !showAbortStatus && (wasAborted || !abortActive);
 
-  // Read revert state from both UI store (responsive) and sync store (survives refresh)
-  const uiRevertMessageID = useSessionUIStore(
-    React.useCallback((s) => currentSessionId ? s.activeRevertMessageIDs.get(currentSessionId) : undefined, [currentSessionId]),
-  );
-  const syncRevertMessageID = useSessionRevertMessageID(currentSessionId ?? "");
-  const revertMessageID = uiRevertMessageID ?? syncRevertMessageID ?? undefined;
-  // Only show revert indicator when messages are loaded (prevents React #185 on early click)
-  const revertMessagesResolved = useSessionMessagesResolved(currentSessionId ?? "");
-  const hasRevertIndicator = showRevertIndicator && Boolean(revertMessageID) && revertMessagesResolved;
-  const hasContent = hasAssistantContent || hasTodoContent || hasLeftAccessory || hasRevertIndicator;
+  const hasContent = hasAssistantContent || hasTodoContent || hasLeftAccessory;
 
   // Close popover when clicking outside
   const popoverRef = React.useRef<HTMLDivElement>(null);
@@ -300,7 +288,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
   return (
     <div className={cn("mb-1", !hasLeftAccessory && "chat-column")} style={STATUS_ROW_CONTAINER_STYLE}>
       <div className={cn("flex items-center justify-between py-0.5 gap-2 h-[1.2rem]", hasLeftAccessory && "px-0.5")}>
-        {/* Left: Abort status | Working placeholder | leftAccessory | Revert indicator */}
+        {/* Left: Abort status | Working placeholder | leftAccessory */}
         <div className={cn("flex-1 flex items-center min-w-0 gap-2", hasLeftAccessory ? "pl-1.5" : "overflow-x-hidden")}>
           {showAssistantStatus && showAbortStatus ? (
             <div className="flex h-full items-center text-[var(--status-error)] pl-0.5">
@@ -322,7 +310,6 @@ export const StatusRow: React.FC<StatusRowProps> = ({
           ) : leftAccessory ? (
             leftAccessory
           ) : null}
-          {showRevertIndicator && currentSessionId && <RevertIndicator sessionId={currentSessionId} />}
         </div>
 
         {/* Right: Abort (mobile only) + Todo */}

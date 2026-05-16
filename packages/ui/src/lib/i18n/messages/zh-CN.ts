@@ -1375,6 +1375,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.revertPopover.forkFromHere': '从此处分支',
   'chat.revertPopover.forkFromMessage': '从此消息分支',
   'chat.revertPopover.restoreAll': '恢复全部',
+  'chat.revertPopover.restore': '恢复',
   'chat.revertPopover.revert': '撤回',
   'chat.revertPopover.fork': '分叉',
   'chat.revert.toast.undo': '已撤回至 {preview}',

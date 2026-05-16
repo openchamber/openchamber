@@ -466,6 +466,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.revertPopover.forkFromHere': 'Rozgałęź stąd',
   'chat.revertPopover.forkFromMessage': 'Rozgałęź od tej wiadomości',
   'chat.revertPopover.restoreAll': 'Przywróć wszystkie',
+  'chat.revertPopover.restore': 'Przywróć',
   'chat.revertPopover.revert': 'Cofnij',
   'chat.revertPopover.fork': 'Rozgałęź',
   'chat.revert.toast.undo': 'Cofnięte do {preview}',

@@ -1375,6 +1375,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.revertPopover.forkFromHere": "Criar ramificação aqui",
   "chat.revertPopover.forkFromMessage": "Criar ramificação desta mensagem",
   "chat.revertPopover.restoreAll": "Restaurar todas",
+  "chat.revertPopover.restore": "Restaurar",
   "chat.revertPopover.revert": "Reverter",
   "chat.revertPopover.fork": "Bifurcar",
   "chat.revert.toast.undo": "Revertido para {preview}",

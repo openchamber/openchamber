@@ -1411,6 +1411,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.revertPopover.forkFromHere': '여기서 분기',
   'chat.revertPopover.forkFromMessage': '이 메시지에서 분기',
   'chat.revertPopover.restoreAll': '모두 복원',
+  'chat.revertPopover.restore': '복원',
   'chat.revertPopover.revert': '되돌리기',
   'chat.revertPopover.fork': '분기',
   'chat.revert.toast.undo': '{preview}(으)로 되돌림',

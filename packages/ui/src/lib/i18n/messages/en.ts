@@ -1409,6 +1409,7 @@ export const dict = {
   'chat.revertPopover.forkFromHere': 'Fork from here',
   'chat.revertPopover.forkFromMessage': 'Fork from this message',
   'chat.revertPopover.restoreAll': 'Restore all',
+  'chat.revertPopover.restore': 'Restore',
   'chat.revertPopover.revert': 'Revert',
   'chat.revertPopover.fork': 'Fork',
   'chat.revert.toast.undo': 'Reverted to {preview}',
