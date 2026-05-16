@@ -181,7 +181,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     [sourceGroupNodes],
   );
   const archivedPageSize = 10;
-  const archivedTotalSessions = group.isArchivedBucket ? sourceGroupNodes.length : 0;
+  const archivedTotalSessions = group.isArchivedBucket ? sourceRootNodes.length : 0;
   const archivedTotalPages = group.isArchivedBucket ? Math.max(1, Math.ceil(archivedTotalSessions / archivedPageSize)) : 1;
   const archivedCurrentPage = group.isArchivedBucket ? Math.max(1, Math.min(archivedPage, archivedTotalPages)) : 1;
   const archivedStartIndex = (archivedCurrentPage - 1) * archivedPageSize;
