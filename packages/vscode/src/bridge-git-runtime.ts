@@ -416,6 +416,20 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       return { id, type, success: true, data: result };
     }
 
+    case 'api:git/commit-file-diff': {
+      const { directory, hash, path: filePath, binary } = (payload || {}) as {
+        directory?: string;
+        hash?: string;
+        path?: string;
+        binary?: boolean;
+      };
+      if (!directory || !hash || !filePath) {
+        return { id, type, success: false, error: 'Directory, hash, and path are required' };
+      }
+      const result = await gitService.getCommitFileDiff(directory, hash, filePath, Boolean(binary));
+      return { id, type, success: true, data: result };
+    }
+
     case 'api:git/identity': {
       const { directory, method, userName, userEmail, sshKey } = (payload || {}) as {
         directory?: string;

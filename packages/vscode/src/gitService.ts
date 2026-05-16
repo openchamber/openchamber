@@ -2619,6 +2619,28 @@ export async function getCommitFiles(
   return { files };
 }
 
+export async function getCommitFileDiff(
+  directory: string,
+  hash: string,
+  filePath: string,
+  isBinary: boolean
+): Promise<{ original: string; modified: string; isBinary: boolean }> {
+  if (isBinary) {
+    return { original: '', modified: '', isBinary: true };
+  }
+
+  const [originalResult, modifiedResult] = await Promise.all([
+    execGit(['show', `${hash}^:${filePath}`], directory),
+    execGit(['show', `${hash}:${filePath}`], directory),
+  ]);
+
+  return {
+    original: originalResult.exitCode === 0 ? originalResult.stdout : '',
+    modified: modifiedResult.exitCode === 0 ? modifiedResult.stdout : '',
+    isBinary: false,
+  };
+}
+
 // ============== Git Identity Operations ==============
 
 export interface GitIdentitySummary {
