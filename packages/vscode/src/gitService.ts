@@ -2630,8 +2630,14 @@ export async function getCommitFiles(
     for (const line of nameStatusResult.stdout.trim().split('\n').filter(Boolean)) {
       const match = line.match(/^([AMDRC])\d*\t(.+)$/);
       if (match) {
-        const [, status, path] = match;
-        statusMap.set(path, status);
+        const [, status, pathPart] = match;
+        // R/C lines have format: R<score>\t<source>\t<dest>
+        // (.+) greedily captures both paths; extract only the destination
+        const mapPath =
+          (status === 'R' || status === 'C') && pathPart.includes('\t')
+            ? pathPart.split('\t').pop()!
+            : pathPart;
+        statusMap.set(mapPath, status);
       }
     }
     for (const file of files) {

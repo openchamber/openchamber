@@ -7,6 +7,7 @@ import type { GitLogEntry, CommitFileEntry } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 import { getCommitFileDiff, type CommitFileDiffResponse } from '@/lib/gitApi';
 import { PierreDiffViewer } from '@/components/views/PierreDiffViewer';
+import { getLanguageFromExtension } from '@/lib/toolHelpers';
 
 
 interface HistoryCommitRowProps {
@@ -90,9 +91,14 @@ export const HistoryCommitRow = React.memo(({
 
     if (cached && cached !== 'error') return; // Already loaded
 
+    if (!directory) {
+      setDiffCache(prev => new Map(prev).set(key, 'error'));
+      return;
+    }
+
     setDiffCache(prev => new Map(prev).set(key, 'loading'));
     try {
-      const result = await getCommitFileDiff(directory ?? '', entry.hash, file.path, file.isBinary);
+      const result = await getCommitFileDiff(directory, entry.hash, file.path, false);
       setDiffCache(prev => new Map(prev).set(key, result));
     } catch {
       setDiffCache(prev => new Map(prev).set(key, 'error'));
@@ -225,15 +231,15 @@ export const HistoryCommitRow = React.memo(({
                             </button>
                           );
                         }
-                        return (
-                          <PierreDiffViewer
-                            original={cached.original}
-                            modified={cached.modified}
-                            language=""
-                            fileName={file.path}
-                            renderSideBySide={false}
-                            layout="inline"
-                          />
+                          return (
+                           <PierreDiffViewer
+                             original={cached.original}
+                             modified={cached.modified}
+                             language={getLanguageFromExtension(file.path) || ''}
+                             fileName={file.path}
+                             renderSideBySide={false}
+                             layout="inline"
+                           />
                         );
                       })()}
                     </div>
