@@ -2567,6 +2567,8 @@ export async function getGitLog(
     args.push(`${resolvedFrom}..${options.to}`);
   } else if (resolvedFrom) {
     args.push(`${resolvedFrom}..HEAD`);
+  } else if (options?.to) {
+    args.push(options.to);
   }
   
   if (options?.file) {
