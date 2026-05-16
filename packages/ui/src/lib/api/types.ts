@@ -303,6 +303,12 @@ export interface GitCommitFilesResponse {
   files: CommitFileEntry[];
 }
 
+export interface CommitFileDiffResponse {
+  original: string;
+  modified: string;
+  isBinary: boolean;
+}
+
 export interface GitWorktreeInfo {
   head: string;
   name: string;
@@ -447,6 +453,7 @@ export interface GitAPI {
   renameBranch(directory: string, oldName: string, newName: string): Promise<{ success: boolean; branch: string }>;
   getGitLog(directory: string, options?: GitLogOptions): Promise<GitLogResponse>;
   getCommitFiles(directory: string, hash: string): Promise<GitCommitFilesResponse>;
+  getCommitFileDiff?(directory: string, hash: string, filePath: string, isBinary: boolean): Promise<CommitFileDiffResponse>;
   getCurrentGitIdentity(directory: string): Promise<GitIdentitySummary | null>;
   hasLocalIdentity?(directory: string): Promise<boolean>;
   setGitIdentity(directory: string, profileId: string): Promise<{ success: boolean; profile: GitIdentityProfile }>;
