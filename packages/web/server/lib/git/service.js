@@ -2688,9 +2688,27 @@ export async function getLog(directory, options = {}) {
 
   try {
     const maxCount = options.maxCount || 50;
+
+    // Prefer remote-tracking base ref so the range works even when the user
+    // has never checked out the base branch locally (same pattern as
+    // getRangeDiff / getRangeFiles).
+    let resolvedFrom = typeof options.from === 'string' && options.from.trim() ? options.from.trim() : undefined;
+    if (resolvedFrom) {
+      const originCandidate = `refs/remotes/origin/${resolvedFrom}`;
+      try {
+        const verified = await git.raw(['rev-parse', '--verify', originCandidate]);
+        if (verified && verified.trim()) {
+          resolvedFrom = `origin/${resolvedFrom}`;
+        }
+      } catch {
+        // ignore – keep original ref, git will surface a useful error if it
+        // also doesn't exist
+      }
+    }
+
     const baseLog = await git.log({
       maxCount,
-      from: options.from,
+      from: resolvedFrom,
       to: options.to,
       file: options.file
     });
@@ -2703,10 +2721,10 @@ export async function getLog(directory, options = {}) {
       '--shortstat'
     ];
 
-    if (options.from && options.to) {
-      logArgs.push(`${options.from}..${options.to}`);
-    } else if (options.from) {
-      logArgs.push(`${options.from}..HEAD`);
+    if (resolvedFrom && options.to) {
+      logArgs.push(`${resolvedFrom}..${options.to}`);
+    } else if (resolvedFrom) {
+      logArgs.push(`${resolvedFrom}..HEAD`);
     } else if (options.to) {
       logArgs.push(options.to);
     }

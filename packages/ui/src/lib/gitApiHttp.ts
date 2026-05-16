@@ -662,7 +662,8 @@ export async function getGitLog(
     })
   );
   if (!response.ok) {
-    throw new Error(`Failed to get git log: ${response.statusText}`);
+    const errorBody = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(`Failed to get git log: ${errorBody.error || response.statusText}`);
   }
   return response.json();
 }
