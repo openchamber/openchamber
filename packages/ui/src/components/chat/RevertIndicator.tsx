@@ -173,7 +173,7 @@ export const RevertIndicator: React.FC<RevertIndicatorProps> = ({ sessionId }) =
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [isExpanded]);
+  }, [isExpanded, sessionId]);
 
   // Subscribe to message count from sync store. Used for two purposes:
   //   (1) render guard — prevent showing indicator before messages load
