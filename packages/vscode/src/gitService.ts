@@ -2516,6 +2516,34 @@ export interface GitLogEntry {
 }
 
 /**
+ * Resolve a log base ref using local-first semantics (mirrors web service.js).
+ *
+ * - Returns undefined when `from` is falsy/whitespace.
+ * - Returns `from` unchanged when the local ref resolves.
+ * - Returns `origin/<from>` when local is absent but the remote-tracking ref exists.
+ * - Returns `from` unchanged when neither resolves (lets git surface the error).
+ */
+async function resolveBaseRefForLog(
+  from: string | undefined,
+  directory: string
+): Promise<string | undefined> {
+  const normalized = typeof from === 'string' ? from.trim() : undefined;
+  if (!normalized) return undefined;
+
+  const checkRef = async (ref: string): Promise<boolean> => {
+    const result = await execGit(['rev-parse', '--verify', ref], directory);
+    return result.exitCode === 0 && Boolean(result.stdout.trim());
+  };
+
+  if (await checkRef(normalized)) return normalized;
+
+  const originRef = `refs/remotes/origin/${normalized}`;
+  if (await checkRef(originRef)) return `origin/${normalized}`;
+
+  return normalized;
+}
+
+/**
  * Get git log
  */
 export async function getGitLog(
@@ -2523,6 +2551,11 @@ export async function getGitLog(
   options?: { maxCount?: number; from?: string; to?: string; file?: string }
 ): Promise<{ all: GitLogEntry[]; latest: GitLogEntry | null; total: number }> {
   const maxCount = options?.maxCount || 50;
+
+  // Prefer the local ref; fall back to origin/<from> only when the local ref
+  // cannot be resolved (e.g. user has never checked out the base branch).
+  const resolvedFrom = await resolveBaseRefForLog(options?.from, directory);
+
   const args = [
     'log',
     `--max-count=${maxCount}`,
@@ -2530,8 +2563,10 @@ export async function getGitLog(
     '--shortstat',
   ];
   
-  if (options?.from && options?.to) {
-    args.push(`${options.from}..${options.to}`);
+  if (resolvedFrom && options?.to) {
+    args.push(`${resolvedFrom}..${options.to}`);
+  } else if (resolvedFrom) {
+    args.push(`${resolvedFrom}..HEAD`);
   }
   
   if (options?.file) {
