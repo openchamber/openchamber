@@ -3341,3 +3341,25 @@ export async function getConflictDetails(directory) {
     throw error;
   }
 }
+
+export async function getCommitFileDiff(directory, hash, filePath, isBinary) {
+  if (!directory || !hash || !filePath) {
+    throw new Error('directory, hash, and path are required for getCommitFileDiff');
+  }
+
+  if (isBinary) {
+    return { original: '', modified: '', isBinary: true };
+  }
+
+  const directoryPath = normalizeDirectoryPath(directory);
+
+  const [originalResult, modifiedResult] = await Promise.all([
+    runGitCommand(directoryPath, ['show', `${hash}^:${filePath}`]),
+    runGitCommand(directoryPath, ['show', `${hash}:${filePath}`]),
+  ]);
+
+  const original = originalResult.success ? originalResult.stdout : '';
+  const modified = modifiedResult.success ? modifiedResult.stdout : '';
+
+  return { original, modified, isBinary: false };
+}
