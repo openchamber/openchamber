@@ -1917,7 +1917,7 @@ const AssistantMessageBody = React.memo(({
                                             <span className="message-footer__label">{turnDurationText}</span>
                                         </span>
                                     </TooltipTrigger>
-                                    <TooltipContent>{turnDurationText}</TooltipContent>
+                                    <TooltipContent>Total time</TooltipContent>
                                 </Tooltip>
                             ) : null}
                             {tpsText ? (
@@ -1953,7 +1953,7 @@ const AssistantMessageBody = React.memo(({
                                             <span className="message-footer__label">{footerTimestamp}</span>
                                         </span>
                                     </TooltipTrigger>
-                                    <TooltipContent>{footerTimestamp}</TooltipContent>
+                                    <TooltipContent>Completed at</TooltipContent>
                                 </Tooltip>
                             ) : null}
                             {!isMiniChatSurface && isLastAssistantInTurn && hasStopFinish ? (
