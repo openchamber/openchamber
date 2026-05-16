@@ -1,3 +1,11 @@
+## [1.11.1] - 2026-05-15
+
+- Chat/Sessions: added a session switcher to the chat header, making it faster to jump between recent chats.
+- Chat/Subagents: opened subagent sessions read-only in the context panel and made subagent chats read-only, making delegated work safer to inspect without accidental edits.
+- Chat/UI: animated sorted-mode tool paths more consistently and guarded tooltip crashes more defensively, keeping active tool output smoother.
+- Usage: quota reset times now display in your local timezone, reducing confusion when tracking provider limits.
+- Skills: the skills catalog now keeps the selected source label visible when switching sources (thanks to @kjhq).
+
 ## [1.11.0] - 2026-05-14
 
 - Chat/Permissions: restored `@agent` mentions in sent messages and parent-session auto-accept for child-session permissions, reducing missed routing and approval friction in delegated work.

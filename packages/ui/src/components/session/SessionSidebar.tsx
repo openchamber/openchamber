@@ -62,14 +62,11 @@ import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore'
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { type SessionGroup, type SessionNode } from './sidebar/types';
 import {
-  type ActiveNowEntry,
-  addActiveNowSession,
   deriveActiveNowSessions,
   deriveLiveActiveNowSessions,
-  persistActiveNowEntries,
-  pruneActiveNowEntries,
-  readActiveNowEntries,
 } from './sidebar/activitySections';
+import { useActiveNowStore } from '@/stores/useActiveNowStore';
+import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import {
   compareSessionsByPinnedAndTime,
   formatProjectLabel,
@@ -170,7 +167,9 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     () => new Map(),
   );
   const safeStorage = React.useMemo(() => getSafeStorage(), []);
-  const [activeNowEntries, setActiveNowEntries] = React.useState<ActiveNowEntry[]>(() => readActiveNowEntries(safeStorage));
+  const activeNowEntries = useActiveNowStore((state) => state.entries);
+  const addActiveNowSessionToStore = useActiveNowStore((state) => state.addSession);
+  const pruneActiveNowEntriesInStore = useActiveNowStore((state) => state.prune);
   const [collapsedProjects, setCollapsedProjects] = React.useState<Set<string>>(new Set());
 
   const [projectRepoStatus, setProjectRepoStatus] = React.useState<Map<string, boolean | null>>(new Map());
@@ -183,18 +182,9 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const [deleteSessionConfirm, setDeleteSessionConfirm] = React.useState<DeleteSessionConfirmState>(null);
   const [deleteFolderConfirm, setDeleteFolderConfirm] = React.useState<DeleteFolderConfirmState>(null);
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = React.useState<BulkDeleteSessionsConfirmState>(null);
-  const [pinnedSessionIds, setPinnedSessionIds] = React.useState<Set<string>>(() => {
-    try {
-      const raw = getSafeStorage().getItem(SESSION_PINNED_STORAGE_KEY);
-      if (!raw) {
-        return new Set();
-      }
-      const parsed = JSON.parse(raw) as string[];
-      return new Set(Array.isArray(parsed) ? parsed.filter((item) => typeof item === 'string') : []);
-    } catch {
-      return new Set();
-    }
-  });
+  const pinnedSessionIds = useSessionPinnedStore((state) => state.ids);
+  const setPinnedSessionIds = useSessionPinnedStore((state) => state.setIds);
+  const togglePinnedSession = useSessionPinnedStore((state) => state.toggle);
   const [collapsedGroups, setCollapsedGroups] = React.useState<Set<string>>(() => {
     try {
       const raw = getSafeStorage().getItem(GROUP_COLLAPSE_STORAGE_KEY);
@@ -546,18 +536,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     setExpandedParents,
     setCollapsedProjects,
   });
-
-  const togglePinnedSession = React.useCallback((sessionId: string) => {
-    setPinnedSessionIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(sessionId)) {
-        next.delete(sessionId);
-      } else {
-        next.add(sessionId);
-      }
-      return next;
-    });
-  }, []);
 
   const sortedSessions = React.useMemo(() => {
     return [...sessions].sort((a, b) => compareSessionsByPinnedAndTime(a, b, pinnedSessionIds));
@@ -969,9 +947,10 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         || section.project.normalizedPath,
       );
       section.groups.forEach((group) => {
-        const secondaryMeta = group.branch && group.branch !== projectLabel
-          ? { projectLabel, branchLabel: group.branch }
-          : { projectLabel, branchLabel: null };
+        const branchCandidate = group.branch && group.branch !== 'HEAD' && group.branch !== projectLabel
+          ? group.branch
+          : null;
+        const secondaryMeta = { projectLabel, branchLabel: branchCandidate };
 
         const visit = (nodes: SessionNode[]) => {
           nodes.forEach((node) => {
@@ -1025,15 +1004,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       return;
     }
 
-    setActiveNowEntries((prev) => {
-      const next = liveActiveSessions.reduce((entries, session) => addActiveNowSession(entries, session.id), prev);
-      if (next === prev) {
-        return prev;
-      }
-      persistActiveNowEntries(safeStorage, next);
-      return next;
-    });
-  }, [liveActiveSessions, safeStorage, showRecentSection]);
+    liveActiveSessions.forEach((session) => addActiveNowSessionToStore(session.id));
+  }, [addActiveNowSessionToStore, liveActiveSessions, showRecentSection]);
 
   React.useEffect(() => {
     if (!showRecentSection) {
@@ -1045,14 +1017,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       allKnownSessionsById.set(session.id, session);
     });
 
-    const pruned = pruneActiveNowEntries(activeNowEntries, allKnownSessionsById);
-    if (pruned.length === activeNowEntries.length && pruned.every((entry, index) => entry.sessionId === activeNowEntries[index]?.sessionId)) {
-      return;
-    }
-
-    setActiveNowEntries(pruned);
-    persistActiveNowEntries(safeStorage, pruned);
-  }, [activeNowEntries, archivedSessions, safeStorage, sessions, showRecentSection]);
+    pruneActiveNowEntriesInStore(allKnownSessionsById);
+  }, [archivedSessions, pruneActiveNowEntriesInStore, sessions, showRecentSection]);
 
   // Prefetch is wired below, after recentSessionIds is computed.
 
@@ -1076,6 +1042,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       { key: 'active-now' as const, title: t('sessions.sidebar.activity.recentTitle'), items: activeNowSessions.map(toItem) },
     ];
   }, [activeNowSessions, sessionSidebarMetaById, showRecentSection, t]);
+
 
   const recentSessionIds = React.useMemo(() => {
     return new Set(activeNowSessions.map((session) => session.id));

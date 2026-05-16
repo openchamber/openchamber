@@ -36,7 +36,7 @@ interface ChangesSectionProps {
   onOpenStashes?: () => void;
 }
 
-const CHANGE_LIST_VIRTUALIZE_THRESHOLD = 120;
+const CHANGE_LIST_VIRTUALIZE_THRESHOLD = 1000;
 const CHANGE_ROW_ESTIMATE_PX = 34;
 
 type ChangesTreeDirectoryNode = {

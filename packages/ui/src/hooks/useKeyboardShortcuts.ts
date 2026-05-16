@@ -9,9 +9,10 @@ import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { canUseElectronDesktopIPC, invokeDesktop, isVSCodeRuntime } from '@/lib/desktop';
 import { showOpenCodeStatus } from '@/lib/openCodeStatus';
-import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts';
+import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { getCycledPrimaryAgentName } from '@/components/chat/mobileControlsUtils';
 
 export const useKeyboardShortcuts = () => {
   const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
@@ -100,6 +101,10 @@ export const useKeyboardShortcuts = () => {
       if (isTerminalEventTarget(e.target)) {
         return;
       }
+
+      const isChatInputTarget = (target: EventTarget | null) => {
+        return target instanceof HTMLTextAreaElement && target.getAttribute('data-chat-input') === 'true';
+      };
 
       if (eventMatchesShortcut(e, combo('open_command_palette'))) {
         e.preventDefault();
@@ -197,6 +202,53 @@ export const useKeyboardShortcuts = () => {
         e.preventDefault();
         const textarea = document.querySelector<HTMLTextAreaElement>('textarea[data-chat-input="true"]');
         textarea?.focus();
+        return;
+      }
+
+      const cycleAgentCombo = combo('cycle_agent');
+      const cycleAgentBackwardCombo = cycleAgentCombo && !cycleAgentCombo.includes('shift')
+        ? normalizeCombo(`shift+${cycleAgentCombo}`)
+        : '';
+      const cycleAgentDirection = cycleAgentBackwardCombo && eventMatchesShortcut(e, cycleAgentBackwardCombo)
+        ? -1
+        : eventMatchesShortcut(e, cycleAgentCombo)
+          ? 1
+          : 0;
+
+      if (cycleAgentDirection !== 0) {
+        const {
+          isSettingsDialogOpen,
+          isCommandPaletteOpen,
+          isHelpDialogOpen,
+          isSessionSwitcherOpen,
+          isAboutDialogOpen,
+          activeMainTab,
+        } = useUIStore.getState();
+
+        const hasOverlay = isSettingsDialogOpen || isCommandPaletteOpen || isHelpDialogOpen || isSessionSwitcherOpen || isAboutDialogOpen;
+        if (hasOverlay || activeMainTab !== 'chat' || !isChatInputTarget(e.target)) {
+          return;
+        }
+
+        const configState = useConfigStore.getState();
+        const nextAgentName = getCycledPrimaryAgentName(
+          configState.getVisibleAgents(),
+          configState.currentAgentName,
+          cycleAgentDirection,
+        );
+
+        if (!nextAgentName) {
+          return;
+        }
+
+        e.preventDefault();
+        configState.setAgent(nextAgentName);
+        useUIStore.getState().addRecentAgent(nextAgentName);
+
+        const sessionId = useSessionUIStore.getState().currentSessionId;
+        if (sessionId) {
+          useSelectionStore.getState().saveSessionAgentSelection(sessionId, nextAgentName);
+        }
         return;
       }
 

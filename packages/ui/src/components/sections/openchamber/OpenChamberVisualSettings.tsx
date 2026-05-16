@@ -249,6 +249,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const directoryShowHidden = useDirectoryShowHidden();
     const showReasoningTraces = useUIStore(state => state.showReasoningTraces);
     const setShowReasoningTraces = useUIStore(state => state.setShowReasoningTraces);
+    const collapsibleThinkingBlocks = useUIStore(state => state.collapsibleThinkingBlocks);
+    const setCollapsibleThinkingBlocks = useUIStore(state => state.setCollapsibleThinkingBlocks);
 
     const mermaidRenderingMode = useUIStore(state => state.mermaidRenderingMode);
     const setMermaidRenderingMode = useUIStore(state => state.setMermaidRenderingMode);
@@ -1553,6 +1555,29 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 ariaLabel={t('settings.openchamber.visual.field.showReasoningTracesAria')}
                                             />
                                             <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.showReasoningTraces')}</span>
+                                        </div>
+                                    )}
+
+                                    {shouldShow('reasoning') && showReasoningTraces && (
+                                        <div
+                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
+                                            role="button"
+                                            tabIndex={0}
+                                            aria-pressed={collapsibleThinkingBlocks}
+                                            onClick={() => setCollapsibleThinkingBlocks(!collapsibleThinkingBlocks)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    setCollapsibleThinkingBlocks(!collapsibleThinkingBlocks);
+                                                }
+                                            }}
+                                        >
+                                            <Checkbox
+                                                checked={collapsibleThinkingBlocks}
+                                                onChange={setCollapsibleThinkingBlocks}
+                                                ariaLabel={t('settings.openchamber.visual.field.collapsibleThinkingBlocksAria')}
+                                            />
+                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.collapsibleThinkingBlocks')}</span>
                                         </div>
                                     )}
 

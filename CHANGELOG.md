@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.11.1] - 2026-05-15
+
+- Multi-Run: added fusion for multi-run sessions, making it easier to combine parallel results into a single follow-up answer with a customizable Fusion magic prompt.
+- Multi-Run: added optional isolation and support for non-Git projects, so parallel runs are available in more workspaces and workflows without requiring branch setup.
+- Chat/Sessions: added a header session switcher with project, branch, diff, active, unread, and sub-session context, making it faster to jump between recent work.
+- Chat/Subagents: opened subagent sessions read-only in the context panel and made subagent chats read-only, making delegated work safer.
+- Chat/Shortcuts: made the agent-switching shortcut configurable and usable from the chat input/model picker, giving keyboard-heavy workflows more control over prompt setup.
+- Desktop/Mini Chat: added session switching and the new-session shortcut to Mini Chat, while preserving user-selected sessions during startup.
+- Preview: improved embedded preview proxying for absolute same-origin requests and WebSocket URLs, and avoided launching unrelated project actions when no dev-server action is detected.
+- Updates/Usage: added a setting to disable OpenCode update notifications, and quota reset times now display in your local timezone.
+- Chat/UI: animated sorted-mode tool paths more consistently and guarded tooltip rendering more defensively, keeping active tool output smoother.
+- Git: large change lists now display reliably, and branch selection stays hidden for non-Git draft sessions.
+- Settings/Skills: the skills catalog now keeps the selected source label visible when switching sources (thanks to @kjhq).
+
 ## [1.11.0] - 2026-05-14
 
 - Updates/OpenCode: added in-app OpenCode update checks and upgrade actions, making it easier to keep the bundled OpenCode runtime current without leaving OpenChamber.

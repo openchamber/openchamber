@@ -242,18 +242,19 @@ const getRelativePathFromDirectory = (filePath: string, currentDirectory: string
     return normalizedPath;
 };
 
-const renderReadFilePath = (displayPath: string) => {
+const renderReadFilePath = (displayPath: string, animate = true) => {
     const lastSlash = displayPath.lastIndexOf('/');
 
     if (lastSlash === -1) {
         return (
-            <span
+            <Text
+                variant={animate ? 'generate-effect' : 'static'}
                 className="min-w-0 flex-1 truncate whitespace-nowrap typography-meta leading-5"
                 style={{ color: 'var(--tools-title)' }}
                 title={displayPath}
             >
                 {displayPath}
-            </span>
+            </Text>
         );
     }
 
@@ -277,7 +278,13 @@ const renderReadFilePath = (displayPath: string) => {
                 {displayDir}
             </span>
             <span className="flex-shrink-0" style={{ color: 'var(--tools-description)' }}>/</span>
-            <span className="flex-shrink-0" style={{ color: 'var(--tools-title)' }}>{name}</span>
+            <Text
+                variant={animate ? 'generate-effect' : 'static'}
+                className="flex-shrink-0"
+                style={{ color: 'var(--tools-title)' }}
+            >
+                {name}
+            </Text>
         </span>
     );
 };
@@ -682,7 +689,7 @@ const StaticToolRowInner: React.FC<{
                         title={entry.offset ? `${entry.displayPath}:${entry.offset}` : entry.displayPath}
                     >
                         {showToolFileIcons ? <FileTypeIcon filePath={entry.path} className="h-3.5 w-3.5" /> : null}
-                        {renderReadFilePath(entry.displayPath)}
+                        {renderReadFilePath(entry.displayPath, animateTailText)}
                     </button>
                 ))
                 : null}

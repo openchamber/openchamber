@@ -155,6 +155,7 @@ function SelectTrigger({
 type SelectContentExtra = {
   position?: "popper" | "item-aligned";
   fitContent?: boolean;
+  portalToBody?: boolean;
   sideOffset?: number;
   side?: "top" | "right" | "bottom" | "left";
   align?: "start" | "center" | "end";
@@ -165,6 +166,7 @@ function SelectContent({
   children,
   position = "popper",
   fitContent = false,
+  portalToBody = false,
   sideOffset,
   side,
   align,
@@ -175,13 +177,13 @@ function SelectContent({
   const portalContainer = portalContext?.portalContainer ?? null;
 
   return (
-    <BaseSelect.Portal container={portalContainer || undefined}>
+    <BaseSelect.Portal container={portalToBody ? undefined : portalContainer || undefined}>
       <BaseSelect.Positioner
         alignItemWithTrigger={alignItemWithTrigger}
         sideOffset={sideOffset}
         side={side}
         align={align}
-        className="z-[120] pointer-events-auto"
+        className="absolute z-[120] pointer-events-auto"
       >
         <BaseSelect.Popup
           data-slot="select-content"

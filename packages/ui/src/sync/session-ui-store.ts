@@ -249,10 +249,10 @@ export type SessionUIState = {
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>
   shareSession: (sessionId: string) => Promise<Session | null>
   unshareSession: (sessionId: string) => Promise<Session | null>
-  revertToMessage: (sessionId: string, messageId: string) => Promise<void>
+  revertToMessage: (sessionId: string, messageId: string, options?: { skipRedoPush?: boolean }) => Promise<void>
   forkFromMessage: (sessionId: string, messageId: string) => Promise<void>
   handleSlashUndo: (sessionId: string) => Promise<void>
-  handleSlashRedo: (sessionId: string) => Promise<void>
+  handleSlashRedo: (sessionId: string, options?: { fullUnrevert?: boolean }) => Promise<void>
   createSessionFromAssistantMessage: (sourceMessageId: string) => Promise<void>
 
   // Data access helpers (read from sync)
@@ -955,12 +955,15 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // revertToMessage — delegates to session-actions (single implementation)
   // ---------------------------------------------------------------------------
   revertToMessage: async (sessionId, messageId) => {
+    // Ensure the complete message range is present before applying the revert
+    // marker. Reverted UI is derived from session.revert + stored messages.
+    await refetchSessionMessages(sessionId)
     const { revertToMessage: revert } = await import("./session-actions")
     await revert(sessionId, messageId)
   },
 
   // ---------------------------------------------------------------------------
-  // handleSlashUndo — reads from sync
+  // handleSlashUndo — reads from sync, records history for redo
   // ---------------------------------------------------------------------------
   handleSlashUndo: async (sessionId) => {
     const messages = getSyncMessages(sessionId)
@@ -980,52 +983,63 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
     if (!targetMessage) return
 
+    // Read target message parts BEFORE calling revertToMessage.
+    // revertToMessage optimistically deletes messages from the sync store
+    // before the API call, so getSyncParts must run first.
     const targetParts = getSyncParts(targetMessage.id)
     const textPart = targetParts.find((p: Part) => p.type === "text") as TextPart | undefined
     const preview = textPart?.text
       ? String(textPart.text).slice(0, 50) + (textPart.text.length > 50 ? "..." : "")
       : "[No text]"
 
+    // revertToMessage handles the redo stack push internally
     await get().revertToMessage(sessionId, targetMessage.id)
 
     const { toast } = await import("sonner")
-    toast.success(`Undid to: ${preview}`)
+    const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
+    const { dictionary } = useI18nStore.getState()
+    toast.success(formatMessage(dictionary, "chat.revert.toast.undo", { preview }))
   },
 
   // ---------------------------------------------------------------------------
-  // handleSlashRedo — reads from sync
+  // handleSlashRedo — moves the authoritative revert marker forward
   // ---------------------------------------------------------------------------
-  handleSlashRedo: async (sessionId) => {
+  handleSlashRedo: async (sessionId, options) => {
+    if (options?.fullUnrevert) {
+      const { unrevertSession } = await import("./session-actions")
+      await unrevertSession(sessionId)
+      const { toast } = await import("sonner")
+      const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
+      const { dictionary } = useI18nStore.getState()
+      toast.success(formatMessage(dictionary, "chat.revert.toast.restored"))
+      return
+    }
+
     const sessions = getSyncSessions()
     const currentSession = sessions.find((s) => s.id === sessionId)
     const revertToId = currentSession?.revert?.messageID
     if (!revertToId) return
 
     await refetchSessionMessages(sessionId)
-
     const messages = getSyncMessages(sessionId)
     const userMessages = messages.filter((m) => m.role === "user")
     const targetMessage = userMessages.find((m) => m.id > revertToId)
 
     if (targetMessage) {
-      const targetParts = getSyncParts(targetMessage.id)
-      const textPart = targetParts.find((p: Part) => p.type === "text") as TextPart | undefined
-      const preview = textPart?.text
-        ? String(textPart.text).slice(0, 50) + (textPart.text.length > 50 ? "..." : "")
-        : "[No text]"
-
-      await get().revertToMessage(sessionId, targetMessage.id)
-
+      await get().revertToMessage(sessionId, targetMessage.id, { skipRedoPush: true })
       const { toast } = await import("sonner")
-      toast.success(`Redid to: ${preview}`)
-    } else {
-      // Full unrevert
-      const { unrevertSession } = await import("./session-actions")
-      await unrevertSession(sessionId)
-
-      const { toast } = await import("sonner")
-      toast.success("Restored all messages")
+      const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
+      const { dictionary } = useI18nStore.getState()
+      toast.success(formatMessage(dictionary, "chat.revert.toast.redo"))
+      return
     }
+
+    const { unrevertSession } = await import("./session-actions")
+    await unrevertSession(sessionId)
+    const { toast } = await import("sonner")
+    const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
+    const { dictionary } = useI18nStore.getState()
+    toast.success(formatMessage(dictionary, "chat.revert.toast.restored"))
   },
 
   // ---------------------------------------------------------------------------

@@ -4,6 +4,7 @@ export {
   clampPercent,
   formatPercent,
   formatQuotaValueLabel,
+  formatQuotaResetLabel,
   resolveUsageTone,
   formatWindowLabel,
   calculatePace,

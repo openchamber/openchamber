@@ -700,6 +700,7 @@ const TurnBlock = React.memo(({
             const isFirstAssistant = assistantIndex === 0;
             const isLastAssistant = assistantIndex === visibleAssistantMessages.length - 1;
             const isActivityOwner = Boolean(activityOwnerMessageId) && message.info.id === activityOwnerMessageId;
+            const hasAnchoredActivitySegment = visibleActivitySegments.some((segment) => segment.anchorMessageId === message.info.id);
             const shouldAttachFullTurnContext = chatRenderMode === 'sorted'
                 ? isAssistantMessage
                 : (isActivityOwner || isFirstAssistant || isLastAssistant);
@@ -722,7 +723,11 @@ const TurnBlock = React.memo(({
                     activityOwnerMessageId,
                     isFirstAssistantInTurn: isFirstAssistant,
                     isLastAssistantInTurn: isLastAssistant,
-                    isWorking: isLastTurn && sessionIsWorking && message.info.id === streamingAssistantMessageId,
+                    isWorking: isLastTurn && sessionIsWorking && (
+                        chatRenderMode === 'sorted'
+                            ? hasAnchoredActivitySegment
+                            : message.info.id === streamingAssistantMessageId
+                    ),
                     hasTools: turn.hasTools,
                     hasReasoning: turn.hasReasoning,
                     ...(shouldAttachFullTurnContext ? {
@@ -777,6 +782,7 @@ const TurnBlock = React.memo(({
             activeStreamingPhase,
             visibleAssistantMessages,
             visibleAssistantIds,
+            visibleActivitySegments,
             activityOwnerMessageId,
             shouldAnimateUserMessage,
             onUserAnimationConsumed,
