@@ -4,9 +4,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
 import type { GitLogEntry, CommitFileEntry } from '@/lib/api/types';
-import type { CommitFileDiffResponse } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
-import { getCommitFileDiff } from '@/lib/gitApi';
+import { getCommitFileDiff, type CommitFileDiffResponse } from '@/lib/gitApi';
 import { PierreDiffViewer } from '@/components/views/PierreDiffViewer';
 import { opencodeClient } from '@/lib/opencode/client';
 
