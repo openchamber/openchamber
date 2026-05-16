@@ -67,7 +67,7 @@ export function computeToolTimeBeforeTextMs(
     for (const ap of activityParts) {
         if (ap.kind !== 'tool') continue;
         const t = ap.part.state?.time;
-        if (t && typeof t.start === 'number' && typeof t.end === 'number') {
+        if (t && typeof t.start === 'number' && typeof t.end === 'number' && t.end > t.start) {
             const clippedStart = Math.max(t.start, windowStart);
             const clippedEnd = Math.min(t.end, windowEnd);
             if (clippedEnd > clippedStart) {

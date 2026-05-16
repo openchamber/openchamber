@@ -181,4 +181,9 @@ describe('computeToolTimeBeforeTextMs', () => {
         const parts: ActivityPart[] = [nonToolPart(), toolPart(1000, 1500)];
         expect(computeToolTimeBeforeTextMs(parts, messageCreatedAt, 2000)).toBe(500);
     });
+
+    test('skips tool parts with end before start', () => {
+        const parts = [toolPart(1500, 1000), toolPart(1000, 1500)];
+        expect(computeToolTimeBeforeTextMs(parts, messageCreatedAt, 2000)).toBe(500);
+    });
 });

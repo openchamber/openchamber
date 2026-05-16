@@ -1737,11 +1737,12 @@ const AssistantMessageBody = React.memo(({
     const toolTimeBeforeTextMs = React.useMemo((): number | undefined => {
         const activityParts = turnGroupingContext?.activityParts as ActivityPart[] | undefined;
         if (!activityParts) return undefined;
+        const userCreatedAt = turnGroupingContext?.userMessageCreatedAt;
+        if (typeof userCreatedAt !== 'number') return undefined;
         const firstTextPart = parts.find((p): p is TextPart => p.type === 'text' && typeof (p as { time?: { start?: number } }).time?.start === 'number');
         const textStart = firstTextPart ? (firstTextPart as unknown as { time: { start: number } }).time.start : undefined;
-        if (typeof messageCreatedAt !== 'number') return 0;
-        return computeToolTimeBeforeTextMs(activityParts, messageCreatedAt, textStart);
-    }, [turnGroupingContext?.activityParts, parts, messageCreatedAt]);
+        return computeToolTimeBeforeTextMs(activityParts, userCreatedAt, textStart);
+    }, [turnGroupingContext?.activityParts, turnGroupingContext?.userMessageCreatedAt, parts]);
 
     const tpsText = React.useMemo(() => {
         if (!isLastAssistantInTurn || !hasStopFinish) return undefined;
@@ -1756,17 +1757,17 @@ const AssistantMessageBody = React.memo(({
 
     const ttftText = React.useMemo(() => {
         if (!isLastAssistantInTurn || !hasStopFinish) return undefined;
-        const msgCreated = messageCreatedAt;
-        if (typeof msgCreated !== 'number') return undefined;
+        const userCreatedAt = turnGroupingContext?.userMessageCreatedAt;
+        if (typeof userCreatedAt !== 'number') return undefined;
         if (typeof toolTimeBeforeTextMs !== 'number') return undefined;
         const firstTextPart = parts.find((p): p is TextPart => p.type === 'text' && typeof (p as { time?: { start?: number } }).time?.start === 'number');
         if (!firstTextPart) return undefined;
         const ttStart = (firstTextPart as unknown as { time: { start: number } }).time.start;
-        const rawTTFT = ttStart - msgCreated;
+        const rawTTFT = ttStart - userCreatedAt;
         const adjustedTTFT = rawTTFT - toolTimeBeforeTextMs;
         if (adjustedTTFT <= 0) return undefined;
         return adjustedTTFT < 1000 ? `${adjustedTTFT}ms` : `${(adjustedTTFT / 1000).toFixed(1)}s`;
-    }, [isLastAssistantInTurn, hasStopFinish, messageCreatedAt, parts, toolTimeBeforeTextMs]);
+    }, [isLastAssistantInTurn, hasStopFinish, turnGroupingContext?.userMessageCreatedAt, parts, toolTimeBeforeTextMs]);
 
     const footerTimestamp = React.useMemo(() => {
         const timestamp = typeof messageCompletedAt === 'number' && messageCompletedAt > 0
