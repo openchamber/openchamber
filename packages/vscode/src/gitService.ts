@@ -2634,11 +2634,14 @@ export async function getCommitFileDiff(
     execGit(['show', `${hash}:${filePath}`], directory),
   ]);
 
-  return {
-    original: originalResult.exitCode === 0 ? originalResult.stdout : '',
-    modified: modifiedResult.exitCode === 0 ? modifiedResult.stdout : '',
-    isBinary: false,
-  };
+  const original = originalResult.exitCode === 0 ? originalResult.stdout : '';
+  const modified = modifiedResult.exitCode === 0 ? modifiedResult.stdout : '';
+
+  if (!original && !modified) {
+    throw new Error(`Failed to read file content at commit ${hash}`);
+  }
+
+  return { original, modified, isBinary: false };
 }
 
 // ============== Git Identity Operations ==============

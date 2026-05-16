@@ -953,6 +953,9 @@ export function registerGitRoutes(app) {
       if (!hash || typeof hash !== 'string') {
         return res.status(400).json({ error: 'hash parameter is required' });
       }
+      if (!/^[0-9a-fA-F]{7,40}$/.test(hash)) {
+        return res.status(400).json({ error: 'hash must be a valid commit SHA' });
+      }
       if (!filePath || typeof filePath !== 'string') {
         return res.status(400).json({ error: 'path parameter is required' });
       }

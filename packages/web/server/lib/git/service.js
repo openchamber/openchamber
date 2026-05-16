@@ -3361,5 +3361,9 @@ export async function getCommitFileDiff(directory, hash, filePath, isBinary) {
   const original = originalResult.success ? originalResult.stdout : '';
   const modified = modifiedResult.success ? modifiedResult.stdout : '';
 
+  if (!originalResult.success && !modifiedResult.success) {
+    throw new Error(`Failed to read file content at commit ${hash}: ${originalResult.stderr || modifiedResult.stderr}`);
+  }
+
   return { original, modified, isBinary: false };
 }

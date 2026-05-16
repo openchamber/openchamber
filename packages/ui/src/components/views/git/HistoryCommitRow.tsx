@@ -7,7 +7,7 @@ import type { GitLogEntry, CommitFileEntry } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 import { getCommitFileDiff, type CommitFileDiffResponse } from '@/lib/gitApi';
 import { PierreDiffViewer } from '@/components/views/PierreDiffViewer';
-import { opencodeClient } from '@/lib/opencode/client';
+
 
 interface HistoryCommitRowProps {
   entry: GitLogEntry;
@@ -16,6 +16,7 @@ interface HistoryCommitRowProps {
   files: CommitFileEntry[];
   isLoadingFiles: boolean;
   onCopyHash: (hash: string) => void;
+  directory: string | undefined;
 }
 
 function formatCommitDate(date: string) {
@@ -56,6 +57,7 @@ export const HistoryCommitRow = React.memo(({
   files,
   isLoadingFiles,
   onCopyHash,
+  directory,
 }: HistoryCommitRowProps) => {
   const { t } = useI18n();
 
@@ -90,13 +92,12 @@ export const HistoryCommitRow = React.memo(({
 
     setDiffCache(prev => new Map(prev).set(key, 'loading'));
     try {
-      const directory = opencodeClient.getDirectory() ?? '';
-      const result = await getCommitFileDiff(directory, entry.hash, file.path, file.isBinary);
+      const result = await getCommitFileDiff(directory ?? '', entry.hash, file.path, file.isBinary);
       setDiffCache(prev => new Map(prev).set(key, result));
     } catch {
       setDiffCache(prev => new Map(prev).set(key, 'error'));
     }
-  }, [diffCache, openDiffPaths, entry.hash]);
+  }, [diffCache, openDiffPaths, entry.hash, directory]);
 
   return (
     <li>

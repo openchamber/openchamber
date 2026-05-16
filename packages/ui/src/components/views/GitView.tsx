@@ -2325,6 +2325,7 @@ export const GitView: React.FC = () => {
               commitFilesMap={commitFilesMap}
               loadingCommitHashes={loadingCommitHashes}
               onCopyHash={handleCopyCommitHash}
+              directory={currentDirectory ?? undefined}
               showHeader={false}
               contentMaxHeightClassName="h-full max-h-none"
               branchDivider={historyBranchDivider}
