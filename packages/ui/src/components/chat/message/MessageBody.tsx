@@ -3,7 +3,7 @@ import type { Part, TextPart } from '@opencode-ai/sdk/v2';
 
 import UserTextPart from './parts/UserTextPart';
 import ToolPart from './parts/ToolPart';
-import { computeMergedToolDurationMs, computeToolTimeBeforeTextMs } from './toolTimeUtils';
+import { computeMergedToolDurationMs, computeToolTimeBeforeTextMs, type ActivityPart } from './toolTimeUtils';
 import AssistantTextPart from './parts/AssistantTextPart';
 import ReasoningPart, { MergedReasoningPart } from './parts/ReasoningPart';
 import { MessageFilesDisplay } from '../FileAttachment';
@@ -1728,14 +1728,14 @@ const AssistantMessageBody = React.memo(({
     const mergedToolDurationMs = React.useMemo((): number | undefined => {
         if (typeof turnGroupingContext?.userMessageCreatedAt !== 'number' || typeof messageCompletedAt !== 'number') return undefined;
         return computeMergedToolDurationMs(
-            turnGroupingContext?.activityParts as { kind: string; part: { state?: { time?: { start?: number; end?: number } } } }[] | undefined,
+            turnGroupingContext?.activityParts as ActivityPart[] | undefined,
             turnGroupingContext.userMessageCreatedAt,
             messageCompletedAt,
         );
     }, [turnGroupingContext?.activityParts, turnGroupingContext?.userMessageCreatedAt, messageCompletedAt]);
 
     const toolTimeBeforeTextMs = React.useMemo((): number | undefined => {
-        const activityParts = turnGroupingContext?.activityParts as { kind: string; part: { state?: { time?: { start?: number; end?: number } } } }[] | undefined;
+        const activityParts = turnGroupingContext?.activityParts as ActivityPart[] | undefined;
         if (!activityParts) return undefined;
         const firstTextPart = parts.find((p): p is TextPart => p.type === 'text' && typeof (p as { time?: { start?: number } }).time?.start === 'number');
         const textStart = firstTextPart ? (firstTextPart as unknown as { time: { start: number } }).time.start : undefined;
