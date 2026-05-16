@@ -207,6 +207,18 @@ export type SessionUIState = {
   pendingChangesBarDismissed: Map<string, string>
   dismissPendingChangesBar: (sessionId: string, signature: string | null) => void
 
+  // Undo/redo navigation stack — keyed by sessionID
+  revertHistory: Map<string, { redoStack: string[]; revertedMessages: Array<{ id: string; preview: string }> }>
+  pushRevertRedo: (sessionId: string, toMessageId: string) => void
+  popRevertRedo: (sessionId: string) => string | undefined
+  clearRevertHistory: (sessionId: string) => void
+  ensureRevertSnapshot: (sessionId: string) => void
+
+  // Per-session revert point for UI indicators (mirrors the directory store revert state
+  // to avoid cross-store subscription issues). Keyed by sessionID so switching sessions
+  // doesn't leak state.
+  activeRevertMessageIDs: Map<string, string>
+
   // Actions — UI state management
   setCurrentSession: (id: string | null, directoryHint?: string | null) => void
   openNewSessionDraft: (options?: Partial<NewSessionDraftState>) => void
@@ -249,10 +261,10 @@ export type SessionUIState = {
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>
   shareSession: (sessionId: string) => Promise<Session | null>
   unshareSession: (sessionId: string) => Promise<Session | null>
-  revertToMessage: (sessionId: string, messageId: string) => Promise<void>
+  revertToMessage: (sessionId: string, messageId: string, options?: { skipRedoPush?: boolean }) => Promise<void>
   forkFromMessage: (sessionId: string, messageId: string) => Promise<void>
   handleSlashUndo: (sessionId: string) => Promise<void>
-  handleSlashRedo: (sessionId: string) => Promise<void>
+  handleSlashRedo: (sessionId: string, options?: { fullUnrevert?: boolean }) => Promise<void>
   createSessionFromAssistantMessage: (sourceMessageId: string) => Promise<void>
 
   // Data access helpers (read from sync)
@@ -364,6 +376,69 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   lastLoadedDirectory: null,
   sessionPlanAvailable: new Map(),
   pendingChangesBarDismissed: new Map(),
+  revertHistory: new Map(),
+  activeRevertMessageIDs: new Map(),
+
+  // ---------------------------------------------------------------------------
+  // Revert history stack operations
+  // ---------------------------------------------------------------------------
+  pushRevertRedo: (sessionId, toMessageId) => {
+    const history = get().revertHistory.get(sessionId) ?? { redoStack: [], revertedMessages: [] }
+    const next = new Map(get().revertHistory)
+    next.set(sessionId, { ...history, redoStack: [...history.redoStack, toMessageId] })
+    set({ revertHistory: next })
+  },
+
+  popRevertRedo: (sessionId) => {
+    const history = get().revertHistory.get(sessionId)
+    if (!history || history.redoStack.length === 0) return undefined
+    const target = history.redoStack[history.redoStack.length - 1]
+    const next = new Map(get().revertHistory)
+    next.set(sessionId, { ...history, redoStack: history.redoStack.slice(0, -1) })
+    set({ revertHistory: next })
+    return target
+  },
+
+  clearRevertHistory: (sessionId) => {
+    const next = new Map(get().revertHistory)
+    next.delete(sessionId)
+    const nextIds = new Map(get().activeRevertMessageIDs)
+    nextIds.delete(sessionId)
+    set({ revertHistory: next, activeRevertMessageIDs: nextIds })
+  },
+
+  // ensureRevertSnapshot — re-snapshots reverted messages from sync store.
+  // Called when popover first opens after page refresh (revertedMessages is empty
+  // because revertHistory lives in memory). Uses only data already in the sync
+  // store — no async refetch — to avoid race conditions with SSE updates.
+  ensureRevertSnapshot: (sessionId) => {
+    const history = get().revertHistory.get(sessionId)
+    if (history?.revertedMessages.length) return // already have data
+
+    const sessions = getSyncSessions()
+    const session = sessions.find((s) => s.id === sessionId)
+    const revertToId = session?.revert?.messageID
+    if (!revertToId) return
+
+    const allMsgs = getSyncMessages(sessionId)
+    const userMsgs = allMsgs.filter((m) => m.role === "user")
+    const revertedMsgs = userMsgs.filter((m) => m.id >= revertToId)
+
+    if (revertedMsgs.length === 0) return
+
+    const previews = revertedMsgs.map((m) => {
+      const parts = getSyncParts(m.id) as Part[]
+      const textPart = parts.find((p: Part) => p.type === "text") as TextPart | undefined
+      const text = textPart?.text ? String(textPart.text).trim() : ""
+      return { id: m.id, preview: text.slice(0, 80) + (text.length > 80 ? "…" : "") || "[no text]" }
+    })
+    const next = new Map(get().revertHistory)
+    next.set(sessionId, {
+      redoStack: history?.redoStack ?? [],
+      revertedMessages: previews,
+    })
+    set({ revertHistory: next })
+  },
 
   // ---------------------------------------------------------------------------
   // setCurrentSession
@@ -850,6 +925,12 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       markPendingUserSendAnimation(currentSessionId)
     }
 
+    // Clear revert history when sending a new message — the server will
+    // permanently delete reverted messages via cleanup(), making redo impossible
+    if (currentSessionId) {
+      get().clearRevertHistory(currentSessionId)
+    }
+
     const files = attachments?.map((a) => ({
       type: "file" as const,
       mime: a.mimeType,
@@ -910,12 +991,16 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // ---------------------------------------------------------------------------
   // deleteSession — calls SDK, SSE event updates child store
   // ---------------------------------------------------------------------------
-  deleteSession: (id) => deleteSessionAction(id),
+  deleteSession: (id) => {
+    get().clearRevertHistory(id)
+    return deleteSessionAction(id)
+  },
 
   deleteSessions: async (ids) => {
     const deletedIds: string[] = []
     const failedIds: string[] = []
     for (const id of ids) {
+      get().clearRevertHistory(id)
       const ok = await deleteSessionAction(id)
       if (ok) deletedIds.push(id)
       else failedIds.push(id)
@@ -923,12 +1008,16 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     return { deletedIds, failedIds }
   },
 
-  archiveSession: (id) => archiveSessionAction(id),
+  archiveSession: (id) => {
+    get().clearRevertHistory(id)
+    return archiveSessionAction(id)
+  },
 
   archiveSessions: async (ids) => {
     const archivedIds: string[] = []
     const failedIds: string[] = []
     for (const id of ids) {
+      get().clearRevertHistory(id)
       const ok = await archiveSessionAction(id)
       if (ok) archivedIds.push(id)
       else failedIds.push(id)
@@ -954,13 +1043,59 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // ---------------------------------------------------------------------------
   // revertToMessage — delegates to session-actions (single implementation)
   // ---------------------------------------------------------------------------
-  revertToMessage: async (sessionId, messageId) => {
+  revertToMessage: async (sessionId, messageId, options) => {
+    // Push current revert point to redoStack so forward-navigation works
+    // (skip when called from handleSlashRedo — it manages the stack itself)
+    if (!options?.skipRedoPush) {
+      const sessions = getSyncSessions()
+      const session = sessions.find((s) => s.id === sessionId)
+      const currentRevertId = session?.revert?.messageID
+      if (currentRevertId) {
+        get().pushRevertRedo(sessionId, currentRevertId)
+      } else {
+        // First undo: push the last user message as the "forward" target
+        const messages = getSyncMessages(sessionId)
+        const userMessages = messages.filter((m) => m.role === "user")
+        const lastUserMsg = userMessages[userMessages.length - 1]
+        if (lastUserMsg) {
+          get().pushRevertRedo(sessionId, lastUserMsg.id)
+        }
+      }
+    }
+    // Snapshot reverted messages BEFORE the server removes them.
+    // Refetch first: a previous revertToMessage call may have optimistically
+    // deleted messages from the sync store whose SSE re-delivery hasn't
+    // completed yet. Without the refetch, getSyncMessages may return stale
+    // (incomplete) data, causing empty previews / "无文本".
+    await refetchSessionMessages(sessionId)
+    const preRevertMsgs = getSyncMessages(sessionId)
+    const preRevertUser = preRevertMsgs.filter((m: Message) => m.role === "user")
+    const preReverted = preRevertUser.filter((m: Message) => m.id >= messageId)
+    const preRevertPreviews = preReverted.map((m: Message) => {
+      const parts = getSyncParts(m.id) as Part[]
+      const textPart = parts.find((p: Part) => p.type === "text") as TextPart | undefined
+      const text = textPart?.text ? String(textPart.text).trim() : ""
+      return { id: m.id, preview: text.slice(0, 80) + (text.length > 80 ? "…" : "") || "[no text]" }
+    })
+
+    // Optimistically set the revert indicator so UI updates immediately
+    const nextIds = new Map(get().activeRevertMessageIDs)
+    nextIds.set(sessionId, messageId)
+    const history = get().revertHistory.get(sessionId)
+    const nextHistory = new Map(get().revertHistory)
+    nextHistory.set(sessionId, { ...history ?? { redoStack: [], revertedMessages: [] }, revertedMessages: preRevertPreviews })
+    set({ activeRevertMessageIDs: nextIds, revertHistory: nextHistory })
+
     const { revertToMessage: revert } = await import("./session-actions")
     await revert(sessionId, messageId)
+
+    // Refetch messages so jump-to-node restores previously-reverted messages
+    const { refetchSessionMessages: refetchMsgs } = await import("./session-actions")
+    await refetchMsgs(sessionId)
   },
 
   // ---------------------------------------------------------------------------
-  // handleSlashUndo — reads from sync
+  // handleSlashUndo — reads from sync, records history for redo
   // ---------------------------------------------------------------------------
   handleSlashUndo: async (sessionId) => {
     const messages = getSyncMessages(sessionId)
@@ -980,48 +1115,65 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
     if (!targetMessage) return
 
+    // revertToMessage handles the redo stack push internally
+    await get().revertToMessage(sessionId, targetMessage.id)
+
     const targetParts = getSyncParts(targetMessage.id)
     const textPart = targetParts.find((p: Part) => p.type === "text") as TextPart | undefined
     const preview = textPart?.text
       ? String(textPart.text).slice(0, 50) + (textPart.text.length > 50 ? "..." : "")
       : "[No text]"
 
-    await get().revertToMessage(sessionId, targetMessage.id)
-
     const { toast } = await import("sonner")
-    toast.success(`Undid to: ${preview}`)
+    toast.success(`Reverted to ${preview}`)
   },
 
   // ---------------------------------------------------------------------------
-  // handleSlashRedo — reads from sync
+  // handleSlashRedo — uses redo stack for reliable forward navigation
   // ---------------------------------------------------------------------------
-  handleSlashRedo: async (sessionId) => {
+  handleSlashRedo: async (sessionId, options) => {
+    // "Restore All" in the popover should always fully unrevert, bypassing
+    // the redo stack which tracks incremental undo/redo navigation.
+    if (options?.fullUnrevert) {
+      const { unrevertSession } = await import("./session-actions")
+      await unrevertSession(sessionId)
+      get().clearRevertHistory(sessionId)
+      const { toast } = await import("sonner")
+      toast.success("Restored all messages")
+      return
+    }
+
     const sessions = getSyncSessions()
     const currentSession = sessions.find((s) => s.id === sessionId)
     const revertToId = currentSession?.revert?.messageID
     if (!revertToId) return
 
-    await refetchSessionMessages(sessionId)
+    // Try the redo stack first for reliable navigation
+    const redoTarget = get().popRevertRedo(sessionId)
 
-    const messages = getSyncMessages(sessionId)
-    const userMessages = messages.filter((m) => m.role === "user")
-    const targetMessage = userMessages.find((m) => m.id > revertToId)
+    if (redoTarget) {
+      // Determine if the redo target is "the latest" (full unrevert needed)
+      const messages = getSyncMessages(sessionId)
+      const userMessages = messages.filter((m) => m.role === "user")
+      const lastUserMsg = userMessages[userMessages.length - 1]
 
-    if (targetMessage) {
-      const targetParts = getSyncParts(targetMessage.id)
-      const textPart = targetParts.find((p: Part) => p.type === "text") as TextPart | undefined
-      const preview = textPart?.text
-        ? String(textPart.text).slice(0, 50) + (textPart.text.length > 50 ? "..." : "")
-        : "[No text]"
-
-      await get().revertToMessage(sessionId, targetMessage.id)
+      if (lastUserMsg && redoTarget >= lastUserMsg.id) {
+        // Redo target is at or past the last message — full unrevert
+        const { unrevertSession } = await import("./session-actions")
+        await unrevertSession(sessionId)
+        get().clearRevertHistory(sessionId)
+      } else {
+        // Revert forward to the redo target (skip redo push — we already popped from redo stack)
+        await get().revertToMessage(sessionId, redoTarget, { skipRedoPush: true })
+      }
 
       const { toast } = await import("sonner")
-      toast.success(`Redid to: ${preview}`)
+      toast.success("Redone")
     } else {
-      // Full unrevert
+      // No redo stack entries — fall back to unrevert (restore all)
       const { unrevertSession } = await import("./session-actions")
       await unrevertSession(sessionId)
+      get().clearRevertHistory(sessionId)
 
       const { toast } = await import("sonner")
       toast.success("Restored all messages")

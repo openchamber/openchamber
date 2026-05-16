@@ -3527,6 +3527,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     showAbortStatus={showAbortStatus}
                     showAssistantStatus={false}
                     showTodos
+                    showRevertIndicator
                     leftAccessory={newSessionDraftOpen || !hasPendingChanges ? null : <PendingChangesBar />}
                 />
                 {showDraftTargetSelectors && selectedDraftProject ? (

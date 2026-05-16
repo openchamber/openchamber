@@ -158,8 +158,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
     const getAgentModelForSession = useSelectionStore((s) => s.getAgentModelForSession);
     const getSessionModelSelection = useSelectionStore((s) => s.getSessionModelSelection);
-    const revertToMessage = sessionActions.revertToMessage;
-    const forkFromMessage = sessionActions.forkFromMessage;
+    const revertToMessage = useSessionUIStore((s) => s.revertToMessage);
+    const forkFromMessage = useSessionUIStore((s) => s.forkFromMessage);
 
     streamPerfCount('ui.chat_message.render');
     if (isInActiveTurn) {

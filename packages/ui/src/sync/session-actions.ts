@@ -577,6 +577,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   const messages = state.message[sessionId] ?? []
   const targetMsg = messages.find((m) => m.id === messageId)
   let messageText = ""
+  let submittedFileParts: Array<Record<string, unknown>> = []
   if (targetMsg && targetMsg.role === "user") {
     const parts = state.part[messageId] ?? []
     const textParts = parts.filter((p) => p.type === "text" && !isSyntheticPart(p))
@@ -584,6 +585,10 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
       .map((p: Record<string, unknown>) => (p as { text?: string }).text || (p as { content?: string }).content || "")
       .join("\n")
       .trim()
+    // Snapshot file parts for later restoration to the input (line ~626).
+    // File parts (type="file") contain url/mime/filename — the file already
+    // exists on the server so we record it as a "server" source attachment.
+    submittedFileParts = parts.filter((p) => p.type === "file") as Array<Record<string, unknown>>
   }
 
   // Optimistically remove reverted messages + set marker
@@ -615,13 +620,27 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
 
   store.setState(patch)
 
-  // Restore reverted message text to input
+  // Restore reverted message text and file attachments to input
   if (messageText) {
     useInputStore.setState({
       pendingInputText: messageText,
       pendingInputMode: "replace" as const,
     })
   }
+
+  // Restore file/image attachments from the target message.
+  // Clear existing attachments first — previous revert's attachments
+  // must not carry over, even when the current message has no files.
+  useInputStore.getState().clearAttachedFiles()
+  for (const fp of submittedFileParts) {
+      const f = fp as Record<string, unknown>
+      const url = typeof f.url === "string" ? f.url : ""
+      const mime = typeof f.mime === "string" ? f.mime : "application/octet-stream"
+      const filename = typeof f.filename === "string" ? f.filename : "attachment"
+      if (url) {
+        useInputStore.getState().addRestoredAttachment({ url, mimeType: mime, filename })
+      }
+    }
 
   // Call SDK and merge authoritative result into store
   try {
