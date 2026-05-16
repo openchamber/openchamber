@@ -4,34 +4,6 @@
  */
 
 import type { OpencodeClient, Session, Message, Part } from "@opencode-ai/sdk/v2/client"
-import type { AttachedFile } from "@/stores/types/sessionTypes"
-
-/**
- * Convert raw file parts from a stored message into AttachedFile objects
- * suitable for restoring to the input store.
- * Only non-synthetic file parts are included.
- */
-function filePartsToAttachments(parts: Part[]): AttachedFile[] {
-  return parts
-    .filter((p) => p.type === "file" && !isSyntheticPart(p))
-    .map((p) => {
-      const fp = p as Record<string, unknown>
-      const url = (fp.url as string) ?? ""
-      const mime = (fp.mime as string) ?? ""
-      const filename = (fp.filename as string) ?? ""
-      return {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        file: new File([], filename, { type: mime }),
-        dataUrl: url,
-        mimeType: mime,
-        filename,
-        size: 0,
-        // Always use "local" so restored attachments are visible and
-        // removable in the composer attachment list regardless of URL scheme.
-        source: "local" as const,
-      }
-    })
-}
 import { Binary } from "./binary"
 import { useSessionUIStore } from "./session-ui-store"
 import { useInputStore } from "./input-store"
@@ -43,6 +15,7 @@ import { registerSessionDirectory } from "./sync-refs"
 import { isSyntheticPart } from "@/lib/messages/synthetic"
 import { materializeSessionSnapshots } from "./materialization"
 import { stripMessageDiffSnapshots } from "./sanitize"
+import type { AttachedFile } from "@/stores/types/sessionTypes"
 
 const MESSAGE_REFETCH_LIMIT = 200
 const MESSAGE_REFETCH_SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
@@ -191,6 +164,45 @@ function getRequestReplyClient(
     return opencodeClient.getScopedSdkClient(requestDirectory)
   }
   return getSessionReplyClient(sessionId)
+}
+
+// ---------------------------------------------------------------------------
+// Attachment helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Convert raw file parts from a stored message into AttachedFile objects
+ * suitable for restoring to the input store.
+ * Only non-synthetic file parts are included.
+ * Size is derived from base64 data URLs when available; otherwise 0 (which
+ * suppresses the size label in the chip rather than showing "0 B").
+ */
+function filePartsToAttachments(parts: Part[]): AttachedFile[] {
+  return parts
+    .filter((p) => p.type === "file" && !isSyntheticPart(p))
+    .map((p) => {
+      const fp = p as Record<string, unknown>
+      const url = (fp.url as string) ?? ""
+      const mime = (fp.mime as string) ?? ""
+      const filename = (fp.filename as string) ?? ""
+      let size = 0
+      if (url.startsWith("data:")) {
+        const base64 = url.split(",")[1] ?? ""
+        const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0
+        size = Math.max(0, Math.floor(base64.length * 3 / 4) - padding)
+      }
+      return {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        file: new File([], filename, { type: mime }),
+        dataUrl: url,
+        mimeType: mime,
+        filename,
+        size,
+        // Always use "local" so restored attachments are visible and
+        // removable in the composer attachment list regardless of URL scheme.
+        source: "local" as const,
+      }
+    })
 }
 
 // ---------------------------------------------------------------------------
