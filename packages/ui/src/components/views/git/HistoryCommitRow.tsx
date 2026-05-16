@@ -204,7 +204,7 @@ export const HistoryCommitRow = React.memo(({
                   </button>
 
                   {openDiffPaths.has(file.path) && (
-                    <div className="max-h-[400px] overflow-y-auto rounded border border-border/40 mx-2 mb-1">
+                    <div className="max-h-[400px] overflow-y-auto rounded border border-border/40 mx-2 mb-1" data-diff-virtual-root data-diff-virtual-content>
                       {file.changeType === 'R' ? (
                         <div className="px-3 py-2 text-sm text-muted-foreground">{t('gitView.history.renamedNoDiff')}</div>
                       ) : file.isBinary ? (
