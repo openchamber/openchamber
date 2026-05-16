@@ -58,3 +58,4 @@ Thumbs.db
 data/
 workspaces/
 *.pid
+.worktrees/
