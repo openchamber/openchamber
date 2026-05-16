@@ -164,6 +164,24 @@ export const registerSkillRoutes = (app, dependencies) => {
     }
   };
 
+  const mergeDiscoveredSkills = async (directory) => {
+    const [openCodeSkills, localSkills] = await Promise.all([
+      fetchOpenCodeDiscoveredSkills(directory),
+      discoverSkills(directory),
+    ]);
+    // Merge both sources — local skills take precedence, dedup by name
+    const skillMap = new Map();
+    for (const skill of (localSkills || [])) {
+      skillMap.set(skill.name, skill);
+    }
+    for (const skill of (openCodeSkills || [])) {
+      if (!skillMap.has(skill.name)) {
+        skillMap.set(skill.name, skill);
+      }
+    }
+    return Array.from(skillMap.values());
+  };
+
   const listGitIdentitiesForResponse = () => {
     try {
       const profiles = getProfiles();
@@ -195,7 +213,7 @@ export const registerSkillRoutes = (app, dependencies) => {
       if (!directory) {
         return res.status(400).json({ error });
       }
-      const skills = (await fetchOpenCodeDiscoveredSkills(directory)) || discoverSkills(directory);
+      const skills = await mergeDiscoveredSkills(directory);
 
       const enrichedSkills = skills.map((skill) => {
         const sources = getSkillSources(skill.name, directory, skill);
@@ -278,7 +296,7 @@ export const registerSkillRoutes = (app, dependencies) => {
       }
 
       const discovered = directory
-        ? ((await fetchOpenCodeDiscoveredSkills(directory)) || discoverSkills(directory))
+        ? await mergeDiscoveredSkills(directory)
         : [];
       const installedByName = new Map(discovered.map((s) => [s.name, s]));
 
@@ -508,7 +526,7 @@ export const registerSkillRoutes = (app, dependencies) => {
       if (!directory) {
         return res.status(400).json({ error });
       }
-      const discoveredSkill = ((await fetchOpenCodeDiscoveredSkills(directory)) || [])
+      const discoveredSkill = (await mergeDiscoveredSkills(directory))
         .find((skill) => skill.name === skillName) || null;
       const sources = getSkillSources(skillName, directory, discoveredSkill);
 
@@ -537,7 +555,7 @@ export const registerSkillRoutes = (app, dependencies) => {
         return res.status(400).json({ error });
       }
 
-      const discoveredSkill = ((await fetchOpenCodeDiscoveredSkills(directory)) || [])
+      const discoveredSkill = (await mergeDiscoveredSkills(directory))
         .find((skill) => skill.name === skillName) || null;
       const sources = getSkillSources(skillName, directory, discoveredSkill);
       if (!sources.md.exists || !sources.md.dir) {
@@ -626,7 +644,7 @@ export const registerSkillRoutes = (app, dependencies) => {
         return res.status(400).json({ error });
       }
 
-      const discoveredSkill = ((await fetchOpenCodeDiscoveredSkills(directory)) || [])
+      const discoveredSkill = (await mergeDiscoveredSkills(directory))
         .find((skill) => skill.name === skillName) || null;
       const sources = getSkillSources(skillName, directory, discoveredSkill);
       if (!sources.md.exists || !sources.md.dir) {
@@ -660,7 +678,7 @@ export const registerSkillRoutes = (app, dependencies) => {
         return res.status(400).json({ error });
       }
 
-      const discoveredSkill = ((await fetchOpenCodeDiscoveredSkills(directory)) || [])
+      const discoveredSkill = (await mergeDiscoveredSkills(directory))
         .find((skill) => skill.name === skillName) || null;
       const sources = getSkillSources(skillName, directory, discoveredSkill);
       if (!sources.md.exists || !sources.md.dir) {
