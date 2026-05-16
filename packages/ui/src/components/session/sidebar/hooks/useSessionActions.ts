@@ -3,6 +3,7 @@ import type { Session } from '@opencode-ai/sdk/v2';
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 
 type DeleteSessionConfirmSetter = React.Dispatch<React.SetStateAction<{
   session: Session;
@@ -26,6 +27,8 @@ type Args = {
   setActiveMainTab: (tab: 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files') => void;
   setSessionSwitcherOpen: (open: boolean) => void;
   setCurrentSession: (sessionId: string | null, directoryHint?: string | null) => void;
+  markSessionActivating?: (sessionId: string) => void;
+  dispatchSessionTransition?: (sessionId: string, runSwitch: () => void) => void;
   updateSessionTitle: (id: string, title: string) => Promise<void>;
   shareSession: (id: string) => Promise<Session | null>;
   unshareSession: (id: string) => Promise<Session | null>;
@@ -83,16 +86,27 @@ export const useSessionActions = (args: Args) => {
         args.setSessionSwitcherOpen(false);
       }
 
-      if (sessionId === args.currentSessionId) {
+      const liveCurrentSessionId = useSessionUIStore.getState().currentSessionId;
+      if (sessionId === liveCurrentSessionId) {
         if (args.allowReselect) {
           args.onSessionSelected?.(sessionId);
         }
         resetSessionSearch();
         return;
       }
-      args.setCurrentSession(sessionId, sessionDirectory ?? null);
-      args.onSessionSelected?.(sessionId);
-      resetSessionSearch();
+      args.markSessionActivating?.(sessionId);
+      const runSwitch = () => {
+        args.setCurrentSession(sessionId, sessionDirectory ?? null);
+        args.onSessionSelected?.(sessionId);
+        resetSessionSearch();
+      };
+      if (args.dispatchSessionTransition) {
+        args.dispatchSessionTransition(sessionId, runSwitch);
+      } else if (typeof window !== 'undefined') {
+        window.requestAnimationFrame(runSwitch);
+      } else {
+        runSwitch();
+      }
     },
     [args],
   );

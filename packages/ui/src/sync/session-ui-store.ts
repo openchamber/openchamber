@@ -416,6 +416,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       markSessionViewed(id)
       setActiveSession(resolvedDir ?? "", id)
     }
+
   },
 
   // ---------------------------------------------------------------------------

@@ -198,28 +198,19 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
             return { activePartType: undefined, activeToolName: undefined, statusText: 'working', isGenericStatus: true };
         }
 
-        const assistantMessages = sessionMessages
-            .filter(
-                (msg): msg is AssistantSessionMessageRecord =>
-                    isAssistantMessage(msg.info) && !isFullySyntheticMessage(msg.parts)
-            );
-
-        if (assistantMessages.length === 0) {
-            return { activePartType: undefined, activeToolName: undefined, statusText: 'working', isGenericStatus: true };
+        let lastAssistant: AssistantSessionMessageRecord | null = null;
+        for (let i = sessionMessages.length - 1; i >= 0; i -= 1) {
+            const candidate = sessionMessages[i];
+            if (!isAssistantMessage(candidate.info) || isFullySyntheticMessage(candidate.parts)) {
+                continue;
+            }
+            lastAssistant = candidate as AssistantSessionMessageRecord;
+            break;
         }
 
-        const sortedAssistantMessages = [...assistantMessages].sort((a, b) => {
-            const aCreated = typeof a.info.time?.created === 'number' ? a.info.time.created : null;
-            const bCreated = typeof b.info.time?.created === 'number' ? b.info.time.created : null;
-
-            if (aCreated !== null && bCreated !== null && aCreated !== bCreated) {
-                return aCreated - bCreated;
-            }
-
-            return a.info.id.localeCompare(b.info.id);
-        });
-
-        const lastAssistant = sortedAssistantMessages[sortedAssistantMessages.length - 1];
+        if (!lastAssistant) {
+            return { activePartType: undefined, activeToolName: undefined, statusText: 'working', isGenericStatus: true };
+        }
 
         let activePartType: 'text' | 'tool' | 'reasoning' | 'editing' | undefined = undefined;
         let activeToolName: string | undefined = undefined;

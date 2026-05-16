@@ -15,6 +15,7 @@ import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { openExternalUrl } from '@/lib/url';
 import { useI18n } from '@/lib/i18n';
+import { formatDirectoryName } from '@/lib/utils';
 
 type DeleteFolderConfirm = {
   scopeKey: string;
@@ -87,6 +88,8 @@ type Props = {
   onToggleCollapsedGroup: (groupKey: string) => void;
   dragHandleProps?: SortableDragHandleProps | null;
   compactBodyPadding?: boolean;
+  archivedPage: number;
+  onArchivedPageChange: (groupKey: string, page: number) => void;
 };
 
 export function SessionGroupSection(props: Props): React.ReactNode {
@@ -131,9 +134,24 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     onToggleCollapsedGroup,
     dragHandleProps,
     compactBodyPadding = false,
+    archivedPage,
+    onArchivedPageChange,
   } = props;
 
   const compareSessionNodes = React.useCallback((a: SessionNode, b: SessionNode) => {
+    if (group.isArchivedBucket) {
+      const aArchived = a.session.time?.archived ?? 0;
+      const bArchived = b.session.time?.archived ?? 0;
+      if (aArchived !== bArchived) {
+        return bArchived - aArchived;
+      }
+      const aCreated = a.session.time?.created ?? 0;
+      const bCreated = b.session.time?.created ?? 0;
+      if (aCreated !== bCreated) {
+        return bCreated - aCreated;
+      }
+      return a.session.id.localeCompare(b.session.id);
+    }
     const aIndex = sessionOrderIndex.get(a.session.id);
     const bIndex = sessionOrderIndex.get(b.session.id);
     if (aIndex !== undefined || bIndex !== undefined) {
@@ -142,7 +160,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
       if (aIndex !== bIndex) return aIndex - bIndex;
     }
     return compareSessionsByPinnedAndTime(a.session, b.session, pinnedSessionIds);
-  }, [pinnedSessionIds, sessionOrderIndex]);
+  }, [group.isArchivedBucket, pinnedSessionIds, sessionOrderIndex]);
 
   const searchData = hasSessionSearchQuery ? groupSearchDataByGroup.get(group) : null;
   const displayMode = useSessionDisplayStore((state) => state.displayMode);
@@ -157,6 +175,21 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     () => [...(shouldFilterGroupContents ? (searchData?.filteredNodes ?? []) : group.sessions)]
       .sort(compareSessionNodes),
     [compareSessionNodes, group.sessions, searchData?.filteredNodes, shouldFilterGroupContents],
+  );
+  const sourceRootNodes = React.useMemo(
+    () => sourceGroupNodes.filter((node) => !((node.session as Session & { parentID?: string | null }).parentID)),
+    [sourceGroupNodes],
+  );
+  const archivedPageSize = 10;
+  const archivedTotalSessions = group.isArchivedBucket ? sourceGroupNodes.length : 0;
+  const archivedTotalPages = group.isArchivedBucket ? Math.max(1, Math.ceil(archivedTotalSessions / archivedPageSize)) : 1;
+  const archivedCurrentPage = group.isArchivedBucket ? Math.max(1, Math.min(archivedPage, archivedTotalPages)) : 1;
+  const archivedStartIndex = (archivedCurrentPage - 1) * archivedPageSize;
+  const effectiveGroupNodes = React.useMemo(
+    () => (group.isArchivedBucket
+      ? sourceRootNodes.slice(archivedStartIndex, archivedStartIndex + archivedPageSize)
+      : sourceRootNodes),
+    [group.isArchivedBucket, sourceRootNodes, archivedStartIndex],
   );
   const folderScopeKey = group.folderScopeKey ?? normalizePath(group.directory ?? null);
   const scopeFolders = React.useMemo(
@@ -174,9 +207,9 @@ export function SessionGroupSection(props: Props): React.ReactNode {
         }
       });
     };
-    collectNodeLookup(sourceGroupNodes);
+    collectNodeLookup(effectiveGroupNodes);
     return map;
-  }, [sourceGroupNodes]);
+  }, [effectiveGroupNodes]);
 
   const allFoldersForGroupBase = React.useMemo(() => scopeFolders.map((folder) => {
     const nodes = folder.sessionIds
@@ -187,6 +220,9 @@ export function SessionGroupSection(props: Props): React.ReactNode {
   }), [scopeFolders, nodeBySessionId, compareSessionNodes]);
 
   const allFoldersForGroup = React.useMemo(() => {
+    if (group.isArchivedBucket) {
+      return [];
+    }
     const folderMapById = new Map(allFoldersForGroupBase.map((entry) => [entry.folder.id, entry]));
     const childFolderIdsByParentId = new Map<string, string[]>();
     for (const { folder } of allFoldersForGroupBase) {
@@ -239,20 +275,27 @@ export function SessionGroupSection(props: Props): React.ReactNode {
   }, [allFoldersForGroupBase, group.isArchivedBucket, hasSessionSearchQuery, normalizedSessionSearchQuery]);
 
   const sessionIdsInFolders = React.useMemo(() => new Set(allFoldersForGroup.flatMap((f) => f.folder.sessionIds)), [allFoldersForGroup]);
-  const ungroupedSessions = React.useMemo(() => sourceGroupNodes.filter((node) => !sessionIdsInFolders.has(node.session.id)), [sourceGroupNodes, sessionIdsInFolders]);
+  const ungroupedSessions = React.useMemo(
+    () => effectiveGroupNodes.filter((node) => !sessionIdsInFolders.has(node.session.id)),
+    [effectiveGroupNodes, sessionIdsInFolders],
+  );
   const rootFolders = React.useMemo(() => allFoldersForGroup.filter(({ folder }) => !folder.parentId), [allFoldersForGroup]);
 
-  if (hasSessionSearchQuery && !groupMatchesSearch && rootFolders.length === 0 && ungroupedSessions.length === 0) {
-    return null;
-  }
-
-  const totalSessions = ungroupedSessions.length;
+  const totalSessions = group.isArchivedBucket ? archivedTotalSessions : ungroupedSessions.length;
   const visibleSessions = group.isArchivedBucket
     ? ungroupedSessions
     : hasSessionSearchQuery
       ? ungroupedSessions
       : (isExpanded ? ungroupedSessions : ungroupedSessions.slice(0, maxVisible));
+  const finalVisibleSessions = React.useMemo(
+    () => (group.isArchivedBucket ? visibleSessions.slice(0, archivedPageSize) : visibleSessions),
+    [group.isArchivedBucket, visibleSessions],
+  );
   const remainingCount = totalSessions - visibleSessions.length;
+
+  if (hasSessionSearchQuery && !groupMatchesSearch && rootFolders.length === 0 && ungroupedSessions.length === 0) {
+    return null;
+  }
 
   const collectGroupSessions = (nodes: SessionNode[]): Session[] => {
     const collected: Session[] = [];
@@ -277,6 +320,17 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     : null;
   const showInlinePrTitle = Boolean(prIndicator && group.branch);
   const showBranchSubtitle = !prIndicator && !group.isMain && Boolean(group.branch);
+  const showArchivedDirectorySubtitle = group.isArchivedBucket && Boolean(group.directory);
+  const archivedProjectLabel = (() => {
+    if (!group.isArchivedBucket) {
+      return null;
+    }
+    const directory = group.directory?.trim() ?? '';
+    if (!directory) {
+      return null;
+    }
+    return formatDirectoryName(directory, undefined) || directory;
+  })();
   const prVisualState = prIndicator?.visualState ?? null;
   const checksSummary = prIndicator && prIndicator.state === 'open' && prIndicator.checks
     ? t('sessions.sidebar.group.pr.checksPassed', {
@@ -457,7 +511,11 @@ export function SessionGroupSection(props: Props): React.ReactNode {
       }}
     >
       {renderFolderItems()}
-      {visibleSessions.map((node) => renderSessionNode(node, 0, group.directory, projectId, group.isArchivedBucket === true))}
+      {finalVisibleSessions.map((node) => (
+        <React.Fragment key={node.session.id}>
+          {renderSessionNode(node, 0, group.directory, projectId, group.isArchivedBucket === true)}
+        </React.Fragment>
+      ))}
       {totalSessions === 0 && allFoldersForGroup.length === 0 ? (
         <div className="py-1 text-left typography-micro text-muted-foreground">
           {group.isArchivedBucket
@@ -465,7 +523,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
             : t('sessions.sidebar.group.empty.noSessionsInWorkspace')}
         </div>
       ) : null}
-      {remainingCount > 0 && !isExpanded ? (
+      {remainingCount > 0 && !isExpanded && !group.isArchivedBucket ? (
         <button
           type="button"
           onClick={() => toggleGroupSessionLimit(groupKey)}
@@ -476,7 +534,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
             : t('sessions.sidebar.group.showMorePlural', { count: remainingCount })}
         </button>
       ) : null}
-      {isExpanded && totalSessions > maxVisible ? (
+      {isExpanded && totalSessions > maxVisible && !group.isArchivedBucket ? (
         <button
           type="button"
           onClick={() => toggleGroupSessionLimit(groupKey)}
@@ -484,6 +542,27 @@ export function SessionGroupSection(props: Props): React.ReactNode {
         >
           {t('sessions.sidebar.group.showFewer')}
         </button>
+      ) : null}
+      {group.isArchivedBucket && archivedTotalPages > 1 ? (
+        <div className="mt-1 flex items-center justify-between gap-2 px-1 text-xs text-muted-foreground">
+          <button
+            type="button"
+            onClick={() => onArchivedPageChange(groupKey, Math.max(1, archivedCurrentPage - 1))}
+            disabled={archivedCurrentPage <= 1}
+            className="rounded px-1 py-0.5 enabled:hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Prev
+          </button>
+          <span>Page {archivedCurrentPage} / {archivedTotalPages}</span>
+          <button
+            type="button"
+            onClick={() => onArchivedPageChange(groupKey, Math.min(archivedTotalPages, archivedCurrentPage + 1))}
+            disabled={archivedCurrentPage >= archivedTotalPages}
+            className="rounded px-1 py-0.5 enabled:hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Next
+          </button>
+        </div>
       ) : null}
     </SessionFolderDndScope>
   );
@@ -593,7 +672,14 @@ export function SessionGroupSection(props: Props): React.ReactNode {
                       {isCollapsed ? <Icon name="arrow-right-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-down-s" className="h-3.5 w-3.5" />}
                     </span>
                   </span>
-                  <span className="min-w-0 flex-1 truncate">{renderHighlightedText(group.label, normalizedSessionSearchQuery)}</span>
+                  <span className="min-w-0 flex-1 truncate">
+                    {renderHighlightedText(
+                      archivedProjectLabel
+                        ? `${t('sessions.sidebar.grouping.archived')} / ${archivedProjectLabel}`
+                        : t('sessions.sidebar.grouping.archived'),
+                      normalizedSessionSearchQuery,
+                    )}
+                  </span>
                 </span>
               ) : (!group.isMain || group.worktree) ? (
                 <span className="inline-flex min-w-0 max-w-full items-center gap-1">
@@ -668,6 +754,12 @@ export function SessionGroupSection(props: Props): React.ReactNode {
                 >
                   {statusLine.label}
                 </span>
+              </span>
+            ) : null}
+            {showArchivedDirectorySubtitle ? (
+              <span className="inline-flex min-w-0 items-center gap-1.5 leading-tight text-[11px] text-muted-foreground/80">
+                <Icon name="folder-2" className="h-3.5 w-3.5 flex-shrink-0" />
+                <span className="min-w-0 truncate">{group.directory}</span>
               </span>
             ) : null}
           </div>

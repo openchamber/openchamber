@@ -336,6 +336,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     const { t } = useI18n();
     // Session UI state
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
+    const previousSessionIdRef = React.useRef<string | null>(null);
+    const sessionSwitchTraceRef = React.useRef<{ sessionId: string; startedAt: number; source: 'initial' | 'switch' } | null>(null);
     const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
     const setCurrentSession = useSessionUIStore((s) => s.setCurrentSession);
     const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
@@ -709,13 +711,34 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 
     const lastScrolledSessionRef = React.useRef<string | null>(null);
 
+    const didSwitchFromAnotherSession = Boolean(
+        currentSessionId
+        && previousSessionIdRef.current
+        && previousSessionIdRef.current !== currentSessionId,
+    );
     const isSessionHydrating =
         Boolean(currentSessionId)
         && !hasRenderableSessionSnapshot;
 
     React.useEffect(() => {
+        if (!currentSessionId || currentSessionId === previousSessionIdRef.current) {
+            previousSessionIdRef.current = currentSessionId;
+            return;
+        }
+
+        const source = previousSessionIdRef.current ? 'switch' as const : 'initial' as const;
+        sessionSwitchTraceRef.current = {
+            sessionId: currentSessionId,
+            startedAt: performance.now(),
+            source,
+        };
+        previousSessionIdRef.current = currentSessionId;
+    }, [currentSessionId]);
+
+    React.useEffect(() => {
         if (!currentSessionId) return;
         if (lastScrolledSessionRef.current === currentSessionId) return;
+        if (!hasRenderableSessionSnapshot) return;
 
         const hasHashTarget = typeof window !== 'undefined' && window.location.hash.length > 0;
         lastScrolledSessionRef.current = currentSessionId;
@@ -731,15 +754,37 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         if (typeof window === 'undefined') {
             run();
         } else {
-            window.requestAnimationFrame(run);
+            window.requestAnimationFrame(() => {
+                window.requestAnimationFrame(run);
+            });
         }
-    }, [currentSessionId, releaseAutoFollow, restoreSnapshot]);
+    }, [currentSessionId, hasRenderableSessionSnapshot, releaseAutoFollow, restoreSnapshot]);
 
     React.useEffect(() => {
         if (!currentSessionId) return;
         if (hasRenderableSessionSnapshot) return;
         void ensureSessionRenderable(currentSessionId);
     }, [currentSessionId, ensureSessionRenderable, hasRenderableSessionSnapshot]);
+
+    React.useEffect(() => {
+        if (!currentSessionId || !hasRenderableSessionSnapshot) {
+            return;
+        }
+        const trace = sessionSwitchTraceRef.current;
+        if (!trace || trace.sessionId !== currentSessionId) {
+            return;
+        }
+        sessionSwitchTraceRef.current = null;
+    }, [currentSessionId, hasRenderableSessionSnapshot]);
+
+    React.useEffect(() => {
+        if (!currentSessionId || !hasRenderableSessionSnapshot || typeof window === 'undefined') {
+            return;
+        }
+        window.dispatchEvent(new CustomEvent('openchamber:session-ready', {
+            detail: { sessionId: currentSessionId },
+        }));
+    }, [currentSessionId, hasRenderableSessionSnapshot]);
 
 	if (!currentSessionId && !draftOpen) {
 		return (
@@ -775,7 +820,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         return null;
     }
 
-	if (isSessionHydrating && sessionMessages.length === 0 && !sessionIsWorking) {
+	if (isSessionHydrating && sessionMessages.length === 0 && !sessionIsWorking && !didSwitchFromAnotherSession) {
 		return (
 			<div className="relative flex flex-col h-full bg-background">
 				{returnToParentButton}

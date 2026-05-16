@@ -51,6 +51,7 @@ const SETTLE_FRAMES = 4;
 const TOUCH_FINGER_DOWN_THRESHOLD = 2;
 const SETTLE_BURST_DURATION_MS = 280;
 const REPIN_GRACE_AFTER_RELEASE_MS = 1200;
+const RESTORE_STABILIZE_DURATION_MS = 1800;
 
 // The bottom of the chat has an empty spacer (10vh on desktop, 40px on mobile)
 // — its height is exactly how far above scrollHeight the user can be while still
@@ -142,6 +143,12 @@ export const useChatAutoFollow = ({
     // (skeleton rendered, no scroll container yet), we record the session here
     // so a follow-up effect can replay the restore once the container mounts.
     const pendingInitialRestoreRef = React.useRef<string | null>(null);
+    const restoreStabilizeRef = React.useRef<{
+        sessionId: string;
+        ratio: number;
+        until: number;
+        lastHeight: number;
+    } | null>(null);
 
     const updateViewportAnchor = useViewportStore((s) => s.updateViewportAnchor);
 
@@ -290,6 +297,7 @@ export const useChatAutoFollow = ({
 
     const goToBottom = React.useCallback((mode: 'instant' | 'smooth' = 'instant') => {
         const container = scrollRef.current;
+        restoreStabilizeRef.current = null;
         setStateValue('following');
         lastUserReleaseAtRef.current = 0;
         if (!container) return;
@@ -367,6 +375,7 @@ export const useChatAutoFollow = ({
         const saved = useViewportStore.getState().sessionMemoryState.get(sessionId)?.scrollPosition;
 
         if (!saved || isAtBottomSnapshot(saved, isMobile)) {
+            restoreStabilizeRef.current = null;
             setStateValue('following');
             lastUserReleaseAtRef.current = 0;
             const target = Math.max(0, container.scrollHeight - container.clientHeight);
@@ -385,6 +394,13 @@ export const useChatAutoFollow = ({
 
         setStateValue('released');
         writeScrollTopInstant(targetTop);
+        const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        restoreStabilizeRef.current = {
+            sessionId,
+            ratio,
+            until: now + RESTORE_STABILIZE_DURATION_MS,
+            lastHeight: container.scrollHeight,
+        };
 
         const memState = useViewportStore.getState().sessionMemoryState.get(sessionId);
         updateViewportAnchor(sessionId, memState?.viewportAnchor ?? 0, {
@@ -400,6 +416,7 @@ export const useChatAutoFollow = ({
         if (!currentSessionId || currentSessionId === lastSessionIdRef.current) {
             return;
         }
+        restoreStabilizeRef.current = null;
         lastSessionIdRef.current = currentSessionId;
         MessageFreshnessDetector.getInstance().recordSessionStart(currentSessionId);
         flushSave();
@@ -459,6 +476,8 @@ export const useChatAutoFollow = ({
         if (programmatic) {
             return;
         }
+
+        restoreStabilizeRef.current = null;
 
         if (currentTop < previousTop && stateRef.current === 'following') {
             stopFollowLoop();
@@ -564,6 +583,28 @@ export const useChatAutoFollow = ({
 
         const observer = new ResizeObserver(() => {
             updateOverflowAndButton();
+            const restoreState = restoreStabilizeRef.current;
+            if (restoreState && stateRef.current === 'released') {
+                const sessionId = currentSessionIdRef.current;
+                const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+                const containerNow = scrollRef.current;
+                if (
+                    containerNow
+                    && sessionId === restoreState.sessionId
+                    && now <= restoreState.until
+                    && containerNow.scrollHeight !== restoreState.lastHeight
+                ) {
+                    const max = Math.max(0, containerNow.scrollHeight - containerNow.clientHeight);
+                    const targetTop = Math.round(restoreState.ratio * max);
+                    markProgrammaticWrite();
+                    containerNow.scrollTop = Math.max(0, Math.min(targetTop, max));
+                    lastScrollTopRef.current = containerNow.scrollTop;
+                    restoreState.lastHeight = containerNow.scrollHeight;
+                }
+                if (now > restoreState.until || sessionId !== restoreState.sessionId) {
+                    restoreStabilizeRef.current = null;
+                }
+            }
             if (stateRef.current === 'following' && sessionWorkingRef.current) {
                 startFollowLoop();
             }
@@ -574,7 +615,7 @@ export const useChatAutoFollow = ({
             observer.observe(inner);
         }
         return () => observer.disconnect();
-    }, [containerEl, startFollowLoop, updateOverflowAndButton]);
+    }, [containerEl, markProgrammaticWrite, startFollowLoop, updateOverflowAndButton]);
 
     React.useEffect(() => {
         updateOverflowAndButton();

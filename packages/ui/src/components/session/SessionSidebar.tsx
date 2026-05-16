@@ -1,4 +1,5 @@
 import React from 'react';
+import { flushSync } from 'react-dom';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { toast } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -269,6 +270,50 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   );
 
   const hasSessionSearchQuery = normalizedSessionSearchQuery.length > 0;
+  const [searchedSessionIds, setSearchedSessionIds] = React.useState<Set<string> | null>(null);
+  const [isSessionSearchLoading, setIsSessionSearchLoading] = React.useState(false);
+  const [archivedPageByGroup, setArchivedPageByGroup] = React.useState<Map<string, number>>(new Map());
+
+  React.useEffect(() => {
+    if (!hasSessionSearchQuery) {
+      setSearchedSessionIds(null);
+      setIsSessionSearchLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setIsSessionSearchLoading(true);
+    const query = normalizedSessionSearchQuery;
+    void fetch(`/api/openchamber/sessions/search?q=${encodeURIComponent(query)}&archived=all&limit=5000`, {
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`Search failed: ${response.status}`);
+        }
+        const payload = await response.json() as { ids?: unknown };
+        const ids = Array.isArray(payload.ids) ? payload.ids.filter((value): value is string => typeof value === 'string') : [];
+        setSearchedSessionIds(new Set(ids));
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        console.warn('Search request failed', error);
+        setSearchedSessionIds(new Set());
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setIsSessionSearchLoading(false);
+        }
+      });
+
+    return () => controller.abort();
+  }, [hasSessionSearchQuery, normalizedSessionSearchQuery]);
+
+  React.useEffect(() => {
+    setArchivedPageByGroup(new Map());
+  }, [normalizedSessionSearchQuery]);
 
   // Session Folders store
   const collapsedFolderIds = useSessionFoldersStore((state) => state.collapsedFolderIds);
@@ -301,6 +346,14 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const archivedSessions = useGlobalSessionsStore((state) => state.archivedSessions);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const [pendingTransitionSessionId, setPendingTransitionSessionId] = React.useState<string | null>(null);
+  const transitionTokenRef = React.useRef(0);
+  const pendingTransitionRaf1Ref = React.useRef<number | null>(null);
+  const pendingTransitionRaf2Ref = React.useRef<number | null>(null);
+  const pendingTransitionTimeoutRef = React.useRef<number | null>(null);
+  const pendingTransitionTraceRef = React.useRef<{ sessionId: string; startedAt: number } | null>(null);
+  const suppressedAutoExpandParentIdsRef = React.useRef<Set<string>>(new Set());
+  const effectiveActiveSessionId = pendingTransitionSessionId ?? currentSessionId;
   const newSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
   const updateSessionTitle = useSessionUIStore((state) => state.updateSessionTitle);
@@ -649,6 +702,42 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     setActiveMainTab,
     setSessionSwitcherOpen,
     setCurrentSession,
+    markSessionActivating: (sessionId) => {
+      flushSync(() => {
+        setPendingTransitionSessionId(sessionId);
+      });
+      pendingTransitionTraceRef.current = { sessionId, startedAt: performance.now() };
+    },
+    dispatchSessionTransition: (sessionId, runSwitch) => {
+      transitionTokenRef.current += 1;
+      const token = transitionTokenRef.current;
+
+      if (pendingTransitionRaf1Ref.current !== null) {
+        window.cancelAnimationFrame(pendingTransitionRaf1Ref.current);
+      }
+      if (pendingTransitionRaf2Ref.current !== null) {
+        window.cancelAnimationFrame(pendingTransitionRaf2Ref.current);
+      }
+      if (pendingTransitionTimeoutRef.current !== null) {
+        window.clearTimeout(pendingTransitionTimeoutRef.current);
+      }
+
+      pendingTransitionTimeoutRef.current = window.setTimeout(() => {
+        if (transitionTokenRef.current !== token) return;
+        setPendingTransitionSessionId((prev) => (prev === sessionId ? null : prev));
+        pendingTransitionTimeoutRef.current = null;
+      }, 10000);
+
+      // Tree-first transition: allow at least one paint for the spinner/highlight,
+      // then dispatch session switch on the following frame.
+      pendingTransitionRaf1Ref.current = window.requestAnimationFrame(() => {
+        if (transitionTokenRef.current !== token) return;
+        pendingTransitionRaf2Ref.current = window.requestAnimationFrame(() => {
+          if (transitionTokenRef.current !== token) return;
+          runSwitch();
+        });
+      });
+    },
     updateSessionTitle,
     shareSession,
     unshareSession,
@@ -666,6 +755,39 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     editTitle,
   });
 
+  React.useEffect(() => {
+    const onReady = (event: Event) => {
+      const custom = event as CustomEvent<{ sessionId?: string }>;
+      const readySessionId = custom.detail?.sessionId;
+      if (!readySessionId) return;
+      if (readySessionId !== pendingTransitionSessionId) return;
+      pendingTransitionTraceRef.current = null;
+      setPendingTransitionSessionId(null);
+      if (pendingTransitionTimeoutRef.current !== null) {
+        window.clearTimeout(pendingTransitionTimeoutRef.current);
+        pendingTransitionTimeoutRef.current = null;
+      }
+    };
+    window.addEventListener('openchamber:session-ready', onReady as EventListener);
+    return () => {
+      window.removeEventListener('openchamber:session-ready', onReady as EventListener);
+    };
+  }, [pendingTransitionSessionId]);
+
+  React.useEffect(() => {
+    return () => {
+      if (pendingTransitionRaf1Ref.current !== null) {
+        window.cancelAnimationFrame(pendingTransitionRaf1Ref.current);
+      }
+      if (pendingTransitionRaf2Ref.current !== null) {
+        window.cancelAnimationFrame(pendingTransitionRaf2Ref.current);
+      }
+      if (pendingTransitionTimeoutRef.current !== null) {
+        window.clearTimeout(pendingTransitionTimeoutRef.current);
+      }
+    };
+  }, []);
+
   const confirmDeleteFolder = React.useCallback(() => {
     if (!deleteFolderConfirm) return;
     const { scopeKey, folderId } = deleteFolderConfirm;
@@ -677,30 +799,40 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     sessionEvents.requestDirectoryDialog();
   }, []);
 
-  // Auto-expand parent session when navigating to a subagent (child) session
-  React.useEffect(() => {
-    if (!currentSessionId) return;
-    const current = sessions.find((s) => s.id === currentSessionId);
-    const parentID = (current as Session & { parentID?: string | null })?.parentID;
-    if (!parentID) return;
-    setExpandedParents((prev) => {
-      if (prev.has(parentID)) return prev;
-      const next = new Set(prev);
-      next.add(parentID);
-      try {
-        safeStorage.setItem(SESSION_EXPANDED_STORAGE_KEY, JSON.stringify(Array.from(next)));
-      } catch { /* ignored */ }
-      return next;
-    });
-  }, [currentSessionId, sessions, safeStorage]);
-
   const toggleParent = React.useCallback((sessionId: string) => {
+    suppressedAutoExpandParentIdsRef.current.delete(sessionId);
     setExpandedParents((prev) => {
       const next = new Set(prev);
       if (next.has(sessionId)) {
         next.delete(sessionId);
       } else {
         next.add(sessionId);
+      }
+      try {
+        safeStorage.setItem(SESSION_EXPANDED_STORAGE_KEY, JSON.stringify(Array.from(next)));
+      } catch { /* ignored */ }
+      return next;
+    });
+  }, [safeStorage]);
+
+  const collapseExpandedSubagentSessions = React.useCallback((sessionIds: string[]) => {
+    if (sessionIds.length === 0) {
+      return;
+    }
+    const collapseSet = new Set(sessionIds);
+    collapseSet.forEach((id) => suppressedAutoExpandParentIdsRef.current.add(id));
+    setExpandedParents((prev) => {
+      let changed = false;
+      const next = new Set<string>();
+      prev.forEach((id) => {
+        if (collapseSet.has(id)) {
+          changed = true;
+          return;
+        }
+        next.add(id);
+      });
+      if (!changed) {
+        return prev;
       }
       try {
         safeStorage.setItem(SESSION_EXPANDED_STORAGE_KEY, JSON.stringify(Array.from(next)));
@@ -880,6 +1012,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     buildGroupedSessions,
     hasSessionSearchQuery,
     normalizedSessionSearchQuery,
+    searchedSessionIds,
     filterSessionNodesForSearch,
     buildGroupSearchText,
     foldersMap,
@@ -887,8 +1020,14 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   const searchEmptyState = (
     <div className="py-6 text-center text-muted-foreground">
-      <p className="typography-ui-label font-semibold">{t('sessions.sidebar.empty.noMatches.title')}</p>
-      <p className="typography-meta mt-1">{t('sessions.sidebar.empty.noMatches.description')}</p>
+      {isSessionSearchLoading ? (
+        <p className="typography-ui-label font-semibold">Searching sessions...</p>
+      ) : (
+        <>
+          <p className="typography-ui-label font-semibold">{t('sessions.sidebar.empty.noMatches.title')}</p>
+          <p className="typography-meta mt-1">{t('sessions.sidebar.empty.noMatches.description')}</p>
+        </>
+      )}
     </div>
   );
 
@@ -1221,7 +1360,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         projectId={projectId}
         archivedBucket={archivedBucket}
         directoryStatus={directoryStatus}
-        currentSessionId={currentSessionId}
+        currentSessionId={effectiveActiveSessionId}
+        optimisticActiveSessionId={pendingTransitionSessionId}
         pinnedSessionIds={pinnedSessionIds}
         expandedParents={expandedParents}
         hasSessionSearchQuery={hasSessionSearchQuery}
@@ -1234,6 +1374,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         handleSaveEdit={handleSaveEdit}
         handleCancelEdit={handleCancelEdit}
         toggleParent={toggleParent}
+        collapseExpandedSubagentSessions={collapseExpandedSubagentSessions}
         handleSessionSelect={handleSessionSelect}
         handleSessionDoubleClick={handleSessionDoubleClick}
         togglePinnedSession={togglePinnedSession}
@@ -1260,7 +1401,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     ),
     [
       directoryStatus,
-      currentSessionId,
+      effectiveActiveSessionId,
+      pendingTransitionSessionId,
       pinnedSessionIds,
       expandedParents,
       hasSessionSearchQuery,
@@ -1273,6 +1415,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       handleSaveEdit,
       handleCancelEdit,
       toggleParent,
+      collapseExpandedSubagentSessions,
       handleSessionSelect,
       handleSessionDoubleClick,
       togglePinnedSession,
@@ -1300,6 +1443,18 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
+      return next;
+    });
+  }, []);
+
+  const setArchivedGroupPage = React.useCallback((groupKey: string, page: number) => {
+    setArchivedPageByGroup((prev) => {
+      const current = prev.get(groupKey) ?? 1;
+      if (current === page) {
+        return prev;
+      }
+      const next = new Map(prev);
+      next.set(groupKey, page);
       return next;
     });
   }, []);
@@ -1368,6 +1523,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         prVisualStateByDirectoryBranch={prVisualStateByDirectoryBranch}
         onToggleCollapsedGroup={toggleCollapsedGroup}
         dragHandleProps={dragHandleProps}
+        archivedPage={archivedPageByGroup.get(groupKey) ?? 1}
+        onArchivedPageChange={setArchivedGroupPage}
       />
     ),
     [
@@ -1401,6 +1558,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       sessionOrderIndex,
       prVisualStateByDirectoryBranch,
       toggleCollapsedGroup,
+      archivedPageByGroup,
+      setArchivedGroupPage,
     ],
   );
 

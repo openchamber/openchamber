@@ -38,6 +38,7 @@ type Args = {
   ) => SessionGroup[];
   hasSessionSearchQuery: boolean;
   normalizedSessionSearchQuery: string;
+  searchedSessionIds: Set<string> | null;
   filterSessionNodesForSearch: (nodes: SessionNode[], query: string) => SessionNode[];
   buildGroupSearchText: (group: SessionGroup) => string;
   foldersMap: SessionFoldersMap;
@@ -55,6 +56,7 @@ export const useSessionSidebarSections = (args: Args) => {
     buildGroupedSessions,
     hasSessionSearchQuery,
     normalizedSessionSearchQuery,
+    searchedSessionIds,
     filterSessionNodesForSearch,
     buildGroupSearchText,
     foldersMap,
@@ -101,15 +103,35 @@ export const useSessionSidebarSections = (args: Args) => {
     }
 
     const countNodes = (nodes: SessionNode[]): number => nodes.reduce((total, node) => total + 1 + countNodes(node.children), 0);
+    const filterSessionNodesByIds = (nodes: SessionNode[]): SessionNode[] => {
+      return nodes.reduce<SessionNode[]>((acc, node) => {
+        const filteredChildren = filterSessionNodesByIds(node.children);
+        const matchSelf = searchedSessionIds?.has(node.session.id) ?? false;
+        if (!matchSelf && filteredChildren.length === 0) {
+          return acc;
+        }
+        acc.push({
+          ...node,
+          children: filteredChildren,
+        });
+        return acc;
+      }, []);
+    };
 
     visibleProjectSections.forEach((section) => {
       section.groups.forEach((group) => {
-        const filteredNodes = filterSessionNodesForSearch(group.sessions, normalizedSessionSearchQuery);
+        const filteredNodes = searchedSessionIds
+          ? filterSessionNodesByIds(group.sessions)
+          : filterSessionNodesForSearch(group.sessions, normalizedSessionSearchQuery);
         const matchedSessionCount = countNodes(filteredNodes);
-        const groupMatches = buildGroupSearchText(group).includes(normalizedSessionSearchQuery);
+        const groupMatches = searchedSessionIds
+          ? false
+          : buildGroupSearchText(group).includes(normalizedSessionSearchQuery);
         const scopeKey = normalizePath(group.directory ?? null);
         const scopeFolders = scopeKey ? (foldersMap[scopeKey] ?? []) : [];
-        const folderNameMatchCount = scopeFolders.filter((folder) => folder.name.toLowerCase().includes(normalizedSessionSearchQuery)).length;
+        const folderNameMatchCount = searchedSessionIds
+          ? 0
+          : scopeFolders.filter((folder) => folder.name.toLowerCase().includes(normalizedSessionSearchQuery)).length;
 
         result.set(group, {
           filteredNodes,
@@ -127,6 +149,7 @@ export const useSessionSidebarSections = (args: Args) => {
     visibleProjectSections,
     filterSessionNodesForSearch,
     normalizedSessionSearchQuery,
+    searchedSessionIds,
     buildGroupSearchText,
     foldersMap,
   ]);

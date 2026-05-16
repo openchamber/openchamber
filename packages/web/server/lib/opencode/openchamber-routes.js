@@ -1,3 +1,5 @@
+import { createOpencodeClient } from '@opencode-ai/sdk/v2';
+
 export const registerOpenChamberRoutes = (app, dependencies) => {
   const {
     fs,
@@ -16,6 +18,105 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
 
   let cachedModelsMetadata = null;
   let cachedModelsMetadataTimestamp = 0;
+  let internalApiClient = null;
+
+  const getInternalApiClient = () => {
+    if (internalApiClient) {
+      return internalApiClient;
+    }
+    const address = typeof server?.address === 'function' ? server.address() : null;
+    const port = address && typeof address === 'object' ? address.port : null;
+    if (!port) {
+      throw new Error('Server port not ready');
+    }
+    internalApiClient = createOpencodeClient({
+      baseUrl: `http://127.0.0.1:${port}/api`,
+    });
+    return internalApiClient;
+  };
+
+  app.get('/api/openchamber/sessions/search', async (req, res) => {
+    try {
+      const query = typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : '';
+      if (!query) {
+        return res.json({ query: '', ids: [], count: 0 });
+      }
+
+      const archivedFilterRaw = typeof req.query.archived === 'string' ? req.query.archived.trim().toLowerCase() : 'all';
+      const archivedFilter = archivedFilterRaw === 'true'
+        ? true
+        : archivedFilterRaw === 'false'
+          ? false
+          : 'all';
+      const hardMax = 5000;
+      const requestedLimit = Number.parseInt(String(req.query.limit ?? ''), 10);
+      const maxMatches = Number.isFinite(requestedLimit) && requestedLimit > 0
+        ? Math.min(requestedLimit, hardMax)
+        : hardMax;
+      const pageSize = 200;
+      const client = getInternalApiClient();
+      const matches = [];
+      const seen = new Set();
+
+      const tryMatchSession = (session) => {
+        if (!session || typeof session.id !== 'string' || seen.has(session.id)) {
+          return;
+        }
+        const title = typeof session.title === 'string' ? session.title.toLowerCase() : '';
+        const directory = typeof session.directory === 'string' ? session.directory.toLowerCase() : '';
+        const projectName = typeof session?.project?.name === 'string' ? session.project.name.toLowerCase() : '';
+        if (title.includes(query) || directory.includes(query) || projectName.includes(query)) {
+          seen.add(session.id);
+          matches.push(session.id);
+        }
+      };
+
+      const searchArchivedMode = async (archivedFlag) => {
+        let cursor = undefined;
+        while (matches.length < maxMatches) {
+          const response = await client.experimental.session.list({
+            archived: archivedFlag,
+            limit: pageSize,
+            ...(cursor !== undefined ? { cursor } : {}),
+          });
+          const page = Array.isArray(response.data) ? response.data : [];
+          if (page.length === 0) {
+            break;
+          }
+          page.forEach(tryMatchSession);
+          if (page.length < pageSize) {
+            break;
+          }
+          const lastUpdated = page[page.length - 1]?.time?.updated;
+          if (typeof lastUpdated !== 'number' || !Number.isFinite(lastUpdated)) {
+            break;
+          }
+          if (cursor !== undefined && lastUpdated >= cursor) {
+            break;
+          }
+          cursor = lastUpdated;
+        }
+      };
+
+      if (archivedFilter === 'all' || archivedFilter === false) {
+        await searchArchivedMode(false);
+      }
+      if (matches.length < maxMatches && (archivedFilter === 'all' || archivedFilter === true)) {
+        await searchArchivedMode(true);
+      }
+
+      return res.json({
+        query,
+        ids: matches,
+        count: matches.length,
+      });
+    } catch (error) {
+      console.error('Session search failed', error);
+      return res.status(500).json({
+        error: error instanceof Error ? error.message : 'Failed to search sessions',
+      });
+    }
+  });
 
   app.get('/api/openchamber/update-check', async (req, res) => {
     try {
