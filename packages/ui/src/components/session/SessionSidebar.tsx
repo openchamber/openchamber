@@ -82,7 +82,6 @@ const PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse';
 const GROUP_ORDER_STORAGE_KEY = 'oc.sessions.groupOrder';
 const GROUP_COLLAPSE_STORAGE_KEY = 'oc.sessions.groupCollapse';
 const PROJECT_ACTIVE_SESSION_STORAGE_KEY = 'oc.sessions.activeSessionByProject';
-const SESSION_EXPANDED_STORAGE_KEY = 'oc.sessions.expandedParents';
 const SESSION_PINNED_STORAGE_KEY = 'oc.sessions.pinned';
 
 type PrVisualState = 'draft' | 'open' | 'blocked' | 'merged' | 'closed';
@@ -163,7 +162,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [editTitle, setEditTitle] = React.useState('');
   const [editingProjectDialogId, setEditingProjectDialogId] = React.useState<string | null>(null);
-  const [expandedParents, setExpandedParents] = React.useState<Set<string>>(new Set());
   const [directoryStatus] = React.useState<Map<string, 'unknown' | 'exists' | 'missing'>>(
     () => new Map(),
   );
@@ -356,7 +354,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const pendingTransitionRaf1Ref = React.useRef<number | null>(null);
   const pendingTransitionRaf2Ref = React.useRef<number | null>(null);
   const pendingTransitionTimeoutRef = React.useRef<number | null>(null);
-  const suppressedAutoExpandParentIdsRef = React.useRef<Set<string>>(new Set());
   const effectiveActiveSessionId = pendingTransitionSessionId ?? currentSessionId;
   const newSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
@@ -577,7 +574,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     hasLoadedGlobalSessions,
     safeStorage,
     keys: {
-      sessionExpanded: SESSION_EXPANDED_STORAGE_KEY,
       projectCollapse: PROJECT_COLLAPSE_STORAGE_KEY,
       sessionPinned: SESSION_PINNED_STORAGE_KEY,
       groupOrder: GROUP_ORDER_STORAGE_KEY,
@@ -590,7 +586,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     groupOrderByProject,
     activeSessionByProject,
     collapsedGroups,
-    setExpandedParents,
     setCollapsedProjects,
   });
 
@@ -800,48 +795,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const handleOpenDirectoryDialog = React.useCallback(() => {
     sessionEvents.requestDirectoryDialog();
   }, []);
-
-  const toggleParent = React.useCallback((sessionId: string) => {
-    suppressedAutoExpandParentIdsRef.current.delete(sessionId);
-    setExpandedParents((prev) => {
-      const next = new Set(prev);
-      if (next.has(sessionId)) {
-        next.delete(sessionId);
-      } else {
-        next.add(sessionId);
-      }
-      try {
-        safeStorage.setItem(SESSION_EXPANDED_STORAGE_KEY, JSON.stringify(Array.from(next)));
-      } catch { /* ignored */ }
-      return next;
-    });
-  }, [safeStorage]);
-
-  const collapseExpandedSubagentSessions = React.useCallback((sessionIds: string[]) => {
-    if (sessionIds.length === 0) {
-      return;
-    }
-    const collapseSet = new Set(sessionIds);
-    collapseSet.forEach((id) => suppressedAutoExpandParentIdsRef.current.add(id));
-    setExpandedParents((prev) => {
-      let changed = false;
-      const next = new Set<string>();
-      prev.forEach((id) => {
-        if (collapseSet.has(id)) {
-          changed = true;
-          return;
-        }
-        next.add(id);
-      });
-      if (!changed) {
-        return prev;
-      }
-      try {
-        safeStorage.setItem(SESSION_EXPANDED_STORAGE_KEY, JSON.stringify(Array.from(next)));
-      } catch { /* ignored */ }
-      return next;
-    });
-  }, [safeStorage]);
 
   const createFolderAndStartRename = React.useCallback(
     (scopeKey: string, parentId?: string | null) => {
@@ -1365,7 +1318,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         currentSessionId={effectiveActiveSessionId}
         optimisticActiveSessionId={pendingTransitionSessionId}
         pinnedSessionIds={pinnedSessionIds}
-        expandedParents={expandedParents}
         hasSessionSearchQuery={hasSessionSearchQuery}
         normalizedSessionSearchQuery={normalizedSessionSearchQuery}
         notifyOnSubtasks={notifyOnSubtasks}
@@ -1375,8 +1327,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         setEditTitle={setEditTitle}
         handleSaveEdit={handleSaveEdit}
         handleCancelEdit={handleCancelEdit}
-        toggleParent={toggleParent}
-        collapseExpandedSubagentSessions={collapseExpandedSubagentSessions}
         handleSessionSelect={handleSessionSelect}
         handleSessionDoubleClick={handleSessionDoubleClick}
         togglePinnedSession={togglePinnedSession}
@@ -1406,7 +1356,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       effectiveActiveSessionId,
       pendingTransitionSessionId,
       pinnedSessionIds,
-      expandedParents,
       hasSessionSearchQuery,
       normalizedSessionSearchQuery,
       notifyOnSubtasks,
@@ -1416,8 +1365,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       setEditTitle,
       handleSaveEdit,
       handleCancelEdit,
-      toggleParent,
-      collapseExpandedSubagentSessions,
       handleSessionSelect,
       handleSessionDoubleClick,
       togglePinnedSession,

@@ -9,7 +9,6 @@ type SafeStorageLike = {
 };
 
 type Keys = {
-  sessionExpanded: string;
   projectCollapse: string;
   sessionPinned: string;
   groupOrder: string;
@@ -28,7 +27,6 @@ type Args = {
   groupOrderByProject: Map<string, string[]>;
   activeSessionByProject: Map<string, string>;
   collapsedGroups: Set<string>;
-  setExpandedParents: React.Dispatch<React.SetStateAction<Set<string>>>;
   setCollapsedProjects: React.Dispatch<React.SetStateAction<Set<string>>>;
 };
 
@@ -43,7 +41,6 @@ export const useSidebarPersistence = (args: Args) => {
     groupOrderByProject,
     activeSessionByProject,
     collapsedGroups,
-    setExpandedParents,
     setCollapsedProjects,
   } = args;
 
@@ -95,13 +92,6 @@ export const useSidebarPersistence = (args: Args) => {
 
   React.useEffect(() => {
     try {
-      const storedParents = safeStorage.getItem(keys.sessionExpanded);
-      if (storedParents) {
-        const parsed = JSON.parse(storedParents);
-        if (Array.isArray(parsed)) {
-          setExpandedParents(new Set(parsed.filter((item) => typeof item === 'string')));
-        }
-      }
       const storedProjects = safeStorage.getItem(keys.projectCollapse);
       if (storedProjects) {
         const parsed = JSON.parse(storedProjects);
@@ -112,7 +102,7 @@ export const useSidebarPersistence = (args: Args) => {
     } catch {
       // ignored
     }
-  }, [keys.projectCollapse, keys.sessionExpanded, safeStorage, setCollapsedProjects, setExpandedParents]);
+  }, [keys.projectCollapse, safeStorage, setCollapsedProjects]);
 
   React.useEffect(() => {
     if (!hasLoadedGlobalSessions) {

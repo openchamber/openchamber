@@ -176,20 +176,16 @@ export function SessionGroupSection(props: Props): React.ReactNode {
       .sort(compareSessionNodes),
     [compareSessionNodes, group.sessions, searchData?.filteredNodes, shouldFilterGroupContents],
   );
-  const sourceRootNodes = React.useMemo(
-    () => sourceGroupNodes.filter((node) => !((node.session as Session & { parentID?: string | null }).parentID)),
-    [sourceGroupNodes],
-  );
   const archivedPageSize = 10;
-  const archivedTotalSessions = group.isArchivedBucket ? sourceRootNodes.length : 0;
+  const archivedTotalSessions = group.isArchivedBucket ? sourceGroupNodes.length : 0;
   const archivedTotalPages = group.isArchivedBucket ? Math.max(1, Math.ceil(archivedTotalSessions / archivedPageSize)) : 1;
   const archivedCurrentPage = group.isArchivedBucket ? Math.max(1, Math.min(archivedPage, archivedTotalPages)) : 1;
   const archivedStartIndex = (archivedCurrentPage - 1) * archivedPageSize;
   const effectiveGroupNodes = React.useMemo(
     () => (group.isArchivedBucket
-      ? sourceRootNodes.slice(archivedStartIndex, archivedStartIndex + archivedPageSize)
+      ? sourceGroupNodes.slice(archivedStartIndex, archivedStartIndex + archivedPageSize)
       : sourceGroupNodes),
-    [group.isArchivedBucket, sourceGroupNodes, sourceRootNodes, archivedStartIndex],
+    [group.isArchivedBucket, sourceGroupNodes, archivedStartIndex],
   );
   const folderScopeKey = group.folderScopeKey ?? normalizePath(group.directory ?? null);
   const scopeFolders = React.useMemo(

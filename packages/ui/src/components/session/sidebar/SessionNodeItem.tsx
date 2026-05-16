@@ -26,6 +26,7 @@ import { DraggableSessionRow } from './sessionFolderDnd';
 import type { SessionNode, SessionSummaryMeta } from './types';
 import { formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText, resolveSessionDiffStats } from './utils';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { useSessionExpansionStore } from '@/stores/useSessionExpansionStore';
 import { useSessionUnseenCount } from '@/sync/notification-store';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 import { useI18n } from '@/lib/i18n';
@@ -50,7 +51,6 @@ type Props = {
   currentSessionId: string | null;
   optimisticActiveSessionId?: string | null;
   pinnedSessionIds: Set<string>;
-  expandedParents: Set<string>;
   hasSessionSearchQuery: boolean;
   normalizedSessionSearchQuery: string;
   notifyOnSubtasks: boolean;
@@ -60,8 +60,6 @@ type Props = {
   setEditTitle: (value: string) => void;
   handleSaveEdit: () => void;
   handleCancelEdit: () => void;
-  toggleParent: (sessionId: string) => void;
-  collapseExpandedSubagentSessions: (sessionIds: string[]) => void;
   handleSessionSelect: (sessionId: string, sessionDirectory: string | null, isMissingDirectory: boolean, projectId?: string | null) => void;
   handleSessionDoubleClick: () => void;
   togglePinnedSession: (sessionId: string) => void;
@@ -86,14 +84,16 @@ type Props = {
   renderContext?: 'project' | 'recent';
 };
 
-const getNodeChildSignature = (node: SessionNode): string => {
-  if (node.children.length === 0) {
-    return '';
+const subtreeIdentityChanged = (prev: SessionNode, next: SessionNode): boolean => {
+  if (prev === next) return false;
+  if (prev.session !== next.session) return true;
+  if (prev.children.length !== next.children.length) return true;
+  for (let i = 0; i < prev.children.length; i += 1) {
+    if (subtreeIdentityChanged(prev.children[i]!, next.children[i]!)) {
+      return true;
+    }
   }
-
-  return node.children
-    .map((child) => `${child.session.id}:${child.children.length}`)
-    .join('|');
+  return false;
 };
 
 const treeContainsSessionId = (node: SessionNode, sessionId: string | null): boolean => {
@@ -138,15 +138,59 @@ const treeContainsMenuKey = (
   return false;
 };
 
-const areEqual = (prev: Props, next: Props): boolean => {
-  const prevSession = prev.node.session;
-  const nextSession = next.node.session;
-  const prevSessionId = prevSession.id;
-  const nextSessionId = nextSession.id;
+const treePinnedMembershipChanged = (
+  node: SessionNode,
+  prev: Set<string>,
+  next: Set<string>,
+): boolean => {
+  if (prev === next) return false;
+  const id = node.session.id;
+  if (prev.has(id) !== next.has(id)) {
+    return true;
+  }
+  for (const child of node.children) {
+    if (treePinnedMembershipChanged(child, prev, next)) {
+      return true;
+    }
+  }
+  return false;
+};
 
-  if (prevSessionId !== nextSessionId) return false;
-  if (prev.node.session !== next.node.session) return false;
-  if (getNodeChildSignature(prev.node) !== getNodeChildSignature(next.node)) return false;
+const collectSubtreeDirectories = (
+  node: SessionNode,
+  groupDirectory: string | null | undefined,
+  out: Set<string>,
+): void => {
+  const directory = normalizePath((node.session as Session & { directory?: string | null }).directory ?? null)
+    ?? normalizePath(groupDirectory ?? null);
+  if (directory) {
+    out.add(directory);
+  }
+  for (const child of node.children) {
+    collectSubtreeDirectories(child, groupDirectory, out);
+  }
+};
+
+const directoryStatusChangedForSubtree = (
+  node: SessionNode,
+  groupDirectory: string | null | undefined,
+  prev: Map<string, 'unknown' | 'exists' | 'missing'>,
+  next: Map<string, 'unknown' | 'exists' | 'missing'>,
+): boolean => {
+  if (prev === next) return false;
+  const directories = new Set<string>();
+  collectSubtreeDirectories(node, groupDirectory, directories);
+  for (const directory of directories) {
+    if (prev.get(directory) !== next.get(directory)) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+const areEqual = (prev: Props, next: Props): boolean => {
+  if (subtreeIdentityChanged(prev.node, next.node)) return false;
   if (prev.depth !== next.depth) return false;
   if (prev.groupDirectory !== next.groupDirectory) return false;
   if (prev.projectId !== next.projectId) return false;
@@ -165,8 +209,7 @@ const areEqual = (prev: Props, next: Props): boolean => {
       return false;
     }
   }
-  if (prev.pinnedSessionIds.has(prevSessionId) !== next.pinnedSessionIds.has(nextSessionId)) return false;
-  if (prev.expandedParents.has(prevSessionId) !== next.expandedParents.has(nextSessionId)) return false;
+  if (treePinnedMembershipChanged(prev.node, prev.pinnedSessionIds, next.pinnedSessionIds)) return false;
   if (prev.hasSessionSearchQuery !== next.hasSessionSearchQuery) return false;
   if (prev.normalizedSessionSearchQuery !== next.normalizedSessionSearchQuery) return false;
   if (prev.notifyOnSubtasks !== next.notifyOnSubtasks) return false;
@@ -184,18 +227,21 @@ const areEqual = (prev: Props, next: Props): boolean => {
       return false;
     }
   }
-  if ((prev.copiedSessionId === prevSessionId) !== (next.copiedSessionId === nextSessionId)) return false;
+  if (prev.copiedSessionId !== next.copiedSessionId) {
+    const prevCopiedInTree = treeContainsSessionId(prev.node, prev.copiedSessionId);
+    const nextCopiedInTree = treeContainsSessionId(next.node, next.copiedSessionId);
+    if (prevCopiedInTree || nextCopiedInTree) {
+      return false;
+    }
+  }
 
-  const prevMenuInTree = treeContainsMenuKey(prev.node, prev.openSidebarMenuKey, prev.renderContext ?? 'project', prev.archivedBucket ?? false);
+  const renderContext = prev.renderContext ?? 'project';
+  const archivedBucket = prev.archivedBucket ?? false;
+  const prevMenuInTree = treeContainsMenuKey(prev.node, prev.openSidebarMenuKey, renderContext, archivedBucket);
   const nextMenuInTree = treeContainsMenuKey(next.node, next.openSidebarMenuKey, next.renderContext ?? 'project', next.archivedBucket ?? false);
   if (prevMenuInTree !== nextMenuInTree) return false;
 
-  const prevDirectory = normalizePath((prevSession as Session & { directory?: string | null }).directory ?? null)
-    ?? normalizePath(prev.groupDirectory ?? null);
-  const nextDirectory = normalizePath((nextSession as Session & { directory?: string | null }).directory ?? null)
-    ?? normalizePath(next.groupDirectory ?? null);
-  if (prevDirectory !== nextDirectory) return false;
-  if ((prevDirectory ? prev.directoryStatus.get(prevDirectory) : null) !== (nextDirectory ? next.directoryStatus.get(nextDirectory) : null)) return false;
+  if (directoryStatusChangedForSubtree(prev.node, prev.groupDirectory, prev.directoryStatus, next.directoryStatus)) return false;
 
   if ((prev.secondaryMeta?.projectLabel ?? null) !== (next.secondaryMeta?.projectLabel ?? null)) return false;
   if ((prev.secondaryMeta?.branchLabel ?? null) !== (next.secondaryMeta?.branchLabel ?? null)) return false;
@@ -219,7 +265,6 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     currentSessionId,
     optimisticActiveSessionId,
     pinnedSessionIds,
-    expandedParents,
     hasSessionSearchQuery,
     normalizedSessionSearchQuery,
     notifyOnSubtasks,
@@ -229,8 +274,6 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     setEditTitle,
     handleSaveEdit,
     handleCancelEdit,
-    toggleParent,
-    collapseExpandedSubagentSessions,
     handleSessionSelect,
     handleSessionDoubleClick,
     togglePinnedSession,
@@ -256,6 +299,12 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   } = props;
   const hasSecondaryProjectLabel = Boolean(secondaryMeta?.projectLabel);
   const hasSecondaryBranchLabel = Boolean(secondaryMeta?.branchLabel);
+  const depthPaddingStyle = depth > 0 ? { paddingLeft: `${8 + depth * 8}px` } : undefined;
+  const indicatorLeftPx = -10 + depth * 8;
+  const indicatorLeftStyle = { left: `${indicatorLeftPx}px` };
+  const statusPinnedLeftStyle = { left: `${indicatorLeftPx - 8}px` };
+  const treeGuideVerticalStyle = depth > 0 ? { left: `${4 + (depth - 1) * 8}px` } : undefined;
+  const treeGuideHorizontalStyle = depth > 0 ? { left: `${4 + (depth - 1) * 8}px`, width: '8px' } : undefined;
 
   const displayMode = useSessionDisplayStore((state) => state.displayMode);
   const isMinimalMode = displayMode === 'minimal';
@@ -325,8 +374,14 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const isOptimisticTarget = optimisticActiveSessionId === session.id && !isActive;
   const sessionTitle = resolvedSession.title || t('sessions.sidebar.session.untitled');
   const hasChildren = node.children.length > 0;
+  const expansionKey = `${renderContext}:${archivedBucket ? 'archived' : 'active'}:${session.id}`;
   const isPinnedSession = pinnedSessionIds.has(session.id);
-  const isExpanded = hasSessionSearchQuery ? true : expandedParents.has(session.id);
+  const isExpandedFromStore = useSessionExpansionStore(
+    React.useCallback((state) => state.keys.has(expansionKey), [expansionKey]),
+  );
+  const isExpanded = hasSessionSearchQuery ? true : isExpandedFromStore;
+  const toggleParent = useSessionExpansionStore((state) => state.toggle);
+  const collapseExpandedSubagentSessions = useSessionExpansionStore((state) => state.collapseMany);
   const childPageSize = 5;
   const [childPage, setChildPage] = React.useState(1);
   const childTotalPages = Math.max(1, Math.ceil(node.children.length / childPageSize));
@@ -337,6 +392,10 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     [node.children, childStartIndex],
   );
   const allDescendantIds = React.useMemo(() => collectNodeDescendantIds(node), [collectNodeDescendantIds, node]);
+  const allDescendantExpansionKeys = React.useMemo(
+    () => allDescendantIds.map((id) => `${renderContext}:${archivedBucket ? 'archived' : 'active'}:${id}`),
+    [allDescendantIds, archivedBucket, renderContext],
+  );
   const isSubtaskSession = Boolean((resolvedSession as Session & { parentID?: string | null }).parentID);
   const unseenCount = useSessionUnseenCount(session.id);
   const needsAttention = unseenCount > 0 && (!isSubtaskSession || notifyOnSubtasks);
@@ -367,9 +426,9 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     if (resolvedPage === childCurrentPage) {
       return;
     }
-    collapseExpandedSubagentSessions(allDescendantIds);
+    collapseExpandedSubagentSessions(allDescendantExpansionKeys);
     setChildPage(resolvedPage);
-  }, [allDescendantIds, childCurrentPage, childTotalPages, collapseExpandedSubagentSessions]);
+  }, [allDescendantExpansionKeys, childCurrentPage, childTotalPages, collapseExpandedSubagentSessions]);
 
   const collectChildExports = React.useCallback(async (children: SessionNode[]): Promise<{ children: ChildSessionExport[]; skipped: number }> => {
     const results: ChildSessionExport[] = [];
@@ -472,8 +531,23 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     return (
       <div
         key={session.id}
-        className={cn('group relative flex items-center rounded-sm px-1.5 py-1', depth > 0 && 'pl-[20px]')}
+        className="group relative flex items-center rounded-sm px-1.5 py-1"
+        style={depthPaddingStyle}
       >
+        {depth > 0 ? (
+          <>
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-y-0 border-l border-border/50"
+              style={treeGuideVerticalStyle}
+            />
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute top-1/2 -translate-y-1/2 border-t border-border/50"
+              style={treeGuideHorizontalStyle}
+            />
+          </>
+        ) : null}
         <div className="flex min-w-0 flex-1 flex-col gap-0">
           <form
             className="flex w-full items-center gap-2"
@@ -559,9 +633,10 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       className={cn(
         'pointer-events-none absolute inline-flex h-3.5 items-center justify-center gap-0.5 transition-opacity',
         isMinimalMode ? 'top-1/2 -translate-y-1/2' : 'top-[14.5px] -translate-y-1/2',
-        showStatusMarker && isPinnedSession ? 'left-[-18px] w-6' : 'left-[-10px] w-3.5',
+        showStatusMarker && isPinnedSession ? 'w-6' : 'w-3.5',
         hasChildren && !alwaysShowActions ? 'opacity-100 group-hover:opacity-0 group-focus-within:opacity-0' : '',
       )}
+      style={showStatusMarker && isPinnedSession ? statusPinnedLeftStyle : indicatorLeftStyle}
     >
       {showStatusMarker ? statusMarkerContent : null}
       {isPinnedSession ? <Icon name="pushpin" className="h-3 w-3 flex-shrink-0 text-primary"  aria-label={t('sessions.sidebar.session.status.pinned')}/> : null}
@@ -573,22 +648,23 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       tabIndex={0}
       onClick={(event) => {
         event.stopPropagation();
-        toggleParent(session.id);
+        toggleParent(expansionKey);
       }}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
           event.stopPropagation();
-          toggleParent(session.id);
+          toggleParent(expansionKey);
         }
       }}
       className={cn(
-        'absolute left-[-10px] inline-flex h-3.5 w-3.5 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
+        'absolute inline-flex h-3.5 w-3.5 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
         isMinimalMode ? 'top-1/2 -translate-y-1/2' : 'top-[14.5px] -translate-y-1/2',
         isMinimalMode && showStatusMarker && !alwaysShowActions
           ? 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto'
           : '',
       )}
+      style={indicatorLeftStyle}
       aria-label={isExpanded
         ? t('sessions.sidebar.session.subsessions.collapse')
         : t('sessions.sidebar.session.subsessions.expand')}
@@ -823,12 +899,26 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           className={cn(
             'group relative my-0.5 flex items-center rounded-sm px-1.5 py-1',
             isMissingDirectory ? 'opacity-75' : '',
-            depth > 0 && 'pl-[20px]',
             isRowSelected && 'bg-primary/15',
             isOptimisticTarget && 'bg-primary/18 ring-1 ring-primary/45',
             isClickFeedbackVisible && 'bg-primary/22 ring-1 ring-primary/55',
           )}
+          style={depthPaddingStyle}
         >
+          {depth > 0 ? (
+            <>
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-y-0 border-l border-border/50"
+                style={treeGuideVerticalStyle}
+              />
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute top-1/2 -translate-y-1/2 border-t border-border/50"
+                style={treeGuideHorizontalStyle}
+              />
+            </>
+          ) : null}
           {leadingIndicators}
           {subsessionChevron}
           <div className="flex min-w-0 flex-1 items-center">

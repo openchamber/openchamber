@@ -35,6 +35,60 @@ export const useProjectSessionLists = (args: Args) => {
     return next;
   }, [sessions]);
 
+  const sessionPools = React.useMemo(() => {
+    const buildChildrenMap = (input: Session[]) => {
+      const byParent = new Map<string, Session[]>();
+      input.forEach((session) => {
+        const parentID = (session as Session & { parentID?: string | null }).parentID;
+        if (!parentID) {
+          return;
+        }
+        const bucket = byParent.get(parentID);
+        if (bucket) {
+          bucket.push(session);
+        } else {
+          byParent.set(parentID, [session]);
+        }
+      });
+      return byParent;
+    };
+
+    const active = dedupeSessionsById(sessions);
+    const archivedLike = dedupeSessionsById([...archivedSessions, ...sessions.filter((session) => !session.time?.archived)]);
+    return {
+      active,
+      activeChildrenByParent: buildChildrenMap(active),
+      archivedLike,
+      archivedLikeChildrenByParent: buildChildrenMap(archivedLike),
+    };
+  }, [archivedSessions, sessions]);
+
+  const includeDescendants = React.useCallback((input: Session[], childrenByParent: Map<string, Session[]>): Session[] => {
+    if (input.length === 0) {
+      return input;
+    }
+    const out: Session[] = [];
+    const seen = new Set<string>();
+    const queue: Session[] = [...input];
+    while (queue.length > 0) {
+      const current = queue.shift();
+      if (!current || seen.has(current.id)) {
+        continue;
+      }
+      seen.add(current.id);
+      out.push(current);
+      const children = childrenByParent.get(current.id);
+      if (children && children.length > 0) {
+        children.forEach((child) => {
+          if (!seen.has(child.id)) {
+            queue.push(child);
+          }
+        });
+      }
+    }
+    return out;
+  }, []);
+
   const getSessionsForProject = React.useCallback(
     (project: { normalizedPath: string }) => {
       const worktreesForProject = isVSCode ? [] : (availableWorktreesByProject.get(project.normalizedPath) ?? []);
@@ -58,10 +112,10 @@ export const useProjectSessionLists = (args: Args) => {
           collected.push(session);
         });
       });
-
-      return collected;
+      const result = includeDescendants(collected, sessionPools.activeChildrenByParent);
+      return result;
     },
-    [availableWorktreesByProject, isVSCode, sessionsByDirectory],
+    [availableWorktreesByProject, includeDescendants, isVSCode, sessionPools.activeChildrenByParent, sessionsByDirectory],
   );
 
   const getArchivedSessionsForProject = React.useCallback(
@@ -90,7 +144,9 @@ export const useProjectSessionLists = (args: Args) => {
           return projectWorktree === project.normalizedPath;
         });
 
-        return dedupeSessionsById([...archived, ...unassignedLive]);
+        const base = dedupeSessionsById([...archived, ...unassignedLive]);
+        const result = includeDescendants(base, sessionPools.archivedLikeChildrenByParent);
+        return result;
       }
 
       const worktreesForProject = isVSCode ? [] : (availableWorktreesByProject.get(project.normalizedPath) ?? []);
@@ -121,9 +177,11 @@ export const useProjectSessionLists = (args: Args) => {
         return projectWorktree === project.normalizedPath || projectWorktree.startsWith(`${project.normalizedPath}/`);
       });
 
-      return dedupeSessionsById([...archived, ...unassignedLive]);
+      const base = dedupeSessionsById([...archived, ...unassignedLive]);
+      const result = includeDescendants(base, sessionPools.archivedLikeChildrenByParent);
+      return result;
     },
-    [archivedSessions, availableWorktreesByProject, isVSCode, sessions],
+    [archivedSessions, availableWorktreesByProject, includeDescendants, isVSCode, sessionPools.archivedLikeChildrenByParent, sessions],
   );
 
   return {

@@ -20,10 +20,9 @@ type Args = {
   isVSCode: boolean;
 };
 
-const isArchivedSession = (session: Session): boolean => Boolean(session.time?.archived);
-
 export const useSessionGrouping = (args: Args) => {
   const { t } = useI18n();
+  const nodeCacheRef = React.useRef<Map<string, SessionNode>>(new Map());
   const buildGroupSearchText = React.useCallback((group: SessionGroup): string => {
     return [group.label, group.branch ?? '', group.description ?? '', group.directory ?? ''].join(' ').toLowerCase();
   }, []);
@@ -75,7 +74,7 @@ export const useSessionGrouping = (args: Args) => {
         const parentID = (session as Session & { parentID?: string | null }).parentID;
         if (!parentID) return;
         const parentSession = sessionMap.get(parentID);
-        if (!parentSession || isArchivedSession(parentSession) !== isArchivedSession(session)) {
+        if (!parentSession) {
           return;
         }
         const collection = childrenMap.get(parentID) ?? [];
@@ -105,17 +104,31 @@ export const useSessionGrouping = (args: Args) => {
         return null;
       };
 
+      const nodeCache = nodeCacheRef.current;
       const buildProjectNode = (session: Session): SessionNode => {
         const children = childrenMap.get(session.id) ?? [];
-        return { session, children: children.map((child) => buildProjectNode(child)), worktree: getSessionWorktree(session) };
+        const childNodes = children.map((child) => buildProjectNode(child));
+        const worktree = getSessionWorktree(session);
+        const cached = nodeCache.get(session.id);
+        if (
+          cached
+          && cached.session === session
+          && cached.worktree === worktree
+          && cached.children.length === childNodes.length
+          && cached.children.every((c, i) => c === childNodes[i])
+        ) {
+          return cached;
+        }
+        const node: SessionNode = { session, children: childNodes, worktree };
+        nodeCache.set(session.id, node);
+        return node;
       };
 
       const roots = sortedProjectSessions.filter((session) => {
         const parentID = (session as Session & { parentID?: string | null }).parentID;
         if (!parentID) return true;
         const parentSession = sessionMap.get(parentID);
-        if (!parentSession) return true;
-        return isArchivedSession(parentSession) !== isArchivedSession(session);
+        return !parentSession;
       });
       const attachedChildIds = new Set<string>();
       childrenMap.forEach((children) => {
