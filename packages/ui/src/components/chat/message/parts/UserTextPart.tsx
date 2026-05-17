@@ -5,9 +5,11 @@ import type { AgentMentionInfo } from '../types';
 import { SimpleMarkdownRenderer } from '../../MarkdownRenderer';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
-import { Icon } from "@/components/icon/Icon";
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { getDirectoryForFilePath } from '@/lib/path-utils';
+import { useI18n } from '@/lib/i18n';
+import { Icon } from "@/components/icon/Icon";
+import { buildUserTextPreview, countAdditionalLines } from './userTextPreview';
 
 type PartWithText = Part & { text?: string; content?: string; value?: string };
 
@@ -25,8 +27,6 @@ const buildMentionUrl = (name: string): string => {
 
 const SKILL_TOKEN_PATTERN = /(^|\s)\/([a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)/g;
 const SKILL_LINK_PREFIX = '#openchamber-skill:';
-
-const buildSkillHref = (name: string): string => `${SKILL_LINK_PREFIX}${encodeURIComponent(name)}`;
 
 const parseSkillHref = (href: string | null | undefined): string | null => {
     if (!href?.startsWith(SKILL_LINK_PREFIX)) return null;
@@ -66,13 +66,13 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
     const textContent = typeof rawText === 'string' ? rawText : partWithText.content || partWithText.value || '';
 
     const [isExpanded, setIsExpanded] = React.useState(false);
-    const [isTruncated, setIsTruncated] = React.useState(false);
     const userMessageRenderingMode = useUIStore((state) => state.userMessageRenderingMode);
     const skills = useSkillsStore((state) => state.skills);
     const openContextFile = useUIStore((state) => state.openContextFile);
     const effectiveDirectory = useEffectiveDirectory();
     const normalizedRenderingMode = normalizeUserMessageRenderingMode(userMessageRenderingMode);
-    const textRef = React.useRef<HTMLDivElement>(null);
+    const { t } = useI18n();
+
     const skillByName = React.useMemo(() => new Map(skills.map((skill) => [skill.name, skill])), [skills]);
 
     const openSkill = React.useCallback((name: string) => {
@@ -80,6 +80,14 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
         if (!skill?.path) return;
         openContextFile(effectiveDirectory || getDirectoryForFilePath('', skill.path) || '/', skill.path);
     }, [effectiveDirectory, openContextFile, skillByName]);
+
+    // Derive collapse affordance directly from content shape — no DOM
+    // measurement, no ResizeObserver. `line-clamp-2` would silently fail
+    // on block descendants (<pre>, <ul>, etc.) and let the message keep
+    // its full height; an explicit single-line preview is reliable.
+    const previewText = React.useMemo(() => buildUserTextPreview(textContent), [textContent]);
+    const additionalLines = React.useMemo(() => countAdditionalLines(textContent), [textContent]);
+    const canCollapse = additionalLines > 0;
 
     const hasActiveSelectionInElement = React.useCallback((element: HTMLElement): boolean => {
         if (typeof window === 'undefined') {
@@ -95,25 +103,22 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
         return element.contains(range.startContainer) || element.contains(range.endContainer);
     }, []);
 
-    React.useEffect(() => {
-        const el = textRef.current;
-        if (!el) return;
+    const previewRef = React.useRef<HTMLDivElement>(null);
 
-        const checkTruncation = () => {
-            if (!isExpanded) {
-                setIsTruncated(el.scrollHeight > el.clientHeight);
-            }
-        };
+    const handleExpandClick = React.useCallback(() => {
+        const element = previewRef.current;
+        if (element && hasActiveSelectionInElement(element)) {
+            return;
+        }
+        if (!isExpanded && canCollapse) {
+            setIsExpanded(true);
+        }
+    }, [hasActiveSelectionInElement, isExpanded, canCollapse]);
 
-        checkTruncation();
-
-        const resizeObserver = new ResizeObserver(checkTruncation);
-        resizeObserver.observe(el);
-
-        return () => resizeObserver.disconnect();
-    }, [textContent, isExpanded]);
-
-    const handleClick = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    // Expanded-view click handler: only intercepts skill mention clicks so they
+    // open the skill file; selection/normal clicks are ignored (no collapse on
+    // click in expanded mode — explicit chevron button handles that).
+    const handleExpandedClick = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
         const target = event.target as HTMLElement | null;
         const skillLink = target?.closest<HTMLElement>('[data-skill-name]');
         const skillName = skillLink?.dataset.skillName
@@ -122,22 +127,8 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
             event.preventDefault();
             event.stopPropagation();
             openSkill(skillName);
-            return;
         }
-
-        const element = textRef.current;
-        if (!element) {
-            return;
-        }
-
-        if (hasActiveSelectionInElement(element)) {
-            return;
-        }
-
-        if (!isExpanded && isTruncated) {
-            setIsExpanded(true);
-        }
-    }, [hasActiveSelectionInElement, isExpanded, isTruncated, openSkill]);
+    }, [openSkill]);
 
     const handleCollapse = React.useCallback((event: React.MouseEvent) => {
         event.stopPropagation();
@@ -156,9 +147,11 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
             content = content.replace(agentMention.token, mentionHtml);
         }
 
+        // Step 3: Skill mentions (`/skill-name`) become clickable spans handled
+        // by handleExpandedClick. Markdown renderer keeps the anchors intact.
         content = content.replace(SKILL_TOKEN_PATTERN, (match, prefix: string, skillName: string) => {
             if (!skillByName.has(skillName)) return match;
-            return `${prefix}[/${skillName}](${buildSkillHref(skillName)})`;
+            return `${prefix}<a href="#" data-skill-name="${skillName}" class="text-primary hover:underline">/${skillName}</a>`;
         });
 
         // Step 4: Preserve user newlines (markdown soft breaks would otherwise collapse to spaces)
@@ -231,14 +224,51 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
         return null;
     }
 
+    // Collapsed view: render only a one-line plain-text preview plus a
+    // "+N lines" hint. This box is intentionally short — no markdown,
+    // no block elements — so the surrounding scroll container collapses
+    // with it instead of holding the previous ~40dvh reservation.
+    // Skill mentions appear as plain `/name` text in the preview; clicking
+    // the row expands first, then expanded view renders interactive skills.
+    if (!isExpanded && canCollapse) {
+        return (
+            <div
+                ref={previewRef}
+                role="button"
+                tabIndex={0}
+                onClick={handleExpandClick}
+                onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        handleExpandClick();
+                    }
+                }}
+                className="flex items-center gap-2 min-w-0 cursor-pointer rounded-sm py-1 hover:bg-[var(--interactive-hover)]/40 transition-colors"
+                aria-expanded={false}
+                aria-label={t('chat.userText.expand')}
+                key={part.id || `${messageId}-user-text`}
+            >
+                <span className="typography-markdown text-foreground/90 truncate min-w-0 flex-1">
+                    {previewText}
+                </span>
+                {additionalLines > 0 && (
+                    <span className="typography-meta text-muted-foreground shrink-0 tabular-nums">
+                        {t('chat.userText.moreLines', { count: additionalLines })}
+                    </span>
+                )}
+                <Icon name="arrow-down-s" className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            </div>
+        );
+    }
+
     return (
         <div className="relative" key={part.id || `${messageId}-user-text`}>
-            {isExpanded && (
+            {canCollapse && (
                 <button
                     type="button"
                     onClick={handleCollapse}
                     className="absolute top-0 right-0 z-10 flex items-center justify-center rounded-sm bg-[var(--surface-elevated)] p-0.5 text-[var(--surface-mutedForeground)] hover:text-[var(--surface-foreground)] hover:bg-[var(--interactive-hover)] transition-colors"
-                    aria-label="Collapse"
+                    aria-label={t('chat.userText.collapse')}
                 >
                     <Icon name="arrow-up-s" className="h-3.5 w-3.5" />
                 </button>
@@ -246,19 +276,16 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
             <div
                 className={cn(
                     "break-words font-sans typography-markdown-body",
-                    isExpanded && "pb-3",
-                    normalizedRenderingMode === 'plain' && 'whitespace-pre-wrap',
-                    !isExpanded && "line-clamp-2",
-                    isTruncated && !isExpanded && "cursor-pointer"
+                    canCollapse && "pb-3",
+                    normalizedRenderingMode === 'plain' && 'whitespace-pre-wrap'
                 )}
-                ref={textRef}
-                onClick={handleClick}
+                onClick={handleExpandedClick}
             >
                 {normalizedRenderingMode === 'markdown' ? (
                     <SimpleMarkdownRenderer
                         content={processedMarkdownContent}
                         className="[&_.markdown-content>*:first-child]:mt-0 [&_.markdown-content>*:last-child]:mb-0"
-                        disableLinkSafety 
+                        disableLinkSafety
                     />
                 ) : (
                     plainTextContent
