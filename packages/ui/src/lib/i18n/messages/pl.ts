@@ -890,7 +890,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.subtask.showPrompt': 'Pokaż prompt',
   'chat.messageBody.subtask.title': 'Zadanie delegowane',
   'chat.reasoningTrace.thinking': 'Myślenie',
-  'chat.reasoningTrace.reasoning': 'Rozumowanie',
   'chat.reasoningTrace.justification': 'Uzasadnienie',
   'chat.reasoningTrace.expandAria': 'Rozwiń ślad rozumowania',
   'chat.reasoningTrace.collapseAria': 'Zwiń ślad rozumowania',

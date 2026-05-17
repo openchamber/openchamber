@@ -1653,7 +1653,6 @@ export const dict: Record<I18nKey, string> = {
   "chat.modelControls.modeValue.all": "Todos",
   "chat.modelControls.modeValue.none": "—",
   "chat.reasoningTrace.thinking": "Pensando",
-  "chat.reasoningTrace.reasoning": "Raciocinando",
   "chat.reasoningTrace.justification": "Justificativa",
   "chat.reasoningTrace.expandAria": "Expandir rastro de raciocínio",
   "chat.reasoningTrace.collapseAria": "Recolher rastro de raciocínio",

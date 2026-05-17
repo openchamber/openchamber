@@ -116,6 +116,18 @@ function getSessionReplyClient(sessionId?: string): OpencodeClient {
   return sdk()
 }
 
+function restoreFilePartsToInput(fileParts: Array<Record<string, unknown>>): void {
+  useInputStore.getState().clearAttachedFiles()
+  for (const filePart of fileParts) {
+    const url = typeof filePart.url === "string" ? filePart.url : ""
+    const mime = typeof filePart.mime === "string" ? filePart.mime : "application/octet-stream"
+    const filename = typeof filePart.filename === "string" ? filePart.filename : "attachment"
+    if (url) {
+      useInputStore.getState().addRestoredAttachment({ url, mimeType: mime, filename })
+    }
+  }
+}
+
 function resolveDirectoryForBlockingRequest(
   type: "permission" | "question",
   sessionId: string,
@@ -589,9 +601,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
       .map((p: Record<string, unknown>) => (p as { text?: string }).text || (p as { content?: string }).content || "")
       .join("\n")
       .trim()
-    // Snapshot file parts for later restoration to the input (line ~626).
-    // File parts (type="file") contain url/mime/filename — the file already
-    // exists on the server so we record it as a "server" source attachment.
+    // Snapshot file parts for later restoration to the input.
     // Exclude synthetic file parts (server-generated file content that should
     // not be restored to the composer).
     submittedFileParts = parts.filter((p) => p.type === "file" && !isSyntheticPart(p)) as Array<Record<string, unknown>>
@@ -634,16 +644,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   // Restore file/image attachments from the target message.
   // Clear existing attachments first — previous revert's attachments
   // must not carry over, even when the current message has no files.
-  useInputStore.getState().clearAttachedFiles()
-  for (const fp of submittedFileParts) {
-      const f = fp as Record<string, unknown>
-      const url = typeof f.url === "string" ? f.url : ""
-      const mime = typeof f.mime === "string" ? f.mime : "application/octet-stream"
-      const filename = typeof f.filename === "string" ? f.filename : "attachment"
-      if (url) {
-        useInputStore.getState().addRestoredAttachment({ url, mimeType: mime, filename })
-      }
-    }
+  restoreFilePartsToInput(submittedFileParts)
 
   // Call SDK and merge authoritative result into store
   try {
@@ -785,13 +786,5 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
     })
   }
   // Clear existing attachments and restore file parts from the forked message.
-  useInputStore.getState().clearAttachedFiles()
-  for (const fp of fileParts) {
-    const url = typeof fp.url === "string" ? fp.url : ""
-    const mime = typeof fp.mime === "string" ? fp.mime : "application/octet-stream"
-    const filename = typeof fp.filename === "string" ? fp.filename : "attachment"
-    if (url) {
-      useInputStore.getState().addRestoredAttachment({ url, mimeType: mime, filename })
-    }
-  }
+  restoreFilePartsToInput(fileParts)
 }

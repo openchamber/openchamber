@@ -337,7 +337,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
 
   // Load stores when project changes or when a page becomes active.
   React.useEffect(() => {
-    if (!isSettingsDialogOpen && !runtimeCtx.isVSCode) {
+    if (!isSettingsDialogOpen && !runtimeCtx.isVSCode && !isWindowed) {
       return;
     }
 
@@ -357,7 +357,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       void useSkillsStore.getState().loadSkills();
       void useSkillsCatalogStore.getState().loadCatalog();
     }
-  }, [activeProjectId, isSettingsDialogOpen, runtimeCtx.isVSCode, settingsSlug]);
+  }, [activeProjectId, isSettingsDialogOpen, isWindowed, runtimeCtx.isVSCode, settingsSlug]);
 
   const openPage = React.useCallback((slug: SettingsPageSlug) => {
     setSettingsPage(slug);

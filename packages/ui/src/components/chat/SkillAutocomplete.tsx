@@ -6,6 +6,7 @@ import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 interface SkillInfo {
   name: string;
   scope: string;
+  source?: string;
   description?: string;
 }
 
@@ -111,6 +112,7 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
 
   const renderSkill = (skill: SkillInfo, index: number) => {
     const isProject = skill.scope === 'project';
+    const source = skill.source || 'opencode';
     return (
       <div
         key={`${skill.name}-${skill.scope}`}
@@ -134,6 +136,9 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
                 : "bg-[var(--status-success-background)] text-[var(--status-success)] border-[var(--status-success-border)]"
             )}>
               {skill.scope}
+            </span>
+            <span className="text-[10px] leading-none uppercase font-bold tracking-tight px-1.5 py-1 rounded border flex-shrink-0 bg-[var(--surface-muted)] text-muted-foreground border-[var(--interactive-border)]/60">
+              {source}
             </span>
           </div>
           {skill.description && (

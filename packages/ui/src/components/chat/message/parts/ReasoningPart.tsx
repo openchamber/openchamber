@@ -209,7 +209,7 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
 
                     {isStreaming ? (
                         <span className="flex items-center gap-1 typography-meta font-medium" style={{ color: 'var(--tools-title)' }}>
-                            <span>{t('chat.reasoningTrace.reasoning')}</span>
+                            <span>{t(variant === 'justification' ? 'chat.reasoningTrace.justification' : 'chat.reasoningTrace.thinking')}</span>
                             <BusyDots />
                         </span>
                     ) : isExpanded ? (
@@ -244,45 +244,51 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                 </div>
             </div>
 
-            {/* Expanded content — left border matching ToolPart */}
-            {isExpanded && (
-                <div
-                    id={contentId}
-                    className="relative ml-2 pl-3 pb-1 pt-0.5"
-                >
-                    <span
-                        aria-hidden="true"
-                        className="pointer-events-none absolute left-0 top-0 bottom-0 w-px"
-                        style={{ backgroundColor: 'var(--tools-border)' }}
-                    />
-                    <ScrollableOverlay
-                        ref={scrollRef}
-                        as="div"
-                        outerClassName="max-h-80"
-                        className="p-0"
-                        useScrollShadow
-                        scrollShadowSize={36}
-                        userIntentOnly
-                    >
-                        <div data-message-text-export-source="true">
-                            <MarkdownRenderer
-                                content={text}
-                                messageId={blockId}
-                                isAnimated={false}
-                                isStreaming={isStreaming}
-                                variant="reasoning"
-                            />
-                        </div>
-                        {actions ? (
-                            <div className="mt-2 mb-1 flex items-center justify-start gap-1.5" data-message-actions="true">
-                                <div className="flex items-center gap-1.5" data-message-action-group="true">
-                                    {actions}
-                                </div>
+            {/* Expanded content — keep mounted so auto-collapse can animate smoothly. */}
+            <div
+                id={contentId}
+                aria-hidden={!isExpanded}
+                className={cn(
+                    'grid transition-[grid-template-rows,opacity] duration-[350ms] ease-out motion-reduce:transition-none',
+                    isExpanded ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0',
+                )}
+            >
+                <div className="min-h-0 overflow-hidden">
+                    <div className="relative ml-2 pl-3 pb-1 pt-0.5">
+                        <span
+                            aria-hidden="true"
+                            className="pointer-events-none absolute left-0 top-0 bottom-0 w-px"
+                            style={{ backgroundColor: 'var(--tools-border)' }}
+                        />
+                        <ScrollableOverlay
+                            ref={scrollRef}
+                            as="div"
+                            outerClassName="max-h-80"
+                            className="p-0"
+                            useScrollShadow
+                            scrollShadowSize={36}
+                            userIntentOnly
+                        >
+                            <div data-message-text-export-source="true">
+                                <MarkdownRenderer
+                                    content={text}
+                                    messageId={blockId}
+                                    isAnimated={false}
+                                    isStreaming={isStreaming}
+                                    variant="reasoning"
+                                />
                             </div>
-                        ) : null}
-                    </ScrollableOverlay>
+                            {actions ? (
+                                <div className="mt-2 mb-1 flex items-center justify-start gap-1.5" data-message-actions="true">
+                                    <div className="flex items-center gap-1.5" data-message-action-group="true">
+                                        {actions}
+                                    </div>
+                                </div>
+                            ) : null}
+                        </ScrollableOverlay>
+                    </div>
                 </div>
-            )}
+            </div>
         </div>
     );
 };

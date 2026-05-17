@@ -1323,7 +1323,7 @@ class OpencodeService {
   }
 
   // Command Management
-  async listCommands(): Promise<Array<{ name: string; description?: string; agent?: string; model?: string }>> {
+  async listCommands(): Promise<Array<{ name: string; description?: string; agent?: string; model?: string; source?: string }>> {
     try {
       const response = await this.client.command.list(
         this.currentDirectory ? { directory: this.currentDirectory } : undefined
@@ -1333,7 +1333,8 @@ class OpencodeService {
         name: cmd.name as string,
         description: cmd.description as string | undefined,
         agent: cmd.agent as string | undefined,
-        model: cmd.model as string | undefined
+        model: cmd.model as string | undefined,
+        source: cmd.source as string | undefined,
         // Intentionally excluding template to keep memory usage low
       }));
     } catch {
@@ -1341,7 +1342,7 @@ class OpencodeService {
     }
   }
 
-  async listCommandsWithDetails(): Promise<Array<{ name: string; description?: string; agent?: string; model?: string; template?: string }>> {
+  async listCommandsWithDetails(): Promise<Array<{ name: string; description?: string; agent?: string; model?: string; source?: string; template?: string }>> {
     try {
       const response = await this.client.command.list(
         this.currentDirectory ? { directory: this.currentDirectory } : undefined
@@ -1352,8 +1353,37 @@ class OpencodeService {
         description: cmd.description as string | undefined,
         agent: cmd.agent as string | undefined,
         model: cmd.model as string | undefined,
+        source: cmd.source as string | undefined,
         template: cmd.template as string | undefined,
       }));
+    } catch {
+      return [];
+    }
+  }
+
+  async listSkillsWithDetails(): Promise<Array<{ name: string; description?: string; location: string; content?: string }>> {
+    try {
+      const response = await this.client.app.skills(
+        this.currentDirectory ? { directory: this.currentDirectory } : undefined,
+      );
+      const data = response.data;
+      if (!Array.isArray(data)) {
+        return [];
+      }
+
+      const skills: Array<{ name: string; description?: string; location: string; content?: string }> = [];
+      for (const item of data as Array<Record<string, unknown>>) {
+          const name = typeof item.name === 'string' ? item.name.trim() : '';
+          const location = typeof item.location === 'string' ? item.location : '';
+          if (!name || !location || location === '<built-in>') {
+            continue;
+          }
+          const skill: { name: string; description?: string; location: string; content?: string } = { name, location };
+          if (typeof item.description === 'string') skill.description = item.description;
+          if (typeof item.content === 'string') skill.content = item.content;
+          skills.push(skill);
+      }
+      return skills;
     } catch {
       return [];
     }

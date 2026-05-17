@@ -54,6 +54,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
 import { useGitBranches, useGitStore, useIsGitRepo } from '@/stores/useGitStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { createWorktreeDraft } from '@/lib/worktreeSessionCreator';
 import { buildSessionTargetOptions } from '@/sync/session-worktree-contract';
@@ -71,6 +72,7 @@ const MAX_VISIBLE_TEXTAREA_LINES = 8;
 const EMPTY_QUEUE: QueuedMessage[] = [];
 const EMPTY_MESSAGES: Message[] = [];
 const FILE_MENTION_TOKEN = /^@[^\s]+$/;
+const INLINE_SKILL_TOKEN_PATTERN = /(^|\s)\/([a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)/g;
 const CHAT_DRAFT_PERSIST_DEBOUNCE_MS = 500;
 const VS_CODE_DROP_DATA_TYPES = [
     'CodeFiles',
@@ -80,6 +82,28 @@ const VS_CODE_DROP_DATA_TYPES = [
     'text/uri-list',
     'text/plain',
 ];
+
+const collectInlineSkillMentions = (text: string, skillNames: Set<string>): string[] => {
+    const mentions: string[] = [];
+    INLINE_SKILL_TOKEN_PATTERN.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = INLINE_SKILL_TOKEN_PATTERN.exec(text)) !== null) {
+        const prefix = match[1] || '';
+        const name = match[2] || '';
+        const slashIndex = match.index + prefix.length;
+        if (slashIndex === 0 || !skillNames.has(name) || mentions.includes(name)) {
+            continue;
+        }
+        mentions.push(name);
+    }
+    return mentions;
+};
+
+const buildSkillMentionInstruction = (skillNames: string[]): string | null => {
+    if (skillNames.length === 0) return null;
+    const formatted = skillNames.map((name) => `/${name}`).join(', ');
+    return `The user explicitly mentioned these skills in their message: ${formatted}. Use the corresponding skill tool when it is relevant to accomplishing the user's request.`;
+};
 
 const hasUserMessages = (sessionId: string, directory?: string) => {
     return getSyncMessages(sessionId, directory).some((message) => message.role === 'user');
@@ -1508,6 +1532,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         let primaryAttachments: AttachedFile[] = [];
         let agentMentionName: string | undefined;
         const additionalParts: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }> = [];
+        const availableSkillNames = new Set(useSkillsStore.getState().skills.map((skill) => skill.name));
+        const mentionedSkillNames: string[] = [];
+        const addMentionedSkills = (text: string) => {
+            for (const name of collectInlineSkillMentions(text, availableSkillNames)) {
+                if (!mentionedSkillNames.includes(name)) mentionedSkillNames.push(name);
+            }
+        };
 
         // Consume any pending synthetic parts (from conflict resolution, etc.)
         const syntheticParts = consumePendingSyntheticParts();
@@ -1517,6 +1548,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             const queuedMsg = queuedMessages[i];
             const { sanitizedText, mention } = parseAgentMentions(queuedMsg.content, agents);
             const { sanitizedText: queuedText, attachments: mentionAttachments } = extractInlineFileMentions(sanitizedText);
+            addMentionedSkills(queuedText);
 
             // Use agent mention from first message that has one
             if (!agentMentionName && mention?.name) {
@@ -1546,6 +1578,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             const { sanitizedText, mention } = parseAgentMentions(messageToSend, agents);
             const { sanitizedText: messageText, attachments: mentionAttachments } = extractInlineFileMentions(sanitizedText);
             const attachmentsToSend = sanitizeAttachmentsForSend(sendableAttachedFiles);
+            addMentionedSkills(messageText);
 
             if (!agentMentionName && mention?.name) {
                 agentMentionName = mention.name;
@@ -1607,6 +1640,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             });
             additionalParts.push({
                 text: linkedPr.contextText,
+                synthetic: true,
+            });
+        }
+
+        const skillMentionInstruction = buildSkillMentionInstruction(mentionedSkillNames);
+        if (skillMentionInstruction) {
+            additionalParts.push({
+                text: skillMentionInstruction,
                 synthetic: true,
             });
         }

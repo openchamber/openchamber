@@ -1,3 +1,5 @@
+import { createOpencodeClient } from '@opencode-ai/sdk/v2';
+
 export const registerSkillRoutes = (app, dependencies) => {
   const {
     fs,
@@ -14,7 +16,6 @@ export const registerSkillRoutes = (app, dependencies) => {
     getOpenCodeAuthHeaders,
     getOpenCodePort,
     getSkillSources,
-    discoverSkills,
     createSkill,
     updateSkill,
     deleteSkill,
@@ -114,31 +115,23 @@ export const registerSkillRoutes = (app, dependencies) => {
 
   const fetchOpenCodeDiscoveredSkills = async (workingDirectory) => {
     if (!getOpenCodePort()) {
-      return null;
+      return [];
     }
 
     try {
-      const url = new URL(buildOpenCodeUrl('/skill', ''));
-      if (workingDirectory) {
-        url.searchParams.set('directory', workingDirectory);
-      }
-
-      const response = await fetch(url.toString(), {
-        method: 'GET',
-        headers: {
-          Accept: 'application/json',
-          ...getOpenCodeAuthHeaders(),
-        },
-        signal: AbortSignal.timeout(8_000),
+      const client = createOpencodeClient({
+        baseUrl: buildOpenCodeUrl('/', '').replace(/\/$/, ''),
+        directory: workingDirectory || undefined,
+        headers: getOpenCodeAuthHeaders(),
+        fetch: (request) => fetch(request, { signal: AbortSignal.timeout(8_000) }),
       });
 
-      if (!response.ok) {
-        return null;
-      }
-
-      const payload = await response.json();
+      const response = await client.app.skills(
+        workingDirectory ? { directory: workingDirectory } : undefined,
+      );
+      const payload = response?.data;
       if (!Array.isArray(payload)) {
-        return null;
+        return [];
       }
 
       return payload
@@ -146,7 +139,7 @@ export const registerSkillRoutes = (app, dependencies) => {
           const name = typeof item?.name === 'string' ? item.name.trim() : '';
           const location = typeof item?.location === 'string' ? item.location : '';
           const description = typeof item?.description === 'string' ? item.description : '';
-          if (!name || !location) {
+          if (!name || !location || location === '<built-in>') {
             return null;
           }
           const inferred = inferSkillScopeAndSourceFromPath(location, workingDirectory);
@@ -159,8 +152,9 @@ export const registerSkillRoutes = (app, dependencies) => {
           };
         })
         .filter(Boolean);
-    } catch {
-      return null;
+    } catch (error) {
+      console.error('Failed to list OpenCode skills:', error);
+      return [];
     }
   };
 
@@ -191,11 +185,11 @@ export const registerSkillRoutes = (app, dependencies) => {
 
   app.get('/api/config/skills', async (req, res) => {
     try {
-      const { directory, error } = await resolveProjectDirectory(req);
-      if (!directory) {
+      const { directory, error } = await resolveOptionalProjectDirectory(req);
+      if (error) {
         return res.status(400).json({ error });
       }
-      const skills = (await fetchOpenCodeDiscoveredSkills(directory)) || discoverSkills(directory);
+      const skills = await fetchOpenCodeDiscoveredSkills(directory);
 
       const enrichedSkills = skills.map((skill) => {
         const sources = getSkillSources(skill.name, directory, skill);
@@ -277,9 +271,7 @@ export const registerSkillRoutes = (app, dependencies) => {
         return res.status(404).json({ ok: false, error: { kind: 'invalidSource', message: 'Unknown source' } });
       }
 
-      const discovered = directory
-        ? ((await fetchOpenCodeDiscoveredSkills(directory)) || discoverSkills(directory))
-        : [];
+      const discovered = await fetchOpenCodeDiscoveredSkills(directory);
       const installedByName = new Map(discovered.map((s) => [s.name, s]));
 
       if (src.sourceType === 'clawdhub' || isClawdHubSource(src.source)) {
@@ -504,11 +496,11 @@ export const registerSkillRoutes = (app, dependencies) => {
   app.get('/api/config/skills/:name', async (req, res) => {
     try {
       const skillName = req.params.name;
-      const { directory, error } = await resolveProjectDirectory(req);
-      if (!directory) {
+      const { directory, error } = await resolveOptionalProjectDirectory(req);
+      if (error) {
         return res.status(400).json({ error });
       }
-      const discoveredSkill = ((await fetchOpenCodeDiscoveredSkills(directory)) || [])
+      const discoveredSkill = (await fetchOpenCodeDiscoveredSkills(directory))
         .find((skill) => skill.name === skillName) || null;
       const sources = getSkillSources(skillName, directory, discoveredSkill);
 
@@ -532,12 +524,12 @@ export const registerSkillRoutes = (app, dependencies) => {
       if (isUnsafeSkillRelativePath(filePath)) {
         return res.status(400).json({ error: 'Invalid file path' });
       }
-      const { directory, error } = await resolveProjectDirectory(req);
-      if (!directory) {
+      const { directory, error } = await resolveOptionalProjectDirectory(req);
+      if (error) {
         return res.status(400).json({ error });
       }
 
-      const discoveredSkill = ((await fetchOpenCodeDiscoveredSkills(directory)) || [])
+      const discoveredSkill = (await fetchOpenCodeDiscoveredSkills(directory))
         .find((skill) => skill.name === skillName) || null;
       const sources = getSkillSources(skillName, directory, discoveredSkill);
       if (!sources.md.exists || !sources.md.dir) {
@@ -563,9 +555,11 @@ export const registerSkillRoutes = (app, dependencies) => {
     try {
       const skillName = req.params.name;
       const { scope, source: skillSource, ...config } = req.body;
-      const { directory, error } = await resolveProjectDirectory(req);
-      if (!directory) {
-        return res.status(400).json({ error });
+      const { directory, error } = scope === SKILL_SCOPE.PROJECT
+        ? await resolveProjectDirectory(req)
+        : await resolveOptionalProjectDirectory(req);
+      if (error || (scope === SKILL_SCOPE.PROJECT && !directory)) {
+        return res.status(400).json({ error: error || 'Project skill creation requires a directory' });
       }
 
       console.log('[Server] Creating skill:', skillName);
@@ -590,15 +584,15 @@ export const registerSkillRoutes = (app, dependencies) => {
     try {
       const skillName = req.params.name;
       const updates = req.body;
-      const { directory, error } = await resolveProjectDirectory(req);
-      if (!directory) {
+      const { directory, error } = await resolveOptionalProjectDirectory(req);
+      if (error) {
         return res.status(400).json({ error });
       }
 
       console.log(`[Server] Updating skill: ${skillName}`);
       console.log('[Server] Working directory:', directory);
 
-      updateSkill(skillName, updates, directory);
+      updateSkill(skillName, updates, directory, updates?.targetPath);
       await refreshOpenCodeAfterConfigChange('skill update');
 
       res.json({
@@ -621,12 +615,12 @@ export const registerSkillRoutes = (app, dependencies) => {
         return res.status(400).json({ error: 'Invalid file path' });
       }
       const { content } = req.body;
-      const { directory, error } = await resolveProjectDirectory(req);
-      if (!directory) {
+      const { directory, error } = await resolveOptionalProjectDirectory(req);
+      if (error) {
         return res.status(400).json({ error });
       }
 
-      const discoveredSkill = ((await fetchOpenCodeDiscoveredSkills(directory)) || [])
+      const discoveredSkill = (await fetchOpenCodeDiscoveredSkills(directory))
         .find((skill) => skill.name === skillName) || null;
       const sources = getSkillSources(skillName, directory, discoveredSkill);
       if (!sources.md.exists || !sources.md.dir) {
@@ -655,12 +649,12 @@ export const registerSkillRoutes = (app, dependencies) => {
       if (isUnsafeSkillRelativePath(filePath)) {
         return res.status(400).json({ error: 'Invalid file path' });
       }
-      const { directory, error } = await resolveProjectDirectory(req);
-      if (!directory) {
+      const { directory, error } = await resolveOptionalProjectDirectory(req);
+      if (error) {
         return res.status(400).json({ error });
       }
 
-      const discoveredSkill = ((await fetchOpenCodeDiscoveredSkills(directory)) || [])
+      const discoveredSkill = (await fetchOpenCodeDiscoveredSkills(directory))
         .find((skill) => skill.name === skillName) || null;
       const sources = getSkillSources(skillName, directory, discoveredSkill);
       if (!sources.md.exists || !sources.md.dir) {
@@ -685,8 +679,8 @@ export const registerSkillRoutes = (app, dependencies) => {
   app.delete('/api/config/skills/:name', async (req, res) => {
     try {
       const skillName = req.params.name;
-      const { directory, error } = await resolveProjectDirectory(req);
-      if (!directory) {
+      const { directory, error } = await resolveOptionalProjectDirectory(req);
+      if (error) {
         return res.status(400).json({ error });
       }
 

@@ -108,6 +108,10 @@ const SkillsInstalledPage: React.FC = () => {
     switch (value) {
       case 'project-opencode':
         return t('settings.skills.location.option.projectOpencode.label');
+      case 'user-claude':
+        return t('settings.skills.location.option.userClaude.label');
+      case 'project-claude':
+        return t('settings.skills.location.option.projectClaude.label');
       case 'user-agents':
         return t('settings.skills.location.option.userAgents.label');
       case 'project-agents':
@@ -121,6 +125,10 @@ const SkillsInstalledPage: React.FC = () => {
     switch (value) {
       case 'project-opencode':
         return t('settings.skills.location.option.projectOpencode.description');
+      case 'user-claude':
+        return t('settings.skills.location.option.userClaude.description');
+      case 'project-claude':
+        return t('settings.skills.location.option.projectClaude.description');
       case 'user-agents':
         return t('settings.skills.location.option.userAgents.description');
       case 'project-agents':
@@ -197,6 +205,7 @@ const SkillsInstalledPage: React.FC = () => {
         instructions: instructions.trim() || undefined,
         scope: isNewSkill ? draftScope : undefined,
         source: isNewSkill ? draftSource : undefined,
+        targetPath: !isNewSkill ? selectedSkill?.path : undefined,
         supportingFiles: isNewSkill && pendingFiles.length > 0 ? pendingFiles : undefined,
       };
 
@@ -386,11 +395,6 @@ const SkillsInstalledPage: React.FC = () => {
           <div className="min-w-0">
             <h2 className="typography-ui-header font-semibold text-foreground truncate flex items-center gap-2">
               {isNewSkill ? t('settings.skills.page.title.newSkill') : selectedSkillName}
-              {selectedSkill?.source === 'claude' && (
-                <span className="typography-micro font-normal bg-[var(--surface-muted)] text-muted-foreground px-1.5 py-0.5 rounded">
-                  {t('settings.skills.page.badge.claudeCompatible')}
-                </span>
-              )}
             </h2>
             <p className="typography-meta text-muted-foreground truncate">
               {selectedSkill
