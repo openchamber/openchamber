@@ -377,10 +377,31 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                 ? 'flex-none basis-auto'
                 : (isMobile ? 'flex-1 basis-0 min-w-0' : 'flex-1 basis-0 min-w-fit'))
               : 'min-w-0 flex-1 basis-0';
+          const handleAuxClick = closable
+            ? (event: React.MouseEvent<HTMLDivElement>) => {
+                // Middle-click (button === 1) closes the tab. Matches browser tab behavior.
+                if (event.button !== 1) {
+                  return;
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                onClose?.(item.id);
+              }
+            : undefined;
+          const handleMouseDown = closable
+            ? (event: React.MouseEvent<HTMLDivElement>) => {
+                // Prevent the browser's middle-click autoscroll affordance.
+                if (event.button === 1) {
+                  event.preventDefault();
+                }
+              }
+            : undefined;
           return (
             <Wrapper key={item.id} id={item.id} className={wrapperClassName}>
               <div
                 ref={(element) => setTabRef(item.id, element)}
+                onAuxClick={handleAuxClick}
+                onMouseDown={handleMouseDown}
                 className={cn(
                   'group flex h-full min-w-0 flex-nowrap items-center',
                   (isScrollable || useIntrinsicPillSizing)
