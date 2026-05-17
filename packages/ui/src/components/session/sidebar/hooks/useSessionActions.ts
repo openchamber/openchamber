@@ -97,8 +97,9 @@ export const useSessionActions = (args: Args) => {
     [args],
   );
 
-  const handleSessionDoubleClick = React.useCallback(() => {
-    args.setActiveMainTab('chat');
+  const handleSessionDoubleClick = React.useCallback((sessionId: string, sessionTitle: string) => {
+    args.setEditingId(sessionId);
+    args.setEditTitle(sessionTitle);
   }, [args]);
 
   const handleSaveEdit = React.useCallback(async () => {

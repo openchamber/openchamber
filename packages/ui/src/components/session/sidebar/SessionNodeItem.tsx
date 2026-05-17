@@ -61,7 +61,7 @@ type Props = {
   handleCancelEdit: () => void;
   toggleParent: (sessionId: string) => void;
   handleSessionSelect: (sessionId: string, sessionDirectory: string | null, isMissingDirectory: boolean, projectId?: string | null) => void;
-  handleSessionDoubleClick: () => void;
+  handleSessionDoubleClick: (sessionId: string, sessionTitle: string) => void;
   togglePinnedSession: (sessionId: string) => void;
   handleShareSession: (session: Session) => void;
   copiedSessionId: string | null;
@@ -786,7 +786,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
 	                    onClick={(event) => handleRowSelect(event)}
                     onDoubleClick={(e) => {
                       e.stopPropagation();
-                      handleSessionDoubleClick();
+                      handleSessionDoubleClick(session.id, sessionTitle);
                     }}
                     className={cn(
 	                      'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed transition-[padding]',
@@ -850,7 +850,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
 	                onClick={(event) => handleRowSelect(event)}
                 onDoubleClick={(e) => {
                   e.stopPropagation();
-                  handleSessionDoubleClick();
+                  handleSessionDoubleClick(session.id, sessionTitle);
                 }}
                 className={cn(
 	                  'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed transition-[padding]',
