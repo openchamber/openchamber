@@ -5,12 +5,12 @@ import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
 import { getSafeStorage } from '@/stores/utils/safeStorage';
-
-type OpenCodeUpdateAvailableEvent = CustomEvent<{ version?: unknown }>;
-type OpenCodeUpgradeStatus = {
-  available?: boolean | null;
-  latestVersion?: string | null;
-};
+import {
+  resolveOpenCodeUpdateVersion,
+  resolveOpenCodeUpgradeStatusVersion,
+  shouldShowOpenCodeUpdateToast,
+  type OpenCodeUpgradeStatusLike,
+} from './openCodeUpdateDedup';
 
 const UPDATE_TOAST_ID = 'opencode-update-available';
 const UPGRADE_TOAST_ID = 'opencode-upgrade-progress';
@@ -89,18 +89,19 @@ export const OpenCodeUpdateToast: React.FC = () => {
 
   React.useEffect(() => {
     const showUpdateAvailableToast = (version: string) => {
+      // Upstream setting wins over our dedup logic: if user disabled
+      // OpenCode update notifications, dismiss any active toast and bail
+      // before consulting dedup state.
       if (!useUIStore.getState().showOpenCodeUpdateNotifications) {
         toast.dismiss(UPDATE_TOAST_ID);
         return;
       }
-      if (!version) {
-        return;
-      }
-      if (seenVersionsRef.current.has(version)) {
-        return;
-      }
-      const dismissedVersion = getSafeStorage().getItem(UPDATE_TOAST_DISMISSED_VERSION_KEY);
-      if (dismissedVersion === version) {
+      const decision = shouldShowOpenCodeUpdateToast({
+        version,
+        dismissedVersion: getSafeStorage().getItem(UPDATE_TOAST_DISMISSED_VERSION_KEY),
+        seenVersions: seenVersionsRef.current,
+      });
+      if (!decision) {
         return;
       }
       seenVersionsRef.current.add(version);
@@ -124,9 +125,7 @@ export const OpenCodeUpdateToast: React.FC = () => {
     };
 
     const onUpdateAvailable = (event: Event) => {
-      const version = typeof (event as OpenCodeUpdateAvailableEvent).detail?.version === 'string'
-        ? String((event as OpenCodeUpdateAvailableEvent).detail.version).trim()
-        : '';
+      const version = resolveOpenCodeUpdateVersion((event as CustomEvent<unknown>).detail);
       showUpdateAvailableToast(version);
     };
 
@@ -137,9 +136,9 @@ export const OpenCodeUpdateToast: React.FC = () => {
       try {
         const response = await fetch('/api/opencode/upgrade-status', { headers: { Accept: 'application/json' } });
         if (!response.ok) throw new Error(response.statusText || 'OpenCode upgrade status check failed');
-        const status = await response.json().catch(() => null) as OpenCodeUpgradeStatus | null;
-        const version = typeof status?.latestVersion === 'string' ? status.latestVersion.trim() : '';
-        if (!cancelled && status?.available === true && version) {
+        const status = await response.json().catch(() => null) as OpenCodeUpgradeStatusLike | null;
+        const version = resolveOpenCodeUpgradeStatusVersion(status);
+        if (!cancelled && version) {
           showUpdateAvailableToast(version);
         }
       } catch {

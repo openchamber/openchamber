@@ -4,6 +4,7 @@ import { isWebRuntime } from '@/lib/desktop';
 import { usePwaDetection } from '@/hooks/usePwaDetection';
 import { useI18n } from '@/lib/i18n';
 import { getSafeSessionStorage, getSafeStorage } from '@/stores/utils/safeStorage';
+import { shouldShowPwaInstallToast } from '@/components/update/openCodeUpdateDedup';
 
 type InstallPromptOutcome = 'accepted' | 'dismissed';
 
@@ -66,16 +67,13 @@ export const usePwaInstallPrompt = () => {
       deferredPrompt = installEvent;
 
       const localStorage = getSafeStorage();
-      if (localStorage.getItem(INSTALL_TOAST_DISMISSED_KEY) === 'true') {
-        return;
-      }
-
       const sessionStorage = getSafeSessionStorage();
-      if (sessionStorage.getItem(INSTALL_TOAST_SESSION_KEY) === 'true') {
-        return;
-      }
-
-      if (installToastId !== null) {
+      const decision = shouldShowPwaInstallToast({
+        dismissed: localStorage.getItem(INSTALL_TOAST_DISMISSED_KEY),
+        sessionShown: sessionStorage.getItem(INSTALL_TOAST_SESSION_KEY),
+        hasActiveToast: installToastId !== null,
+      });
+      if (!decision) {
         return;
       }
 
