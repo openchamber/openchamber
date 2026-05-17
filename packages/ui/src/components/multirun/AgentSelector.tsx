@@ -22,6 +22,8 @@ export interface AgentSelectorProps {
   disabled?: boolean;
   /** ID for accessibility */
   id?: string;
+  /** Portal menu to body instead of nearest dialog. */
+  portalToBody?: boolean;
 }
 
 /**
@@ -34,6 +36,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
   className,
   disabled,
   id,
+  portalToBody,
 }) => {
   const { t } = useI18n();
   const getVisibleAgents = useConfigStore((state) => state.getVisibleAgents);
@@ -95,7 +98,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
       >
         <SelectValue placeholder={t('multirun.agentSelector.placeholder')} />
       </SelectTrigger>
-      <SelectContent fitContent>
+      <SelectContent fitContent portalToBody={portalToBody}>
         {selectableAgents.length > 0 && (
           <SelectGroup>
             {selectableAgents.map((agent) => (

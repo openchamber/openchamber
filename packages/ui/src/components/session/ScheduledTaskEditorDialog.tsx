@@ -9,12 +9,12 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { toast } from '@/components/ui';
-import { RiAddLine, RiCloseLine, RiCalendarLine, RiArrowLeftSLine, RiArrowRightSLine, RiArrowDownSLine } from '@remixicon/react';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { AgentSelector } from '@/components/sections/commands/AgentSelector';
 import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
 import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo } from '@/components/chat/CommandAutocomplete';
 import { FileMentionAutocomplete, type FileMentionHandle } from '@/components/chat/FileMentionAutocomplete';
+import { Icon } from "@/components/icon/Icon";
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import type { ScheduledTask } from '@/lib/scheduledTasksApi';
@@ -700,7 +700,6 @@ export function ScheduledTaskEditorDialog(props: {
     };
   }, [isDatePickerOpen]);
 
-
   const variantOptions = React.useMemo(() => {
     const provider = providers.find((item) => item.id === draft.execution.providerID);
     const model = provider?.models?.find((item) => item.id === draft.execution.modelID) as { variants?: Record<string, unknown> } | undefined;
@@ -1066,10 +1065,10 @@ export function ScheduledTaskEditorDialog(props: {
                     onClick={() => setIsDatePickerOpen((prev) => !prev)}
                   >
                     <span className="inline-flex items-center gap-2">
-                      <RiCalendarLine className="h-4 w-4 text-muted-foreground" />
+                      <Icon name="calendar" className="h-4 w-4 text-muted-foreground" />
                       <span className="typography-ui-label text-foreground">{formatDateLabel(draft.schedule.onceDate, t('sessions.scheduledTasks.editor.date.placeholder'), locale)}</span>
                     </span>
-                    <RiArrowDownSLine className="h-4 w-4 text-muted-foreground" />
+                    <Icon name="arrow-down-s" className="h-4 w-4 text-muted-foreground" />
                   </button>
 
                   {isDatePickerOpen ? (
@@ -1082,7 +1081,7 @@ export function ScheduledTaskEditorDialog(props: {
                           aria-label={t('sessions.scheduledTasks.editor.date.previousMonth')}
                           disabled={isAtCurrentMonth}
                         >
-                          <RiArrowLeftSLine className="h-4 w-4" />
+                          <Icon name="arrow-left-s" className="h-4 w-4" />
                         </button>
                         <div className="typography-ui-label text-foreground">
                           {new Intl.DateTimeFormat(locale, { month: 'long', year: 'numeric' }).format(calendarMonth)}
@@ -1093,7 +1092,7 @@ export function ScheduledTaskEditorDialog(props: {
                           onClick={() => setCalendarMonth((prev) => shiftMonth(prev, 1))}
                           aria-label={t('sessions.scheduledTasks.editor.date.nextMonth')}
                         >
-                          <RiArrowRightSLine className="h-4 w-4" />
+                          <Icon name="arrow-right-s" className="h-4 w-4" />
                         </button>
                       </div>
 
@@ -1210,19 +1209,22 @@ export function ScheduledTaskEditorDialog(props: {
                     {orderedWeekdays.map((weekday) => {
                       const checked = draft.schedule.weekdays.includes(weekday.value);
                       return (
-                        <button
+                        <div
                           key={weekday.value}
-                          type="button"
-                          onClick={() => toggleWeekday(weekday.value, !checked)}
                           className={[
-                            'inline-flex items-center gap-1.5 px-0.5 py-0.5 typography-meta',
+                            'group inline-flex items-center gap-1.5 px-0.5 py-0.5 typography-meta',
                             checked ? 'text-foreground' : 'text-muted-foreground',
-                            'hover:text-foreground',
                           ].join(' ')}
                         >
                           <Checkbox checked={checked} onChange={(next) => toggleWeekday(weekday.value, next)} ariaLabel={weekday.label} />
-                          <span>{weekday.label}</span>
-                        </button>
+                          <button
+                            type="button"
+                            onClick={() => toggleWeekday(weekday.value, !checked)}
+                            className="group-hover:text-foreground"
+                          >
+                            {weekday.label}
+                          </button>
+                        </div>
                       );
                     })}
                   </div>
@@ -1252,7 +1254,7 @@ export function ScheduledTaskEditorDialog(props: {
                           onClick={() => removeTimeAt(index)}
                           aria-label={t('sessions.scheduledTasks.editor.times.removeAria')}
                         >
-                          <RiCloseLine className="h-4 w-4" />
+                          <Icon name="close" className="h-4 w-4" />
                         </Button>
                       ) : null}
                     </div>
@@ -1260,7 +1262,7 @@ export function ScheduledTaskEditorDialog(props: {
                 </div>
                 <div>
                   <Button type="button" size="sm" variant="outline" onClick={addTime}>
-                    <RiAddLine className="mr-1 h-4 w-4" /> {t('sessions.scheduledTasks.editor.times.add')}
+                    <Icon name="add" className="mr-1 h-4 w-4" /> {t('sessions.scheduledTasks.editor.times.add')}
                   </Button>
                 </div>
               </div>

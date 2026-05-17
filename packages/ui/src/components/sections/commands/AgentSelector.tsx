@@ -10,9 +10,9 @@ import { useAgentsStore, filterVisibleAgents } from '@/stores/useAgentsStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDeviceInfo } from '@/lib/device';
-import { RiArrowDownSLine, RiLoader4Line, RiRobot2Line } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { useOpenCodeReadiness } from '@/hooks/useOpenCodeReadiness';
 
@@ -138,26 +138,26 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                     <div className="flex items-center gap-2">
                         {!isReady ? (
                             <>
-                                <RiLoader4Line className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                                <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
                                 <span className="typography-meta text-muted-foreground">{isUnavailable ? t('common.unavailable') : t('common.loading')}</span>
                             </>
                         ) : (
                             <>
-                                <RiRobot2Line className="h-3.5 w-3.5 text-muted-foreground" />
+                                <Icon name="robot-2" className="h-3.5 w-3.5 text-muted-foreground" />
                                 <span className="typography-meta font-medium text-foreground">
                                     {agentName || t('settings.commands.agentSelector.selectAgentPlaceholder')}
                                 </span>
                             </>
                         )}
                     </div>
-                    <RiArrowDownSLine className="h-3 w-3 text-muted-foreground" />
+                    <Icon name="arrow-down-s" className="h-3 w-3 text-muted-foreground" />
                 </button>
             ) : !isReady ? (
                 <div className={cn(
                     'flex items-center gap-2 px-2 rounded-lg bg-interactive-selection/20 border border-border/20 h-6 w-fit opacity-60',
                     className
                 )}>
-                    <RiLoader4Line className="h-3 w-3 animate-spin text-muted-foreground flex-shrink-0" />
+                    <Icon name="loader-4" className="h-3 w-3 animate-spin text-muted-foreground flex-shrink-0" />
                     <span className="typography-micro font-medium whitespace-nowrap text-muted-foreground">
                         {isUnavailable ? t('common.unavailable') : t('common.loading')}
                     </span>
@@ -169,11 +169,11 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                             'flex items-center gap-2 px-2 rounded-lg bg-interactive-selection/20 border border-border/20 cursor-pointer hover:bg-interactive-hover/30 h-6 w-fit',
                             className
                         )}>
-                            <RiRobot2Line className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
+                            <Icon name="robot-2" className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
                             <span className="typography-micro font-medium whitespace-nowrap">
                                 {agentName || t('settings.commands.agentSelector.notSelected')}
                             </span>
-                            <RiArrowDownSLine className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
+                            <Icon name="arrow-down-s" className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
                         </div>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent className="max-w-[300px]">

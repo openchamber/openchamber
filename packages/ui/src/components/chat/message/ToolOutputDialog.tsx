@@ -1,6 +1,5 @@
 import React from 'react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
-import { RiArrowLeftSLine, RiArrowRightSLine, RiBrainAi3Line, RiCloseLine, RiFileImageLine, RiFileList2Line, RiFilePdfLine, RiFileSearchLine, RiFolder6Line, RiGitBranchLine, RiGlobalLine, RiListCheck3, RiLoader4Line, RiPencilAiLine, RiSearchLine, RiTaskLine, RiTerminalBoxLine, RiToolsLine } from '@remixicon/react';
 import { File as PierreFile, PatchDiff } from '@pierre/diffs/react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { createPortal } from 'react-dom';
@@ -26,6 +25,7 @@ import type { ToolPopupContent, DiffViewMode } from './types';
 import { DiffViewToggle } from './DiffViewToggle';
 import { VirtualizedCodeBlock, type CodeLine } from './parts/VirtualizedCodeBlock';
 import { JsonTreeView } from '@/components/ui/JsonTreeView';
+import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 
 interface ToolOutputDialogProps {
@@ -40,54 +40,54 @@ const getToolIcon = (toolName: string) => {
     const tool = toolName.toLowerCase();
 
     if (tool === 'reasoning') {
-        return <RiBrainAi3Line className={iconClass} />;
+        return <Icon name="brain-ai-3" className={iconClass} />;
     }
     if (tool === 'image-preview') {
-        return <RiFileImageLine className={iconClass} />;
+        return <Icon name="file-image" className={iconClass} />;
     }
     if (tool === 'mermaid-preview') {
-        return <RiFileList2Line className={iconClass} />;
+        return <Icon name="file-list-2" className={iconClass} />;
     }
     if (tool === 'edit' || tool === 'multiedit' || tool === 'apply_patch' || tool === 'str_replace' || tool === 'str_replace_based_edit_tool') {
-        return <RiPencilAiLine className={iconClass} />;
+        return <Icon name="pencil-ai" className={iconClass} />;
     }
     if (tool === 'write' || tool === 'create' || tool === 'file_write') {
-        return <RiFilePdfLine className={iconClass} />;
+        return <Icon name="file-pdf" className={iconClass} />;
     }
     if (tool === 'read' || tool === 'view' || tool === 'file_read' || tool === 'cat') {
-        return <RiFilePdfLine className={iconClass} />;
+        return <Icon name="file-pdf" className={iconClass} />;
     }
     if (tool === 'bash' || tool === 'shell' || tool === 'cmd' || tool === 'terminal') {
-        return <RiTerminalBoxLine className={iconClass} />;
+        return <Icon name="terminal-box" className={iconClass} />;
     }
     if (tool === 'list' || tool === 'ls' || tool === 'dir' || tool === 'list_files') {
-        return <RiFolder6Line className={iconClass} />;
+        return <Icon name="folder-6" className={iconClass} />;
     }
     if (tool === 'search' || tool === 'grep' || tool === 'find' || tool === 'ripgrep') {
-        return <RiSearchLine className={iconClass} />;
+        return <Icon name="search" className={iconClass} />;
     }
     if (tool === 'glob') {
-        return <RiFileSearchLine className={iconClass} />;
+        return <Icon name="file-search" className={iconClass} />;
     }
     if (tool === 'fetch' || tool === 'curl' || tool === 'wget' || tool === 'webfetch') {
-        return <RiGlobalLine className={iconClass} />;
+        return <Icon name="global" className={iconClass} />;
     }
     if (tool === 'web-search' || tool === 'websearch' || tool === 'search_web' || tool === 'google' || tool === 'bing' || tool === 'duckduckgo') {
-        return <RiSearchLine className={iconClass} />;
+        return <Icon name="search" className={iconClass} />;
     }
     if (tool === 'todowrite' || tool === 'todoread') {
-        return <RiListCheck3 className={iconClass} />;
+        return <Icon name="list-check-3" className={iconClass} />;
     }
     if (tool === 'plan_enter') {
-        return <RiFileList2Line className={iconClass} />;
+        return <Icon name="file-list-2" className={iconClass} />;
     }
     if (tool === 'plan_exit') {
-        return <RiTaskLine className={iconClass} />;
+        return <Icon name="task" className={iconClass} />;
     }
     if (tool.startsWith('git')) {
-        return <RiGitBranchLine className={iconClass} />;
+        return <Icon name="git-branch" className={iconClass} />;
     }
-    return <RiToolsLine className={iconClass} />;
+    return <Icon name="tools" className={iconClass} />;
 };
 
 const PREVIEW_ANIMATION_MS = 150;
@@ -442,7 +442,7 @@ const ImagePreviewDialog: React.FC<{
                         className="absolute left-3 top-1/2 -translate-y-1/2 z-10 h-10 w-10 flex items-center justify-center rounded-full bg-black/40 text-foreground/90 hover:bg-black/55 focus:outline-none focus:ring-2 focus:ring-primary/60"
                         aria-label={t('chat.toolOutputDialog.image.previousAria')}
                     >
-                        <RiArrowLeftSLine className="h-6 w-6" />
+                        <Icon name="arrow-left-s" className="h-6 w-6" />
                     </button>
                     <button
                         type="button"
@@ -451,7 +451,7 @@ const ImagePreviewDialog: React.FC<{
                         className="absolute right-3 top-1/2 -translate-y-1/2 z-10 h-10 w-10 flex items-center justify-center rounded-full bg-black/40 text-foreground/90 hover:bg-black/55 focus:outline-none focus:ring-2 focus:ring-primary/60"
                         aria-label={t('chat.toolOutputDialog.image.nextAria')}
                     >
-                        <RiArrowRightSLine className="h-6 w-6" />
+                        <Icon name="arrow-right-s" className="h-6 w-6" />
                     </button>
                 </>
             )}
@@ -480,7 +480,7 @@ const ImagePreviewDialog: React.FC<{
                             onClick={() => onOpenChange(false)}
                             aria-label={t('chat.toolOutputDialog.image.closeAria')}
                         >
-                            <RiCloseLine className="h-4 w-4" />
+                            <Icon name="close" className="h-4 w-4" />
                         </button>
                     </div>
 
@@ -927,7 +927,7 @@ const MermaidPreviewDialog: React.FC<{
                             onClick={() => onOpenChange(false)}
                             aria-label={t('chat.toolOutputDialog.mermaid.closeAria')}
                         >
-                            <RiCloseLine className="h-4 w-4" />
+                            <Icon name="close" className="h-4 w-4" />
                         </button>
                     </div>
                     <div
@@ -937,7 +937,7 @@ const MermaidPreviewDialog: React.FC<{
                         <div className="h-full overflow-hidden">
                             {status === 'loading' && (
                                 <div className="h-full min-h-28 flex items-center justify-center gap-2 text-muted-foreground typography-meta">
-                                    <RiLoader4Line className="h-4 w-4 animate-spin" />
+                                    <Icon name="loader-4" className="h-4 w-4 animate-spin" />
                                     <span>{t('chat.toolOutputDialog.mermaid.loading')}</span>
                                 </div>
                             )}
@@ -1016,7 +1016,7 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                 <div className="flex-shrink-0 pb-1">
                     <div className="flex items-start gap-2 text-foreground typography-ui-header font-semibold">
                         {popup.metadata?.tool ? getToolIcon(popup.metadata.tool as string) : (
-                            <RiToolsLine className="h-3.5 w-3.5 text-foreground flex-shrink-0" />
+                            <Icon name="tools" className="h-3.5 w-3.5 text-foreground flex-shrink-0" />
                         )}
                         <span className="break-words flex-1 leading-tight">{popup.title}</span>
                         {popup.isDiff && (

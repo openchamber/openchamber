@@ -1,8 +1,8 @@
 import React from 'react';
-import { RiChat3Line, RiRestartLine } from '@remixicon/react';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { useI18n } from '@/lib/i18n';
+import { Icon } from "@/components/icon/Icon";
 
 interface ChatErrorBoundaryState {
   hasError: boolean;
@@ -57,7 +57,7 @@ class ChatErrorBoundaryView extends React.Component<ChatErrorBoundaryViewProps, 
           <Card className="w-full max-w-md">
             <CardHeader className="text-center">
               <CardTitle className="flex items-center justify-center gap-2 text-destructive">
-                <RiChat3Line className="h-5 w-5" />
+                <Icon name="chat-3" className="h-5 w-5" />
                 {this.props.texts.title}
               </CardTitle>
             </CardHeader>
@@ -83,7 +83,7 @@ class ChatErrorBoundaryView extends React.Component<ChatErrorBoundaryViewProps, 
 
               <div className="flex gap-2">
                 <Button onClick={this.handleReset} variant="outline" className="flex-1">
-                  <RiRestartLine className="h-4 w-4 mr-2" />
+                  <Icon name="restart" className="h-4 w-4 mr-2" />
                   {this.props.texts.resetAction}
                 </Button>
               </div>

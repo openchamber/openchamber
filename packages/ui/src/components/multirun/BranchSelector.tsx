@@ -9,7 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { useGitStore, useGitBranches, useGitLoadingBranches } from '@/stores/useGitStore';
+import { useGitStore, useGitBranches, useGitLoadingBranches, useGitLoadingStatus, useIsGitRepo } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { useI18n } from '@/lib/i18n';
@@ -53,15 +53,26 @@ export interface BranchSelectorState {
 export function useBranchOptions(directory: string | null): BranchSelectorState {
   const { git } = useRuntimeAPIs();
   const branches = useGitBranches(directory);
-  const isLoading = useGitLoadingBranches(directory);
+  const isGitRepo = useIsGitRepo(directory);
+  const isLoadingStatus = useGitLoadingStatus(directory);
+  const isLoadingBranches = useGitLoadingBranches(directory);
   const fetchBranches = useGitStore((state) => state.fetchBranches);
+  const fetchStatus = useGitStore((state) => state.fetchStatus);
+
+  React.useEffect(() => {
+    if (!directory || !git || isGitRepo !== null || isLoadingStatus) return;
+    void fetchStatus(directory, git, { silent: true });
+  }, [directory, git, fetchStatus, isGitRepo, isLoadingStatus]);
 
   // Fetch branches if not cached
   React.useEffect(() => {
     if (!directory || !git) return;
+    if (isGitRepo !== true) return;
     if (branches?.all) return; // Already cached
     void fetchBranches(directory, git);
-  }, [directory, git, branches?.all, fetchBranches]);
+  }, [directory, git, isGitRepo, branches?.all, fetchBranches]);
+
+  const isLoading = isLoadingStatus || (isGitRepo === true && isLoadingBranches);
 
   // Compute local and remote branch lists (same as NewWorktreeDialog)
   const localBranches = React.useMemo(() => {
@@ -82,10 +93,10 @@ export function useBranchOptions(directory: string | null): BranchSelectorState 
   // isGitRepository: true if we got branches, false if fetch returned empty, null if not yet loaded
   const isGitRepository = React.useMemo<boolean | null>(() => {
     if (!directory) return null;
+    if (isGitRepo !== null) return isGitRepo;
     if (isLoading) return null;
-    if (!branches) return null;
-    return Boolean(branches.all);
-  }, [directory, isLoading, branches]);
+    return branches?.all ? true : null;
+  }, [directory, isLoading, branches, isGitRepo]);
 
   return { localBranches, remoteBranches, isLoading, isGitRepository };
 }

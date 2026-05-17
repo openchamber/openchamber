@@ -1,8 +1,8 @@
 import React from 'react';
-import { RiFileCopyLine, RiCheckLine, RiExternalLinkLine, RiArrowDownSLine } from '@remixicon/react';
 import { isDesktopShell, isTauriShell, startDesktopWindowDrag } from '@/lib/desktop';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Icon } from "@/components/icon/Icon";
 import { updateDesktopSettings } from '@/lib/persistence';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { restartDesktopApp } from '@/lib/desktop';
@@ -39,7 +39,7 @@ function BashCommand({ onCopy, copyTitle }: { onCopy: () => void; copyTitle: str
         title={copyTitle}
         aria-label={copyTitle}
       >
-        <RiFileCopyLine className="h-4 w-4" />
+        <Icon name="file-copy" className="h-4 w-4" />
       </button>
     </div>
   );
@@ -306,7 +306,7 @@ export function ChooserScreen({ onCliAvailable }: ChooserScreenProps) {
             <div className="app-region-no-drag rounded-lg border border-border bg-background/60 backdrop-blur-sm px-4 py-3 font-mono text-sm">
               {copied ? (
                 <div className="flex items-center gap-2" style={{ color: 'var(--status-success)' }}>
-                  <RiCheckLine className="h-4 w-4" />
+                  <Icon name="check" className="h-4 w-4" />
                   {t('onboarding.common.status.copiedToClipboard')}
                 </div>
               ) : (
@@ -322,7 +322,7 @@ export function ChooserScreen({ onCliAvailable }: ChooserScreenProps) {
                 className="text-xs text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1"
               >
                 {platform === 'windows' ? t('onboarding.localSetup.docs.windows') : t('onboarding.localSetup.docs.default')}
-                <RiExternalLinkLine className="h-3 w-3" />
+                <Icon name="external-link" className="h-3 w-3" />
               </a>
               <button
                 type="button"
@@ -377,7 +377,7 @@ export function ChooserScreen({ onCliAvailable }: ChooserScreenProps) {
             >
               <summary className="flex items-center justify-between cursor-pointer py-2.5 text-sm text-muted-foreground hover:text-foreground transition-colors list-none [&::-webkit-details-marker]:hidden">
                 <span>{t('onboarding.localSetup.advanced.title')}</span>
-                <RiArrowDownSLine className="h-4 w-4 transition-transform group-open:rotate-180" />
+                <Icon name="arrow-down-s" className="h-4 w-4 transition-transform group-open:rotate-180" />
               </summary>
               <div className="pb-4 space-y-2">
                 <div className="flex gap-2">
@@ -419,7 +419,7 @@ export function ChooserScreen({ onCliAvailable }: ChooserScreenProps) {
             >
               <summary className="flex items-center justify-between cursor-pointer py-2.5 text-sm text-muted-foreground hover:text-foreground transition-colors list-none [&::-webkit-details-marker]:hidden">
                 <span>{t('onboarding.localSetup.troubleshoot.title')}</span>
-                <RiArrowDownSLine className="h-4 w-4 transition-transform group-open:rotate-180" />
+                <Icon name="arrow-down-s" className="h-4 w-4 transition-transform group-open:rotate-180" />
               </summary>
               <ul className="pb-4 space-y-1.5 text-xs text-muted-foreground list-disc pl-4">
                 {platform === 'windows' ? (

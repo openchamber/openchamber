@@ -1,52 +1,31 @@
-import {
-  RiCodeBoxLine,
-  RiTerminalBoxLine,
-  RiRocketLine,
-  RiFlaskLine,
-  RiGamepadLine,
-  RiBriefcaseLine,
-  RiHomeLine,
-  RiGlobalLine,
-  RiLeafLine,
-  RiShieldLine,
-  RiPaletteLine,
-  RiServerLine,
-  RiSmartphoneLine,
-  RiDatabase2Line,
-  RiLightbulbLine,
-  RiMusicLine,
-  RiCameraLine,
-  RiBookOpenLine,
-  RiHeartLine,
-  type RemixiconComponentType,
-} from '@remixicon/react';
 import type { ProjectEntry } from '@/lib/api/types';
+import type { IconName } from "@/components/icon/icons";
 
 type ThemeVariant = 'light' | 'dark';
 
-export const PROJECT_ICONS: Array<{ key: string; Icon: RemixiconComponentType; label: string }> = [
-  { key: 'code',       Icon: RiCodeBoxLine,      label: 'Code' },
-  { key: 'terminal',   Icon: RiTerminalBoxLine,   label: 'Terminal' },
-  { key: 'rocket',     Icon: RiRocketLine,        label: 'Rocket' },
-  { key: 'flask',      Icon: RiFlaskLine,         label: 'Lab' },
-  { key: 'gamepad',    Icon: RiGamepadLine,       label: 'Game' },
-  { key: 'briefcase',  Icon: RiBriefcaseLine,     label: 'Work' },
-  { key: 'home',       Icon: RiHomeLine,          label: 'Home' },
-  { key: 'globe',      Icon: RiGlobalLine,        label: 'Web' },
-  { key: 'leaf',       Icon: RiLeafLine,          label: 'Nature' },
-  { key: 'shield',     Icon: RiShieldLine,        label: 'Security' },
-  { key: 'palette',    Icon: RiPaletteLine,       label: 'Design' },
-  { key: 'server',     Icon: RiServerLine,        label: 'Server' },
-  { key: 'phone',      Icon: RiSmartphoneLine,    label: 'Mobile' },
-  { key: 'database',   Icon: RiDatabase2Line,     label: 'Data' },
-  { key: 'lightbulb',  Icon: RiLightbulbLine,     label: 'Idea' },
-  { key: 'music',      Icon: RiMusicLine,         label: 'Music' },
-  { key: 'camera',     Icon: RiCameraLine,        label: 'Media' },
-  { key: 'book',       Icon: RiBookOpenLine,      label: 'Docs' },
-  { key: 'heart',      Icon: RiHeartLine,         label: 'Favorite' },
+export const PROJECT_ICONS: Array<{ key: string; Icon: IconName; label: string }> = [
+  { key: 'code',       Icon: 'code-box',      label: 'Code' },
+  { key: 'terminal',   Icon: 'terminal-box',   label: 'Terminal' },
+  { key: 'rocket',     Icon: 'rocket',        label: 'Rocket' },
+  { key: 'flask',      Icon: 'flask',         label: 'Lab' },
+  { key: 'gamepad',    Icon: 'gamepad',       label: 'Game' },
+  { key: 'briefcase',  Icon: 'briefcase',     label: 'Work' },
+  { key: 'home',       Icon: 'home',          label: 'Home' },
+  { key: 'globe',      Icon: 'global',        label: 'Web' },
+  { key: 'leaf',       Icon: 'leaf',          label: 'Nature' },
+  { key: 'shield',     Icon: 'shield',        label: 'Security' },
+  { key: 'palette',    Icon: 'palette',       label: 'Design' },
+  { key: 'server',     Icon: 'server',        label: 'Server' },
+  { key: 'phone',      Icon: 'smartphone',    label: 'Mobile' },
+  { key: 'database',   Icon: 'database-2',     label: 'Data' },
+  { key: 'lightbulb',  Icon: 'lightbulb',     label: 'Idea' },
+  { key: 'music',      Icon: 'music',         label: 'Music' },
+  { key: 'camera',     Icon: 'camera',        label: 'Media' },
+  { key: 'book',       Icon: 'book-open',      label: 'Docs' },
+  { key: 'heart',      Icon: 'heart',         label: 'Favorite' },
 ];
 
-export const PROJECT_ICON_MAP: Record<string, RemixiconComponentType> = Object.fromEntries(
+export const PROJECT_ICON_MAP: Record<string, IconName> = Object.fromEntries(
   PROJECT_ICONS.map((i) => [i.key, i.Icon])
 );
 

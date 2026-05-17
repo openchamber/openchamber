@@ -1,10 +1,10 @@
 import React from 'react';
-import { RiAddLine, RiBrainAi3Line, RiCloseLine, RiSearchLine, RiStarFill, RiTimeLine } from '@remixicon/react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
+import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -79,7 +79,7 @@ export const ModelChip: React.FC<{
         onClick={onRemove}
         className="text-muted-foreground hover:text-foreground ml-0.5"
       >
-        <RiCloseLine className="h-3.5 w-3.5" />
+        <Icon name="close" className="h-3.5 w-3.5" />
       </button>
     </div>
   );
@@ -100,6 +100,14 @@ export interface ModelMultiSelectProps {
   maxModels?: number;
   /** Optional className for add model trigger button */
   addButtonClassName?: string;
+  /** Direction for the model picker popup. Multi-run launcher opens upward near the footer. */
+  dropdownSide?: 'top' | 'bottom';
+  /** Optional className for the picker popup. */
+  dropdownClassName?: string;
+  /** Optional className for the trigger/dropdown positioning container. */
+  containerClassName?: string;
+  /** Optional trigger icon override. */
+  triggerIcon?: React.ReactNode;
 }
 
 /**
@@ -115,6 +123,10 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
   showChips = true,
   maxModels,
   addButtonClassName,
+  dropdownSide = 'top',
+  dropdownClassName,
+  containerClassName,
+  triggerIcon,
 }) => {
   const { t } = useI18n();
   const providers = useConfigStore((state) => state.providers);
@@ -128,7 +140,8 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
   const dropdownRef = React.useRef<HTMLDivElement>(null);
   const triggerRef = React.useRef<HTMLButtonElement>(null);
   const itemRefs = React.useRef<(HTMLButtonElement | null)[]>([]);
-  const canAddModel = maxModels === undefined || selectedModels.length < maxModels;
+  const isSingleSelect = maxModels === 1;
+  const canAddModel = maxModels === undefined || selectedModels.length < maxModels || isSingleSelect;
 
   // Count occurrences of each model for display purposes
   const modelCounts = React.useMemo(() => {
@@ -208,11 +221,20 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
 
   const hasResults = filteredFavorites.length > 0 || filteredRecents.length > 0 || filteredProviders.length > 0;
 
-  // Calculate available height: space above trigger within visible area
+  // Calculate available height: multi-run opens upward inside a scroller; fusion opens downward and may extend past the dialog.
   React.useEffect(() => {
     if (!isOpen || !triggerRef.current) return;
 
     const triggerRect = triggerRef.current.getBoundingClientRect();
+
+    if (dropdownSide === 'bottom') {
+      const viewportHeight = window.visualViewport?.height ?? document.documentElement.clientHeight ?? window.innerHeight;
+      const spaceBelow = viewportHeight - triggerRect.bottom - 16;
+      // availableHeight is only the scrollable model list; reserve room for search + keyboard hint chrome.
+      const listSpaceBelow = spaceBelow - 112;
+      setAvailableHeight(Math.max(160, Math.min(320, listSpaceBelow)));
+      return;
+    }
 
     // Find the nearest dialog or overflow ancestor to constrain within
     let container: HTMLElement | null = triggerRef.current.parentElement;
@@ -231,7 +253,7 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
     const spaceAbove = triggerRect.top - topBound - 16;
     // Cap: min 150, max 300
     setAvailableHeight(Math.max(150, Math.min(300, spaceAbove)));
-  }, [isOpen]);
+  }, [dropdownSide, isOpen]);
 
   // Focus search input when opened
   React.useEffect(() => {
@@ -292,12 +314,27 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
         type="button"
         disabled={!canAddModel}
         onClick={() => {
-          onAdd({
+          const nextModel = {
             providerID,
             modelID,
             displayName: (model.name as string) || modelID,
             instanceId: generateInstanceId(),
+          };
+          if (isSingleSelect && selectedModels.length > 0 && onUpdate) {
+            onUpdate(0, nextModel);
+            setIsOpen(false);
+            setSearchQuery('');
+            setSelectedIndex(0);
+            return;
+          }
+          onAdd({
+            ...nextModel,
           });
+          if (isSingleSelect) {
+            setIsOpen(false);
+            setSearchQuery('');
+            setSelectedIndex(0);
+          }
           // Don't close dropdown - allow selecting multiple
         }}
         onMouseEnter={() => setSelectedIndex(flatIndex)}
@@ -333,7 +370,7 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
     <div className="space-y-2">
       <div className="flex flex-wrap gap-1.5 items-center">
         {/* Add model button (dropdown trigger) */}
-        <div className="relative" ref={dropdownRef}>
+        <div className={cn('relative', containerClassName)} ref={dropdownRef}>
           <Button
             ref={triggerRef}
             type="button"
@@ -349,7 +386,7 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
               setIsOpen(!isOpen);
             }}
           >
-            <RiAddLine className="h-3.5 w-3.5 mr-1" />
+            {triggerIcon ?? <Icon name="add" className="h-3.5 w-3.5 mr-1" />}
             {addButtonLabel ?? t('multirun.modelMultiSelect.actions.addModel')}
           </Button>
 
@@ -398,12 +435,22 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
                 e.stopPropagation();
                 const selectedItem = flatModelList[selectedIndex];
                 if (selectedItem && canAddModel) {
-                  onAdd({
+                  const nextModel = {
                     providerID: selectedItem.providerID,
                     modelID: selectedItem.modelID,
                     displayName: (selectedItem.model.name as string) || selectedItem.modelID,
                     instanceId: generateInstanceId(),
-                  });
+                  };
+                  if (isSingleSelect && selectedModels.length > 0 && onUpdate) {
+                    onUpdate(0, nextModel);
+                  } else {
+                    onAdd(nextModel);
+                  }
+                  if (isSingleSelect) {
+                    setIsOpen(false);
+                    setSearchQuery('');
+                    setSelectedIndex(0);
+                  }
                 }
               } else if (e.key === 'Escape') {
                 e.preventDefault();
@@ -418,7 +465,11 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
 
             return (
               <div
-                className="absolute bottom-full left-0 mb-1 z-50 w-[min(380px,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] flex flex-col overflow-hidden rounded-xl border border-border/50 shadow-lg"
+                className={cn(
+                  'absolute left-0 z-50 w-[min(420px,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] flex flex-col overflow-hidden rounded-xl border border-border/50 shadow-lg',
+                  dropdownSide === 'top' ? 'bottom-full mb-1' : 'top-full mt-1',
+                  dropdownClassName,
+                )}
                 style={{
                   background: 'linear-gradient(var(--surface-elevated),var(--surface-elevated)),linear-gradient(var(--surface-background),var(--surface-background))',
                 }}
@@ -426,7 +477,7 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
                 {/* Search input */}
                 <div className="p-2 border-b border-border/40">
                   <div className="relative">
-                    <RiSearchLine className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                    <Icon name="search" className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                     <Input
                       ref={searchInputRef}
                       type="text"
@@ -455,7 +506,7 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
                     {filteredFavorites.length > 0 && (
                       <>
                         <div className="typography-micro font-semibold text-muted-foreground uppercase tracking-wider sticky top-0 z-10 -mx-1 flex items-center gap-2 border-b border-border/30 px-3 py-1.5 [background:linear-gradient(var(--surface-elevated),var(--surface-elevated)),linear-gradient(var(--surface-background),var(--surface-background))]">
-                          <RiStarFill className="h-4 w-4 text-primary" />
+                          <Icon name="star-fill" className="h-4 w-4 text-primary" />
                           {t('multirun.modelMultiSelect.sections.favorites')}
                         </div>
                         {filteredFavorites.map(({ model, providerID, modelID }) => {
@@ -470,7 +521,7 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
                       <>
                         {filteredFavorites.length > 0 && <div className="h-px bg-border/40 my-1" />}
                         <div className="typography-micro font-semibold text-muted-foreground uppercase tracking-wider sticky top-0 z-10 -mx-1 flex items-center gap-2 border-b border-border/30 px-3 py-1.5 [background:linear-gradient(var(--surface-elevated),var(--surface-elevated)),linear-gradient(var(--surface-background),var(--surface-background))]">
-                          <RiTimeLine className="h-4 w-4" />
+                          <Icon name="time" className="h-4 w-4" />
                           {t('multirun.modelMultiSelect.sections.recent')}
                         </div>
                         {filteredRecents.map(({ model, providerID, modelID }) => {
@@ -554,13 +605,17 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
                         size="chip"
                         className="px-2 gap-1.5 rounded-md !border-border/80 !bg-[var(--surface-subtle)] hover:!bg-[var(--interactive-hover)]/70 typography-meta font-medium text-foreground"
                       >
-                        <RiBrainAi3Line
+                        <Icon name="brain-ai-3"
                           className={cn(
                             'h-3.5 w-3.5 flex-shrink-0',
                             variantValue === DEFAULT_VARIANT_VALUE ? 'text-muted-foreground' : 'text-[color:var(--status-info)]'
                           )}
                         />
-                        <SelectValue placeholder={t('multirun.modelMultiSelect.variant.placeholder')} />
+                        <SelectValue placeholder={t('multirun.modelMultiSelect.variant.placeholder')}>
+                          {(value) => value === DEFAULT_VARIANT_VALUE
+                            ? t('multirun.modelMultiSelect.variant.default')
+                            : value}
+                        </SelectValue>
                       </SelectTrigger>
                       <SelectContent fitContent>
                         <SelectItem value={DEFAULT_VARIANT_VALUE} className="pr-2 [&>span:first-child]:hidden">

@@ -1,10 +1,10 @@
 import React from 'react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { RiInformationLine, RiRestartLine } from '@remixicon/react';
 import { toast } from '@/components/ui';
 import { NumberInput } from '@/components/ui/number-input';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Icon } from "@/components/icon/Icon";
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionAutoCleanup } from '@/hooks/useSessionAutoCleanup';
 import { useI18n } from '@/lib/i18n';
@@ -65,7 +65,7 @@ export const SessionRetentionSettings: React.FC = () => {
           </h3>
           <Tooltip>
             <TooltipTrigger asChild>
-              <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+              <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
             </TooltipTrigger>
             <TooltipContent sideOffset={8} className="max-w-xs">
               {t('settings.openchamber.sessionRetention.tooltip')}
@@ -120,7 +120,7 @@ export const SessionRetentionSettings: React.FC = () => {
               aria-label={t('settings.openchamber.sessionRetention.actions.resetRetentionAria')}
               title={t('settings.common.actions.reset')}
             >
-              <RiRestartLine className="h-3.5 w-3.5" />
+              <Icon name="restart" className="h-3.5 w-3.5" />
             </Button>
           </div>
         </div>

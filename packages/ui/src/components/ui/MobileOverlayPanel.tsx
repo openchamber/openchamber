@@ -1,8 +1,8 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
-import { RiCloseLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { ScrollableOverlay } from './ScrollableOverlay';
+import { Icon } from "@/components/icon/Icon";
 
 interface MobileOverlayPanelProps {
   open: boolean;
@@ -90,7 +90,7 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
               onClick={onClose}
               className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-interactive-hover"
             >
-              <RiCloseLine className="h-4 w-4" />
+              <Icon name="close" className="h-4 w-4" />
             </button>
           );
 

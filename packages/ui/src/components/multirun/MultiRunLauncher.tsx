@@ -1,7 +1,7 @@
 import React from 'react';
-import { RiAddLine, RiArrowDownSLine, RiAttachment2, RiCloseLine, RiFileImageLine, RiFileLine, RiFolderLine, RiInformationLine, RiTerminalLine } from '@remixicon/react';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -20,6 +20,7 @@ import type { CreateMultiRunParams, MultiRunGroup } from '@/types/multirun';
 import { ModelMultiSelect, generateInstanceId, type ModelSelectionWithId } from './ModelMultiSelect';
 import { BranchSelector, useBranchOptions } from './BranchSelector';
 import { AgentSelector } from './AgentSelector';
+import { Icon } from "@/components/icon/Icon";
 import { isDesktopShell } from '@/lib/desktop';
 import { useTabletStandalonePwaRuntime } from '@/lib/device';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
@@ -57,7 +58,7 @@ const InfoTip: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <Tooltip>
     <TooltipTrigger asChild>
       <button type="button" tabIndex={-1} className="inline-flex items-center justify-center text-muted-foreground/50 hover:text-muted-foreground transition-colors">
-        <RiInformationLine className="h-3.5 w-3.5" />
+        <Icon name="information" className="h-3.5 w-3.5" />
       </button>
     </TooltipTrigger>
     <TooltipContent side="top" className="max-w-[240px]">
@@ -98,6 +99,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
   const [setupCommands, setSetupCommands] = React.useState<string[]>([]);
   const [isSetupCommandsOpen, setIsSetupCommandsOpen] = React.useState(false);
   const [isLoadingSetupCommands, setIsLoadingSetupCommands] = React.useState(false);
+  const [isolateRuns, setIsolateRuns] = React.useState(true);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const templates = usePromptTemplatesStore((s) => s.templates);
@@ -155,7 +157,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
         iconColor: currentTheme.colors.surface.foreground,
       },
     );
-    const ProjectIcon = project.icon ? PROJECT_ICON_MAP[project.icon] : null;
+    const projectIconName = project.icon ? PROJECT_ICON_MAP[project.icon] : null;
     const iconColor = project.color ? PROJECT_COLOR_MAP[project.color] : undefined;
 
     return (
@@ -167,10 +169,10 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
           >
             <img src={imageUrl} alt="" className="h-full w-full object-contain" draggable={false} />
           </span>
-        ) : ProjectIcon ? (
-          <ProjectIcon className="h-3.5 w-3.5 shrink-0" style={iconColor ? { color: iconColor } : undefined} />
+        ) : projectIconName ? (
+          <Icon name={projectIconName} className="h-3.5 w-3.5 shrink-0" style={iconColor ? { color: iconColor } : undefined} />
         ) : (
-          <RiFolderLine className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" style={iconColor ? { color: iconColor } : undefined} />
+          <Icon name="folder" className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80"  style={iconColor ? { color: iconColor } : undefined}/>
         )}
         <span className="truncate">{displayLabel}</span>
       </span>
@@ -243,6 +245,22 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
 
   const [worktreeBaseBranch, setWorktreeBaseBranch] = React.useState<string>('');
   const { isLoading: isLoadingWorktreeBaseBranches, isGitRepository } = useBranchOptions(selectedProjectDirectory);
+  const wasIsolationDisabledByNonGitRef = React.useRef(false);
+  const canIsolateRuns = isGitRepository === true;
+  const effectiveIsolateRuns = canIsolateRuns && isolateRuns;
+
+  React.useEffect(() => {
+    if (isGitRepository === false) {
+      wasIsolationDisabledByNonGitRef.current = true;
+      setIsolateRuns(false);
+      return;
+    }
+
+    if (isGitRepository === true && wasIsolationDisabledByNonGitRef.current) {
+      wasIsolationDisabledByNonGitRef.current = false;
+      setIsolateRuns(true);
+    }
+  }, [isGitRepository]);
 
   const createMultiRun = useMultiRunStore((state) => state.createMultiRun);
   const error = useMultiRunStore((state) => state.error);
@@ -379,7 +397,8 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
         name: name.trim(),
         groups,
         agent: selectedAgent || undefined,
-        worktreeBaseBranch,
+        worktreeBaseBranch: effectiveIsolateRuns ? worktreeBaseBranch : undefined,
+        isolateRuns: effectiveIsolateRuns,
         files: filesForStore.length > 0 ? filesForStore : undefined,
         setupCommands: commandsForStore.length > 0 ? commandsForStore : undefined,
       };
@@ -400,9 +419,9 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
     name.trim()
     && runGroups.some((g) => g.prompt.trim() && g.models.length >= 1)
     && totalRunCount >= 1
-    && worktreeBaseBranch
-    && isGitRepository
-    && !isLoadingWorktreeBaseBranches,
+    && selectedProjectDirectory
+    && !isLoadingWorktreeBaseBranches
+    && (isGitRepository === false || !effectiveIsolateRuns || worktreeBaseBranch)
   );
 
   const configuredSetupCount = setupCommands.filter((cmd) => cmd.trim()).length;
@@ -430,7 +449,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
                     aria-label={t('multirun.launcher.actions.closeEsc')}
                     className="inline-flex h-9 w-9 items-center justify-center p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary app-region-no-drag"
                   >
-                    <RiCloseLine className="h-5 w-5" />
+                    <Icon name="close" className="h-5 w-5" />
                   </button>
                 </TooltipTrigger>
                 <TooltipContent><p>{t('multirun.launcher.actions.closeEsc')}</p></TooltipContent>
@@ -491,8 +510,18 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
                   directory={selectedProjectDirectory}
                   value={worktreeBaseBranch}
                   onChange={setWorktreeBaseBranch}
+                  disabled={!effectiveIsolateRuns}
                   id="multirun-worktree-base-branch"
                 />
+                <label className="mt-1.5 flex w-fit items-center gap-1.5 typography-micro text-muted-foreground">
+                  <Checkbox
+                    checked={isolateRuns}
+                    onChange={setIsolateRuns}
+                    disabled={!canIsolateRuns}
+                    ariaLabel={t('multirun.launcher.isolateRuns.label')}
+                  />
+                  <span>{t('multirun.launcher.isolateRuns.label')}</span>
+                </label>
               </div>
 
               <div className="flex flex-col gap-1">
@@ -505,7 +534,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
 
             <Collapsible open={isSetupCommandsOpen} onOpenChange={setIsSetupCommandsOpen}>
               <CollapsibleTrigger className="w-full flex items-center gap-2 py-1.5 px-2 -mx-2 rounded-lg hover:bg-[var(--interactive-hover)]/50 transition-colors group">
-                <RiTerminalLine className="h-3.5 w-3.5 text-muted-foreground/70" />
+                <Icon name="terminal" className="h-3.5 w-3.5 text-muted-foreground/70" />
                 <span className="typography-meta font-medium text-muted-foreground group-hover:text-foreground transition-colors">
                   {t('multirun.launcher.setupCommands.label')}
                 </span>
@@ -522,7 +551,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
                     {configuredSetupCount}
                   </span>
                 )}
-                <RiArrowDownSLine className={cn(
+                <Icon name="arrow-down-s" className={cn(
                   'h-3.5 w-3.5 text-muted-foreground/50 transition-transform duration-200 ml-auto',
                   isSetupCommandsOpen && 'rotate-180',
                 )} />
@@ -551,7 +580,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
                             className="flex-shrink-0 flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
                             aria-label={t('multirun.launcher.setupCommands.removeCommandAria')}
                           >
-                            <RiCloseLine className="h-3.5 w-3.5" />
+                            <Icon name="close" className="h-3.5 w-3.5" />
                           </button>
                         </div>
                       ))}
@@ -560,7 +589,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
                         onClick={() => setSetupCommands([...setupCommands, ''])}
                         className="flex items-center gap-1 typography-meta text-muted-foreground hover:text-foreground transition-colors px-1"
                       >
-                        <RiAddLine className="h-3 w-3" />
+                        <Icon name="add" className="h-3 w-3" />
                         {t('multirun.launcher.setupCommands.addCommand')}
                       </button>
                     </>
@@ -580,7 +609,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
                       onClick={() => fileInputRef.current?.click()}
                       className="inline-flex items-center gap-1 h-6 px-2 rounded-md typography-micro text-muted-foreground hover:text-foreground hover:bg-[var(--interactive-hover)]/50 transition-colors"
                     >
-                      <RiAttachment2 className="h-3 w-3" />
+                      <Icon name="attachment-2" className="h-3 w-3" />
                       {t('multirun.launcher.attachments.attach')}
                     </button>
                   </TooltipTrigger>
@@ -593,13 +622,19 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
                     style={{ backgroundColor: 'var(--surface-elevated)', borderColor: 'var(--interactive-border)' }}
                   >
                     {file.mimeType.startsWith('image/') ? (
-                      <RiFileImageLine className="h-3 w-3 text-muted-foreground" />
+                      <Icon name="file-image" className="h-3 w-3 text-muted-foreground" />
                     ) : (
-                      <RiFileLine className="h-3 w-3 text-muted-foreground" />
+                      <Icon name="file" className="h-3 w-3 text-muted-foreground" />
                     )}
-                    <span className="truncate max-w-[100px]" title={file.filename}>{file.filename}</span>
-                    <button type="button" onClick={() => handleRemoveFile(file.id)} className="text-muted-foreground hover:text-destructive">
-                      <RiCloseLine className="h-3 w-3" />
+                    <span className="truncate max-w-[100px]" title={file.filename}>
+                      {file.filename}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveFile(file.id)}
+                      className="text-muted-foreground hover:text-destructive"
+                    >
+                      <Icon name="close" className="h-3 w-3" />
                     </button>
                   </div>
                 ))}
@@ -647,7 +682,18 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
 
       <div className="shrink-0 px-4 sm:px-6 py-3">
         <div className="mx-auto w-full max-w-2xl flex items-center justify-end gap-2">
-          <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
+          {!effectiveIsolateRuns && isGitRepository !== null ? (
+            <div className="mr-auto flex min-w-0 items-center gap-1.5 typography-micro text-muted-foreground">
+              <Icon name="information" className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">{t('multirun.launcher.project.gitRequired')}</span>
+            </div>
+          ) : null}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onCancel}
+          >
             {t('multirun.launcher.actions.cancel')}
           </Button>
           <Button type="submit" size="sm" disabled={!isValid || isSubmitting}>

@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { RiFolderLine, RiGitRepositoryLine, RiRobot2Line, RiUser3Line } from '@remixicon/react';
+import { Icon } from "@/components/icon/Icon";
 
 import { isVSCodeRuntime } from '@/lib/desktop';
 import type { SkillsCatalogItem } from '@/lib/api/types';
@@ -364,7 +364,7 @@ export const InstallFromRepoDialog: React.FC<InstallFromRepoDialogProps> = ({ op
                   disabled={isScanning || !source.trim()}
                   className="gap-2"
                 >
-                  <RiGitRepositoryLine className="h-4 w-4" />
+                  <Icon name="git-repository" className="h-4 w-4" />
                   {isScanning ? t('settings.skills.catalog.shared.actions.scanning') : t('settings.skills.catalog.shared.actions.scan')}
                 </Button>
               </div>
@@ -401,8 +401,8 @@ export const InstallFromRepoDialog: React.FC<InstallFromRepoDialogProps> = ({ op
                   }}
                 >
                   <SelectTrigger size="lg" className="w-full gap-1.5">
-                    {scope === 'user' ? <RiUser3Line className="h-4 w-4" /> : <RiFolderLine className="h-4 w-4" />}
-                    {targetSource === 'agents' ? <RiRobot2Line className="h-4 w-4" /> : null}
+                    {scope === 'user' ? <Icon name="user-3" className="h-4 w-4" /> : <Icon name="folder" className="h-4 w-4" />}
+                    {targetSource === 'agents' ? <Icon name="robot-2" className="h-4 w-4" /> : null}
                     <span>{locationLabelText(locationValueFrom(scope, targetSource))}</span>
                   </SelectTrigger>
                   <SelectContent align="start">
@@ -410,8 +410,8 @@ export const InstallFromRepoDialog: React.FC<InstallFromRepoDialogProps> = ({ op
                       <SelectItem key={option.value} value={option.value} className="pr-2 [&>span:first-child]:hidden">
                         <div className="flex flex-col gap-0.5">
                           <div className="flex items-center gap-2">
-                            {option.scope === 'user' ? <RiUser3Line className="h-4 w-4" /> : <RiFolderLine className="h-4 w-4" />}
-                            {option.source === 'agents' ? <RiRobot2Line className="h-4 w-4" /> : null}
+                            {option.scope === 'user' ? <Icon name="user-3" className="h-4 w-4" /> : <Icon name="folder" className="h-4 w-4" />}
+                            {option.source === 'agents' ? <Icon name="robot-2" className="h-4 w-4" /> : null}
                             <span>{locationLabelText(option.value)}</span>
                           </div>
                           <span className="typography-micro text-muted-foreground ml-6">{locationDescriptionText(option.value)}</span>

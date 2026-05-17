@@ -31,6 +31,25 @@ const SSE_RESPONSE_HEADERS = {
 const MAX_RECONNECTS = 3;
 const BASE_RECONNECT_DELAY = 1000; // 1 second
 
+const sleep = (ms: number, signal: AbortSignal) => new Promise<void>((resolve) => {
+  if (signal.aborted) {
+    resolve();
+    return;
+  }
+
+  const timeout = setTimeout(() => {
+    signal.removeEventListener('abort', handleAbort);
+    resolve();
+  }, ms);
+  const handleAbort = () => {
+    clearTimeout(timeout);
+    resolve();
+  };
+  signal.addEventListener('abort', handleAbort, { once: true });
+});
+
+const getAbortReason = (signal: AbortSignal) => signal.reason ?? new DOMException('Aborted', 'AbortError');
+
 const serializeSseEventBlock = (event: StreamEvent<unknown>): string => {
   const lines: string[] = [];
   if (typeof event.id === 'string' && event.id.length > 0) {
@@ -110,8 +129,6 @@ export const openSseProxy = async ({
   // Reconnect logic with exponential backoff
   let reconnectAttempts = 0;
 
-  const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
   const connect = async (): Promise<{ stream: AsyncIterable<unknown> }> => {
     try {
       console.log(`[SSE] Connecting to ${pathname} (attempt ${reconnectAttempts + 1}/${MAX_RECONNECTS + 1})`);
@@ -155,7 +172,10 @@ export const openSseProxy = async ({
           error
         );
 
-        await sleep(delay);
+        await sleep(delay, signal);
+        if (signal.aborted) {
+          throw getAbortReason(signal);
+        }
         return connect(); // Recursive retry
       }
 
@@ -185,7 +205,10 @@ export const openSseProxy = async ({
           if (reconnectAttempts < MAX_RECONNECTS) {
             reconnectAttempts++;
             const delay = BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttempts - 1);
-            await sleep(delay);
+            await sleep(delay, signal);
+            if (signal.aborted) {
+              return;
+            }
 
             // Attempt to reconnect
             try {

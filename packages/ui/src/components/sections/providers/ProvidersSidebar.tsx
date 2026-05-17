@@ -4,9 +4,9 @@ import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { Button } from '@/components/ui/button';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { RiAddLine, RiStackLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { SettingsProjectSelector } from '@/components/sections/shared/SettingsProjectSelector';
+import { Icon } from "@/components/icon/Icon";
 import { opencodeClient } from '@/lib/opencode/client';
 import { useI18n } from '@/lib/i18n';
 
@@ -122,7 +122,7 @@ export const ProvidersSidebar: React.FC<ProvidersSidebarProps> = ({ onItemSelect
             aria-label={t('settings.providers.sidebar.actions.connectProviderAria')}
             title={t('settings.providers.sidebar.actions.connectProviderTitle')}
           >
-            <RiAddLine className="h-3.5 w-3.5" />
+            <Icon name="add" className="h-3.5 w-3.5" />
           </Button>
         </div>
       </div>
@@ -130,7 +130,7 @@ export const ProvidersSidebar: React.FC<ProvidersSidebarProps> = ({ onItemSelect
       <ScrollableOverlay outerClassName="flex-1 min-h-0" className="space-y-1 px-3 py-2 overflow-x-hidden">
         {providers.length === 0 ? (
           <div className="py-12 px-4 text-center text-muted-foreground">
-            <RiStackLine className="mx-auto mb-3 h-10 w-10 opacity-50" />
+            <Icon name="stack" className="mx-auto mb-3 h-10 w-10 opacity-50" />
             <p className="typography-ui-label font-medium">{t('settings.providers.sidebar.empty.title')}</p>
             <p className="typography-meta mt-1 opacity-75">{t('settings.providers.sidebar.empty.description')}</p>
           </div>

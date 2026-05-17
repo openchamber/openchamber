@@ -1,12 +1,4 @@
 import React from 'react';
-import {
-  RiGitBranchLine,
-  RiArrowDownSLine,
-  RiAddLine,
-  RiCloseLine,
-  RiLoader4Line,
-  RiArrowLeftLine,
-} from '@remixicon/react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -23,6 +15,7 @@ import {
   CommandSeparator,
 } from '@/components/ui/command';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Icon } from "@/components/icon/Icon";
 import type { GitRemote } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 
@@ -177,11 +170,11 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
               className="h-8 min-w-0 max-w-full justify-start gap-1.5 px-2 py-1"
               disabled={disabled}
             >
-              <RiGitBranchLine className="size-4 text-primary" />
+              <Icon name="git-branch" className="size-4 text-primary" />
               <span className="min-w-0 truncate font-medium text-left">
                 {currentBranch || t('gitView.branch.detachedHead')}
               </span>
-              <RiArrowDownSLine className="size-4 opacity-60" />
+              <Icon name="arrow-down-s" className="size-4 opacity-60" />
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
@@ -214,7 +207,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
                       disabled={isCreating}
                       className="shrink-0 text-muted-foreground hover:text-foreground disabled:opacity-50"
                     >
-                      <RiArrowLeftLine className="size-4" />
+                      <Icon name="arrow-left" className="size-4" />
                     </button>
                     <span className="typography-meta text-muted-foreground">
                       {t('gitView.branch.pushToPrefix')} <span className="text-foreground font-medium">{sanitizedNewBranch}</span> {t('gitView.branch.pushToSuffix')}
@@ -231,7 +224,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
                       >
                         <span className="typography-ui-label text-foreground">
                           {isCreating ? (
-                            <RiLoader4Line className="inline size-3 mr-1.5 animate-spin" />
+                            <Icon name="loader-4" className="inline size-3 mr-1.5 animate-spin" />
                           ) : null}
                           {remote.name}
                         </span>
@@ -244,7 +237,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
                 </div>
               ) : !showCreate ? (
                 <CommandItem onSelect={handleShowCreate}>
-                  <RiAddLine className="size-4" />
+                  <Icon name="add" className="size-4" />
                   <span>{t('gitView.branch.create')}</span>
                 </CommandItem>
               ) : (
@@ -274,9 +267,9 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
                     className="shrink-0 text-muted-foreground hover:text-foreground disabled:opacity-50"
                   >
                     {isCreating ? (
-                      <RiLoader4Line className="size-4 animate-spin" />
+                      <Icon name="loader-4" className="size-4 animate-spin" />
                     ) : (
-                      <RiAddLine className="size-4" />
+                      <Icon name="add" className="size-4" />
                     )}
                   </button>
                   <button
@@ -285,7 +278,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
                     disabled={isCreating}
                     className="shrink-0 text-muted-foreground hover:text-foreground disabled:opacity-50"
                   >
-                    <RiCloseLine className="size-4" />
+                    <Icon name="close" className="size-4" />
                   </button>
                 </div>
               )}

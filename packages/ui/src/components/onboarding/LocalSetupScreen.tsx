@@ -1,8 +1,8 @@
 import React from 'react';
-import { RiFileCopyLine, RiCheckLine, RiExternalLinkLine } from '@remixicon/react';
 import { isDesktopShell, isTauriShell } from '@/lib/desktop';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Icon } from "@/components/icon/Icon";
 import { updateDesktopSettings } from '@/lib/persistence';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { restartDesktopApp } from '@/lib/desktop';
@@ -40,7 +40,7 @@ function BashCommand({ onCopy, copyTitle }: { onCopy: () => void; copyTitle: str
         className="inline-flex items-center text-muted-foreground hover:text-foreground transition-colors"
         title={copyTitle}
       >
-        <RiFileCopyLine className="h-4 w-4" />
+        <Icon name="file-copy" className="h-4 w-4" />
       </button>
     </div>
   );
@@ -264,7 +264,7 @@ export function LocalSetupScreen({
           <div className="bg-background/60 backdrop-blur-sm border border-border rounded-lg px-5 py-3 font-mono text-sm w-fit">
             {copied ? (
               <div className="flex items-center justify-center gap-2" style={{ color: 'var(--status-success)' }}>
-                <RiCheckLine className="h-4 w-4" />
+                <Icon name="check" className="h-4 w-4" />
                 {t('onboarding.common.status.copiedToClipboard')}
               </div>
             ) : (
@@ -280,7 +280,7 @@ export function LocalSetupScreen({
           className="text-sm text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1 justify-center"
         >
           {platform === 'windows' ? t('onboarding.localSetup.docs.windows') : t('onboarding.localSetup.docs.default')}
-          <RiExternalLinkLine className="h-3 w-3" />
+          <Icon name="external-link" className="h-3 w-3" />
         </a>
 
         {checkError && (

@@ -18,6 +18,9 @@ export const createSettingsHelpers = (dependencies) => {
   } = dependencies;
 
   const PWA_APP_NAME_MAX_LENGTH = 64;
+  const STT_SERVER_URL_MAX_LENGTH = 2048;
+  const STT_MODEL_MAX_LENGTH = 256;
+  const STT_LANGUAGE_MAX_LENGTH = 64;
   const PWA_ORIENTATION_VALUES = new Set(['system', 'portrait', 'landscape']);
   const MOBILE_KEYBOARD_MODE_VALUES = new Set(['native', 'resize-content']);
 
@@ -164,6 +167,9 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.showReasoningTraces === 'boolean') {
       result.showReasoningTraces = candidate.showReasoningTraces;
+    }
+    if (typeof candidate.collapsibleThinkingBlocks === 'boolean') {
+      result.collapsibleThinkingBlocks = candidate.collapsibleThinkingBlocks;
     }
     if (typeof candidate.showTextJustificationActivity === 'boolean') {
       result.showTextJustificationActivity = candidate.showTextJustificationActivity;
@@ -599,6 +605,46 @@ export const createSettingsHelpers = (dependencies) => {
       }
     }
 
+    if (typeof candidate.sttProvider === 'string') {
+      const provider = candidate.sttProvider.trim();
+      if (provider === 'browser' || provider === 'server' || provider === 'wasm') {
+        result.sttProvider = provider;
+      }
+    }
+    if (typeof candidate.sttServerUrl === 'string') {
+      const trimmed = candidate.sttServerUrl.trim();
+      if (trimmed.length <= STT_SERVER_URL_MAX_LENGTH) {
+        result.sttServerUrl = trimmed;
+      }
+    }
+    if (typeof candidate.sttModel === 'string') {
+      const trimmed = candidate.sttModel.trim();
+      if (trimmed.length <= STT_MODEL_MAX_LENGTH) {
+        result.sttModel = trimmed;
+      }
+    }
+    if (typeof candidate.wasmSttModel === 'string') {
+      const trimmed = candidate.wasmSttModel.trim();
+      if (trimmed.length <= 256) {
+        result.wasmSttModel = trimmed;
+      }
+    }
+    if (typeof candidate.sttLanguage === 'string') {
+      const trimmed = candidate.sttLanguage.trim();
+      if (trimmed.length <= STT_LANGUAGE_MAX_LENGTH) {
+        result.sttLanguage = trimmed;
+      }
+    }
+    if (typeof candidate.sttSilenceThresholdDb === 'number' && Number.isFinite(candidate.sttSilenceThresholdDb)) {
+      result.sttSilenceThresholdDb = Math.max(-100, Math.min(0, candidate.sttSilenceThresholdDb));
+    }
+    if (typeof candidate.sttSilenceHoldMs === 'number' && Number.isFinite(candidate.sttSilenceHoldMs)) {
+      result.sttSilenceHoldMs = Math.max(250, Math.min(10000, Math.round(candidate.sttSilenceHoldMs)));
+    }
+    if (typeof candidate.sttTranscribeOnStop === 'boolean') {
+      result.sttTranscribeOnStop = candidate.sttTranscribeOnStop;
+    }
+
     return result;
   };
 
@@ -685,7 +731,13 @@ export const createSettingsHelpers = (dependencies) => {
           ? settings.showReasoningTraces
           : typeof sanitized.showReasoningTraces === 'boolean'
             ? sanitized.showReasoningTraces
-            : false
+            : false,
+      collapsibleThinkingBlocks:
+        typeof settings.collapsibleThinkingBlocks === 'boolean'
+          ? settings.collapsibleThinkingBlocks
+          : typeof sanitized.collapsibleThinkingBlocks === 'boolean'
+            ? sanitized.collapsibleThinkingBlocks
+            : true,
     };
   };
 

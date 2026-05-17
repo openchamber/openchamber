@@ -1,5 +1,4 @@
 import React from 'react';
-import { RiArrowLeftLine } from '@remixicon/react';
 import type { Message, Part, Session } from '@opencode-ai/sdk/v2';
 
 import { ChatInput } from './ChatInput';
@@ -19,6 +18,7 @@ import { useChatTurnNavigation } from './hooks/useChatTurnNavigation';
 import { useDeviceInfo } from '@/lib/device';
 import { Button } from '@/components/ui/button';
 import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
+import { Icon } from "@/components/icon/Icon";
 import type { PermissionRequest } from '@/types/permission';
 import type { QuestionRequest } from '@/types/question';
 import { cn } from '@/lib/utils';
@@ -315,11 +315,24 @@ const HYDRATING_SKELETON_ITEMS: Array<{
     },
 ];
 
-type ChatContainerProps = {
-    autoOpenDraft?: boolean;
+const ReadOnlyPromptBanner: React.FC = () => {
+    const { t } = useI18n();
+
+    return (
+        <div className="p-3">
+            <div className="rounded-2xl border border-border/70 bg-[var(--surface-background)] px-4 py-3 typography-ui-label text-muted-foreground">
+                {t('chat.container.readOnlySubagentPromptBanner')}
+            </div>
+        </div>
+    );
 };
 
-export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = true }) => {
+type ChatContainerProps = {
+    autoOpenDraft?: boolean;
+    readOnly?: boolean;
+};
+
+export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = true, readOnly = false }) => {
     const { t } = useI18n();
     // Session UI state
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
@@ -521,10 +534,11 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 ? t('chat.container.returnToParent.titleNamed', { title: parentSession.title })
                 : t('chat.container.returnToParent.title')}
         >
-            <RiArrowLeftLine className="h-4 w-4" />
+            <Icon name="arrow-left" className="h-4 w-4" />
             {t('chat.container.returnToParent.label')}
         </Button>
     ) : null;
+    const promptReadOnly = readOnly || Boolean(parentSession);
 
     React.useEffect(() => {
         if (autoOpenDraft && !currentSessionId && !draftOpen) {
@@ -657,7 +671,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         };
     }, [currentSessionId, isDesktopExpandedInput, navigation, scrollRef]);
 
-
     React.useLayoutEffect(() => {
         const container = scrollRef.current;
         if (!container) return;
@@ -752,7 +765,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 							: 'bg-background'
 					)}
 				>
-						<ChatInput scrollToBottom={resumeToLatestInstant} />
+						{promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={resumeToLatestInstant} />}
 				</div>
 			</div>
         );
@@ -812,7 +825,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 							: 'bg-background'
 					)}
 				>
-					<ChatInput scrollToBottom={resumeToLatestInstant} />
+					{promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={resumeToLatestInstant} />}
 				</div>
             </div>
         );
@@ -845,7 +858,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 							: 'bg-background'
 					)}
 				>
-					<ChatInput scrollToBottom={resumeToLatestInstant} />
+					{promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={resumeToLatestInstant} />}
 				</div>
             </div>
         );
@@ -893,7 +906,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                         onClick={navigation.resumeToLatest}
                     />
                 )}
-                <ChatInput scrollToBottom={resumeToLatestInstant} />
+                {promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={resumeToLatestInstant} />}
             </div>
 
             <TimelineDialog

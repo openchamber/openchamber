@@ -28,24 +28,13 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { getContextFileOpenFailureMessage, validateContextFileOpen } from '@/lib/contextFileOpenGuard';
 import { toast } from '@/components/ui';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
-import {
-  RiAddLine,
-  RiChatAi3Line,
-  RiFolderAddLine,
-  RiGitBranchLine,
-  RiLayoutLeftLine,
-  RiLayoutRightLine,
-  RiPieChartLine,
-  RiWindowLine,
-  RiSettings3Line,
-  RiTerminalBoxLine,
-} from '@remixicon/react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { canUseElectronDesktopIPC, invokeDesktop, isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
 import { SETTINGS_PAGE_METADATA, type SettingsRuntimeContext } from '@/lib/settings/metadata';
 import { getSettingsNavIcon } from '@/components/views/SettingsView';
+import { Icon } from "@/components/icon/Icon";
 import { scoreByFuzzyQuery } from '@/lib/search/fuzzySearch';
 import { truncatePathMiddle } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
@@ -154,7 +143,7 @@ export const CommandPalette: React.FC = () => {
       {
         id: 'new-session',
         title: t('commandPalette.item.newSession'),
-        icon: <RiAddLine className="mr-2 h-4 w-4" />,
+        icon: <Icon name="add" className="mr-2 h-4 w-4" />,
         shortcutId: 'new_chat',
         searchText: t('commandPalette.item.newSession'),
         onSelect: run(() => {
@@ -166,7 +155,7 @@ export const CommandPalette: React.FC = () => {
       {
         id: 'new-worktree',
         title: t('commandPalette.item.newWorktreeDraft'),
-        icon: <RiGitBranchLine className="mr-2 h-4 w-4" />,
+        icon: <Icon name="git-branch" className="mr-2 h-4 w-4" />,
         shortcutId: 'new_chat_worktree',
         searchText: t('commandPalette.item.newWorktreeDraft'),
         onSelect: run(() => {
@@ -176,7 +165,7 @@ export const CommandPalette: React.FC = () => {
       {
         id: 'add-project',
         title: t('commandPalette.item.addProject'),
-        icon: <RiFolderAddLine className="mr-2 h-4 w-4" />,
+        icon: <Icon name="folder-add" className="mr-2 h-4 w-4" />,
         searchText: t('commandPalette.item.addProject'),
         onSelect: run(() => {
           sessionEvents.requestDirectoryDialog();
@@ -187,7 +176,7 @@ export const CommandPalette: React.FC = () => {
         title: isMobile
           ? t('commandPalette.item.showSessionSwitcher')
           : t('commandPalette.item.toggleSidebar'),
-        icon: <RiLayoutLeftLine className="mr-2 h-4 w-4" />,
+        icon: <Icon name="layout-left" className="mr-2 h-4 w-4" />,
         shortcutId: 'toggle_sidebar',
         searchText: isMobile
           ? t('commandPalette.item.showSessionSwitcher')
@@ -204,7 +193,7 @@ export const CommandPalette: React.FC = () => {
       {
         id: 'toggle-right-sidebar',
         title: t('commandPalette.item.toggleRightSidebar'),
-        icon: <RiLayoutRightLine className="mr-2 h-4 w-4" />,
+        icon: <Icon name="layout-right" className="mr-2 h-4 w-4" />,
         shortcutId: 'toggle_right_sidebar',
         searchText: t('commandPalette.item.toggleRightSidebar'),
         onSelect: run(() => toggleRightSidebar()),
@@ -212,7 +201,7 @@ export const CommandPalette: React.FC = () => {
       {
         id: 'toggle-terminal',
         title: t('commandPalette.item.toggleTerminal'),
-        icon: <RiTerminalBoxLine className="mr-2 h-4 w-4" />,
+        icon: <Icon name="terminal-box" className="mr-2 h-4 w-4" />,
         shortcutId: 'toggle_terminal',
         searchText: t('commandPalette.item.toggleTerminal'),
         onSelect: run(() => toggleBottomTerminal()),
@@ -220,7 +209,7 @@ export const CommandPalette: React.FC = () => {
       {
         id: 'context-usage',
         title: t('commandPalette.item.showContextUsage'),
-        icon: <RiPieChartLine className="mr-2 h-4 w-4" />,
+        icon: <Icon name="pie-chart" className="mr-2 h-4 w-4" />,
         searchText: t('commandPalette.item.showContextUsage'),
         onSelect: run(() => {
           if (currentDirectory) openContextOverview(currentDirectory);
@@ -229,7 +218,7 @@ export const CommandPalette: React.FC = () => {
       {
         id: 'open-settings',
         title: t('commandPalette.item.openSettings'),
-        icon: <RiSettings3Line className="mr-2 h-4 w-4" />,
+        icon: <Icon name="settings-3" className="mr-2 h-4 w-4" />,
         shortcutId: 'open_settings',
         searchText: t('commandPalette.item.openSettings'),
         onSelect: run(() => setSettingsDialogOpen(true)),
@@ -239,7 +228,7 @@ export const CommandPalette: React.FC = () => {
       list.splice(1, 0, {
         id: 'new-mini-chat',
         title: t('commandPalette.item.newMiniChat'),
-        icon: <RiWindowLine className="mr-2 h-4 w-4" />,
+        icon: <Icon name="window" className="mr-2 h-4 w-4" />,
         shortcutId: 'new_mini_chat',
         searchText: t('commandPalette.item.newMiniChat'),
         onSelect: run(() => {
@@ -283,12 +272,12 @@ export const CommandPalette: React.FC = () => {
       .filter((p) => p.slug !== 'home')
       .filter((p) => (p.isAvailable ? p.isAvailable(settingsRuntimeCtx) : true))
       .map((page) => {
-        const Icon = getSettingsNavIcon(page.slug) ?? RiSettings3Line;
+        const iconName = getSettingsNavIcon(page.slug) ?? 'settings-3';
         const keywords = (page.keywords ?? []).join(' ');
         return {
           id: `settings:${page.slug}`,
           title: page.title,
-          icon: <Icon className="mr-2 h-4 w-4" />,
+          icon: <Icon name={iconName} className="mr-2 h-4 w-4" />,
           searchText: `${page.title} ${page.group} ${keywords}`,
           onSelect: run(() => {
             setSettingsPage(page.slug);
@@ -507,11 +496,11 @@ export const CommandPalette: React.FC = () => {
                           value={`session:${session.id}`}
                           onSelect={() => handleOpenSession(session)}
                         >
-                          <RiChatAi3Line className="mr-2 h-4 w-4" />
+                          <Icon name="chat-ai-3" className="mr-2 h-4 w-4" />
                           <span className="truncate">{title}</span>
                           {branch ? (
                             <span className="ml-auto inline-flex items-center gap-1 text-muted-foreground typography-meta">
-                              <RiGitBranchLine className="h-3 w-3" />
+                              <Icon name="git-branch" className="h-3 w-3" />
                               <span className="truncate max-w-[160px]">{branch}</span>
                             </span>
                           ) : null}

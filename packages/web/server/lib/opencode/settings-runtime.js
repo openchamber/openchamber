@@ -105,12 +105,13 @@ export const createSettingsRuntime = (deps) => {
         return entry;
       }
       const trimmedPath = entry.path.trim();
-      if (!trimmedPath.startsWith(fromDir)) {
+      const relativePath = path.relative(fromDir, trimmedPath);
+      if (relativePath && (relativePath.startsWith('..') || path.isAbsolute(relativePath))) {
         return entry;
       }
       return {
         ...entry,
-        path: `${toDir}${trimmedPath.slice(fromDir.length)}`,
+        path: relativePath ? path.join(toDir, relativePath) : toDir,
       };
     });
   };

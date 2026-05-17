@@ -10,8 +10,8 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
-import { RiCheckboxBlankLine, RiCheckboxLine, RiDeleteBinLine, RiGitBranchLine } from '@remixicon/react';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { Icon } from "@/components/icon/Icon";
 import { DirectoryExplorerDialog } from './DirectoryExplorerDialog';
 import { cn, formatPathForDisplay } from '@/lib/utils';
 import type { Session } from '@opencode-ai/sdk/v2';
@@ -442,11 +442,7 @@ export const SessionDialogs: React.FC = () => {
                     deletedIds = result.archivedIds;
                     failedIds = result.failedIds;
                 } else {
-                    const result = await deleteSessions(ids, {
-                        archiveWorktree: false,
-                        deleteRemoteBranch: removeRemoteBranch,
-                        deleteLocalBranch,
-                    });
+                    const result = await deleteSessions(ids);
                     deletedIds = result.deletedIds;
                     failedIds = result.failedIds;
                 }
@@ -610,7 +606,7 @@ export const SessionDialogs: React.FC = () => {
             {isWorktreeDelete ? (
                 <div className="space-y-2 rounded-lg bg-muted/30 p-3">
                     <div className="flex items-center gap-2">
-                        <RiGitBranchLine className="h-4 w-4 text-muted-foreground" />
+                        <Icon name="git-branch" className="h-4 w-4 text-muted-foreground" />
                         <span className="typography-meta font-medium text-foreground">{t('sessions.sidebar.sessionDialogs.worktree.label')}</span>
                         {targetWorktree?.label ? (
                             <span className="typography-micro text-muted-foreground/70">{targetWorktree.label}</span>
@@ -655,9 +651,9 @@ export const SessionDialogs: React.FC = () => {
                 )}
             >
                 {deleteDialogShouldRemoveRemote ? (
-                    <RiCheckboxLine className="size-4 text-primary" />
+                    <Icon name="checkbox" className="size-4 text-primary" />
                 ) : (
-                    <RiCheckboxBlankLine className="size-4" />
+                    <Icon name="checkbox-blank" className="size-4" />
                 )}
                 {t('sessions.sidebar.sessionDialogs.actions.deleteRemoteBranch')}
             </button>
@@ -684,9 +680,9 @@ export const SessionDialogs: React.FC = () => {
             )}
         >
             {deleteDialogShouldDeleteLocalBranch ? (
-                <RiCheckboxLine className="size-4 text-primary" />
+                <Icon name="checkbox" className="size-4 text-primary" />
             ) : (
-                <RiCheckboxBlankLine className="size-4" />
+                <Icon name="checkbox-blank" className="size-4" />
             )}
             {t('sessions.sidebar.sessionDialogs.actions.deleteLocalBranch')}
         </button>
@@ -717,7 +713,7 @@ export const SessionDialogs: React.FC = () => {
                 className="inline-flex items-center gap-1.5 typography-meta text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
                 aria-pressed={!showDeletionDialog}
             >
-                {!showDeletionDialog ? <RiCheckboxLine className="size-4 text-primary" /> : <RiCheckboxBlankLine className="size-4" />}
+                {!showDeletionDialog ? <Icon name="checkbox" className="size-4 text-primary" /> : <Icon name="checkbox-blank" className="size-4" />}
                 {t('sessions.sidebar.dialogs.neverAsk')}
             </button>
             <div className="flex items-center gap-2">
@@ -783,7 +779,7 @@ export const SessionDialogs: React.FC = () => {
                     >
                         <DialogHeader>
                             <DialogTitle className={cn(isWorktreeDelete && 'flex items-center gap-2')}>
-                                {isWorktreeDelete && <RiDeleteBinLine className="h-5 w-5" />}
+                                {isWorktreeDelete && <Icon name="delete-bin" className="h-5 w-5" />}
                                 {deleteDialogTitle}
                             </DialogTitle>
                             {deleteDialogDescription && <DialogDescription>{deleteDialogDescription}</DialogDescription>}

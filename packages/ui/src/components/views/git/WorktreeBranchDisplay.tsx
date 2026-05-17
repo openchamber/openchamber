@@ -1,6 +1,6 @@
 import React from 'react';
-import { RiGitBranchLine, RiEditLine, RiCheckLine, RiCloseLine, RiLoader4Line } from '@remixicon/react';
 import { Button } from '@/components/ui/button';
+import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 
 interface WorktreeBranchDisplayProps {
@@ -86,7 +86,7 @@ export const WorktreeBranchDisplay: React.FC<WorktreeBranchDisplayProps> = ({
             handleSaveEdit();
           }}
         >
-          <RiGitBranchLine className="size-4 text-primary" />
+          <Icon name="git-branch" className="size-4 text-primary" />
           <input
             ref={inputRef}
             value={editBranchName}
@@ -99,21 +99,25 @@ export const WorktreeBranchDisplay: React.FC<WorktreeBranchDisplayProps> = ({
           <button
             type="submit"
             disabled={isRenaming}
+            aria-label={isRenaming ? t('gitView.branch.renameSaving') : t('gitView.branch.renameSave')}
+            title={isRenaming ? t('gitView.branch.renameSaving') : t('gitView.branch.renameSave')}
             className="shrink-0 text-muted-foreground hover:text-foreground disabled:opacity-50"
           >
             {isRenaming ? (
-              <RiLoader4Line className="size-4 animate-spin" />
+              <Icon name="loader-4" className="size-4 animate-spin" />
             ) : (
-              <RiCheckLine className="size-4" />
+              <Icon name="check" className="size-4" />
             )}
           </button>
           <button
             type="button"
             onClick={handleCancelEdit}
             disabled={isRenaming}
+            aria-label={t('gitView.branch.renameCancel')}
+            title={t('gitView.branch.renameCancel')}
             className="shrink-0 text-muted-foreground hover:text-foreground disabled:opacity-50"
           >
-            <RiCloseLine className="size-4" />
+            <Icon name="close" className="size-4" />
           </button>
         </form>
       </div>
@@ -122,7 +126,7 @@ export const WorktreeBranchDisplay: React.FC<WorktreeBranchDisplayProps> = ({
 
   return (
     <div className="flex w-full min-w-0 items-center gap-1.5 px-2 py-1 h-8">
-      <RiGitBranchLine className="size-4 text-primary shrink-0" />
+      <Icon name="git-branch" className="size-4 text-primary shrink-0" />
       <div className="inline-flex min-w-0 max-w-full items-center gap-1">
         <span className="truncate typography-ui-label font-normal text-foreground">
           {currentBranch || t('gitView.branch.detachedHead')}
@@ -135,7 +139,7 @@ export const WorktreeBranchDisplay: React.FC<WorktreeBranchDisplayProps> = ({
             onClick={handleStartEdit}
             title={t('gitView.branch.renameTitle')}
           >
-            <RiEditLine className="size-4" />
+            <Icon name="edit" className="size-4" />
           </Button>
         )}
       </div>

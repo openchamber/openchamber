@@ -22,14 +22,10 @@ import {
     TooltipProvider,
     TooltipTrigger,
 } from '@/components/ui/tooltip';
-import {
-    RiMicOffLine,
-    RiStopCircleLine,
-    RiVoiceRecognitionLine,
-    RiVolumeUpLine,
-} from '@remixicon/react';
 import { VoiceStatusIndicator } from './VoiceStatusIndicator';
 import { toast } from '@/components/ui/toast';
+import { Icon } from "@/components/icon/Icon";
+import { useI18n } from '@/lib/i18n';
 
 // Status text for accessibility and labels
 const statusLabels: Record<string, string> = {
@@ -70,7 +66,10 @@ const normalizeVoiceErrorMessage = (error: string): string => {
  * Browser Voice Button with language selection
  */
 export function BrowserVoiceButton() {
+    const { t } = useI18n();
     const voiceModeEnabled = useConfigStore((s) => s.voiceModeEnabled);
+    const sttProvider = useConfigStore((s) => s.sttProvider);
+    const sttTranscribeOnStop = useConfigStore((s) => s.sttTranscribeOnStop);
     
     const {
         status,
@@ -79,6 +78,7 @@ export function BrowserVoiceButton() {
 
         startVoice,
         stopVoice,
+        finishVoiceInput,
         conversationMode,
         toggleConversationMode,
         isMobile,
@@ -113,6 +113,10 @@ export function BrowserVoiceButton() {
     const isIdle = status === 'idle';
 
     const isSpeaking = status === 'speaking';
+    // WASM STT always needs finishVoiceInput to flush the recorder and transcribe.
+    // Server STT uses it when sttTranscribeOnStop is enabled.
+    const canTranscribeOnStop = sttProvider === 'wasm' || (sttProvider === 'server' && sttTranscribeOnStop);
+    const isListeningWithTranscribeOnStop = status === 'listening' && canTranscribeOnStop;
 
     // Show toast notification when voice error occurs
     useEffect(() => {
@@ -136,6 +140,8 @@ export function BrowserVoiceButton() {
     // Status text for accessibility
     const statusText = isError
         ? error || 'Voice Error'
+        : isListeningWithTranscribeOnStop
+          ? t('voice.action.finishAndTranscribe')
         : conversationMode && status === 'idle'
           ? 'Start Voice (Continuous mode on)'
           : statusLabels[status] || 'Start Voice';
@@ -144,6 +150,9 @@ export function BrowserVoiceButton() {
     const getTooltipContent = () => {
         if (isError && error) {
             return normalizeVoiceErrorMessage(error);
+        }
+        if (isListeningWithTranscribeOnStop) {
+            return t('voice.action.finishAndTranscribe');
         }
         if (isActive) {
             return 'Stop voice conversation';
@@ -157,6 +166,10 @@ export function BrowserVoiceButton() {
     // Handle voice activation (used by both click and touch)
     const activateVoice = useCallback(async () => {
         if (isActive) {
+            if (status === 'listening' && canTranscribeOnStop) {
+                finishVoiceInput();
+                return;
+            }
             stopVoice();
         } else if (status !== 'error') {
             // On mobile, we must NOT do any async operations before calling startVoice()
@@ -186,7 +199,7 @@ export function BrowserVoiceButton() {
                 }
             }
         }
-    }, [isActive, status, startVoice, stopVoice, isMobile]);
+    }, [isActive, status, canTranscribeOnStop, finishVoiceInput, startVoice, stopVoice, isMobile]);
 
     // Handle Shift+Click to toggle conversation mode
     const handleClick = useCallback(async (e: React.MouseEvent) => {
@@ -260,8 +273,6 @@ export function BrowserVoiceButton() {
         toggleConversationMode();
     }, [toggleConversationMode]);
 
-
-
     // If voice mode is disabled, don't render anything
     if (!voiceModeEnabled) {
         return null;
@@ -289,7 +300,7 @@ export function BrowserVoiceButton() {
                             aria-label={tooltipMessage}
                             className={`${buttonSizeClass} p-0 ${clearHoverBackgroundClass}`}
                         >
-                            <RiMicOffLine className={`${iconSizeClass} opacity-50`} />
+                            <Icon name="mic-off" className={`${iconSizeClass} opacity-50`} />
                         </Button>
                     </TooltipTrigger>
                     <TooltipContent side="bottom" align="center">
@@ -341,10 +352,10 @@ export function BrowserVoiceButton() {
                             {isActive ? (
                                 isSpeaking ? (
                                     // Green speaker icon when AI is speaking
-                                    <RiVolumeUpLine className={`${iconSizeClass} text-green-400 animate-pulse`} />
+                                    <Icon name="volume-up" className={`${iconSizeClass} text-green-400 animate-pulse`} />
                                 ) : (
                                     // Red stop icon for listening/processing (both mobile and desktop)
-                                    <RiStopCircleLine className={`${iconSizeClass} text-[var(--status-error)]`} />
+                                    <Icon name="stop-circle" className={`${iconSizeClass} text-[var(--status-error)]`} />
                                 )
                             ) : (
                                 <VoiceStatusIndicator
@@ -373,7 +384,7 @@ export function BrowserVoiceButton() {
                         `${buttonSizeClass} p-0 ${clearHoverBackgroundClass} ${conversationMode ? 'text-[var(--status-info)] hover:text-[var(--status-info)]' : 'text-muted-foreground hover:text-foreground'}`
                     }
                 >
-                    <RiVoiceRecognitionLine className={continuousIconSizeClass} />
+                    <Icon name="voice-recognition" className={continuousIconSizeClass} />
                 </Button>
             )}
         </div>

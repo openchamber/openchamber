@@ -18,6 +18,8 @@ import { stripMessageDiffSnapshots } from "./sanitize"
 
 const MESSAGE_REFETCH_LIMIT = 200
 const MESSAGE_REFETCH_SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
+const UNREVERT_REFETCH_ATTEMPTS = 3
+const UNREVERT_REFETCH_RETRY_MS = 150
 
 // Reference set by SyncProvider — allows actions to access SDK and stores
 let _sdk: OpencodeClient | null = null
@@ -25,6 +27,8 @@ let _childStores: ChildStoreManager | null = null
 let _getDirectory: () => string = () => ""
 let _optimisticAdd: ((input: { sessionID: string; message: Message; parts: Part[] }) => void) | null = null
 let _optimisticRemove: ((input: { sessionID: string; messageID: string }) => void) | null = null
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 export function setActionRefs(
   sdk: OpencodeClient,
@@ -577,6 +581,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   const messages = state.message[sessionId] ?? []
   const targetMsg = messages.find((m) => m.id === messageId)
   let messageText = ""
+  let submittedFileParts: Array<Record<string, unknown>> = []
   if (targetMsg && targetMsg.role === "user") {
     const parts = state.part[messageId] ?? []
     const textParts = parts.filter((p) => p.type === "text" && !isSyntheticPart(p))
@@ -584,9 +589,16 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
       .map((p: Record<string, unknown>) => (p as { text?: string }).text || (p as { content?: string }).content || "")
       .join("\n")
       .trim()
+    // Snapshot file parts for later restoration to the input (line ~626).
+    // File parts (type="file") contain url/mime/filename — the file already
+    // exists on the server so we record it as a "server" source attachment.
+    submittedFileParts = parts.filter((p) => p.type === "file") as Array<Record<string, unknown>>
   }
 
-  // Optimistically remove reverted messages + set marker
+  // Optimistically set only the revert marker. Keep messages and parts in the
+  // local store; visible-message selectors derive the displayed timeline from
+  // session.revert. This matches the server model and preserves reverted
+  // messages for the restore dock without maintaining a separate shadow copy.
   const prevRevert = (() => {
     const s = state.session.find((s) => s.id === sessionId)
     return (s as Session & { revert?: unknown })?.revert
@@ -594,19 +606,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   const sessions = [...state.session]
   const sessionIdx = sessions.findIndex((s) => s.id === sessionId)
 
-  // Remove messages at and after the revert point from the store
-  const prevMessages = state.message[sessionId] ?? []
-  const prevPart = { ...state.part }
-  const keptMessages = prevMessages.filter((m) => m.id < messageId)
-  const removedMessages = prevMessages.filter((m) => m.id >= messageId)
-  for (const m of removedMessages) {
-    delete prevPart[m.id]
-  }
-
-  const patch: Record<string, unknown> = {
-    message: { ...state.message, [sessionId]: keptMessages },
-    part: prevPart,
-  }
+  const patch: Record<string, unknown> = {}
 
   if (sessionIdx >= 0) {
     sessions[sessionIdx] = { ...sessions[sessionIdx], revert: { messageID: messageId } } as Session
@@ -615,13 +615,33 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
 
   store.setState(patch)
 
-  // Restore reverted message text to input
+  // Save input store state before mutations — if the API fails we need to
+  // roll back both text and attachments to their previous values.
+  const prevInputAttachments = [...useInputStore.getState().attachedFiles]
+  const prevInputText = useInputStore.getState().pendingInputText
+  const prevInputMode = useInputStore.getState().pendingInputMode
+
+  // Restore reverted message text and file attachments to input
   if (messageText) {
     useInputStore.setState({
       pendingInputText: messageText,
       pendingInputMode: "replace" as const,
     })
   }
+
+  // Restore file/image attachments from the target message.
+  // Clear existing attachments first — previous revert's attachments
+  // must not carry over, even when the current message has no files.
+  useInputStore.getState().clearAttachedFiles()
+  for (const fp of submittedFileParts) {
+      const f = fp as Record<string, unknown>
+      const url = typeof f.url === "string" ? f.url : ""
+      const mime = typeof f.mime === "string" ? f.mime : "application/octet-stream"
+      const filename = typeof f.filename === "string" ? f.filename : "attachment"
+      if (url) {
+        useInputStore.getState().addRestoredAttachment({ url, mimeType: mime, filename })
+      }
+    }
 
   // Call SDK and merge authoritative result into store
   try {
@@ -645,8 +665,12 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
     }
     store.setState({
       session: rollback,
-      message: { ...current.message, [sessionId]: prevMessages },
-      part: { ...current.part, ...Object.fromEntries(removedMessages.map((m) => [m.id, state.part[m.id] ?? []])) },
+    })
+    // Rollback input store: restore previous text and attachments
+    useInputStore.setState({
+      pendingInputText: prevInputText,
+      pendingInputMode: prevInputMode,
+      attachedFiles: prevInputAttachments,
     })
     throw err
   }
@@ -679,6 +703,7 @@ export async function refetchSessionMessages(sessionId: string): Promise<void> {
 export async function unrevertSession(sessionId: string): Promise<void> {
   const store = dirStore()
   const state = store.getState()
+  const previousMessageCount = state.message[sessionId]?.length ?? 0
 
   // Abort if busy
   const status = state.session_status[sessionId]
@@ -700,7 +725,12 @@ export async function unrevertSession(sessionId: string): Promise<void> {
       store.setState({ session: sessions })
     }
   }
-  await refetchSessionMessages(sessionId)
+  for (let attempt = 0; attempt < UNREVERT_REFETCH_ATTEMPTS; attempt += 1) {
+    if (attempt > 0) await wait(UNREVERT_REFETCH_RETRY_MS)
+    await refetchSessionMessages(sessionId)
+    const nextMessageCount = store.getState().message[sessionId]?.length ?? 0
+    if (nextMessageCount > previousMessageCount) return
+  }
 }
 
 /**

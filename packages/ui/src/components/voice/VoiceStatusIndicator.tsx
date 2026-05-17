@@ -18,15 +18,9 @@
  */
 
 import React from 'react';
-import {
-    RiMicLine,
-    RiMicOffLine,
-    RiLoader4Line,
-    RiVolumeUpLine,
-    RiAlertLine,
-} from '@remixicon/react';
 import type { BrowserVoiceStatus } from '@/hooks/useBrowserVoice';
 import { useI18n } from '@/lib/i18n';
+import { Icon } from "@/components/icon/Icon";
 
 export interface VoiceStatusIndicatorProps {
     /** Current voice status */
@@ -59,7 +53,7 @@ const sizeClasses = {
 const statusConfig: Record<
     BrowserVoiceStatus,
     {
-        icon: typeof RiMicLine;
+        icon: string;
         color: string;
         labelKey:
           | 'voice.status.idle'
@@ -71,29 +65,29 @@ const statusConfig: Record<
     }
 > = {
     idle: {
-        icon: RiMicOffLine,
+        icon: "mic-off",
         color: 'text-muted-foreground',
         labelKey: 'voice.status.idle',
     },
     listening: {
-        icon: RiMicLine,
+        icon: "mic",
         color: 'text-primary',
         labelKey: 'voice.status.listening',
         animation: 'animate-pulse',
     },
     processing: {
-        icon: RiLoader4Line,
+        icon: "loader-4",
         color: 'text-primary',
         labelKey: 'voice.status.processing',
         animation: 'animate-spin',
     },
     speaking: {
-        icon: RiVolumeUpLine,
+        icon: "volume-up",
         color: 'text-green-500',
         labelKey: 'voice.status.speaking',
     },
     error: {
-        icon: RiAlertLine,
+        icon: "alert",
         color: 'text-destructive',
         labelKey: 'voice.status.error',
     },
@@ -111,14 +105,14 @@ export function VoiceStatusIndicator({
 }: VoiceStatusIndicatorProps) {
     const { t } = useI18n();
     const config = statusConfig[status];
-    const Icon = config.icon;
+    const statusIconName = config.icon;
     const sizeClass = sizeClasses[size];
     const containerClass = showLabel ? sizeClass.container : '';
 
     return (
         <div className={`flex items-center ${containerClass} ${className}`}>
             <div className="relative">
-                <Icon
+                <Icon name={statusIconName}
                     className={`
                         ${sizeClass.icon}
                         ${config.color}

@@ -110,11 +110,6 @@ function findDevServerAction(actions: OpenChamberProjectAction[]): OpenChamberPr
     }
   }
 
-  // Fallback: return the first action if there's only one
-  if (actions.length === 1) {
-    return actions[0];
-  }
-
   return null;
 }
 

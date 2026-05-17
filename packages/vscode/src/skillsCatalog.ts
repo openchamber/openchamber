@@ -438,33 +438,44 @@ function parseSkillRepoSource(input: string, subpath?: string) {
   if (!raw) {
     return { ok: false as const, error: { kind: 'invalidSource' as const, message: 'Repository source is required' } };
   }
+  const urlFormat = raw.startsWith('https://') ? 'https' : raw.startsWith('git@') ? 'ssh' : 'shorthand';
+  const gitHost = urlFormat === 'https' ? raw.split('/')[2] : urlFormat === 'ssh' ? raw.split('@')[1].split(':')[0] : null;
+
+  if (gitHost === null && urlFormat !== 'shorthand') {
+    return { ok: false as const, error: { kind: 'invalidSource' as const, message: 'Unsupported repository source format'} };
+  }
+
+  const pathSegments = urlFormat === 'https'
+    ? raw.split('/').slice(3).filter(Boolean)
+    : urlFormat === 'ssh'
+      ? (raw.split('@')[1].split(':')[1] ?? '').split('/').filter(Boolean)
+      : null;
+    
+  const repoName = pathSegments && pathSegments.length > 0
+    ? pathSegments[pathSegments.length - 1].replace(/\.git$/i, '')
+    : null;
+  
+  const gitOwner = pathSegments && pathSegments.length > 1
+    ? pathSegments.slice(0, -1).join('/')
+    : (pathSegments && pathSegments.length === 1 ? pathSegments[0] : null);
 
   const explicitSubpath = subpath?.trim() ? subpath.trim() : null;
 
-  const sshMatch = raw.match(/^git@github\.com:([^/\s]+)\/([^\s#]+)$/i);
-  if (sshMatch) {
-    const owner = sshMatch[1];
-    const repo = sshMatch[2].replace(/\.git$/i, '');
-    return {
-      ok: true as const,
-      normalizedRepo: `${owner}/${repo}`,
-      cloneUrlHttps: `https://github.com/${owner}/${repo}.git`,
-      cloneUrlSsh: `git@github.com:${owner}/${repo}.git`,
-      effectiveSubpath: explicitSubpath,
-    };
-  }
+  if (urlFormat === 'ssh' || urlFormat === 'https') {
+    const owner = (gitOwner || '').trim();
+    const repo = (repoName || '').trim();
 
-  const httpsMatch = raw.match(/^https?:\/\/github\.com\/([^/\s]+)\/([^\s#]+)$/i);
-  if (httpsMatch) {
-    const owner = httpsMatch[1];
-    const repo = httpsMatch[2].replace(/\.git$/i, '');
+    if (!owner || !repo) {
+      return { ok: false as const, error: { kind: 'invalidSource' as const, message: `Invalid ${urlFormat} repository format.` } };
+    }
+
     return {
       ok: true as const,
       normalizedRepo: `${owner}/${repo}`,
-      cloneUrlHttps: `https://github.com/${owner}/${repo}.git`,
-      cloneUrlSsh: `git@github.com:${owner}/${repo}.git`,
+      cloneUrlHttps: `https://${gitHost}/${owner}/${repo}.git`,
+      cloneUrlSsh: `git@${gitHost}:${owner}/${repo}.git`,
       effectiveSubpath: explicitSubpath,
-    };
+    }
   }
 
   const shorthandMatch = raw.match(/^([^/\s]+)\/([^/\s]+)(?:\/(.+))?$/);

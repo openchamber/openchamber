@@ -14,6 +14,7 @@ import { PROJECT_ICONS, PROJECT_COLORS, PROJECT_COLOR_MAP, getProjectIconImageUr
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
+import { Icon } from "@/components/icon/Icon";
 
 interface ProjectEditDialogProps {
   open: boolean;
@@ -329,7 +330,7 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
                 <span className="w-4 h-0.5 bg-muted-foreground/40 rotate-45 rounded-full" />
               </button>
               {PROJECT_ICONS.map((i) => {
-                const IconComponent = i.Icon;
+                const iconName = i.Icon;
                 return (
                   <button
                     key={i.key}
@@ -343,7 +344,7 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
                     )}
                     title={i.label}
                   >
-                    <IconComponent
+                    <Icon name={iconName}
                       className="w-4 h-4"
                       style={currentColorVar ? { color: currentColorVar } : undefined}
                     />

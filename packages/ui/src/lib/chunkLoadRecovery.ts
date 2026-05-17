@@ -46,13 +46,26 @@ function scheduleReloadOnce(error: unknown): void {
   const now = Date.now();
   const signature = reloadMarkerSignature(error);
 
+  let marker: { signature?: unknown; timestamp?: unknown } | null = null;
   try {
     const rawMarker = window.sessionStorage.getItem(RELOAD_STORAGE_KEY);
-    const marker = rawMarker ? JSON.parse(rawMarker) as { signature?: unknown; timestamp?: unknown } : null;
-    const markerTimestamp = typeof marker?.timestamp === 'number' ? marker.timestamp : 0;
-    if (marker?.signature === signature && now - markerTimestamp < RELOAD_GUARD_MS) {
-      return;
+    if (rawMarker) {
+      try {
+        marker = JSON.parse(rawMarker) as { signature?: unknown; timestamp?: unknown };
+      } catch {
+        marker = null;
+      }
     }
+  } catch {
+    return;
+  }
+
+  const markerTimestamp = typeof marker?.timestamp === 'number' ? marker.timestamp : 0;
+  if (marker?.signature === signature && now - markerTimestamp < RELOAD_GUARD_MS) {
+    return;
+  }
+
+  try {
     window.sessionStorage.setItem(RELOAD_STORAGE_KEY, JSON.stringify({ signature, timestamp: now }));
   } catch {
     return;

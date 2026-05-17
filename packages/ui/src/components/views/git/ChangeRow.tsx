@@ -1,11 +1,8 @@
 import React, { useCallback, useMemo } from 'react';
-import {
-  RiArrowGoBackLine,
-  RiLoader4Line,
-} from '@remixicon/react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Checkbox } from '@/components/ui/checkbox';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
+import { Icon } from "@/components/icon/Icon";
 import type { GitStatus } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 
@@ -160,9 +157,9 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
               aria-label={t('gitView.changes.revertFileAria', { path: file.path })}
             >
               {isReverting ? (
-                <RiLoader4Line className="size-3.5 animate-spin" />
+                <Icon name="loader-4" className="size-3.5 animate-spin" />
               ) : (
-                <RiArrowGoBackLine className="size-3.5" />
+                <Icon name="arrow-go-back" className="size-3.5" />
               )}
             </button>
           </TooltipTrigger>

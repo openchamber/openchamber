@@ -18,6 +18,8 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     getProviderSources,
     removeProviderConfig,
     refreshOpenCodeAfterConfigChange,
+    buildOpenCodeUrl,
+    getOpenCodeAuthHeaders,
   } = dependencies;
 
   let authLibrary = null;
@@ -37,6 +39,69 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
 
     const trimmed = value.trim();
     return trimmed || null;
+  };
+
+  const parseVersionForComparison = (value) => {
+    const normalized = String(value || '').replace(/^v/, '').split('+')[0];
+    const prereleaseIndex = normalized.indexOf('-');
+    const core = prereleaseIndex >= 0 ? normalized.slice(0, prereleaseIndex) : normalized;
+    const parts = core.split('.').map((part) => {
+      const parsed = Number.parseInt(part || '0', 10);
+      return Number.isFinite(parsed) ? parsed : 0;
+    });
+    return { parts, prerelease: prereleaseIndex >= 0 };
+  };
+
+  const compareVersions = (left, right) => {
+    const a = parseVersionForComparison(left);
+    const b = parseVersionForComparison(right);
+    const length = Math.max(a.parts.length, b.parts.length);
+    for (let index = 0; index < length; index += 1) {
+      const diff = (a.parts[index] || 0) - (b.parts[index] || 0);
+      if (diff !== 0) return diff;
+    }
+    if (a.prerelease !== b.prerelease) return a.prerelease ? -1 : 1;
+    return 0;
+  };
+
+  const fetchLatestOpenCodeVersionFromGithub = async () => {
+    const response = await fetch('https://api.github.com/repos/anomalyco/opencode/releases/latest', {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) {
+      throw new Error(`OpenCode releases responded with ${response.status}`);
+    }
+    const payload = await response.json();
+    const tag = typeof payload?.tag_name === 'string' ? payload.tag_name.trim() : '';
+    return tag.replace(/^v/, '');
+  };
+
+  const fetchLatestOpenCodeVersionFromNpm = async () => {
+    const response = await fetch('https://registry.npmjs.org/opencode-ai/latest', {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) {
+      throw new Error(`OpenCode npm registry responded with ${response.status}`);
+    }
+    const payload = await response.json();
+    return typeof payload?.version === 'string' ? payload.version.trim().replace(/^v/, '') : '';
+  };
+
+  const fetchLatestOpenCodeVersion = async () => {
+    const results = await Promise.allSettled([
+      fetchLatestOpenCodeVersionFromNpm(),
+      fetchLatestOpenCodeVersionFromGithub(),
+    ]);
+    const versions = results
+      .filter((result) => result.status === 'fulfilled' && result.value)
+      .map((result) => result.value);
+    if (versions.length === 0) {
+      const failure = results.find((result) => result.status === 'rejected');
+      throw failure?.reason instanceof Error ? failure.reason : new Error('Failed to resolve latest OpenCode version');
+    }
+    return versions.sort((left, right) => compareVersions(right, left))[0];
   };
 
   const pruneExpiredPendingMcpAuthContexts = () => {
@@ -66,6 +131,71 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     } catch (error) {
       console.error('Failed to resolve OpenCode binary:', error);
       res.status(500).json({ error: 'Failed to resolve OpenCode binary' });
+    }
+  });
+
+  app.post('/api/opencode/upgrade', async (req, res) => {
+    try {
+      const target = typeof req.body?.target === 'string' && req.body.target.trim().length > 0
+        ? req.body.target.trim()
+        : undefined;
+      const response = await fetch(buildOpenCodeUrl('/global/upgrade', ''), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          ...getOpenCodeAuthHeaders(),
+        },
+        body: JSON.stringify(target ? { target } : {}),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        return res.status(response.status).json({
+          success: false,
+          error: payload?.error || response.statusText || 'Failed to upgrade OpenCode',
+        });
+      }
+      return res.json(payload ?? { success: true });
+    } catch (error) {
+      console.error('Failed to upgrade OpenCode:', error);
+      return res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to upgrade OpenCode',
+      });
+    }
+  });
+
+  app.get('/api/opencode/upgrade-status', async (_req, res) => {
+    try {
+      const [healthResponse, latestVersion] = await Promise.all([
+        fetch(buildOpenCodeUrl('/global/health', ''), {
+          method: 'GET',
+          headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+        }),
+        fetchLatestOpenCodeVersion(),
+      ]);
+      const health = await healthResponse.json().catch(() => null);
+      if (!healthResponse.ok) {
+        return res.status(healthResponse.status).json({
+          available: null,
+          error: health?.error || healthResponse.statusText || 'Failed to read OpenCode version',
+        });
+      }
+      const currentVersion = typeof health?.version === 'string' ? health.version.replace(/^v/, '') : null;
+      if (!currentVersion || !latestVersion) {
+        return res.json({ available: null, currentVersion, latestVersion: latestVersion || null });
+      }
+      const available = compareVersions(latestVersion, currentVersion) > 0;
+      return res.json({
+        available,
+        currentVersion,
+        latestVersion,
+      });
+    } catch (error) {
+      return res.status(500).json({
+        available: null,
+        error: error instanceof Error ? error.message : 'Failed to check OpenCode upgrade status',
+      });
     }
   });
 

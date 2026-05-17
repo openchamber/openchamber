@@ -11,10 +11,10 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
-import { RiArrowDownSLine, RiArrowRightSLine, RiInformationLine } from '@remixicon/react';
 import type { UsageWindows, QuotaProviderId } from '@/types';
 import { getAllModelFamilies, getDisplayModelName, sortModelFamilies, groupModelsByFamilyWithGetter } from '@/lib/quota/model-families';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 
 const formatTime = (timestamp: number | null) => {
@@ -56,7 +56,6 @@ export const UsagePage: React.FC = () => {
     void loadSettings();
     void fetchAllQuotas();
   }, [loadSettings, fetchAllQuotas]);
-
 
   React.useEffect(() => {
     if (selectedProviderId) {
@@ -194,7 +193,7 @@ export const UsagePage: React.FC = () => {
               <span className="typography-ui-label text-foreground">{t('settings.usage.page.options.showInHeader')}</span>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                  <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                 </TooltipTrigger>
                 <TooltipContent sideOffset={8} className="max-w-xs">
                   {t('settings.usage.page.options.showInHeaderTooltip')}
@@ -269,9 +268,9 @@ export const UsagePage: React.FC = () => {
                           </span>
                         </div>
                         {isCollapsed ? (
-                          <RiArrowRightSLine className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+                          <Icon name="arrow-right-s" className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
                         ) : (
-                          <RiArrowDownSLine className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+                          <Icon name="arrow-down-s" className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
                         )}
                       </CollapsibleTrigger>
                       <CollapsibleContent>
@@ -322,9 +321,9 @@ export const UsagePage: React.FC = () => {
                           </span>
                         </div>
                         {isCollapsed ? (
-                          <RiArrowRightSLine className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+                          <Icon name="arrow-right-s" className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
                         ) : (
-                          <RiArrowDownSLine className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+                          <Icon name="arrow-down-s" className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
                         )}
                       </CollapsibleTrigger>
                       <CollapsibleContent>

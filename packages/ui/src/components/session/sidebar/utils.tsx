@@ -81,6 +81,15 @@ export const normalizePath = (value?: string | null) => {
   return normalized.length === 0 ? '/' : normalized;
 };
 
+export const isPathWithinProject = (directory?: string | null, projectPath?: string | null): boolean => {
+  const normalizedDirectory = normalizePath(directory);
+  const normalizedProjectPath = normalizePath(projectPath);
+  if (!normalizedDirectory || !normalizedProjectPath) return false;
+  if (normalizedDirectory === normalizedProjectPath) return true;
+  if (normalizedProjectPath === '/') return normalizedDirectory.startsWith('/');
+  return normalizedDirectory.startsWith(`${normalizedProjectPath}/`);
+};
+
 export const normalizeForBranchComparison = (value: string): string => {
   return value
     .toLowerCase()

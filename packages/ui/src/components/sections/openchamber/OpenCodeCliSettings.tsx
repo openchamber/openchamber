@@ -1,11 +1,13 @@
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { RiFolderLine, RiInformationLine } from '@remixicon/react';
+import { Icon } from "@/components/icon/Icon";
 import { isDesktopShell, isTauriShell } from '@/lib/desktop';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
 
 export const OpenCodeCliSettings: React.FC = () => {
@@ -13,6 +15,8 @@ export const OpenCodeCliSettings: React.FC = () => {
   const [value, setValue] = React.useState('');
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
+  const showOpenCodeUpdateNotifications = useUIStore((state) => state.showOpenCodeUpdateNotifications);
+  const setShowOpenCodeUpdateNotifications = useUIStore((state) => state.setShowOpenCodeUpdateNotifications);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -95,7 +99,7 @@ export const OpenCodeCliSettings: React.FC = () => {
           </h3>
           <Tooltip>
             <TooltipTrigger asChild>
-              <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+              <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
             </TooltipTrigger>
             <TooltipContent sideOffset={8} className="max-w-xs">
               {t('settings.openchamber.opencodeCli.tooltipPrefix')}
@@ -130,7 +134,7 @@ export const OpenCodeCliSettings: React.FC = () => {
               aria-label={t('settings.openchamber.opencodeCli.actions.browseAria')}
               title={t('settings.openchamber.opencodeCli.actions.browse')}
             >
-              <RiFolderLine className="h-4 w-4" />
+              <Icon name="folder" className="h-4 w-4" />
             </Button>
           </div>
         </div>
@@ -147,6 +151,17 @@ export const OpenCodeCliSettings: React.FC = () => {
             {'.'}
           </div>
         </div>
+
+        <label className="flex cursor-pointer items-center gap-2 py-1.5">
+          <Checkbox
+            checked={showOpenCodeUpdateNotifications}
+            onChange={setShowOpenCodeUpdateNotifications}
+            ariaLabel={t('settings.openchamber.opencodeCli.field.showUpdateNotificationsAria')}
+          />
+          <span className="typography-ui-label text-foreground">
+            {t('settings.openchamber.opencodeCli.field.showUpdateNotifications')}
+          </span>
+        </label>
 
         <div className="flex justify-start py-1.5">
           <Button

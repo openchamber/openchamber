@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { RiInformationLine } from '@remixicon/react';
+import { Icon } from "@/components/icon/Icon";
 import {
   fetchMagicPromptOverrides,
   getDefaultMagicPromptTemplate,
@@ -140,6 +140,14 @@ const PROMPT_PAGE_MAP: Record<string, PromptPageConfig> = {
       { id: 'session.review.instructions', titleKey: 'settings.magicPrompts.page.block.instructions' },
     ],
   },
+  'session.fusion': {
+    titleKey: 'settings.magicPrompts.page.group.sessionFusion.title',
+    descriptionKey: 'settings.magicPrompts.page.group.sessionFusion.description',
+    blocks: [
+      { id: 'session.fusion.visible', titleKey: 'settings.magicPrompts.page.block.visiblePrompt' },
+      { id: 'session.fusion.instructions', titleKey: 'settings.magicPrompts.page.block.instructions' },
+    ],
+  },
 };
 
 const hasOwn = (input: Record<string, string>, key: string) => Object.prototype.hasOwnProperty.call(input, key);
@@ -269,7 +277,7 @@ export const MagicPromptsPage: React.FC = () => {
               <h2 className="typography-ui-header font-semibold text-foreground">{tUnsafe(pageConfig.titleKey)}</h2>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                  <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                 </TooltipTrigger>
                 <TooltipContent sideOffset={8} className="max-w-xs">
                   {tUnsafe(pageConfig.descriptionKey)}
@@ -306,7 +314,7 @@ export const MagicPromptsPage: React.FC = () => {
                   <h3 className="typography-ui-label text-foreground">{tUnsafe(block.titleKey)}</h3>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                      <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                     </TooltipTrigger>
                     <TooltipContent sideOffset={8} className="max-w-xs">
                       {definition.description}

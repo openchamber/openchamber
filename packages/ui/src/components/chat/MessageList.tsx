@@ -17,7 +17,7 @@ import { streamPerfCount, streamPerfMeasure } from '@/stores/utils/streamDebug';
 import type { StreamPhase } from './message/types';
 import { normalizeParts } from './message/partUtils';
 
-const MESSAGE_LIST_VIRTUALIZE_THRESHOLD = Number.POSITIVE_INFINITY;
+const MESSAGE_LIST_VIRTUALIZE_THRESHOLD = 5;
 const MESSAGE_LIST_OVERSCAN = 6;
 
 const estimateHistoryEntryHeight = (entry: RenderEntry | undefined): number => {
@@ -414,6 +414,7 @@ export interface MessageListHandle {
     scrollToMessageId: (messageId: string, options?: { behavior?: ScrollBehavior }) => boolean;
     captureViewportAnchor: () => { messageId: string; offsetTop: number } | null;
     restoreViewportAnchor: (anchor: { messageId: string; offsetTop: number }) => boolean;
+    scrollToBottom: () => void;
 }
 
 type RenderEntry =
@@ -699,6 +700,7 @@ const TurnBlock = React.memo(({
             const isFirstAssistant = assistantIndex === 0;
             const isLastAssistant = assistantIndex === visibleAssistantMessages.length - 1;
             const isActivityOwner = Boolean(activityOwnerMessageId) && message.info.id === activityOwnerMessageId;
+            const hasAnchoredActivitySegment = visibleActivitySegments.some((segment) => segment.anchorMessageId === message.info.id);
             const shouldAttachFullTurnContext = chatRenderMode === 'sorted'
                 ? isAssistantMessage
                 : (isActivityOwner || isFirstAssistant || isLastAssistant);
@@ -721,7 +723,11 @@ const TurnBlock = React.memo(({
                     activityOwnerMessageId,
                     isFirstAssistantInTurn: isFirstAssistant,
                     isLastAssistantInTurn: isLastAssistant,
-                    isWorking: isLastTurn && sessionIsWorking && message.info.id === streamingAssistantMessageId,
+                    isWorking: isLastTurn && sessionIsWorking && (
+                        chatRenderMode === 'sorted'
+                            ? hasAnchoredActivitySegment
+                            : message.info.id === streamingAssistantMessageId
+                    ),
                     hasTools: turn.hasTools,
                     hasReasoning: turn.hasReasoning,
                     ...(shouldAttachFullTurnContext ? {
@@ -776,6 +782,7 @@ const TurnBlock = React.memo(({
             activeStreamingPhase,
             visibleAssistantMessages,
             visibleAssistantIds,
+            visibleActivitySegments,
             activityOwnerMessageId,
             shouldAnimateUserMessage,
             onUserAnimationConsumed,
@@ -977,7 +984,7 @@ const StaticHistoryList: React.FC<{
         ? Math.max(0, totalSize - (virtualRows[virtualRows.length - 1]?.end ?? 0))
         : 0;
 
-    if (!shouldVirtualize) {
+    if (!shouldVirtualize || (virtualRows.length === 0 && entries.length > 0)) {
         return (
             <div ref={contentRef} className="relative w-full">
                 {entries.map((entry) => (
@@ -1269,57 +1276,110 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
 
     const historyEntries = staticRenderEntries;
     const shouldVirtualizeHistory = historyEntries.length >= MESSAGE_LIST_VIRTUALIZE_THRESHOLD;
-    const [historyWidthPx, setHistoryWidthPx] = React.useState<number | null>(null);
-    const historyMeasurementScopeKey = historyWidthPx === null ? 'width:unknown' : `width:${Math.round(historyWidthPx)}`;
+
+    const previousHistoryLenRef = React.useRef(historyEntries.length);
+    const previousFirstEntryKeyRef = React.useRef(historyEntries[0]?.key);
 
     React.useLayoutEffect(() => {
-        const historyContent = historyContentRef.current;
-        if (!historyContent || !shouldVirtualizeHistory) {
-            setHistoryWidthPx((previous) => (previous === null ? previous : null));
+        const previousLen = previousHistoryLenRef.current;
+        const currentLen = historyEntries.length;
+        const previousFirstKey = previousFirstEntryKeyRef.current;
+        const currentFirstKey = historyEntries[0]?.key;
+
+        previousHistoryLenRef.current = currentLen;
+        previousFirstEntryKeyRef.current = currentFirstKey;
+
+        const grew = currentLen > previousLen;
+        const firstChanged = previousFirstKey !== currentFirstKey;
+        if (!shouldVirtualizeHistory || !grew || !firstChanged || previousLen === 0) {
             return;
         }
 
-        const updateWidth = (nextWidth: number) => {
-            setHistoryWidthPx((previous) => {
-                if (previous !== null && Math.abs(previous - nextWidth) < 0.5) {
-                    return previous;
-                }
-                return nextWidth;
-            });
-        };
-
-        updateWidth(historyContent.getBoundingClientRect().width);
-
-        if (typeof ResizeObserver === 'undefined') {
+        const prependedCount = currentLen - previousLen;
+        const shiftedOldFirst = historyEntries[prependedCount]?.key;
+        if (shiftedOldFirst !== previousFirstKey) {
             return;
         }
 
-        const observer = new ResizeObserver(() => {
-            updateWidth(historyContent.getBoundingClientRect().width);
-        });
-        observer.observe(historyContent);
-        return () => {
-            observer.disconnect();
-        };
-    }, [historyEntries.length, shouldVirtualizeHistory]);
+        // Prepend detected: new entries added at the beginning of the list.
+        // The virtualizer renders based on the current scroll offset which
+        // now maps to different items. Compensate so the user sees the
+        // prepended content (scroll to top) or stays on the same content.
+        let prependedHeight = 0;
+        for (let i = 0; i < prependedCount; i++) {
+            prependedHeight += estimateHistoryEntryHeight(historyEntries[i]);
+        }
+
+        const scrollEl = resolveScrollContainer();
+        if (!scrollEl || prependedHeight <= 0) return;
+
+        scrollEl.scrollTop += prependedHeight;
+    });
 
     const historyVirtualizer = useVirtualizer({
         count: historyEntries.length,
         getScrollElement: resolveScrollContainer,
         estimateSize: (index) => estimateHistoryEntryHeight(historyEntries[index]),
-        getItemKey: (index) => `${historyMeasurementScopeKey}:${historyEntries[index]?.key ?? index}`,
+        getItemKey: (index) => historyEntries[index]?.key ?? String(index),
         measureElement: measureVirtualElement,
         useAnimationFrameWithResizeObserver: true,
         overscan: MESSAGE_LIST_OVERSCAN,
         enabled: shouldVirtualizeHistory,
     });
 
-    React.useEffect(() => {
-        if (!shouldVirtualizeHistory || historyWidthPx === null) {
+    React.useLayoutEffect(() => {
+        const historyContent = historyContentRef.current;
+        if (!historyContent || !shouldVirtualizeHistory) {
             return;
         }
+
+        if (typeof ResizeObserver === 'undefined') {
+            return;
+        }
+
+        const observer = new ResizeObserver(() => {
+            historyVirtualizer.measure();
+        });
+        observer.observe(historyContent);
+        return () => {
+            observer.disconnect();
+        };
+    }, [historyEntries.length, shouldVirtualizeHistory, historyVirtualizer]);
+
+    React.useEffect(() => {
+        if (!shouldVirtualizeHistory) {
+            return;
+        }
+        const scrollEl = resolveScrollContainer();
+        const prevTotal = historyVirtualizer.getTotalSize();
+        const nearBottom = scrollEl && prevTotal > 0
+            ? scrollEl.scrollTop + scrollEl.clientHeight >= prevTotal - 10
+            : false
+
         historyVirtualizer.measure();
-    }, [historyVirtualizer, historyWidthPx, shouldVirtualizeHistory]);
+
+        // measure() defers via useAnimationFrameWithResizeObserver.
+        // Wait two frames then, if we were near the estimated bottom, scroll
+        // to the real bottom after measurements settle.
+        let frame2: number | null = null;
+        const frame1 = requestAnimationFrame(() => {
+            frame2 = requestAnimationFrame(() => {
+                if (!nearBottom) return
+                const el = resolveScrollContainer()
+                if (!el) return
+                const target = Math.max(0, el.scrollHeight - el.clientHeight)
+                if (target > 0 && Math.abs(el.scrollTop - target) > 5) {
+                    el.scrollTop = target
+                }
+            })
+        })
+        return () => {
+            cancelAnimationFrame(frame1)
+            if (frame2 !== null) {
+                cancelAnimationFrame(frame2)
+            }
+        }
+    }, [historyVirtualizer, resolveScrollContainer, shouldVirtualizeHistory]);
 
     const scheduleVirtualMeasure = React.useCallback(() => {
         if (!shouldVirtualizeHistory) {
@@ -1590,6 +1650,16 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
 
                 return applyAnchor();
             },
+
+            scrollToBottom: () => {
+                if (shouldVirtualizeHistory && historyEntries.length > 0) {
+                    historyVirtualizer.scrollToIndex(historyEntries.length - 1, { align: 'end' });
+                    return;
+                }
+                const container = resolveScrollContainer();
+                if (!container) return;
+                container.scrollTop = container.scrollHeight;
+            },
         };
 
         if (typeof ref === 'function') {
@@ -1604,7 +1674,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         return () => {
             objectRef.current = null;
         };
-    }, [findMessageElement, historyEntries.length, messageIndexMap, resolveScrollContainer, scrollHistoryIndexIntoView, scrollMessageElementIntoView, trailingStreamingEntry, turnIndexMap, ref]);
+    }, [findMessageElement, historyEntries.length, historyVirtualizer, messageIndexMap, resolveScrollContainer, scrollHistoryIndexIntoView, scrollMessageElementIntoView, shouldVirtualizeHistory, trailingStreamingEntry, turnIndexMap, ref]);
 
     const disableFadeIn = false;
 

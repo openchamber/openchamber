@@ -1,11 +1,11 @@
 import React from 'react';
-import { RiAddLine, RiDeleteBinLine, RiPlug2Line, RiRefreshLine, RiStopLine } from '@remixicon/react';
 import { Button } from '@/components/ui/button';
 import { SettingsSidebarLayout } from '@/components/sections/shared/SettingsSidebarLayout';
 import { SettingsSidebarItem } from '@/components/sections/shared/SettingsSidebarItem';
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { toast } from '@/components/ui';
+import { Icon } from "@/components/icon/Icon";
 import type { DesktopSshInstance } from '@/lib/desktopSsh';
 import { useI18n } from '@/lib/i18n';
 
@@ -145,7 +145,7 @@ export const RemoteInstancesSidebar: React.FC<RemoteInstancesSidebarProps> = ({ 
               onClick={() => void handleAdd()}
               aria-label={t('settings.remoteInstances.sidebar.actions.addSshInstance')}
             >
-              <RiAddLine className="size-4" />
+              <Icon name="add" className="size-4" />
             </Button>
           </div>
         </div>
@@ -172,7 +172,7 @@ export const RemoteInstancesSidebar: React.FC<RemoteInstancesSidebarProps> = ({ 
             actions={[
               {
                 label: isReady ? t('settings.remoteInstances.sidebar.actions.disconnect') : t('settings.remoteInstances.sidebar.actions.connect'),
-                icon: isReady ? RiStopLine : RiPlug2Line,
+                icon: isReady ? 'stop' : 'plug-2',
                 onClick: () => {
                   const op = isReady ? disconnect(instance.id) : connectWithPortRecovery(instance);
                   void op.catch((error) => {
@@ -189,7 +189,7 @@ export const RemoteInstancesSidebar: React.FC<RemoteInstancesSidebarProps> = ({ 
               },
               {
                 label: t('settings.remoteInstances.sidebar.actions.retry'),
-                icon: RiRefreshLine,
+                icon: "refresh",
                 onClick: () => {
                   if (!canRetry) return;
                   void retry(instance.id).catch((error) => {
@@ -201,7 +201,7 @@ export const RemoteInstancesSidebar: React.FC<RemoteInstancesSidebarProps> = ({ 
               },
               {
                 label: t('settings.remoteInstances.sidebar.actions.remove'),
-                icon: RiDeleteBinLine,
+                icon: "delete-bin",
                 destructive: true,
                 onClick: () => {
                   void removeInstance(instance.id).then(() => {

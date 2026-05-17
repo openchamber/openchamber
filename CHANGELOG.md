@@ -4,6 +4,34 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.11.1] - 2026-05-15
+
+- Multi-Run: added fusion for multi-run sessions, making it easier to combine parallel results into a single follow-up answer with a customizable Fusion magic prompt.
+- Multi-Run: added optional isolation and support for non-Git projects, so parallel runs are available in more workspaces and workflows without requiring branch setup.
+- Chat/Sessions: added a header session switcher with project, branch, diff, active, unread, and sub-session context, making it faster to jump between recent work.
+- Chat/Subagents: opened subagent sessions read-only in the context panel and made subagent chats read-only, making delegated work safer.
+- Chat/Shortcuts: made the agent-switching shortcut configurable and usable from the chat input/model picker, giving keyboard-heavy workflows more control over prompt setup.
+- Desktop/Mini Chat: added session switching and the new-session shortcut to Mini Chat, while preserving user-selected sessions during startup.
+- Preview: improved embedded preview proxying for absolute same-origin requests and WebSocket URLs, and avoided launching unrelated project actions when no dev-server action is detected.
+- Updates/Usage: added a setting to disable OpenCode update notifications, and quota reset times now display in your local timezone.
+- Chat/UI: animated sorted-mode tool paths more consistently and guarded tooltip rendering more defensively, keeping active tool output smoother.
+- Git: large change lists now display reliably, and branch selection stays hidden for non-Git draft sessions.
+- Settings/Skills: the skills catalog now keeps the selected source label visible when switching sources (thanks to @kjhq).
+
+## [1.11.0] - 2026-05-14
+
+- Updates/OpenCode: added in-app OpenCode update checks and upgrade actions, making it easier to keep the bundled OpenCode runtime current without leaving OpenChamber.
+- Voice: added local Whisper speech-to-text, giving voice input a private on-device transcription option.
+- Voice: synced speech recognition settings across devices and let server transcription finish processing audio when voice input stops for more reliable dictation (thanks to @kostazol).
+- Chat/Permissions: restored `@agent` mentions in sent messages and parent-session auto-accept for child-session permissions, reducing missed routing and approval friction in delegated work.
+- Chat/Input: queued messages now auto-send one at a time in FIFO order, and model/agent selections persist across reloads so draft context is less likely to reset unexpectedly (thanks to @lyxxx708, @chutastic).
+- Chat/Performance: virtualized more timeline content, deferred heavy tool output, and improved scroll-to-bottom behavior so long sessions stay smoother.
+- VSCode: improved chat sidebar command handoff, active-editor context updates, SSE cleanup, Agent Manager settings sync, and archived-session bulk delete reliability in the extension (thanks to @isanchez404, @jjdubski).
+- Git: generalized repository provider handling beyond GitHub and made commit/PR generation more tolerant of JSON wrapped in assistant text, improving Git workflows across more hosts (thanks to @kjhq).
+- Terminal: rejected file paths as terminal working directories, preserved UTF-8 replay chunks, and cleaned up WebSocket/SSE listeners more reliably during shutdown and reconnects (thanks to @isanchez404).
+- Usage/Reliability: guarded quota percentages and reset timestamps more defensively, reducing misleading usage displays with incomplete provider data (thanks to @isanchez404).
+- UI/Reliability: added smaller fixes for chunk-load recovery, locale retry behavior, stale attachment reads, scheduled tasks, session folders, and accessible Git/session controls (thanks to @isanchez404).
+
 ## [1.10.4] - 2026-05-09
 
 - Desktop/Mini Chat: improved Mini Chat session controls with current context usage in the compact header and a single header action that opens either the active session or current draft in Mini Chat.

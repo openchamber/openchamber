@@ -1,7 +1,7 @@
 import React from 'react';
-import { RiArrowRightSLine, RiCheckLine, RiCloseLine, RiEditLine, RiListCheck3, RiQuestionLine } from '@remixicon/react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Radio } from '@/components/ui/radio';
+import { Icon } from "@/components/icon/Icon";
 
 import { cn } from '@/lib/utils';
 import { isIMECompositionEvent } from '@/lib/ime';
@@ -217,7 +217,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
           {/* Header */}
           <div className="px-2 py-1.5 border-b border-border/20">
             <div className="flex items-center gap-2">
-              <RiQuestionLine className="h-3.5 w-3.5 text-primary" />
+              <Icon name="question" className="h-3.5 w-3.5 text-primary" />
               <span className="typography-meta font-medium text-muted-foreground">{t('chat.questionCard.inputNeeded')}</span>
               {isFromSubagent ? (
                 <span className="typography-micro text-muted-foreground px-1.5 py-0.5 rounded bg-foreground/5">
@@ -257,7 +257,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
                               : 'text-foreground/85 hover:text-foreground hover:bg-interactive-hover/20'
                       )}
                     >
-                      {isSummary ? <RiListCheck3 className="h-3 w-3" /> : null}
+                      {isSummary ? <Icon name="list-check-3" className="h-3 w-3" /> : null}
                       {tab.label}
                     </button>
                   );
@@ -366,7 +366,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
                     )}
                   >
                     <div className="flex items-center gap-2">
-                      <RiEditLine className={cn(
+                      <Icon name="edit" className={cn(
                         'h-3.5 w-3.5',
                         isCustomActive ? 'text-primary' : 'text-muted-foreground/50'
                       )} />
@@ -427,7 +427,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
                 'disabled:opacity-50 disabled:cursor-not-allowed'
               )}
             >
-              {requiredSatisfied ? <RiCheckLine className="h-3 w-3" /> : <RiArrowRightSLine className="h-3 w-3" />}
+              {requiredSatisfied ? <Icon name="check" className="h-3 w-3" /> : <Icon name="arrow-right-s" className="h-3 w-3" />}
               {requiredSatisfied ? t('chat.questionCard.submit') : t('chat.questionCard.next')}
             </button>
 
@@ -441,7 +441,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
                 'disabled:opacity-50 disabled:cursor-not-allowed'
               )}
             >
-              <RiCloseLine className="h-3 w-3" />
+              <Icon name="close" className="h-3 w-3" />
               {t('chat.questionCard.dismiss')}
             </button>
 

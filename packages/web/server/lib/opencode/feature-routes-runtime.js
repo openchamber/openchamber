@@ -82,6 +82,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       getProviderSources,
       removeProviderConfig,
       refreshOpenCodeAfterConfigChange,
+      buildOpenCodeUrl,
+      getOpenCodeAuthHeaders,
     });
 
     registerProjectIconRoutes(app, {

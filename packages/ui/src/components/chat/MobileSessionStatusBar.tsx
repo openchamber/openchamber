@@ -10,15 +10,6 @@ import type { ProjectEntry } from '@/lib/api/types';
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { getAgentColor } from '@/lib/agentColors';
 import {
-  RiLoader4Line,
-  RiAddLine,
-  RiDragMove2Line,
-  RiDeleteBinLine,
-  RiEditLine,
-  RiArrowUpLine,
-  RiArrowDownLine,
-} from '@remixicon/react';
-import {
   DndContext,
   closestCenter,
   KeyboardSensor,
@@ -51,6 +42,7 @@ import { Button } from '@/components/ui/button';
 import { ProjectEditDialog } from '@/components/layout/ProjectEditDialog';
 import { useDrawerSwipe } from '@/hooks/useDrawerSwipe';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { Icon } from "@/components/icon/Icon";
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useNotificationStore } from '@/sync/notification-store';
 import { useI18n } from '@/lib/i18n';
@@ -275,7 +267,7 @@ function useProjectStatus(
 
 function StatusIndicator({ isRunning, needsAttention }: { isRunning: boolean; needsAttention: boolean }) {
   if (isRunning) {
-    return <RiLoader4Line className="h-2.5 w-2.5 animate-spin text-[var(--status-info)]" />;
+    return <Icon name="loader-4" className="h-2.5 w-2.5 animate-spin text-[var(--status-info)]" />;
   }
   if (needsAttention) {
     return <div className="h-1.5 w-1.5 rounded-full bg-[var(--status-error)]" />;
@@ -287,7 +279,7 @@ function RunningIndicator({ count }: { count: number }) {
   if (count === 0) return null;
   return (
     <span className="flex items-center gap-1 text-[13px] text-[var(--status-info)]">
-      <RiLoader4Line className="h-3.5 w-3.5 animate-spin" />
+      <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin" />
       {count}
     </span>
   );
@@ -369,10 +361,9 @@ function SessionItem({
                   className="flex-shrink-0"
                   title={`Sub-session: ${getSessionTitle(child)}`}
                 >
-                  <RiLoader4Line
-                    className="h-2.5 w-2.5 animate-spin"
-                    style={{ color: `var(${childColor.var})` }}
-                  />
+                  <Icon name="loader-4" className="h-2.5 w-2.5 animate-spin"
+                    
+                    style={{ color: `var(${childColor.var})` }}/>
                 </div>
               );
             })}
@@ -428,7 +419,7 @@ function SessionStatusHeader({
   childIndicators = []
 }: SessionStatusHeaderProps) {
   const [imageFailed, setImageFailed] = React.useState(false);
-  const ProjectIcon = currentProjectIcon ? PROJECT_ICON_MAP[currentProjectIcon] : null;
+  const projectIconName = currentProjectIcon ? PROJECT_ICON_MAP[currentProjectIcon] : null;
   const imageUrl = !imageFailed ? currentProjectIconImageUrl : null;
   const projectColorVar = currentProjectColor ? (PROJECT_COLOR_MAP[currentProjectColor] ?? null) : null;
   const extraCount = childIndicators.length > 3 ? childIndicators.length - 3 : 0;
@@ -459,8 +450,8 @@ function SessionStatusHeader({
                   onError={() => setImageFailed(true)}
                 />
               </span>
-            ) : ProjectIcon && (
-              <ProjectIcon
+            ) : projectIconName && (
+              <Icon name={projectIconName}
                 className="h-2.5 w-2.5"
                 style={projectColorVar ? { color: projectColorVar } : undefined}
               />
@@ -492,10 +483,9 @@ function SessionStatusHeader({
                     className="flex-shrink-0"
                     title={`Sub-session: ${child.session.title || 'Untitled'}`}
                   >
-                    <RiLoader4Line
-                      className="h-2.5 w-2.5 animate-spin"
-                      style={{ color: `var(${childColor.var})` }}
-                    />
+                    <Icon name="loader-4" className="h-2.5 w-2.5 animate-spin"
+                      
+                      style={{ color: `var(${childColor.var})` }}/>
                   </div>
                 );
               })}
@@ -512,8 +502,6 @@ function SessionStatusHeader({
     </button>
   );
 }
-
-
 
 // Hook for long press with movement detection
 function useLongPress(
@@ -625,7 +613,7 @@ function SortableProjectItem({
   };
 
   const [imageFailed, setImageFailed] = React.useState(false);
-  const ProjectIcon = project.icon ? PROJECT_ICON_MAP[project.icon] : null;
+  const projectIconName = project.icon ? PROJECT_ICON_MAP[project.icon] : null;
   const projectIconImageUrl = !imageFailed
     ? getProjectIconImageUrl(project, {
       themeVariant: currentTheme.metadata.variant,
@@ -650,7 +638,7 @@ function SortableProjectItem({
         {...attributes}
         {...listeners}
       >
-        <RiDragMove2Line className="h-4 w-4" />
+        <Icon name="drag-move-2" className="h-4 w-4" />
       </button>
 
       {/* Project info */}
@@ -668,8 +656,8 @@ function SortableProjectItem({
               onError={() => setImageFailed(true)}
             />
           </span>
-        ) : ProjectIcon ? (
-          <ProjectIcon
+        ) : projectIconName ? (
+          <Icon name={projectIconName}
             className="h-5 w-5 flex-shrink-0"
             style={projectColorVar ? { color: projectColorVar } : undefined}
           />
@@ -690,7 +678,7 @@ function SortableProjectItem({
           disabled={isFirst}
           className="p-1.5 rounded text-[var(--surface-mutedForeground)] hover:text-[var(--surface-foreground)] hover:bg-[var(--interactive-hover)] disabled:opacity-30 disabled:cursor-not-allowed"
         >
-          <RiArrowUpLine className="h-4 w-4" />
+          <Icon name="arrow-up" className="h-4 w-4" />
         </button>
         <button
           type="button"
@@ -698,7 +686,7 @@ function SortableProjectItem({
           disabled={isLast}
           className="p-1.5 rounded text-[var(--surface-mutedForeground)] hover:text-[var(--surface-foreground)] hover:bg-[var(--interactive-hover)] disabled:opacity-30 disabled:cursor-not-allowed"
         >
-          <RiArrowDownLine className="h-4 w-4" />
+          <Icon name="arrow-down" className="h-4 w-4" />
         </button>
 
         <div className="w-px h-5 bg-[var(--interactive-border)] mx-1" />
@@ -709,7 +697,7 @@ function SortableProjectItem({
           onClick={onEdit}
           className="p-1.5 rounded text-[var(--surface-mutedForeground)] hover:text-[var(--primary-base)] hover:bg-[var(--primary-base)]/10"
         >
-          <RiEditLine className="h-4 w-4" />
+          <Icon name="edit" className="h-4 w-4" />
         </button>
 
         {/* Delete button */}
@@ -718,7 +706,7 @@ function SortableProjectItem({
           onClick={onDelete}
           className="p-1.5 rounded text-[var(--surface-mutedForeground)] hover:text-[var(--status-error)] hover:bg-[var(--status-error)]/10"
         >
-          <RiDeleteBinLine className="h-4 w-4" />
+          <Icon name="delete-bin" className="h-4 w-4" />
         </button>
       </div>
     </div>
@@ -863,7 +851,7 @@ function ProjectButton({
 }: ProjectButtonProps) {
   const { currentTheme } = useThemeSystem();
   const [imageFailed, setImageFailed] = React.useState(false);
-  const ProjectIcon = project.icon ? PROJECT_ICON_MAP[project.icon] : null;
+  const projectIconName = project.icon ? PROJECT_ICON_MAP[project.icon] : null;
   const projectIconImageUrl = !imageFailed
     ? getProjectIconImageUrl(project, {
       themeVariant: currentTheme.metadata.variant,
@@ -900,7 +888,7 @@ function ProjectButton({
       {/* Status indicators */}
       <div className="flex items-center gap-0.5">
         {status.hasRunning && (
-          <RiLoader4Line className="h-2.5 w-2.5 animate-spin text-[var(--status-info)]" />
+          <Icon name="loader-4" className="h-2.5 w-2.5 animate-spin text-[var(--status-info)]" />
         )}
         {!status.hasRunning && status.hasUnread && (
           <div className="h-1.5 w-1.5 rounded-full bg-[var(--status-error)]" />
@@ -921,8 +909,8 @@ function ProjectButton({
             onError={() => setImageFailed(true)}
           />
         </span>
-      ) : ProjectIcon && (
-        <ProjectIcon
+      ) : projectIconName && (
+        <Icon name={projectIconName}
           className="h-3.5 w-3.5"
           style={projectColorVar ? { color: projectColorVar } : undefined}
         />
@@ -1021,7 +1009,7 @@ function ProjectBar({
           className="flex items-center justify-center !py-1.5 px-2 rounded-md border border-[var(--primary-base)]/60 bg-[var(--primary-base)]/5 text-[var(--primary-base)]/80 hover:text-[var(--primary-base)] hover:bg-[var(--primary-base)]/10 !min-h-0"
           aria-label={t('chat.mobileStatus.projects.addAria')}
         >
-          <RiAddLine className="h-3 w-3" />
+          <Icon name="add" className="h-3 w-3" />
         </button>
       </div>
     );
@@ -1097,7 +1085,7 @@ function ProjectBar({
         className="flex items-center justify-center !py-1.5 px-2 rounded-md border border-[var(--primary-base)]/60 bg-[var(--primary-base)]/5 text-[var(--primary-base)]/80 hover:text-[var(--primary-base)] hover:bg-[var(--primary-base)]/10 shrink-0 !min-h-0"
         aria-label={t('chat.mobileStatus.projects.addAria')}
       >
-        <RiAddLine className="h-3.5 w-3.5" />
+        <Icon name="add" className="h-3.5 w-3.5" />
       </button>
 
       {/* Delete confirmation dialog */}

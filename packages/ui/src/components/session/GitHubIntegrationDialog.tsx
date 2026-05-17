@@ -9,16 +9,6 @@ import {
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import {
-  RiGithubLine,
-  RiLoader4Line,
-  RiSearchLine,
-  RiErrorWarningLine,
-  RiCheckLine,
-  RiGitPullRequestLine,
-  RiGitBranchLine,
-  RiCloseLine,
-} from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -27,6 +17,7 @@ import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { validateWorktreeCreate } from '@/lib/worktrees/worktreeManager';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { Icon } from "@/components/icon/Icon";
 import type {
   GitHubIssue,
   GitHubIssueSummary,
@@ -299,7 +290,7 @@ export function GitHubIntegrationDialog({
     <>
       {!isGitHubConnected ? (
         <div className="flex-1 flex flex-col items-center justify-center p-8 gap-4">
-          <RiGithubLine className="h-12 w-12 text-muted-foreground" />
+          <Icon name="github" className="h-12 w-12 text-muted-foreground" />
           <div className="text-center">
             <p className="typography-ui-label text-foreground">{t('session.githubIntegration.connect.title')}</p>
             <p className="typography-small text-muted-foreground mt-1">
@@ -312,7 +303,7 @@ export function GitHubIntegrationDialog({
         <>
           {/* Search */}
           <div className="relative mt-2">
-            <RiSearchLine className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Icon name="search" className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -329,7 +320,7 @@ export function GitHubIntegrationDialog({
               {/* Loading */}
               {loading && (
                 <div className="flex items-center justify-center h-full">
-                  <RiLoader4Line className="h-5 w-5 animate-spin text-muted-foreground" />
+                  <Icon name="loader-4" className="h-5 w-5 animate-spin text-muted-foreground" />
                 </div>
               )}
 
@@ -337,7 +328,7 @@ export function GitHubIntegrationDialog({
               {error && (
                 <div className="flex items-center justify-center h-full">
                   <div className="flex items-center gap-2 p-2 rounded-md bg-destructive/10 text-destructive">
-                    <RiErrorWarningLine className="h-4 w-4" />
+                    <Icon name="error-warning" className="h-4 w-4" />
                     <span className="typography-small">{error}</span>
                   </div>
                 </div>
@@ -391,7 +382,7 @@ export function GitHubIntegrationDialog({
                   )}
                   {loadingMore && (
                     <div className="flex items-center justify-center py-2">
-                      <RiLoader4Line className="h-4 w-4 animate-spin text-muted-foreground" />
+                      <Icon name="loader-4" className="h-4 w-4 animate-spin text-muted-foreground" />
                     </div>
                   )}
                 </div>
@@ -463,7 +454,7 @@ export function GitHubIntegrationDialog({
                   )}
                   {loadingMore && (
                     <div className="flex items-center justify-center py-2">
-                      <RiLoader4Line className="h-4 w-4 animate-spin text-muted-foreground" />
+                      <Icon name="loader-4" className="h-4 w-4 animate-spin text-muted-foreground" />
                     </div>
                   )}
                 </div>
@@ -489,7 +480,7 @@ export function GitHubIntegrationDialog({
         {/* Selected Issue/PR display - hidden on mobile (shown in header instead) */}
         {!isMobile && (selectedIssue || selectedPr) && (
           <div className="flex items-center gap-2 px-2 h-8 rounded-md bg-muted/50 border border-border/50">
-            <RiCheckLine className="h-3.5 w-3.5 text-status-success shrink-0" />
+            <Icon name="check" className="h-3.5 w-3.5 text-status-success shrink-0" />
             <span className="typography-small truncate max-w-[150px]">
               {selectedIssue
                 ? t('session.githubIntegration.selected.issueNumber', { number: selectedIssue.number })
@@ -499,7 +490,7 @@ export function GitHubIntegrationDialog({
               onClick={handleClear}
               className="text-muted-foreground hover:text-foreground shrink-0 p-0.5 rounded hover:bg-muted transition-colors"
             >
-              <RiCloseLine className="h-3.5 w-3.5" />
+              <Icon name="close" className="h-3.5 w-3.5" />
             </button>
           </div>
         )}
@@ -562,8 +553,8 @@ export function GitHubIntegrationDialog({
               <div className="w-full">
                 <SortableTabsStrip
                   items={[
-                    { id: 'issues', label: t('session.githubIntegration.tabs.issues'), icon: <RiGitBranchLine className="h-3.5 w-3.5" /> },
-                    { id: 'prs', label: t('session.githubIntegration.tabs.pullRequests'), icon: <RiGitPullRequestLine className="h-3.5 w-3.5" /> },
+                    { id: 'issues', label: t('session.githubIntegration.tabs.issues'), icon: <Icon name="git-branch" className="h-3.5 w-3.5" /> },
+                    { id: 'prs', label: t('session.githubIntegration.tabs.pullRequests'), icon: <Icon name="git-pull-request" className="h-3.5 w-3.5" /> },
                   ]}
                   activeId={activeTab}
                   onSelect={(id) => {
@@ -578,7 +569,7 @@ export function GitHubIntegrationDialog({
               {/* Selected Item Inline Display */}
               {(selectedIssue || selectedPr) && (
                 <div className="flex items-center gap-2 px-2 py-1 rounded-md bg-muted/50 border border-border/50">
-                  <RiCheckLine className="h-3.5 w-3.5 text-status-success shrink-0" />
+                  <Icon name="check" className="h-3.5 w-3.5 text-status-success shrink-0" />
                   <span className="typography-small truncate flex-1">
                     {selectedIssue
                       ? t('session.githubIntegration.selected.issueNumber', { number: selectedIssue.number })
@@ -588,7 +579,7 @@ export function GitHubIntegrationDialog({
                     onClick={handleClear}
                     className="text-muted-foreground hover:text-foreground shrink-0 p-0.5 rounded hover:bg-muted transition-colors"
                   >
-                    <RiCloseLine className="h-3.5 w-3.5" />
+                    <Icon name="close" className="h-3.5 w-3.5" />
                   </button>
                 </div>
               )}
@@ -603,7 +594,7 @@ export function GitHubIntegrationDialog({
             <DialogHeader className="flex flex-row items-center justify-between">
               <div className="flex items-center gap-3">
                 <DialogTitle className="flex items-center gap-2 shrink-0">
-                  <RiGithubLine className="h-5 w-5" />
+                  <Icon name="github" className="h-5 w-5" />
                   {t('session.githubIntegration.title')}
                 </DialogTitle>
                 
@@ -611,8 +602,8 @@ export function GitHubIntegrationDialog({
                 <div className="w-[220px]">
                   <SortableTabsStrip
                     items={[
-                      { id: 'issues', label: t('session.githubIntegration.tabs.issues'), icon: <RiGitBranchLine className="h-3.5 w-3.5" /> },
-                      { id: 'prs', label: t('session.githubIntegration.tabs.pullRequests'), icon: <RiGitPullRequestLine className="h-3.5 w-3.5" /> },
+                      { id: 'issues', label: t('session.githubIntegration.tabs.issues'), icon: <Icon name="git-branch" className="h-3.5 w-3.5" /> },
+                      { id: 'prs', label: t('session.githubIntegration.tabs.pullRequests'), icon: <Icon name="git-pull-request" className="h-3.5 w-3.5" /> },
                     ]}
                     activeId={activeTab}
                     onSelect={(id) => {

@@ -1,7 +1,6 @@
 
 import React from 'react';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
-import { RiArrowDownSLine, RiArrowRightSLine, RiExternalLinkLine } from '@remixicon/react';
 import { PatchDiff } from '@pierre/diffs/react';
 import { cn } from '@/lib/utils';
 import { SimpleMarkdownRenderer } from '../../MarkdownRenderer';
@@ -34,6 +33,7 @@ import {
     tryParseJsonOutput,
 } from '../toolRenderers';
 import { JsonTreeViewer } from '@/components/ui/JsonTreeViewer';
+import { Icon } from "@/components/icon/Icon";
 import { DiffViewToggle, type DiffViewMode } from '../DiffViewToggle';
 import { MinDurationShineText } from './MinDurationShineText';
 import { ToolRevealOnMount } from './ToolRevealOnMount';
@@ -185,6 +185,32 @@ const LiveDuration: React.FC<{ start: number; end?: number; active: boolean }> =
     const now = useDurationTickerNow(active, 250);
 
     return <>{formatDuration(start, end, now)}</>;
+};
+
+const useDeferredExpandedContent = (isExpanded: boolean) => {
+    const [shouldRender, setShouldRender] = React.useState(false);
+
+    React.useEffect(() => {
+        if (!isExpanded) {
+            setShouldRender(false);
+            return;
+        }
+
+        if (typeof window === 'undefined') {
+            setShouldRender(true);
+            return;
+        }
+
+        const frame = window.requestAnimationFrame(() => {
+            setShouldRender(true);
+        });
+
+        return () => {
+            window.cancelAnimationFrame(frame);
+        };
+    }, [isExpanded]);
+
+    return shouldRender;
 };
 
 const parseDiffStats = (metadata?: Record<string, unknown>): { added: number; removed: number } | null => {
@@ -696,7 +722,7 @@ const ToolScrollableSection: React.FC<ToolScrollableSectionProps> = ({
                 disableHorizontal ? 'overflow-y-auto overflow-x-hidden' : 'overflow-auto',
                 className,
             )}
-            size={24}
+           
         >
             <div className="w-full min-w-0">
                 {children}
@@ -1054,7 +1080,8 @@ const TaskToolSummary: React.FC<{
     isActive?: boolean;
 }> = ({ entries, isExpanded, isMobile, output, sessionId, onShowPopup, input, animateTailText = true, isActive = false }) => {
     const { t } = useI18n();
-    const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
+    const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
+    const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
     const showToolFileIcons = useUIStore((state) => state.showToolFileIcons);
     const displayEntries = entries;
 
@@ -1066,8 +1093,13 @@ const TaskToolSummary: React.FC<{
 
     const handleOpenSession = (event: React.MouseEvent) => {
         event.stopPropagation();
-        if (sessionId) {
-            setCurrentSession(sessionId);
+        if (sessionId && currentDirectory) {
+            openContextPanelTab(currentDirectory, {
+                mode: 'chat',
+                dedupeKey: `session:${sessionId}`,
+                label: agentType.charAt(0).toUpperCase() + agentType.slice(1),
+                readOnly: true,
+            });
         }
     };
 
@@ -1164,7 +1196,7 @@ const TaskToolSummary: React.FC<{
                     onPointerDown={(event) => event.stopPropagation()}
                     onClick={handleOpenSession}
                 >
-                    <RiExternalLinkLine className="h-3.5 w-3.5 flex-shrink-0" />
+                    <Icon name="external-link" className="h-3.5 w-3.5 flex-shrink-0" />
                     <span className="typography-meta text-primary font-medium">{t('chat.toolPart.openSubtask', { type: agentType.charAt(0).toUpperCase() + agentType.slice(1) })}</span>
                 </button>
             )}
@@ -1182,9 +1214,9 @@ const TaskToolSummary: React.FC<{
                         }}
                     >
                         {isOutputExpanded ? (
-                            <RiArrowDownSLine className="h-3.5 w-3.5 flex-shrink-0" />
+                            <Icon name="arrow-down-s" className="h-3.5 w-3.5 flex-shrink-0" />
                         ) : (
-                            <RiArrowRightSLine className="h-3.5 w-3.5 flex-shrink-0" />
+                            <Icon name="arrow-right-s" className="h-3.5 w-3.5 flex-shrink-0" />
                         )}
                         <span className="typography-meta text-foreground/80 font-medium">{t('chat.toolPart.output')}</span>
                     </button>
@@ -1327,20 +1359,20 @@ const renderPathLikeGitChanges = (path: string, grow = true) => {
     );
 };
 
-const renderAnimatedPathWithIcon = (path: string, _animate = true, grow = true, showFileIcons = true) => {
-    void _animate;
+const renderAnimatedPathWithIcon = (path: string, animate = true, grow = true, showFileIcons = true) => {
     const lastSlash = path.lastIndexOf('/');
 
     if (lastSlash === -1) {
         return (
             <span className={cn('min-w-0 inline-flex items-center gap-1 overflow-hidden', grow && 'flex-1')} title={path}>
                 {showFileIcons ? <FileTypeIcon filePath={path} className="h-3.5 w-3.5 flex-shrink-0" /> : null}
-                <span
+                <Text
+                    variant={animate ? 'generate-effect' : 'static'}
                     className={cn('min-w-0 truncate whitespace-nowrap typography-meta', grow && 'flex-1')}
                     style={{ color: 'var(--tools-title)' }}
                 >
                     {path}
-                </span>
+                </Text>
             </span>
         );
     }
@@ -1367,9 +1399,13 @@ const renderAnimatedPathWithIcon = (path: string, _animate = true, grow = true, 
                     {displayDir}
                 </span>
                 <span className="flex-shrink-0" style={{ color: 'var(--tools-description)' }}>/</span>
-                <span className="flex-shrink-0" style={{ color: 'var(--tools-title)' }}>
+                <Text
+                    variant={animate ? 'generate-effect' : 'static'}
+                    className="flex-shrink-0"
+                    style={{ color: 'var(--tools-title)' }}
+                >
                     {name}
-                </span>
+                </Text>
             </span>
         </span>
     );
@@ -1857,8 +1893,6 @@ const ToolPart: React.FC<ToolPartProps> = ({
         lastGitRefreshSignatureRef.current = signature;
         sessionEvents.requestGitRefresh({ directory: currentDirectory });
     }, [currentDirectory, isError, isFinalized, normalizedPartTool, part.id, status]);
-
-
 
     const shouldNotifyStructuralChange = isFinalized || isTaskTool;
 
@@ -2393,7 +2427,6 @@ const ToolPart: React.FC<ToolPartProps> = ({
         taskSessionId,
     ]);
 
-
     const taskSummaryLenRef = React.useRef<number>(taskSummaryEntries.length);
     React.useEffect(() => {
         if (!isTaskTool) {
@@ -2495,6 +2528,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
 
     const iconStyle = !isTaskTool && isError ? TOOL_ERROR_ICON_STYLE : TOOL_NORMAL_ICON_STYLE;
     const titleStyle = !isTaskTool && isError ? TOOL_ERROR_TITLE_STYLE : TOOL_NORMAL_TITLE_STYLE;
+    const shouldRenderExpandedContent = useDeferredExpandedContent(isExpanded);
 
     if (!shouldTreatAsFinalized && !isActive && !isTaskTool) {
         return null;
@@ -2538,7 +2572,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
                                 !isExpanded && (alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/tool:opacity-100')
                             )}
                         >
-                            {isExpanded ? <RiArrowDownSLine className="h-3.5 w-3.5" /> : <RiArrowRightSLine className="h-3.5 w-3.5" />}
+                            {isExpanded ? <Icon name="arrow-down-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-right-s" className="h-3.5 w-3.5" />}
                         </div>
                     </div>
                     {isMultiFileApplyPatch ? (
@@ -2638,7 +2672,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
                 />
             ) : null}
 
-            {!isTaskTool && isExpanded ? (
+            {!isTaskTool && shouldRenderExpandedContent ? (
                 <div className="relative ml-2 pl-3">
                     <span
                         aria-hidden="true"

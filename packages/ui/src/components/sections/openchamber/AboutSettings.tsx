@@ -1,5 +1,4 @@
 import React from 'react';
-import { RiDiscordFill, RiDownloadLine, RiGithubFill, RiLoaderLine, RiTwitterXFill } from '@remixicon/react';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useShallow } from 'zustand/react/shallow';
 import { UpdateDialog } from '@/components/ui/UpdateDialog';
@@ -7,6 +6,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { toast } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 
 const GITHUB_URL = 'https://github.com/btriapitsyn/openchamber';
@@ -85,7 +85,7 @@ export const AboutSettings: React.FC = () => {
               onClick={() => setUpdateDialogOpen(true)}
               className="flex items-center gap-1 typography-meta text-[var(--primary-base)] hover:underline"
             >
-              <RiDownloadLine className="h-3.5 w-3.5" />
+              <Icon name="download" className="h-3.5 w-3.5" />
               {t('settings.openchamber.about.actions.update')}
             </button>
           )}
@@ -103,7 +103,7 @@ export const AboutSettings: React.FC = () => {
             rel="noopener noreferrer"
             className="flex items-center gap-1 typography-meta text-muted-foreground hover:text-foreground transition-colors"
           >
-            <RiGithubFill className="h-3.5 w-3.5" />
+            <Icon name="github-fill" className="h-3.5 w-3.5" />
             <span>GitHub</span>
           </a>
 
@@ -113,7 +113,7 @@ export const AboutSettings: React.FC = () => {
             rel="noopener noreferrer"
             className="flex items-center gap-1 typography-meta text-muted-foreground hover:text-foreground transition-colors"
           >
-            <RiDiscordFill className="h-3.5 w-3.5" />
+            <Icon name="discord-fill" className="h-3.5 w-3.5" />
             <span>Discord</span>
           </a>
 
@@ -123,7 +123,7 @@ export const AboutSettings: React.FC = () => {
             rel="noopener noreferrer"
             className="flex items-center gap-1 typography-meta text-muted-foreground hover:text-foreground transition-colors"
           >
-            <RiTwitterXFill className="h-3.5 w-3.5" />
+            <Icon name="twitter-xfill" className="h-3.5 w-3.5" />
             <span>@btriapitsyn</span>
           </a>
         </div>
@@ -144,7 +144,6 @@ export const AboutSettings: React.FC = () => {
     );
   }
 
-
   // Desktop layout (redesigned)
   return (
     <div className="mb-8">
@@ -164,7 +163,7 @@ export const AboutSettings: React.FC = () => {
           <div className="flex items-center gap-3">
             {updateStore.checking && (
               <div className="flex items-center gap-2 text-muted-foreground">
-                <RiLoaderLine className="h-4 w-4 animate-spin" />
+                <Icon name="loader" className="h-4 w-4 animate-spin" />
                 <span className="typography-meta">{t('settings.openchamber.about.state.checking')}</span>
               </div>
             )}
@@ -174,7 +173,7 @@ export const AboutSettings: React.FC = () => {
                 variant="default"
                 onClick={() => setUpdateDialogOpen(true)}
               >
-                <RiDownloadLine className="h-4 w-4 mr-1" />
+                <Icon name="download" className="h-4 w-4 mr-1" />
                 {t('settings.openchamber.about.actions.updateToVersion', { version: updateStore.info?.version || '' })}
               </Button>
             )}
@@ -206,7 +205,7 @@ export const AboutSettings: React.FC = () => {
             rel="noopener noreferrer"
             className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground typography-meta transition-colors"
           >
-            <RiGithubFill className="h-4 w-4" />
+            <Icon name="github-fill" className="h-4 w-4" />
             <span>GitHub</span>
           </a>
 
@@ -216,7 +215,7 @@ export const AboutSettings: React.FC = () => {
             rel="noopener noreferrer"
             className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground typography-meta transition-colors"
           >
-            <RiTwitterXFill className="h-4 w-4" />
+            <Icon name="twitter-xfill" className="h-4 w-4" />
             <span>@btriapitsyn</span>
           </a>
         </div>

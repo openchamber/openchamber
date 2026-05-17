@@ -16,6 +16,7 @@ release
 /tsc
 /openchamber@*
 local-dev*
+.tmp/
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

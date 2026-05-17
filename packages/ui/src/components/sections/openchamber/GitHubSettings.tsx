@@ -8,8 +8,8 @@ import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
 import { openExternalUrl } from '@/lib/url';
 import { useI18n } from '@/lib/i18n';
-import { RiGithubFill, RiInformationLine } from '@remixicon/react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Icon } from "@/components/icon/Icon";
 
 type GitHubUser = {
   login: string;
@@ -246,7 +246,7 @@ export const GitHubSettings: React.FC = () => {
           <h3 className="typography-ui-header font-semibold text-foreground">GitHub</h3>
           <Tooltip>
             <TooltipTrigger asChild>
-              <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+              <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
             </TooltipTrigger>
             <TooltipContent sideOffset={8} className="max-w-xs">
               {t('settings.github.page.tooltip.connectAccount')}
@@ -276,7 +276,7 @@ export const GitHubSettings: React.FC = () => {
                   {user?.name?.trim() || user?.login || 'GitHub'}
                 </div>
                 <div className={cn("flex items-center gap-2 typography-meta text-muted-foreground mt-0.5", isMobile ? "flex-wrap" : "truncate")}>
-                  <RiGithubFill className="h-3.5 w-3.5 shrink-0" />
+                  <Icon name="github-fill" className="h-3.5 w-3.5 shrink-0" />
                   <span className="font-mono">{user?.login || t('settings.github.page.label.unknownUser')}</span>
                   {user?.email && <span className="opacity-50">•</span>}
                   {user?.email && <span>{user.email}</span>}
@@ -329,7 +329,7 @@ export const GitHubSettings: React.FC = () => {
                         />
                       ) : (
                         <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[var(--interactive-border)] bg-[var(--surface-muted)]">
-                          <RiGithubFill className="h-3 w-3 text-muted-foreground" />
+                          <Icon name="github-fill" className="h-3 w-3 text-muted-foreground" />
                         </div>
                       )}
                       <div className="min-w-0 flex flex-col">

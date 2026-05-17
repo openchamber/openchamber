@@ -1,5 +1,4 @@
 import * as React from 'react';
-import { RiArrowDownSLine, RiLoader4Line, RiSplitCellsHorizontal, RiSparklingLine } from '@remixicon/react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,6 +14,7 @@ import {
   CommandList,
 } from '@/components/ui/command';
 import { toast } from '@/components/ui';
+import { Icon } from "@/components/icon/Icon";
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
 import { useUIStore } from '@/stores/useUIStore';
@@ -344,7 +344,7 @@ export const IntegrateCommitsSection: React.FC<{
     <section className={containerClassName}>
       <div className={headerClassName}>
         <div className="flex items-center gap-2 min-w-0">
-          <RiSplitCellsHorizontal className="size-4 text-muted-foreground" />
+          <Icon name="split-cells-horizontal" className="size-4 text-muted-foreground" />
           <h3 className="typography-ui-header font-semibold text-foreground truncate">{t('gitView.integrate.title')}</h3>
           {ui.kind === 'ready' && ui.plan.commits.length > 0 ? (
             <span className="typography-meta text-muted-foreground truncate">
@@ -354,7 +354,7 @@ export const IntegrateCommitsSection: React.FC<{
         </div>
         <div className="flex items-center gap-2">
           {ui.kind === 'loading' || ui.kind === 'running' ? (
-            <RiLoader4Line className="size-4 animate-spin text-muted-foreground" />
+            <Icon name="loader-4" className="size-4 animate-spin text-muted-foreground" />
           ) : null}
         </div>
       </div>
@@ -375,7 +375,7 @@ export const IntegrateCommitsSection: React.FC<{
                 <Button variant="outline" size="sm" className="gap-1.5">
                   {t('gitView.integrate.target')}
                   <span className="max-w-[160px] truncate font-mono text-xs text-muted-foreground">{targetBranch}</span>
-                  <RiArrowDownSLine className="size-4 opacity-60" />
+                  <Icon name="arrow-down-s" className="size-4 opacity-60" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent
@@ -495,7 +495,7 @@ export const IntegrateCommitsSection: React.FC<{
                   disabled={!currentSessionId}
                   onClick={() => void handleResolveWithAi({ state: ui.state, details: ui.details }, false)}
                 >
-                  <RiSparklingLine className="size-3.5" />
+                  <Icon name="sparkling" className="size-3.5" />
                   {t('gitView.integrate.currentSession')}
                 </Button>
                 <Button
@@ -504,7 +504,7 @@ export const IntegrateCommitsSection: React.FC<{
                   className="typography-meta gap-1"
                   onClick={() => void handleResolveWithAi({ state: ui.state, details: ui.details }, true)}
                 >
-                  <RiSparklingLine className="size-3.5" />
+                  <Icon name="sparkling" className="size-3.5" />
                   {t('gitView.integrate.newSession')}
                 </Button>
                 <Button size="sm" className="typography-meta" onClick={() => void handleContinue()}>

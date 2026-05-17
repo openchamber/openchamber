@@ -29,6 +29,7 @@ const __dirname = path.dirname(__filename);
 
 const DEFAULT_PORT = 3000;
 const DEFAULT_TAIL_LINES = 200;
+const DAEMON_READY_TIMEOUT_MS = 30000;
 const LOG_ROTATE_MAX_BYTES = 10 * 1024 * 1024;
 const LOG_ROTATE_KEEP = 5;
 const TUNNEL_PROFILES_VERSION = 1;
@@ -3006,30 +3007,43 @@ const commands = {
     child.unref();
     serveSpin?.start(`Starting OpenChamber on port ${targetPort === 0 ? 'auto' : targetPort}...`);
 
-    const resolvedPort = await new Promise((resolve) => {
-      let settled = false;
-      const timeout = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        resolve(targetPort);
-      }, 5000);
+    let resolvedPort;
+    try {
+      resolvedPort = await new Promise((resolve, reject) => {
+        let settled = false;
+        const timeout = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          reject(new Error(`OpenChamber daemon did not report ready within ${DAEMON_READY_TIMEOUT_MS / 1000}s`));
+        }, DAEMON_READY_TIMEOUT_MS);
 
-      child.on('message', (msg) => {
-        if (settled) return;
-        if (msg && msg.type === 'openchamber:ready' && typeof msg.port === 'number') {
+        child.on('message', (msg) => {
+          if (settled) return;
+          if (msg && msg.type === 'openchamber:ready' && typeof msg.port === 'number') {
+            settled = true;
+            clearTimeout(timeout);
+            resolve(msg.port);
+          }
+        });
+
+        child.on('error', (error) => {
+          if (settled) return;
           settled = true;
           clearTimeout(timeout);
-          resolve(msg.port);
-        }
-      });
+          reject(error);
+        });
 
-      child.on('exit', () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timeout);
-        resolve(targetPort);
+        child.on('exit', (code, signal) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeout);
+          reject(new Error(`OpenChamber daemon exited before reporting ready${signal ? ` (${signal})` : ` (code ${code ?? 'unknown'})`}`));
+        });
       });
-    });
+    } catch (error) {
+      await terminateProcessTree(child.pid, { gracefulTimeoutMs: 1500, forceTimeoutMs: 1500 });
+      throw error;
+    }
 
     try {
       if (typeof child.disconnect === 'function' && child.connected) {

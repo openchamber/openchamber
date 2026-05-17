@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { RiArrowDownSLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
+import { Icon } from "@/components/icon/Icon";
 
 interface SidebarGroupProps {
   /** Group display label (e.g. "business", "automation-ai") */
@@ -64,7 +64,7 @@ export const SidebarGroup: React.FC<SidebarGroupProps> = ({
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
         )}
       >
-        <RiArrowDownSLine
+        <Icon name="arrow-down-s"
           className={cn(
             'h-3.5 w-3.5 flex-shrink-0 transition-transform duration-200',
             !expanded && '-rotate-90',

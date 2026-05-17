@@ -16,6 +16,7 @@ type ScrollableOverlayProps = React.HTMLAttributes<HTMLElement> & {
   preventOverscroll?: boolean;
   useScrollShadow?: boolean;
   scrollShadowSize?: number;
+  userIntentOnly?: boolean;
   /** Forwarded to the inner element (e.g. textarea). */
   disabled?: boolean;
 };
@@ -36,6 +37,7 @@ export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlay
     preventOverscroll = false,
     useScrollShadow = false,
     scrollShadowSize,
+    userIntentOnly = false,
     ...rest
   }, ref) => {
     const containerRef = React.useRef<HTMLElement | null>(null);
@@ -91,6 +93,7 @@ export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlay
           className={scrollbarClassName}
           disableHorizontal={disableHorizontal}
           observeMutations={observeMutations}
+          userIntentOnly={userIntentOnly}
         />
       </div>
     );

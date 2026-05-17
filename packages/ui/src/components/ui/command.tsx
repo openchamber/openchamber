@@ -2,10 +2,10 @@
 
 import * as React from "react"
 import { Command as CommandPrimitive } from "cmdk"
-import { RiCommandLine, RiArrowUpLine, RiSearchLine } from "@remixicon/react";
 
 import { cn } from "@/lib/utils"
 import { ScrollableOverlay } from "@/components/ui/ScrollableOverlay";
+import { Icon } from "@/components/icon/Icon";
 import {
   Dialog,
   DialogContent,
@@ -79,7 +79,7 @@ const CommandInput = React.forwardRef<
        data-slot="command-input-wrapper"
        className="flex h-8 items-center gap-2 border-b px-3"
      >
-       <RiSearchLine className="size-4 shrink-0 opacity-50" />
+       <Icon name="search" className="size-4 shrink-0 opacity-50" />
        <CommandPrimitive.Input
         ref={ref}
         data-slot="command-input"
@@ -189,11 +189,11 @@ function CommandShortcut({
     }
 
     if (normalized === 'cmd' || normalized === '⌘' || normalized === 'command' || normalized === 'meta') {
-      return <RiCommandLine className="size-3.5" />;
+      return <Icon name="command" className="size-3.5" />;
     }
 
     if (normalized === 'shift' || normalized === '⇧') {
-      return <RiArrowUpLine className="size-3.5" />;
+      return <Icon name="arrow-up" className="size-3.5" />;
     }
 
     return (

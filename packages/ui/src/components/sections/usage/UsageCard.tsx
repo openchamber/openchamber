@@ -1,6 +1,6 @@
 import React from 'react';
 import type { UsageWindow } from '@/types';
-import { formatQuotaValueLabel, formatWindowLabel, calculatePace, calculateExpectedUsagePercent } from '@/lib/quota';
+import { formatQuotaValueLabel, formatQuotaResetLabel, formatWindowLabel, calculatePace, calculateExpectedUsagePercent } from '@/lib/quota';
 import { UsageProgressBar } from './UsageProgressBar';
 import { PaceIndicator } from './PaceIndicator';
 import { useQuotaStore } from '@/stores/useQuotaStore';
@@ -27,7 +27,7 @@ export const UsageCard: React.FC<UsageCardProps> = ({
   const displayPercent = displayMode === 'remaining' ? window.remainingPercent : window.usedPercent;
   const barLabel = displayMode === 'remaining' ? 'remaining' : 'used';
   const percentLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
-  const resetLabel = window.resetAfterFormatted ?? window.resetAtFormatted ?? '';
+  const resetLabel = formatQuotaResetLabel(window.resetAt, window.resetAfterFormatted ?? window.resetAtFormatted);
   const windowLabel = formatWindowLabel(title);
 
   const paceInfo = React.useMemo(() => {

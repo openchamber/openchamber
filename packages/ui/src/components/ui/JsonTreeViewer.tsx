@@ -1,5 +1,4 @@
 import React from 'react';
-import { RiArrowDownSLine, RiArrowRightSLine } from '@remixicon/react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 
 import {
@@ -10,6 +9,7 @@ import {
   type JsonTreeNode,
   type FlatJsonNode,
 } from '@/lib/jsonTreeUtils';
+import { Icon } from "@/components/icon/Icon";
 
 interface JsonTreeViewerProps {
   data: unknown;
@@ -129,9 +129,9 @@ const JsonRow = React.memo(
             className="mr-1 flex h-4 w-4 shrink-0 items-center justify-center rounded-sm hover:bg-[var(--interactive-hover)] text-muted-foreground"
           >
             {isExpanded ? (
-              <RiArrowDownSLine className="h-3 w-3" />
+              <Icon name="arrow-down-s" className="h-3 w-3" />
             ) : (
-              <RiArrowRightSLine className="h-3 w-3" />
+              <Icon name="arrow-right-s" className="h-3 w-3" />
             )}
           </button>
         ) : (

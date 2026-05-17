@@ -5,7 +5,6 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
 import { useSkillsStore, type SkillConfig, type SkillScope, type SupportingFile, type PendingFile } from '@/stores/useSkillsStore';
 import { useShallow } from 'zustand/react/shallow';
-import { RiAddLine, RiBookOpenLine, RiDeleteBinLine, RiFileLine, RiFolderLine, RiRobot2Line, RiUser3Line } from '@remixicon/react';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
   Select,
@@ -21,6 +20,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Icon } from "@/components/icon/Icon";
 import { SkillsCatalogPage } from './catalog/SkillsCatalogPage';
 import {
   SKILL_LOCATION_OPTIONS,
@@ -359,7 +359,7 @@ const SkillsInstalledPage: React.FC = () => {
     return (
       <div className="flex h-full items-center justify-center px-4">
         <div className="text-center text-muted-foreground">
-          <RiBookOpenLine className="mx-auto mb-3 h-10 w-10 sm:h-12 sm:w-12 opacity-50" />
+          <Icon name="book-open" className="mx-auto mb-3 h-10 w-10 sm:h-12 sm:w-12 opacity-50" />
           <p className="typography-body">{t('settings.skills.page.empty.title')}</p>
           <p className="typography-meta mt-1 opacity-75">{t('settings.skills.page.empty.description')}</p>
         </div>
@@ -433,11 +433,11 @@ const SkillsInstalledPage: React.FC = () => {
                   >
                     <SelectTrigger className="w-fit gap-1.5">
                       {draftScope === 'user' ? (
-                        <RiUser3Line className="h-3.5 w-3.5" />
+                        <Icon name="user-3" className="h-3.5 w-3.5" />
                       ) : (
-                        <RiFolderLine className="h-3.5 w-3.5" />
+                        <Icon name="folder" className="h-3.5 w-3.5" />
                       )}
-                      {draftSource === 'agents' ? <RiRobot2Line className="h-3.5 w-3.5" /> : null}
+                      {draftSource === 'agents' ? <Icon name="robot-2" className="h-3.5 w-3.5" /> : null}
                       <span>{locationLabelText(locationValueFrom(draftScope, draftSource))}</span>
                     </SelectTrigger>
                     <SelectContent align="start">
@@ -445,8 +445,8 @@ const SkillsInstalledPage: React.FC = () => {
                         <SelectItem key={option.value} value={option.value}>
                           <div className="flex flex-col gap-0.5">
                             <div className="flex items-center gap-2">
-                              {option.scope === 'user' ? <RiUser3Line className="h-3.5 w-3.5" /> : <RiFolderLine className="h-3.5 w-3.5" />}
-                              {option.source === 'agents' ? <RiRobot2Line className="h-3.5 w-3.5" /> : null}
+                              {option.scope === 'user' ? <Icon name="user-3" className="h-3.5 w-3.5" /> : <Icon name="folder" className="h-3.5 w-3.5" />}
+                              {option.source === 'agents' ? <Icon name="robot-2" className="h-3.5 w-3.5" /> : null}
                               <span>{locationLabelText(option.value)}</span>
                             </div>
                             <span className="typography-micro text-muted-foreground ml-6">{locationDescriptionText(option.value)}</span>
@@ -501,7 +501,7 @@ const SkillsInstalledPage: React.FC = () => {
               {t('settings.skills.page.section.supportingFiles')}
             </h3>
             <Button variant="outline" size="xs" className="!font-normal gap-1" onClick={handleAddFile}>
-              <RiAddLine className="h-3.5 w-3.5" /> {t('settings.skills.page.actions.addFile')}
+              <Icon name="add" className="h-3.5 w-3.5" /> {t('settings.skills.page.actions.addFile')}
             </Button>
           </div>
 
@@ -525,7 +525,7 @@ const SkillsInstalledPage: React.FC = () => {
                       className="flex items-center gap-2 py-1.5 cursor-pointer group"
                       onClick={() => handleEditFile(file.path)}
                     >
-                      <RiFileLine className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                      <Icon name="file" className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
                       <span className="typography-ui-label text-foreground truncate">{file.path}</span>
                       {isNewSkill && (
                         <span className="typography-micro text-[var(--status-warning)] bg-[var(--status-warning)]/10 px-1.5 py-0.5 rounded flex-shrink-0">
@@ -540,7 +540,7 @@ const SkillsInstalledPage: React.FC = () => {
                           handleDeleteFile(file.path);
                         }}
                       >
-                        <RiDeleteBinLine className="h-3 w-3" />
+                        <Icon name="delete-bin" className="h-3 w-3" />
                       </Button>
                     </div>
                   ))}

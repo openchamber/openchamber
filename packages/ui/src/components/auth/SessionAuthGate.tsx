@@ -1,5 +1,4 @@
 import React from 'react';
-import { RiLockLine, RiLockUnlockLine, RiLoader4Line } from '@remixicon/react';
 import { browserSupportsWebAuthn } from '@simplewebauthn/browser';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -10,6 +9,7 @@ import { syncDesktopSettings, initializeAppearancePreferences } from '@/lib/pers
 import { applyPersistedDirectoryPreferences } from '@/lib/directoryPersistence';
 import { DesktopHostSwitcherInline } from '@/components/desktop/DesktopHostSwitcher';
 import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
+import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import {
   authenticateWithPasskey,
@@ -483,9 +483,9 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
                   disabled={isSubmitting || (isPasskeyBusy && activePasskeyAction !== 'auth')}
                 >
                   {isPasskeyBusy ? (
-                    <RiLoader4Line className="h-4 w-4 animate-spin" />
+                    <Icon name="loader-4" className="h-4 w-4 animate-spin" />
                   ) : (
-                    <RiLockUnlockLine className="h-4 w-4" />
+                    <Icon name="lock-unlock" className="h-4 w-4" />
                   )}
                   <span>{isPasskeyBusy && activePasskeyAction === 'auth'
                     ? t('sessionAuth.actions.cancelPasskey')
@@ -494,7 +494,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
               )}
               <div className="flex items-center gap-2">
                 <div className="relative flex-1">
-                  <RiLockLine className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/60" />
+                  <Icon name="lock" className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/60" />
                   <Input
                     id="openchamber-ui-password"
                     ref={passwordInputRef}
@@ -521,9 +521,9 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
                   aria-label={isSubmitting ? t('sessionAuth.actions.unlockingAria') : t('sessionAuth.actions.unlockAria')}
                 >
                   {isSubmitting ? (
-                    <RiLoader4Line className="h-4 w-4 animate-spin" />
+                    <Icon name="loader-4" className="h-4 w-4 animate-spin" />
                   ) : (
-                    <RiLockUnlockLine className="h-4 w-4" />
+                    <Icon name="lock-unlock" className="h-4 w-4" />
                   )}
                 </Button>
               </div>

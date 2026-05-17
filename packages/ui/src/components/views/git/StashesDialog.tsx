@@ -1,10 +1,10 @@
 import React from 'react';
-import { RiArchiveStackLine, RiDeleteBinLine, RiInboxArchiveLine, RiInboxUnarchiveFill, RiInboxUnarchiveLine, RiLoader4Line, RiSearchLine } from '@remixicon/react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from '@/components/ui';
+import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { GitStashEntry } from '@/lib/api/types';
@@ -124,7 +124,7 @@ export const StashesDialog: React.FC<StashesDialogProps> = ({
       <DialogContent className="max-w-2xl max-h-[70vh] flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <RiArchiveStackLine className="h-5 w-5" />
+            <Icon name="archive-stack" className="h-5 w-5" />
             {t('gitView.stashes.title')}
           </DialogTitle>
           <DialogDescription>{t('gitView.stashes.description')}</DialogDescription>
@@ -140,7 +140,7 @@ export const StashesDialog: React.FC<StashesDialogProps> = ({
               className="flex-1"
             />
             <Button onClick={handleCreate} disabled={!hasUncommittedChanges || isOperating || !directory}>
-              {operation === 'create' ? <RiLoader4Line className="size-4 animate-spin" /> : <RiInboxArchiveLine className="size-4" />}
+              {operation === 'create' ? <Icon name="loader-4" className="size-4 animate-spin" /> : <Icon name="inbox-archive" className="size-4" />}
               {t('gitView.stashes.actions.stashCurrentWithCount', { count: uncommittedFileCount })}
             </Button>
           </div>
@@ -148,13 +148,13 @@ export const StashesDialog: React.FC<StashesDialogProps> = ({
         </div>
 
         <div className="relative mt-2">
-          <RiSearchLine className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Icon name="search" className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('gitView.stashes.searchPlaceholder')} className="pl-9" />
         </div>
 
         <div className="flex-1 overflow-y-auto">
           {isLoading ? (
-            <div className="flex items-center justify-center py-10 text-muted-foreground"><RiLoader4Line className="size-5 animate-spin" /></div>
+            <div className="flex items-center justify-center py-10 text-muted-foreground"><Icon name="loader-4" className="size-5 animate-spin" /></div>
           ) : filtered.length === 0 ? (
             <div className="py-8 text-center text-muted-foreground">{query ? t('gitView.stashes.empty.search') : t('gitView.stashes.empty.list')}</div>
           ) : filtered.map((stash, index) => (
@@ -172,9 +172,9 @@ export const StashesDialog: React.FC<StashesDialogProps> = ({
                 </p>
               </div>
               <div className="mr-2 flex shrink-0 items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100">
-                <StashIconButton label={t('gitView.stashes.actions.apply')} loading={operation === `apply:${stash.ref}`} onClick={() => runStashAction(stash, 'apply')} disabled={isOperating}><RiInboxUnarchiveLine className="size-4" /></StashIconButton>
-                <StashIconButton label={t('gitView.stashes.actions.pop')} loading={operation === `pop:${stash.ref}`} onClick={() => runStashAction(stash, 'pop')} disabled={isOperating}><RiInboxUnarchiveFill className="size-4" /></StashIconButton>
-                <StashIconButton label={t('gitView.stashes.actions.drop')} loading={operation === `drop:${stash.ref}`} onClick={() => runStashAction(stash, 'drop')} disabled={isOperating} destructive><RiDeleteBinLine className="size-4" /></StashIconButton>
+                <StashIconButton label={t('gitView.stashes.actions.apply')} loading={operation === `apply:${stash.ref}`} onClick={() => runStashAction(stash, 'apply')} disabled={isOperating}><Icon name="inbox-unarchive" className="size-4" /></StashIconButton>
+                <StashIconButton label={t('gitView.stashes.actions.pop')} loading={operation === `pop:${stash.ref}`} onClick={() => runStashAction(stash, 'pop')} disabled={isOperating}><Icon name="inbox-unarchive-fill" className="size-4" /></StashIconButton>
+                <StashIconButton label={t('gitView.stashes.actions.drop')} loading={operation === `drop:${stash.ref}`} onClick={() => runStashAction(stash, 'drop')} disabled={isOperating} destructive><Icon name="delete-bin" className="size-4" /></StashIconButton>
               </div>
             </div>
           ))}
@@ -187,8 +187,8 @@ export const StashesDialog: React.FC<StashesDialogProps> = ({
 const StashIconButton: React.FC<{ label: string; loading: boolean; disabled: boolean; destructive?: boolean; onClick: () => void; children: React.ReactNode }> = ({ label, loading, disabled, destructive, onClick, children }) => (
   <Tooltip>
     <TooltipTrigger asChild>
-      <button type="button" className={cn('flex h-6 w-6 items-center justify-center transition-colors disabled:opacity-50', destructive ? 'text-[var(--status-error)] hover:text-[var(--status-error)]' : 'text-muted-foreground hover:text-foreground')} onClick={onClick} disabled={disabled}>
-        {loading ? <RiLoader4Line className="size-4 animate-spin" /> : children}
+      <button type="button" aria-label={label} aria-busy={loading || undefined} className={cn('flex h-6 w-6 items-center justify-center transition-colors disabled:opacity-50', destructive ? 'text-[var(--status-error)] hover:text-[var(--status-error)]' : 'text-muted-foreground hover:text-foreground')} onClick={onClick} disabled={disabled}>
+        {loading ? <Icon name="loader-4" className="size-4 animate-spin" /> : children}
       </button>
     </TooltipTrigger>
     <TooltipContent sideOffset={6}>{label}</TooltipContent>

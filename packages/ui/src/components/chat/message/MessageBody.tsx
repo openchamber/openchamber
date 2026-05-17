@@ -4,7 +4,7 @@ import type { Part } from '@opencode-ai/sdk/v2';
 import UserTextPart from './parts/UserTextPart';
 import ToolPart from './parts/ToolPart';
 import AssistantTextPart from './parts/AssistantTextPart';
-import ReasoningPart from './parts/ReasoningPart';
+import ReasoningPart, { MergedReasoningPart } from './parts/ReasoningPart';
 import { MessageFilesDisplay } from '../FileAttachment';
 import { TurnChangedFilesDropdown } from '../TurnChangedFilesDropdown';
 import type { ToolPart as ToolPartType } from '@opencode-ai/sdk/v2';
@@ -16,7 +16,6 @@ import { FadeInOnReveal } from './FadeInOnReveal';
 import { Button } from '@/components/ui/button';
 import { SaveProjectPlanDialog } from '@/components/session/SaveProjectPlanDialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { RiCheckLine, RiFileCopyLine, RiChatNewLine, RiArrowGoBackLine, RiGitBranchLine, RiHourglassLine, RiTimeLine, RiVolumeUpLine, RiStopLine, RiImageDownloadLine, RiLoader4Line, RiErrorWarningLine, RiBookletLine, RiGlobalLine, RiInformationLine } from '@remixicon/react';
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import type { ContentChangeReason } from '@/hooks/useChatAutoFollow';
 
@@ -34,6 +33,7 @@ import { useChatSurfaceMode } from '@/components/chat/useChatSurfaceMode';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { toPng } from 'html-to-image';
 import { toast } from '@/components/ui';
+import { Icon } from "@/components/icon/Icon";
 import { formatTimestampForDisplay } from './timeFormat';
 import { ToolRevealOnMount } from './parts/ToolRevealOnMount';
 import { StaticToolRow } from './parts/ProgressiveGroup';
@@ -45,6 +45,7 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useSessions } from '@/sync/sync-context';
 import { useI18n } from '@/lib/i18n';
 import { extractLoopbackUrls } from '@/lib/url';
+
 
 const CONTAIN_LAYOUT_STYLE = { contain: 'layout' as const, transform: 'translateZ(0)' };
 const MESSAGE_FOOTER_CONTAINER_STYLE = { containerType: 'inline-size' as const, containerName: 'message-footer' };
@@ -89,10 +90,10 @@ const normalizeSubtaskModel = (model: SubtaskPartLike['model']): string | null =
     return `${providerID}/${modelID}`;
 };
 
-
 const UserSubtaskPart: React.FC<{ part: SubtaskPartLike }> = ({ part }) => {
     const [expanded, setExpanded] = React.useState(false);
-    const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
+    const effectiveDirectory = useEffectiveDirectory();
+    const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
     const { t } = useI18n();
 
     const description = typeof part.description === 'string' ? part.description.trim() : '';
@@ -152,7 +153,13 @@ const UserSubtaskPart: React.FC<{ part: SubtaskPartLike }> = ({ part }) => {
                         type="button"
                         className="typography-meta text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2"
                         onClick={() => {
-                            void setCurrentSession(taskSessionID);
+                            if (!effectiveDirectory) return;
+                            openContextPanelTab(effectiveDirectory, {
+                                mode: 'chat',
+                                dedupeKey: `session:${taskSessionID}`,
+                                label: description || agent || t('contextPanel.mode.chat'),
+                                readOnly: true,
+                            });
                         }}
                     >
                         {t('chat.messageBody.subtask.openSession')}
@@ -244,7 +251,7 @@ const UserShellActionPart: React.FC<{ part: ShellActionPartLike }> = ({ part }) 
                             aria-label={copiedOutput ? t('chat.messageBody.shellCommand.copied') : t('chat.messageBody.shellCommand.copyOutput')}
                             title={copiedOutput ? t('chat.messageBody.shellCommand.copied') : t('chat.messageBody.shellCommand.copyOutput')}
                         >
-                            {copiedOutput ? <RiCheckLine className="h-3.5 w-3.5" /> : <RiFileCopyLine className="h-3.5 w-3.5" />}
+                            {copiedOutput ? <Icon name="check" className="h-3.5 w-3.5" /> : <Icon name="file-copy" className="h-3.5 w-3.5" />}
                         </button>
                     </div>
                     {expanded ? (
@@ -267,8 +274,6 @@ const formatTurnDuration = (durationMs: number): string => {
     const seconds = Math.round(totalSeconds % 60);
     return `${minutes}m ${seconds}s`;
 };
-
-
 
 interface MessageBodyProps {
     sessionId?: string;
@@ -463,7 +468,7 @@ const UserMessageBody = React.memo(({ messageId, parts, isMobile, alwaysShowActi
                                     onRevert();
                                 }}
                             >
-                                <RiArrowGoBackLine className="h-3 w-3" />
+                                <Icon name="arrow-go-back" className="h-3 w-3" />
                             </Button>
                         </TooltipTrigger>
                         <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.revert')}</TooltipContent>
@@ -484,7 +489,7 @@ const UserMessageBody = React.memo(({ messageId, parts, isMobile, alwaysShowActi
                                     effectiveOnFork();
                                 }}
                             >
-                                <RiGitBranchLine className="h-3 w-3" />
+                                <Icon name="git-branch" className="h-3 w-3" />
                             </Button>
                         </TooltipTrigger>
                         <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.fork')}</TooltipContent>
@@ -510,9 +515,9 @@ const UserMessageBody = React.memo(({ messageId, parts, isMobile, alwaysShowActi
                                 }}
                             >
                                 {isMessageCopied ? (
-                                    <RiCheckLine className="h-3 w-3 text-[color:var(--status-success)]" />
+                                    <Icon name="check" className="h-3 w-3 text-[color:var(--status-success)]" />
                                 ) : (
-                                    <RiFileCopyLine className="h-3 w-3" />
+                                    <Icon name="file-copy" className="h-3 w-3" />
                                 )}
                             </Button>
                         </TooltipTrigger>
@@ -770,9 +775,9 @@ const AssistantMessageActionButtons = React.memo(({
                             }}
                         >
                             {isMessageCopied ? (
-                                <RiCheckLine className="h-3.5 w-3.5 text-[color:var(--status-success)]" />
+                                <Icon name="check" className="h-3.5 w-3.5 text-[color:var(--status-success)]" />
                             ) : (
-                                <RiFileCopyLine className="h-3.5 w-3.5" />
+                                <Icon name="file-copy" className="h-3.5 w-3.5" />
                             )}
                         </Button>
                     </TooltipTrigger>
@@ -796,9 +801,9 @@ const AssistantMessageActionButtons = React.memo(({
                         }}
                     >
                         {isSharing ? (
-                            <RiLoader4Line className="h-4 w-4 animate-spin" />
+                            <Icon name="loader-4" className="h-4 w-4 animate-spin" />
                         ) : (
-                            <RiImageDownloadLine className="h-4 w-4" />
+                            <Icon name="image-download" className="h-4 w-4" />
                         )}
                     </Button>
                 </TooltipTrigger>
@@ -820,9 +825,9 @@ const AssistantMessageActionButtons = React.memo(({
                             onClick={handleTTSClick}
                         >
                             {isTTSPlaying ? (
-                                <RiStopLine className="h-3.5 w-3.5" />
+                                <Icon name="stop" className="h-3.5 w-3.5" />
                             ) : (
-                                <RiVolumeUpLine className="h-3.5 w-3.5" />
+                                <Icon name="volume-up" className="h-3.5 w-3.5" />
                             )}
                         </Button>
                     </TooltipTrigger>
@@ -1011,6 +1016,8 @@ const AssistantMessageBody = React.memo(({
     const [isPlanDialogOpen, setIsPlanDialogOpen] = React.useState(false);
     const [isSavingPlan, setIsSavingPlan] = React.useState(false);
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
+    const collapsibleThinkingBlocks = useUIStore((state) => state.collapsibleThinkingBlocks);
+    const groupReasoningBlocks = useUIStore((state) => state.groupReasoningBlocks);
     const showSplitAssistantMessageActions = useUIStore((state) => state.showSplitAssistantMessageActions);
     const isSortedRenderMode = chatRenderMode === 'sorted';
     const isMiniChatSurface = chatSurfaceMode === 'mini-chat';
@@ -1032,7 +1039,6 @@ const AssistantMessageBody = React.memo(({
         const resolved = resolveProjectForSessionDirectory(projects, availableWorktreesByProject, directory);
         return resolved ? { id: resolved.id, path: resolved.path } : null;
     }, [availableWorktreesByProject, currentSession?.directory, effectiveDirectory, projects]);
-
 
     const hasTools = toolParts.length > 0;
 
@@ -1082,7 +1088,6 @@ const AssistantMessageBody = React.memo(({
         return toolParts.every((toolPart) => isToolFinalized(toolPart));
     }, [toolParts, hasPendingTools, isToolFinalized]);
 
-
     const reasoningParts = React.useMemo(() => {
         return visibleParts.filter((part) => part.type === 'reasoning');
     }, [visibleParts]);
@@ -1104,7 +1109,6 @@ const AssistantMessageBody = React.memo(({
         reasoningParts.length > 0 &&
         hasTools &&
         (hasPendingTools || hasOpenStep || !allToolsFinalized);
-
 
     const shouldHoldTools = awaitingMessageCompletion
         || (hasTools && (hasPendingTools || hasOpenStep || !allToolsFinalized));
@@ -1398,7 +1402,7 @@ const AssistantMessageBody = React.memo(({
 
     const shouldDeferSortedInlineText = isSortedRenderMode && !hasStopFinish;
     const showErrorMessage = Boolean(errorMessage);
-    const ErrorIcon = errorVariant === 'info' ? RiInformationLine : RiErrorWarningLine;
+    const errorIconName = errorVariant === 'info' ? 'information' : 'error-warning';
     const shouldShowMessageActions = hasCopyableText;
     const shouldShowTurnFooter = isLastAssistantInTurn && hasTextContent && (hasStopFinish || Boolean(errorMessage));
     const shouldRenderActionsInActivity = isSortedRenderMode;
@@ -1466,7 +1470,6 @@ const AssistantMessageBody = React.memo(({
 
     const shouldRenderStandaloneActionsAfterContent = shouldShowStandaloneMessageActions && lastRenderableTextPartIndex < 0;
 
-
     const renderedParts = React.useMemo(() => {
         const rendered: React.ReactNode[] = [];
 
@@ -1506,7 +1509,16 @@ const AssistantMessageBody = React.memo(({
         // Flat rendering: iterate parts in natural order.
         // Group consecutive static tools (read, grep, glob, etc.) into compact rows.
         // Expandable tools (bash, edit, task) get individual rows.
-        // Text and reasoning render inline at their natural position.
+        // Text renders inline at its natural position.
+        // Reasoning: all reasoning parts for this message are merged into ONE block
+        // at the position of the first reasoning part (VSCode Copilot pattern).
+        const flatReasoningParts = visibleParts.filter((p) => {
+            if (p.type !== 'reasoning') return false;
+            const a = activityByPart.get(p);
+            return a?.kind !== 'reasoning';
+        });
+        let reasoningMergeRendered = false;
+
         let i = 0;
         while (i < visibleParts.length) {
             const part = visibleParts[i];
@@ -1553,17 +1565,8 @@ const AssistantMessageBody = React.memo(({
                     continue;
                 }
                 if (showReasoningTraces) {
-                    if (isSortedRenderMode) {
-                        rendered.push(
-                            <ReasoningPart
-                                key={`reasoning-${messageId}-${i}`}
-                                part={part}
-                                messageId={messageId}
-                                onContentChange={onContentChange}
-                                alwaysShowActions={alwaysShowMessageActions}
-                            />
-                        );
-                    } else {
+                    if (!collapsibleThinkingBlocks) {
+                        // Non-collapsible mode: render thinking blocks as plain text inline.
                         rendered.push(
                             <AssistantTextPart
                                 key={`reasoning-${messageId}-${i}`}
@@ -1572,6 +1575,29 @@ const AssistantMessageBody = React.memo(({
                                 messageId={messageId}
                                 streamPhase={streamPhase}
                                 chatRenderMode={chatRenderMode}
+                                onContentChange={onContentChange}
+                            />
+                        );
+                    } else if (groupReasoningBlocks) {
+                        // Merged mode (VSCode pattern): one block for all reasoning parts.
+                        if (!reasoningMergeRendered) {
+                            reasoningMergeRendered = true;
+                            rendered.push(
+                                <MergedReasoningPart
+                                    key={`reasoning-merged-${messageId}`}
+                                    parts={flatReasoningParts}
+                                    messageId={messageId}
+                                    onContentChange={onContentChange}
+                                />
+                            );
+                        }
+                    } else {
+                        // Per-part mode: each reasoning block at its natural position.
+                        rendered.push(
+                            <ReasoningPart
+                                key={`reasoning-${messageId}-${i}`}
+                                part={part}
+                                messageId={messageId}
                                 onContentChange={onContentChange}
                             />
                         );
@@ -1661,6 +1687,8 @@ const AssistantMessageBody = React.memo(({
         animatedToolIdsLookup,
         animateActivityRows,
         chatRenderMode,
+        collapsibleThinkingBlocks,
+        groupReasoningBlocks,
         collapsedPreviewCount,
         expandedTools,
         isMobile,
@@ -1729,7 +1757,7 @@ const AssistantMessageBody = React.memo(({
                                 openContextPreview(directory, messagePreviewUrl);
                             }}
                         >
-                            <RiGlobalLine className="h-4 w-4" />
+                            <Icon name="global" className="h-4 w-4" />
                         </Button>
                     </TooltipTrigger>
                     <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.openPreview')}</TooltipContent>
@@ -1750,7 +1778,7 @@ const AssistantMessageBody = React.memo(({
                             onPointerDown={(event) => event.stopPropagation()}
                             onClick={handleSaveAsPlanClick}
                         >
-                            <RiBookletLine className="h-4 w-4" />
+                            <Icon name="booklet" className="h-4 w-4" />
                         </Button>
                     </TooltipTrigger>
                     <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.saveAsPlan')}</TooltipContent>
@@ -1766,7 +1794,7 @@ const AssistantMessageBody = React.memo(({
                         onPointerDown={(event) => event.stopPropagation()}
                         onClick={handleForkClick}
                     >
-                        <RiChatNewLine className="h-4 w-4" />
+                        <Icon name="chat-new" className="h-4 w-4" />
                     </Button>
                 </TooltipTrigger>
                 <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.startNewSession')}</TooltipContent>
@@ -1824,7 +1852,7 @@ const AssistantMessageBody = React.memo(({
                                     : 'bg-[var(--status-error-background)] border-[var(--status-error-border)]',
                             )}>
                                 <div className="flex items-center gap-2">
-                                    <ErrorIcon className={cn(
+                                    <Icon name={errorIconName} className={cn(
                                         'h-4 w-4 shrink-0',
                                         errorVariant === 'info' ? 'text-[var(--status-info)]' : 'text-[var(--status-error)]',
                                     )} />
@@ -1862,7 +1890,7 @@ const AssistantMessageBody = React.memo(({
                                 <Tooltip>
                                     <TooltipTrigger asChild>
                                         <span className="text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1">
-                                            <RiHourglassLine className="h-3.5 w-3.5" />
+                                            <Icon name="hourglass" className="h-3.5 w-3.5" />
                                             <span className="message-footer__label">{turnDurationText}</span>
                                         </span>
                                     </TooltipTrigger>
@@ -1876,7 +1904,7 @@ const AssistantMessageBody = React.memo(({
                                             className={footerTimestampClassName}
                                             aria-label={`Message time: ${footerTimestamp}`}
                                         >
-                                            <RiTimeLine className="h-3.5 w-3.5" />
+                                            <Icon name="time" className="h-3.5 w-3.5" />
                                             <span className="message-footer__label">{footerTimestamp}</span>
                                         </span>
                                     </TooltipTrigger>

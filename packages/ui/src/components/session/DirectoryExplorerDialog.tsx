@@ -16,18 +16,9 @@ import { useFileSystemAccess } from '@/hooks/useFileSystemAccess';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui';
 import { IdentityDropdown } from '@/components/views/git/GitHeader';
-import {
-  RiArrowDownSLine,
-  RiArrowLeftSLine,
-  RiArrowUpSLine,
-  RiCheckboxBlankLine,
-  RiCheckboxLine,
-  RiCornerDownLeftLine,
-  RiFolder6Line,
-  RiFolderAddLine,
-} from '@remixicon/react';
 import { useDeviceInfo } from '@/lib/device';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { Icon } from "@/components/icon/Icon";
 import { opencodeClient } from '@/lib/opencode/client';
 import {
   setDirectoryShowHidden,
@@ -523,7 +514,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
       onClick={() => setDirectoryShowHidden(!showHidden)}
       className="flex flex-shrink-0 items-center gap-2 rounded-lg px-2 py-1 typography-meta text-muted-foreground transition-colors hover:bg-interactive-hover/40"
     >
-      {showHidden ? <RiCheckboxLine className="h-4 w-4 text-primary" /> : <RiCheckboxBlankLine className="h-4 w-4" />}
+      {showHidden ? <Icon name="checkbox" className="h-4 w-4 text-primary" /> : <Icon name="checkbox-blank" className="h-4 w-4" />}
       {t('directoryExplorerDialog.toggle.showHidden')}
     </button>
   );
@@ -552,7 +543,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
         </div>
       ) : null}
       <div className="relative">
-        <RiFolderAddLine className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/80" />
+        <Icon name="folder-add" className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/80" />
         <Input
           ref={inputRef}
           value={query}
@@ -626,9 +617,9 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
                   )}
                 >
                   {row.type === 'up' ? (
-                    <RiArrowLeftSLine className="h-4 w-4 flex-shrink-0 text-muted-foreground/80" />
+                    <Icon name="arrow-left-s" className="h-4 w-4 flex-shrink-0 text-muted-foreground/80" />
                   ) : (
-                    <RiFolder6Line className="h-4 w-4 flex-shrink-0 text-muted-foreground/80" />
+                    <Icon name="folder-6" className="h-4 w-4 flex-shrink-0 text-muted-foreground/80" />
                   )}
                   <span className="flex min-w-0 flex-1 items-center gap-1.5">
                     <span className="truncate typography-ui-label text-foreground">{row.name}</span>
@@ -657,17 +648,17 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   const footerHints = (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 typography-micro text-muted-foreground">
       <span className="inline-flex items-center gap-1">
-        <RiArrowUpSLine className="h-3.5 w-3.5" />
-        <RiArrowDownSLine className="-ml-1 h-3.5 w-3.5" />
+        <Icon name="arrow-up-s" className="h-3.5 w-3.5" />
+        <Icon name="arrow-down-s" className="-ml-1 h-3.5 w-3.5" />
         {t('directoryExplorerDialog.footer.navigate')}
       </span>
       <span className="inline-flex items-center gap-1">
-        <RiCornerDownLeftLine className="h-3.5 w-3.5" />
+        <Icon name="corner-down-left" className="h-3.5 w-3.5" />
         {t('directoryExplorerDialog.footer.select')}
       </span>
       <span className="inline-flex items-center gap-1">
         <span>{submitModifierLabel}</span>
-        <RiCornerDownLeftLine className="h-3.5 w-3.5" />
+        <Icon name="corner-down-left" className="h-3.5 w-3.5" />
         {t('directoryExplorerDialog.footer.add')}
       </span>
     </div>

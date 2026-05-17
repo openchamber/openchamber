@@ -58,6 +58,7 @@ export type DesktopSettings = {
   securityScopedBookmarks?: string[];
   pinnedDirectories?: string[];
   showReasoningTraces?: boolean;
+  collapsibleThinkingBlocks?: boolean;
   showDeletionDialog?: boolean;
   nativeNotificationsEnabled?: boolean;
   notificationMode?: 'always' | 'hidden-only';
@@ -166,6 +167,14 @@ export type DesktopSettings = {
   responseStyleEnabled?: boolean;
   responseStylePreset?: 'concise' | 'detailed' | 'mentor' | 'pushback' | 'noFiller' | 'matchEnergy' | 'warmPeer' | 'custom';
   responseStyleCustomInstructions?: string;
+  sttProvider?: 'browser' | 'server' | 'wasm';
+  sttServerUrl?: string;
+  sttModel?: string;
+  wasmSttModel?: string;
+  sttLanguage?: string;
+  sttSilenceThresholdDb?: number;
+  sttSilenceHoldMs?: number;
+  sttTranscribeOnStop?: boolean;
 };
 
 type TauriGlobal = {

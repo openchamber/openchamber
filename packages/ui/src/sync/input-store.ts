@@ -34,6 +34,14 @@ const toFileUrl = (filepath: string): string => {
 
 const getVSCodeSelectionKey = (path: string, filename: string): string => `${path}\u0000${filename}`
 
+const readFileAsDataUrl = (file: File): Promise<string> => new Promise((resolve, reject) => {
+  const reader = new FileReader()
+  reader.onload = () => resolve(reader.result as string)
+  reader.onerror = () => reject(reader.error ?? new Error("Failed to read file"))
+  reader.onabort = () => reject(new Error("File read aborted"))
+  reader.readAsDataURL(file)
+})
+
 const isSameVSCodeActiveEditorFile = (a: VSCodeActiveEditorFile | null, b: VSCodeActiveEditorFile | null): boolean => {
   if (a === b) return true
   if (!a || !b) return false
@@ -78,6 +86,8 @@ export type InputState = {
   addVSCodeFileAttachment: (path: string, name: string, fileSize: number | null) => void
   addVSCodeSelectionAttachment: (path: string, file: File) => Promise<void>
   setActiveEditorFile: (file: VSCodeActiveEditorFile | null) => void
+  /** Add attachments restored from a reverted message (file already on server) */
+  addRestoredAttachment: (file: { url: string; mimeType: string; filename: string }) => void
 }
 
 export const useInputStore = create<InputState>()((set, get) => ({
@@ -110,11 +120,12 @@ export const useInputStore = create<InputState>()((set, get) => ({
   addAttachedFile: async (file: File) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
     const generation = attachmentReadGeneration
-    const dataUrl = await new Promise<string>((resolve) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve(reader.result as string)
-      reader.readAsDataURL(file)
-    })
+    let dataUrl: string
+    try {
+      dataUrl = await readFileAsDataUrl(file)
+    } catch {
+      return
+    }
     if (generation !== attachmentReadGeneration) return
     const attached: AttachedFile = {
       id,
@@ -176,11 +187,9 @@ export const useInputStore = create<InputState>()((set, get) => ({
     pendingVSCodeSelectionKeys.add(selectionKey)
     let dataUrl: string
     try {
-      dataUrl = await new Promise<string>((resolve) => {
-        const reader = new FileReader()
-        reader.onload = () => resolve(reader.result as string)
-        reader.readAsDataURL(file)
-      })
+      dataUrl = await readFileAsDataUrl(file)
+    } catch {
+      return
     } finally {
       pendingVSCodeSelectionKeys.delete(selectionKey)
     }
@@ -202,5 +211,24 @@ export const useInputStore = create<InputState>()((set, get) => ({
   setActiveEditorFile: (file) => {
     if (isSameVSCodeActiveEditorFile(get().activeEditorFile, file)) return
     set({ activeEditorFile: file })
+  },
+
+  addRestoredAttachment: ({ url, mimeType, filename }) => {
+    const id = `restored-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    // Use "local" source so the file renders in AttachedFilesList.
+    // Set serverPath to the URL so ImagePreview can use it as the img src
+    // when dataUrl is not a data: URL. sanitizeAttachmentsForSend leaves
+    // dataUrl alone for non-server sources, so the URL stays intact on send.
+    const attached: AttachedFile = {
+      id,
+      file: new File([], filename, { type: mimeType }),
+      dataUrl: url,
+      mimeType,
+      filename,
+      size: 0,
+      source: "local",
+      serverPath: url,
+    }
+    set((s) => ({ attachedFiles: [...s.attachedFiles, attached] }))
   },
 }))

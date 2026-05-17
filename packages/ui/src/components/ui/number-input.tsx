@@ -1,9 +1,9 @@
 import * as React from "react"
-import { RiAddLine, RiSubtractLine } from "@remixicon/react"
 
 import { useDeviceInfo } from "@/lib/device"
 import { useI18n } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
+import { Icon } from "@/components/icon/Icon";
 
 export interface NumberInputProps
   extends Omit<React.ComponentProps<"input">, "value" | "onChange" | "type"> {
@@ -224,7 +224,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
               !decrementDisabled && "active:bg-interactive-hover"
             )}
           >
-            <RiSubtractLine className="block h-4 w-4" />
+            <Icon name="subtract" className="block h-4 w-4" />
           </button>
 
           <div
@@ -251,7 +251,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
               !incrementDisabled && "active:bg-interactive-hover"
             )}
           >
-            <RiAddLine className="block h-4 w-4" />
+            <Icon name="add" className="block h-4 w-4" />
           </button>
         </div>
       )
@@ -276,7 +276,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
             "disabled:pointer-events-none disabled:opacity-50"
           )}
         >
-          <RiSubtractLine className="block h-3.5 w-3.5" />
+          <Icon name="subtract" className="block h-3.5 w-3.5" />
         </button>
         <input
           {...props}
@@ -310,7 +310,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
             "disabled:pointer-events-none disabled:opacity-50"
           )}
         >
-          <RiAddLine className="block h-3.5 w-3.5" />
+          <Icon name="add" className="block h-3.5 w-3.5" />
         </button>
       </div>
     )

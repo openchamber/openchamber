@@ -13,10 +13,12 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { NumberInput } from '@/components/ui/number-input';
-import { RiPlayLine, RiStopLine, RiCloseLine, RiAppleLine, RiInformationLine } from '@remixicon/react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Icon } from "@/components/icon/Icon";
 import { browserVoiceService } from '@/lib/voice/browserVoiceService';
 import { audioStreamService } from '@/lib/voice/audioStreamService';
+import { wasmSttService, WASM_MODELS } from '@/lib/voice/wasmSttService';
+import type { WasmModelStatus } from '@/lib/voice/wasmSttService';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 const LANGUAGE_OPTIONS = [
@@ -31,6 +33,82 @@ const LANGUAGE_OPTIONS = [
     { value: 'ko-KR', label: '한국어' },
     { value: 'uk-UA', label: 'Українська' },
 ];
+
+const WasmModelStatusIndicator = ({ modelId }: { modelId: string }) => {
+    const { t } = useI18n();
+    const [status, setStatus] = useState<WasmModelStatus>(wasmSttService.getModelStatus());
+    const [loading, setLoading] = useState(false);
+
+    useEffect(() => {
+        const handler = (s: WasmModelStatus) => setStatus(s);
+        wasmSttService.onModelStatusChange = handler;
+        return () => { wasmSttService.onModelStatusChange = null; };
+    }, []);
+
+    const currentModelId = wasmSttService.getCurrentModelId();
+    const isLoadingOrDownloading = status.state === 'downloading' || status.state === 'loading';
+
+    // Reset local loading state when model finishes loading or errors
+    useEffect(() => {
+        if (status.state !== 'downloading' && status.state !== 'loading') {
+            setLoading(false);
+        }
+    }, [status.state]);
+
+    const handleDownload = async () => {
+        setLoading(true);
+        try {
+            await wasmSttService.loadModel(modelId);
+        } catch {
+            // Error is shown via status indicator
+        }
+    };
+
+    if (status.state === 'ready' && currentModelId === modelId) {
+        return (
+            <div className="flex items-center gap-2">
+                <span className="typography-ui-compact text-green-600 dark:text-green-400">
+                    {t('settings.voice.page.stt.wasmLoaded')}
+                </span>
+            </div>
+        );
+    }
+
+    if (isLoadingOrDownloading) {
+        const progress = status.state === 'downloading' ? Math.round(status.progress) : undefined;
+        return (
+            <div className="flex items-center gap-2">
+                <span className="typography-ui-compact text-muted-foreground">
+                    {status.state === 'downloading' ? t('settings.voice.page.stt.wasmDownloading') : t('settings.voice.page.stt.wasmLoading')}
+                    {progress !== undefined ? ` (${progress}%)` : ''}
+                </span>
+            </div>
+        );
+    }
+
+    if (status.state === 'error') {
+        // Partial download (cached progress): show retry button.
+        return (
+            <div className="flex items-center gap-2">
+                <span className="typography-ui-compact text-destructive">{status.error}</span>
+                <Button variant="chip" size="xs" disabled={loading} onClick={handleDownload}>
+                    {t('settings.voice.page.stt.wasmRetry')}
+                </Button>
+            </div>
+        );
+    }
+
+    return (
+        <div className="flex items-center gap-2">
+            <span className="typography-ui-compact text-muted-foreground">
+                {t('settings.voice.page.stt.wasmNotLoaded')}
+            </span>
+            <Button variant="chip" size="xs" disabled={loading} onClick={handleDownload}>
+                {t('settings.voice.page.stt.wasmDownload')}
+            </Button>
+        </div>
+    );
+};
 
 const OPENAI_VOICE_OPTIONS = [
     { value: 'alloy', label: 'Alloy' },
@@ -86,12 +164,16 @@ export const VoiceSettings: React.FC = () => {
     const setSttServerUrl = useConfigStore((state) => state.setSttServerUrl);
     const sttModel = useConfigStore((state) => state.sttModel);
     const setSttModel = useConfigStore((state) => state.setSttModel);
+    const wasmSttModel = useConfigStore((state) => state.wasmSttModel);
+    const setWasmSttModel = useConfigStore((state) => state.setWasmSttModel);
     const sttLanguage = useConfigStore((state) => state.sttLanguage);
     const setSttLanguage = useConfigStore((state) => state.setSttLanguage);
     const sttSilenceThresholdDb = useConfigStore((state) => state.sttSilenceThresholdDb);
     const setSttSilenceThresholdDb = useConfigStore((state) => state.setSttSilenceThresholdDb);
     const sttSilenceHoldMs = useConfigStore((state) => state.sttSilenceHoldMs);
     const setSttSilenceHoldMs = useConfigStore((state) => state.setSttSilenceHoldMs);
+    const sttTranscribeOnStop = useConfigStore((state) => state.sttTranscribeOnStop);
+    const setSttTranscribeOnStop = useConfigStore((state) => state.setSttTranscribeOnStop);
     const setShowMessageTTSButtons = useConfigStore((state) => state.setShowMessageTTSButtons);
     const voiceModeEnabled = useConfigStore((state) => state.voiceModeEnabled);
     const setVoiceModeEnabled = useConfigStore((state) => state.setVoiceModeEnabled);
@@ -445,7 +527,7 @@ export const VoiceSettings: React.FC = () => {
                                         <span className="typography-ui-label text-foreground">{t('settings.voice.page.field.provider')}</span>
                                         <Tooltip>
                                             <TooltipTrigger asChild>
-                                                <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                                                <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                                             </TooltipTrigger>
                                             <TooltipContent sideOffset={8} className="max-w-xs">
                                                 <ul className="space-y-1">
@@ -493,7 +575,7 @@ export const VoiceSettings: React.FC = () => {
                                                 onClick={() => setVoiceProvider('say')}
                                                 className="!font-normal"
                                             >
-                                                <RiAppleLine className="w-3.5 h-3.5 mr-0.5" />
+                                                <Icon name="apple" className="w-3.5 h-3.5 mr-0.5" />
                                                 {t('settings.voice.page.provider.say')}
                                             </Button>
                                         )}
@@ -528,7 +610,7 @@ export const VoiceSettings: React.FC = () => {
                                                 onClick={() => setOpenaiApiKey('')}
                                                 className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                                             >
-                                                <RiCloseLine className="w-3.5 h-3.5" />
+                                                <Icon name="close" className="w-3.5 h-3.5" />
                                             </button>
                                         )}
                                     </div>
@@ -559,7 +641,7 @@ export const VoiceSettings: React.FC = () => {
                                                     onClick={() => setOpenaiCompatibleUrl('')}
                                                     className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                                                 >
-                                                    <RiCloseLine className="w-3.5 h-3.5" />
+                                                    <Icon name="close" className="w-3.5 h-3.5" />
                                                 </button>
                                             )}
                                         </div>
@@ -592,7 +674,7 @@ export const VoiceSettings: React.FC = () => {
                                                 />
                                             </div>
                                             <Button size="xs" variant="ghost" onClick={previewCompatibleVoice} title={t('settings.voice.page.actions.preview')} disabled={!openaiCompatibleUrl.trim()}>
-                                                {isCompatiblePreviewPlaying ? <RiStopLine className="w-3.5 h-3.5" /> : <RiPlayLine className="w-3.5 h-3.5" />}
+                                                {isCompatiblePreviewPlaying ? <Icon name="stop" className="w-3.5 h-3.5" /> : <Icon name="play" className="w-3.5 h-3.5" />}
                                             </Button>
                                         </div>
                                     </div>
@@ -616,7 +698,7 @@ export const VoiceSettings: React.FC = () => {
                                                 </SelectContent>
                                             </Select>
                                             <Button size="xs" variant="ghost" onClick={previewOpenAIVoice} title={t('settings.voice.page.actions.preview')}>
-                                                {isOpenAIPreviewPlaying ? <RiStopLine className="w-3.5 h-3.5" /> : <RiPlayLine className="w-3.5 h-3.5" />}
+                                                {isOpenAIPreviewPlaying ? <Icon name="stop" className="w-3.5 h-3.5" /> : <Icon name="play" className="w-3.5 h-3.5" />}
                                             </Button>
                                         </>
                                     )}
@@ -638,26 +720,26 @@ export const VoiceSettings: React.FC = () => {
                                                 </SelectContent>
                                             </Select>
                                             <Button size="xs" variant="ghost" onClick={previewVoice} title={t('settings.voice.page.actions.preview')}>
-                                                {isPreviewPlaying ? <RiStopLine className="w-3.5 h-3.5" /> : <RiPlayLine className="w-3.5 h-3.5" />}
+                                                {isPreviewPlaying ? <Icon name="stop" className="w-3.5 h-3.5" /> : <Icon name="play" className="w-3.5 h-3.5" />}
                                             </Button>
                                         </>
                                     )}
 
                                     {voiceProvider === 'browser' && filteredBrowserVoices.length > 0 && (
                                         <>
-                                            <Select value={browserVoice || '__auto__'} onValueChange={(value) => setBrowserVoice(value === '__auto__' ? '' : value)}>
+                                            <Select value={browserVoice || '$auto'} onValueChange={(value) => setBrowserVoice(value === '$auto' ? '' : value)}>
                                                 <SelectTrigger className="w-fit max-w-[200px]">
                                                     <SelectValue placeholder={t('settings.voice.page.field.auto')} />
                                                 </SelectTrigger>
                                                 <SelectContent>
-                                                    <SelectItem value="__auto__">{t('settings.voice.page.field.auto')}</SelectItem>
+                                                    <SelectItem value="$auto">{t('settings.voice.page.field.auto')}</SelectItem>
                                                     {filteredBrowserVoices.map((v) => (
                                                         <SelectItem key={v.name} value={v.name}>{v.name} ({v.lang})</SelectItem>
                                                     ))}
                                                 </SelectContent>
                                             </Select>
                                             <Button size="xs" variant="ghost" onClick={previewBrowserVoice} title={t('settings.voice.page.actions.preview')}>
-                                                {isBrowserPreviewPlaying ? <RiStopLine className="w-3.5 h-3.5" /> : <RiPlayLine className="w-3.5 h-3.5" />}
+                                                {isBrowserPreviewPlaying ? <Icon name="stop" className="w-3.5 h-3.5" /> : <Icon name="play" className="w-3.5 h-3.5" />}
                                             </Button>
                                         </>
                                     )}
@@ -734,7 +816,7 @@ export const VoiceSettings: React.FC = () => {
                                     <span className="typography-ui-label text-foreground">{t('settings.voice.page.field.provider')}</span>
                                     <Tooltip>
                                         <TooltipTrigger asChild>
-                                            <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                                            <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                                         </TooltipTrigger>
                                         <TooltipContent sideOffset={8} className="max-w-xs">
                                             <ul className="space-y-1">
@@ -763,12 +845,33 @@ export const VoiceSettings: React.FC = () => {
                                     >
                                         {t('settings.voice.page.provider.server')}
                                     </Button>
+                                    <Button
+                                        variant="chip"
+                                        size="xs"
+                                        aria-pressed={sttProvider === 'wasm'}
+                                        onClick={() => setSttProvider('wasm')}
+                                        className="!font-normal"
+                                    >
+                                        {t('settings.voice.page.provider.wasm')}
+                                    </Button>
                                 </div>
                             </div>
                         </div>
 
                         {sttProvider === 'server' && (
                             <div className="py-1.5 space-y-2">
+                                <div
+                                    className="group flex cursor-pointer items-center gap-2 py-1.5"
+                                    role="button"
+                                    tabIndex={0}
+                                    aria-pressed={sttTranscribeOnStop}
+                                    onClick={() => setSttTranscribeOnStop(!sttTranscribeOnStop)}
+                                    onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setSttTranscribeOnStop(!sttTranscribeOnStop); } }}
+                                >
+                                    <Checkbox checked={sttTranscribeOnStop} onChange={setSttTranscribeOnStop} ariaLabel={t('settings.voice.page.field.transcribeOnStopAria')} />
+                                    <span className="typography-ui-label text-foreground">{t('settings.voice.page.field.transcribeOnStop')}</span>
+                                </div>
+
                                 {!audioStreamService.isSupported() && (
                                     <p className="typography-meta text-[var(--status-error)]">
                                         {t('settings.voice.page.field.sttBrowserSupportError')}
@@ -795,7 +898,7 @@ export const VoiceSettings: React.FC = () => {
                                                 onClick={() => setSttServerUrl('')}
                                                 className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                                             >
-                                                <RiCloseLine className="w-3.5 h-3.5" />
+                                                <Icon name="close" className="w-3.5 h-3.5" />
                                             </button>
                                         )}
                                     </div>
@@ -844,6 +947,38 @@ export const VoiceSettings: React.FC = () => {
                                         <span className="typography-meta text-muted-foreground">{t('settings.voice.page.field.millisecondsUnit')}</span>
                                     </div>
                                 </div>
+                            </div>
+                        )}
+
+                        {sttProvider === 'wasm' && (
+                            <div className="py-1.5 space-y-2">
+                                <div>
+                                    <span className="typography-ui-label text-muted-foreground">
+                                        {t('settings.voice.page.stt.wasmModel')}
+                                    </span>
+                                    <Select value={wasmSttModel} onValueChange={setWasmSttModel}>
+                                        <SelectTrigger className="mt-0.5">
+                                            <SelectValue placeholder={t('settings.voice.page.stt.wasmModel')} />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {WASM_MODELS.map((m) => (
+                                                <SelectItem key={m.id} value={m.id}>
+                                                    <div className="flex flex-col">
+                                                        <span>{m.name}</span>
+                                                        <span className="typography-ui-compact text-muted-foreground">
+                                                            {m.size} · {m.languages}
+                                                        </span>
+                                                    </div>
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    <p className="typography-ui-compact text-muted-foreground mt-0.5">
+                                        {WASM_MODELS.find((m) => m.id === wasmSttModel)?.description}
+                                    </p>
+                                </div>
+                                {/* Model status indicator */}
+                                <WasmModelStatusIndicator modelId={wasmSttModel} />
                             </div>
                         )}
                     </section>

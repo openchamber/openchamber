@@ -1,9 +1,9 @@
-import { RiCheckLine } from '@remixicon/react';
 
 import { cn } from '@/lib/utils';
 import { typography } from '@/lib/typography';
 import { formatToolInput, detectToolOutputLanguage } from '@/lib/toolHelpers';
 import { SimpleMarkdownRenderer } from '../MarkdownRenderer';
+import { Icon } from "@/components/icon/Icon";
 
 const cleanOutput = (output: string) => {
     let cleaned = output.replace(/^<file>\s*\n?/, '').replace(/\n?<\/file>\s*$/, '');
@@ -473,13 +473,13 @@ export const renderTodoOutput = (
                 {todosByStatus.completed.length > 0 && (
                     <div className="space-y-2">
                         <div className="flex items-center gap-2">
-                            <RiCheckLine className="w-3 h-3" style={{ color: 'var(--status-success)' }} />
+                            <Icon name="check" className="w-3 h-3"  style={{ color: 'var(--status-success)' }}/>
                             <span className="typography-meta font-semibold uppercase tracking-wide" style={{ color: 'var(--status-success)' }}>{labels.completed}</span>
                         </div>
                         <div className="space-y-1.5 pl-4">
                             {todosByStatus.completed.map((todo, idx) => (
                                 <div key={todo.id || idx} className="flex items-start gap-2">
-                                    <RiCheckLine className="w-3 h-3 mt-0.5 flex-shrink-0" style={{ color: 'var(--status-success)', opacity: 0.7 }} />
+                                    <Icon name="check" className="w-3 h-3 mt-0.5 flex-shrink-0"  style={{ color: 'var(--status-success)', opacity: 0.7 }}/>
                                     <span className="typography-code text-foreground flex-1 leading-relaxed">{todo.content}</span>
                                 </div>
                             ))}

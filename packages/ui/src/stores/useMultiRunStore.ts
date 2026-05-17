@@ -105,14 +105,11 @@ export const useMultiRunStore = create<MultiRunStore>()(
           const directory = project.path;
 
           const isGit = await checkIsGitRepository(directory);
-          if (!isGit) {
-            set({ error: 'Not in a git repository', isLoading: false });
-            return null;
-          }
+          const shouldIsolateRuns = isGit && params.isolateRuns !== false;
 
           const groupSlug = toGitSafeSlug(groupName);
-          const rootBranch = await getRootBranch(directory);
-          const rootTrackingRemote = await resolveRootTrackingRemote(directory);
+          const rootBranch = shouldIsolateRuns ? await getRootBranch(directory) : undefined;
+          const rootTrackingRemote = shouldIsolateRuns ? await resolveRootTrackingRemote(directory) : null;
 
           const createdRuns: Array<{
             sessionId: string;
@@ -152,7 +149,30 @@ export const useMultiRunStore = create<MultiRunStore>()(
                 ? `${groupPart}/${modelPart}`
                 : modelPart;
 
+              const sessionTitle = count > 1
+                ? `${groupSlug}/${groupPart}/${model.providerID}/${model.modelID}/${index}`
+                : groupPart
+                  ? `${groupSlug}/${groupPart}/${model.providerID}/${model.modelID}`
+                  : `${groupSlug}/${model.providerID}/${model.modelID}`;
+
               try {
+                if (!shouldIsolateRuns) {
+                  const session = await opencodeClient.withDirectory(
+                    directory,
+                    () => opencodeClient.createSession({ title: sessionTitle }),
+                  );
+
+                  createdRuns.push({
+                    sessionId: session.id,
+                    worktreePath: directory,
+                    providerID: model.providerID,
+                    modelID: model.modelID,
+                    variant: model.variant,
+                    prompt,
+                  });
+                  continue;
+                }
+
                 const worktreeMetadata = await createWorktreeWithDefaults(project, {
                   preferredName,
                   mode: 'new',
@@ -169,12 +189,6 @@ export const useMultiRunStore = create<MultiRunStore>()(
                   createdFromBranch: rootBranch,
                   kind: 'standard' as const,
                 };
-
-                const sessionTitle = count > 1
-                  ? `${groupSlug}/${groupPart}/${model.providerID}/${model.modelID}/${index}`
-                  : groupPart
-                    ? `${groupSlug}/${groupPart}/${model.providerID}/${model.modelID}`
-                    : `${groupSlug}/${model.providerID}/${model.modelID}`;
 
                 const session = await opencodeClient.withDirectory(
                   worktreeMetadata.path,

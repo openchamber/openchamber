@@ -22,6 +22,7 @@ export interface CreateMultiRunParams {
   groups: MultiRunGroup[];
   agent?: string;
   worktreeBaseBranch?: string;
+  isolateRuns?: boolean;
   files?: MultiRunFileAttachment[];
   setupCommands?: string[];
 }

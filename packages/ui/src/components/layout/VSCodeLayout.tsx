@@ -1,6 +1,7 @@
 import React from 'react';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { SessionSidebar } from '@/components/session/SessionSidebar';
+import { SessionDialogs } from '@/components/session/SessionDialogs';
 import { ChatView } from '@/components/views/ChatView';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useViewportStore } from '@/sync/viewport-store';
@@ -8,6 +9,8 @@ import { useSessions, useDirectorySync, useSessionMessages, useSessionMessagesRe
 import { useConfigStore } from '@/stores/useConfigStore';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { McpDropdown } from '@/components/mcp/McpDropdown';
+import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 import { cn } from '@/lib/utils';
 import {
   DropdownMenu,
@@ -22,14 +25,14 @@ import { useI18n } from '@/lib/i18n';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { UsageProgressBar } from '@/components/sections/usage/UsageProgressBar';
 import { PaceIndicator } from '@/components/sections/usage/PaceIndicator';
-import { formatQuotaValueLabel, formatWindowLabel, QUOTA_PROVIDERS, calculatePace, calculateExpectedUsagePercent } from '@/lib/quota';
+import { Icon } from "@/components/icon/Icon";
+import { formatQuotaValueLabel, formatQuotaResetLabel, formatWindowLabel, QUOTA_PROVIDERS, calculatePace, calculateExpectedUsagePercent } from '@/lib/quota';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import type { UsageWindow } from '@/types';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
-import { RiAddLine, RiArrowLeftLine, RiRefreshLine, RiRobot2Line, RiSettings3Line, RiTimerLine } from '@remixicon/react';
 
 const SettingsView = lazyWithChunkRecovery(() => import('@/components/views/SettingsView').then(m => ({ default: m.SettingsView })));
 
@@ -218,7 +221,6 @@ export const VSCodeLayout: React.FC = () => {
   const handleBackToSessions = React.useCallback(() => {
     setCurrentView('sessions');
   }, []);
-
 
   // Listen for connection status changes
   React.useEffect(() => {
@@ -422,6 +424,7 @@ export const VSCodeLayout: React.FC = () => {
             showMcp
             showContextUsage
             showRateLimits
+            enableSessionSwitcher
           />
           <div className="flex-1 overflow-hidden">
             <ErrorBoundary>
@@ -474,6 +477,7 @@ export const VSCodeLayout: React.FC = () => {
               showMcp
               showContextUsage
               showRateLimits
+              enableSessionSwitcher
             />
             <div className="flex-1 overflow-hidden">
               <ErrorBoundary>
@@ -511,6 +515,7 @@ export const VSCodeLayout: React.FC = () => {
               showMcp
               showContextUsage
               showRateLimits
+              enableSessionSwitcher
             />
             <div className="flex-1 overflow-hidden">
               <ErrorBoundary>
@@ -520,6 +525,7 @@ export const VSCodeLayout: React.FC = () => {
           </div>
         </>
       )}
+      <SessionDialogs />
     </div>
   );
 };
@@ -534,13 +540,15 @@ interface VSCodeHeaderProps {
   showMcp?: boolean;
   showContextUsage?: boolean;
   showRateLimits?: boolean;
+  enableSessionSwitcher?: boolean;
 }
 
-const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, onNewSession, onSettings, onAgentManager, showMcp, showContextUsage, showRateLimits }) => {
+const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, onNewSession, onSettings, onAgentManager, showMcp, showContextUsage, showRateLimits, enableSessionSwitcher }) => {
   const { t } = useI18n();
   const getCurrentModel = useConfigStore((state) => state.getCurrentModel);
   const providers = useConfigStore((state) => state.providers);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   const currentSessionMessages = useSessionMessages(currentSessionId ?? '');
   const currentSessionMessagesResolved = useSessionMessagesResolved(currentSessionId ?? '');
   const quotaResults = useQuotaStore((state) => state.results);
@@ -693,17 +701,29 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
           className="inline-flex h-7 w-7 items-center justify-center text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           aria-label={t('vscodeLayout.actions.backToSessionsAria')}
         >
-          <RiArrowLeftLine className="h-5 w-5" />
+          <Icon name="arrow-left" className="h-5 w-5" />
         </button>
       )}
-      <h1 className="text-sm font-medium truncate flex-1" title={title}>{title}</h1>
+      {enableSessionSwitcher ? (
+        <SessionSwitcherDropdown variant="compact" scopeProjectId={activeProjectId}>
+          <button
+            type="button"
+            aria-label={t('sessions.switcher.openAria')}
+            className="flex min-w-0 flex-1 items-center rounded-md px-1 py-0.5 -my-0.5 text-left transition-colors hover:bg-interactive-hover/60 focus-visible:outline-none focus-visible:bg-interactive-hover/60"
+          >
+            <span className="text-sm font-medium truncate" title={title}>{title}</span>
+          </button>
+        </SessionSwitcherDropdown>
+      ) : (
+        <h1 className="text-sm font-medium truncate flex-1" title={title}>{title}</h1>
+      )}
       {onNewSession && (
         <button
           onClick={onNewSession}
           className="inline-flex h-9 w-9 items-center justify-center p-2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           aria-label={t('vscodeLayout.actions.newSessionAria')}
         >
-          <RiAddLine className="h-5 w-5" />
+          <Icon name="add" className="h-5 w-5" />
         </button>
       )}
       {onAgentManager && (
@@ -712,7 +732,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
           className="inline-flex h-9 w-9 items-center justify-center p-2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           aria-label={t('vscodeLayout.actions.openAgentManagerAria')}
         >
-          <RiRobot2Line className="h-5 w-5" />
+          <Icon name="robot-2" className="h-5 w-5" />
         </button>
       )}
       {showMcp && (
@@ -735,7 +755,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
               className="inline-flex h-9 w-9 items-center justify-center p-2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               disabled={isQuotaLoading}
             >
-              <RiTimerLine className="h-5 w-5" />
+              <Icon name="timer" className="h-5 w-5" />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent
@@ -783,7 +803,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
                     disabled={isQuotaLoading}
                     aria-label={t('vscodeLayout.quota.actions.refreshAria')}
                   >
-                    <RiRefreshLine className="h-4 w-4" />
+                    <Icon name="refresh" className="h-4 w-4" />
                   </button>
                 </div>
               </DropdownMenuLabel>
@@ -849,7 +869,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
                                 </div>
                               )}
                               <span className="flex items-center justify-between typography-micro text-muted-foreground text-[10px]">
-                                <span>{window.resetAfterFormatted ?? window.resetAtFormatted ?? ''}</span>
+                                <span>{formatQuotaResetLabel(window.resetAt, window.resetAfterFormatted ?? window.resetAtFormatted)}</span>
                               </span>
                       </span>
                     </DropdownMenuItem>
@@ -868,7 +888,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
           className="inline-flex h-9 w-9 items-center justify-center p-2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           aria-label={t('vscodeLayout.actions.settingsAria')}
         >
-          <RiSettings3Line className="h-5 w-5" />
+          <Icon name="settings-3" className="h-5 w-5" />
         </button>
       )}
       {showContextUsage && stableContextUsage && stableContextUsage.totalTokens > 0 && (

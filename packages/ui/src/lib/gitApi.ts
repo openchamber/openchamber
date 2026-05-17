@@ -58,6 +58,46 @@ const requestChatForceScrollBottom = (sessionId: string) => {
   }));
 };
 
+const extractJsonObject = (value: string): Record<string, unknown> | null => {
+  const text = value.trim();
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = (fenced?.[1] ?? text).trim();
+  const starts = [candidate.indexOf('{')].filter((index) => index >= 0);
+
+  for (const start of starts) {
+    for (let end = candidate.length; end > start; end -= 1) {
+      if (candidate[end - 1] !== '}') continue;
+      try {
+        const parsed = JSON.parse(candidate.slice(start, end)) as unknown;
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          return parsed as Record<string, unknown>;
+        }
+      } catch {
+        // Keep scanning; models sometimes wrap JSON with prose or fences.
+      }
+    }
+  }
+
+  return null;
+};
+
+const extractAssistantText = (response: unknown): string => {
+  const data = (response as { data?: { parts?: Array<unknown> } } | null)?.data;
+  const parts = Array.isArray(data?.parts) ? data.parts : [];
+  return parts
+    .map((part) => {
+      const item = part as { type?: unknown; text?: unknown; content?: unknown; value?: unknown };
+      if (item.type !== 'text') return '';
+      if (typeof item.text === 'string') return item.text;
+      if (typeof item.content === 'string') return item.content;
+      if (typeof item.value === 'string') return item.value;
+      return '';
+    })
+    .filter((text) => text.trim().length > 0)
+    .join('\n')
+    .trim();
+};
+
 export async function checkIsGitRepository(directory: string): Promise<boolean> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.checkIsGitRepository(directory);
@@ -150,20 +190,6 @@ export async function generateCommitMessage(
       visiblePrompt,
       hiddenPrompt,
       generationSession,
-      schema: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          subject: { type: 'string', description: 'Conventional commit subject line.' },
-          highlights: {
-            type: 'array',
-            items: { type: 'string', description: 'Short user-facing highlight.' },
-            maxItems: 3,
-            description: 'Optional short user-facing highlights.',
-          },
-        },
-        required: ['subject', 'highlights'],
-      },
       kind: 'commit',
     });
 
@@ -271,15 +297,6 @@ export async function generatePullRequestDescription(
       visiblePrompt,
       hiddenPrompt,
       generationSession,
-      schema: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          title: { type: 'string', description: 'Pull request title.' },
-          body: { type: 'string', description: 'Pull request markdown description.' },
-        },
-        required: ['title', 'body'],
-      },
       kind: 'pr',
     });
 
@@ -347,14 +364,12 @@ const runStructuredGenerationInActiveSession = async ({
   visiblePrompt,
   hiddenPrompt,
   generationSession,
-  schema,
   kind,
 }: {
   directory: string;
   visiblePrompt: string;
   hiddenPrompt?: string;
   generationSession: SessionGenerationContext;
-  schema: Record<string, unknown>;
   kind: 'commit' | 'pr';
 }): Promise<Record<string, unknown>> => {
   const requestStartedAt = Date.now();
@@ -371,7 +386,11 @@ const runStructuredGenerationInActiveSession = async ({
   const hiddenPromptText = typeof hiddenPrompt === 'string' ? hiddenPrompt.trim() : '';
   const promptParts: Array<{ type: 'text'; text: string; synthetic?: boolean }> = [];
   if (visiblePromptText) {
-    promptParts.push({ type: 'text', text: visiblePromptText, synthetic: false });
+    promptParts.push({
+      type: 'text',
+      text: hiddenPromptText ? `${visiblePromptText}\n\n` : visiblePromptText,
+      synthetic: false,
+    });
   }
   if (hiddenPromptText) {
     promptParts.push({ type: 'text', text: hiddenPromptText, synthetic: true });
@@ -391,11 +410,6 @@ const runStructuredGenerationInActiveSession = async ({
         modelID: generationSession.modelID,
       },
       ...(generationSession.agent ? { agent: generationSession.agent } : {}),
-      format: {
-        type: 'json_schema',
-        schema,
-        retryCount: 2,
-      },
       parts: promptParts,
     });
   });
@@ -405,21 +419,23 @@ const runStructuredGenerationInActiveSession = async ({
     throw new Error(responseError?.message || `Failed to generate ${kind} output`);
   }
 
-  const info = response.data.info as { finish?: string; structured_output?: unknown; structured?: unknown; error?: unknown };
-  const structuredOutput = info?.structured_output || info?.structured;
-  if (!structuredOutput || typeof structuredOutput !== 'object' || Array.isArray(structuredOutput)) {
-    console.error('[git-generation][browser] invalid structured output', {
+  const info = response.data.info as { finish?: string; error?: unknown };
+  const assistantText = extractAssistantText(response);
+  const parsedOutput = extractJsonObject(assistantText);
+  if (!parsedOutput) {
+    console.error('[git-generation][browser] invalid JSON output', {
       kind,
       sessionId: generationSession.sessionId,
       elapsedMs: Date.now() - requestStartedAt,
       finish: info?.finish,
+      assistantText,
       messageInfo: response.data.info,
       messageParts: response.data.parts,
     });
-    throw new Error('No structured output returned by session');
+    throw new Error('No JSON output returned by session');
   }
 
-  return structuredOutput as Record<string, unknown>;
+  return parsedOutput;
 };
 
 export async function listGitWorktrees(directory: string): Promise<import('./api/types').GitWorktreeInfo[]> {

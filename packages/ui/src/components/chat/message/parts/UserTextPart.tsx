@@ -4,7 +4,7 @@ import type { Part } from '@opencode-ai/sdk/v2';
 import type { AgentMentionInfo } from '../types';
 import { SimpleMarkdownRenderer } from '../../MarkdownRenderer';
 import { useUIStore } from '@/stores/useUIStore';
-import { RiArrowUpSLine } from '@remixicon/react';
+import { Icon } from "@/components/icon/Icon";
 
 type PartWithText = Part & { text?: string; content?: string; value?: string };
 
@@ -149,7 +149,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
                     className="absolute top-0 right-0 z-10 flex items-center justify-center rounded-sm bg-[var(--surface-elevated)] p-0.5 text-[var(--surface-mutedForeground)] hover:text-[var(--surface-foreground)] hover:bg-[var(--interactive-hover)] transition-colors"
                     aria-label="Collapse"
                 >
-                    <RiArrowUpSLine className="h-3.5 w-3.5" />
+                    <Icon name="arrow-up-s" className="h-3.5 w-3.5" />
                 </button>
             )}
             <div
