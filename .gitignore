@@ -9,6 +9,10 @@ node_modules
 dist
 dist-ssr
 release
+
+# changelog-card tool: cached webfonts + generated cards
+scripts/changelog-card/.fonts/
+changelog-*.png
 *.local
 *.tgz
 *.vsix

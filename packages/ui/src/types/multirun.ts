@@ -32,6 +32,8 @@ export interface CreateMultiRunParams {
   agent?: string;
   /** Base branch for new branches (defaults to `HEAD`). */
   worktreeBaseBranch?: string;
+  /** Whether Git projects should isolate each run in its own worktree. */
+  isolateRuns?: boolean;
   /** Files to attach to all runs */
   files?: MultiRunFileAttachment[];
   /** Setup commands to run in each new worktree after creation */

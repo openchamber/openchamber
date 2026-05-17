@@ -486,7 +486,7 @@ const desktopAnnotationToFile = async (
   }
 };
 
-const buildEmbeddedSessionChatURL = (sessionID: string, directory: string | null): string => {
+const buildEmbeddedSessionChatURL = (sessionID: string, directory: string | null, readOnly: boolean): string => {
   if (typeof window === 'undefined') {
     return '';
   }
@@ -494,6 +494,11 @@ const buildEmbeddedSessionChatURL = (sessionID: string, directory: string | null
   const url = new URL(window.location.pathname, window.location.origin);
   url.searchParams.set('ocPanel', 'session-chat');
   url.searchParams.set('sessionId', sessionID);
+  if (readOnly) {
+    url.searchParams.set('readOnly', '1');
+  } else {
+    url.searchParams.delete('readOnly');
+  }
   if (directory && directory.trim().length > 0) {
     url.searchParams.set('directory', directory);
   } else {
@@ -1937,7 +1942,7 @@ export const ContextPanel: React.FC = () => {
             return null;
           }
 
-          const src = buildEmbeddedSessionChatURL(sessionID, directoryKey || null);
+          const src = buildEmbeddedSessionChatURL(sessionID, directoryKey || null, tab.readOnly);
           if (!src) {
             return null;
           }

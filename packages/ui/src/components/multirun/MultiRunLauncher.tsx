@@ -1,6 +1,7 @@
 import React from 'react';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -105,6 +106,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
   const [setupCommands, setSetupCommands] = React.useState<string[]>([]);
   const [isSetupCommandsOpen, setIsSetupCommandsOpen] = React.useState(false);
   const [isLoadingSetupCommands, setIsLoadingSetupCommands] = React.useState(false);
+  const [isolateRuns, setIsolateRuns] = React.useState(true);
   const [showFileMention, setShowFileMention] = React.useState(false);
   const [mentionQuery, setMentionQuery] = React.useState('');
   const [showCommandAutocomplete, setShowCommandAutocomplete] = React.useState(false);
@@ -301,6 +303,22 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
   // Use the BranchSelector hook for branch state management
   const [worktreeBaseBranch, setWorktreeBaseBranch] = React.useState<string>('');
   const { isLoading: isLoadingWorktreeBaseBranches, isGitRepository } = useBranchOptions(selectedProjectDirectory);
+  const wasIsolationDisabledByNonGitRef = React.useRef(false);
+  const canIsolateRuns = isGitRepository === true;
+  const effectiveIsolateRuns = canIsolateRuns && isolateRuns;
+
+  React.useEffect(() => {
+    if (isGitRepository === false) {
+      wasIsolationDisabledByNonGitRef.current = true;
+      setIsolateRuns(false);
+      return;
+    }
+
+    if (isGitRepository === true && wasIsolationDisabledByNonGitRef.current) {
+      wasIsolationDisabledByNonGitRef.current = false;
+      setIsolateRuns(true);
+    }
+  }, [isGitRepository]);
 
   const createMultiRun = useMultiRunStore((state) => state.createMultiRun);
   const error = useMultiRunStore((state) => state.error);
@@ -567,7 +585,8 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
         prompt: prompt.trim(),
         models: modelsForStore,
         agent: selectedAgent || undefined,
-        worktreeBaseBranch,
+        worktreeBaseBranch: effectiveIsolateRuns ? worktreeBaseBranch : undefined,
+        isolateRuns: effectiveIsolateRuns,
         files: filesForStore.length > 0 ? filesForStore : undefined,
         setupCommands: commandsForStore.length > 0 ? commandsForStore : undefined,
       };
@@ -587,7 +606,12 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
   };
 
   const isValid = Boolean(
-    name.trim() && prompt.trim() && selectedModels.length >= 2 && worktreeBaseBranch && isGitRepository && !isLoadingWorktreeBaseBranches
+    name.trim() &&
+    prompt.trim() &&
+    selectedModels.length >= 2 &&
+    selectedProjectDirectory &&
+    !isLoadingWorktreeBaseBranches &&
+    (isGitRepository === false || !effectiveIsolateRuns || worktreeBaseBranch)
   );
 
   const configuredSetupCount = setupCommands.filter(cmd => cmd.trim()).length;
@@ -693,8 +717,18 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
                   directory={selectedProjectDirectory}
                   value={worktreeBaseBranch}
                   onChange={setWorktreeBaseBranch}
+                  disabled={!effectiveIsolateRuns}
                   id="multirun-worktree-base-branch"
                 />
+                <label className="mt-1.5 flex w-fit items-center gap-1.5 typography-micro text-muted-foreground">
+                  <Checkbox
+                    checked={isolateRuns}
+                    onChange={setIsolateRuns}
+                    disabled={!canIsolateRuns}
+                    ariaLabel={t('multirun.launcher.isolateRuns.label')}
+                  />
+                  <span>{t('multirun.launcher.isolateRuns.label')}</span>
+                </label>
               </div>
 
               {/* Agent */}
@@ -929,6 +963,12 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
       {/* ── Fixed footer ── */}
       <div className="shrink-0 px-4 sm:px-6 py-3">
         <div className="mx-auto w-full max-w-2xl flex items-center justify-end gap-2">
+          {!effectiveIsolateRuns && isGitRepository !== null ? (
+            <div className="mr-auto flex min-w-0 items-center gap-1.5 typography-micro text-muted-foreground">
+              <Icon name="information" className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">{t('multirun.launcher.project.gitRequired')}</span>
+            </div>
+          ) : null}
           <Button
             type="button"
             variant="ghost"

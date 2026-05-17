@@ -10,7 +10,7 @@ import { useSelectionStore } from '@/sync/selection-store';
 import { useInputStore } from '@/sync/input-store';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import * as sessionActions from '@/sync/session-actions';
-import { useUserMessageHistory } from '@/sync/sync-context';
+import { useDirectorySync, useUserMessageHistory } from '@/sync/sync-context';
 import { useInlineCommentDraftStore, type InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
 import { appendInlineComments } from '@/lib/messages/inlineComments';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
@@ -30,6 +30,7 @@ import { MobileModelButton } from './MobileModelButton';
 import { MobileSessionStatusBar } from './MobileSessionStatusBar';
 import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
 import { toast } from '@/components/ui';
+import { Button } from '@/components/ui/button';
 // useMessageStore removed — messages now come from sync system
 import { isTauriShell, isVSCodeRuntime } from '@/lib/desktop';
 import { isIMECompositionEvent } from '@/lib/ime';
@@ -53,6 +54,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
 import { useGitBranches, useGitStore, useIsGitRepo } from '@/stores/useGitStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { createWorktreeDraft } from '@/lib/worktreeSessionCreator';
 import { buildSessionTargetOptions } from '@/sync/session-worktree-contract';
@@ -62,10 +64,15 @@ import { useI18n } from '@/lib/i18n';
 import { fetchResponseStyleInstruction } from '@/lib/responseStyle';
 import { wrapSystemReminder } from '@/lib/systemReminder';
 import { getSyncMessages } from '@/sync/sync-refs';
+import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
+import { isSyntheticPart } from '@/lib/messages/synthetic';
+import type { Message, Part } from '@opencode-ai/sdk/v2/client';
 
 const MAX_VISIBLE_TEXTAREA_LINES = 8;
 const EMPTY_QUEUE: QueuedMessage[] = [];
+const EMPTY_MESSAGES: Message[] = [];
 const FILE_MENTION_TOKEN = /^@[^\s]+$/;
+const INLINE_SKILL_TOKEN_PATTERN = /(^|\s)\/([a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)/g;
 const CHAT_DRAFT_PERSIST_DEBOUNCE_MS = 500;
 const VS_CODE_DROP_DATA_TYPES = [
     'CodeFiles',
@@ -76,8 +83,50 @@ const VS_CODE_DROP_DATA_TYPES = [
     'text/plain',
 ];
 
+const collectInlineSkillMentions = (text: string, skillNames: Set<string>): string[] => {
+    const mentions: string[] = [];
+    INLINE_SKILL_TOKEN_PATTERN.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = INLINE_SKILL_TOKEN_PATTERN.exec(text)) !== null) {
+        const prefix = match[1] || '';
+        const name = match[2] || '';
+        const slashIndex = match.index + prefix.length;
+        if (slashIndex === 0 || !skillNames.has(name) || mentions.includes(name)) {
+            continue;
+        }
+        mentions.push(name);
+    }
+    return mentions;
+};
+
+const buildSkillMentionInstruction = (skillNames: string[]): string | null => {
+    if (skillNames.length === 0) return null;
+    const formatted = skillNames.map((name) => `/${name}`).join(', ');
+    return `The user explicitly mentioned these skills in their message: ${formatted}. Use the corresponding skill tool when it is relevant to accomplishing the user's request.`;
+};
+
 const hasUserMessages = (sessionId: string, directory?: string) => {
     return getSyncMessages(sessionId, directory).some((message) => message.role === 'user');
+};
+
+const getRevertedPreview = (parts: Part[], fallback: string): string => {
+    const text = parts
+        .filter((part) => part.type === 'text' && !isSyntheticPart(part))
+        .map((part) => {
+            const record = part as Record<string, unknown>;
+            return typeof record.text === 'string'
+                ? record.text
+                : typeof record.content === 'string'
+                    ? record.content
+                    : '';
+        })
+        .join('\n')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    if (text) return text;
+    const filePart = parts.find((part) => part.type === 'file') as (Part & { filename?: string }) | undefined;
+    return filePart?.filename ? `[${filePart.filename}]` : fallback;
 };
 
 const FILE_URI_PREFIX = 'file://';
@@ -226,6 +275,144 @@ const MemoBrowserVoiceButton = React.memo(BrowserVoiceButton);
 const MemoMobileAgentButton = React.memo(MobileAgentButton);
 const MemoMobileModelButton = React.memo(MobileModelButton);
 const MemoStatusRow = React.memo(StatusRow);
+
+type RevertedMessageDockProps = {
+    sessionId: string | null;
+    directory?: string;
+};
+
+const RevertedMessageDock: React.FC<RevertedMessageDockProps> = React.memo(({ sessionId, directory }) => {
+    const { t } = useI18n();
+    const revertToMessage = useSessionUIStore((s) => s.revertToMessage);
+    const forkFromMessage = useSessionUIStore((s) => s.forkFromMessage);
+    const handleSlashRedo = useSessionUIStore((s) => s.handleSlashRedo);
+    const [restoringId, setRestoringId] = React.useState<string | null>(null);
+    const [forkingId, setForkingId] = React.useState<string | null>(null);
+    const [collapsed, setCollapsed] = React.useState(true);
+    const revertMessageID = useDirectorySync(
+        React.useCallback((state) => {
+            if (!sessionId) return undefined;
+            const session = state.session.find((item) => item.id === sessionId);
+            return (session as { revert?: { messageID?: string } } | undefined)?.revert?.messageID;
+        }, [sessionId]),
+        directory,
+    );
+    const sessionMessages = useDirectorySync(
+        React.useCallback((state) => (sessionId ? state.message[sessionId] ?? EMPTY_MESSAGES : EMPTY_MESSAGES), [sessionId]),
+        directory,
+    );
+    const partsByMessage = useDirectorySync(React.useCallback((state) => state.part, []), directory);
+
+    const userMessages = React.useMemo(
+        () => sessionMessages.filter((message): message is Message & { role: 'user' } => message.role === 'user'),
+        [sessionMessages],
+    );
+    const noTextContent = t('chat.revertPopover.noTextContent');
+    const items = React.useMemo(() => {
+        if (!revertMessageID) return [];
+        return userMessages
+            .filter((message) => message.id >= revertMessageID)
+            .map((message) => ({
+                id: message.id,
+                text: getRevertedPreview(partsByMessage[message.id] ?? [], noTextContent),
+            }));
+    }, [noTextContent, partsByMessage, revertMessageID, userMessages]);
+    const firstRevertedMessageId = items[0]?.id;
+
+    React.useEffect(() => {
+        setCollapsed(true);
+    }, [revertMessageID, firstRevertedMessageId]);
+
+    const handleRestore = React.useCallback(async (messageId: string) => {
+        if (!sessionId || restoringId) return;
+        setRestoringId(messageId);
+        try {
+            const nextMessage = userMessages.find((message) => message.id > messageId);
+            if (nextMessage) {
+                await revertToMessage(sessionId, nextMessage.id, { skipRedoPush: true });
+            } else {
+                await handleSlashRedo(sessionId, { fullUnrevert: true });
+            }
+        } finally {
+            setRestoringId(null);
+        }
+    }, [handleSlashRedo, revertToMessage, restoringId, sessionId, userMessages]);
+
+    const handleFork = React.useCallback(async (messageId: string) => {
+        if (!sessionId || forkingId) return;
+        setForkingId(messageId);
+        try {
+            await forkFromMessage(sessionId, messageId);
+        } finally {
+            setForkingId(null);
+        }
+    }, [forkFromMessage, forkingId, sessionId]);
+
+    if (!sessionId || items.length === 0) return null;
+
+    return (
+        <div className="pb-2 w-full px-1">
+            <div className="rounded-xl border border-border/60 bg-[var(--surface-elevated)] text-[var(--surface-elevated-foreground)] shadow-sm overflow-hidden">
+                <button
+                    type="button"
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[var(--interactive-hover)] transition-colors"
+                    onClick={() => setCollapsed((value) => !value)}
+                    aria-expanded={!collapsed}
+                >
+                    <span className="typography-ui-label font-medium text-foreground flex-shrink-0">
+                        {t('chat.revertPopover.title')} messages {items.length}
+                    </span>
+                    <Icon
+                        name="arrow-down-s"
+                        className={cn("ml-auto h-4 w-4 text-muted-foreground transition-transform", !collapsed && "rotate-180")}
+                        aria-hidden="true"
+                    />
+                </button>
+                {!collapsed && (
+                    <div className="px-3 pb-3 flex flex-col gap-1.5 max-h-[10.5rem] overflow-y-auto">
+                        {items.map((item) => (
+                            <div key={item.id} className="flex min-w-0 items-center gap-2 py-1">
+                                <span className="min-w-0 flex-1 truncate typography-ui-label text-foreground">
+                                    {item.text}
+                                </span>
+                                <Button
+                                    type="button"
+                                    variant="secondary"
+                                    size="xs"
+                                    disabled={Boolean(restoringId || forkingId)}
+                                    onClick={() => { void handleFork(item.id); }}
+                                >
+                                    {forkingId === item.id ? (
+                                        <Icon name="loader-4" className="h-3 w-3 animate-spin" aria-hidden="true" />
+                                    ) : (
+                                        <Icon name="git-branch" className="h-3 w-3" aria-hidden="true" />
+                                    )}
+                                    {t('chat.revertPopover.fork')}
+                                </Button>
+                                <Button
+                                    type="button"
+                                    variant="secondary"
+                                    size="xs"
+                                    disabled={Boolean(restoringId || forkingId)}
+                                    onClick={() => { void handleRestore(item.id); }}
+                                >
+                                    {restoringId === item.id ? (
+                                        <Icon name="loader-4" className="h-3 w-3 animate-spin" aria-hidden="true" />
+                                    ) : (
+                                        <Icon name="arrow-go-forward" className="h-3 w-3" aria-hidden="true" />
+                                    )}
+                                    {t('chat.revertPopover.restore')}
+                                </Button>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+});
+
+RevertedMessageDock.displayName = 'RevertedMessageDock';
 
 type ComposerAttachmentControlsProps = {
     isMobile: boolean;
@@ -753,6 +940,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     ).current;
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
     const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
+    const currentSessionDirectoryForSync = useSessionUIStore(
+        React.useCallback((s) => currentSessionId ? s.getDirectoryForSession(currentSessionId) : null, [currentSessionId]),
+    );
     const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
     const newSessionDraftOpen = Boolean(newSessionDraft?.open);
     const setNewSessionDraftTarget = useSessionUIStore((s) => s.setNewSessionDraftTarget);
@@ -791,6 +981,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const isExpandedInput = useUIStore((state) => state.isExpandedInput);
     const setExpandedInput = useUIStore((state) => state.setExpandedInput);
     const setTimelineDialogOpen = useUIStore((state) => state.setTimelineDialogOpen);
+    const cycleAgentShortcutOverride = useUIStore((state) => state.shortcutOverrides.cycle_agent);
+    const cycleAgentShortcut = React.useMemo(() => (
+        getEffectiveShortcutCombo('cycle_agent', cycleAgentShortcutOverride ? { cycle_agent: cycleAgentShortcutOverride } : undefined)
+    ), [cycleAgentShortcutOverride]);
     const { git: runtimeGit } = useRuntimeAPIs();
     const { currentTheme } = useThemeSystem();
     const chatSearchDirectory = useChatSearchDirectory();
@@ -1338,6 +1532,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         let primaryAttachments: AttachedFile[] = [];
         let agentMentionName: string | undefined;
         const additionalParts: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }> = [];
+        const availableSkillNames = new Set(useSkillsStore.getState().skills.map((skill) => skill.name));
+        const mentionedSkillNames: string[] = [];
+        const addMentionedSkills = (text: string) => {
+            for (const name of collectInlineSkillMentions(text, availableSkillNames)) {
+                if (!mentionedSkillNames.includes(name)) mentionedSkillNames.push(name);
+            }
+        };
 
         // Consume any pending synthetic parts (from conflict resolution, etc.)
         const syntheticParts = consumePendingSyntheticParts();
@@ -1347,6 +1548,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             const queuedMsg = queuedMessages[i];
             const { sanitizedText, mention } = parseAgentMentions(queuedMsg.content, agents);
             const { sanitizedText: queuedText, attachments: mentionAttachments } = extractInlineFileMentions(sanitizedText);
+            addMentionedSkills(queuedText);
 
             // Use agent mention from first message that has one
             if (!agentMentionName && mention?.name) {
@@ -1376,6 +1578,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             const { sanitizedText, mention } = parseAgentMentions(messageToSend, agents);
             const { sanitizedText: messageText, attachments: mentionAttachments } = extractInlineFileMentions(sanitizedText);
             const attachmentsToSend = sanitizeAttachmentsForSend(sendableAttachedFiles);
+            addMentionedSkills(messageText);
 
             if (!agentMentionName && mention?.name) {
                 agentMentionName = mention.name;
@@ -1441,7 +1644,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             });
         }
 
-        if (!primaryText && additionalParts.length === 0) return;
+        const skillMentionInstruction = buildSkillMentionInstruction(mentionedSkillNames);
+        if (skillMentionInstruction) {
+            additionalParts.push({
+                text: skillMentionInstruction,
+                synthetic: true,
+            });
+        }
+
+        if (!primaryText && primaryAttachments.length === 0 && additionalParts.length === 0) return;
 
         // Clear queue and input
         if (currentSessionId && hasQueuedMessages) {
@@ -1762,9 +1973,19 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             return;
         }
 
-        if (e.key === 'Tab' && !showCommandAutocomplete && !showSkillAutocomplete && !showFileMention) {
+        const cycleAgentBackwardShortcut = cycleAgentShortcut && !cycleAgentShortcut.includes('shift')
+            ? normalizeCombo(`shift+${cycleAgentShortcut}`)
+            : '';
+        const cycleAgentDirection = cycleAgentBackwardShortcut && eventMatchesShortcut(e, cycleAgentBackwardShortcut)
+            ? -1
+            : eventMatchesShortcut(e, cycleAgentShortcut)
+                ? 1
+                : 0;
+
+        if (cycleAgentDirection !== 0 && !showCommandAutocomplete && !showSkillAutocomplete && !showFileMention) {
             e.preventDefault();
-            handleCycleAgent();
+            e.stopPropagation();
+            handleCycleAgent(cycleAgentDirection);
             return;
         }
 
@@ -1988,8 +2209,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         void abortCurrentOperation(currentSessionId || undefined);
     }, [abortCurrentOperation, clearAbortPrompt, currentSessionId, startAbortIndicator]);
 
-    const handleCycleAgent = React.useCallback(() => {
-        const nextAgentName = getCycledPrimaryAgentName(agents, currentAgentName);
+    const handleCycleAgent = React.useCallback((direction: 1 | -1 = 1) => {
+        const nextAgentName = getCycledPrimaryAgentName(agents, currentAgentName, direction);
         if (!nextAgentName) return;
 
         setAgent(nextAgentName);
@@ -3015,11 +3236,21 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     );
 
     const selectedDraftProjectBranches = useGitBranches(selectedDraftProjectPath);
+    const selectedDraftProjectIsGitRepo = useIsGitRepo(selectedDraftProjectPath);
+    const fetchGitStatus = useGitStore((state) => state.fetchStatus);
     const fetchBranches = useGitStore((state) => state.fetchBranches);
     const [isDiscoveringDraftBranches, setIsDiscoveringDraftBranches] = React.useState(false);
 
     React.useEffect(() => {
-        if (!showDraftTargetSelectors || !selectedDraftProjectPath || !selectedDraftProject || !runtimeGit) {
+        if (!showDraftTargetSelectors || !selectedDraftProjectPath || !runtimeGit || selectedDraftProjectIsGitRepo !== null) {
+            return;
+        }
+
+        void fetchGitStatus(selectedDraftProjectPath, runtimeGit, { silent: true });
+    }, [fetchGitStatus, runtimeGit, selectedDraftProjectIsGitRepo, selectedDraftProjectPath, showDraftTargetSelectors]);
+
+    React.useEffect(() => {
+        if (!showDraftTargetSelectors || !selectedDraftProjectPath || !selectedDraftProject || !runtimeGit || selectedDraftProjectIsGitRepo !== true) {
             setIsDiscoveringDraftBranches(false);
             return;
         }
@@ -3042,7 +3273,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         return () => {
             cancelled = true;
         };
-    }, [fetchBranches, runtimeGit, selectedDraftProject, selectedDraftProjectBranches?.all, selectedDraftProjectPath, showDraftTargetSelectors]);
+    }, [fetchBranches, runtimeGit, selectedDraftProject, selectedDraftProjectBranches?.all, selectedDraftProjectIsGitRepo, selectedDraftProjectPath, showDraftTargetSelectors]);
 
     const selectedDraftProjectCurrentBranch = selectedDraftProjectBranches?.current?.trim() ?? '';
 
@@ -3166,6 +3397,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     }, [newSessionDraft?.open, newSessionDraft?.preserveDirectoryOverride, selectedDraftBranchIsKnown, selectedDraftDirectory]);
 
     const shouldShowDraftBranchSelector = React.useMemo(() => {
+        if (selectedDraftProjectIsGitRepo !== true) {
+            return false;
+        }
         if (isDiscoveringDraftBranches) {
             return false;
         }
@@ -3173,7 +3407,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             return true;
         }
         return worktreeBranchOptions.length > 0;
-    }, [isDiscoveringDraftBranches, projectRootBranchOption, worktreeBranchOptions.length]);
+    }, [isDiscoveringDraftBranches, projectRootBranchOption, selectedDraftProjectIsGitRepo, worktreeBranchOptions.length]);
 
     const handleDraftProjectChange = React.useCallback((projectId: string) => {
         const draft = useSessionUIStore.getState().newSessionDraft;
@@ -3495,6 +3729,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         </div>
                     </div>
                 )}
+                <RevertedMessageDock
+                    sessionId={currentSessionId}
+                    directory={currentSessionDirectoryForSync ?? currentDirectory}
+                />
                 <MemoStatusRow
                     showAbortStatus={showAbortStatus}
                     showAssistantStatus={false}

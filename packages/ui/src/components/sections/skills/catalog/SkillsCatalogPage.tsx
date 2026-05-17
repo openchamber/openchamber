@@ -199,7 +199,9 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
                 onValueChange={(v) => setSelectedSource(v)}
               >
                 <SelectTrigger className="w-fit">
-                  <SelectValue placeholder={t('settings.skills.catalog.page.field.selectSourcePlaceholder')} />
+                  <SelectValue placeholder={t('settings.skills.catalog.page.field.selectSourcePlaceholder')}>
+                    {selectedSource?.label}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent align="start">
                   {sources.map((src) => (

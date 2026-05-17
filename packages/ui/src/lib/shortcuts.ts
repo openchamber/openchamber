@@ -298,6 +298,13 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
     description: 'Cycle thinking variant while in chat',
   },
   {
+    id: 'cycle_agent',
+    defaultCombo: 'tab',
+    label: 'Cycle agent',
+    description: 'Cycle agent while the model selector is open',
+    customizable: true,
+  },
+  {
     id: 'cycle_favorite_model_forward',
     defaultCombo: 'ctrl+]',
     label: 'Cycle favorite model forward',

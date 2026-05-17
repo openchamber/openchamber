@@ -64,7 +64,8 @@ export const HelpDialog: React.FC = () => {
           keys: '',
         },
         {
-          keys: ["Tab"],
+          id: 'cycle_agent',
+          keys: '',
           descriptionKey: "helpDialog.item.cycleAgent",
           icon: "ai-agent",
         },

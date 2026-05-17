@@ -46,6 +46,7 @@ import { useIsTextTruncated } from '@/hooks/useIsTextTruncated';
 import { formatEffortLabel, getCycledPrimaryAgentName, type MobileControlsPanel } from './mobileControlsUtils';
 import { useI18n } from '@/lib/i18n';
 import { useOpenCodeReadiness } from '@/hooks/useOpenCodeReadiness';
+import { eventMatchesShortcut, formatShortcutForDisplay, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
 
  
 type IconComponent = IconName;
@@ -429,6 +430,11 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
     const setSettingsPage = useUIStore((state) => state.setSettingsPage);
     const hiddenModels = useUIStore((state) => state.hiddenModels);
+    const cycleAgentShortcutOverride = useUIStore((state) => state.shortcutOverrides.cycle_agent);
+    const cycleAgentShortcut = React.useMemo(() => (
+        getEffectiveShortcutCombo('cycle_agent', cycleAgentShortcutOverride ? { cycle_agent: cycleAgentShortcutOverride } : undefined)
+    ), [cycleAgentShortcutOverride]);
+    const cycleAgentShortcutLabel = React.useMemo(() => formatShortcutForDisplay(cycleAgentShortcut), [cycleAgentShortcut]);
     const collapsedProviderSet = React.useMemo(() => {
         const result = new Set<string>();
         for (const providerId of collapsedModelProviders) {
@@ -1298,6 +1304,22 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         }
         handleAgentChange(nextAgentName, { closeModelSelector: false });
     }, [agents, currentAgentName, handleAgentChange]);
+
+    const getCycleAgentDirectionFromEvent = React.useCallback((event: KeyboardEvent | React.KeyboardEvent): 1 | -1 | null => {
+        const cycleAgentBackwardShortcut = cycleAgentShortcut && !cycleAgentShortcut.includes('shift')
+            ? normalizeCombo(`shift+${cycleAgentShortcut}`)
+            : '';
+
+        if (cycleAgentBackwardShortcut && eventMatchesShortcut(event, cycleAgentBackwardShortcut)) {
+            return -1;
+        }
+
+        if (eventMatchesShortcut(event, cycleAgentShortcut)) {
+            return 1;
+        }
+
+        return null;
+    }, [cycleAgentShortcut]);
 
     const handleProviderAndModelChange = (
         providerId: string,
@@ -2566,9 +2588,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             e.stopPropagation();
             keyboardOwnsModelSelectionRef.current = true;
 
-            if (e.key === 'Tab') {
+            const cycleAgentDirection = getCycleAgentDirectionFromEvent(e);
+            if (cycleAgentDirection) {
                 e.preventDefault();
-                handleCycleAgentFromModelPicker(e.shiftKey ? -1 : 1);
+                handleCycleAgentFromModelPicker(cycleAgentDirection);
             } else if (e.key === 'ArrowDown') {
                 e.preventDefault();
                 setModelSelectedIndex((prev) => (prev + 1) % Math.max(1, totalItems));
@@ -2639,6 +2662,18 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 e.preventDefault();
                 setAgentMenuOpen(false);
             }
+        };
+
+        const handleModelShortcutKeyDownCapture = (e: React.KeyboardEvent) => {
+            const cycleAgentDirection = getCycleAgentDirectionFromEvent(e);
+            if (!cycleAgentDirection) {
+                return;
+            }
+
+            e.preventDefault();
+            e.stopPropagation();
+            keyboardOwnsModelSelectionRef.current = true;
+            handleCycleAgentFromModelPicker(cycleAgentDirection);
         };
 
         const handleFavoriteDragEnd = (event: DragEndEvent) => {
@@ -2729,7 +2764,12 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 </div>
                             </DropdownMenuTrigger>
                         </TooltipTrigger>
-                        <DropdownMenuContent className="w-[min(380px,calc(100vw-2rem))] p-0 flex flex-col" align="end" alignOffset={-40}>
+                        <DropdownMenuContent
+                            className="w-[min(380px,calc(100vw-2rem))] p-0 flex flex-col"
+                            align="end"
+                            alignOffset={-40}
+                            onKeyDownCapture={handleModelShortcutKeyDownCapture}
+                        >
                             {/* Search Input */}
                             <div className="p-2 border-b border-border/40">
                                 <div className="relative">
@@ -2919,7 +2959,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                             <div className="px-3 pt-1 pb-1.5 border-t border-border/40 typography-micro text-muted-foreground">
                                 <div className="flex items-center gap-x-2 whitespace-nowrap overflow-hidden">
                                     <span>{t('chat.modelControls.keyboardHintNavigate')}</span>
-                                    <span>{t('chat.modelControls.keyboardHintSwitchAgent')}</span>
+                                    <span>{t('chat.modelControls.keyboardHintSwitchAgent', { shortcut: cycleAgentShortcutLabel })}</span>
                                     <span className={cn(!highlightedSupportsThinking && 'invisible')}>
                                         {t('chat.modelControls.keyboardHintThinking')}
                                     </span>

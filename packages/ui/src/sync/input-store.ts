@@ -42,6 +42,22 @@ const readFileAsDataUrl = (file: File): Promise<string> => new Promise((resolve,
   reader.readAsDataURL(file)
 })
 
+const getDataUrlByteSize = (url: string): number => {
+  if (!url.startsWith("data:")) return 0
+  const commaIndex = url.indexOf(",")
+  if (commaIndex < 0) return 0
+  const metadata = url.slice(0, commaIndex).toLowerCase()
+  const payload = url.slice(commaIndex + 1)
+  if (!metadata.endsWith(";base64")) return 0
+  let padding = 0
+  if (payload.endsWith("==")) {
+    padding = 2
+  } else if (payload.endsWith("=")) {
+    padding = 1
+  }
+  return Math.max(0, Math.floor((payload.length * 3) / 4) - padding)
+}
+
 const isSameVSCodeActiveEditorFile = (a: VSCodeActiveEditorFile | null, b: VSCodeActiveEditorFile | null): boolean => {
   if (a === b) return true
   if (!a || !b) return false
@@ -86,6 +102,8 @@ export type InputState = {
   addVSCodeFileAttachment: (path: string, name: string, fileSize: number | null) => void
   addVSCodeSelectionAttachment: (path: string, file: File) => Promise<void>
   setActiveEditorFile: (file: VSCodeActiveEditorFile | null) => void
+  /** Add attachments restored from a reverted message (file already on server) */
+  addRestoredAttachment: (file: { url: string; mimeType: string; filename: string }) => void
 }
 
 export const useInputStore = create<InputState>()((set, get) => ({
@@ -209,5 +227,24 @@ export const useInputStore = create<InputState>()((set, get) => ({
   setActiveEditorFile: (file) => {
     if (isSameVSCodeActiveEditorFile(get().activeEditorFile, file)) return
     set({ activeEditorFile: file })
+  },
+
+  addRestoredAttachment: ({ url, mimeType, filename }) => {
+    const id = `restored-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    // Use "local" source so the file renders in AttachedFilesList.
+    // Set serverPath to the URL so ImagePreview can use it as the img src
+    // when dataUrl is not a data: URL. sanitizeAttachmentsForSend leaves
+    // dataUrl alone for non-server sources, so the URL stays intact on send.
+    const attached: AttachedFile = {
+      id,
+      file: new File([], filename, { type: mimeType }),
+      dataUrl: url,
+      mimeType,
+      filename,
+      size: getDataUrlByteSize(url),
+      source: "local",
+      serverPath: url,
+    }
+    set((s) => ({ attachedFiles: [...s.attachedFiles, attached] }))
   },
 }))

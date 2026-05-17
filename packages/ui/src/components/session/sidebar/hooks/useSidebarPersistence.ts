@@ -39,7 +39,6 @@ export const useSidebarPersistence = (args: Args) => {
     safeStorage,
     keys,
     sessions,
-    pinnedSessionIds,
     setPinnedSessionIds,
     groupOrderByProject,
     activeSessionByProject,
@@ -134,14 +133,6 @@ export const useSidebarPersistence = (args: Args) => {
       return changed ? next : prev;
     });
   }, [hasLoadedGlobalSessions, sessions, setPinnedSessionIds]);
-
-  React.useEffect(() => {
-    try {
-      safeStorage.setItem(keys.sessionPinned, JSON.stringify(Array.from(pinnedSessionIds)));
-    } catch {
-      // ignored
-    }
-  }, [keys.sessionPinned, pinnedSessionIds, safeStorage]);
 
   React.useEffect(() => {
     try {

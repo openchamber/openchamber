@@ -8,6 +8,25 @@ type AsChildRenderProps = {
   children?: React.ReactNode;
 };
 
+class TooltipPartBoundary extends React.Component<{
+  children: React.ReactNode;
+  fallback?: React.ReactNode;
+}, { hasError: boolean }> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback ?? null;
+    }
+
+    return this.props.children;
+  }
+}
+
 type ProviderProps = React.ComponentProps<typeof BaseTooltip.Provider> & {
   delayDuration?: number;
   skipDelayDuration?: number;
@@ -54,7 +73,11 @@ function TooltipTrigger({
   const renderProps: AsChildRenderProps = asChild && React.isValidElement(children)
     ? { render: children as React.ReactElement }
     : { children };
-  return <BaseTooltip.Trigger data-slot="tooltip-trigger" {...props} {...renderProps} />
+  return (
+    <TooltipPartBoundary fallback={children}>
+      <BaseTooltip.Trigger data-slot="tooltip-trigger" {...props} {...renderProps} />
+    </TooltipPartBoundary>
+  )
 }
 
 type ContentProps = React.ComponentProps<typeof BaseTooltip.Popup> & {
@@ -73,22 +96,24 @@ function TooltipContent({
   ...props
 }: ContentProps) {
   return (
-    <BaseTooltip.Portal>
-      <BaseTooltip.Positioner sideOffset={sideOffset} side={side} align={align} className="z-50">
-        <BaseTooltip.Popup
-          data-slot="tooltip-content"
-          className={cn(
-            "bg-muted text-muted-foreground border border-border/60 transition-all duration-150 ease-out data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95 z-50 w-fit origin-[var(--transform-origin)] rounded-xl px-3 py-1.5 typography-meta text-balance overflow-hidden",
-            className
-          )}
-          style={{ ...style }}
-          {...props}
-        >
-          {children}
-          <BaseTooltip.Arrow className="fill-muted z-50 size-2" />
-        </BaseTooltip.Popup>
-      </BaseTooltip.Positioner>
-    </BaseTooltip.Portal>
+    <TooltipPartBoundary>
+      <BaseTooltip.Portal>
+        <BaseTooltip.Positioner sideOffset={sideOffset} side={side} align={align} className="z-50">
+          <BaseTooltip.Popup
+            data-slot="tooltip-content"
+            className={cn(
+              "bg-muted text-muted-foreground border border-border/60 transition-all duration-150 ease-out data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95 z-50 w-fit origin-[var(--transform-origin)] rounded-xl px-3 py-1.5 typography-meta text-balance overflow-hidden",
+              className
+            )}
+            style={{ ...style }}
+            {...props}
+          >
+            {children}
+            <BaseTooltip.Arrow className="fill-muted z-50 size-2" />
+          </BaseTooltip.Popup>
+        </BaseTooltip.Positioner>
+      </BaseTooltip.Portal>
+    </TooltipPartBoundary>
   )
 }
 

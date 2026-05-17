@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { ChatContainer } from '@/components/chat/ChatContainer';
 import { ChatSurfaceProvider } from '@/components/chat/ChatSurfaceContext';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
+import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { invokeDesktop, isElectronShell } from '@/lib/desktop';
@@ -129,7 +130,8 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
     return segments.at(-1) ?? project.path;
   }, [activeProject, directoryLabel, pathMatchedProject]);
   const gitBranchForDirectory = useGitBranchLabel(openDirectory || null);
-  const branchLabel = gitBranchForDirectory || worktreeMetadataBranch || sessionWorktreeMetadata?.branch?.trim() || worktreeAttachment?.branch?.trim() || catalogWorktreeBranch;
+  const rawBranchLabel = gitBranchForDirectory || worktreeMetadataBranch || sessionWorktreeMetadata?.branch?.trim() || worktreeAttachment?.branch?.trim() || catalogWorktreeBranch;
+  const branchLabel = rawBranchLabel && rawBranchLabel !== 'HEAD' ? rawBranchLabel : null;
   const diffStats = React.useMemo(() => {
     return resolveSessionDiffStats(session?.summary as Parameters<typeof resolveSessionDiffStats>[0]);
   }, [session?.summary]);
@@ -260,25 +262,35 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
       )}
       style={dragRegionStyle}
     >
-      <div className="min-w-0 flex-1">
-        <div className="truncate pl-1 typography-ui-label text-[14px] font-normal leading-tight text-foreground">{title}</div>
-        <div className="flex min-w-0 items-center gap-1.5 truncate pl-1 typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75">
-          <span className="truncate">{projectLabel}</span>
-          {branchLabel ? (
-            <span className="inline-flex min-w-0 items-center gap-0.5">
-              <Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
-              <span className="truncate">{branchLabel}</span>
-            </span>
-          ) : null}
-          {hasChanges ? (
-            <span className="inline-flex flex-shrink-0 items-center gap-0 text-[0.92em]">
-              <span className="text-status-success/80">+{changes.additions}</span>
-              <span className="text-muted-foreground/60">/</span>
-              <span className="text-status-error/65">-{changes.deletions}</span>
-            </span>
-          ) : null}
-        </div>
-      </div>
+      <SessionSwitcherDropdown>
+        <button
+          type="button"
+          aria-label={t('sessions.switcher.openAria')}
+          style={noDragRegionStyle}
+          className="flex min-w-0 max-w-full flex-col items-start rounded-md px-1 py-0.5 text-left transition-colors hover:bg-interactive-hover/60 focus-visible:outline-none focus-visible:bg-interactive-hover/60"
+        >
+          <span className="truncate typography-ui-label text-[14px] font-normal leading-tight text-foreground max-w-full">
+            {title}
+          </span>
+          <span className="flex min-w-0 max-w-full items-center gap-1.5 truncate typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75">
+            <span className="truncate">{projectLabel}</span>
+            {branchLabel ? (
+              <span className="inline-flex min-w-0 items-center gap-0.5">
+                <Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
+                <span className="truncate">{branchLabel}</span>
+              </span>
+            ) : null}
+            {hasChanges ? (
+              <span className="inline-flex flex-shrink-0 items-center gap-0 text-[0.92em]">
+                <span className="text-status-success/80">+{changes.additions}</span>
+                <span className="text-muted-foreground/60">/</span>
+                <span className="text-status-error/65">-{changes.deletions}</span>
+              </span>
+            ) : null}
+          </span>
+        </button>
+      </SessionSwitcherDropdown>
+      <div className="min-w-0 flex-1" />
       {stableContextUsage && stableContextUsage.totalTokens > 0 ? (
         <ContextUsageDisplay
           totalTokens={stableContextUsage.totalTokens}

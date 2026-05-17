@@ -26,7 +26,9 @@ export type MagicPromptId =
   | 'session.summary.visible'
   | 'session.summary.instructions'
   | 'session.review.visible'
-  | 'session.review.instructions';
+  | 'session.review.instructions'
+  | 'session.fusion.visible'
+  | 'session.fusion.instructions';
 
 export interface MagicPromptDefinition {
   id: MagicPromptId;
@@ -569,6 +571,26 @@ Output:
   - category: bug or rule violation
 
 Keep the review concise and practical.`,
+  },
+  {
+    id: 'session.fusion.visible',
+    title: 'Fusion Visible Prompt',
+    group: 'Session',
+    description: 'Visible user message for multi-run fusion sessions.',
+    template: 'Create the best combined answer from the multi-run results.',
+  },
+  {
+    id: 'session.fusion.instructions',
+    title: 'Fusion Instructions',
+    group: 'Session',
+    description: 'Hidden instructions used before multi-run source outputs in fusion sessions.',
+    template: `You are performing fusion over multiple model outputs from the same original task.
+
+Goal: produce the strongest possible final answer by combining complementary information, resolving conflicts, removing duplicates, and preserving useful nuance.
+
+Use the results below as source material. Do not mention that the inputs were hidden parts. If sources disagree, prefer the most specific, well-supported, and internally consistent answer.
+
+--- FUSION INPUTS START ---`,
   },
 ] as const;
 

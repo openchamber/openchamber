@@ -31,7 +31,8 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { opencodeClient } from '@/lib/opencode/client';
-import { SyncProvider, useSessions } from '@/sync/sync-context';
+import { SyncProvider } from '@/sync/sync-context';
+import { useSync } from '@/sync/use-sync';
 import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
 import { AboutDialog } from '@/components/ui/AboutDialog';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
@@ -95,10 +96,16 @@ type AppProps = {
 type EmbeddedSessionChatConfig = {
   sessionId: string;
   directory: string | null;
+  readOnly: boolean;
 };
 
 type EmbeddedVisibilityPayload = {
   visible?: unknown;
+};
+
+const normalizeEmbeddedDirectory = (value: string | null | undefined): string => {
+  if (!value) return '';
+  return value.replace(/\\/g, '/').replace(/\/+$/g, '');
 };
 
 const readEmbeddedSessionChatConfig = (): EmbeddedSessionChatConfig | null => {
@@ -125,6 +132,7 @@ const readEmbeddedSessionChatConfig = (): EmbeddedSessionChatConfig | null => {
   return {
     sessionId,
     directory,
+    readOnly: params.get('readOnly') === '1' || params.get('readOnly') === 'true',
   };
 };
 
@@ -136,31 +144,55 @@ const isMcpOAuthCallbackPath = (): boolean => {
   return window.location.pathname === MCP_OAUTH_CALLBACK_PATH;
 };
 
-const EmbeddedSessionSelectionGate: React.FC<{
-  embeddedSessionChat: EmbeddedSessionChatConfig | null;
+const EmbeddedSessionChatContent: React.FC<{
+  embeddedSessionChat: EmbeddedSessionChatConfig;
   isVSCodeRuntime: boolean;
-}> = ({ embeddedSessionChat, isVSCodeRuntime }) => {
-  const sessions = useSessions();
+  embeddedBackgroundWorkEnabled: boolean;
+}> = ({ embeddedSessionChat, isVSCodeRuntime, embeddedBackgroundWorkEnabled }) => {
+  const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
+  const sync = useSync();
+  const bootstrapKeyRef = React.useRef<string | null>(null);
+
+  const expectedDirectory = normalizeEmbeddedDirectory(embeddedSessionChat.directory);
+  const activeDirectory = normalizeEmbeddedDirectory(currentDirectory);
 
   React.useEffect(() => {
-    if (!embeddedSessionChat || isVSCodeRuntime) {
+    if (isVSCodeRuntime) return;
+    if (expectedDirectory && activeDirectory !== expectedDirectory) return;
+
+    const bootstrapKey = `${expectedDirectory}\n${embeddedSessionChat.sessionId}`;
+    if (bootstrapKeyRef.current === bootstrapKey && currentSessionId === embeddedSessionChat.sessionId) {
       return;
     }
 
-    if (currentSessionId === embeddedSessionChat.sessionId) {
-      return;
-    }
+    bootstrapKeyRef.current = bootstrapKey;
+    setCurrentSession(embeddedSessionChat.sessionId, embeddedSessionChat.directory);
+    void sync.ensureSessionRenderable(embeddedSessionChat.sessionId, true);
+  }, [
+    activeDirectory,
+    currentSessionId,
+    embeddedSessionChat.directory,
+    embeddedSessionChat.sessionId,
+    expectedDirectory,
+    isVSCodeRuntime,
+    setCurrentSession,
+    sync,
+  ]);
 
-    if (!sessions.some((session) => session.id === embeddedSessionChat.sessionId)) {
-      return;
-    }
+  if (expectedDirectory && activeDirectory !== expectedDirectory) {
+    return null;
+  }
 
-    void setCurrentSession(embeddedSessionChat.sessionId);
-  }, [currentSessionId, embeddedSessionChat, isVSCodeRuntime, sessions, setCurrentSession]);
-
-  return null;
+  return (
+    <>
+      <SyncAppEffects embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
+      <OpenCodeUpdateToast />
+      <ChatView readOnly={embeddedSessionChat.readOnly} />
+      <Toaster />
+    </>
+  );
 };
 
 function App({ apis }: AppProps) {
@@ -780,11 +812,11 @@ function App({ apis }: AppProps) {
           <RuntimeAPIProvider apis={apis}>
             <TooltipProvider delayDuration={300} skipDelayDuration={150}>
               <div className="h-full text-foreground bg-background">
-                <EmbeddedSessionSelectionGate embeddedSessionChat={embeddedSessionChat} isVSCodeRuntime={isVSCodeRuntime} />
-                <SyncAppEffects embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
-                <OpenCodeUpdateToast />
-                <ChatView />
-                <Toaster />
+                <EmbeddedSessionChatContent
+                  embeddedSessionChat={embeddedSessionChat}
+                  isVSCodeRuntime={isVSCodeRuntime}
+                  embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled}
+                />
               </div>
             </TooltipProvider>
           </RuntimeAPIProvider>

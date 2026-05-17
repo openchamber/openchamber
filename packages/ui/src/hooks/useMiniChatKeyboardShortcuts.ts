@@ -17,6 +17,7 @@ export const useMiniChatKeyboardShortcuts = () => {
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const activeProject = useProjectsStore((state) => state.getActiveProject());
+  const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
 
   React.useEffect(() => {
     const combo = (actionId: string) => getEffectiveShortcutCombo(actionId, shortcutOverrides);
@@ -36,6 +37,17 @@ export const useMiniChatKeyboardShortcuts = () => {
         })?.catch((error) => {
           console.warn('[mini-chat-shortcuts] failed to open draft mini chat window', error);
         });
+        return;
+      }
+
+      if (eventMatchesShortcut(event, combo('new_chat'))) {
+        event.preventDefault();
+        openNewSessionDraft({
+          selectedProjectId: activeProject?.id ?? null,
+          directoryOverride: currentDirectory || activeProject?.path || null,
+          preserveDirectoryOverride: Boolean(currentDirectory || activeProject?.path),
+        });
+        focusChatInput();
         return;
       }
 
@@ -90,5 +102,5 @@ export const useMiniChatKeyboardShortcuts = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeProject?.id, activeProject?.path, currentDirectory, shortcutOverrides]);
+  }, [activeProject?.id, activeProject?.path, currentDirectory, openNewSessionDraft, shortcutOverrides]);
 };

@@ -2,6 +2,7 @@ import * as React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui/toast';
 import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
 
 type OpenCodeUpdateAvailableEvent = CustomEvent<{ version?: unknown }>;
@@ -17,8 +18,15 @@ const CHECK_RETRY_DELAYS_MS = [10_000, 60_000];
 
 export const OpenCodeUpdateToast: React.FC = () => {
   const { t } = useI18n();
+  const showOpenCodeUpdateNotifications = useUIStore((state) => state.showOpenCodeUpdateNotifications);
   const seenVersionsRef = React.useRef(new Set<string>());
   const upgradingRef = React.useRef(false);
+
+  React.useEffect(() => {
+    if (!showOpenCodeUpdateNotifications) {
+      toast.dismiss(UPDATE_TOAST_ID);
+    }
+  }, [showOpenCodeUpdateNotifications]);
 
   const reloadOpenCode = React.useCallback(() => {
     toast.dismiss(UPGRADE_TOAST_ID);
@@ -79,6 +87,10 @@ export const OpenCodeUpdateToast: React.FC = () => {
 
   React.useEffect(() => {
     const showUpdateAvailableToast = (version: string) => {
+      if (!useUIStore.getState().showOpenCodeUpdateNotifications) {
+        toast.dismiss(UPDATE_TOAST_ID);
+        return;
+      }
       if (!version) {
         return;
       }
@@ -125,7 +137,9 @@ export const OpenCodeUpdateToast: React.FC = () => {
       }
     };
 
-    timeoutIds.push(setTimeout(() => { void checkForUpdate(0); }, INITIAL_CHECK_DELAY_MS));
+    if (showOpenCodeUpdateNotifications) {
+      timeoutIds.push(setTimeout(() => { void checkForUpdate(0); }, INITIAL_CHECK_DELAY_MS));
+    }
 
     window.addEventListener('openchamber:opencode-update-available', onUpdateAvailable);
     return () => {
@@ -133,7 +147,7 @@ export const OpenCodeUpdateToast: React.FC = () => {
       for (const timeoutId of timeoutIds) clearTimeout(timeoutId);
       window.removeEventListener('openchamber:opencode-update-available', onUpdateAvailable);
     };
-  }, [runUpgrade, t]);
+  }, [runUpgrade, showOpenCodeUpdateNotifications, t]);
 
   return null;
 };

@@ -9,6 +9,8 @@ import { useSessions, useDirectorySync, useSessionMessages, useSessionMessagesRe
 import { useConfigStore } from '@/stores/useConfigStore';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { McpDropdown } from '@/components/mcp/McpDropdown';
+import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 import { cn } from '@/lib/utils';
 import {
   DropdownMenu,
@@ -24,7 +26,7 @@ import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { UsageProgressBar } from '@/components/sections/usage/UsageProgressBar';
 import { PaceIndicator } from '@/components/sections/usage/PaceIndicator';
 import { Icon } from "@/components/icon/Icon";
-import { formatQuotaValueLabel, formatWindowLabel, QUOTA_PROVIDERS, calculatePace, calculateExpectedUsagePercent } from '@/lib/quota';
+import { formatQuotaValueLabel, formatQuotaResetLabel, formatWindowLabel, QUOTA_PROVIDERS, calculatePace, calculateExpectedUsagePercent } from '@/lib/quota';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { updateDesktopSettings } from '@/lib/persistence';
@@ -422,6 +424,7 @@ export const VSCodeLayout: React.FC = () => {
             showMcp
             showContextUsage
             showRateLimits
+            enableSessionSwitcher
           />
           <div className="flex-1 overflow-hidden">
             <ErrorBoundary>
@@ -474,6 +477,7 @@ export const VSCodeLayout: React.FC = () => {
               showMcp
               showContextUsage
               showRateLimits
+              enableSessionSwitcher
             />
             <div className="flex-1 overflow-hidden">
               <ErrorBoundary>
@@ -511,6 +515,7 @@ export const VSCodeLayout: React.FC = () => {
               showMcp
               showContextUsage
               showRateLimits
+              enableSessionSwitcher
             />
             <div className="flex-1 overflow-hidden">
               <ErrorBoundary>
@@ -535,13 +540,15 @@ interface VSCodeHeaderProps {
   showMcp?: boolean;
   showContextUsage?: boolean;
   showRateLimits?: boolean;
+  enableSessionSwitcher?: boolean;
 }
 
-const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, onNewSession, onSettings, onAgentManager, showMcp, showContextUsage, showRateLimits }) => {
+const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, onNewSession, onSettings, onAgentManager, showMcp, showContextUsage, showRateLimits, enableSessionSwitcher }) => {
   const { t } = useI18n();
   const getCurrentModel = useConfigStore((state) => state.getCurrentModel);
   const providers = useConfigStore((state) => state.providers);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   const currentSessionMessages = useSessionMessages(currentSessionId ?? '');
   const currentSessionMessagesResolved = useSessionMessagesResolved(currentSessionId ?? '');
   const quotaResults = useQuotaStore((state) => state.results);
@@ -697,7 +704,19 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
           <Icon name="arrow-left" className="h-5 w-5" />
         </button>
       )}
-      <h1 className="text-sm font-medium truncate flex-1" title={title}>{title}</h1>
+      {enableSessionSwitcher ? (
+        <SessionSwitcherDropdown variant="compact" scopeProjectId={activeProjectId}>
+          <button
+            type="button"
+            aria-label={t('sessions.switcher.openAria')}
+            className="flex min-w-0 flex-1 items-center rounded-md px-1 py-0.5 -my-0.5 text-left transition-colors hover:bg-interactive-hover/60 focus-visible:outline-none focus-visible:bg-interactive-hover/60"
+          >
+            <span className="text-sm font-medium truncate" title={title}>{title}</span>
+          </button>
+        </SessionSwitcherDropdown>
+      ) : (
+        <h1 className="text-sm font-medium truncate flex-1" title={title}>{title}</h1>
+      )}
       {onNewSession && (
         <button
           onClick={onNewSession}
@@ -850,7 +869,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
                                 </div>
                               )}
                               <span className="flex items-center justify-between typography-micro text-muted-foreground text-[10px]">
-                                <span>{window.resetAfterFormatted ?? window.resetAtFormatted ?? ''}</span>
+                                <span>{formatQuotaResetLabel(window.resetAt, window.resetAfterFormatted ?? window.resetAtFormatted)}</span>
                               </span>
                       </span>
                     </DropdownMenuItem>
