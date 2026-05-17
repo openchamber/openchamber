@@ -279,6 +279,27 @@ async function execGit(args: string[], cwd: string): Promise<{ stdout: string; s
   });
 }
 
+function extractGitStatusPath(status: string, pathPart: string): string {
+  if ((status === 'R' || status === 'C') && pathPart.includes('\t')) {
+    return pathPart.split('\t').pop() || pathPart;
+  }
+  return pathPart;
+}
+
+function extractGitNumstatDestinationPath(filePath: string): string {
+  if (!filePath.includes(' => ')) {
+    return filePath;
+  }
+
+  const braceMatch = filePath.match(/^(.*)\{([^{}]*)\s=>\s([^{}]*)\}(.*)$/);
+  if (braceMatch) {
+    const [, prefix, , destination, suffix] = braceMatch;
+    return `${prefix}${destination}${suffix}`.replace(/\/+/g, '/');
+  }
+
+  return filePath.split(' => ').pop()?.trim() || filePath;
+}
+
 // ============== Repository Operations ==============
 
 /**
@@ -2631,19 +2652,11 @@ export async function getCommitFiles(
       const match = line.match(/^([AMDRC])\d*\t(.+)$/);
       if (match) {
         const [, status, pathPart] = match;
-        // R/C lines have format: R<score>\t<source>\t<dest>
-        // (.+) greedily captures both paths; extract only the destination
-        const mapPath =
-          (status === 'R' || status === 'C') && pathPart.includes('\t')
-            ? pathPart.split('\t').pop()!
-            : pathPart;
-        statusMap.set(mapPath, status);
+        statusMap.set(extractGitStatusPath(status, pathPart), status);
       }
     }
     for (const file of files) {
-      const basePath = file.path.includes(' => ')
-        ? file.path.split(' => ').pop()?.replace(/[{}]/g, '') ?? file.path
-        : file.path;
+      const basePath = extractGitNumstatDestinationPath(file.path);
       const status = statusMap.get(basePath) ?? statusMap.get(file.path);
       if (status) {
         file.changeType = status;

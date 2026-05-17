@@ -9,6 +9,48 @@ import { getCommitFileDiff, type CommitFileDiffResponse } from '@/lib/gitApi';
 import { PierreDiffViewer } from '@/components/views/PierreDiffViewer';
 import { getLanguageFromExtension } from '@/lib/toolHelpers';
 
+const HISTORY_DIFF_REQUEST_TIMEOUT_MS = 15000;
+const HISTORY_DIFF_LARGE_CHANGED_LINES = 500;
+const HISTORY_DIFF_CACHE_MAX_ENTRIES = 12;
+const HISTORY_DIFF_CACHE_MAX_TOTAL_SIZE_BYTES = 8 * 1024 * 1024;
+
+type HistoryDiffCacheValue = CommitFileDiffResponse | 'loading' | 'error';
+
+const getHistoryDiffCacheSize = (value: HistoryDiffCacheValue): number => {
+  if (typeof value === 'string') {
+    return 0;
+  }
+  return (value.original?.length ?? 0) + (value.modified?.length ?? 0);
+};
+
+const trimHistoryDiffCache = (cache: Map<string, HistoryDiffCacheValue>): Map<string, HistoryDiffCacheValue> => {
+  if (cache.size <= HISTORY_DIFF_CACHE_MAX_ENTRIES) {
+    let totalSize = 0;
+    for (const value of cache.values()) {
+      totalSize += getHistoryDiffCacheSize(value);
+    }
+    if (totalSize <= HISTORY_DIFF_CACHE_MAX_TOTAL_SIZE_BYTES) {
+      return cache;
+    }
+  }
+
+  const entries = Array.from(cache.entries()).reverse();
+  const next = new Map<string, HistoryDiffCacheValue>();
+  let totalSize = 0;
+  for (const [key, value] of entries) {
+    if (next.size >= HISTORY_DIFF_CACHE_MAX_ENTRIES) {
+      continue;
+    }
+    const entrySize = getHistoryDiffCacheSize(value);
+    if (totalSize + entrySize > HISTORY_DIFF_CACHE_MAX_TOTAL_SIZE_BYTES && next.size > 0) {
+      continue;
+    }
+    next.set(key, value);
+    totalSize += entrySize;
+  }
+
+  return new Map(Array.from(next.entries()).reverse());
+};
 
 interface HistoryCommitRowProps {
   entry: GitLogEntry;
@@ -63,7 +105,28 @@ export const HistoryCommitRow = React.memo(({
   const { t } = useI18n();
 
   const [openDiffPaths, setOpenDiffPaths] = React.useState<Set<string>>(new Set());
-  const [diffCache, setDiffCache] = React.useState<Map<string, CommitFileDiffResponse | 'loading' | 'error'>>(new Map());
+  const [diffCache, setDiffCache] = React.useState<Map<string, HistoryDiffCacheValue>>(new Map());
+  const [forceRenderLargePaths, setForceRenderLargePaths] = React.useState<Set<string>>(new Set());
+
+  const loadFileDiff = React.useCallback(async (file: CommitFileEntry) => {
+    const key = file.path;
+    if (!directory) {
+      setDiffCache(prev => new Map(prev).set(key, 'error'));
+      return;
+    }
+
+    setDiffCache(prev => trimHistoryDiffCache(new Map(prev).set(key, 'loading')));
+    try {
+      const fetchPromise = getCommitFileDiff(directory, entry.hash, file.path, false);
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error(`Timed out after ${HISTORY_DIFF_REQUEST_TIMEOUT_MS}ms`)), HISTORY_DIFF_REQUEST_TIMEOUT_MS);
+      });
+      const result = await Promise.race([fetchPromise, timeoutPromise]);
+      setDiffCache(prev => trimHistoryDiffCache(new Map(prev).set(key, result)));
+    } catch {
+      setDiffCache(prev => new Map(prev).set(key, 'error'));
+    }
+  }, [directory, entry.hash]);
 
   const toggleFileDiff = React.useCallback(async (file: CommitFileEntry) => {
     const key = file.path;
@@ -80,7 +143,7 @@ export const HistoryCommitRow = React.memo(({
     const cached = diffCache.get(key);
     const isOpen = openDiffPaths.has(key);
 
-    if (isOpen && cached !== 'error') {
+    if (isOpen && cached && cached !== 'error') {
       // Close it
       setOpenDiffPaths(prev => { const next = new Set(prev); next.delete(key); return next; });
       return;
@@ -91,19 +154,13 @@ export const HistoryCommitRow = React.memo(({
 
     if (cached && cached !== 'error') return; // Already loaded
 
-    if (!directory) {
-      setDiffCache(prev => new Map(prev).set(key, 'error'));
+    const changedLines = file.insertions + file.deletions;
+    if (changedLines > HISTORY_DIFF_LARGE_CHANGED_LINES && !forceRenderLargePaths.has(key)) {
       return;
     }
 
-    setDiffCache(prev => new Map(prev).set(key, 'loading'));
-    try {
-      const result = await getCommitFileDiff(directory, entry.hash, file.path, false);
-      setDiffCache(prev => new Map(prev).set(key, result));
-    } catch {
-      setDiffCache(prev => new Map(prev).set(key, 'error'));
-    }
-  }, [diffCache, openDiffPaths, entry.hash, directory]);
+    await loadFileDiff(file);
+  }, [diffCache, forceRenderLargePaths, loadFileDiff, openDiffPaths]);
 
   return (
     <li>
@@ -174,7 +231,10 @@ export const HistoryCommitRow = React.memo(({
                   <button
                     type="button"
                     onClick={() => toggleFileDiff(file)}
-                    className="w-full flex items-center gap-2 typography-micro text-left cursor-pointer hover:bg-[var(--interactive-hover)] transition-colors rounded px-1"
+                    className={cn(
+                      'w-full flex items-center gap-2 typography-micro text-left cursor-pointer transition-colors rounded px-1',
+                      openDiffPaths.has(file.path) ? 'bg-sidebar/90' : 'hover:bg-sidebar/40'
+                    )}
                   >
                     <span
                       className={cn(
@@ -205,7 +265,7 @@ export const HistoryCommitRow = React.memo(({
                     )}
                     <Icon
                       name={openDiffPaths.has(file.path) ? 'arrow-down-s' : 'arrow-right-s'}
-                      className="size-3 shrink-0 ml-auto text-muted-foreground"
+                      className="size-3 shrink-0 text-muted-foreground"
                     />
                   </button>
 
@@ -216,6 +276,32 @@ export const HistoryCommitRow = React.memo(({
                       ) : file.isBinary ? (
                         <div className="px-3 py-2 text-sm text-muted-foreground">{t('gitView.history.binaryNoDiff')}</div>
                       ) : (() => {
+                        const changedLines = file.insertions + file.deletions;
+                        if (!forceRenderLargePaths.has(file.path) && changedLines > HISTORY_DIFF_LARGE_CHANGED_LINES) {
+                          return (
+                            <div className="flex flex-col items-start gap-1 px-3 py-2 text-sm text-muted-foreground">
+                              <div className="typography-ui-label font-semibold text-foreground">
+                                {t('gitView.history.largeDiffTitle', { count: changedLines })}
+                              </div>
+                              <div className="typography-meta text-muted-foreground">
+                                {t('gitView.history.largeDiffDescription')}
+                              </div>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="xs"
+                                className="h-6 px-0 text-primary hover:bg-transparent hover:underline"
+                                onClick={() => {
+                                  setForceRenderLargePaths(prev => new Set(prev).add(file.path));
+                                  void loadFileDiff(file);
+                                }}
+                              >
+                                {t('gitView.history.renderDiffAnyway')}
+                              </Button>
+                            </div>
+                          );
+                        }
+
                         const cached = diffCache.get(file.path);
                         if (cached === 'loading' || cached === undefined) {
                           return <div className="px-3 py-2 text-sm text-muted-foreground">{t('gitView.history.loadingDiff')}</div>;
@@ -231,8 +317,8 @@ export const HistoryCommitRow = React.memo(({
                             </button>
                           );
                         }
-                          return (
-                           <PierreDiffViewer
+                        return (
+                            <PierreDiffViewer
                              original={cached.original}
                              modified={cached.modified}
                              language={getLanguageFromExtension(file.path) || ''}
