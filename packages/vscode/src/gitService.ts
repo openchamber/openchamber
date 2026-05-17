@@ -2578,7 +2578,7 @@ export async function getGitLog(
   const result = await execGit(args, directory);
   
   if (result.exitCode !== 0) {
-    return { all: [], latest: null, total: 0 };
+    throw new Error(result.stderr.trim() || result.stdout.trim() || 'Failed to get git log');
   }
 
   const entries: GitLogEntry[] = [];
