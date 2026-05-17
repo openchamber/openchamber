@@ -4,6 +4,7 @@ import { toast } from '@/components/ui/toast';
 import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
+import { getSafeStorage } from '@/stores/utils/safeStorage';
 
 type OpenCodeUpdateAvailableEvent = CustomEvent<{ version?: unknown }>;
 type OpenCodeUpgradeStatus = {
@@ -15,6 +16,7 @@ const UPDATE_TOAST_ID = 'opencode-update-available';
 const UPGRADE_TOAST_ID = 'opencode-upgrade-progress';
 const INITIAL_CHECK_DELAY_MS = 5_000;
 const CHECK_RETRY_DELAYS_MS = [10_000, 60_000];
+const UPDATE_TOAST_DISMISSED_VERSION_KEY = 'opencode-update-toast-dismissed-version';
 
 export const OpenCodeUpdateToast: React.FC = () => {
   const { t } = useI18n();
@@ -97,6 +99,10 @@ export const OpenCodeUpdateToast: React.FC = () => {
       if (seenVersionsRef.current.has(version)) {
         return;
       }
+      const dismissedVersion = getSafeStorage().getItem(UPDATE_TOAST_DISMISSED_VERSION_KEY);
+      if (dismissedVersion === version) {
+        return;
+      }
       seenVersionsRef.current.add(version);
 
       toast.info(t('opencodeUpdate.toast.available.title'), {
@@ -106,6 +112,13 @@ export const OpenCodeUpdateToast: React.FC = () => {
         action: {
           label: t('opencodeUpdate.toast.actions.update'),
           onClick: runUpgrade,
+        },
+        cancel: {
+          label: t('opencodeUpdate.toast.actions.dismiss'),
+          onClick: () => {
+            getSafeStorage().setItem(UPDATE_TOAST_DISMISSED_VERSION_KEY, version);
+            toast.dismiss(UPDATE_TOAST_ID);
+          },
         },
       });
     };
