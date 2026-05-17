@@ -1,4 +1,5 @@
 import type { OpencodeClient, PermissionRequest, Project, QuestionRequest } from "@opencode-ai/sdk/v2/client"
+import { opencodeClient } from "@/lib/opencode/client"
 import { retry } from "./retry"
 import type { GlobalState, State } from "./types"
 
@@ -187,7 +188,7 @@ export async function bootstrapDirectory(input: {
   // These enrich the UI but aren't required for basic functionality.
   // ---------------------------------------------------------------------------
   void Promise.allSettled([
-    retry(() => sdk.app.agents().then((x) => set({ agent: unwrap(x, "app.agents") }))),
+    retry(() => opencodeClient.withDirectory(directory, () => opencodeClient.listAgents()).then((agents) => set({ agent: agents }))),
     retry(() => sdk.command.list().then((x) => set({ command: unwrap(x, "command.list") }))),
     retry(() => sdk.mcp.status().then((x) => set({ mcp: unwrap(x, "mcp.status") }))),
     retry(() => sdk.lsp.status().then((x) => set({ lsp: unwrap(x, "lsp.status") }))),
