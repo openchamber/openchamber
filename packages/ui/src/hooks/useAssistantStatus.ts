@@ -198,28 +198,41 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
             return { activePartType: undefined, activeToolName: undefined, statusText: 'working', isGenericStatus: true };
         }
 
-        const assistantMessages = sessionMessages
-            .filter(
-                (msg): msg is AssistantSessionMessageRecord =>
-                    isAssistantMessage(msg.info) && !isFullySyntheticMessage(msg.parts)
-            );
-
-        if (assistantMessages.length === 0) {
-            return { activePartType: undefined, activeToolName: undefined, statusText: 'working', isGenericStatus: true };
+        // Pick the latest assistant message by created-time (tiebreak by id) in a
+        // single pass — sync reconciliation can splice messages out of array order.
+        let lastAssistant: AssistantSessionMessageRecord | null = null;
+        let lastCreated: number | null = null;
+        for (const candidate of sessionMessages) {
+            if (!isAssistantMessage(candidate.info) || isFullySyntheticMessage(candidate.parts)) {
+                continue;
+            }
+            const typed = candidate as AssistantSessionMessageRecord;
+            const candidateCreated = typeof typed.info.time?.created === 'number' ? typed.info.time.created : null;
+            if (lastAssistant === null) {
+                lastAssistant = typed;
+                lastCreated = candidateCreated;
+                continue;
+            }
+            const bothHaveCreated = candidateCreated !== null && lastCreated !== null;
+            const isNewer = bothHaveCreated
+                ? candidateCreated! > lastCreated!
+                : (typed.info.id.localeCompare(lastAssistant.info.id) > 0);
+            if (bothHaveCreated && candidateCreated === lastCreated) {
+                if (typed.info.id.localeCompare(lastAssistant.info.id) > 0) {
+                    lastAssistant = typed;
+                    lastCreated = candidateCreated;
+                }
+                continue;
+            }
+            if (isNewer) {
+                lastAssistant = typed;
+                lastCreated = candidateCreated;
+            }
         }
 
-        const sortedAssistantMessages = [...assistantMessages].sort((a, b) => {
-            const aCreated = typeof a.info.time?.created === 'number' ? a.info.time.created : null;
-            const bCreated = typeof b.info.time?.created === 'number' ? b.info.time.created : null;
-
-            if (aCreated !== null && bCreated !== null && aCreated !== bCreated) {
-                return aCreated - bCreated;
-            }
-
-            return a.info.id.localeCompare(b.info.id);
-        });
-
-        const lastAssistant = sortedAssistantMessages[sortedAssistantMessages.length - 1];
+        if (!lastAssistant) {
+            return { activePartType: undefined, activeToolName: undefined, statusText: 'working', isGenericStatus: true };
+        }
 
         let activePartType: 'text' | 'tool' | 'reasoning' | 'editing' | undefined = undefined;
         let activeToolName: string | undefined = undefined;
