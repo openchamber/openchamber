@@ -168,11 +168,25 @@ export const useSessionActions = (args: Args) => {
     return collected;
   }, [args.childrenMap]);
 
+  // Archive cascades to subagents that aren't already archived; hard-delete
+  // cascades to every descendant unconditionally. We collect once and filter
+  // per-action so the dialog count and the executed ID list always agree.
+  const filterDescendantsForAction = React.useCallback(
+    (descendants: Session[], shouldHardDelete: boolean): Session[] => {
+      if (shouldHardDelete) return descendants;
+      return descendants.filter((s) => !s.time?.archived);
+    },
+    [],
+  );
+
   const executeDeleteSession = React.useCallback(
     async (session: Session, source?: { archivedBucket?: boolean }) => {
-      const descendants = collectDescendants(session.id);
       const shouldHardDelete = source?.archivedBucket === true;
-      if (descendants.length === 0) {
+      const effectiveDescendants = filterDescendantsForAction(
+        collectDescendants(session.id),
+        shouldHardDelete,
+      );
+      if (effectiveDescendants.length === 0) {
         const success = shouldHardDelete
           ? await args.deleteSession(session.id)
           : await args.archiveSession(session.id);
@@ -188,7 +202,7 @@ export const useSessionActions = (args: Args) => {
         return;
       }
 
-      const ids = [session.id, ...descendants.map((s) => s.id)];
+      const ids = [session.id, ...effectiveDescendants.map((s) => s.id)];
       if (shouldHardDelete) {
         const { deletedIds, failedIds } = await args.deleteSessions(ids);
         if (deletedIds.length > 0) {
@@ -216,19 +230,23 @@ export const useSessionActions = (args: Args) => {
           : t('sessions.sidebar.bulkActions.failedArchivePlural', { count: failedIds.length }));
       }
     },
-    [args, collectDescendants, t],
+    [args, collectDescendants, filterDescendantsForAction, t],
   );
 
   const handleDeleteSession = React.useCallback(
     (session: Session, source?: { archivedBucket?: boolean }) => {
-      const descendants = collectDescendants(session.id);
+      const shouldHardDelete = source?.archivedBucket === true;
+      const effectiveDescendants = filterDescendantsForAction(
+        collectDescendants(session.id),
+        shouldHardDelete,
+      );
       if (!args.showDeletionDialog) {
         void executeDeleteSession(session, source);
         return;
       }
-      args.setDeleteSessionConfirm({ session, descendantCount: descendants.length, archivedBucket: source?.archivedBucket === true });
+      args.setDeleteSessionConfirm({ session, descendantCount: effectiveDescendants.length, archivedBucket: shouldHardDelete });
     },
-    [args, collectDescendants, executeDeleteSession],
+    [args, collectDescendants, executeDeleteSession, filterDescendantsForAction],
   );
 
   const confirmDeleteSession = React.useCallback(async () => {
