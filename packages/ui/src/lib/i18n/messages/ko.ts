@@ -1002,7 +1002,6 @@ export const dict: Record<I18nKey, string> = {
   'rightSidebar.contextNotesTodo.empty.selectProject': '메모와 Todo를 추가할 프로젝트를 선택하세요.',
   'rightSidebar.contextNotesTodo.notes.title': '빠른 메모 - {project}',
   'rightSidebar.contextNotesTodo.notes.placeholder': '컨텍스트, 리마인더, 링크를 기록하세요',
-  'rightSidebar.contextNotesTodo.notes.resizeAria': '메모 패널 크기 조정',
   'rightSidebar.contextNotesTodo.todo.title': 'Todo',
   'rightSidebar.contextNotesTodo.todo.itemsSingle': '{count}개 항목',
   'rightSidebar.contextNotesTodo.todo.itemsPlural': '{count}개 항목',

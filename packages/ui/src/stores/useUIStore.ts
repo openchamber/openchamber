@@ -492,9 +492,7 @@ interface UIStore {
   bottomTerminalHeight: number;
   hasManuallyResizedBottomTerminal: boolean;
   notesPanelHeight: number;
-  hasManuallyResizedNotesPanel: boolean;
   todoPanelHeight: number;
-  hasManuallyResizedTodoPanel: boolean;
   isSessionSwitcherOpen: boolean;
   activeMainTab: MainTab;
   mainTabGuard: MainTabGuard | null;
@@ -755,9 +753,7 @@ export const useUIStore = create<UIStore>()(
         bottomTerminalHeight: 300,
         hasManuallyResizedBottomTerminal: false,
         notesPanelHeight: 112,
-        hasManuallyResizedNotesPanel: false,
         todoPanelHeight: 259,
-        hasManuallyResizedTodoPanel: false,
         isSessionSwitcherOpen: false,
         activeMainTab: 'chat',
         mainTabGuard: null,
@@ -1286,11 +1282,11 @@ export const useUIStore = create<UIStore>()(
         },
 
         setNotesPanelHeight: (height) => {
-          set({ notesPanelHeight: height, hasManuallyResizedNotesPanel: true });
+          set({ notesPanelHeight: height });
         },
 
         setTodoPanelHeight: (height) => {
-          set({ todoPanelHeight: height, hasManuallyResizedTodoPanel: true });
+          set({ todoPanelHeight: height });
         },
 
         setSessionSwitcherOpen: (open) => {
@@ -1958,14 +1954,8 @@ export const useUIStore = create<UIStore>()(
             if (typeof state.notesPanelHeight !== 'number' || !Number.isFinite(state.notesPanelHeight)) {
               state.notesPanelHeight = 112;
             }
-            if (typeof state.hasManuallyResizedNotesPanel !== 'boolean') {
-              state.hasManuallyResizedNotesPanel = false;
-            }
             if (typeof state.todoPanelHeight !== 'number' || !Number.isFinite(state.todoPanelHeight)) {
               state.todoPanelHeight = 259;
-            }
-            if (typeof state.hasManuallyResizedTodoPanel !== 'boolean') {
-              state.hasManuallyResizedTodoPanel = false;
             }
           }
 

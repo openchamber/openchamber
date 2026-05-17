@@ -999,7 +999,6 @@ export const dict = {
   'rightSidebar.contextNotesTodo.empty.selectProject': 'Select a project to add notes and todos.',
   'rightSidebar.contextNotesTodo.notes.title': 'Quick notes - {project}',
   'rightSidebar.contextNotesTodo.notes.placeholder': 'Capture context, reminders, or links',
-  'rightSidebar.contextNotesTodo.notes.resizeAria': 'Resize notes panel',
   'rightSidebar.contextNotesTodo.todo.title': 'Todo',
   'rightSidebar.contextNotesTodo.todo.itemsSingle': '{count} item',
   'rightSidebar.contextNotesTodo.todo.itemsPlural': '{count} items',

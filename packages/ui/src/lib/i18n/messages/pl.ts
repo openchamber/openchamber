@@ -1854,7 +1854,6 @@ export const dict: Record<I18nKey, string> = {
   'projectEditDialog.toast.iconUpdated': 'Zaktualizowano ikonę projektu',
   'rightSidebar.contextNotesTodo.empty.selectProject': 'Wybierz projekt, aby dodać notatki i zadania.',
   'rightSidebar.contextNotesTodo.notes.placeholder': 'Zapisz kontekst, przypomnienia lub linki',
-  'rightSidebar.contextNotesTodo.notes.resizeAria': 'Zmień rozmiar panelu notatek',
   'rightSidebar.contextNotesTodo.notes.title': 'Szybkie notatki — {project}',
   'rightSidebar.contextNotesTodo.plan.defaultTitle': 'Plan',
   'rightSidebar.contextNotesTodo.plans.deletePlan': 'Usuń plan',

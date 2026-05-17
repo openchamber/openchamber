@@ -965,7 +965,6 @@ export const dict: Record<I18nKey, string> = {
   "rightSidebar.contextNotesTodo.empty.selectProject": "Виберіть проєкт, щоб додати нотатки та завдання.",
   "rightSidebar.contextNotesTodo.notes.title": "Швидкі нотатки - {project}",
   "rightSidebar.contextNotesTodo.notes.placeholder": "Зберігайте контекст, нагадування або посилання",
-  "rightSidebar.contextNotesTodo.notes.resizeAria": "Змінити розмір панелі нотаток",
   "rightSidebar.contextNotesTodo.todo.title": "Todo",
   "rightSidebar.contextNotesTodo.todo.itemsSingle": "{count} пункт",
   "rightSidebar.contextNotesTodo.todo.itemsPlural": "пунктів: {count}",

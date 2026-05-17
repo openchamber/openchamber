@@ -965,7 +965,6 @@ export const dict: Record<I18nKey, string> = {
   'rightSidebar.contextNotesTodo.empty.selectProject': '请选择一个项目以添加笔记和待办事项。',
   'rightSidebar.contextNotesTodo.notes.title': '快速笔记 - {project}',
   'rightSidebar.contextNotesTodo.notes.placeholder': '记录上下文、提醒或链接',
-  'rightSidebar.contextNotesTodo.notes.resizeAria': '调整笔记面板大小',
   'rightSidebar.contextNotesTodo.todo.title': '待办',
   'rightSidebar.contextNotesTodo.todo.itemsSingle': '{count} 项',
   'rightSidebar.contextNotesTodo.todo.itemsPlural': '{count} 项',
