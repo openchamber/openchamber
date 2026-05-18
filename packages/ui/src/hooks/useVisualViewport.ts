@@ -5,11 +5,6 @@ export interface VisualViewportState {
   keyboardHeight: number;
 }
 
-const getInitialHeight = (): number => {
-  if (typeof window === 'undefined') return 0;
-  return window.visualViewport?.height ?? window.innerHeight;
-};
-
 export const getVisualViewportState = (): VisualViewportState => {
   if (typeof window === 'undefined') {
     return { height: 0, keyboardHeight: 0 };
@@ -24,10 +19,7 @@ export const getVisualViewportState = (): VisualViewportState => {
 };
 
 export const useVisualViewport = (): VisualViewportState => {
-  const [state, setState] = React.useState<VisualViewportState>(() => ({
-    height: getInitialHeight(),
-    keyboardHeight: 0,
-  }));
+  const [state, setState] = React.useState<VisualViewportState>(getVisualViewportState);
 
   const rafIdRef = React.useRef<number | null>(null);
 
