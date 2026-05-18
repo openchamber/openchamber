@@ -277,6 +277,30 @@ export function createEventPipeline(input: EventPipelineInput) {
   const isHidden = (): boolean =>
     typeof document !== "undefined" && document.visibilityState !== "visible"
 
+  // Extract an HTTP status code from anywhere it might be hiding on the
+  // error object. The SDK's unwrap pattern stashes it on `.status`; raw
+  // fetch failures may carry `.response.status`; some SDKs also use `.code`.
+  const extractStatus = (error: unknown): number | undefined => {
+    if (!error || typeof error !== "object") return undefined
+    const direct = (error as { status?: unknown }).status
+    if (typeof direct === "number") return direct
+    const fromResponse = (error as { response?: { status?: unknown } }).response?.status
+    if (typeof fromResponse === "number") return fromResponse
+    return undefined
+  }
+
+  // 4xx errors don't recover from blind retry — wrong path, expired auth,
+  // bad request body. Keep retrying anyway (a remote reconfigure or reauth
+  // can fix the underlying problem) but at the long cap so we're not
+  // hammering the server at 5s intervals indefinitely. 408 (timeout) and
+  // 429 (rate limit) are retryable in spirit — let them through to the
+  // normal exponential path.
+  const isPermanentHttpStatus = (status: number): boolean => {
+    if (status < 400 || status >= 500) return false
+    if (status === 408 || status === 429) return false
+    return true
+  }
+
   /**
    * Wait between reconnect attempts. Resolves early when:
    *   - the browser fires `online` (network came back — probe immediately),
@@ -679,7 +703,18 @@ export function createEventPipeline(input: EventPipelineInput) {
           // or offline so a backgrounded PWA on a flaky link doesn't burn
           // battery. waitForRetry below resolves early on `online` or
           // visibility-visible so recovery is still under a second.
-          retryDelayMs = computeRetryDelay(consecutiveFailures)
+          //
+          // Override for permanent 4xx errors: stuck-path / bad-auth scenarios
+          // won't recover from blind retry. Use the long cap immediately so
+          // the client doesn't pound the server log at 12 reqs/min. The
+          // waitForRetry interrupters still apply, so a fix on the other end
+          // followed by `online`/visibility recovery probes promptly.
+          const status = extractStatus(error)
+          if (status !== undefined && isPermanentHttpStatus(status)) {
+            retryDelayMs = RETRY_BACKOFF_CAP_HIDDEN_OR_OFFLINE_MS
+          } else {
+            retryDelayMs = computeRetryDelay(consecutiveFailures)
+          }
         }
       } finally {
         abort.signal.removeEventListener("abort", onAbort)

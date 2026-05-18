@@ -230,6 +230,7 @@ The SSE/WebSocket reconnect loop in `packages/ui/src/sync/event-pipeline.ts` ret
 
 - **`navigator.onLine`**: when the browser reports offline, use the long backoff cap (~60s) instead of the short one (~5s). The expected recovery path is the `online` event, not the next probe.
 - **`document.visibilityState`**: when hidden, use the long cap too. A backgrounded PWA shouldn't hammer the network at 1/5s; the browser may also throttle our timers, but state the intent in code rather than relying on it.
+- **HTTP status of the last failure**: permanent 4xx errors (401, 403, 404, …) don't recover from blind retry. Jump straight to the long cap instead of running the normal exponential path; otherwise a stale-path or expired-token client would put ~12 reqs/min on the server log forever. 408 (Request Timeout) and 429 (Too Many Requests) are retryable in spirit — let them go through normal backoff.
 - **Consecutive failures**: real exponential growth (`base * 2^failures`, clamped), not constant 500ms. A hard-down server should see geometrically fewer probes per minute over time.
 
 The inter-attempt wait must be interruptible by `online`, visibility-becomes-visible, and the pipeline's abort signal — otherwise recovery is delayed by however long the current sleep had left to run.
