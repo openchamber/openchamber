@@ -59,7 +59,7 @@ type Props = {
   setEditTitle: (value: string) => void;
   handleSaveEdit: () => void;
   handleCancelEdit: () => void;
-  toggleParent: (sessionId: string) => void;
+  toggleParent: (expansionKey: string) => void;
   handleSessionSelect: (sessionId: string, sessionDirectory: string | null, isMissingDirectory: boolean, projectId?: string | null) => void;
   handleSessionDoubleClick: () => void;
   togglePinnedSession: (sessionId: string) => void;
@@ -157,7 +157,18 @@ const areEqual = (prev: Props, next: Props): boolean => {
     }
   }
   if (prev.pinnedSessionIds.has(prevSessionId) !== next.pinnedSessionIds.has(nextSessionId)) return false;
-  if (prev.expandedParents.has(prevSessionId) !== next.expandedParents.has(nextSessionId)) return false;
+  // Expansion is keyed per render context, so compare the composite key
+  // matching the one isExpanded reads from in render. If a session appears
+  // in two contexts (project + recent), they have independent state.
+  {
+    const prevRenderContext = prev.renderContext ?? 'project';
+    const nextRenderContext = next.renderContext ?? 'project';
+    const prevArchived = prev.archivedBucket ?? false;
+    const nextArchived = next.archivedBucket ?? false;
+    const prevExpansionKey = `${prevRenderContext}:${prevArchived ? 'archived' : 'active'}:${prevSessionId}`;
+    const nextExpansionKey = `${nextRenderContext}:${nextArchived ? 'archived' : 'active'}:${nextSessionId}`;
+    if (prev.expandedParents.has(prevExpansionKey) !== next.expandedParents.has(nextExpansionKey)) return false;
+  }
   if (prev.hasSessionSearchQuery !== next.hasSessionSearchQuery) return false;
   if (prev.normalizedSessionSearchQuery !== next.normalizedSessionSearchQuery) return false;
   if (prev.notifyOnSubtasks !== next.notifyOnSubtasks) return false;
@@ -312,7 +323,11 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const sessionTitle = resolvedSession.title || t('sessions.sidebar.session.untitled');
   const hasChildren = node.children.length > 0;
   const isPinnedSession = pinnedSessionIds.has(session.id);
-  const isExpanded = hasSessionSearchQuery ? true : expandedParents.has(session.id);
+  // Per-render-context expansion key: the same session can appear in both
+  // the project's root and the "Recent" list, and expanding one should not
+  // expand the other. Matches the format of menuInstanceKey.
+  const expansionKey = menuInstanceKey;
+  const isExpanded = hasSessionSearchQuery ? true : expandedParents.has(expansionKey);
   const isSubtaskSession = Boolean((resolvedSession as Session & { parentID?: string | null }).parentID);
   const unseenCount = useSessionUnseenCount(session.id);
   const needsAttention = unseenCount > 0 && (!isSubtaskSession || notifyOnSubtasks);
@@ -529,13 +544,13 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       tabIndex={0}
       onClick={(event) => {
         event.stopPropagation();
-        toggleParent(session.id);
+        toggleParent(expansionKey);
       }}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
           event.stopPropagation();
-          toggleParent(session.id);
+          toggleParent(expansionKey);
         }
       }}
       className={cn(
