@@ -270,9 +270,7 @@ const SkillsInstalledPage: React.FC = () => {
   const handleSkillMarkdownChange = React.useCallback((nextMarkdown: string) => {
     setSkillMarkdown(nextMarkdown);
     const parsed = parseSkillMarkdown(nextMarkdown);
-    if (parsed.description !== null) {
-      setDescription(parsed.description);
-    }
+    setDescription(parsed.description ?? '');
     setInstructions(parsed.instructions);
   }, []);
 
