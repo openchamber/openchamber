@@ -35,10 +35,11 @@ import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { useDeviceInfo } from '@/lib/device';
 import { cn, getModifierLabel, getRevealLabelKey, hasModifier } from '@/lib/utils';
-import { getLanguageFromExtension, getImageMimeType, isImageFile } from '@/lib/toolHelpers';
+import { getLanguageFromExtension, getImageMimeType, isDrawioFile, isImageFile } from '@/lib/toolHelpers';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { DiagramEditor } from '@/components/diagram';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { EditorView } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
@@ -695,6 +696,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const [mdViewMode, setMdViewMode] = React.useState<PreviewViewMode>('edit');
   const [jsonViewMode, setJsonViewMode] = React.useState<'tree' | 'text'>('tree');
   const [htmlViewMode, setHtmlViewMode] = React.useState<PreviewViewMode>('edit');
+  const [drawioViewMode, setDrawioViewMode] = React.useState<PreviewViewMode>('preview');
   const textViewModeByPathRef = React.useRef<Record<string, TextViewMode>>({});
   const mdViewModeByPathRef = React.useRef<Record<string, PreviewViewMode>>({});
   const htmlViewModeByPathRef = React.useRef<Record<string, PreviewViewMode>>({});
@@ -2143,8 +2145,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const isMarkdown = Boolean(selectedFile?.path && isMarkdownFile(selectedFile.path));
   const isJson = Boolean(selectedFile?.path && isJsonFile(selectedFile.path));
   const isHtml = Boolean(selectedFile?.path && isHtmlFile(selectedFile.path));
+  const isDrawio = Boolean(selectedFile?.path && isDrawioFile(selectedFile.path));
   const isTextFile = Boolean(selectedFile && !isSelectedImage);
-  const canUseShikiFileView = isTextFile && !isMarkdown && !(isHtml && htmlViewMode === 'preview');
+  const canUseShikiFileView = isTextFile && !isMarkdown && !isDrawio && !(isHtml && htmlViewMode === 'preview');
   const staticLanguageExtension = React.useMemo(
     () => (selectedFilePath ? languageByExtension(selectedFilePath) : null),
     [selectedFilePath],
@@ -2949,6 +2952,14 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             }}
           />
         )}
+        {isDrawio && (
+          <>
+            <PreviewToggleButton
+              currentMode={drawioViewMode}
+              onToggle={() => setDrawioViewMode(drawioViewMode === 'preview' ? 'edit' : 'preview')}
+            />
+          </>
+        )}
 
         {isJson && (
           withTooltip(jsonViewMode === 'tree' ? t('filesView.editor.switchToTextView') : t('filesView.editor.switchToTreeView'),
@@ -3315,6 +3326,17 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                 src={imageSrc}
                 alt={selectedFile?.name ?? t('filesView.editor.imageAltFallback')}
                 className="max-w-full max-h-[70vh] object-contain rounded-md border border-border/30 bg-primary/10"
+              />
+            </div>
+          ) : selectedFile && isDrawio && drawioViewMode === 'preview' ? (
+            <div className="h-full overflow-hidden" style={{ minHeight: '400px' }}>
+              <DiagramEditor
+                xml={fileContent}
+                onChange={(newXml) => {
+                  if (selectedFile?.path && files.writeFile && newXml !== fileContent) {
+                    files.writeFile(selectedFile.path, newXml).catch(() => {});
+                  }
+                }}
               />
             </div>
           ) : selectedFile && isJson && jsonViewMode === 'tree' ? (

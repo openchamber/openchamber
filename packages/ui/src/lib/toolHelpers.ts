@@ -679,6 +679,13 @@ export function getLanguageFromExtension(filePath: string): string | null {
   return languageMap[ext || ''] || null;
 }
 
+const DIAGRAM_EXTENSIONS = ['drawio', 'dio'];
+
+export function isDrawioFile(filePath: string): boolean {
+  const ext = filePath.split('.').pop()?.toLowerCase();
+  return DIAGRAM_EXTENSIONS.includes(ext || '');
+}
+
 const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'bmp', 'avif'];
 
 export function isImageFile(filePath: string): boolean {
