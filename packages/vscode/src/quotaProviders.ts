@@ -97,8 +97,16 @@ type ZhipuaiMcpTimeLimit = {
 type ZhipuaiPayload = {
   data?: {
     limits?: Array<ZhipuaiTokensLimit | ZhipuaiMcpTimeLimit>;
-    level?: string;
   };
+};
+
+type WaferPayload = {
+  remaining_included_requests?: number | string;
+  included_request_limit?: number | string;
+  overage_request_count?: number | string;
+  current_period_used_percent?: number | string;
+  window_end?: number | string;
+  plan_tier?: string;
 };
 
 export type ProviderResult = {
@@ -437,6 +445,11 @@ export const listConfiguredQuotaProviders = () => {
 
   if (readTextFile(OLLAMA_CLOUD_COOKIE_PATH)) {
     configured.add('ollama-cloud');
+  }
+
+  const waferAuth = normalizeAuthEntry(getAuthEntry(auth, ['wafer', 'wafer-ai', 'wafer_ai']));
+  if (waferAuth && ((waferAuth as Record<string, unknown>).key || (waferAuth as Record<string, unknown>).token)) {
+    configured.add('wafer');
   }
 
   return Array.from(configured);
@@ -1738,6 +1751,112 @@ export const fetchNanoGptQuota = async (): Promise<ProviderResult> => {
   }
 };
 
+const WAFER_QUOTA_URL = 'https://pass.wafer.ai/v1/inference/quota';
+const WAFER_WINDOW_SECONDS = 5 * 3600;
+
+export const fetchWaferQuota = async (): Promise<ProviderResult> => {
+  const auth = readAuthFile();
+  const entry = normalizeAuthEntry(getAuthEntry(auth, ['wafer', 'wafer-ai', 'wafer_ai'])) as Record<string, unknown> | null;
+  const apiKey = (entry?.key as string | undefined) ?? (entry?.token as string | undefined);
+
+  if (!apiKey) {
+    return buildResult({
+      providerId: 'wafer',
+      providerName: 'Wafer.ai',
+      ok: false,
+      configured: false,
+      error: 'Not configured',
+    });
+  }
+
+  const timeoutSignal = AbortSignal.timeout(15_000);
+
+  try {
+    const response = await fetch(WAFER_QUOTA_URL, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      signal: timeoutSignal,
+    });
+
+    if (!response.ok) {
+      return buildResult({
+        providerId: 'wafer',
+        providerName: 'Wafer.ai',
+        ok: false,
+        configured: true,
+        error: `API error: ${response.status}`,
+      });
+    }
+
+    const payload = await response.json() as WaferPayload;
+    const remaining = toNumber(payload?.remaining_included_requests);
+    const limit = toNumber(payload?.included_request_limit);
+    const overage = toNumber(payload?.overage_request_count);
+    const usedPercentRaw = toNumber(payload?.current_period_used_percent);
+    const windowEnd = toTimestamp(payload?.window_end);
+    const planTier = asNonEmptyString(payload?.plan_tier);
+
+    if (remaining === null && limit === null && overage === null && usedPercentRaw === null) {
+      return buildResult({
+        providerId: 'wafer',
+        providerName: 'Wafer.ai',
+        ok: false,
+        configured: true,
+        error: 'No quota data in response',
+      });
+    }
+
+    const hasOverage = overage !== null && overage > 0;
+    const usedPercent = hasOverage
+      ? Math.max(0, usedPercentRaw ?? 0)
+      : Math.max(0, Math.min(100, usedPercentRaw ?? 0));
+
+    const windowLabel = resolveWindowLabel(WAFER_WINDOW_SECONDS);
+
+    let valueLabel: string | null = null;
+    if (remaining !== null && limit !== null) {
+      const parts: string[] = [];
+      if (planTier) parts.push(planTier);
+      parts.push(`${remaining}/${limit} requests`);
+      if (hasOverage) parts.push(`+${overage} overage`);
+      valueLabel = parts.join(' — ');
+    }
+
+    const windows: Record<string, UsageWindow> = {};
+    windows[windowLabel] = toUsageWindow({
+      usedPercent,
+      windowSeconds: WAFER_WINDOW_SECONDS,
+      resetAt: windowEnd,
+      valueLabel,
+    });
+
+    return buildResult({
+      providerId: 'wafer',
+      providerName: 'Wafer.ai',
+      ok: true,
+      configured: true,
+      usage: { windows },
+    });
+  } catch (error) {
+    const isTimeout = error instanceof DOMException && error.name === 'AbortError' && timeoutSignal.aborted;
+    const isParseError = error instanceof SyntaxError;
+    return buildResult({
+      providerId: 'wafer',
+      providerName: 'Wafer.ai',
+      ok: false,
+      configured: true,
+      error: isTimeout
+        ? 'Request timed out'
+        : isParseError
+          ? 'Invalid response from provider'
+          : (error instanceof Error ? error.message : 'Request failed'),
+    });
+  }
+};
+
 export const fetchQuotaForProvider = async (providerId: string): Promise<ProviderResult> => {
   switch (providerId) {
     case 'claude':
@@ -1766,6 +1885,8 @@ export const fetchQuotaForProvider = async (providerId: string): Promise<Provide
       return fetchZaiQuota();
     case 'zhipuai-coding-plan':
       return fetchZhipuaiCodingPlanQuota();
+    case 'wafer':
+      return fetchWaferQuota();
     default:
       return buildResult({
         providerId,
