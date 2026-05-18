@@ -138,10 +138,6 @@ export const useChatAutoFollow = ({
     const pendingSaveRef = React.useRef<{ sessionId: string; anchor: number } | null>(null);
     const settleBurstRafRef = React.useRef<number | null>(null);
     const lastUserReleaseAtRef = React.useRef(0);
-    // When restoreSnapshot is invoked while ChatViewport is still hydrating
-    // (skeleton rendered, no scroll container yet), we record the session here
-    // so a follow-up effect can replay the restore once the container mounts.
-    const pendingInitialRestoreRef = React.useRef<string | null>(null);
 
     const updateViewportAnchor = useViewportStore((s) => s.updateViewportAnchor);
 
@@ -356,13 +352,11 @@ export const useChatAutoFollow = ({
 
         const container = scrollRef.current;
         if (!container) {
-            // ChatViewport not mounted yet (e.g., session still hydrating).
-            // Record the request so the container-attach effect can replay it.
-            pendingInitialRestoreRef.current = sessionId;
-            setStateValue('following');
+            // Caller is expected to gate restore on rendered messages, so the
+            // container should be attached by then. If we somehow get here
+            // (e.g. container unmount race), no-op rather than queueing.
             return false;
         }
-        pendingInitialRestoreRef.current = null;
 
         const saved = useViewportStore.getState().sessionMemoryState.get(sessionId)?.scrollPosition;
 
@@ -406,10 +400,6 @@ export const useChatAutoFollow = ({
         stopFollowLoop();
         stopSettleBurst();
         markProgrammaticWrite();
-        // Drop any pending restore request inherited from a different session.
-        if (pendingInitialRestoreRef.current && pendingInitialRestoreRef.current !== currentSessionId) {
-            pendingInitialRestoreRef.current = null;
-        }
     }, [currentSessionId, flushSave, markProgrammaticWrite, stopFollowLoop, stopSettleBurst]);
 
     React.useEffect(() => {
@@ -419,14 +409,6 @@ export const useChatAutoFollow = ({
             startFollowLoop();
         }
     }, [sessionIsWorking, startFollowLoop, stopFollowLoop]);
-
-    // Replay a deferred restoreSnapshot once ChatViewport mounts.
-    React.useEffect(() => {
-        if (!containerEl) return;
-        if (pendingInitialRestoreRef.current && pendingInitialRestoreRef.current === currentSessionId) {
-            void restoreSnapshot();
-        }
-    }, [containerEl, currentSessionId, restoreSnapshot]);
 
     const updateOverflowAndButton = React.useCallback(() => {
         const container = scrollRef.current;

@@ -708,14 +708,31 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     }, [currentSessionId, isDesktopExpandedInput, scrollRef]);
 
     const lastScrolledSessionRef = React.useRef<string | null>(null);
+    const previousSessionIdRef = React.useRef<string | null>(null);
 
     const isSessionHydrating =
         Boolean(currentSessionId)
         && !hasRenderableSessionSnapshot;
 
     React.useEffect(() => {
+        // Invalidate the "already restored this session" guard whenever the
+        // active session changes. Without this, restoring session X, navigating
+        // away, then returning to X is treated as alreadyRestored and skipped —
+        // even though a fresh restore is exactly what's wanted.
+        if (previousSessionIdRef.current !== currentSessionId) {
+            lastScrolledSessionRef.current = null;
+            previousSessionIdRef.current = currentSessionId;
+        }
+    }, [currentSessionId]);
+
+    React.useEffect(() => {
         if (!currentSessionId) return;
         if (lastScrolledSessionRef.current === currentSessionId) return;
+        // Gate on rendered messages: hasRenderableSessionSnapshot can stay
+        // false for the rest of the visit if any assistant message has
+        // unmaterialized parts. By the time sessionMessages renders, the
+        // scroll container has mounted.
+        if (sessionMessages.length === 0) return;
 
         const hasHashTarget = typeof window !== 'undefined' && window.location.hash.length > 0;
         lastScrolledSessionRef.current = currentSessionId;
@@ -733,7 +750,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         } else {
             window.requestAnimationFrame(run);
         }
-    }, [currentSessionId, releaseAutoFollow, restoreSnapshot]);
+    }, [currentSessionId, releaseAutoFollow, restoreSnapshot, sessionMessages.length]);
 
     React.useEffect(() => {
         if (!currentSessionId) return;
