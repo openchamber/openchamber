@@ -575,6 +575,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         goToBottom,
         releaseAutoFollow,
         restoreSnapshot,
+        scrollContainerEl,
         isPinned,
         isFollowingProgrammatically,
         showScrollButton,
@@ -748,26 +749,40 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         // Gate on rendered messages: hasRenderableSessionSnapshot can stay
         // false for the rest of the visit if any assistant message has
         // unmaterialized parts. By the time sessionMessages renders, the
-        // scroll container has mounted.
+        // scroll container has mounted (in the normal case).
         if (sessionMessages.length === 0) return;
+        // Defensive: messages can be rendered while the scroll container is
+        // briefly detached (Suspense fallback re-mount, etc.). Skip until
+        // the container is attached; the `scrollContainerEl` dep below
+        // re-runs this effect when it re-mounts.
+        if (!scrollContainerEl) return;
 
+        const sessionAtScheduleTime = currentSessionId;
         const hasHashTarget = typeof window !== 'undefined' && window.location.hash.length > 0;
-        lastScrolledSessionRef.current = currentSessionId;
         if (hasHashTarget) {
             // Hash navigation handler will scroll to target; we just release auto-follow.
+            lastScrolledSessionRef.current = sessionAtScheduleTime;
             releaseAutoFollow();
             return;
         }
 
         const run = () => {
-            void restoreSnapshot();
+            // Only mark this session as restored once the restore actually
+            // applied scroll (container was attached). On failure
+            // (container un-mount race), leave the guard untouched so the
+            // effect retries when the container re-mounts.
+            void restoreSnapshot().then((containerWasReady) => {
+                if (containerWasReady) {
+                    lastScrolledSessionRef.current = sessionAtScheduleTime;
+                }
+            });
         };
         if (typeof window === 'undefined') {
             run();
         } else {
             window.requestAnimationFrame(run);
         }
-    }, [currentSessionId, releaseAutoFollow, restoreSnapshot, sessionMessages.length]);
+    }, [currentSessionId, releaseAutoFollow, restoreSnapshot, sessionMessages.length, scrollContainerEl]);
 
     React.useEffect(() => {
         if (!currentSessionId) return;
