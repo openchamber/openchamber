@@ -20,6 +20,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useDeviceInfo } from '@/lib/device';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useVisualViewport } from '@/hooks/useVisualViewport';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { isDesktopShell } from '@/lib/desktop';
@@ -84,6 +85,7 @@ export const MainLayout: React.FC = () => {
     const multiRunLauncherPrefillPrompt = useUIStore((state) => state.multiRunLauncherPrefillPrompt);
 
     const { isMobile, isTablet } = useDeviceInfo();
+    const visualViewport = useVisualViewport();
     const isDesktopShellRuntime = React.useMemo(() => isDesktopShell(), []);
     const sidebarWidth = useUIStore((state) => state.sidebarWidth);
     const rightSidebarWidth = useUIStore((state) => state.rightSidebarWidth);
@@ -390,10 +392,11 @@ export const MainLayout: React.FC = () => {
             <div
                 data-page-scroll-lock="true"
                 className={cn(
-                    'main-content-safe-area h-[100dvh]',
-                    isMobile ? 'flex flex-col' : 'flex',
+                    'main-content-safe-area',
+                    isMobile ? 'flex flex-col' : 'flex h-[100dvh]',
                     'bg-background'
                 )}
+                style={isMobile && visualViewport.height > 0 ? { height: visualViewport.height } : undefined}
             >
                 <CommandPalette />
                 <HelpDialog />
