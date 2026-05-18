@@ -210,6 +210,20 @@ All scripts are in `package.json`.
 - Prefer per-item results, rollback paths, or resumable cleanup over all-or-nothing assumptions.
 - Never leave optimistic state or local caches stranded after failure.
 
+### Distinguish fetch failure from empty success
+
+Client API methods that feed authoritative state (bootstrap, reconnect resync, retry loops) **must signal fetch failure distinctly from a successful-but-empty server response.** A method that swallows errors and returns `[]`/`{}`/`null` lets the caller delete or overwrite legitimate state on a transient network blip, indistinguishable from "the server says nothing here."
+
+- **Decide which methods are authoritative.** A method is authoritative if any caller uses its result to delete, clear, or replace persisted/sync state. UI-display-only methods (autocomplete, dropdowns, settings pages) can keep silent-empty fallback because the user's next action refreshes them.
+- **For authoritative methods, pick one of two patterns** — both already exist in the codebase, do not invent a third:
+  - **Throw on failure** (e.g. `listPendingPermissions`, `listPendingQuestions`, `listAgents`, the `unwrap()` helper in `packages/ui/src/sync/bootstrap.ts`). Use this when the caller has an outer `try/catch` per logical block — the throw skips the block and preserves prior state.
+  - **Return `T | null` on failure, where `null` strictly means "fetch failed"** (e.g. `getSessionStatusForDirectory`, the `.catch(() => null)` + early-return-on-null pattern at the per-session reconnect loop in `sync-context.tsx`). Use this when the caller has follow-up work that should still run when one fetch fails.
+- **Never swallow inside the method while returning the same type as success.** The SDK's `{data, error}` shape already does this silently — wrap with `if (result.error) throw …` so the failure can't be lost.
+- **Verify the caller actually preserves state on failure.** Adding the throw is only half the fix; the consumer must not run the "delete missing" / "overwrite" branch unless it knows the fetch succeeded. The relevant outer `try/catch` is often already there but dormant.
+- **Retry loops require a failure signal.** A `for (let attempt = 0; attempt < 3; …)` retry around a method that swallows to `[]` will run exactly once — the loop never sees an error.
+
+This rule is the API-layer counterpart of "Use live server/session state for live activity. Do not let historical anomalies masquerade as current execution." A fetch failure is the same kind of anomaly — don't let it masquerade as authoritative server state.
+
 ## CLI Parity and Safety Policy (MANDATORY)
 
 ### Principle: policy-first, UX-second

@@ -889,33 +889,33 @@ async function resyncDirectoryAfterReconnect(
   if (candidateSessionIds.length === 0) return
 
   const nextStatuses = await opencodeClient.getSessionStatusForDirectory(directory)
-  const relevantStatuses: Record<string, SessionStatus> = {}
-
-  for (const sessionId of candidateSessionIds) {
-    const nextStatus = toSessionStatus(nextStatuses[sessionId])
-    if (nextStatus) {
-      relevantStatuses[sessionId] = nextStatus
+  // null = fetch failed; preserve existing state. {} or populated = authoritative
+  // snapshot of active sessions — candidates not listed are idle now.
+  if (nextStatuses !== null) {
+    const relevantStatuses: Record<string, SessionStatus> = {}
+    for (const sessionId of candidateSessionIds) {
+      relevantStatuses[sessionId] = toSessionStatus(nextStatuses[sessionId]) ?? { type: "idle" }
     }
-  }
 
-  if (Object.keys(relevantStatuses).length > 0) {
-    store.setState((state: DirectoryStore) => {
-      let changed = false
-      for (const [sessionId, nextStatus] of Object.entries(relevantStatuses)) {
-        if (!haveEquivalentSyncSnapshots(state.session_status?.[sessionId], nextStatus)) {
-          changed = true
-          break
+    if (Object.keys(relevantStatuses).length > 0) {
+      store.setState((state: DirectoryStore) => {
+        let changed = false
+        for (const [sessionId, nextStatus] of Object.entries(relevantStatuses)) {
+          if (!haveEquivalentSyncSnapshots(state.session_status?.[sessionId], nextStatus)) {
+            changed = true
+            break
+          }
         }
-      }
 
-      if (!changed) {
-        return state
-      }
+        if (!changed) {
+          return state
+        }
 
-      return {
-        session_status: { ...state.session_status, ...relevantStatuses },
-      }
-    })
+        return {
+          session_status: { ...state.session_status, ...relevantStatuses },
+        }
+      })
+    }
   }
 
   const scopedClient = opencodeClient.getScopedSdkClient(directory)
