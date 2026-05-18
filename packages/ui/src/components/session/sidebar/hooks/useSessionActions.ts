@@ -26,6 +26,12 @@ type Args = {
   setActiveMainTab: (tab: 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files') => void;
   setSessionSwitcherOpen: (open: boolean) => void;
   setCurrentSession: (sessionId: string | null, directoryHint?: string | null) => void;
+  // Optional optimistic-highlight hooks. The sidebar provides these so the
+  // clicked row can paint a spinner before the heavy chat render runs.
+  // Other consumers (e.g. the switcher dropdown) leave them undefined and
+  // fall back to a plain single-frame rAF defer.
+  markSessionActivating?: (sessionId: string) => void;
+  dispatchSessionTransition?: (sessionId: string, runSwitch: () => void) => void;
   updateSessionTitle: (id: string, title: string) => Promise<void>;
   shareSession: (id: string) => Promise<Session | null>;
   unshareSession: (id: string) => Promise<Session | null>;
@@ -90,9 +96,19 @@ export const useSessionActions = (args: Args) => {
         resetSessionSearch();
         return;
       }
-      args.setCurrentSession(sessionId, sessionDirectory ?? null);
-      args.onSessionSelected?.(sessionId);
-      resetSessionSearch();
+      args.markSessionActivating?.(sessionId);
+      const runSwitch = () => {
+        args.setCurrentSession(sessionId, sessionDirectory ?? null);
+        args.onSessionSelected?.(sessionId);
+        resetSessionSearch();
+      };
+      if (args.dispatchSessionTransition) {
+        args.dispatchSessionTransition(sessionId, runSwitch);
+      } else if (typeof window !== 'undefined') {
+        window.requestAnimationFrame(runSwitch);
+      } else {
+        runSwitch();
+      }
     },
     [args],
   );

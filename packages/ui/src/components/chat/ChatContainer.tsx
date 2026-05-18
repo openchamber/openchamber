@@ -758,6 +758,18 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         void ensureSessionRenderable(currentSessionId);
     }, [currentSessionId, ensureSessionRenderable, hasRenderableSessionSnapshot]);
 
+    // Notify the sidebar (or anyone else interested) that the session content
+    // is ready, so the optimistic activation spinner can be cleared. Visual-
+    // overlay coordination only — currentSessionId remains the source of truth.
+    React.useEffect(() => {
+        if (!currentSessionId || !hasRenderableSessionSnapshot || typeof window === 'undefined') {
+            return;
+        }
+        window.dispatchEvent(new CustomEvent('openchamber:session-ready', {
+            detail: { sessionId: currentSessionId },
+        }));
+    }, [currentSessionId, hasRenderableSessionSnapshot]);
+
 	if (!currentSessionId && !draftOpen) {
 		return (
 			<div className="flex flex-col h-full bg-background">

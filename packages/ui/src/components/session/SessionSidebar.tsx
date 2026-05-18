@@ -1,4 +1,5 @@
 import React from 'react';
+import { flushSync } from 'react-dom';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { toast } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -301,6 +302,15 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const archivedSessions = useGlobalSessionsStore((state) => state.archivedSessions);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  // Optimistic activation: visual-only overlay applied to the just-clicked row
+  // so it paints a spinner before the chat render runs. Source of truth for
+  // "active session" stays `currentSessionId`; this state never leaks into
+  // selection/isActive logic — only the spinner UI in SessionNodeItem.
+  const [pendingTransitionSessionId, setPendingTransitionSessionId] = React.useState<string | null>(null);
+  const transitionTokenRef = React.useRef(0);
+  const pendingTransitionRaf1Ref = React.useRef<number | null>(null);
+  const pendingTransitionRaf2Ref = React.useRef<number | null>(null);
+  const pendingTransitionTimeoutRef = React.useRef<number | null>(null);
   const newSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
   const updateSessionTitle = useSessionUIStore((state) => state.updateSessionTitle);
@@ -649,6 +659,47 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     setActiveMainTab,
     setSessionSwitcherOpen,
     setCurrentSession,
+    markSessionActivating: (sessionId) => {
+      // flushSync so the spinner/highlight is in the DOM on the next paint,
+      // before the rAF below dispatches the heavy session switch.
+      flushSync(() => {
+        setPendingTransitionSessionId(sessionId);
+      });
+    },
+    dispatchSessionTransition: (sessionId, runSwitch) => {
+      transitionTokenRef.current += 1;
+      const token = transitionTokenRef.current;
+
+      if (pendingTransitionRaf1Ref.current !== null) {
+        window.cancelAnimationFrame(pendingTransitionRaf1Ref.current);
+      }
+      if (pendingTransitionRaf2Ref.current !== null) {
+        window.cancelAnimationFrame(pendingTransitionRaf2Ref.current);
+      }
+      if (pendingTransitionTimeoutRef.current !== null) {
+        window.clearTimeout(pendingTransitionTimeoutRef.current);
+      }
+
+      // Failsafe: if `openchamber:session-ready` never fires (sync stalled,
+      // target session deleted mid-transition, etc.) drop the optimistic
+      // spinner so the sidebar doesn't get stuck. 4s comfortably covers a
+      // slow hydration but is short enough that a stuck spinner is noticed.
+      pendingTransitionTimeoutRef.current = window.setTimeout(() => {
+        if (transitionTokenRef.current !== token) return;
+        setPendingTransitionSessionId((prev) => (prev === sessionId ? null : prev));
+        pendingTransitionTimeoutRef.current = null;
+      }, 4000);
+
+      // First rAF paints the spinner/highlight; second rAF dispatches the
+      // session switch on the following frame.
+      pendingTransitionRaf1Ref.current = window.requestAnimationFrame(() => {
+        if (transitionTokenRef.current !== token) return;
+        pendingTransitionRaf2Ref.current = window.requestAnimationFrame(() => {
+          if (transitionTokenRef.current !== token) return;
+          runSwitch();
+        });
+      });
+    },
     updateSessionTitle,
     shareSession,
     unshareSession,
@@ -693,6 +744,41 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       return next;
     });
   }, [currentSessionId, sessions, safeStorage]);
+
+  // Clear the optimistic spinner once the chat dispatches session-ready for
+  // the same id we're waiting on. Stale events (different id, or pending was
+  // already cleared by a newer click) are ignored.
+  React.useEffect(() => {
+    const onReady = (event: Event) => {
+      const custom = event as CustomEvent<{ sessionId?: string }>;
+      const readySessionId = custom.detail?.sessionId;
+      if (!readySessionId) return;
+      if (readySessionId !== pendingTransitionSessionId) return;
+      setPendingTransitionSessionId(null);
+      if (pendingTransitionTimeoutRef.current !== null) {
+        window.clearTimeout(pendingTransitionTimeoutRef.current);
+        pendingTransitionTimeoutRef.current = null;
+      }
+    };
+    window.addEventListener('openchamber:session-ready', onReady as EventListener);
+    return () => {
+      window.removeEventListener('openchamber:session-ready', onReady as EventListener);
+    };
+  }, [pendingTransitionSessionId]);
+
+  React.useEffect(() => {
+    return () => {
+      if (pendingTransitionRaf1Ref.current !== null) {
+        window.cancelAnimationFrame(pendingTransitionRaf1Ref.current);
+      }
+      if (pendingTransitionRaf2Ref.current !== null) {
+        window.cancelAnimationFrame(pendingTransitionRaf2Ref.current);
+      }
+      if (pendingTransitionTimeoutRef.current !== null) {
+        window.clearTimeout(pendingTransitionTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const toggleParent = React.useCallback((sessionId: string) => {
     setExpandedParents((prev) => {
@@ -1222,6 +1308,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         archivedBucket={archivedBucket}
         directoryStatus={directoryStatus}
         currentSessionId={currentSessionId}
+        optimisticActiveSessionId={pendingTransitionSessionId}
         pinnedSessionIds={pinnedSessionIds}
         expandedParents={expandedParents}
         hasSessionSearchQuery={hasSessionSearchQuery}
@@ -1261,6 +1348,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     [
       directoryStatus,
       currentSessionId,
+      pendingTransitionSessionId,
       pinnedSessionIds,
       expandedParents,
       hasSessionSearchQuery,

@@ -48,6 +48,10 @@ type Props = {
   archivedBucket?: boolean;
   directoryStatus: Map<string, 'unknown' | 'exists' | 'missing'>;
   currentSessionId: string | null;
+  // Visual-only overlay: when set, the row whose id matches paints a
+  // "switching" spinner + ring before the chat finishes hydrating. Source of
+  // truth for `isActive` stays `currentSessionId`.
+  optimisticActiveSessionId?: string | null;
   pinnedSessionIds: Set<string>;
   expandedParents: Set<string>;
   hasSessionSearchQuery: boolean;
@@ -156,6 +160,13 @@ const areEqual = (prev: Props, next: Props): boolean => {
       return false;
     }
   }
+  if (prev.optimisticActiveSessionId !== next.optimisticActiveSessionId) {
+    const prevOptimisticInTree = treeContainsSessionId(prev.node, prev.optimisticActiveSessionId ?? null);
+    const nextOptimisticInTree = treeContainsSessionId(next.node, next.optimisticActiveSessionId ?? null);
+    if (prevOptimisticInTree || nextOptimisticInTree) {
+      return false;
+    }
+  }
   if (prev.pinnedSessionIds.has(prevSessionId) !== next.pinnedSessionIds.has(nextSessionId)) return false;
   if (prev.expandedParents.has(prevSessionId) !== next.expandedParents.has(nextSessionId)) return false;
   if (prev.hasSessionSearchQuery !== next.hasSessionSearchQuery) return false;
@@ -208,6 +219,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     archivedBucket = false,
     directoryStatus,
     currentSessionId,
+    optimisticActiveSessionId,
     pinnedSessionIds,
     expandedParents,
     hasSessionSearchQuery,
@@ -309,6 +321,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const directoryState = sessionDirectory ? directoryStatus.get(sessionDirectory) : null;
   const isMissingDirectory = directoryState === 'missing';
   const isActive = currentSessionId === session.id;
+  const isOptimisticTarget = optimisticActiveSessionId === session.id && !isActive;
   const sessionTitle = resolvedSession.title || t('sessions.sidebar.session.untitled');
   const hasChildren = node.children.length > 0;
   const isPinnedSession = pinnedSessionIds.has(session.id);
@@ -768,6 +781,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
             isMissingDirectory ? 'opacity-75' : '',
             depth > 0 && 'pl-[20px]',
             isRowSelected && 'bg-primary/15',
+            isOptimisticTarget && 'bg-primary/18 ring-1 ring-primary/45',
           )}
         >
           {leadingIndicators}
@@ -797,6 +811,13 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                     )}
                   >
                     <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isMinimalMode ? 'gap-1' : 'gap-1')}>
+                      {isOptimisticTarget ? (
+                        <span
+                          className="h-3.5 w-3.5 flex-shrink-0 animate-spin rounded-full border-2 border-primary/35 border-t-primary"
+                          aria-label="Switching session"
+                          title="Switching session"
+                        />
+                      ) : null}
                       <div className={cn('block min-w-0 flex-1 truncate typography-ui-label font-normal', isActive ? 'text-primary' : 'text-foreground')}>{renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}</div>
                       {alwaysShowActions ? <span className="ml-2 flex-shrink-0 text-[0.72rem] text-muted-foreground/75">{sessionCompactUpdatedLabel}</span> : null}
                       {!alwaysShowActions ? (
@@ -861,6 +882,13 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                 )}
               >
                 <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isMinimalMode ? 'gap-1' : 'gap-1')}>
+                    {isOptimisticTarget ? (
+                      <span
+                        className="h-3.5 w-3.5 flex-shrink-0 animate-spin rounded-full border-2 border-primary/35 border-t-primary"
+                        aria-label="Switching session"
+                        title="Switching session"
+                      />
+                    ) : null}
                     <div className={cn('block min-w-0 flex-1 truncate typography-ui-label font-normal', isActive ? 'text-primary' : 'text-foreground')}>{renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}</div>
                     {pendingPermissionCount > 0 ? (
                       <span className="inline-flex items-center gap-1 rounded bg-destructive/10 px-1 py-0.5 text-[0.7rem] text-destructive flex-shrink-0" title={t('sessions.sidebar.session.status.permissionRequired')} aria-label={t('sessions.sidebar.session.status.permissionRequired')}>
