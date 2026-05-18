@@ -105,6 +105,7 @@ type WaferPayload = {
   included_request_limit?: number | string;
   overage_request_count?: number | string;
   current_period_used_percent?: number | string;
+  window_start?: number | string;
   window_end?: number | string;
   plan_tier?: string;
 };
@@ -1796,6 +1797,7 @@ export const fetchWaferQuota = async (): Promise<ProviderResult> => {
     const limit = toNumber(payload?.included_request_limit);
     const overage = toNumber(payload?.overage_request_count);
     const usedPercentRaw = toNumber(payload?.current_period_used_percent);
+    const windowStart = toTimestamp(payload?.window_start);
     const windowEnd = toTimestamp(payload?.window_end);
     const planTier = asNonEmptyString(payload?.plan_tier);
 
@@ -1814,7 +1816,10 @@ export const fetchWaferQuota = async (): Promise<ProviderResult> => {
       ? Math.max(0, usedPercentRaw ?? 0)
       : Math.max(0, Math.min(100, usedPercentRaw ?? 0));
 
-    const windowLabel = resolveWindowLabel(WAFER_WINDOW_SECONDS);
+    const windowSeconds = windowStart !== null && windowEnd !== null
+      ? Math.round((windowEnd - windowStart) / 1000)
+      : WAFER_WINDOW_SECONDS;
+    const windowLabel = resolveWindowLabel(windowSeconds);
 
     let valueLabel: string | null = null;
     if (remaining !== null && limit !== null) {
@@ -1828,7 +1833,7 @@ export const fetchWaferQuota = async (): Promise<ProviderResult> => {
     const windows: Record<string, UsageWindow> = {};
     windows[windowLabel] = toUsageWindow({
       usedPercent,
-      windowSeconds: WAFER_WINDOW_SECONDS,
+      windowSeconds,
       resetAt: windowEnd,
       valueLabel,
     });

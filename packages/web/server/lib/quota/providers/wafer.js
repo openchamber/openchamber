@@ -65,6 +65,7 @@ export const fetchQuota = async () => {
     const limit = toNumber(payload?.included_request_limit);
     const overage = toNumber(payload?.overage_request_count);
     const usedPercentRaw = toNumber(payload?.current_period_used_percent);
+    const windowStart = toTimestamp(payload?.window_start);
     const windowEnd = toTimestamp(payload?.window_end);
     const planTier = asNonEmptyString(payload?.plan_tier);
 
@@ -83,7 +84,10 @@ export const fetchQuota = async () => {
       ? Math.max(0, usedPercentRaw ?? 0)
       : Math.max(0, Math.min(100, usedPercentRaw ?? 0));
 
-    const windowLabel = resolveWindowLabel(WAFER_WINDOW_SECONDS);
+    const windowSeconds = windowStart !== null && windowEnd !== null
+      ? Math.round((windowEnd - windowStart) / 1000)
+      : WAFER_WINDOW_SECONDS;
+    const windowLabel = resolveWindowLabel(windowSeconds);
 
     let valueLabel = null;
     if (remaining !== null && limit !== null) {
@@ -97,7 +101,7 @@ export const fetchQuota = async () => {
     const windows = {};
     windows[windowLabel] = toUsageWindow({
       usedPercent,
-      windowSeconds: WAFER_WINDOW_SECONDS,
+      windowSeconds,
       resetAt: windowEnd,
       valueLabel
     });
