@@ -12,7 +12,7 @@ import {
 
 export const providerId = 'wafer';
 export const providerName = 'Wafer.ai';
-export const aliases = ['wafer', 'wafer-ai', 'wafer_ai'];
+export const aliases = ['wafer', 'wafer-ai', 'wafer_ai', 'wafer.ai'];
 
 const WAFER_QUOTA_URL = 'https://pass.wafer.ai/v1/inference/quota';
 const WAFER_WINDOW_SECONDS = 5 * 3600;
@@ -38,14 +38,14 @@ export const fetchQuota = async () => {
     });
   }
 
-  const timeoutSignal = AbortSignal.timeout(15_000);
+    const timeoutSignal = AbortSignal.timeout(15_000);
 
   try {
     const response = await fetch(WAFER_QUOTA_URL, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json'
+        'Accept-Encoding': 'identity'
       },
       signal: timeoutSignal
     });
@@ -89,9 +89,9 @@ export const fetchQuota = async () => {
     if (remaining !== null && limit !== null) {
       const parts = [];
       if (planTier) parts.push(planTier);
-      parts.push(`${remaining}/${limit} requests`);
+      parts.push(`${remaining} / ${limit} left`);
       if (hasOverage) parts.push(`+${overage} overage`);
-      valueLabel = parts.join(' — ');
+      valueLabel = parts.join(' · ');
     }
 
     const windows = {};

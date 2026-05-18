@@ -447,7 +447,7 @@ export const listConfiguredQuotaProviders = () => {
     configured.add('ollama-cloud');
   }
 
-  const waferAuth = normalizeAuthEntry(getAuthEntry(auth, ['wafer', 'wafer-ai', 'wafer_ai']));
+  const waferAuth = normalizeAuthEntry(getAuthEntry(auth, ['wafer', 'wafer-ai', 'wafer_ai', 'wafer.ai']));
   if (waferAuth && ((waferAuth as Record<string, unknown>).key || (waferAuth as Record<string, unknown>).token)) {
     configured.add('wafer');
   }
@@ -1756,7 +1756,7 @@ const WAFER_WINDOW_SECONDS = 5 * 3600;
 
 export const fetchWaferQuota = async (): Promise<ProviderResult> => {
   const auth = readAuthFile();
-  const entry = normalizeAuthEntry(getAuthEntry(auth, ['wafer', 'wafer-ai', 'wafer_ai'])) as Record<string, unknown> | null;
+  const entry = normalizeAuthEntry(getAuthEntry(auth, ['wafer', 'wafer-ai', 'wafer_ai', 'wafer.ai'])) as Record<string, unknown> | null;
   const apiKey = (entry?.key as string | undefined) ?? (entry?.token as string | undefined);
 
   if (!apiKey) {
@@ -1776,7 +1776,7 @@ export const fetchWaferQuota = async (): Promise<ProviderResult> => {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
+        'Accept-Encoding': 'identity',
       },
       signal: timeoutSignal,
     });
@@ -1820,9 +1820,9 @@ export const fetchWaferQuota = async (): Promise<ProviderResult> => {
     if (remaining !== null && limit !== null) {
       const parts: string[] = [];
       if (planTier) parts.push(planTier);
-      parts.push(`${remaining}/${limit} requests`);
+      parts.push(`${remaining} / ${limit} left`);
       if (hasOverage) parts.push(`+${overage} overage`);
-      valueLabel = parts.join(' — ');
+      valueLabel = parts.join(' · ');
     }
 
     const windows: Record<string, UsageWindow> = {};
