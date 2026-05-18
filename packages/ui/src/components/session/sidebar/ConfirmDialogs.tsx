@@ -7,6 +7,10 @@ import { useI18n } from '@/lib/i18n';
 export type DeleteSessionConfirmState = {
   session: Session;
   descendantCount: number;
+  // Snapshot of the descendant IDs computed when the dialog opened, so the
+  // executed list matches the count shown to the user even if childrenMap
+  // changes while the dialog is open.
+  descendantIds: string[];
   archivedBucket: boolean;
 } | null;
 

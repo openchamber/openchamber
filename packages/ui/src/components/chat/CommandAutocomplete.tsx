@@ -8,7 +8,7 @@ import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 
-type CommandSource = 'openchamber' | 'opencode';
+type CommandSource = 'openchamber' | 'opencode' | 'skill';
 
 export interface CommandInfo {
   id: string;
@@ -28,6 +28,24 @@ export interface CommandAutocompleteHandle {
 }
 
 type AutocompleteTab = 'commands' | 'agents' | 'files';
+
+const BASE_BADGE_CLASS = "text-[10px] leading-none uppercase font-bold tracking-tight px-1.5 py-1 rounded border flex-shrink-0";
+const TYPE_BADGE_CLASS = cn(
+  BASE_BADGE_CLASS,
+  "bg-[color-mix(in_srgb,var(--primary-base)_12%,transparent)] text-[color-mix(in_srgb,var(--primary-base)_70%,transparent)] border-[color-mix(in_srgb,var(--primary-base)_24%,transparent)]"
+);
+const USER_BADGE_CLASS = cn(
+  BASE_BADGE_CLASS,
+  "bg-[color-mix(in_srgb,var(--status-success)_12%,transparent)] text-[color-mix(in_srgb,var(--status-success)_70%,transparent)] border-[color-mix(in_srgb,var(--status-success)_24%,transparent)]"
+);
+const PROJECT_BADGE_CLASS = cn(
+  BASE_BADGE_CLASS,
+  "bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[color-mix(in_srgb,var(--status-info)_70%,transparent)] border-[color-mix(in_srgb,var(--status-info)_24%,transparent)]"
+);
+const NEUTRAL_BADGE_CLASS = cn(
+  BASE_BADGE_CLASS,
+  "bg-[var(--surface-muted)] text-muted-foreground border-[var(--interactive-border)]/60"
+);
 
 interface CommandAutocompleteProps {
   searchQuery: string;
@@ -63,6 +81,8 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
   const skills = useSkillsStore((s) => s.skills);
   const refreshSkills = useSkillsStore((s) => s.loadSkills);
   const [selectedIndex, setSelectedIndex] = React.useState(0);
+  const selectedIndexRef = React.useRef(0);
+  const keyboardNavigationRef = React.useRef(false);
   const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const ignoreClickRef = React.useRef(false);
@@ -107,8 +127,16 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
           agent: cmd.agent ?? undefined,
           model: cmd.model ?? undefined,
           isBuiltIn: cmd.name === 'init' || cmd.name === 'review',
-          isSkill: skillNames.has(cmd.name),
+          isSkill: cmd.source === 'skill' || skillNames.has(cmd.name),
           scope: cmd.scope,
+        }));
+        const skillCommands: CommandInfo[] = skills.map((skill, index) => ({
+          id: `skill:${skill.scope}:${skill.source ?? 'opencode'}:${skill.name}:${index}`,
+          name: skill.name,
+          source: 'skill',
+          description: skill.description,
+          isSkill: true,
+          scope: skill.scope,
         }));
 
         const builtInCommands: CommandInfo[] = [
@@ -134,7 +162,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
             : []
           ),
         ];
-        const allCommands = [...builtInCommands, ...customCommands];
+        const allCommands = [...builtInCommands, ...customCommands, ...skillCommands];
 
         const allowInitCommand = !hasMessagesInCurrentSession;
         const filtered = (searchQuery
@@ -201,8 +229,11 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
   }, [commands]);
 
   React.useEffect(() => {
+    selectedIndexRef.current = selectedIndex;
+  }, [selectedIndex]);
+
+  React.useEffect(() => {
     itemRefs.current[selectedIndex]?.scrollIntoView({
-      behavior: 'smooth',
       block: 'nearest'
     });
   }, [selectedIndex]);
@@ -220,24 +251,26 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
       }
 
       if (key === 'ArrowDown') {
+        keyboardNavigationRef.current = true;
         setSelectedIndex((prev) => (prev + 1) % total);
         return;
       }
 
       if (key === 'ArrowUp') {
+        keyboardNavigationRef.current = true;
         setSelectedIndex((prev) => (prev - 1 + total) % total);
         return;
       }
 
       if (key === 'Enter' || key === 'Tab') {
-        const safeIndex = ((selectedIndex % total) + total) % total;
+        const safeIndex = ((selectedIndexRef.current % total) + total) % total;
         const command = commands[safeIndex];
         if (command) {
           onCommandSelect(command);
         }
       }
     }
-  }), [commands, selectedIndex, onClose, onCommandSelect]);
+  }), [commands, onClose, onCommandSelect]);
 
   const getCommandIcon = (command: CommandInfo) => {
 
@@ -322,8 +355,6 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
             {commands.map((command, index) => {
               const isSystem = command.isBuiltIn;
               const isOpenChamberBadge = command.isOpenChamber;
-              const isProject = command.scope === 'project';
-              
               return (
                 <div
                   key={command.id}
@@ -375,7 +406,10 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
                     }
                     onCommandSelect(command);
                   }}
-                  onMouseEnter={() => setSelectedIndex(index)}
+                  onMouseMove={() => {
+                    keyboardNavigationRef.current = false;
+                    setSelectedIndex(index);
+                  }}
                 >
                   <div className="mt-0.5">
                     {getCommandIcon(command)}
@@ -384,37 +418,29 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
                     <div className="flex items-center gap-2">
                       <span className="typography-ui-label font-medium">/{command.name}</span>
                       {command.isSkill ? (
-                        <span className="text-[10px] leading-none uppercase font-bold tracking-tight bg-[var(--status-info-background)] text-[var(--status-info)] border-[var(--status-info-border)] px-1.5 py-1 rounded border flex-shrink-0">
+                        <span className={TYPE_BADGE_CLASS}>
                           {t('chat.commandAutocomplete.badge.skill')}
                         </span>
-                      ) : null}
+                      ) : (
+                        <span className={TYPE_BADGE_CLASS}>
+                          {t('chat.commandAutocomplete.badge.command')}
+                        </span>
+                      )}
                       {isOpenChamberBadge ? (
-                        <span
-                          className="text-[10px] leading-none uppercase font-bold tracking-tight px-1.5 py-1 rounded border flex-shrink-0"
-                          style={{
-                            backgroundColor: 'color-mix(in srgb, var(--primary-base) 14%, transparent)',
-                            color: 'var(--primary-base)',
-                            borderColor: 'color-mix(in srgb, var(--primary-base) 28%, transparent)',
-                          }}
-                        >
+                        <span className={NEUTRAL_BADGE_CLASS}>
                           OpenChamber
                         </span>
                       ) : isSystem ? (
-                        <span className="text-[10px] leading-none uppercase font-bold tracking-tight bg-[var(--status-warning-background)] text-[var(--status-warning)] border-[var(--status-warning-border)] px-1.5 py-1 rounded border flex-shrink-0">
+                        <span className={NEUTRAL_BADGE_CLASS}>
                           {t('chat.commandAutocomplete.badge.system')}
                         </span>
                       ) : command.scope ? (
-                        <span className={cn(
-                          "text-[10px] leading-none uppercase font-bold tracking-tight px-1.5 py-1 rounded border flex-shrink-0",
-                          isProject 
-                            ? "bg-[var(--status-info-background)] text-[var(--status-info)] border-[var(--status-info-border)]"
-                            : "bg-[var(--status-success-background)] text-[var(--status-success)] border-[var(--status-success-border)]"
-                        )}>
+                        <span className={command.scope === 'project' ? PROJECT_BADGE_CLASS : USER_BADGE_CLASS}>
                           {command.scope}
                         </span>
                       ) : null}
                       {command.agent && (
-                        <span className="text-[10px] leading-none font-bold tracking-tight bg-[var(--surface-subtle)] text-[var(--surface-foreground)] border-[var(--interactive-border)] px-1.5 py-1 rounded border flex-shrink-0">
+                        <span className={NEUTRAL_BADGE_CLASS}>
                           {command.agent}
                         </span>
                       )}

@@ -82,7 +82,13 @@ const PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse';
 const GROUP_ORDER_STORAGE_KEY = 'oc.sessions.groupOrder';
 const GROUP_COLLAPSE_STORAGE_KEY = 'oc.sessions.groupCollapse';
 const PROJECT_ACTIVE_SESSION_STORAGE_KEY = 'oc.sessions.activeSessionByProject';
-const SESSION_EXPANDED_STORAGE_KEY = 'oc.sessions.expandedParents';
+// v2 key holds composite "${renderContext}:${active|archived}:${sessionId}"
+// entries so the same session in different render contexts (e.g. "Recent"
+// and a project's root) has independent expand state. v1 held bare session
+// ids; useSidebarPersistence migrates v1 data on first read by fanning each
+// id into all four context combinations.
+const SESSION_EXPANDED_STORAGE_KEY = 'oc.sessions.expandedParents.v2';
+const LEGACY_SESSION_EXPANDED_STORAGE_KEY = 'oc.sessions.expandedParents';
 const SESSION_PINNED_STORAGE_KEY = 'oc.sessions.pinned';
 
 type PrVisualState = 'draft' | 'open' | 'blocked' | 'merged' | 'closed';
@@ -531,6 +537,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     safeStorage,
     keys: {
       sessionExpanded: SESSION_EXPANDED_STORAGE_KEY,
+      sessionExpandedLegacy: LEGACY_SESSION_EXPANDED_STORAGE_KEY,
       projectCollapse: PROJECT_COLLAPSE_STORAGE_KEY,
       sessionPinned: SESSION_PINNED_STORAGE_KEY,
       groupOrder: GROUP_ORDER_STORAGE_KEY,
@@ -728,16 +735,25 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     sessionEvents.requestDirectoryDialog();
   }, []);
 
-  // Auto-expand parent session when navigating to a subagent (child) session
+  // Auto-expand parent session when navigating to a subagent (child) session.
+  // We don't know which render context the user will look at the parent in
+  // (Recent, project root, archived bucket, ...), so fan out across all
+  // four combinations to ensure it's expanded wherever it appears.
   React.useEffect(() => {
     if (!currentSessionId) return;
     const current = sessions.find((s) => s.id === currentSessionId);
     const parentID = (current as Session & { parentID?: string | null })?.parentID;
     if (!parentID) return;
+    const keysToAdd = [
+      `project:active:${parentID}`,
+      `project:archived:${parentID}`,
+      `recent:active:${parentID}`,
+      `recent:archived:${parentID}`,
+    ];
     setExpandedParents((prev) => {
-      if (prev.has(parentID)) return prev;
+      if (keysToAdd.every((k) => prev.has(k))) return prev;
       const next = new Set(prev);
-      next.add(parentID);
+      keysToAdd.forEach((k) => next.add(k));
       try {
         safeStorage.setItem(SESSION_EXPANDED_STORAGE_KEY, JSON.stringify(Array.from(next)));
       } catch { /* ignored */ }
@@ -780,13 +796,13 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     };
   }, []);
 
-  const toggleParent = React.useCallback((sessionId: string) => {
+  const toggleParent = React.useCallback((expansionKey: string) => {
     setExpandedParents((prev) => {
       const next = new Set(prev);
-      if (next.has(sessionId)) {
-        next.delete(sessionId);
+      if (next.has(expansionKey)) {
+        next.delete(expansionKey);
       } else {
-        next.add(sessionId);
+        next.add(expansionKey);
       }
       try {
         safeStorage.setItem(SESSION_EXPANDED_STORAGE_KEY, JSON.stringify(Array.from(next)));

@@ -26,6 +26,25 @@ import {
 // Use relative path by default (works with both dev and nginx proxy server)
 // Can be overridden with VITE_OPENCODE_URL for absolute URLs in special deployments
 const DEFAULT_BASE_URL = import.meta.env.VITE_OPENCODE_URL || "/api";
+
+/**
+ * Render an SDK error payload into a short string for Error messages.
+ * The SDK returns `{data, error}` shape without throwing on non-2xx; methods
+ * that need to signal failure (so callers can preserve state instead of
+ * conflating failure with an empty success) wrap the error with this helper.
+ */
+function formatSdkError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object" && "message" in error && typeof (error as { message: unknown }).message === "string") {
+    return (error as { message: string }).message;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
 const ABSOLUTE_URL_PATTERN = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//;
 const ID_RANDOM_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 const ID_RANDOM_LENGTH = 14;
@@ -951,12 +970,20 @@ class OpencodeService {
   async getSessionStatus(): Promise<
     Record<string, { type: "idle" | "busy" | "retry"; attempt?: number; message?: string; next?: number }>
   > {
-    return this.getSessionStatusForDirectory(this.currentDirectory ?? null);
+    return (await this.getSessionStatusForDirectory(this.currentDirectory ?? null)) ?? {};
   }
 
+  /**
+   * Returns the upstream `/session/status` map, or `null` if the fetch failed.
+   *
+   * `null` vs `{}` matters for reconnect resync: the server omits idle sessions
+   * from the response, so an empty `{}` means "everything is idle" and a candidate
+   * missing from the response is authoritatively idle. A network/HTTP failure must
+   * not be conflated with that — return `null` so the caller can preserve state.
+   */
   async getSessionStatusForDirectory(
     directory: string | null | undefined
-  ): Promise<Record<string, { type: "idle" | "busy" | "retry"; attempt?: number; message?: string; next?: number }>> {
+  ): Promise<Record<string, { type: "idle" | "busy" | "retry"; attempt?: number; message?: string; next?: number }> | null> {
     try {
       const base = this.baseUrl.replace(/\/$/, "");
       const url = new URL(`${base}/session/status`);
@@ -974,12 +1001,12 @@ class OpencodeService {
       });
 
       if (!response.ok) {
-        return {};
+        return null;
       }
 
       const data = await response.json().catch(() => null);
       if (!data || typeof data !== "object") {
-        return {};
+        return null;
       }
 
       return data as Record<
@@ -987,14 +1014,14 @@ class OpencodeService {
         { type: "idle" | "busy" | "retry"; attempt?: number; message?: string; next?: number }
       >;
     } catch {
-      return {};
+      return null;
     }
   }
 
   async getGlobalSessionStatus(): Promise<
     Record<string, { type: "idle" | "busy" | "retry"; attempt?: number; message?: string; next?: number }>
   > {
-    return this.getSessionStatusForDirectory(null);
+    return (await this.getSessionStatusForDirectory(null)) ?? {};
   }
 
   /**
@@ -1059,17 +1086,22 @@ class OpencodeService {
     return result.data || false;
   }
 
+  /**
+   * Throws on fetch/SDK failure. Callers that drive authoritative state from
+   * the result (e.g. reconnect resync) must let the throw propagate so they
+   * can preserve existing state instead of conflating "fetch failed" with
+   * "server returned no pending permissions".
+   */
   async listPendingPermissions(options?: { directories?: Array<string | null | undefined> }): Promise<PermissionRequest[]> {
     const fetches: Array<Promise<PermissionRequest[]>> = [];
 
     const fetchForDirectory = async (directory?: string | null): Promise<PermissionRequest[]> => {
-      try {
-        const trimmed = typeof directory === 'string' ? directory.trim() : '';
-        const result = await this.client.permission.list(trimmed ? { directory: trimmed } : undefined);
-        return (result.data || []) as unknown as PermissionRequest[];
-      } catch {
-        return [];
+      const trimmed = typeof directory === 'string' ? directory.trim() : '';
+      const result = await this.client.permission.list(trimmed ? { directory: trimmed } : undefined);
+      if (result.error) {
+        throw new Error(`permission.list failed: ${formatSdkError(result.error)}`);
       }
+      return (result.data || []) as unknown as PermissionRequest[];
     };
 
     // Try unscoped first (server may return global pending items).
@@ -1133,17 +1165,21 @@ class OpencodeService {
     return result.data || false;
   }
 
+  /**
+   * Throws on fetch/SDK failure. See {@link listPendingPermissions} for
+   * rationale — resync paths preserve state on throw via outer try/catch
+   * instead of conflating failure with an empty server response.
+   */
   async listPendingQuestions(options?: { directories?: Array<string | null | undefined> }): Promise<QuestionRequest[]> {
     const fetches: Array<Promise<QuestionRequest[]>> = [];
 
     const fetchForDirectory = async (directory?: string | null): Promise<QuestionRequest[]> => {
-      try {
-        const trimmed = typeof directory === 'string' ? directory.trim() : '';
-        const result = await this.client.question.list(trimmed ? { directory: trimmed } : undefined);
-        return (result.data || []) as unknown as QuestionRequest[];
-      } catch {
-        return [];
+      const trimmed = typeof directory === 'string' ? directory.trim() : '';
+      const result = await this.client.question.list(trimmed ? { directory: trimmed } : undefined);
+      if (result.error) {
+        throw new Error(`question.list failed: ${formatSdkError(result.error)}`);
       }
+      return (result.data || []) as unknown as QuestionRequest[];
     };
 
     // Try unscoped first (server may return global pending items).
@@ -1257,15 +1293,19 @@ class OpencodeService {
   }
 
   // Agent Management
+  /**
+   * Throws on fetch/SDK failure so caller-side retry loops (see
+   * useAgentsStore) can observe failure and retry; silently returning an
+   * empty list would defeat retries and clear the cached agent list.
+   */
   async listAgents(): Promise<Agent[]> {
-    try {
-      const response = await this.client.app.agents(
-        this.currentDirectory ? { directory: this.currentDirectory } : undefined
-      );
-      return response.data || [];
-    } catch {
-      return [];
+    const response = await this.client.app.agents(
+      this.currentDirectory ? { directory: this.currentDirectory } : undefined
+    );
+    if (response.error) {
+      throw new Error(`app.agents failed: ${formatSdkError(response.error)}`);
     }
+    return response.data || [];
   }
 
   // SSE infrastructure removed — EventPipeline in sync/event-pipeline.ts handles

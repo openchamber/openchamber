@@ -5,12 +5,15 @@ import { Icon } from "@/components/icon/Icon";
 
 import { cn } from '@/lib/utils';
 import { isIMECompositionEvent } from '@/lib/ime';
+import { copyTextToClipboard } from '@/lib/clipboard';
+import { toast } from '@/components/ui';
 import type { QuestionRequest } from '@/types/question';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessions } from '@/sync/sync-context';
 import * as sessionActions from '@/sync/session-actions';
 import { useI18n } from '@/lib/i18n';
+import { serializeQuestionAsJson, serializeQuestionAsMarkdown } from './questionSerializers';
 
 interface QuestionCardProps {
   question: QuestionRequest;
@@ -206,6 +209,26 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
     }
   }, [question.id, question.sessionID, rejectQuestion]);
 
+  const handleCopyMarkdown = React.useCallback(async () => {
+    const text = serializeQuestionAsMarkdown(question);
+    const result = await copyTextToClipboard(text);
+    if (result.ok) {
+      toast.success(t('chat.questionCard.copiedMarkdown'));
+      return;
+    }
+    toast.error(t('chat.questionCard.copyFailed'));
+  }, [question, t]);
+
+  const handleCopyJson = React.useCallback(async () => {
+    const text = serializeQuestionAsJson(question);
+    const result = await copyTextToClipboard(text);
+    if (result.ok) {
+      toast.success(t('chat.questionCard.copiedJson'));
+      return;
+    }
+    toast.error(t('chat.questionCard.copyFailed'));
+  }, [question, t]);
+
   if (hasResponded || questions.length === 0) {
     return null;
   }
@@ -229,6 +252,26 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
                   {activeHeader}
                 </span>
               ) : null}
+              <div className={cn('flex items-center gap-0.5', activeHeader ? null : 'ml-auto')}>
+                <button
+                  type="button"
+                  onClick={handleCopyMarkdown}
+                  title={t('chat.questionCard.copyMarkdown')}
+                  aria-label={t('chat.questionCard.copyMarkdown')}
+                  className="flex items-center justify-center h-5 w-5 rounded text-muted-foreground hover:text-foreground hover:bg-interactive-hover/30 transition-colors"
+                >
+                  <Icon name="file-text" className="h-3 w-3" />
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCopyJson}
+                  title={t('chat.questionCard.copyJson')}
+                  aria-label={t('chat.questionCard.copyJson')}
+                  className="flex items-center justify-center h-5 w-5 rounded text-muted-foreground hover:text-foreground hover:bg-interactive-hover/30 transition-colors"
+                >
+                  <Icon name="code-box" className="h-3 w-3" />
+                </button>
+              </div>
             </div>
           </div>
 

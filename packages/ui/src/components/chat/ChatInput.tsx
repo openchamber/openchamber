@@ -88,10 +88,8 @@ const collectInlineSkillMentions = (text: string, skillNames: Set<string>): stri
     INLINE_SKILL_TOKEN_PATTERN.lastIndex = 0;
     let match: RegExpExecArray | null;
     while ((match = INLINE_SKILL_TOKEN_PATTERN.exec(text)) !== null) {
-        const prefix = match[1] || '';
         const name = match[2] || '';
-        const slashIndex = match.index + prefix.length;
-        if (slashIndex === 0 || !skillNames.has(name) || mentions.includes(name)) {
+        if (!skillNames.has(name) || mentions.includes(name)) {
             continue;
         }
         mentions.push(name);
