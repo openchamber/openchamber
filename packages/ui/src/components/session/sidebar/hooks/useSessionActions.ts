@@ -3,6 +3,7 @@ import type { Session } from '@opencode-ai/sdk/v2';
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 
 type DeleteSessionConfirmSetter = React.Dispatch<React.SetStateAction<{
   session: Session;
@@ -97,7 +98,19 @@ export const useSessionActions = (args: Args) => {
         return;
       }
       args.markSessionActivating?.(sessionId);
+      // Capture the store state at click time. Inside the rAF-deferred
+      // runSwitch, bail if something else (route handler, sync recovery,
+      // command palette, deep link) moved the store off this id during the
+      // ~33ms rAF window — otherwise runSwitch would clobber the other
+      // caller's destination.
+      const fromAtClick = useSessionUIStore.getState().currentSessionId;
       const runSwitch = () => {
+        const live = useSessionUIStore.getState().currentSessionId;
+        if (live !== fromAtClick && live !== sessionId) {
+          // Out-of-band write happened while this transition was pending;
+          // honor it instead of overriding.
+          return;
+        }
         args.setCurrentSession(sessionId, sessionDirectory ?? null);
         args.onSessionSelected?.(sessionId);
         resetSessionSearch();

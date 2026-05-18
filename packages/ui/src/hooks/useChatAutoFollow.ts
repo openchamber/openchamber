@@ -39,6 +39,7 @@ export interface UseChatAutoFollowResult {
     releaseAutoFollow: () => void;
     saveSnapshotNow: () => void;
     restoreSnapshot: () => Promise<boolean>;
+    scrollContainerEl: HTMLDivElement | null;
 }
 
 const BOTTOM_SPACER_DESKTOP_VH = 0.10;
@@ -352,9 +353,9 @@ export const useChatAutoFollow = ({
 
         const container = scrollRef.current;
         if (!container) {
-            // Caller is expected to gate restore on rendered messages, so the
-            // container should be attached by then. If we somehow get here
-            // (e.g. container unmount race), no-op rather than queueing.
+            // Container un-mounted during the rAF window (Suspense re-mount,
+            // navigation race, etc.). Return false so the caller can leave
+            // its "already restored" guard untouched and retry on re-mount.
             return false;
         }
 
@@ -369,7 +370,11 @@ export const useChatAutoFollow = ({
                 startFollowLoop();
             }
             startSettleBurst();
-            return false;
+            // Container was ready, scroll-to-bottom path taken. The session
+            // has been positioned; report success so the caller can mark it
+            // restored. Return semantics: `true` = container was attached and
+            // some scroll was applied; `false` = container missing, retry.
+            return true;
         }
 
         const savedMaxScroll = Math.max(0, saved.scrollHeight - saved.clientHeight);
@@ -692,5 +697,10 @@ export const useChatAutoFollow = ({
         releaseAutoFollow,
         saveSnapshotNow,
         restoreSnapshot,
+        // Exposed so ChatContainer can re-trigger the restore effect when
+        // the scroll container un-mounts and re-mounts (Suspense, etc.) —
+        // restoreSnapshot bails out on missing container and never updates
+        // its guard, so the effect needs a dep that actually changes.
+        scrollContainerEl: containerEl,
     };
 };
