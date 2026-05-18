@@ -26,9 +26,11 @@ export const useVisualViewport = (): VisualViewportState => {
       rafIdRef.current = requestAnimationFrame(() => {
         rafIdRef.current = null;
         const vv = window.visualViewport!;
-        setState({
-          height: vv.height,
-          keyboardHeight: Math.max(0, window.innerHeight - vv.height),
+        const height = vv.height;
+        const keyboardHeight = Math.max(0, window.innerHeight - height);
+        setState((prev) => {
+          if (prev.height === height && prev.keyboardHeight === keyboardHeight) return prev;
+          return { height, keyboardHeight };
         });
       });
     };
