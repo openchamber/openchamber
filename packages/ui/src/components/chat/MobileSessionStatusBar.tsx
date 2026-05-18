@@ -1436,6 +1436,7 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
   const projects = useProjectsStore((state) => state.projects);
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   const setActiveProject = useProjectsStore((state) => state.setActiveProject);
+  const setActiveProjectIdOnly = useProjectsStore((state) => state.setActiveProjectIdOnly);
   const removeProject = useProjectsStore((state) => state.removeProject);
   const getActiveProject = useProjectsStore((state) => state.getActiveProject);
 
@@ -1498,9 +1499,29 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
   };
 
   const handleProjectSwitch = (projectId: string) => {
-    if (projectId !== activeProjectId) {
-      setActiveProject(projectId);
+    if (projectId === activeProjectId) {
+      return;
     }
+    const draft = useSessionUIStore.getState().newSessionDraft;
+    if (draft?.open) {
+      if (
+        draft.pendingWorktreeRequestId ||
+        draft.bootstrapPendingDirectory ||
+        draft.preserveDirectoryOverride
+      ) {
+        return;
+      }
+      const project = projects.find((p) => p.id === projectId);
+      if (project) {
+        setActiveProjectIdOnly(projectId);
+        useSessionUIStore.getState().setNewSessionDraftTarget({
+          projectId,
+          directoryOverride: project.path,
+        });
+      }
+      return;
+    }
+    setActiveProject(projectId);
   };
 
   const handleAddProject = () => {
