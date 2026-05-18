@@ -31,6 +31,16 @@ const DEFAULT_RECONNECT_DELAY_MS = 250
 const DEFAULT_HEARTBEAT_TIMEOUT_MS = 30_000
 const WS_FALLBACK_WINDOW_MS = 60_000
 const DEFAULT_WS_READY_TIMEOUT_MS = 2_000
+// Retry pacing. Visible+online tabs probe quickly so the user sees connection
+// recovery in under a second of real outage; hidden/offline tabs back off
+// further so a backgrounded PWA on a flaky link doesn't burn battery probing
+// a dead network every few seconds. The browser would throttle hidden-tab
+// timers anyway, but this keeps the intent explicit and shrinks server load
+// from idle tabs.
+const RETRY_BACKOFF_BASE_MS = 250
+const RETRY_BACKOFF_CAP_VISIBLE_MS = 5_000
+const RETRY_BACKOFF_CAP_HIDDEN_OR_OFFLINE_MS = 60_000
+const RETRY_BACKOFF_MAX_EXPONENT = 8
 const ABSOLUTE_URL_PATTERN = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//
 
 export type EventPipelineInput = {
@@ -260,6 +270,69 @@ export function createEventPipeline(input: EventPipelineInput) {
   const isAbortError = (error: unknown): boolean =>
     error instanceof DOMException && error.name === "AbortError" ||
     (typeof error === "object" && error !== null && (error as { name?: string }).name === "AbortError")
+
+  const isOffline = (): boolean =>
+    typeof navigator === "object" && navigator !== null && navigator.onLine === false
+
+  const isHidden = (): boolean =>
+    typeof document !== "undefined" && document.visibilityState !== "visible"
+
+  /**
+   * Wait between reconnect attempts. Resolves early when:
+   *   - the browser fires `online` (network came back — probe immediately),
+   *   - the tab becomes visible (user came back — probe immediately),
+   *   - the pipeline is being torn down (cleanup aborts).
+   * Otherwise resolves after `ms` like a plain timer.
+   */
+  const waitForRetry = (ms: number) => new Promise<void>((resolve) => {
+    if (ms <= 0 || abort.signal.aborted) {
+      resolve()
+      return
+    }
+
+    const cleanup = () => {
+      if (timer !== undefined) {
+        clearTimeout(timer)
+        timer = undefined
+      }
+      if (typeof globalThis.window !== "undefined") {
+        globalThis.window.removeEventListener("online", onInterrupt)
+      }
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisibilityInterrupt)
+      }
+      abort.signal.removeEventListener("abort", onInterrupt)
+    }
+    const onInterrupt = () => {
+      cleanup()
+      resolve()
+    }
+    const onVisibilityInterrupt = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        onInterrupt()
+      }
+    }
+
+    let timer: ReturnType<typeof setTimeout> | undefined = setTimeout(onInterrupt, ms)
+    if (typeof globalThis.window !== "undefined") {
+      globalThis.window.addEventListener("online", onInterrupt, { once: true })
+    }
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisibilityInterrupt)
+    }
+    abort.signal.addEventListener("abort", onInterrupt, { once: true })
+  })
+
+  const computeRetryDelay = (failures: number): number => {
+    if (failures <= 0) return 0
+    // Offline: don't spin probing a dead network. Use the long cap and rely on
+    // waitForRetry to resolve early when the `online` event fires. The cap is
+    // also a fallback for browsers that miss `online`.
+    if (isOffline()) return RETRY_BACKOFF_CAP_HIDDEN_OR_OFFLINE_MS
+    const cap = isHidden() ? RETRY_BACKOFF_CAP_HIDDEN_OR_OFFLINE_MS : RETRY_BACKOFF_CAP_VISIBLE_MS
+    const exponent = Math.min(failures - 1, RETRY_BACKOFF_MAX_EXPONENT)
+    return Math.min(cap, RETRY_BACKOFF_BASE_MS * 2 ** exponent)
+  }
 
   let streamErrorLogged = false
   let attempt: AbortController | undefined
@@ -600,9 +673,13 @@ export function createEventPipeline(input: EventPipelineInput) {
               : `${currentTransport}_error:unknown`
           notifyDisconnected(reason)
 
-          // Backoff so a hard-down server doesn't spin the browser event loop.
-          // Cap at 5s; reset occurs in markConnected().
-          retryDelayMs = Math.min(5_000, Math.max(retryDelayMs, 250) * (consecutiveFailures <= 1 ? 1 : 2))
+          // Exponential backoff so a hard-down server / dead network doesn't
+          // spin the event loop. Caps lower (5s) when the user is foreground
+          // and the browser thinks it's online; caps higher (60s) when hidden
+          // or offline so a backgrounded PWA on a flaky link doesn't burn
+          // battery. waitForRetry below resolves early on `online` or
+          // visibility-visible so recovery is still under a second.
+          retryDelayMs = computeRetryDelay(consecutiveFailures)
         }
       } finally {
         abort.signal.removeEventListener("abort", onAbort)
@@ -617,7 +694,7 @@ export function createEventPipeline(input: EventPipelineInput) {
         attemptAbortReason = null
       }
       if (retryDelayMs > 0) {
-        await wait(retryDelayMs)
+        await waitForRetry(retryDelayMs)
       }
     }
   })().finally(flushAll)
@@ -642,6 +719,24 @@ export function createEventPipeline(input: EventPipelineInput) {
     attempt?.abort()
   }
 
+  // Browser told us the network is back. If we're already in a disconnected
+  // cycle, abort the (stale) attempt and let the loop probe immediately;
+  // waitForRetry also resolves early on `online`, so any inter-attempt sleep
+  // ends now. Guard on `disconnected` so a spurious `online` from the browser
+  // doesn't disrupt a healthy connection.
+  const onOnline = () => {
+    if (!disconnected) return
+    attempt?.abort()
+  }
+
+  // Browser told us we're offline. Abort the current attempt — its socket /
+  // fetch will throw soon anyway, this just stops sooner. computeRetryDelay
+  // then returns the long cap so we wait for `online` instead of hammering
+  // a dead network.
+  const onOffline = () => {
+    attempt?.abort()
+  }
+
   if (typeof document !== "undefined") {
     document.addEventListener("visibilitychange", onVisibility)
     window.addEventListener("pageshow", onPageShow)
@@ -651,6 +746,8 @@ export function createEventPipeline(input: EventPipelineInput) {
   // test environments can replace globalThis.window with a stub.
   if (typeof globalThis.window !== "undefined") {
     globalThis.window.addEventListener("openchamber:system-resume", onSystemResume)
+    globalThis.window.addEventListener("online", onOnline)
+    globalThis.window.addEventListener("offline", onOffline)
   }
 
   const cleanup = () => {
@@ -660,6 +757,8 @@ export function createEventPipeline(input: EventPipelineInput) {
     }
     if (typeof globalThis.window !== "undefined") {
       globalThis.window.removeEventListener("openchamber:system-resume", onSystemResume)
+      globalThis.window.removeEventListener("online", onOnline)
+      globalThis.window.removeEventListener("offline", onOffline)
     }
     abort.abort()
     flushAll()

@@ -224,6 +224,16 @@ Client API methods that feed authoritative state (bootstrap, reconnect resync, r
 
 This rule is the API-layer counterpart of "Use live server/session state for live activity. Do not let historical anomalies masquerade as current execution." A fetch failure is the same kind of anomaly — don't let it masquerade as authoritative server state.
 
+### Reconnect-loop pacing
+
+The SSE/WebSocket reconnect loop in `packages/ui/src/sync/event-pipeline.ts` retries indefinitely. To avoid burning battery and server load on dead/idle connections, the loop's pacing must respect three signals:
+
+- **`navigator.onLine`**: when the browser reports offline, use the long backoff cap (~60s) instead of the short one (~5s). The expected recovery path is the `online` event, not the next probe.
+- **`document.visibilityState`**: when hidden, use the long cap too. A backgrounded PWA shouldn't hammer the network at 1/5s; the browser may also throttle our timers, but state the intent in code rather than relying on it.
+- **Consecutive failures**: real exponential growth (`base * 2^failures`, clamped), not constant 500ms. A hard-down server should see geometrically fewer probes per minute over time.
+
+The inter-attempt wait must be interruptible by `online`, visibility-becomes-visible, and the pipeline's abort signal — otherwise recovery is delayed by however long the current sleep had left to run.
+
 ## CLI Parity and Safety Policy (MANDATORY)
 
 ### Principle: policy-first, UX-second
