@@ -261,6 +261,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.menu.betaBadge": "beta",
   "sessions.sidebar.session.menu.label": "Menú de sesión",
   "sessions.sidebar.session.untitled": "Sesión sin título",
+  "sessions.sidebar.session.switching": "Cambiando de sesión",
   "sessions.sidebar.session.export.nothingToExport": "No hay nada para exportar",
   "sessions.sidebar.session.export.success": "Sesión exportada",
   "sessions.sidebar.session.export.failedRevealPath": "No se pudo mostrar la ruta",

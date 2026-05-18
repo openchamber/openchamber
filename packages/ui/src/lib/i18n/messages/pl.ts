@@ -92,6 +92,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.menu.betaBadge': 'beta',
   'sessions.sidebar.session.menu.label': 'Menu sesji',
   'sessions.sidebar.session.untitled': 'Nienazwana Sesja',
+  'sessions.sidebar.session.switching': 'Przełączanie sesji',
   'sessions.sidebar.session.export.nothingToExport': 'Brak danych do eksportu',
   'sessions.sidebar.session.export.success': 'Sesja wyeksportowana',
   'sessions.sidebar.session.export.failedRevealPath': 'Nie udało się ujawnić ścieżki',

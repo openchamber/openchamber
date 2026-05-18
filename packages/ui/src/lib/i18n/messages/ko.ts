@@ -261,6 +261,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.menu.betaBadge': 'beta',
   'sessions.sidebar.session.menu.label': '세션 메뉴',
   'sessions.sidebar.session.untitled': '제목 없는 세션',
+  'sessions.sidebar.session.switching': '세션 전환 중',
   'sessions.sidebar.session.export.nothingToExport': '내보낼 내용 없음',
   'sessions.sidebar.session.export.success': '세션 내보냄',
   'sessions.sidebar.session.export.failedRevealPath': '경로 표시 실패',

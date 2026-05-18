@@ -814,8 +814,8 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                       {isOptimisticTarget ? (
                         <span
                           className="h-3.5 w-3.5 flex-shrink-0 animate-spin rounded-full border-2 border-primary/35 border-t-primary"
-                          aria-label="Switching session"
-                          title="Switching session"
+                          aria-label={t('sessions.sidebar.session.switching')}
+                          title={t('sessions.sidebar.session.switching')}
                         />
                       ) : null}
                       <div className={cn('block min-w-0 flex-1 truncate typography-ui-label font-normal', isActive ? 'text-primary' : 'text-foreground')}>{renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}</div>
@@ -885,8 +885,8 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                     {isOptimisticTarget ? (
                       <span
                         className="h-3.5 w-3.5 flex-shrink-0 animate-spin rounded-full border-2 border-primary/35 border-t-primary"
-                        aria-label="Switching session"
-                        title="Switching session"
+                        aria-label={t('sessions.sidebar.session.switching')}
+                        title={t('sessions.sidebar.session.switching')}
                       />
                     ) : null}
                     <div className={cn('block min-w-0 flex-1 truncate typography-ui-label font-normal', isActive ? 'text-primary' : 'text-foreground')}>{renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}</div>

@@ -261,6 +261,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.menu.betaBadge": "бета-версія",
   "sessions.sidebar.session.menu.label": "Меню сесії",
   "sessions.sidebar.session.untitled": "Сесія без назви",
+  "sessions.sidebar.session.switching": "Перемикання сесії",
   "sessions.sidebar.session.export.nothingToExport": "Нічого для експорту",
   "sessions.sidebar.session.export.success": "Сесія експортовано",
   "sessions.sidebar.session.export.failedRevealPath": "Не вдалося відкрити шлях",

@@ -260,6 +260,7 @@ export const dict = {
   'sessions.sidebar.session.menu.betaBadge': 'beta',
   'sessions.sidebar.session.menu.label': 'Session menu',
   'sessions.sidebar.session.untitled': 'Untitled Session',
+  'sessions.sidebar.session.switching': 'Switching session',
   'sessions.sidebar.session.export.nothingToExport': 'Nothing to export',
   'sessions.sidebar.session.export.success': 'Session exported',
   'sessions.sidebar.session.export.failedRevealPath': 'Failed to reveal path',
