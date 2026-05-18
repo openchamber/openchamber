@@ -200,33 +200,21 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
 
         // Pick the latest assistant message by created-time (tiebreak by id) in a
         // single pass — sync reconciliation can splice messages out of array order.
+        const isLater = (a: AssistantSessionMessageRecord, b: AssistantSessionMessageRecord) => {
+            const aTime = typeof a.info.time?.created === 'number' ? a.info.time.created : null;
+            const bTime = typeof b.info.time?.created === 'number' ? b.info.time.created : null;
+            if (aTime !== null && bTime !== null && aTime !== bTime) return aTime > bTime;
+            return a.info.id.localeCompare(b.info.id) > 0;
+        };
+
         let lastAssistant: AssistantSessionMessageRecord | null = null;
-        let lastCreated: number | null = null;
         for (const candidate of sessionMessages) {
             if (!isAssistantMessage(candidate.info) || isFullySyntheticMessage(candidate.parts)) {
                 continue;
             }
             const typed = candidate as AssistantSessionMessageRecord;
-            const candidateCreated = typeof typed.info.time?.created === 'number' ? typed.info.time.created : null;
-            if (lastAssistant === null) {
+            if (lastAssistant === null || isLater(typed, lastAssistant)) {
                 lastAssistant = typed;
-                lastCreated = candidateCreated;
-                continue;
-            }
-            const bothHaveCreated = candidateCreated !== null && lastCreated !== null;
-            const isNewer = bothHaveCreated
-                ? candidateCreated! > lastCreated!
-                : (typed.info.id.localeCompare(lastAssistant.info.id) > 0);
-            if (bothHaveCreated && candidateCreated === lastCreated) {
-                if (typed.info.id.localeCompare(lastAssistant.info.id) > 0) {
-                    lastAssistant = typed;
-                    lastCreated = candidateCreated;
-                }
-                continue;
-            }
-            if (isNewer) {
-                lastAssistant = typed;
-                lastCreated = candidateCreated;
             }
         }
 
