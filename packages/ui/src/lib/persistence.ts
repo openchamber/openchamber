@@ -1,6 +1,7 @@
 import type { DesktopSettings } from '@/lib/desktop';
 import { createProjectIdFromPath } from '@/lib/projectId';
 import { useUIStore } from '@/stores/useUIStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 import { isMonoFontOption, isUiFontOption } from '@/lib/fontOptions';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { setDirectoryShowHidden } from '@/lib/directoryShowHidden';
@@ -1185,6 +1186,19 @@ let _pendingSettingsChanges: Partial<DesktopSettings> | null = null;
 let _settingsFlushTimer: ReturnType<typeof setTimeout> | null = null;
 const SETTINGS_DEBOUNCE_MS = 200;
 
+// Sync the in-memory projects store with server-normalized paths (symlink resolution, dedup).
+const reconcileProjectsFromServer = (settings: DesktopSettings): void => {
+  if (!Array.isArray(settings.projects) || settings.projects.length === 0) {
+    return;
+  }
+  const store = useProjectsStore.getState();
+  const currentPaths = store.projects.map((p) => p.path).join(',');
+  const serverPaths = settings.projects.map((p: { path?: string }) => p?.path ?? '').join(',');
+  if (currentPaths !== serverPaths) {
+    useProjectsStore.setState({ projects: settings.projects as typeof store.projects });
+  }
+};
+
 const _flushSettingsUpdate = async (): Promise<void> => {
   const changes = _pendingSettingsChanges;
   _pendingSettingsChanges = null;
@@ -1198,6 +1212,7 @@ const _flushSettingsUpdate = async (): Promise<void> => {
       if (updated) {
         persistToLocalStorage(updated);
         applyDesktopUiPreferences(updated);
+        reconcileProjectsFromServer(updated);
       }
       return;
     } catch (error) {
@@ -1224,6 +1239,7 @@ const _flushSettingsUpdate = async (): Promise<void> => {
     if (updated) {
       persistToLocalStorage(updated);
       applyDesktopUiPreferences(updated);
+      reconcileProjectsFromServer(updated);
       // Invalidate GET cache so next read sees the fresh data
       _settingsCache = null;
     }

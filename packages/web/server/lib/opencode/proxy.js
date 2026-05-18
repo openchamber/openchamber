@@ -416,5 +416,23 @@ export const registerOpenCodeProxy = (app, deps) => {
     },
   });
 
+  // Resolve symlinks in directory query params so paths match OpenCode's session DB.
+  app.use('/api', (req, _res, next) => {
+    try {
+      const url = new URL(req.url, 'http://localhost');
+      const directory = url.searchParams.get('directory');
+      if (directory) {
+        const realPath = fs.realpathSync(directory);
+        if (realPath !== directory) {
+          url.searchParams.set('directory', realPath);
+          req.url = url.pathname + url.search;
+        }
+      }
+    } catch {
+      // pass through as-is if realpath fails
+    }
+    next();
+  });
+
   app.use('/api', apiProxy);
 };

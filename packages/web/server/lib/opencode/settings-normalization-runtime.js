@@ -3,6 +3,7 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     os,
     path,
     processLike,
+    realpathSync,
     tunnelBootstrapTtlDefaultMs,
     tunnelBootstrapTtlMinMs,
     tunnelBootstrapTtlMaxMs,
@@ -32,6 +33,18 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     return trimmed;
   };
 
+  // Resolve symlinks, falling back to the original value on failure.
+  const safeRealpathSync = (value) => {
+    if (!realpathSync || typeof value !== 'string' || !value) {
+      return value;
+    }
+    try {
+      return realpathSync(value);
+    } catch {
+      return value;
+    }
+  };
+
   const normalizePathForPersistence = (value) => {
     if (typeof value !== 'string') {
       return value;
@@ -47,11 +60,13 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
       return trimmed;
     }
 
+    const resolved = safeRealpathSync(trimmed);
+
     if (processLike.platform !== 'win32') {
-      return trimmed;
+      return resolved;
     }
 
-    return trimmed.replace(/\//g, '\\');
+    return resolved.replace(/\//g, '\\');
   };
 
   const areStringArraysEqual = (a, b) => {
@@ -107,7 +122,7 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
       const candidate = entry;
       const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
       const rawPath = typeof candidate.path === 'string' ? candidate.path.trim() : '';
-      const resolvedPath = rawPath ? path.resolve(normalizeDirectoryPath(rawPath)) : '';
+      const resolvedPath = rawPath ? safeRealpathSync(path.resolve(normalizeDirectoryPath(rawPath))) : '';
       const normalizedPath = resolvedPath ? normalizePathForPersistence(resolvedPath) : '';
       const label = typeof candidate.label === 'string' ? candidate.label.trim() : '';
       const icon = typeof candidate.icon === 'string' ? candidate.icon.trim() : '';

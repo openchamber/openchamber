@@ -30,7 +30,8 @@ export const createProjectDirectoryRuntime = (dependencies) => {
       if (!stats.isDirectory()) {
         return { ok: false, error: 'Specified path is not a directory' };
       }
-      return { ok: true, directory: resolved };
+      const realPath = await fsPromises.realpath(resolved);
+      return { ok: true, directory: realPath };
     } catch (error) {
       const err = error;
       if (err && typeof err === 'object' && err.code === 'ENOENT') {

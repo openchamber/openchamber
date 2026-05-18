@@ -914,7 +914,7 @@ export const registerFsRoutes = (app, dependencies) => {
     };
 
     try {
-      resolvedPath = path.resolve(normalizeDirectoryPath(rawPath));
+      resolvedPath = await fsPromises.realpath(path.resolve(normalizeDirectoryPath(rawPath)));
 
       const stats = await fsPromises.stat(resolvedPath);
       if (!stats.isDirectory()) {
