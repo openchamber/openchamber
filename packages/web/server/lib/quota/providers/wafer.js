@@ -38,7 +38,7 @@ export const fetchQuota = async () => {
     });
   }
 
-    const timeoutSignal = AbortSignal.timeout(15_000);
+  const timeoutSignal = AbortSignal.timeout(15_000);
 
   try {
     const response = await fetch(WAFER_QUOTA_URL, {
