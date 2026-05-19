@@ -20,14 +20,12 @@ export const DiagramEditor = React.forwardRef<DiagramEditorHandle, DiagramEditor
     const latestXmlRef = React.useRef(xml);
     const [isDark, setIsDark] = React.useState(false);
     const drawioRef = React.useRef<React.ComponentRef<typeof DrawIoEmbed>>(null);
-    const isNewFile = !xml;
     const hasShownTemplate = React.useRef(false);
-
-    const effectiveXml = xml || BLANK_XML;
+    const initialXml = React.useRef(xml);
 
     React.useEffect(() => {
-      latestXmlRef.current = effectiveXml;
-    }, [effectiveXml]);
+      latestXmlRef.current = initialXml.current || BLANK_XML;
+    }, []);
 
     React.useEffect(() => {
       const check = () => {
@@ -45,13 +43,13 @@ export const DiagramEditor = React.forwardRef<DiagramEditorHandle, DiagramEditor
     }));
 
     const handleLoad = React.useCallback(() => {
-      if (isNewFile && !hasShownTemplate.current) {
+      if (!initialXml.current && !hasShownTemplate.current) {
         hasShownTemplate.current = true;
         setTimeout(() => {
           drawioRef.current?.template({});
         }, 500);
       }
-    }, [isNewFile]);
+    }, []);
 
     const handleAutoSave = React.useCallback((data: { xml: string }) => {
       latestXmlRef.current = data.xml;
@@ -62,7 +60,7 @@ export const DiagramEditor = React.forwardRef<DiagramEditorHandle, DiagramEditor
       <div className={cn('h-full w-full', className)}>
         <DrawIoEmbed
           ref={drawioRef}
-          xml={effectiveXml}
+          xml={initialXml.current || BLANK_XML}
           autosave
           urlParameters={{
             ui: readOnly ? 'simple' : isDark ? 'dark' : 'kennedy',
