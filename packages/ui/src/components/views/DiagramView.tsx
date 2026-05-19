@@ -14,6 +14,7 @@ export function DiagramView() {
   const [loading, setLoading] = React.useState(true);
   const editorRef = React.useRef<DiagramEditorHandle>(null);
   const loadFileRef = React.useRef<((path: string) => Promise<void>) | null>(null);
+  const saveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   React.useEffect(() => {
     const pending = useUIStore.getState().consumePendingDiagramFile();
@@ -79,8 +80,12 @@ export function DiagramView() {
           xml={xml}
           className="h-full"
           onChange={(newXml) => {
-            if (filePath && files?.writeFile && newXml !== xml) {
-              files.writeFile(filePath, newXml).catch(() => {});
+            const writeFile = files?.writeFile;
+            if (filePath && writeFile && newXml !== xml) {
+              if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+              saveTimerRef.current = setTimeout(() => {
+                writeFile(filePath, newXml).catch(() => {});
+              }, 800);
             }
           }}
         />
