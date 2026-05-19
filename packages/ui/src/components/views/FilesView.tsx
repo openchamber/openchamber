@@ -803,6 +803,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const lastLoadedFileStatRef = React.useRef<FileStatSnapshot | null>(null);
   const activeFileLoadIdRef = React.useRef(0);
   const [autoSaveStatus, setAutoSaveStatus] = React.useState<'idle' | 'saved'>('idle');
+  const [diagramSaved, setDiagramSaved] = React.useState(false);
   const [autoSaveEnabled, setAutoSaveEnabled] = React.useState(getInitialAutoSaveEnabled);
 
   const [confirmDiscardOpen, setConfirmDiscardOpen] = React.useState(false);
@@ -2966,14 +2967,19 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                 onClick={async () => {
                   const xml = diagramEditorRef.current?.getXml();
                   if (selectedFile?.path && xml && files.writeFile && xml !== fileContent) {
+                    setDiagramSaved(true);
+                    setTimeout(() => setDiagramSaved(false), 1500);
                     await files.writeFile(selectedFile.path, xml);
-                    setAutoSaveStatus('idle');
                   }
                 }}
                 className="size-6 p-0 text-foreground hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
                 title="Save diagram"
               >
-                <Icon name="save-3" className="size-4" />
+                {diagramSaved ? (
+                  <Icon name="check" className="size-4 text-[color:var(--status-success)]" />
+                ) : (
+                  <Icon name="save-3" className="size-4" />
+                )}
               </Button>
             )}
           </>
