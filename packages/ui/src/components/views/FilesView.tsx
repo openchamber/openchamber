@@ -794,7 +794,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const [loadedFileLineEnding, setLoadedFileLineEnding] = React.useState<FileLineEnding>('\n');
   const dialogInputRef = React.useRef<HTMLInputElement>(null);
   const autoSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const drawioSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const diagramEditorRef = React.useRef<React.ComponentRef<typeof DiagramEditor>>(null);
   const lastLoadedFileStatRef = React.useRef<FileStatSnapshot | null>(null);
   const activeFileLoadIdRef = React.useRef(0);
   const [autoSaveStatus, setAutoSaveStatus] = React.useState<'idle' | 'saved'>('idle');
@@ -2866,6 +2866,22 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
               currentMode={drawioViewMode}
               onToggle={() => setDrawioViewMode(drawioViewMode === 'preview' ? 'edit' : 'preview')}
             />
+            {drawioViewMode === 'preview' && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={async () => {
+                  const xml = diagramEditorRef.current?.getXml();
+                  if (selectedFile?.path && xml && files.writeFile && xml !== fileContent) {
+                    await files.writeFile(selectedFile.path, xml);
+                  }
+                }}
+                className="size-6 p-0 text-muted-foreground opacity-65 hover:bg-transparent hover:opacity-100 focus-visible:bg-transparent active:bg-transparent"
+                title="Save diagram"
+              >
+                <Icon name="save-3" className="size-4" />
+              </Button>
+            )}
           </>
         )}
 
@@ -3239,17 +3255,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           ) : selectedFile && isDrawio && drawioViewMode === 'preview' ? (
             <div className="h-full overflow-hidden" style={{ minHeight: '400px' }}>
               <DiagramEditor
+                ref={diagramEditorRef}
                 xml={fileContent}
-                onChange={(newXml) => {
-                  const writeFile = files.writeFile;
-                  const path = selectedFile?.path;
-                  if (path && writeFile && newXml !== fileContent) {
-                    if (drawioSaveTimerRef.current) clearTimeout(drawioSaveTimerRef.current);
-                    drawioSaveTimerRef.current = setTimeout(() => {
-                      writeFile(path, newXml).catch(() => {});
-                    }, 800);
-                  }
-                }}
               />
             </div>
           ) : selectedFile && isJson && jsonViewMode === 'tree' ? (
