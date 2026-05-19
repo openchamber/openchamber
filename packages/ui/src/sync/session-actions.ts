@@ -15,6 +15,7 @@ import { registerSessionDirectory } from "./sync-refs"
 import { isSyntheticPart } from "@/lib/messages/synthetic"
 import { materializeSessionSnapshots } from "./materialization"
 import { stripMessageDiffSnapshots } from "./sanitize"
+import { sessionEvents } from "@/lib/sessionEvents"
 
 const MESSAGE_REFETCH_LIMIT = 200
 const MESSAGE_REFETCH_SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
@@ -648,7 +649,8 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
 
   // Call SDK and merge authoritative result into store
   try {
-    const result = await sdk().session.revert({ sessionID: sessionId, directory: dir(), messageID: messageId })
+    const directory = dir()
+    const result = await sdk().session.revert({ sessionID: sessionId, directory, messageID: messageId })
     if (result.data) {
       const current = store.getState()
       const updated = [...current.session]
@@ -657,6 +659,9 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
         updated[idx] = result.data
         store.setState({ session: updated })
       }
+    }
+    if (directory) {
+      sessionEvents.requestGitRefresh({ directory })
     }
   } catch (err) {
     // Rollback: restore removed messages + revert marker

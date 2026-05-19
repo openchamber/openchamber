@@ -1548,7 +1548,7 @@ export const settingsDict = {
   'settings.voice.page.stt.wasmNotLoaded': 'Model zostanie pobrany przy pierwszym użyciu',
   'settings.voice.page.stt.wasmDownload': 'Pobierz',
   'settings.voice.page.stt.wasmRetry': 'Spróbuj ponownie',
-  'settings.voice.page.section.playbackAndSummary': 'Odtwarzanie i podsumowanie',
+  'settings.voice.page.section.playbackAndSummary': 'Odtwarzanie',
   'settings.voice.page.section.speechRecognition': 'Rozpoznawanie mowy',
   'settings.voice.page.section.voiceSetup': 'Konfiguracja głosu',
   'settings.voice.page.tooltip.browser': 'Darmowe, offline, ograniczone wsparcie mobilne.',

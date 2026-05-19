@@ -85,7 +85,7 @@ export interface OpenChamberProjectContextData extends OpenChamberProjectNotesTo
   plans: OpenChamberProjectPlanFileLink[];
 }
 
-export const OPENCHAMBER_PROJECT_NOTES_MAX_LENGTH = 1000;
+export const OPENCHAMBER_PROJECT_NOTES_MAX_LENGTH = 3000;
 export const OPENCHAMBER_PROJECT_TODO_TEXT_MAX_LENGTH = 120;
 export const OPENCHAMBER_PROJECT_ACTION_NAME_MAX_LENGTH = 80;
 export const OPENCHAMBER_PROJECT_ACTION_COMMAND_MAX_LENGTH = 4000;

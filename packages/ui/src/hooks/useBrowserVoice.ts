@@ -35,7 +35,7 @@ import { getSyncMessages, getSyncParts } from '@/sync/sync-refs';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useServerTTS } from './useServerTTS';
 import { useSayTTS } from './useSayTTS';
-import { summarizeText, shouldSummarize, sanitizeForTTS } from '@/lib/voice/summarize';
+import { sanitizeForTTS } from '@/lib/voice/summarize';
 
 export type BrowserVoiceStatus = 'idle' | 'listening' | 'processing' | 'speaking' | 'error';
 
@@ -151,8 +151,6 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
   const openaiCompatibleVoice = useConfigStore((state) => state.openaiCompatibleVoice);
   const openaiCompatibleUrl = useConfigStore((state) => state.openaiCompatibleUrl);
   const openaiCompatibleTtsModel = useConfigStore((state) => state.openaiCompatibleTtsModel);
-  const summarizeVoiceConversation = useConfigStore((state) => state.summarizeVoiceConversation);
-  const summarizeCharacterThreshold = useConfigStore((state) => state.summarizeCharacterThreshold);
 
   const shouldCheckOpenAIAvailability = voiceModeEnabled && (voiceProvider === 'openai' || voiceProvider === 'openai-compatible');
   const shouldCheckSayAvailability = voiceModeEnabled && voiceProvider === 'say';
@@ -476,17 +474,7 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
             // Speak the response
             setStatus('speaking');
             try {
-              // Summarize text if enabled and over threshold
-              let textToSpeak = textParts;
-              if (summarizeVoiceConversation && shouldSummarize(textParts, 'voice')) {
-                console.log('[useBrowserVoice] Summarizing AI response before speaking...');
-                textToSpeak = await summarizeText(textParts, {
-                  threshold: summarizeCharacterThreshold,
-                });
-              } else {
-                // Still sanitize for TTS even when not summarizing
-                textToSpeak = sanitizeForTTS(textParts);
-              }
+              const textToSpeak = sanitizeForTTS(textParts);
               
               // Helper to restart listening after speech ends
               // Only auto-restart if conversation mode is enabled
@@ -613,7 +601,7 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
       setStatus('error');
       processingMessageRef.current = false;
     }
-  }, [currentSessionId, currentProviderId, currentModelId, currentAgentName, language, sendMessage, setPendingInputText, createSession, speechRate, speechPitch, speechVolume, isServerTTSAvailable, speakServerTTS, isSayTTSAvailable, speakSayTTS, voiceProvider, sayVoice, browserVoice, openaiVoice, openaiCompatibleVoice, openaiCompatibleUrl, openaiCompatibleTtsModel, summarizeVoiceConversation, summarizeCharacterThreshold, conversationMode, startCurrentSTT]);
+  }, [currentSessionId, currentProviderId, currentModelId, currentAgentName, language, sendMessage, setPendingInputText, createSession, speechRate, speechPitch, speechVolume, isServerTTSAvailable, speakServerTTS, isSayTTSAvailable, speakSayTTS, voiceProvider, sayVoice, browserVoice, openaiVoice, openaiCompatibleVoice, openaiCompatibleUrl, openaiCompatibleTtsModel, conversationMode, startCurrentSTT]);
 
   // Handle speech recognition result
   const handleSpeechResult = useCallback(async (text: string, isFinal: boolean) => {

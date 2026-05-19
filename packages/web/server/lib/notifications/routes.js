@@ -162,6 +162,8 @@ export const registerNotificationRoutes = (app, dependencies) => {
   });
 
   app.get('/api/notifications/stream', async (req, res) => {
+    await ensureSessionWatcher();
+
     const uiToken = uiAuthController?.ensureSessionToken
       ? await uiAuthController.ensureSessionToken(req, res)
       : getUiSessionTokenFromRequest(req);

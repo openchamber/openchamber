@@ -137,6 +137,18 @@ export class AgentManagerPanelProvider {
     });
   }
 
+  public notifyWindowFocusChanged(focused: boolean): void {
+    if (!this._panel) {
+      return;
+    }
+
+    this._panel.webview.postMessage({
+      type: 'command',
+      command: 'windowFocusChanged',
+      payload: { focused },
+    });
+  }
+
   private _sendCachedState() {
     if (!this._panel) {
       return;
@@ -147,6 +159,7 @@ export class AgentManagerPanelProvider {
       status: this._cachedStatus,
       error: this._cachedError,
     });
+    this.notifyWindowFocusChanged(vscode.window.state.focused);
   }
 
   private _buildSseHeaders(extra?: Record<string, string>): Record<string, string> {

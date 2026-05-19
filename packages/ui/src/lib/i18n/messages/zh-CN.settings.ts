@@ -1302,7 +1302,7 @@ export const settingsDict = {
   'settings.notifications.page.testNotification.body': '这是来自 OpenChamber 的测试通知。',
   'settings.voice.page.section.voiceSetup': '语音设置',
   'settings.voice.page.section.speechRecognition': '语音识别',
-  'settings.voice.page.section.playbackAndSummary': '播放与摘要',
+  'settings.voice.page.section.playbackAndSummary': '播放',
   'settings.voice.page.field.enableVoiceModeAria': '启用语音模式',
   'settings.voice.page.field.enableVoiceMode': '启用语音模式',
   'settings.voice.page.field.provider': '提供方',

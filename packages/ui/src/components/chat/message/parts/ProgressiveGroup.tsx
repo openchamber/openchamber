@@ -22,6 +22,7 @@ import { useSkillsStore } from '@/stores/useSkillsStore';
 import ReasoningPart from './ReasoningPart';
 import JustificationBlock from './JustificationBlock';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
+import { getExternalFaviconUrl } from '@/lib/url';
 
 interface ProgressiveGroupProps {
     parts: TurnActivityPart[];
@@ -40,6 +41,29 @@ interface ProgressiveGroupProps {
     animatedToolIds?: Set<string>;
     renderJustificationActions?: (activity: TurnActivityPart) => React.ReactNode;
 }
+
+const ExternalLinkFavicon: React.FC<{ href: string }> = ({ href }) => {
+    const [failed, setFailed] = React.useState(false);
+    const faviconUrl = React.useMemo(() => getExternalFaviconUrl(href), [href]);
+
+    if (!faviconUrl || failed) {
+        return null;
+    }
+
+    return (
+        <span className="inline-flex size-[18px] flex-shrink-0 items-center justify-center rounded border border-[var(--border)] bg-[var(--interactive-hover)]">
+            <img
+                src={faviconUrl}
+                alt=""
+                aria-hidden="true"
+                loading="lazy"
+                decoding="async"
+                className="size-3.5 rounded-sm"
+                onError={() => setFailed(true)}
+            />
+        </span>
+    );
+};
 
 const isActivityRunning = (activity: TurnActivityPart): boolean => {
     if (activity.kind !== 'tool') return false;
@@ -728,13 +752,14 @@ const StaticToolRowInner: React.FC<{
                         target="_blank"
                         rel="noopener noreferrer"
                         className={cn(
-                            'min-w-0 flex-1 underline decoration-[color:var(--status-info)] underline-offset-2 hover:opacity-90',
+                            'min-w-0 flex-1 inline-flex items-center gap-1.5 underline decoration-[color:var(--status-info)] underline-offset-2 hover:opacity-90',
                             'truncate whitespace-nowrap typography-meta'
                         )}
                         style={{ color: 'var(--status-info)' }}
                         title={url}
                     >
-                        {url}
+                        <ExternalLinkFavicon href={url} />
+                        <span className="min-w-0 truncate">{url}</span>
                     </a>
                 ))
                 : null}

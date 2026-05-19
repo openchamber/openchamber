@@ -45,6 +45,7 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useSessions } from '@/sync/sync-context';
 import { useI18n } from '@/lib/i18n';
 import { extractLoopbackUrls } from '@/lib/url';
+import { useDeviceInfo } from '@/lib/device';
 
 
 const CONTAIN_LAYOUT_STYLE = { contain: 'layout' as const, transform: 'translateZ(0)' };
@@ -93,6 +94,8 @@ const normalizeSubtaskModel = (model: SubtaskPartLike['model']): string | null =
 const UserSubtaskPart: React.FC<{ part: SubtaskPartLike }> = ({ part }) => {
     const [expanded, setExpanded] = React.useState(false);
     const effectiveDirectory = useEffectiveDirectory();
+    const { isMobile } = useDeviceInfo();
+    const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
     const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
     const { t } = useI18n();
 
@@ -154,6 +157,11 @@ const UserSubtaskPart: React.FC<{ part: SubtaskPartLike }> = ({ part }) => {
                         className="typography-meta text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2"
                         onClick={() => {
                             if (!effectiveDirectory) return;
+                            if (isMobile || isVSCodeRuntime()) {
+                                setCurrentSession(taskSessionID, effectiveDirectory);
+                                return;
+                            }
+
                             openContextPanelTab(effectiveDirectory, {
                                 mode: 'chat',
                                 dedupeKey: `session:${taskSessionID}`,

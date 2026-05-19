@@ -6,6 +6,7 @@ import type { StoreApi } from "zustand"
 import { useStore } from "zustand"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
 import { createEventPipeline } from "./event-pipeline"
+import { isVSCodeRuntime } from "@/lib/desktop"
 import { reduceGlobalEvent, applyGlobalProject, applyDirectoryEvent } from "./event-reducer"
 import { useGlobalSyncStore, type GlobalSyncStore } from "./global-sync-store"
 import { ChildStoreManager, type DirectoryStore } from "./child-store"
@@ -306,6 +307,15 @@ type EventRoutingIndex = {
   sessionDirectoryById: Map<string, string>
   messageSessionById: Map<string, string>
   sessionMessageIdsById: Map<string, Set<string>>
+}
+
+const SHOULD_DISPATCH_VSCODE_NOTIFICATIONS = isVSCodeRuntime()
+
+const dispatchVSCodeRuntimeNotificationEvent = (directory: string, payload: Event) => {
+  if (!SHOULD_DISPATCH_VSCODE_NOTIFICATIONS || typeof window === "undefined") return
+  window.dispatchEvent(new CustomEvent("openchamber:vscode-notification-event", {
+    detail: { directory, payload },
+  }))
 }
 
 const createEventRoutingIndex = (): EventRoutingIndex => ({
@@ -1432,6 +1442,7 @@ export function SyncProvider(props: {
         return resolveDirectoryFromRoutingIndex(routingIndex, directory, payload, childStores)
       },
       onEvent: (directory, payload) => {
+        dispatchVSCodeRuntimeNotificationEvent(directory, payload)
         if (payload.type === "installation.update-available") {
           const version = typeof (payload.properties as { version?: unknown })?.version === "string"
             ? (payload.properties as { version: string }).version

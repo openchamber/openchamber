@@ -1,15 +1,15 @@
 # Text Module Documentation
 
 ## Purpose
-This module provides shared text transformation helpers that are not owned by a single product surface. Today it contains the shared summarization pipeline used by TTS, notifications, and note distillation flows.
+This module provides shared text transformation helpers that are not owned by a single product surface. It previously proxied model-backed summarization through the opencode.ai Zen provider; that provider is no longer available for this use, so summarization now returns local sanitized/distilled fallback text only.
 
 ## Entrypoints and structure
-- `packages/web/server/lib/text/summarization.js`: Shared summarize + sanitize helpers backed by opencode.ai zen API.
+- `packages/web/server/lib/text/summarization.js`: Shared summarize stub + sanitize helpers. It performs no external model calls.
 
 ## Public exports
 
 ### Summarization (summarization.js)
-- `summarizeText({ text, threshold, maxLength, zenModel, mode })`: Shared summarization entrypoint.
+- `summarizeText({ text, threshold, maxLength, zenModel, mode })`: Retired summarization entrypoint retained as an API-compatible stub. `zenModel` is ignored.
 - `sanitizeForTTS(text)`: Sanitizes text for speech output.
 - `sanitizeForNotification(text)`: Sanitizes text for compact notification output.
 - `sanitizeForNote(text)`: Sanitizes text for short note/distillation output.
@@ -23,9 +23,9 @@ This module provides shared text transformation helpers that are not owned by a 
 
 ### `summarizeText`
 Returns object with:
-- `summary`: Final transformed text.
-- `summarized`: Boolean indicating whether model summarization succeeded.
-- `reason`: Optional failure/skip reason.
+- `summary`: Local sanitized/distilled fallback text.
+- `summarized`: Always `false` while the model provider is unavailable.
+- `reason`: Skip reason, usually `Model summarization provider unavailable` for text above threshold.
 - `originalLength`: Optional original text length.
 - `summaryLength`: Optional final summary length.
 

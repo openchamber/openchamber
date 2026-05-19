@@ -1302,7 +1302,7 @@ export const settingsDict = {
   'settings.notifications.page.testNotification.body': 'OpenChamber의 테스트 알림입니다.',
   'settings.voice.page.section.voiceSetup': '음성',
   'settings.voice.page.section.speechRecognition': '음성 인식',
-  'settings.voice.page.section.playbackAndSummary': '재생 및 요약',
+  'settings.voice.page.section.playbackAndSummary': '재생',
   'settings.voice.page.field.enableVoiceModeAria': '음성 모드 활성화',
   'settings.voice.page.field.enableVoiceMode': '음성 모드 활성화',
   'settings.voice.page.field.provider': '프로바이더',

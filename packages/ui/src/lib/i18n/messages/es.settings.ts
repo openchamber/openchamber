@@ -1302,7 +1302,7 @@ export const settingsDict = {
   "settings.notifications.page.testNotification.body": "Esta es una notificación de prueba de OpenChamber.",
   "settings.voice.page.section.voiceSetup": "Configuración de voz",
   "settings.voice.page.section.speechRecognition": "Reconocimiento de voz",
-  "settings.voice.page.section.playbackAndSummary": "Reproducción y resumen",
+  "settings.voice.page.section.playbackAndSummary": "Reproducción",
   "settings.voice.page.field.enableVoiceModeAria": "Habilitar modo de voz",
   "settings.voice.page.field.enableVoiceMode": "Habilitar modo de voz",
   "settings.voice.page.field.provider": "Proveedor",

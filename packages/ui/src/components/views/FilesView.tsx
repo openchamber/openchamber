@@ -542,7 +542,7 @@ const Dialogs: React.FC<DialogsProps> = ({
             onClick={() => void onDialogSubmit()}
             disabled={isDialogSubmitting || (activeDialog !== 'delete' && !dialogInputValue.trim())}
           >
-            {isDialogSubmitting ? <Icon name="loader-4" className="animate-spin" /> : (
+            {isDialogSubmitting ? <Icon name="loader-4" className="size-4 animate-spin" /> : (
                 activeDialog === 'delete' ? t('filesView.dialog.delete.confirm') : t('filesView.dialog.confirm')
             )}
           </Button>

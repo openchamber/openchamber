@@ -357,7 +357,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
               >
                 {changelog.kind === 'raw' ? (
                   <div
-                    className="p-4 typography-markdown-body text-foreground leading-relaxed break-words [&_a]:!text-[var(--primary-base)] [&_a]:!no-underline hover:[&_a]:!underline"
+                    className="p-4 typography-markdown-body text-foreground leading-relaxed break-words [&_a]:!text-[var(--primary-base)] [&_a]:!no-underline [&_a:hover]:!underline"
                     onClickCapture={(e) => {
                       const target = e.target as HTMLElement;
                       const a = target.closest('a');
@@ -373,7 +373,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                 ) : (
                   <div className="divide-y divide-[var(--surface-subtle)]">
                     {changelog.sections.map((section) => (
-                      <div key={section.version} className="p-4 hover:bg-background/40 transition-colors">
+                      <div key={section.version} className="p-4">
                         <div className="flex items-center gap-3 mb-3">
                           <span className="typography-ui-label font-mono text-[var(--primary-base)] bg-[var(--primary-base)]/10 px-1.5 py-0.5 rounded">
                             v{section.version}
@@ -383,7 +383,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                           </span>
                         </div>
                         <div
-                          className="typography-markdown-body text-foreground leading-relaxed break-words [&_a]:!text-[var(--primary-base)] [&_a]:!no-underline hover:[&_a]:!underline"
+                          className="typography-markdown-body text-foreground leading-relaxed break-words [&_a]:!text-[var(--primary-base)] [&_a]:!no-underline [&_a:hover]:!underline"
                           onClickCapture={(e) => {
                             const target = e.target as HTMLElement;
                             const a = target.closest('a');

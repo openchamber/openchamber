@@ -145,9 +145,8 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
             content = content.replace(agentMention.token, mentionHtml);
         }
 
-        content = content.replace(SKILL_TOKEN_PATTERN, (match, prefix: string, skillName: string, offset: number) => {
-            const slashIndex = offset + prefix.length;
-            if (slashIndex === 0 || !skillByName.has(skillName)) return match;
+        content = content.replace(SKILL_TOKEN_PATTERN, (match, prefix: string, skillName: string) => {
+            if (!skillByName.has(skillName)) return match;
             return `${prefix}[/${skillName}](${buildSkillHref(skillName)})`;
         });
 
@@ -165,7 +164,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
             const prefix = match[1] || '';
             const skillName = match[2];
             const slashIndex = match.index + prefix.length;
-            if (slashIndex === 0 || !skillByName.has(skillName)) continue;
+            if (!skillByName.has(skillName)) continue;
 
             if (match.index > cursor) nodes.push(textContent.slice(cursor, match.index));
             if (prefix) nodes.push(prefix);

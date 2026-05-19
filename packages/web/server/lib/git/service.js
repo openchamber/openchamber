@@ -1752,8 +1752,8 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
   }
 
   return {
-    original,
-    modified,
+    original: typeof original === 'string' ? original.replace(/\r\n/g, '\n') : original,
+    modified: typeof modified === 'string' ? modified.replace(/\r\n/g, '\n') : modified,
     path: filePath,
     isBinary: false,
   };

@@ -134,14 +134,11 @@ export function useServerTTS(options: UseServerTTSOptions = {}): UseServerTTSRet
   const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   
-  // Get current model, threshold, and max length from config store for summarization
+  // Get current model and API settings from config store.
   const currentProviderId = useConfigStore((state) => state.currentProviderId);
   const currentModelId = useConfigStore((state) => state.currentModelId);
-  const summarizeCharacterThreshold = useConfigStore((state) => state.summarizeCharacterThreshold);
-  const summarizeMaxLength = useConfigStore((state) => state.summarizeMaxLength);
   const openaiApiKey = useConfigStore((state) => state.openaiApiKey);
   const openaiCompatibleUrl = useConfigStore((state) => state.openaiCompatibleUrl);
-  const settingsZenModel = useConfigStore((state) => state.settingsZenModel);
 
   // Check if server TTS is available
   const checkAvailability = useCallback(async (): Promise<boolean> => {
@@ -275,19 +272,14 @@ export function useServerTTS(options: UseServerTTSOptions = {}): UseServerTTSRet
           model: options?.model || undefined,
           speed: options?.speed || 0.9,
           instructions: options?.instructions,
-          summarize: options?.summarize ?? true, // Summarize by default for voice output
+          summarize: false,
           // Use provided provider/model, or fall back to current chat model
           providerId: options?.providerId || currentProviderId || undefined,
           modelId: options?.modelId || currentModelId || undefined,
-          // Use provided threshold, or fall back to user setting, or default to 200
-          threshold: options?.threshold ?? summarizeCharacterThreshold ?? 200,
-          // Max character length for summaries
-          maxLength: summarizeMaxLength ?? 500,
           // Send API key from settings if available
           apiKey: openaiApiKey || undefined,
           // Send custom base URL for OpenAI-compatible servers
           baseURL: options?.baseURL || undefined,
-          ...(settingsZenModel ? { zenModel: settingsZenModel } : {}),
         }),
         signal: abortControllerRef.current.signal,
       });
@@ -350,7 +342,7 @@ export function useServerTTS(options: UseServerTTSOptions = {}): UseServerTTSRet
       options?.onError?.(errorMsg);
       setIsPlaying(false);
     }
-  }, [stop, currentProviderId, currentModelId, summarizeCharacterThreshold, summarizeMaxLength, openaiApiKey, settingsZenModel]);
+  }, [stop, currentProviderId, currentModelId, openaiApiKey]);
 
   // Cleanup on unmount
   useEffect(() => {
