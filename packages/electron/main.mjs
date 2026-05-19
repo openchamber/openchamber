@@ -11,6 +11,17 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import updaterPkg from 'electron-updater';
 import { ElectronSshManager } from './ssh-manager.mjs';
+import {
+  buildLinuxMenuTemplate,
+  nativeNotificationUnsupportedReason,
+  resolveElectronRuntimePaths,
+  stopInProcessWebServer,
+  shouldInstallExplicitApplicationMenu,
+  shouldRequireQuitConfirmationForPlatform,
+  shouldRouteLastWindowCloseThroughQuitConfirmation,
+} from './electron-lifecycle-utils.mjs';
+import { buildLinuxInstalledApps, buildLinuxOpenSpecs, fetchLinuxAppIcons, filterLinuxInstalledApps, readLinuxDesktopEntries } from './linux-app-discovery.mjs';
+import { unsupportedAppSpecificOpenError, validateLocalPath } from './path-open-utils.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -185,13 +196,14 @@ const prepareForQuit = ({ installingUpdate = false } = {}) => {
     }
   }
 
-  if (!installingUpdate) {
-    try {
-      killSidecar();
-    } catch {
-    }
-    void sshManager.shutdownAll().catch(() => {});
+  try {
+    killSidecar();
+  } catch {
   }
+
+  void sshManager.shutdownAll().catch((error) => {
+    log.warn('[electron] SSH cleanup failed during quit:', error);
+  });
 };
 
 const performConfirmedQuit = () => {
@@ -581,8 +593,14 @@ const detectLanIPv4Address = async () => {
 
 const buildLocalUrl = (port) => `http://127.0.0.1:${port}`;
 
-const resourceRoot = () => isDev ? path.join(__dirname, 'resources') : process.resourcesPath;
-const resolveWebDistDir = () => path.join(resourceRoot(), 'web-dist');
+const runtimePaths = () => resolveElectronRuntimePaths({
+  isDev,
+  mainDir: __dirname,
+  appPath: app.getAppPath(),
+  resourcesPath: process.resourcesPath,
+});
+const resolveWebDistDir = () => runtimePaths().webDistDir;
+const resolvePreloadPath = () => runtimePaths().preloadPath;
 
 const normalizeNotificationInput = (raw) => {
   if (!raw || typeof raw !== 'object') return {};
@@ -620,6 +638,7 @@ const focusForegroundWindow = () => {
 // click events to silently stop firing after ~1 min.
 // See https://blog.bloomca.me/2025/02/22/electron-mac-notifications
 const activeNotifications = new Set();
+let notificationUnsupportedLogged = false;
 
 const maybeShowNativeNotification = (rawInput) => {
   const payload = normalizeNotificationInput(rawInput);
@@ -630,6 +649,13 @@ const maybeShowNativeNotification = (rawInput) => {
   }
 
   if (!Notification.isSupported()) {
+    if (!notificationUnsupportedLogged) {
+      notificationUnsupportedLogged = true;
+      log.warn('[electron] native notifications are not supported; skipping notification', {
+        platform: process.platform,
+        reason: nativeNotificationUnsupportedReason(process.platform),
+      });
+    }
     return;
   }
 
@@ -659,9 +685,23 @@ const maybeShowNativeNotification = (rawInput) => {
     release();
   });
   notification.on('close', release);
-  notification.on('failed', release);
+  notification.on('failed', (_event, error) => {
+    log.warn('[electron] native notification failed', {
+      platform: process.platform,
+      reason: error?.message || String(error || 'unknown'),
+    });
+    release();
+  });
 
-  notification.show();
+  try {
+    notification.show();
+  } catch (error) {
+    log.warn('[electron] native notification show failed', {
+      platform: process.platform,
+      reason: error?.message || String(error),
+    });
+    release();
+  }
 };
 
 const mapUpdaterProgressEvent = (payload) => ({
@@ -767,10 +807,15 @@ const spawnLocalServer = async () => {
 
   // The server module reads ENV_DESKTOP_NOTIFY / OPENCHAMBER_DIST_DIR /
   // OPENCHAMBER_RUNTIME at import time (top-level const), so these must be
-  // set before the first import. After this point, the same env is used by
-  // both the Electron main and the server running inside it.
+  // set before the first import. Packaged builds rely on electron-builder
+  // extraResources copying packages/electron/resources/web-dist to
+  // process.resourcesPath/web-dist on Linux and macOS.
+  const webDistDir = resolveWebDistDir();
+  if (!isDev && !fs.existsSync(webDistDir)) {
+    throw new Error(`Packaged web assets not found at ${webDistDir}`);
+  }
   process.env.OPENCHAMBER_HOST = bindHost;
-  process.env.OPENCHAMBER_DIST_DIR = resolveWebDistDir();
+  process.env.OPENCHAMBER_DIST_DIR = webDistDir;
   process.env.OPENCHAMBER_RUNTIME = 'desktop';
   process.env.OPENCHAMBER_DESKTOP_NOTIFY = 'true';
   process.env.OPENCHAMBER_SKIP_API_COMPRESSION = process.env.OPENCHAMBER_SKIP_API_COMPRESSION || 'true';
@@ -802,17 +847,7 @@ const spawnLocalServer = async () => {
 };
 
 const killSidecar = () => {
-  if (state.serverHandle) {
-    try {
-      const result = state.serverHandle.stop({ exitProcess: false });
-      if (result && typeof result.then === 'function') {
-        result.catch(() => {});
-      }
-    } catch {
-    }
-    state.serverHandle = null;
-  }
-  state.sidecarUrl = null;
+  stopInProcessWebServer({ state, logger: log });
 };
 
 const macosMajorVersion = () => {
@@ -1177,7 +1212,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url }) => {
         `--openchamber-macos-major=${desktopMacosMajor}`,
         `--openchamber-boot-outcome=${JSON.stringify(state.bootOutcome || null)}`,
       ],
-      preload: isDev ? path.join(__dirname, 'preload.mjs') : path.join(app.getAppPath(), 'preload.mjs'),
+      preload: resolvePreloadPath(),
       backgroundThrottling: true,
       contextIsolation: true,
       nodeIntegration: false,
@@ -1252,6 +1287,19 @@ const createBrowserWindow = ({ label, restoreGeometry, url }) => {
       }
     }
 
+    if (shouldRouteLastWindowCloseThroughQuitConfirmation(process.platform) && !state.quitRequested) {
+      const remainingVisible = BrowserWindow.getAllWindows().filter(
+        (window) => !window.isDestroyed() && window.isVisible(),
+      ).length;
+
+      if (remainingVisible <= 1) {
+        debounceWindowStatePersist(browserWindow, true);
+        event.preventDefault();
+        void requestQuitWithConfirmation();
+        return;
+      }
+    }
+
     debounceWindowStatePersist(browserWindow, true);
   });
   browserWindow.on('closed', () => {
@@ -1260,9 +1308,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url }) => {
       state.mainWindow = null;
     }
     if (BrowserWindow.getAllWindows().length === 0) {
-      if (!state.installingUpdate) {
-        killSidecar();
-      }
+      killSidecar();
       if (process.platform !== 'darwin') {
         app.quit();
       }
@@ -1428,7 +1474,7 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
         `--openchamber-home=${desktopHome}`,
         `--openchamber-macos-major=${desktopMacosMajor}`,
       ],
-      preload: isDev ? path.join(__dirname, 'preload.mjs') : path.join(app.getAppPath(), 'preload.mjs'),
+      preload: resolvePreloadPath(),
       backgroundThrottling: true,
       contextIsolation: true,
       nodeIntegration: false,
@@ -1466,6 +1512,16 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
     browserWindow.on('show', refreshTrafficLights);
     browserWindow.on('focus', refreshTrafficLights);
   }
+
+  browserWindow.on('close', (event) => {
+    if (!shouldRouteLastWindowCloseThroughQuitConfirmation(process.platform) || state.quitRequested) return;
+    const remainingVisible = BrowserWindow.getAllWindows().filter(
+      (window) => !window.isDestroyed() && window.isVisible(),
+    ).length;
+    if (remainingVisible > 1) return;
+    event.preventDefault();
+    void requestQuitWithConfirmation();
+  });
 
   browserWindow.once('ready-to-show', () => {
     browserWindow.show();
@@ -1721,6 +1777,80 @@ const buildInstalledApps = async (apps) => {
     results.push({ name, iconDataUrl });
   }
   return results;
+};
+
+const buildPlatformInstalledApps = async (apps) => {
+  if (process.platform === 'linux') {
+    return buildLinuxInstalledApps(apps);
+  }
+  return buildInstalledApps(apps);
+};
+
+const filterPlatformInstalledApps = async (apps) => {
+  if (process.platform === 'linux') {
+    return filterLinuxInstalledApps(apps);
+  }
+  const results = await Promise.all(
+    apps.map(async (appName) => (await isAppBundleInstalled(String(appName))) ? String(appName) : null)
+  );
+  return results.filter(Boolean);
+};
+
+const fetchPlatformAppIcons = async (apps) => {
+  if (process.platform === 'linux') {
+    return fetchLinuxAppIcons(apps);
+  }
+  const results = [];
+  for (const name of apps) {
+    const appPath = await resolveAppBundlePath(String(name));
+    if (!appPath) continue;
+    const dataUrl = await iconToDataUrl(await resolveAppIconPath(appPath), String(name));
+    if (dataUrl) results.push({ app: String(name), data_url: dataUrl });
+  }
+  return results;
+};
+
+const spawnDetached = async (program, args) => await new Promise((resolve, reject) => {
+  const child = spawn(program, args, {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
+  });
+  let settled = false;
+  const finish = (callback, value) => {
+    if (settled) return;
+    settled = true;
+    callback(value);
+  };
+  child.once('error', (error) => finish(reject, error));
+  child.once('spawn', () => {
+    child.unref();
+    finish(resolve);
+  });
+});
+
+const runLinuxSpecChain = async (specs, appName) => {
+  const failures = [];
+  for (const spec of specs) {
+    if (spec.kind === 'default') {
+      if (spec.targetKind === 'file') {
+        shell.showItemInFolder(spec.targetPath);
+        return;
+      }
+      const errorMessage = await shell.openPath(spec.targetPath);
+      if (!errorMessage) return;
+      failures.push(`default opener: ${errorMessage}`);
+      continue;
+    }
+
+    try {
+      await spawnDetached(spec.program, spec.args);
+      return;
+    } catch (error) {
+      failures.push(`${spec.program}: ${error?.message || String(error)}`);
+    }
+  }
+  throw new Error(`Failed to open in ${appName}: ${failures.join('; ') || 'no Linux opener was discovered'}`);
 };
 
 const parseSshConfigImports = () => {
@@ -1997,13 +2127,19 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     case 'desktop_open_path': {
       const targetPath = typeof args.path === 'string' ? args.path.trim() : '';
       const appName = typeof args.app === 'string' ? args.app.trim() : '';
-      if (!targetPath) throw new Error('Path is required');
+      const validated = await validateLocalPath(targetPath);
       if (process.platform === 'darwin') {
-        const openArgs = appName ? ['-a', appName, targetPath] : [targetPath];
+        const openArgs = appName ? ['-a', appName, validated.path] : [validated.path];
         spawn('open', openArgs, { detached: true, stdio: 'ignore' }).unref();
         return null;
       }
-      await shell.openPath(targetPath);
+      if (appName) {
+        throw new Error(unsupportedAppSpecificOpenError('paths'));
+      }
+      const errorMessage = await shell.openPath(validated.path);
+      if (errorMessage) {
+        throw new Error(`Failed to open path: ${errorMessage}`);
+      }
       return null;
     }
 
@@ -2022,77 +2158,78 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
 
     case 'desktop_reveal_path': {
       const targetPath = typeof args.path === 'string' ? args.path.trim() : '';
-      if (!targetPath) {
-        throw new Error('Path is required');
-      }
-
-      const stats = await fsp.stat(targetPath).catch(() => null);
-      if (stats?.isDirectory()) {
-        await shell.openPath(targetPath);
+      const validated = await validateLocalPath(targetPath);
+      if (validated.stats.isDirectory()) {
+        const errorMessage = await shell.openPath(validated.path);
+        if (errorMessage) {
+          throw new Error(`Failed to reveal path: ${errorMessage}`);
+        }
         return null;
       }
 
-      shell.showItemInFolder(targetPath);
+      shell.showItemInFolder(validated.path);
       return null;
     }
 
     case 'desktop_open_in_app': {
-      if (process.platform !== 'darwin') {
-        throw new Error('desktop_open_in_app is only supported on macOS');
-      }
       const projectPath = typeof args.projectPath === 'string' ? args.projectPath.trim() : '';
       const appId = typeof args.appId === 'string' ? args.appId.trim().toLowerCase() : '';
       const appName = typeof args.appName === 'string' ? args.appName.trim() : '';
       if (!projectPath || !appId || !appName) {
         throw new Error('Project path, app id, and app name are required');
       }
-      runSpecChain(buildOpenProjectSpecs({ projectPath, appId, appName }), appName);
-      return null;
+      const validated = await validateLocalPath(projectPath, 'Project path');
+      if (process.platform === 'darwin') {
+        runSpecChain(buildOpenProjectSpecs({ projectPath: validated.path, appId, appName }), appName);
+        return null;
+      }
+      if (process.platform === 'linux') {
+        const entries = await readLinuxDesktopEntries();
+        await runLinuxSpecChain(buildLinuxOpenSpecs({ targetPath: validated.path, appId, appName, targetKind: 'project', entries }), appName);
+        return null;
+      }
+      throw new Error(unsupportedAppSpecificOpenError('projects'));
     }
 
     case 'desktop_open_file_in_app': {
-      if (process.platform !== 'darwin') {
-        throw new Error('desktop_open_file_in_app is only supported on macOS');
-      }
       const filePath = typeof args.filePath === 'string' ? args.filePath.trim() : '';
       const appId = typeof args.appId === 'string' ? args.appId.trim().toLowerCase() : '';
       const appName = typeof args.appName === 'string' ? args.appName.trim() : '';
       if (!filePath || !appId || !appName) {
         throw new Error('File path, app id, and app name are required');
       }
-      runSpecChain(buildOpenFileSpecs({ filePath, appId, appName }), appName);
-      return null;
+      const validated = await validateLocalPath(filePath, 'File path');
+      if (process.platform === 'darwin') {
+        runSpecChain(buildOpenFileSpecs({ filePath: validated.path, appId, appName }), appName);
+        return null;
+      }
+      if (process.platform === 'linux') {
+        const entries = await readLinuxDesktopEntries();
+        await runLinuxSpecChain(buildLinuxOpenSpecs({ targetPath: validated.path, appId, appName, targetKind: 'file', entries }), appName);
+        return null;
+      }
+      throw new Error(unsupportedAppSpecificOpenError('files'));
     }
 
     case 'desktop_filter_installed_apps': {
-      if (process.platform !== 'darwin') {
-        throw new Error('desktop_filter_installed_apps is only supported on macOS');
+      if (process.platform !== 'darwin' && process.platform !== 'linux') {
+        throw new Error('desktop_filter_installed_apps is only supported on macOS and Linux');
       }
       if (!Array.isArray(args.apps)) return [];
-      const results = await Promise.all(
-        args.apps.map(async (appName) => (await isAppBundleInstalled(String(appName))) ? String(appName) : null)
-      );
-      return results.filter(Boolean);
+      return filterPlatformInstalledApps(args.apps);
     }
 
     case 'desktop_fetch_app_icons': {
-      if (process.platform !== 'darwin') {
-        throw new Error('desktop_fetch_app_icons is only supported on macOS');
+      if (process.platform !== 'darwin' && process.platform !== 'linux') {
+        throw new Error('desktop_fetch_app_icons is only supported on macOS and Linux');
       }
       const names = Array.isArray(args.apps) ? args.apps : [];
-      const results = [];
-      for (const name of names) {
-        const appPath = await resolveAppBundlePath(String(name));
-        if (!appPath) continue;
-        const dataUrl = await iconToDataUrl(await resolveAppIconPath(appPath), String(name));
-        if (dataUrl) results.push({ app: String(name), dataUrl });
-      }
-      return results;
+      return fetchPlatformAppIcons(names);
     }
 
     case 'desktop_get_installed_apps': {
-      if (process.platform !== 'darwin') {
-        throw new Error('desktop_get_installed_apps is only supported on macOS');
+      if (process.platform !== 'darwin' && process.platform !== 'linux') {
+        throw new Error('desktop_get_installed_apps is only supported on macOS and Linux');
       }
       const cachePath = buildInstalledAppsCachePath();
       const now = Math.floor(Date.now() / 1000);
@@ -2105,7 +2242,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       const hasCache = Boolean(cache);
       const isCacheStale = !cache || (now - Number(cache.updatedAt || 0)) > INSTALLED_APPS_CACHE_TTL_SECS;
       const refresh = async () => {
-        const apps = await buildInstalledApps(Array.isArray(args.apps) ? args.apps : []);
+        const apps = await buildPlatformInstalledApps(Array.isArray(args.apps) ? args.apps : []);
         await fsp.mkdir(path.dirname(cachePath), { recursive: true });
         await fsp.writeFile(cachePath, JSON.stringify({ updatedAt: now, apps }, null, 2));
         emitToAllWindows('openchamber:installed-apps-updated', apps);
@@ -2262,18 +2399,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         }
       }
       if (applyUpdate) {
-        // Match the working updater pattern closely: only bypass the macOS
-        // hide-on-close / quit-confirmation guards, leave the rest of the
-        // updater-driven quit/install sequence alone.
-        state.quitRequested = true;
-        state.installingUpdate = true;
-        state.quitConfirmationPending = false;
-        if (state.mainWindow && !state.mainWindow.isDestroyed()) {
-          try {
-            debounceWindowStatePersist(state.mainWindow, true);
-          } catch {
-          }
-        }
+        prepareForQuit({ installingUpdate: true });
       }
       // Defer so the IPC reply flushes before the app starts shutting down.
       // Without this, quitAndInstall() can race with the renderer's pending
@@ -2283,6 +2409,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
           if (applyUpdate) {
             autoUpdater.quitAndInstall();
           } else {
+            prepareForQuit();
             app.relaunch();
             app.exit(0);
           }
@@ -2502,6 +2629,23 @@ const buildMacMenu = () => {
   ]);
 };
 
+const buildLinuxMenu = () => Menu.buildFromTemplate(buildLinuxMenuTemplate({
+  appName: app.name,
+  dispatchAction: (action) => dispatchMenuAction(action),
+  dispatchCheckForUpdates,
+  reloadMenuTargetWindow,
+  relaunchFromMenu,
+  requestQuitWithConfirmation,
+  newWindow: () => handleInvoke(null, 'desktop_new_window'),
+  clearCache: () => handleInvoke(null, 'desktop_clear_cache'),
+  openExternal: (url) => shell.openExternal(url),
+  urls: {
+    bugReport: GITHUB_BUG_REPORT_URL,
+    featureRequest: GITHUB_FEATURE_REQUEST_URL,
+    discord: DISCORD_INVITE_URL,
+  },
+}));
+
 contextMenu({
   showInspectElement: isDev,
   showSaveImageAs: true,
@@ -2604,17 +2748,17 @@ app.on('window-all-closed', () => {
     return;
   }
 
-  if (!state.installingUpdate) {
-    killSidecar();
-    void sshManager.shutdownAll();
-  }
+  killSidecar();
+  void sshManager.shutdownAll().catch((error) => {
+    log.warn('[electron] SSH cleanup failed after all windows closed:', error);
+  });
   if (process.platform !== 'darwin') {
     app.quit();
   }
 });
 
 app.on('before-quit', (event) => {
-  if (state.quitConfirmed || state.installingUpdate || process.platform !== 'darwin') {
+  if (state.quitConfirmed || state.installingUpdate || !shouldRequireQuitConfirmationForPlatform(process.platform)) {
     state.quitRequested = true;
     return;
   }
@@ -2667,8 +2811,8 @@ app.whenReady().then(async () => {
   nativeTheme.themeSource = readThemeSource();
   setupAutoUpdater();
 
-  if (process.platform === 'darwin') {
-    Menu.setApplicationMenu(buildMacMenu());
+  if (shouldInstallExplicitApplicationMenu(process.platform)) {
+    Menu.setApplicationMenu(process.platform === 'darwin' ? buildMacMenu() : buildLinuxMenu());
   }
 
   state.mainWindow = createBrowserWindow({
