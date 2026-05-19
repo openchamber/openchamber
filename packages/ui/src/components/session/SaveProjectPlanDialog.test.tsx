@@ -31,8 +31,12 @@ describe('SaveProjectPlanDialog', () => {
       </I18nProvider>,
     );
 
-    const labelMatch = markup.match(/<label[^>]*for="([^"]+)"[^>]*>Title<\/label>/);
-    expect(labelMatch?.[1]).toBeTruthy();
-    expect(markup).toContain(`id="${labelMatch?.[1]}"`);
+    const labelMatch = markup.match(/<label[^>]*for="([^"]+)"[^>]*>/);
+    if (!labelMatch) {
+      throw new Error('Expected a label associated with the title input');
+    }
+
+    const [, titleInputId] = labelMatch;
+    expect(markup).toContain(`id="${titleInputId}"`);
   });
 });
