@@ -74,7 +74,7 @@ export function DiagramView() {
         <button
           type="button"
           onClick={() => void saveDiagram()}
-          className="size-6 flex items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          className="size-6 flex items-center justify-center rounded-md text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           title="Save diagram"
         >
           <Icon name="save-3" className="size-4" />
