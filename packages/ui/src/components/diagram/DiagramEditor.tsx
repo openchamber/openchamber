@@ -35,6 +35,8 @@ export const DiagramEditor = React.forwardRef<DiagramEditorHandle, DiagramEditor
       stableXmlRef.current = latestXmlRef.current;
     }
 
+    const containerRef = React.useRef<HTMLDivElement>(null);
+
     React.useEffect(() => {
       const check = () => setIsDark(detectDark());
       check();
@@ -42,6 +44,13 @@ export const DiagramEditor = React.forwardRef<DiagramEditorHandle, DiagramEditor
       observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
       return () => observer.disconnect();
     }, []);
+
+    React.useEffect(() => {
+      const id = setTimeout(() => {
+        containerRef.current?.querySelector<HTMLIFrameElement>('.diagrams-iframe')?.focus();
+      }, 600);
+      return () => clearTimeout(id);
+    }, [isDark]);
 
     React.useImperativeHandle(ref, () => ({
       getXml: () => latestXmlRef.current,
@@ -62,7 +71,7 @@ export const DiagramEditor = React.forwardRef<DiagramEditorHandle, DiagramEditor
     }, [onChange]);
 
     return (
-      <div className={cn('h-full w-full', className)}>
+      <div ref={containerRef} className={cn('h-full w-full', className)}>
         <DrawIoEmbed
           key={isDark ? 'dark' : 'light'}
           ref={drawioRef}
