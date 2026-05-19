@@ -1565,23 +1565,30 @@ function ExpandedView({
             <span>{t('chat.mobileStatus.noSessionsInProject')}</span>
           </div>
         ) : (
-          displaySessions.map((session) => (
-            <SessionItem
-              key={session.id}
-              session={session}
-              isCurrent={session.id === currentSessionId}
-              getSessionAgentName={getSessionAgentName}
-              getSessionTitle={getSessionTitle}
-              onClick={() => onSessionClick(session.id)}
-              onDoubleClick={onSessionDoubleClick}
-              needsAttention={needsAttention}
-              isEditing={editingSessionId === session.id}
-              editingTitle={editingTitle}
-              onEditingTitleChange={onEditingTitleChange}
-              onEditSave={onEditSave}
-              onEditCancel={onEditCancel}
-            />
-          ))
+          displaySessions.map((session) => {
+            // When the current session is being edited, the sticky header
+            // already renders the rename input; suppress the duplicate
+            // input on this row to avoid two simultaneous editors.
+            const isCurrent = session.id === currentSessionId;
+            const isEditingHere = editingSessionId === session.id && !isCurrent;
+            return (
+              <SessionItem
+                key={session.id}
+                session={session}
+                isCurrent={isCurrent}
+                getSessionAgentName={getSessionAgentName}
+                getSessionTitle={getSessionTitle}
+                onClick={() => onSessionClick(session.id)}
+                onDoubleClick={onSessionDoubleClick}
+                needsAttention={needsAttention}
+                isEditing={isEditingHere}
+                editingTitle={editingTitle}
+                onEditingTitleChange={onEditingTitleChange}
+                onEditSave={onEditSave}
+                onEditCancel={onEditCancel}
+              />
+            );
+          })
         )}
       </div>
     </div>

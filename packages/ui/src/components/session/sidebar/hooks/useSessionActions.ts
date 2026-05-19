@@ -103,11 +103,13 @@ export const useSessionActions = (args: Args) => {
   }, [args]);
 
   const handleSaveEdit = React.useCallback(async () => {
-    if (args.editingId && args.editTitle.trim()) {
-      await args.updateSessionTitle(args.editingId, args.editTitle.trim());
-      args.setEditingId(null);
-      args.setEditTitle('');
+    if (!args.editingId) return;
+    const trimmed = args.editTitle.trim();
+    if (trimmed) {
+      await args.updateSessionTitle(args.editingId, trimmed);
     }
+    args.setEditingId(null);
+    args.setEditTitle('');
   }, [args]);
 
   const handleCancelEdit = React.useCallback(() => {
