@@ -20,6 +20,7 @@ import * as zhipuaiCodingPlan from './zhipuai-coding-plan.js';
 import * as minimaxCodingPlan from './minimax-coding-plan.js';
 import * as minimaxCnCodingPlan from './minimax-cn-coding-plan.js';
 import * as ollamaCloud from './ollama-cloud.js';
+import * as opencodeGo from './opencode-go.js';
 import * as zhipuai from './zhipuai.js';
 
 const registry = {
@@ -101,6 +102,12 @@ const registry = {
     isConfigured: ollamaCloud.isConfigured,
     fetchQuota: ollamaCloud.fetchQuota
   },
+  'opencode-go': {
+    providerId: opencodeGo.providerId,
+    providerName: opencodeGo.providerName,
+    isConfigured: opencodeGo.isConfigured,
+    fetchQuota: opencodeGo.fetchQuota
+  },
   'zhipuai-coding-plan': {
     providerId: zhipuai.providerId,
     providerName: zhipuai.providerName,
@@ -165,4 +172,5 @@ export const fetchNanoGptQuota = nanogpt.fetchQuota;
 export const fetchMinimaxCodingPlanQuota = minimaxCodingPlan.fetchQuota;
 export const fetchMinimaxCnCodingPlanQuota = minimaxCnCodingPlan.fetchQuota;
 export const fetchOllamaCloudQuota = ollamaCloud.fetchQuota;
+export const fetchOpenCodeGoQuota = opencodeGo.fetchQuota;
 export const fetchZhipuaiQuota = zhipuai.fetchQuota;

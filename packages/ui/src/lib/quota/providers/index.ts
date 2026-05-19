@@ -12,6 +12,7 @@ export const QUOTA_PROVIDERS: QuotaProviderMeta[] = [
   { id: 'google', name: 'Google' },
   { id: 'kimi-for-coding', name: 'Kimi for Coding' },
   { id: 'nano-gpt', name: 'NanoGPT' },
+  { id: 'opencode-go', name: 'OpenCode Go' },
   { id: 'openrouter', name: 'OpenRouter' },
   { id: 'zai-coding-plan', name: 'z.ai' },
   { id: 'zhipuai-coding-plan', name: 'Zhipu AI Coding Plan' },

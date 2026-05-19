@@ -788,6 +788,14 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
       (entry): entry is string => typeof entry === 'string' && entry.length > 0
     );
   }
+  if (typeof candidate.opencodeGoWorkspaceId === 'string') {
+    const trimmed = candidate.opencodeGoWorkspaceId.trim();
+    result.opencodeGoWorkspaceId = trimmed;
+  }
+  if (typeof candidate.opencodeGoSessionCookie === 'string') {
+    const trimmed = candidate.opencodeGoSessionCookie.trim();
+    result.opencodeGoSessionCookie = trimmed;
+  }
 
   // Parse usageSelectedModels (Record<string, string[]>)
   if (candidate.usageSelectedModels && typeof candidate.usageSelectedModels === 'object') {

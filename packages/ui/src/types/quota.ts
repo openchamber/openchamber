@@ -8,6 +8,7 @@ export type QuotaProviderId =
   | 'kimi-for-coding'
   | 'nano-gpt'
   | 'openrouter'
+  | 'opencode-go'
   | 'zai-coding-plan'
   | 'zhipuai-coding-plan'
   | 'minimax-coding-plan'

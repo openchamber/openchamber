@@ -1,6 +1,8 @@
 import React from 'react';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { UsageCard } from './UsageCard';
 import { QUOTA_PROVIDERS } from '@/lib/quota';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
@@ -16,6 +18,7 @@ import { getAllModelFamilies, getDisplayModelName, sortModelFamilies, groupModel
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
+import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 
 const formatTime = (timestamp: number | null) => {
   if (!timestamp) return '-';
@@ -49,6 +52,7 @@ export const UsagePage: React.FC = () => {
   const selectedModels = useQuotaStore((state) => state.selectedModels);
   const toggleModelSelected = useQuotaStore((state) => state.toggleModelSelected);
   const applyDefaultSelections = useQuotaStore((state) => state.applyDefaultSelections);
+  const fetchProviderQuota = useQuotaStore((state) => state.fetchProviderQuota);
 
   useQuotaAutoRefresh();
 
@@ -139,6 +143,83 @@ export const UsagePage: React.FC = () => {
   }, [selectedProviderId, selectedModels, toggleModelSelected]);
 
   const providerSelectedModels = selectedProviderId ? (selectedModels[selectedProviderId] ?? []) : [];
+  const [opencodeGoWorkspaceId, setOpencodeGoWorkspaceId] = React.useState('');
+  const [opencodeGoSessionCookie, setOpencodeGoSessionCookie] = React.useState('');
+  const [isSavingOpencodeGoAccess, setIsSavingOpencodeGoAccess] = React.useState(false);
+  const [opencodeGoAccessMessage, setOpencodeGoAccessMessage] = React.useState<string | null>(null);
+  const [opencodeGoAccessError, setOpencodeGoAccessError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+
+    const loadOpencodeGoAccess = async () => {
+      try {
+        const runtimeSettings = getRegisteredRuntimeAPIs()?.settings;
+        if (runtimeSettings) {
+          const result = await runtimeSettings.load();
+          if (cancelled) return;
+          const settings = result?.settings as Record<string, unknown> | undefined;
+          setOpencodeGoWorkspaceId(typeof settings?.opencodeGoWorkspaceId === 'string' ? settings.opencodeGoWorkspaceId : '');
+          setOpencodeGoSessionCookie(typeof settings?.opencodeGoSessionCookie === 'string' ? settings.opencodeGoSessionCookie : '');
+          return;
+        }
+
+        const response = await fetch('/api/config/settings', {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+        });
+        const settings = await response.json().catch(() => null) as Record<string, unknown> | null;
+        if (cancelled) return;
+        setOpencodeGoWorkspaceId(typeof settings?.opencodeGoWorkspaceId === 'string' ? settings.opencodeGoWorkspaceId : '');
+        setOpencodeGoSessionCookie(typeof settings?.opencodeGoSessionCookie === 'string' ? settings.opencodeGoSessionCookie : '');
+      } catch (error) {
+        console.warn('Failed to load OpenCode Go access settings:', error);
+      }
+    };
+
+    void loadOpencodeGoAccess();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const saveOpencodeGoAccess = React.useCallback(async () => {
+    setIsSavingOpencodeGoAccess(true);
+    setOpencodeGoAccessMessage(null);
+    setOpencodeGoAccessError(null);
+
+    const payload = {
+      opencodeGoWorkspaceId: opencodeGoWorkspaceId.trim(),
+      opencodeGoSessionCookie: opencodeGoSessionCookie.trim(),
+    };
+
+    try {
+      const runtimeSettings = getRegisteredRuntimeAPIs()?.settings;
+      if (runtimeSettings) {
+        await runtimeSettings.save(payload);
+      } else {
+        const response = await fetch('/api/config/settings', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify(payload),
+        });
+        if (!response.ok) {
+          const data = await response.json().catch(() => null);
+          throw new Error(typeof data?.error === 'string' ? data.error : 'Failed to save OpenCode Go access settings');
+        }
+      }
+
+      await fetchProviderQuota('opencode-go');
+      setOpencodeGoAccessMessage('Saved. OpenCode Go usage has been refreshed.');
+    } catch (error) {
+      setOpencodeGoAccessError(error instanceof Error ? error.message : 'Failed to save OpenCode Go access settings');
+    } finally {
+      setIsSavingOpencodeGoAccess(false);
+    }
+  }, [fetchProviderQuota, opencodeGoSessionCookie, opencodeGoWorkspaceId]);
 
   if (!selectedProviderId) {
     return (
@@ -223,6 +304,65 @@ export const UsagePage: React.FC = () => {
             <p className="typography-meta text-[var(--status-warning)]/80 mt-1">
               {t('settings.usage.page.state.providerNotConfiguredDescription')}
             </p>
+          </div>
+        )}
+
+        {selectedProviderId === 'opencode-go' && (
+          <div className="mb-8">
+            <div className="mb-1 px-1">
+              <h3 className="typography-ui-header font-medium text-foreground">Dashboard Access</h3>
+              <p className="typography-meta mt-1 text-muted-foreground">
+                OpenCode Go subscription usage comes from the opencode.ai dashboard. The API key is not enough on its own, so add your workspace ID and a logged-in dashboard session here.
+              </p>
+            </div>
+            <section className="space-y-3 p-2">
+              <div className="space-y-1.5">
+                <span className="typography-ui-label text-foreground">Workspace ID</span>
+                <Input
+                  className="h-7"
+                  value={opencodeGoWorkspaceId}
+                  onChange={(event) => setOpencodeGoWorkspaceId(event.target.value)}
+                  placeholder="wrk_..."
+                />
+              </div>
+              <div className="space-y-1.5">
+                <span className="typography-ui-label text-foreground">Dashboard Session Cookie</span>
+                <Input
+                  type="password"
+                  className="h-7"
+                  value={opencodeGoSessionCookie}
+                  onChange={(event) => setOpencodeGoSessionCookie(event.target.value)}
+                  placeholder="Paste the auth cookie value"
+                />
+                <p className="typography-meta text-muted-foreground">
+                  Paste the `auth` cookie value from a logged-in `opencode.ai` dashboard session. This is stored locally in your OpenChamber settings.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 pt-1">
+                <Button size="sm" onClick={() => void saveOpencodeGoAccess()} disabled={isSavingOpencodeGoAccess}>
+                  {isSavingOpencodeGoAccess ? 'Saving…' : 'Save and Refresh'}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setOpencodeGoWorkspaceId('');
+                    setOpencodeGoSessionCookie('');
+                    setOpencodeGoAccessMessage(null);
+                    setOpencodeGoAccessError(null);
+                  }}
+                  disabled={isSavingOpencodeGoAccess}
+                >
+                  Clear Draft
+                </Button>
+              </div>
+              {opencodeGoAccessMessage && (
+                <p className="typography-meta text-[var(--status-success)]">{opencodeGoAccessMessage}</p>
+              )}
+              {opencodeGoAccessError && (
+                <p className="typography-meta text-[var(--status-error)]">{opencodeGoAccessError}</p>
+              )}
+            </section>
           </div>
         )}
 
