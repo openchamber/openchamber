@@ -11,9 +11,9 @@ export function sanitizeForTTS(text) {
   if (!text || typeof text !== 'string') return '';
 
   return text
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`[^`]*`/g, ' ')
     .replace(/[*_~`#]/g, '')
-    .replace(/```[\s\S]*?```/g, '')
-    .replace(/`[^`]*`/g, '')
     .replace(/^\s*[$#>]\s*/gm, '')
     .replace(/[|&;<>]/g, ' ')
     .replace(/\\/g, '')

@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { summarizeText } from './summarization.js';
+import { sanitizeForTTS, summarizeText } from './summarization.js';
 
 describe('text summarization stubs', () => {
+  it('removes code from TTS text before stripping markdown punctuation', () => {
+    expect(sanitizeForTTS('Read `const value = 1` aloud')).toBe('Read aloud');
+    expect(sanitizeForTTS('Before\n```js\nconst value = 1\n```\nAfter')).toBe('Before After');
+  });
+
   it('does not call the retired zen provider', async () => {
     const result = await summarizeText({
       text: 'The implementation now correctly loads notification templates before dispatching the notification. It also fetches the latest assistant message when the event payload does not include message parts. This should make completion notifications match user settings.',
