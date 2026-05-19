@@ -69,6 +69,8 @@ export const DiagramEditor = React.forwardRef<DiagramEditorHandle, DiagramEditor
             chrome: readOnly,
             nav: readOnly,
             layers: readOnly,
+            noSaveBtn: true,
+            noExitBtn: true,
           }}
           onLoad={handleLoad}
           onAutoSave={handleAutoSave}
