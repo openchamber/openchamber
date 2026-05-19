@@ -794,6 +794,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const [loadedFileLineEnding, setLoadedFileLineEnding] = React.useState<FileLineEnding>('\n');
   const dialogInputRef = React.useRef<HTMLInputElement>(null);
   const autoSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const drawioSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastLoadedFileStatRef = React.useRef<FileStatSnapshot | null>(null);
   const activeFileLoadIdRef = React.useRef(0);
   const [autoSaveStatus, setAutoSaveStatus] = React.useState<'idle' | 'saved'>('idle');
@@ -3240,8 +3241,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
               <DiagramEditor
                 xml={fileContent}
                 onChange={(newXml) => {
-                  if (selectedFile?.path && files.writeFile && newXml !== fileContent) {
-                    files.writeFile(selectedFile.path, newXml).catch(() => {});
+                  const writeFile = files.writeFile;
+                  const path = selectedFile?.path;
+                  if (path && writeFile && newXml !== fileContent) {
+                    if (drawioSaveTimerRef.current) clearTimeout(drawioSaveTimerRef.current);
+                    drawioSaveTimerRef.current = setTimeout(() => {
+                      writeFile(path, newXml).catch(() => {});
+                    }, 800);
                   }
                 }}
               />
