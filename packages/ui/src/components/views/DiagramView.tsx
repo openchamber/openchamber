@@ -14,7 +14,6 @@ export function DiagramView() {
   const [loading, setLoading] = React.useState(true);
   const editorRef = React.useRef<DiagramEditorHandle>(null);
   const loadFileRef = React.useRef<((path: string) => Promise<void>) | null>(null);
-  const saveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   React.useEffect(() => {
     const pending = useUIStore.getState().consumePendingDiagramFile();
@@ -39,6 +38,13 @@ export function DiagramView() {
   }, [files]);
 
   loadFileRef.current = loadFile;
+
+  const saveDiagram = React.useCallback(async () => {
+    const newXml = editorRef.current?.getXml();
+    if (filePath && files?.writeFile && newXml && newXml !== xml) {
+      await files.writeFile(filePath, newXml);
+    }
+  }, [filePath, files, xml]);
 
   const fileName = filePath ? filePath.split('/').pop() || filePath : '';
 
@@ -67,6 +73,14 @@ export function DiagramView() {
         <span className="typography-ui text-muted-foreground truncate flex-1">{fileName}</span>
         <button
           type="button"
+          onClick={() => void saveDiagram()}
+          className="size-6 flex items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          title="Save diagram"
+        >
+          <Icon name="save-3" className="size-4" />
+        </button>
+        <button
+          type="button"
           onClick={() => useUIStore.getState().setActiveMainTab('chat')}
           className="size-6 flex items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           title={t('filesView.diagram.closeDiagramView')}
@@ -79,15 +93,6 @@ export function DiagramView() {
           ref={editorRef}
           xml={xml}
           className="h-full"
-          onChange={(newXml) => {
-            const writeFile = files?.writeFile;
-            if (filePath && writeFile && newXml !== xml) {
-              if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-              saveTimerRef.current = setTimeout(() => {
-                writeFile(filePath, newXml).catch(() => {});
-              }, 800);
-            }
-          }}
         />
       </div>
     </div>
