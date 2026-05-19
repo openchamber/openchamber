@@ -8,6 +8,15 @@ import type { GeneratedResult } from './generatedJsonResult';
 export const GeneratedJsonResultCard: React.FC<{ result: GeneratedResult }> = ({ result }) => {
   const { t } = useI18n();
   const [copied, setCopied] = React.useState(false);
+  const copiedResetTimerRef = React.useRef<number | null>(null);
+
+  React.useEffect(() => {
+    return () => {
+      if (copiedResetTimerRef.current !== null) {
+        window.clearTimeout(copiedResetTimerRef.current);
+      }
+    };
+  }, []);
 
   const copyText = React.useMemo(() => {
     if (result.kind === 'commit') {
@@ -19,8 +28,16 @@ export const GeneratedJsonResultCard: React.FC<{ result: GeneratedResult }> = ({
   const handleCopy = React.useCallback(async () => {
     const copyResult = await copyTextToClipboard(copyText || result.raw);
     if (!copyResult.ok) return;
+
+    if (copiedResetTimerRef.current !== null) {
+      window.clearTimeout(copiedResetTimerRef.current);
+    }
+
     setCopied(true);
-    window.setTimeout(() => setCopied(false), 2000);
+    copiedResetTimerRef.current = window.setTimeout(() => {
+      copiedResetTimerRef.current = null;
+      setCopied(false);
+    }, 2000);
   }, [copyText, result.raw]);
 
   return (
