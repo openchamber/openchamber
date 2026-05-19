@@ -83,6 +83,9 @@ DESKTOP
     if [[ ! -f "$icon_source" ]]; then
       icon_source="$icon_dir/icon_${size}.png"
     fi
+    if [[ ! -f "$icon_source" ]]; then
+      continue
+    fi
     install -Dm644 "$icon_source" "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/openchamber.png"
   done
 }

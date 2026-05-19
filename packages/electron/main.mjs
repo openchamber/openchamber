@@ -129,6 +129,7 @@ const GITHUB_FEATURE_REQUEST_URL = 'https://github.com/openchamber/openchamber/i
 const DISCORD_INVITE_URL = 'https://discord.gg/ZYRSdnwwKA';
 const INSTALLED_APPS_CACHE_TTL_SECS = 60 * 60 * 24;
 const INSTALLED_APPS_CACHE_FILE = 'discovered-apps.json';
+const LINUX_DESKTOP_ENTRIES_CACHE_TTL_MS = 30_000;
 
 const { autoUpdater } = updaterPkg;
 
@@ -1810,6 +1811,18 @@ const fetchPlatformAppIcons = async (apps) => {
   return results;
 };
 
+let linuxDesktopEntriesCache = { expiresAt: 0, entries: null };
+
+const getLinuxDesktopEntries = async () => {
+  const now = Date.now();
+  if (linuxDesktopEntriesCache.entries && linuxDesktopEntriesCache.expiresAt > now) {
+    return linuxDesktopEntriesCache.entries;
+  }
+  const entries = await readLinuxDesktopEntries();
+  linuxDesktopEntriesCache = { entries, expiresAt: now + LINUX_DESKTOP_ENTRIES_CACHE_TTL_MS };
+  return entries;
+};
+
 const spawnDetached = async (program, args) => await new Promise((resolve, reject) => {
   const child = spawn(program, args, {
     detached: true,
@@ -2184,7 +2197,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         return null;
       }
       if (process.platform === 'linux') {
-        const entries = await readLinuxDesktopEntries();
+        const entries = await getLinuxDesktopEntries();
         await runLinuxSpecChain(buildLinuxOpenSpecs({ targetPath: validated.path, appId, appName, targetKind: 'project', entries }), appName);
         return null;
       }
@@ -2204,7 +2217,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         return null;
       }
       if (process.platform === 'linux') {
-        const entries = await readLinuxDesktopEntries();
+        const entries = await getLinuxDesktopEntries();
         await runLinuxSpecChain(buildLinuxOpenSpecs({ targetPath: validated.path, appId, appName, targetKind: 'file', entries }), appName);
         return null;
       }

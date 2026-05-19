@@ -77,6 +77,7 @@ const assertArchPackageConfig = async () => {
   assert(pkgbuild.includes("license=('MIT')"), 'PKGBUILD should declare MIT license');
   assert(pkgbuild.includes("conflicts=('openchamber')"), 'PKGBUILD should keep openchamber conflict for /usr/bin/openchamber');
   assert(pkgbuild.includes('Exec=/opt/OpenChamber/openchamber %U'), 'PKGBUILD desktop entry should keep package executable and URL placeholder');
+  assert(pkgbuild.includes('continue'), 'PKGBUILD should skip optional icon sizes that electron-builder did not emit');
   for (const dependency of ['gtk3', 'libnotify', 'nss', 'libxss', 'libxtst', 'xdg-utils']) {
     assert(pkgbuild.includes(`'${dependency}'`), `PKGBUILD should include ${dependency} runtime dependency`);
     assert(srcinfo.includes(`depends = ${dependency}`), `.SRCINFO should include ${dependency} runtime dependency`);
