@@ -15,25 +15,32 @@ export interface DiagramEditorProps {
 
 const BLANK_XML = '<mxfile><diagram id="new" name="Page-1"><mxGraphModel dx="0" dy="0" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0"><root><mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel></diagram></mxfile>';
 
-const xmlAcrossMounts: { current: string } = { current: '' };
+function detectDark(): boolean {
+  if (typeof document === 'undefined') return false;
+  const theme = document.documentElement.getAttribute('data-theme');
+  return theme === 'dark' || (!theme && window.matchMedia('(prefers-color-scheme: dark)').matches);
+}
 
 export const DiagramEditor = React.forwardRef<DiagramEditorHandle, DiagramEditorProps>(
   function DiagramEditor({ xml, readOnly, className, onChange }, ref) {
-    const latestXmlRef = React.useRef(xmlAcrossMounts.current || xml);
+    const latestXmlRef = React.useRef(xml);
     const drawioRef = React.useRef<React.ComponentRef<typeof DrawIoEmbed>>(null);
     const hasShownTemplate = React.useRef(false);
-    const [remountKey, setRemountKey] = React.useState(0);
-    const [isDark, setIsDark] = React.useState(false);
-    const isDarkRef = React.useRef(false);
+    const [isDark, setIsDark] = React.useState(detectDark);
+    const stableXmlRef = React.useRef(xml);
 
-    const initialXmlRef = React.useRef(xmlAcrossMounts.current || xml);
-
-    if (xmlAcrossMounts.current) {
-      xmlAcrossMounts.current = '';
+    const prevIsDark = React.useRef(isDark);
+    if (prevIsDark.current !== isDark) {
+      prevIsDark.current = isDark;
+      stableXmlRef.current = latestXmlRef.current;
     }
 
     React.useEffect(() => {
-      latestXmlRef.current = initialXmlRef.current || BLANK_XML;
+      const check = () => setIsDark(detectDark());
+      check();
+      const observer = new MutationObserver(check);
+      observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+      return () => observer.disconnect();
     }, []);
 
     React.useImperativeHandle(ref, () => ({
@@ -41,13 +48,13 @@ export const DiagramEditor = React.forwardRef<DiagramEditorHandle, DiagramEditor
     }));
 
     const handleLoad = React.useCallback(() => {
-      if (!initialXmlRef.current && !hasShownTemplate.current) {
+      if (!xml && !hasShownTemplate.current) {
         hasShownTemplate.current = true;
         setTimeout(() => {
           drawioRef.current?.template({});
         }, 500);
       }
-    }, []);
+    }, [xml]);
 
     const handleAutoSave = React.useCallback((data: { xml: string }) => {
       latestXmlRef.current = data.xml;
@@ -57,9 +64,9 @@ export const DiagramEditor = React.forwardRef<DiagramEditorHandle, DiagramEditor
     return (
       <div className={cn('h-full w-full', className)}>
         <DrawIoEmbed
-          key={remountKey}
+          key={isDark ? 'dark' : 'light'}
           ref={drawioRef}
-          xml={initialXmlRef.current || BLANK_XML}
+          xml={stableXmlRef.current || BLANK_XML}
           autosave
           urlParameters={{
             ui: readOnly ? 'simple' : isDark ? 'dark' : 'kennedy',
