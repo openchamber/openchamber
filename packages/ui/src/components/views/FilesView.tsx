@@ -2874,18 +2874,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                   const xml = diagramEditorRef.current?.getXml();
                   if (selectedFile?.path && xml && files.writeFile && xml !== fileContent) {
                     await files.writeFile(selectedFile.path, xml);
-                    setAutoSaveStatus('saved');
-                    setTimeout(() => setAutoSaveStatus('idle'), 2000);
+                    setAutoSaveStatus('idle');
                   }
                 }}
                 className="size-6 p-0 text-foreground hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
                 title="Save diagram"
               >
-                {autoSaveStatus === 'saved' ? (
-                  <Icon name="check" className="size-4 text-[color:var(--status-success)]" />
-                ) : (
-                  <Icon name="save-3" className="size-4" />
-                )}
+                <Icon name="save-3" className="size-4" />
               </Button>
             )}
           </>
