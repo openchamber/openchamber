@@ -349,9 +349,10 @@ const resolveGitFileContext = async (directoryPath, git, filePath, repoRootOverr
 
     const repoPath = toGitPath(path.relative(repoRoot, absolutePath));
     const existsInWorktree = await fsp.stat(absolutePath).then((stat) => stat.isFile()).catch(() => false);
+    const existsInIndex = await git.raw(['cat-file', '-e', `:${repoPath}`]).then(() => true).catch(() => false);
     const existsInHead = await git.raw(['cat-file', '-e', `HEAD:${repoPath}`]).then(() => true).catch(() => false);
 
-    if (existsInWorktree || existsInHead) {
+    if (existsInWorktree || existsInIndex || existsInHead) {
       return {
         absolutePath,
         repoPath,
@@ -649,6 +650,21 @@ const runGitCommand = async (cwd, args) => {
       message: parseGitErrorText(error),
     };
   }
+};
+
+const resolveGitCommitFilePath = async (repoRoot, hash, candidates) => {
+  for (const candidate of candidates) {
+    const [originalTreeResult, modifiedTreeResult] = await Promise.all([
+      runGitCommand(repoRoot, ['ls-tree', '--name-only', `${hash}^`, '--', candidate]),
+      runGitCommand(repoRoot, ['ls-tree', '--name-only', hash, '--', candidate]),
+    ]);
+
+    if ((originalTreeResult.success && originalTreeResult.stdout.trim()) || (modifiedTreeResult.success && modifiedTreeResult.stdout.trim())) {
+      return candidate;
+    }
+  }
+
+  throw new Error('Invalid file path');
 };
 
 const runGitCommandOrThrow = async (cwd, args, fallbackMessage) => {
@@ -3482,7 +3498,7 @@ export async function getCommitFileDiff(directory, hash, filePath, isBinary) {
     return { original: '', modified: '', isBinary: true };
   }
 
-  const { directoryPath, directoryGit, repoRoot } = await createRepositoryGitContext(directory);
+  const { directoryPath, repoRoot } = await createRepositoryGitContext(directory);
   const candidates = Array.from(new Set([
     toGitPath(path.relative(repoRoot, path.resolve(repoRoot, filePath))),
     toGitPath(path.relative(repoRoot, path.resolve(directoryPath, filePath))),
@@ -3505,8 +3521,7 @@ export async function getCommitFileDiff(directory, hash, filePath, isBinary) {
   }
 
   if (!originalResult || !modifiedResult) {
-    const fileContext = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
-    const resolvedPath = fileContext.repoPath;
+    const resolvedPath = await resolveGitCommitFilePath(repoRoot, hash, candidates);
     [originalResult, modifiedResult] = await Promise.all([
       runGitCommand(repoRoot, ['show', `${hash}^:${resolvedPath}`]),
       runGitCommand(repoRoot, ['show', `${hash}:${resolvedPath}`]),
