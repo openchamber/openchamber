@@ -776,7 +776,7 @@ export const settingsDict = {
   'settings.projects.sidebar.actions.addProject': '添加项目',
   'settings.projects.page.empty.noProjects': '暂无项目。',
   'settings.projects.page.title.default': '项目设置',
-  'settings.projects.page.section.worktree': '工作树（worktree）',
+  'settings.projects.page.section.worktree': '工作树',
   'settings.projects.page.field.projectName': '项目名称',
   'settings.projects.page.field.projectNamePlaceholder': '项目名称',
   'settings.projects.page.field.accentColor': '强调色',
