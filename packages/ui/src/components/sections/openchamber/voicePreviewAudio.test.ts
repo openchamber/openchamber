@@ -2,7 +2,8 @@ import { describe, expect, test } from 'bun:test';
 
 import { disposePreviewAudio } from './voicePreviewAudio';
 
-type MockAudio = Pick<HTMLAudioElement, 'pause' | 'removeAttribute' | 'src'> & {
+type MockAudio = Pick<HTMLAudioElement, 'load' | 'pause' | 'removeAttribute' | 'src'> & {
+    loadCalls: number;
     paused: boolean;
     removedAttributes: string[];
 };
@@ -10,8 +11,12 @@ type MockAudio = Pick<HTMLAudioElement, 'pause' | 'removeAttribute' | 'src'> & {
 const createMockAudio = (src: string): MockAudio => {
     const audio: MockAudio = {
         src,
+        loadCalls: 0,
         paused: false,
         removedAttributes: [],
+        load: () => {
+            audio.loadCalls += 1;
+        },
         pause: () => {
             audio.paused = true;
         },
@@ -50,6 +55,7 @@ describe('disposePreviewAudio', () => {
             expect(audio.paused).toBe(true);
             expect(revokedUrls).toEqual(['blob:https://example.test/preview']);
             expect(audio.removedAttributes).toEqual(['src']);
+            expect(audio.loadCalls).toBe(1);
             expect(audio.src).toBe('');
         });
     });
@@ -63,11 +69,18 @@ describe('disposePreviewAudio', () => {
             expect(audio.paused).toBe(true);
             expect(revokedUrls).toEqual([]);
             expect(audio.removedAttributes).toEqual(['src']);
+            expect(audio.loadCalls).toBe(1);
         });
     });
 
     test('ignores missing audio', () => {
-        disposePreviewAudio(null);
-        expect(true).toBe(true);
+        let threw = false;
+        try {
+            disposePreviewAudio(null);
+        } catch {
+            threw = true;
+        }
+
+        expect(threw).toBe(false);
     });
 });
