@@ -4,12 +4,14 @@ export type QueuedGitIndexMutation = {
   directory: string;
   direction: GitIndexMutationDirection;
   paths: Set<string>;
+  rollback?: () => void;
 };
 
 type MutationSnapshot = {
   directory: string;
   direction: GitIndexMutationDirection;
   paths: string[];
+  rollback?: () => void;
 };
 
 type GitIndexMutationQueueOptions = {
@@ -53,6 +55,7 @@ export const createGitIndexMutationQueue = ({
       directory: nextMutation.directory,
       direction: nextMutation.direction,
       paths: Array.from(nextMutation.paths),
+      rollback: nextMutation.rollback,
     };
 
     void (async () => {

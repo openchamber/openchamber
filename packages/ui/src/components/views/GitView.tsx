@@ -317,6 +317,7 @@ export const GitView: React.FC = () => {
   const prefetchDiffs = useGitStore((state) => state.prefetchDiffs);
   const setLogMaxCount = useGitStore((state) => state.setLogMaxCount);
   const moveStatusPathsOptimistically = useGitStore((state) => state.moveStatusPathsOptimistically);
+  const restoreStatus = useGitStore((state) => state.restoreStatus);
   const isMobile = useUIStore((state) => state.isMobile);
   const openContextDiff = useUIStore((state) => state.openContextDiff);
   const navigateToDiff = useUIStore((state) => state.navigateToDiff);
@@ -392,7 +393,8 @@ export const GitView: React.FC = () => {
   const gitIndexMutationQueue = React.useMemo<GitIndexMutationQueue>(() => createGitIndexMutationQueue({
     runMutation: ({ directory, direction, paths }) => runGitIndexMutation(directory, direction, paths),
     onMutationComplete: ({ directory }) => scheduleGitReconcile(directory),
-    onMutationError: ({ directory, direction }, error) => {
+    onMutationError: ({ directory, direction, rollback }, error) => {
+      rollback?.();
       scheduleGitReconcile(directory);
       const fallback = direction === 'stage'
         ? t('gitView.toast.stageFileFailed')
@@ -1675,16 +1677,17 @@ export const GitView: React.FC = () => {
       uniquePaths.forEach((path) => next.add(path));
       return next;
     });
-    moveStatusPathsOptimistically(currentDirectory, uniquePaths, direction);
+    const previousStatus = moveStatusPathsOptimistically(currentDirectory, uniquePaths, direction);
 
     gitIndexMutationQueue.enqueue({
       directory: currentDirectory,
       direction,
       paths: new Set(uniquePaths),
+      rollback: () => restoreStatus(currentDirectory, previousStatus),
     });
 
     scheduleGitMutationFlush();
-  }, [currentDirectory, gitIndexMutationQueue, moveStatusPathsOptimistically, scheduleGitMutationFlush]);
+  }, [currentDirectory, gitIndexMutationQueue, moveStatusPathsOptimistically, restoreStatus, scheduleGitMutationFlush]);
 
   React.useEffect(() => {
     if (!isResizingGitChangesSplit) {
@@ -1717,6 +1720,24 @@ export const GitView: React.FC = () => {
   const startGitChangesSplitResize = React.useCallback((event: React.PointerEvent) => {
     setIsResizingGitChangesSplit(true);
     event.preventDefault();
+  }, []);
+
+  const handleGitChangesSplitKeyDown = React.useCallback((event: React.KeyboardEvent) => {
+    const step = event.shiftKey ? 10 : 5;
+
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setGitChangesSplitPercent((value) => Math.max(25, value - step));
+    } else if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setGitChangesSplitPercent((value) => Math.min(75, value + step));
+    } else if (event.key === 'Home') {
+      event.preventDefault();
+      setGitChangesSplitPercent(25);
+    } else if (event.key === 'End') {
+      event.preventDefault();
+      setGitChangesSplitPercent(75);
+    }
   }, []);
 
   const handleRevertFile = React.useCallback(
@@ -2358,9 +2379,13 @@ export const GitView: React.FC = () => {
                               isResizingGitChangesSplit && 'bg-[var(--interactive-hover)]/60'
                             )}
                             onPointerDown={startGitChangesSplitResize}
+                            onKeyDown={handleGitChangesSplitKeyDown}
                             role="separator"
                             aria-orientation="horizontal"
                             aria-label={t('gitView.changes.resizeSplitAria')}
+                            aria-valuemin={25}
+                            aria-valuemax={75}
+                            aria-valuenow={Math.round(gitChangesSplitPercent)}
                             tabIndex={0}
                           />
                           <div

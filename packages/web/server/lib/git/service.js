@@ -342,6 +342,17 @@ const normalizeFilePathList = (paths) => Array.from(new Set(
     .filter(Boolean)
 ));
 
+const validateRepositoryFilePaths = (directoryPath, filePaths) => {
+  const repoRoot = path.resolve(directoryPath);
+
+  for (const filePath of filePaths) {
+    const absoluteTarget = path.resolve(repoRoot, filePath);
+    if (!absoluteTarget.startsWith(repoRoot + path.sep) && absoluteTarget !== repoRoot) {
+      throw new Error(`Path is outside repository: ${filePath}`);
+    }
+  }
+};
+
 const cleanBranchName = (branch) => {
   if (!branch) {
     return branch;
@@ -2158,13 +2169,15 @@ export async function stageFiles(directory, paths) {
     throw new Error('directory and path are required for stageFile');
   }
 
+  const directoryPath = normalizeDirectoryPath(directory);
   const filePaths = normalizeFilePathList(paths);
   if (filePaths.length === 0) {
     throw new Error('directory and path are required for stageFile');
   }
+  validateRepositoryFilePaths(directoryPath, filePaths);
 
   await withGitIndexMutationQueue(directory, async () => {
-    const git = await createGit(normalizeDirectoryPath(directory));
+    const git = await createGit(directoryPath);
     await git.raw(['add', '--', ...filePaths]);
   });
 }
@@ -2178,13 +2191,15 @@ export async function unstageFiles(directory, paths) {
     throw new Error('directory and path are required for unstageFile');
   }
 
+  const directoryPath = normalizeDirectoryPath(directory);
   const filePaths = normalizeFilePathList(paths);
   if (filePaths.length === 0) {
     throw new Error('directory and path are required for unstageFile');
   }
+  validateRepositoryFilePaths(directoryPath, filePaths);
 
   await withGitIndexMutationQueue(directory, async () => {
-    const git = await createGit(normalizeDirectoryPath(directory));
+    const git = await createGit(directoryPath);
     await git.raw(['restore', '--staged', '--', ...filePaths]).catch(async () => {
       await git.raw(['reset', 'HEAD', '--', ...filePaths]);
     });
@@ -2197,86 +2212,86 @@ export async function commit(directory, message, options = {}) {
     let temporarilyUnstagedFiles = [];
 
     try {
-    const requestedFiles = Array.isArray(options.files)
-      ? options.files
-        .map((value) => String(value || '').trim())
-        .filter(Boolean)
-      : [];
-    const requestedStageFiles = Array.isArray(options.stageFiles)
-      ? options.stageFiles
-        .map((value) => String(value || '').trim())
-        .filter(Boolean)
-      : null;
-    let filesToCommit = requestedFiles;
-    let commitFromIndexOnly = false;
+      const requestedFiles = Array.isArray(options.files)
+        ? options.files
+          .map((value) => String(value || '').trim())
+          .filter(Boolean)
+        : [];
+      const requestedStageFiles = Array.isArray(options.stageFiles)
+        ? options.stageFiles
+          .map((value) => String(value || '').trim())
+          .filter(Boolean)
+        : null;
+      let filesToCommit = requestedFiles;
+      let commitFromIndexOnly = false;
 
-    if (options.addAll) {
-      await git.add('.');
-    } else if (requestedFiles.length > 0) {
-      const status = await git.status();
-      const fileStatusByPath = new Map(status.files.map((file) => [file.path, file]));
-      filesToCommit = requestedFiles.filter((filePath) => fileStatusByPath.has(filePath));
+      if (options.addAll) {
+        await git.add('.');
+      } else if (requestedFiles.length > 0) {
+        const status = await git.status();
+        const fileStatusByPath = new Map(status.files.map((file) => [file.path, file]));
+        filesToCommit = requestedFiles.filter((filePath) => fileStatusByPath.has(filePath));
 
-      if (filesToCommit.length === 0) {
-        throw new Error('No selected files are available to commit. Refresh git status and try again.');
-      }
+        if (filesToCommit.length === 0) {
+          throw new Error('No selected files are available to commit. Refresh git status and try again.');
+        }
 
-      if (requestedStageFiles) {
-        commitFromIndexOnly = true;
-        const selectedFileSet = new Set(filesToCommit);
-        temporarilyUnstagedFiles = status.files
-          .filter((file) => {
-            const indexStatus = (file.index || '').trim();
-            return indexStatus && indexStatus !== '?' && !selectedFileSet.has(file.path);
-          })
-          .map((file) => file.path);
+        if (requestedStageFiles) {
+          commitFromIndexOnly = true;
+          const selectedFileSet = new Set(filesToCommit);
+          temporarilyUnstagedFiles = status.files
+            .filter((file) => {
+              const indexStatus = (file.index || '').trim();
+              return indexStatus && indexStatus !== '?' && !selectedFileSet.has(file.path);
+            })
+            .map((file) => file.path);
 
-        if (temporarilyUnstagedFiles.length > 0) {
-          await git.raw(['restore', '--staged', '--', ...temporarilyUnstagedFiles]);
+          if (temporarilyUnstagedFiles.length > 0) {
+            await git.raw(['restore', '--staged', '--', ...temporarilyUnstagedFiles]);
+          }
+        }
+
+        const filesNeedingAdd = requestedStageFiles
+          ? requestedStageFiles.filter((filePath) => fileStatusByPath.has(filePath))
+          : filesToCommit.filter((filePath) => {
+            const fileStatus = fileStatusByPath.get(filePath);
+            if (!fileStatus) {
+              return false;
+            }
+
+            const alreadyFullyStaged = fileStatus.index !== ' ' && fileStatus.working_dir === ' ';
+            return !alreadyFullyStaged;
+          });
+
+        if (filesNeedingAdd.length > 0) {
+          await git.raw(['add', '--', ...filesNeedingAdd]);
         }
       }
 
-      const filesNeedingAdd = requestedStageFiles
-        ? requestedStageFiles.filter((filePath) => fileStatusByPath.has(filePath))
-        : filesToCommit.filter((filePath) => {
-          const fileStatus = fileStatusByPath.get(filePath);
-          if (!fileStatus) {
-            return false;
-          }
+      const commitArgs =
+        !commitFromIndexOnly && !options.addAll && filesToCommit.length > 0
+          ? filesToCommit
+          : undefined;
 
-          const alreadyFullyStaged = fileStatus.index !== ' ' && fileStatus.working_dir === ' ';
-          return !alreadyFullyStaged;
+      let result;
+      try {
+        result = await git.commit(message, commitArgs);
+      } catch (error) {
+        const gitErrorText = parseGitErrorText(error);
+        const isPathspecError = gitErrorText.includes('pathspec') && gitErrorText.includes('did not match any files');
+        if (!isPathspecError || !commitArgs || commitArgs.length === 0) {
+          throw error;
+        }
+
+        // Fallback for deleted/stale selections: commit currently staged changes.
+        result = await git.commit(message);
+      }
+
+      if (temporarilyUnstagedFiles.length > 0) {
+        await git.raw(['add', '--', ...temporarilyUnstagedFiles]).catch((restoreError) => {
+          console.error('Failed to restore temporarily unstaged files:', restoreError);
         });
-
-      if (filesNeedingAdd.length > 0) {
-        await git.add(filesNeedingAdd);
       }
-    }
-
-    const commitArgs =
-      !commitFromIndexOnly && !options.addAll && filesToCommit.length > 0
-        ? filesToCommit
-        : undefined;
-
-    let result;
-    try {
-      result = await git.commit(message, commitArgs);
-    } catch (error) {
-      const gitErrorText = parseGitErrorText(error);
-      const isPathspecError = gitErrorText.includes('pathspec') && gitErrorText.includes('did not match any files');
-      if (!isPathspecError || !commitArgs || commitArgs.length === 0) {
-        throw error;
-      }
-
-      // Fallback for deleted/stale selections: commit currently staged changes.
-      result = await git.commit(message);
-    }
-
-    if (temporarilyUnstagedFiles.length > 0) {
-      await git.add(temporarilyUnstagedFiles).catch((restoreError) => {
-        console.error('Failed to restore temporarily unstaged files:', restoreError);
-      });
-    }
 
       return {
         success: true,

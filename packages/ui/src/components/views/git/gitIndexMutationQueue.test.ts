@@ -113,4 +113,32 @@ describe('createGitIndexMutationQueue', () => {
     expect(completedDirections).toEqual(['unstage']);
     expect(completedPaths).toEqual([['a.ts'], ['b.ts']]);
   });
+
+  test('passes rollback callbacks to error handlers', async () => {
+    let rollbackCalled = false;
+    const queue = createGitIndexMutationQueue({
+      runMutation: async () => {
+        throw new Error('stage failed');
+      },
+      onMutationComplete: () => {},
+      onMutationError: (mutation) => {
+        mutation.rollback?.();
+      },
+      onPathsComplete: () => {},
+      scheduleFlush: () => queue.flush(),
+    });
+
+    queue.enqueue({
+      directory: '/repo',
+      direction: 'stage',
+      paths: new Set(['a.ts']),
+      rollback: () => {
+        rollbackCalled = true;
+      },
+    });
+    queue.flush();
+    await waitMicrotask();
+
+    expect(rollbackCalled).toBe(true);
+  });
 });

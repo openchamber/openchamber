@@ -2198,7 +2198,7 @@ export async function createGitCommit(
         await execGit(['restore', '--staged', '--', ...temporarilyUnstagedFiles], directory);
       }
       if (options.stageFiles.length > 0) {
-        await execGit(['add', ...options.stageFiles], directory);
+        await execGit(['add', '--', ...options.stageFiles], directory);
       }
 
       const result = await execGit(['commit', '-m', message], directory);
@@ -2221,7 +2221,7 @@ export async function createGitCommit(
       };
     } finally {
       if (temporarilyUnstagedFiles.length > 0) {
-        await execGit(['add', ...temporarilyUnstagedFiles], directory);
+        await execGit(['add', '--', ...temporarilyUnstagedFiles], directory);
       }
     }
   }
