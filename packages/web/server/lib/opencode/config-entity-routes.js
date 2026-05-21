@@ -18,6 +18,11 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
     createMcpConfig,
     updateMcpConfig,
     deleteMcpConfig,
+    listPromptTemplates,
+    getPromptTemplate,
+    createPromptTemplate,
+    updatePromptTemplate,
+    deletePromptTemplate,
   } = dependencies;
 
   const completeMcpMutation = async (res, action, name, applyChange) => {
@@ -365,6 +370,97 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
     } catch (error) {
       console.error('Failed to delete command:', error);
       res.status(500).json({ error: error.message || 'Failed to delete command' });
+    }
+  });
+
+  app.get('/api/config/prompt-templates', async (req, res) => {
+    try {
+      const { directory, error } = await resolveOptionalProjectDirectory(req);
+      if (error) {
+        return res.status(400).json({ error });
+      }
+      const templates = listPromptTemplates(directory);
+      res.json(templates);
+    } catch (error) {
+      console.error('[API:GET /api/config/prompt-templates] Failed:', error);
+      res.status(500).json({ error: error.message || 'Failed to list prompt templates' });
+    }
+  });
+
+  app.get('/api/config/prompt-templates/:id', async (req, res) => {
+    try {
+      const id = req.params.id;
+      const { directory, error } = await resolveOptionalProjectDirectory(req);
+      if (error) {
+        return res.status(400).json({ error });
+      }
+      const template = getPromptTemplate(id, directory);
+      if (!template) {
+        return res.status(404).json({ error: `Prompt template "${id}" not found` });
+      }
+      res.json(template);
+    } catch (error) {
+      console.error('[API:GET /api/config/prompt-templates/:id] Failed:', error);
+      res.status(500).json({ error: error.message || 'Failed to get prompt template' });
+    }
+  });
+
+  app.post('/api/config/prompt-templates/:id', async (req, res) => {
+    try {
+      const id = req.params.id;
+      const config = req.body || {};
+      const { directory, error } = await resolveOptionalProjectDirectory(req);
+      if (error) {
+        return res.status(400).json({ error });
+      }
+      console.log(`[API:POST /api/config/prompt-templates] Creating prompt template: ${id}`);
+      const template = createPromptTemplate(id, config, directory);
+      res.json({ success: true, template });
+    } catch (error) {
+      console.error('[API:POST /api/config/prompt-templates/:id] Failed:', error);
+      if (error.message?.includes('already exists')) {
+        return res.status(409).json({ error: error.message });
+      }
+      res.status(500).json({ error: error.message || 'Failed to create prompt template' });
+    }
+  });
+
+  app.patch('/api/config/prompt-templates/:id', async (req, res) => {
+    try {
+      const id = req.params.id;
+      const updates = req.body;
+      const { directory, error } = await resolveOptionalProjectDirectory(req);
+      if (error) {
+        return res.status(400).json({ error });
+      }
+      console.log(`[API:PATCH /api/config/prompt-templates] Updating prompt template: ${id}`);
+      const template = updatePromptTemplate(id, updates, directory);
+      res.json({ success: true, template });
+    } catch (error) {
+      console.error('[API:PATCH /api/config/prompt-templates/:id] Failed:', error);
+      if (error.message?.includes('not found')) {
+        return res.status(404).json({ error: error.message });
+      }
+      res.status(500).json({ error: error.message || 'Failed to update prompt template' });
+    }
+  });
+
+  app.delete('/api/config/prompt-templates/:id', async (req, res) => {
+    try {
+      const id = req.params.id;
+      const { directory, error } = await resolveOptionalProjectDirectory(req);
+      if (error) {
+        return res.status(400).json({ error });
+      }
+      console.log(`[API:DELETE /api/config/prompt-templates] Deleting prompt template: ${id}`);
+      deletePromptTemplate(id, directory);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('[API:DELETE /api/config/prompt-templates/:id] Failed:', error);
+      if (error.message?.includes('not found')) {
+        return res.status(404).json({ error: error.message });
+      }
+      res.status(500).json({ error: error.message || 'Failed to delete prompt template' });
     }
   });
 };

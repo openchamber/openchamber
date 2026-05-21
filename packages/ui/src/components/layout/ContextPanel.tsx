@@ -1828,7 +1828,7 @@ export const ContextPanel: React.FC = () => {
   const isFileTabActive = activeTab?.mode === 'file';
 
   const header = (
-    <header className="flex h-8 items-stretch border-b border-transparent">
+    <header className="flex h-10 items-stretch border-b border-transparent">
       <SortableTabsStrip
         items={tabItems}
         activeId={activeTab?.id ?? null}

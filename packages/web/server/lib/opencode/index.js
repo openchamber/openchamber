@@ -64,3 +64,12 @@ export {
   updateMcpConfig,
   deleteMcpConfig,
 } from './mcp.js';
+
+export {
+  listPromptTemplates,
+  getPromptTemplate,
+  createPromptTemplate,
+  updatePromptTemplate,
+  deletePromptTemplate,
+  slugify as slugifyPromptTemplate,
+} from './prompt-templates.js';

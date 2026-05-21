@@ -203,9 +203,17 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
     }
   };
 
+function formatUnknownToolDisplayName(toolName: string): string {
+  return toolName
+    .trim()
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^./, (char) => char.toUpperCase());
+}
+
 export function getToolMetadata(toolName: string): ToolMetadata {
   return TOOL_METADATA[toolName] || {
-    displayName: toolName.charAt(0).toUpperCase() + toolName.slice(1).replace(/-/g, ' '),
+    displayName: formatUnknownToolDisplayName(toolName),
     category: 'system',
     outputLanguage: 'text',
     inputFields: []

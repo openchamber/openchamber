@@ -18,6 +18,7 @@ export type SettingsPageSlug =
   | 'shortcuts'
   | 'sessions'
   | 'magic-prompts'
+  | 'prompt-templates'
   | 'notifications'
   | 'voice'
   | 'tunnel';
@@ -183,6 +184,13 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     kind: 'split',
     keywords: ['prompts', 'templates', 'git', 'github', 'review', 'commit', 'pull request'],
     isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    slug: 'prompt-templates',
+    title: 'Prompt Templates',
+    group: 'general',
+    kind: 'split',
+    keywords: ['prompt', 'templates', 'multi-run', 'strategy', 'approach'],
   },
 
   { slug: 'notifications', title: 'Notifications', group: 'general', kind: 'single', keywords: ['alerts', 'native', 'summary', 'summarization'], },

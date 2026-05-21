@@ -1208,6 +1208,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // ---------------------------------------------------------------------------
   markSessionPlanAvailable: (sessionId) => {
     set((state) => {
+      if (state.sessionPlanAvailable.get(sessionId) === true) {
+        return state
+      }
       const next = new Map(state.sessionPlanAvailable)
       next.set(sessionId, true)
       return { sessionPlanAvailable: next }
