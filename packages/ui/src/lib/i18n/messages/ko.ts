@@ -1158,6 +1158,7 @@ export const dict: Record<I18nKey, string> = {
   'directoryExplorerDialog.browse.empty': '일치하는 디렉터리가 없습니다.',
   'directoryExplorerDialog.browse.parentDirectory': '상위 디렉터리',
   'directoryExplorerDialog.browse.addedBadge': '추가됨',
+  'directoryExplorerDialog.browse.quickAdd': '추가',
   'directoryExplorerDialog.footer.navigate': '탐색',
   'directoryExplorerDialog.footer.select': '선택',
   'directoryExplorerDialog.footer.add': '추가',

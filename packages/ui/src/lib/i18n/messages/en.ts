@@ -1156,6 +1156,7 @@ export const dict = {
   'directoryExplorerDialog.browse.empty': 'No matching directories.',
   'directoryExplorerDialog.browse.parentDirectory': 'Parent directory',
   'directoryExplorerDialog.browse.addedBadge': 'Added',
+  'directoryExplorerDialog.browse.quickAdd': 'Add',
   'directoryExplorerDialog.footer.navigate': 'Navigate',
   'directoryExplorerDialog.footer.select': 'Select',
   'directoryExplorerDialog.footer.add': 'Add',

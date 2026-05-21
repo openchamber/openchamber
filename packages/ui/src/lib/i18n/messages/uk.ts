@@ -1122,6 +1122,7 @@ export const dict: Record<I18nKey, string> = {
   "directoryExplorerDialog.browse.empty": "Немає відповідних каталогів.",
   "directoryExplorerDialog.browse.parentDirectory": "Батьківський каталог",
   "directoryExplorerDialog.browse.addedBadge": "Додано",
+  "directoryExplorerDialog.browse.quickAdd": "Додати",
   "directoryExplorerDialog.footer.navigate": "Навігація",
   "directoryExplorerDialog.footer.select": "Вибрати",
   "directoryExplorerDialog.footer.add": "Додати",

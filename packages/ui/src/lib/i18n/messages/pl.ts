@@ -1255,6 +1255,7 @@ export const dict: Record<I18nKey, string> = {
   'directoryExplorerDialog.actions.openInFinder': 'Otwórz w Finderze',
   'directoryExplorerDialog.actions.openingFinder': 'Otwieranie...',
   'directoryExplorerDialog.browse.addedBadge': 'Dodano',
+  'directoryExplorerDialog.browse.quickAdd': 'Dodaj',
   'directoryExplorerDialog.browse.directories': 'Katalogi',
   'directoryExplorerDialog.browse.empty': 'Brak pasujących katalogów.',
   'directoryExplorerDialog.browse.loading': 'Ładowanie katalogów...',

@@ -1122,6 +1122,7 @@ export const dict: Record<I18nKey, string> = {
   'directoryExplorerDialog.browse.empty': '没有匹配的目录。',
   'directoryExplorerDialog.browse.parentDirectory': '上级目录',
   'directoryExplorerDialog.browse.addedBadge': '已添加',
+  'directoryExplorerDialog.browse.quickAdd': '添加',
   'directoryExplorerDialog.footer.navigate': '导航',
   'directoryExplorerDialog.footer.select': '选择',
   'directoryExplorerDialog.footer.add': '添加',

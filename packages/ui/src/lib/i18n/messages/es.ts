@@ -1122,6 +1122,7 @@ export const dict: Record<I18nKey, string> = {
   "directoryExplorerDialog.browse.empty": "No hay directorios coincidentes.",
   "directoryExplorerDialog.browse.parentDirectory": "Directorio padre",
   "directoryExplorerDialog.browse.addedBadge": "Añadido",
+  "directoryExplorerDialog.browse.quickAdd": "Añadir",
   "directoryExplorerDialog.footer.navigate": "Navegar",
   "directoryExplorerDialog.footer.select": "Seleccionar",
   "directoryExplorerDialog.footer.add": "Añadir",

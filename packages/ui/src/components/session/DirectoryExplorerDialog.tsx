@@ -389,6 +389,18 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     onOpenChange(false);
   }, [onOpenChange]);
 
+  const handleQuickAdd = React.useCallback((event: React.MouseEvent, path: string) => {
+    event.stopPropagation();
+    const normalized = normalizeDirectoryPath(path);
+    if (normalized && addedProjectPaths.has(normalized)) return;
+    const added = addProject(path);
+    if (!added) {
+      toast.error(t('directoryExplorerDialog.toast.failedToAddProject'), {
+        description: t('directoryExplorerDialog.toast.selectValidDirectoryPath'),
+      });
+    }
+  }, [addProject, addedProjectPaths, t]);
+
   const finalizeSelection = React.useCallback(async (target: string) => {
     if (!target || isConfirming) return;
     const normalized = normalizeDirectoryPath(target);
@@ -628,6 +640,16 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
                     <span className="rounded-full border border-border/60 px-2 py-0.5 typography-meta text-muted-foreground">
                       {t('directoryExplorerDialog.browse.addedBadge')}
                     </span>
+                  ) : row.type === 'directory' ? (
+                    <button
+                      type="button"
+                      onMouseDown={(event) => event.stopPropagation()}
+                      onClick={(event) => handleQuickAdd(event, row.path)}
+                      className="flex-shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:bg-interactive-hover/60 hover:text-foreground"
+                      title={t('directoryExplorerDialog.browse.quickAdd')}
+                    >
+                      <Icon name="add" className="h-3.5 w-3.5" />
+                    </button>
                   ) : null}
                 </button>
               );
