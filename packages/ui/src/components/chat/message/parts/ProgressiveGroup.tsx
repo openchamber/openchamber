@@ -14,7 +14,7 @@ import { Icon } from "@/components/icon/Icon";
 import { FadeInOnReveal } from '../FadeInOnReveal';
 import { getToolIcon } from './toolPresentation';
 import { getToolMetadata } from '@/lib/toolHelpers';
-import { isExpandableTool, isStandaloneTool, isStaticTool } from './toolRenderUtils';
+import { isExpandableTool, isStandaloneTool } from './toolRenderUtils';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -410,7 +410,6 @@ const getToolShortDescription = (activity: TurnActivityPart): string | null => {
 
 type AggregatedRow =
     | { type: 'tool-expandable'; activity: TurnActivityPart }
-    | { type: 'tool-static-group'; toolName: string; activities: TurnActivityPart[] }
     | { type: 'reasoning'; activity: TurnActivityPart }
     | { type: 'justification'; activity: TurnActivityPart }
     | { type: 'tool-fallback'; activity: TurnActivityPart };
@@ -483,53 +482,11 @@ const MemoExpandableToolRow = React.memo(ExpandableToolRow, (prev, next) => {
         && areRenderRelevantPartsEqual([prev.activity.part], [next.activity.part]);
 });
 
-interface StaticGroupedToolRowProps {
-    toolName: string;
-    activities: TurnActivityPart[];
-    animateTailText: boolean;
-    animateRows: boolean;
-}
-
-const StaticGroupedToolRow: React.FC<StaticGroupedToolRowProps> = ({
-    toolName,
-    activities,
-    animateTailText,
-    animateRows,
-}) => {
-    const content = (
-        <StaticToolRow
-            toolName={toolName}
-            activities={activities}
-            animateTailText={animateTailText}
-        />
-    );
-
-    const maybeWrapped = animateTailText ? (
-        <ToolRevealOnMount animate={true} wipe>
-            {content}
-        </ToolRevealOnMount>
-    ) : content;
-
-    if (!animateRows) {
-        return maybeWrapped;
-    }
-
-    return <FadeInOnReveal>{maybeWrapped}</FadeInOnReveal>;
-};
-
-const MemoStaticGroupedToolRow = React.memo(StaticGroupedToolRow, (prev, next) => {
-    return prev.toolName === next.toolName
-        && prev.animateTailText === next.animateTailText
-        && prev.animateRows === next.animateRows
-        && areActivityListsEqual(prev.activities, next.activities);
-});
-
 /**
  * Aggregate sorted activity parts into display rows.
- * Static tools are rendered as one row per call.
  * Reasoning/justification become inline text.
- * Expandable tools (edit, bash, write, question) stay as individual rows.
- * Unknown tools stay as individual expandable rows (fallback).
+ * Expandable tools stay as individual rows.
+ * Unknown named tools stay as individual expandable rows.
  */
 const aggregateRows = (parts: TurnActivityPart[]): AggregatedRow[] => {
     const rows: AggregatedRow[] = [];
@@ -566,13 +523,7 @@ const aggregateRows = (parts: TurnActivityPart[]): AggregatedRow[] => {
             continue;
         }
 
-        if (isStaticTool(toolName)) {
-            rows.push({ type: 'tool-static-group', toolName, activities: [activity] });
-            i++;
-            continue;
-        }
-
-        // Unknown/fallback tool — keep as expandable
+        // Empty or malformed tool names fall back to the generic expandable row.
         rows.push({ type: 'tool-fallback', activity });
         i++;
     }
@@ -898,7 +849,7 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
     };
 
     const renderedRows = shouldRenderRows
-        ? visibleRows.map((row, index) => {
+        ? visibleRows.map((row) => {
         switch (row.type) {
             case 'reasoning':
                 return wrapRow(
@@ -936,17 +887,6 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                         onShowPopup={onShowPopup}
                         onContentChange={onContentChange}
                         animateTailText={Boolean(animatedToolIds?.has(row.activity.id))}
-                        animateRows={animateRows}
-                    />
-                );
-
-            case 'tool-static-group':
-                return (
-                    <MemoStaticGroupedToolRow
-                        key={`static-${row.toolName}-${row.activities[0]?.id ?? index}`}
-                        toolName={row.toolName}
-                        activities={row.activities}
-                        animateTailText={row.activities.some((activity) => animatedToolIds?.has(activity.id))}
                         animateRows={animateRows}
                     />
                 );

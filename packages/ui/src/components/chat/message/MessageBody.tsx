@@ -1641,7 +1641,7 @@ const AssistantMessageBody = React.memo(({
                     continue;
                 }
 
-                // Expandable tools: bash, edit, write, task, question — individual rows
+                // Expandable named tools: individual rows
                 if (isExpandableTool(toolName)) {
                     rendered.push(
                         <FadeInOnReveal key={`tool-${toolPart.id}`}>
@@ -1664,7 +1664,7 @@ const AssistantMessageBody = React.memo(({
                     continue;
                 }
 
-                // Static tools: one row per tool call (no grouping)
+                // Empty or malformed tool names: one compact fallback row
                 rendered.push(
                     <FadeInOnReveal key={`static-tools-${toolPart.id}`}>
                         <ToolRevealOnMount animate={animatedToolIdsLookup.has(toolPart.id)} wipe>
