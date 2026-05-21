@@ -1739,6 +1739,20 @@ export const useConfigStore = create<ConfigStore>()(
                             });
                         };
 
+                        // Prefer the selected agent's configured model when switching agents.
+                        const agent = agents.find((candidate) => candidate.name === agentName);
+                        const agentModelSelection = agent?.model;
+                        if (agentModelSelection?.providerID && agentModelSelection?.modelID) {
+                            const { providerID, modelID } = agentModelSelection;
+                            const agentProvider = providers.find((provider) => provider.id === providerID);
+                            const agentModel = agentProvider?.models.find((model) => model.id === modelID);
+
+                            if (agentModel) {
+                                applyResolvedModelSelection(providerID, modelID, undefined);
+                                return;
+                            }
+                        }
+
                         if (currentSessionId) {
                             const existingAgentModel = useSelectionStore.getState().getAgentModelForSession(currentSessionId, agentName);
                             if (existingAgentModel && hasProviderModel(providers, existingAgentModel.providerId, existingAgentModel.modelId)) {
@@ -1759,7 +1773,7 @@ export const useConfigStore = create<ConfigStore>()(
                             }
                         }
 
-                        // If settings has a default model, use it instead of agent's preferred
+                        // If the agent has no preferred model, use settings default.
                         if (settingsDefaultModel) {
                             const parsed = parseModelString(settingsDefaultModel);
                             if (parsed) {
@@ -1780,18 +1794,7 @@ export const useConfigStore = create<ConfigStore>()(
                             }
                         }
 
-                        // Fall back to agent's preferred model
-                        const agent = agents.find((candidate) => candidate.name === agentName);
-                        const agentModelSelection = agent?.model;
-                        if (agentModelSelection?.providerID && agentModelSelection?.modelID) {
-                            const { providerID, modelID } = agentModelSelection;
-                            const agentProvider = providers.find((provider) => provider.id === providerID);
-                            const agentModel = agentProvider?.models.find((model) => model.id === modelID);
-
-                            if (agentModel) {
-                                applyResolvedModelSelection(providerID, modelID, undefined);
-                            }
-                        }
+                        // Otherwise keep the current valid model selection unchanged.
                     }
                 },
 

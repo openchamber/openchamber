@@ -1019,6 +1019,18 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                             return;
                         }
 
+                        const selectedAgent = agents.find((agent) => agent.name === currentAgentName);
+                        if (selectedAgent?.model?.providerID && selectedAgent.model.modelID) {
+                            const result = tryApplyModelSelection(
+                                selectedAgent.model.providerID,
+                                selectedAgent.model.modelID,
+                                currentAgentName,
+                            );
+                            if (result === 'applied' || result === 'provider-missing') {
+                                return;
+                            }
+                        }
+
                         const persistedChoice = getAgentModelForSession(currentSessionId, currentAgentName);
 
                         if (persistedChoice) {
@@ -1043,7 +1055,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         return () => {
             abortController.abort();
         };
-    }, [currentAgentName, currentSessionId, getAgentModelForSession, tryApplyModelSelection, contextHydrated]);
+    }, [agents, currentAgentName, currentSessionId, getAgentModelForSession, tryApplyModelSelection, contextHydrated]);
 
     React.useEffect(() => {
         if (!contextHydrated || !currentAgentName) {
