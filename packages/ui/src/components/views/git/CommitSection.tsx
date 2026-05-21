@@ -9,7 +9,7 @@ import { useI18n } from '@/lib/i18n';
 type CommitAction = 'commit' | 'commitAndPush' | null;
 
 interface CommitSectionProps {
-  selectedCount: number;
+  stagedCount: number;
   commitMessage: string;
   onCommitMessageChange: (value: string) => void;
   generatedHighlights: string[];
@@ -24,7 +24,7 @@ interface CommitSectionProps {
 }
 
 export const CommitSection: React.FC<CommitSectionProps> = ({
-  selectedCount,
+  stagedCount,
   commitMessage,
   onCommitMessageChange,
   generatedHighlights,
@@ -38,8 +38,8 @@ export const CommitSection: React.FC<CommitSectionProps> = ({
   onOpenGitmojiPicker,
 }) => {
   const { t } = useI18n();
-  const hasSelectedFiles = selectedCount > 0;
-  const canCommit = commitMessage.trim() && hasSelectedFiles && commitAction === null;
+  const hasStagedFiles = stagedCount > 0;
+  const canCommit = commitMessage.trim() && hasStagedFiles && commitAction === null;
   const { isMobile, hasTouchInput } = useDeviceInfo();
 
   const containerClassName = 'border-0 bg-transparent rounded-none';
@@ -53,9 +53,9 @@ export const CommitSection: React.FC<CommitSectionProps> = ({
       </div>
 
       <div className={contentClassName}>
-        {!hasSelectedFiles ? (
+        {!hasStagedFiles ? (
           <p className="typography-meta text-muted-foreground">
-            {t('gitView.commit.selectFilesHint')}
+            {t('gitView.commit.stageFilesHint')}
           </p>
         ) : null}
 
@@ -94,7 +94,7 @@ export const CommitSection: React.FC<CommitSectionProps> = ({
             disabled={
               isGeneratingMessage ||
               commitAction !== null ||
-              selectedCount === 0
+              stagedCount === 0
             }
             type="button"
             aria-label={t('gitView.commit.generateAria')}

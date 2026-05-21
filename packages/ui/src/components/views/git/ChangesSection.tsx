@@ -1,6 +1,5 @@
 import React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -20,13 +19,15 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
 
 interface ChangesSectionProps {
+  title?: string;
   changeEntries: GitStatus['files'];
-  selectedPaths: Set<string>;
   diffStats: Record<string, { insertions: number; deletions: number }> | undefined;
   revertingPaths: Set<string>;
-  onToggleFile: (path: string) => void;
-  onSelectAll: () => void;
-  onClearSelection: () => void;
+  actionSymbol: '+' | '-';
+  getActionLabel: (path: string) => string;
+  onActionFile: (path: string) => void;
+  onActionAll?: (paths: string[]) => void;
+  actionBusyPaths?: Set<string>;
   onRevertAll?: (paths: string[]) => Promise<void> | void;
   onViewDiff: (path: string) => void;
   onRevertFile: (path: string) => void;
@@ -150,34 +151,15 @@ const flattenChangesTree = (
   return rows;
 };
 
-const getDirectorySelectionState = (
-  directory: ChangesTreeDirectoryNode,
-  selectedPaths: Set<string>
-): 'none' | 'partial' | 'all' => {
-  if (directory.files.length === 0) {
-    return 'none';
-  }
-
-  let selectedCount = 0;
-  for (const file of directory.files) {
-    if (selectedPaths.has(file.path)) {
-      selectedCount += 1;
-    }
-  }
-
-  if (selectedCount === 0) return 'none';
-  if (selectedCount === directory.files.length) return 'all';
-  return 'partial';
-};
-
 export const ChangesSection: React.FC<ChangesSectionProps> = ({
+  title,
   changeEntries,
-  selectedPaths,
   diffStats,
   revertingPaths,
-  onToggleFile,
-  onSelectAll,
-  onClearSelection,
+  actionSymbol,
+  getActionLabel,
+  onActionFile,
+  onActionAll,
   onRevertAll,
   onViewDiff,
   onRevertFile,
@@ -190,7 +172,6 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
   const gitChangesViewMode = useUIStore((state) => state.gitChangesViewMode);
   const isTreeView = gitChangesViewMode === 'tree';
-  const selectedCount = selectedPaths.size;
   const totalCount = changeEntries.length;
   const [confirmRevertAllOpen, setConfirmRevertAllOpen] = React.useState(false);
   const treeRoot = React.useMemo(() => buildChangesTree(changeEntries), [changeEntries]);
@@ -229,10 +210,6 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
   const rowItems = React.useMemo(() => (isTreeView ? treeRows : changeEntries), [changeEntries, isTreeView, treeRows]);
   const rowCount = rowItems.length;
   const shouldVirtualize = rowCount >= CHANGE_LIST_VIRTUALIZE_THRESHOLD;
-  const hasAnySelected = selectedCount > 0;
-  const areAllSelected = totalCount > 0 && selectedCount === totalCount;
-  const isPartiallySelected = hasAnySelected && !areAllSelected;
-
   const rowVirtualizer = useVirtualizer({
     count: rowCount,
     getScrollElement: () => scrollRef.current,
@@ -327,19 +304,9 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
     });
   }, []);
 
-  const toggleDirectorySelection = React.useCallback((directory: ChangesTreeDirectoryNode) => {
-    const state = getDirectorySelectionState(directory, selectedPaths);
-    const shouldSelectAll = state !== 'all';
-
-    for (const file of directory.files) {
-      const isSelected = selectedPaths.has(file.path);
-      if (shouldSelectAll && !isSelected) {
-        onToggleFile(file.path);
-      } else if (!shouldSelectAll && isSelected) {
-        onToggleFile(file.path);
-      }
-    }
-  }, [onToggleFile, selectedPaths]);
+  const runDirectoryAction = React.useCallback((directory: ChangesTreeDirectoryNode) => {
+    onActionAll?.(directory.files.map((file) => file.path));
+  }, [onActionAll]);
 
   const renderRow = React.useCallback((item: GitStatus['files'][number] | FlattenedTreeRow) => {
     if (!isTreeView) {
@@ -347,9 +314,10 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
       return (
         <ChangeRow
           file={file}
-          checked={selectedPaths.has(file.path)}
+          actionLabel={getActionLabel(file.path)}
+          actionSymbol={actionSymbol}
+          onAction={() => onActionFile(file.path)}
           stats={diffStats?.[file.path]}
-          onToggle={() => onToggleFile(file.path)}
           onViewDiff={() => onViewDiff(file.path)}
           onRevert={() => onRevertFile(file.path)}
           isReverting={revertingPaths.has(file.path) || isRevertingAll}
@@ -365,9 +333,10 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
       return (
         <ChangeRow
           file={file}
-          checked={selectedPaths.has(file.path)}
+          actionLabel={getActionLabel(file.path)}
+          actionSymbol={actionSymbol}
+          onAction={() => onActionFile(file.path)}
           stats={diffStats?.[file.path]}
-          onToggle={() => onToggleFile(file.path)}
           onViewDiff={() => onViewDiff(file.path)}
           onRevert={() => onRevertFile(file.path)}
           isReverting={revertingPaths.has(file.path) || isRevertingAll}
@@ -379,23 +348,12 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
 
     const directory = row.directory;
     const isExpanded = expandedDirectories.has(directory.path);
-    const selectionState = getDirectorySelectionState(directory, selectedPaths);
 
     return (
       <div
         className={cn('group flex items-center gap-2 py-1.5 hover:bg-sidebar/40', rowPaddingClassName)}
         style={{ paddingLeft: `${row.depth * TREE_INDENT_PX}px` }}
       >
-        <div className="flex size-5 shrink-0 items-center justify-center">
-          <Checkbox
-            size="sm"
-            checked={selectionState === 'all'}
-            indeterminate={selectionState === 'partial'}
-            onChange={() => toggleDirectorySelection(directory)}
-            ariaLabel={t('gitView.changes.toggleDirectorySelectionAria', { path: directory.path })}
-          />
-        </div>
-
         <button
           type="button"
           onClick={() => toggleDirectoryExpanded(directory.path)}
@@ -414,22 +372,32 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
           </span>
           <span className="ml-auto shrink-0 typography-micro text-muted-foreground">{directory.files.length}</span>
         </button>
+        <button
+          type="button"
+          onClick={() => runDirectoryAction(directory)}
+          className="flex size-5 shrink-0 items-center justify-center rounded typography-micro font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]"
+          aria-label={t(actionSymbol === '+' ? 'gitView.changes.stageDirectoryAria' : 'gitView.changes.unstageDirectoryAria', { path: directory.path })}
+          title={t(actionSymbol === '+' ? 'gitView.changes.stageDirectoryAria' : 'gitView.changes.unstageDirectoryAria', { path: directory.path })}
+        >
+          {actionSymbol}
+        </button>
       </div>
     );
   }, [
     diffStats,
     expandedDirectories,
+    actionSymbol,
+    getActionLabel,
     isRevertingAll,
     isTreeView,
+    onActionFile,
     onRevertFile,
-    onToggleFile,
     onViewDiff,
     revertingPaths,
     rowPaddingClassName,
-    selectedPaths,
+    runDirectoryAction,
     t,
     toggleDirectoryExpanded,
-    toggleDirectorySelection,
   ]);
 
   const handleConfirmRevertAll = React.useCallback(async () => {
@@ -446,23 +414,10 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
       <section className={containerClassName}>
         <header className={headerClassName}>
           <div className="flex min-w-0 items-center gap-2">
-            <h3 className="typography-ui-header font-semibold text-foreground">{t('gitView.changes.title')}</h3>
+            <h3 className="typography-ui-header font-semibold text-foreground">{title ?? t('gitView.changes.title')}</h3>
             {totalCount > 0 ? (
-              <div
-                className={cn(
-                  'inline-flex h-6 items-center gap-1 rounded px-1.5',
-                  isRevertingAll && 'cursor-not-allowed opacity-50'
-                )}
-              >
-                <Checkbox
-                  size="sm"
-                  checked={hasAnySelected}
-                  indeterminate={isPartiallySelected}
-                  disabled={isRevertingAll}
-                  onChange={() => (areAllSelected ? onClearSelection() : onSelectAll())}
-                  ariaLabel={areAllSelected ? t('gitView.changes.clearSelectionAria') : t('gitView.changes.selectAllAria')}
-                />
-                <span className="typography-meta text-muted-foreground">{selectedCount}/{totalCount}</span>
+              <div className="inline-flex h-6 items-center gap-1 rounded px-1.5">
+                <span className="typography-meta text-muted-foreground">{totalCount}</span>
               </div>
             ) : null}
             {onOpenStashes ? (

@@ -132,6 +132,30 @@ export async function revertGitFile(directory: string, filePath: string): Promis
   return gitHttp.revertGitFile(directory, filePath);
 }
 
+export async function stageGitFile(directory: string, filePath: string): Promise<void> {
+  const runtime = getRuntimeGit();
+  if (runtime?.stageGitFile) return runtime.stageGitFile(directory, filePath);
+  return gitHttp.stageGitFile(directory, filePath);
+}
+
+export async function stageGitFiles(directory: string, filePaths: string[]): Promise<void> {
+  const runtime = getRuntimeGit();
+  if (runtime?.stageGitFiles) return runtime.stageGitFiles(directory, filePaths);
+  return gitHttp.stageGitFiles(directory, filePaths);
+}
+
+export async function unstageGitFile(directory: string, filePath: string): Promise<void> {
+  const runtime = getRuntimeGit();
+  if (runtime?.unstageGitFile) return runtime.unstageGitFile(directory, filePath);
+  return gitHttp.unstageGitFile(directory, filePath);
+}
+
+export async function unstageGitFiles(directory: string, filePaths: string[]): Promise<void> {
+  const runtime = getRuntimeGit();
+  if (runtime?.unstageGitFiles) return runtime.unstageGitFiles(directory, filePaths);
+  return gitHttp.unstageGitFiles(directory, filePaths);
+}
+
 export async function isLinkedWorktree(directory: string): Promise<boolean> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.isLinkedWorktree(directory);

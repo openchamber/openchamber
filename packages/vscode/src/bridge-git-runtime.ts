@@ -225,17 +225,40 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       return { id, type, success: true, data: { success: true } };
     }
 
+    case 'api:git/stage': {
+      const { directory, path: filePath, paths } = (payload || {}) as { directory?: string; path?: string; paths?: string[] };
+      const filePaths = (Array.isArray(paths) ? paths : [filePath])
+        .filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+      if (!directory || filePaths.length === 0) {
+        return { id, type, success: false, error: 'Directory and path are required' };
+      }
+      await gitService.stageGitFiles(directory, filePaths);
+      return { id, type, success: true, data: { success: true } };
+    }
+
+    case 'api:git/unstage': {
+      const { directory, path: filePath, paths } = (payload || {}) as { directory?: string; path?: string; paths?: string[] };
+      const filePaths = (Array.isArray(paths) ? paths : [filePath])
+        .filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+      if (!directory || filePaths.length === 0) {
+        return { id, type, success: false, error: 'Directory and path are required' };
+      }
+      await gitService.unstageGitFiles(directory, filePaths);
+      return { id, type, success: true, data: { success: true } };
+    }
+
     case 'api:git/commit': {
-      const { directory, message, addAll, files } = (payload || {}) as {
+      const { directory, message, addAll, files, stageFiles } = (payload || {}) as {
         directory?: string;
         message?: string;
         addAll?: boolean;
         files?: string[];
+        stageFiles?: string[];
       };
       if (!directory || !message) {
         return { id, type, success: false, error: 'Directory and message are required' };
       }
-      const result = await gitService.createGitCommit(directory, message, { addAll, files });
+      const result = await gitService.createGitCommit(directory, message, { addAll, files, stageFiles });
       return { id, type, success: true, data: result };
     }
 

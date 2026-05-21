@@ -1691,7 +1691,7 @@ export const ContextPanel: React.FC = () => {
     }
 
     if (activeTab.mode === 'diff' && activeTab.targetPath) {
-      setPendingDiffFile(activeTab.targetPath);
+      setPendingDiffFile(activeTab.targetPath, activeTab.stagedDiff);
     }
   }, [activeTab, directoryKey, setPendingDiffFile, setSelectedFilePath]);
 

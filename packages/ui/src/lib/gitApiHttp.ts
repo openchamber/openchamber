@@ -219,6 +219,52 @@ export async function revertGitFile(directory: string, filePath: string): Promis
   }
 }
 
+export async function stageGitFile(directory: string, filePath: string): Promise<void> {
+  await stageGitFiles(directory, [filePath]);
+}
+
+export async function stageGitFiles(directory: string, filePaths: string[]): Promise<void> {
+  const paths = filePaths.map((path) => path.trim()).filter(Boolean);
+
+  if (paths.length === 0) {
+    throw new Error('path is required to stage git changes');
+  }
+
+  const response = await fetch(buildUrl(`${API_BASE}/stage`, directory), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paths }),
+  });
+
+  if (!response.ok) {
+    const message = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(message.error || 'Failed to stage git changes');
+  }
+}
+
+export async function unstageGitFile(directory: string, filePath: string): Promise<void> {
+  await unstageGitFiles(directory, [filePath]);
+}
+
+export async function unstageGitFiles(directory: string, filePaths: string[]): Promise<void> {
+  const paths = filePaths.map((path) => path.trim()).filter(Boolean);
+
+  if (paths.length === 0) {
+    throw new Error('path is required to unstage git changes');
+  }
+
+  const response = await fetch(buildUrl(`${API_BASE}/unstage`, directory), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paths }),
+  });
+
+  if (!response.ok) {
+    const message = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(message.error || 'Failed to unstage git changes');
+  }
+}
+
 export async function isLinkedWorktree(directory: string): Promise<boolean> {
   if (!directory) {
     return false;
@@ -494,6 +540,7 @@ export async function createGitCommit(
       message,
       addAll: options.addAll ?? false,
       files: options.files,
+      stageFiles: options.stageFiles,
     }),
   });
   if (!response.ok) {

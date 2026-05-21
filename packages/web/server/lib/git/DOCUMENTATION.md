@@ -31,6 +31,8 @@ The following functions are exported and used by the web server:
 - `getFileDiff(directory, { path, staged })`: Get original and modified file contents for a single file (handles images as data URLs).
 - `collectDiffs(directory, files)`: Collect diff output for multiple files.
 - `revertFile(directory, filePath)`: Revert a file to HEAD state.
+- `stageFile(directory, filePath)`: Add one file path to the index.
+- `unstageFile(directory, filePath)`: Remove one file path from the index while preserving working-tree content.
 
 ### Branch Operations
 - `getBranches(directory)`: Get list of local and remote branches (filtered to active remote branches).
@@ -48,7 +50,7 @@ The following functions are exported and used by the web server:
 - `isLinkedWorktree(directory)`: Check if directory is a linked worktree (not primary).
 
 ### Commit and Remote Operations
-- `commit(directory, message, options)`: Create a commit (supports addAll or specific files).
+- `commit(directory, message, options)`: Create a commit from the current index. `options.stageFiles` may be provided with `options.files` by older callers to stage only selected unstaged rows before committing, but the shared Git panel now stages/unstages explicitly before commit.
 - `pull(directory, options)`: Pull changes from remote.
 - `push(directory, options)`: Push changes to remote (auto-sets upstream if needed).
 - `fetch(directory, options)`: Fetch changes from remote.
@@ -105,6 +107,11 @@ The following functions are internal helpers used by exported functions:
 - `mergeInProgress`: Object with `{ head, message }` if merge in progress.
 - `rebaseInProgress`: Object with `{ headName, onto }` if rebase in progress.
 
+### Staged and unstaged change handling
+- `status.files` exposes both `index` and `working_dir` codes. Shared UI uses these as separate scopes: staged rows are derived from non-empty `index` statuses, while unstaged rows are derived from `working_dir` statuses and untracked files.
+- A file with both staged and unstaged changes can appear in both UI sections. Staged rows request diffs with `staged: true`; unstaged rows request normal working-tree diffs.
+- The shared Git panel exposes explicit staging actions. Unstaged rows use `stageFile`, staged rows use `unstageFile`, and commits operate on the current staged index.
+- `stageFiles` remains supported for callers that need to stage a selected unstaged subset as part of commit. In that mode the server temporarily unstages unrelated index entries, stages `stageFiles`, commits from the index, then restores temporarily unstaged entries.
 ### Worktree Create/Remove Response
 - `head`: HEAD commit SHA.
 - `name`: Worktree name.

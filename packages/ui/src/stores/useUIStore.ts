@@ -25,6 +25,7 @@ type ContextPanelTab = {
   dedupeKey: string;
   label: string | null;
   readOnly: boolean;
+  stagedDiff: boolean;
   touchedAt: number;
 };
 
@@ -34,6 +35,7 @@ type ContextPanelTabDescriptor = {
   dedupeKey?: string | null;
   label?: string | null;
   readOnly?: boolean;
+  stagedDiff?: boolean;
 };
 
 type ContextPanelDirectoryState = {
@@ -204,6 +206,7 @@ const createContextPanelTab = (descriptor: ContextPanelTabDescriptor): ContextPa
     dedupeKey,
     label: normalizeContextTabLabel(descriptor.label),
     readOnly: descriptor.readOnly === true,
+    stagedDiff: descriptor.stagedDiff === true,
     touchedAt: Date.now(),
   };
 };
@@ -243,6 +246,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       dedupeKey?: unknown;
       label?: unknown;
       readOnly?: unknown;
+      stagedDiff?: unknown;
       touchedAt?: unknown;
     };
 
@@ -269,6 +273,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       dedupeKey,
       label: normalizeContextTabLabel(typeof candidate.label === 'string' ? candidate.label : null),
       readOnly: candidate.readOnly === true,
+      stagedDiff: candidate.stagedDiff === true,
       touchedAt: typeof candidate.touchedAt === 'number' && Number.isFinite(candidate.touchedAt)
         ? candidate.touchedAt
         : Date.now(),
@@ -327,6 +332,7 @@ const upsertContextPanelTab = (
           targetPath: nextTab.targetPath,
           dedupeKey: nextTab.dedupeKey,
           label: nextTab.label,
+          stagedDiff: nextTab.stagedDiff,
           touchedAt: Date.now(),
         }
       : tab));
@@ -504,6 +510,7 @@ interface UIStore {
   mainTabGuard: MainTabGuard | null;
   sidebarOpenBeforeFullscreenTab: boolean | null;
   pendingDiffFile: string | null;
+  pendingDiffStaged: boolean;
   pendingFileNavigation: PendingFileNavigation | null;
   pendingFileFocusPath: string | null;
   isMobile: boolean;
@@ -611,7 +618,7 @@ interface UIStore {
   setRightSidebarWidth: (width: number) => void;
   setRightSidebarTab: (tab: RightSidebarTab) => void;
   openContextPanelTab: (directory: string, tab: ContextPanelTabDescriptor) => void;
-  openContextDiff: (directory: string, filePath: string) => void;
+  openContextDiff: (directory: string, filePath: string, staged?: boolean) => void;
   openContextFile: (directory: string, filePath: string) => void;
   openContextFileAtLine: (directory: string, filePath: string, line: number, column?: number) => void;
   openContextOverview: (directory: string) => void;
@@ -635,10 +642,10 @@ interface UIStore {
   setSessionDropdownOpen: (open: boolean) => void;
   setActiveMainTab: (tab: MainTab) => void;
   setMainTabGuard: (guard: MainTabGuard | null) => void;
-  setPendingDiffFile: (filePath: string | null) => void;
+  setPendingDiffFile: (filePath: string | null, staged?: boolean) => void;
   setPendingFileNavigation: (navigation: PendingFileNavigation | null) => void;
   setPendingFileFocusPath: (path: string | null) => void;
-  navigateToDiff: (filePath: string) => void;
+  navigateToDiff: (filePath: string, staged?: boolean) => void;
   consumePendingDiffFile: () => string | null;
   setIsMobile: (isMobile: boolean) => void;
   toggleCommandPalette: () => void;
@@ -772,6 +779,7 @@ export const useUIStore = create<UIStore>()(
         mainTabGuard: null,
         sidebarOpenBeforeFullscreenTab: null,
         pendingDiffFile: null,
+        pendingDiffStaged: false,
         pendingFileNavigation: null,
         pendingFileFocusPath: null,
         isMobile: false,
@@ -975,15 +983,20 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
-        openContextDiff: (directory, filePath) => {
+        openContextDiff: (directory, filePath, staged = false) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           const normalizedFilePath = (filePath || '').trim();
           if (!normalizedDirectory || !normalizedFilePath) {
             return;
           }
 
-          get().openContextPanelTab(normalizedDirectory, { mode: 'diff', targetPath: normalizedFilePath });
-          get().setPendingDiffFile(normalizedFilePath);
+          get().openContextPanelTab(normalizedDirectory, {
+            mode: 'diff',
+            targetPath: normalizedFilePath,
+            dedupeKey: staged ? 'staged' : null,
+            stagedDiff: staged,
+          });
+          set({ pendingDiffFile: normalizedFilePath, pendingDiffStaged: staged });
         },
 
         openContextFile: (directory, filePath) => {
@@ -1334,8 +1347,8 @@ export const useUIStore = create<UIStore>()(
           set({ activeMainTab: tab });
         },
 
-        setPendingDiffFile: (filePath) => {
-          set({ pendingDiffFile: filePath });
+        setPendingDiffFile: (filePath, staged = false) => {
+          set({ pendingDiffFile: filePath, pendingDiffStaged: filePath ? staged : false });
         },
 
         setPendingFileNavigation: (navigation) => {
@@ -1346,18 +1359,18 @@ export const useUIStore = create<UIStore>()(
           set({ pendingFileFocusPath: path });
         },
 
-        navigateToDiff: (filePath) => {
+        navigateToDiff: (filePath, staged = false) => {
           const guard = get().mainTabGuard;
           if (guard && !guard('diff')) {
             return;
           }
-          set({ pendingDiffFile: filePath, activeMainTab: 'diff' });
+          set({ pendingDiffFile: filePath, pendingDiffStaged: staged, activeMainTab: 'diff' });
         },
 
         consumePendingDiffFile: () => {
           const { pendingDiffFile } = get();
           if (pendingDiffFile) {
-            set({ pendingDiffFile: null });
+            set({ pendingDiffFile: null, pendingDiffStaged: false });
           }
           return pendingDiffFile;
         },

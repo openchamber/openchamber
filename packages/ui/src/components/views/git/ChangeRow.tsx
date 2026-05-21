@@ -1,6 +1,5 @@
 import React, { useCallback, useMemo } from 'react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { Checkbox } from '@/components/ui/checkbox';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Icon } from "@/components/icon/Icon";
 import type { GitStatus } from '@/lib/api/types';
@@ -40,8 +39,9 @@ function describeChange(file: GitStatus['files'][number]): ChangeDescriptor {
 
 interface ChangeRowProps {
   file: GitStatus['files'][number];
-  checked: boolean;
-  onToggle: () => void;
+  actionLabel: string;
+  actionSymbol: '+' | '-';
+  onAction: () => void;
   onViewDiff: () => void;
   onRevert: () => void;
   isReverting: boolean;
@@ -52,8 +52,9 @@ interface ChangeRowProps {
 
 export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
   file,
-  checked,
-  onToggle,
+  actionLabel,
+  actionSymbol,
+  onAction,
   onViewDiff,
   onRevert,
   isReverting,
@@ -71,13 +72,22 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
     (event: React.KeyboardEvent) => {
       if (event.key === ' ') {
         event.preventDefault();
-        onToggle();
+        onAction();
       } else if (event.key === 'Enter') {
         event.preventDefault();
         onViewDiff();
       }
     },
-    [onToggle, onViewDiff]
+    [onAction, onViewDiff]
+  );
+
+  const handleActionClick = useCallback(
+    (event: React.MouseEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      onAction();
+    },
+    [onAction]
   );
 
   const handleRevertClick = useCallback(
@@ -98,14 +108,6 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
       onKeyDown={handleKeyDown}
       style={indentPx > 0 ? { paddingLeft: `${indentPx}px` } : undefined}
     >
-        <div className="flex size-5 shrink-0 items-center justify-center" onClick={(e) => { e.stopPropagation(); }}>
-          <Checkbox
-            size="sm"
-            checked={checked}
-            onChange={() => onToggle()}
-            ariaLabel={t('gitView.changes.selectFileAria', { path: file.path })}
-          />
-        </div>
         <span
           className="typography-micro font-semibold w-4 text-center uppercase"
           style={{ color: descriptor.color }}
@@ -147,6 +149,15 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
           <span className="text-muted-foreground mx-0.5">/</span>
           <span style={{ color: 'var(--status-error)' }}>-{deletions}</span>
         </span>
+        <button
+          type="button"
+          onClick={handleActionClick}
+          className="flex size-5 shrink-0 items-center justify-center rounded typography-micro font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]"
+          aria-label={actionLabel}
+          title={actionLabel}
+        >
+          {actionSymbol}
+        </button>
         <Tooltip>
           <TooltipTrigger asChild>
             <button

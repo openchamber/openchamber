@@ -67,6 +67,22 @@ export const createVSCodeGitAPI = (): GitAPI => ({
     await sendBridgeMessage('api:git/revert', { directory, path: filePath });
   },
 
+  stageGitFile: async (directory: string, filePath: string): Promise<void> => {
+    await sendBridgeMessage('api:git/stage', { directory, path: filePath });
+  },
+
+  stageGitFiles: async (directory: string, filePaths: string[]): Promise<void> => {
+    await sendBridgeMessage('api:git/stage', { directory, paths: filePaths });
+  },
+
+  unstageGitFile: async (directory: string, filePath: string): Promise<void> => {
+    await sendBridgeMessage('api:git/unstage', { directory, path: filePath });
+  },
+
+  unstageGitFiles: async (directory: string, filePaths: string[]): Promise<void> => {
+    await sendBridgeMessage('api:git/unstage', { directory, paths: filePaths });
+  },
+
   isLinkedWorktree: async (directory: string): Promise<boolean> => {
     return sendBridgeMessage<boolean>('api:git/worktree-type', { directory });
   },
@@ -182,6 +198,7 @@ export const createVSCodeGitAPI = (): GitAPI => ({
       message,
       addAll: options?.addAll,
       files: options?.files,
+      stageFiles: options?.stageFiles,
     });
   },
 

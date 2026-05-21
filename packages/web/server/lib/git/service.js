@@ -12,6 +12,7 @@ const execFileAsync = promisify(execFile);
 const gpgconfCandidates = ['gpgconf', '/opt/homebrew/bin/gpgconf', '/usr/local/bin/gpgconf'];
 let resolvedGitBinary = null;
 const worktreeBootstrapState = new Map();
+const gitIndexMutationQueues = new Map();
 
 const WORKTREE_BOOTSTRAP_PENDING = 'pending';
 const WORKTREE_BOOTSTRAP_READY = 'ready';
@@ -306,6 +307,40 @@ const normalizeDirectoryPath = (value) => {
 
   return trimmed;
 };
+
+const getGitIndexMutationQueueKey = (directory) => {
+  const normalized = normalizeDirectoryPath(directory);
+  if (!normalized) {
+    return '';
+  }
+  return path.resolve(normalized);
+};
+
+const withGitIndexMutationQueue = async (directory, task) => {
+  const key = getGitIndexMutationQueueKey(directory);
+  if (!key) {
+    return task();
+  }
+
+  const previous = gitIndexMutationQueues.get(key) || Promise.resolve();
+  const current = previous.catch(() => {}).then(task);
+  const tail = current.catch(() => {});
+  gitIndexMutationQueues.set(key, tail);
+
+  try {
+    return await current;
+  } finally {
+    if (gitIndexMutationQueues.get(key) === tail) {
+      gitIndexMutationQueues.delete(key);
+    }
+  }
+};
+
+const normalizeFilePathList = (paths) => Array.from(new Set(
+  (Array.isArray(paths) ? paths : [paths])
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+));
 
 const cleanBranchName = (branch) => {
   if (!branch) {
@@ -1732,14 +1767,30 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
   const fullPath = path.join(directoryPath, filePath);
   let modified = '';
   try {
-    const stat = await fsp.stat(fullPath);
-    if (stat.isFile()) {
+    if (staged) {
       if (isImage) {
-        // For images, read as binary and convert to data URL
-        const buffer = await fsp.readFile(fullPath);
-        modified = `data:${mimeType};base64,${buffer.toString('base64')}`;
+        const { stdout } = await execFileAsync(getGitBinary(), ['show', `:${filePath}`], {
+          cwd: directoryPath,
+          encoding: 'buffer',
+          windowsHide: true,
+          maxBuffer: 50 * 1024 * 1024,
+        });
+        if (stdout && stdout.length > 0) {
+          modified = `data:${mimeType};base64,${stdout.toString('base64')}`;
+        }
       } else {
-        modified = await fsp.readFile(fullPath, 'utf8');
+        modified = await git.show([`:${filePath}`]);
+      }
+    } else {
+      const stat = await fsp.stat(fullPath);
+      if (stat.isFile()) {
+        if (isImage) {
+          // For images, read as binary and convert to data URL
+          const buffer = await fsp.readFile(fullPath);
+          modified = `data:${mimeType};base64,${buffer.toString('base64')}`;
+        } else {
+          modified = await fsp.readFile(fullPath, 'utf8');
+        }
       }
     }
   } catch (error) {
@@ -1760,54 +1811,56 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
 }
 
 export async function revertFile(directory, filePath) {
-  const directoryPath = normalizeDirectoryPath(directory);
-  const git = await createGit(directoryPath);
-  const repoRoot = path.resolve(directoryPath);
-  const absoluteTarget = path.resolve(repoRoot, filePath);
+  return withGitIndexMutationQueue(directory, async () => {
+    const directoryPath = normalizeDirectoryPath(directory);
+    const git = await createGit(directoryPath);
+    const repoRoot = path.resolve(directoryPath);
+    const absoluteTarget = path.resolve(repoRoot, filePath);
 
-  if (!absoluteTarget.startsWith(repoRoot + path.sep) && absoluteTarget !== repoRoot) {
-    throw new Error('Invalid file path');
-  }
+    if (!absoluteTarget.startsWith(repoRoot + path.sep) && absoluteTarget !== repoRoot) {
+      throw new Error('Invalid file path');
+    }
 
-  const isTracked = await git
-    .raw(['ls-files', '--error-unmatch', filePath])
-    .then(() => true)
-    .catch(() => false);
+    const isTracked = await git
+      .raw(['ls-files', '--error-unmatch', filePath])
+      .then(() => true)
+      .catch(() => false);
 
-  if (!isTracked) {
-    try {
-      await git.raw(['clean', '-f', '-d', '--', filePath]);
-      return;
-    } catch (cleanError) {
+    if (!isTracked) {
       try {
-        await fsp.rm(absoluteTarget, { recursive: true, force: true });
+        await git.raw(['clean', '-f', '-d', '--', filePath]);
         return;
-      } catch (fsError) {
-        if (fsError && typeof fsError === 'object' && fsError.code === 'ENOENT') {
+      } catch (cleanError) {
+        try {
+          await fsp.rm(absoluteTarget, { recursive: true, force: true });
           return;
+        } catch (fsError) {
+          if (fsError && typeof fsError === 'object' && fsError.code === 'ENOENT') {
+            return;
+          }
+          console.error('Failed to remove untracked file during revert:', fsError);
+          throw fsError;
         }
-        console.error('Failed to remove untracked file during revert:', fsError);
-        throw fsError;
       }
     }
-  }
 
-  try {
-    await git.raw(['restore', '--staged', filePath]);
-  } catch (error) {
-    await git.raw(['reset', 'HEAD', '--', filePath]).catch(() => {});
-  }
-
-  try {
-    await git.raw(['restore', filePath]);
-  } catch (error) {
     try {
-      await git.raw(['checkout', '--', filePath]);
-    } catch (fallbackError) {
-      console.error('Failed to revert git file:', fallbackError);
-      throw fallbackError;
+      await git.raw(['restore', '--staged', filePath]);
+    } catch (error) {
+      await git.raw(['reset', 'HEAD', '--', filePath]).catch(() => {});
     }
-  }
+
+    try {
+      await git.raw(['restore', filePath]);
+    } catch (error) {
+      try {
+        await git.raw(['checkout', '--', filePath]);
+      } catch (fallbackError) {
+        console.error('Failed to revert git file:', fallbackError);
+        throw fallbackError;
+      }
+    }
+  });
 }
 
 export async function collectDiffs(directory, files = []) {
@@ -2096,16 +2149,66 @@ export async function fetch(directory, options = {}) {
   }
 }
 
-export async function commit(directory, message, options = {}) {
-  const git = await createGit(directory);
+export async function stageFile(directory, filePath) {
+  await stageFiles(directory, [filePath]);
+}
 
-  try {
+export async function stageFiles(directory, paths) {
+  if (!directory) {
+    throw new Error('directory and path are required for stageFile');
+  }
+
+  const filePaths = normalizeFilePathList(paths);
+  if (filePaths.length === 0) {
+    throw new Error('directory and path are required for stageFile');
+  }
+
+  await withGitIndexMutationQueue(directory, async () => {
+    const git = await createGit(normalizeDirectoryPath(directory));
+    await git.raw(['add', '--', ...filePaths]);
+  });
+}
+
+export async function unstageFile(directory, filePath) {
+  await unstageFiles(directory, [filePath]);
+}
+
+export async function unstageFiles(directory, paths) {
+  if (!directory) {
+    throw new Error('directory and path are required for unstageFile');
+  }
+
+  const filePaths = normalizeFilePathList(paths);
+  if (filePaths.length === 0) {
+    throw new Error('directory and path are required for unstageFile');
+  }
+
+  await withGitIndexMutationQueue(directory, async () => {
+    const git = await createGit(normalizeDirectoryPath(directory));
+    await git.raw(['restore', '--staged', '--', ...filePaths]).catch(async () => {
+      await git.raw(['reset', 'HEAD', '--', ...filePaths]);
+    });
+  });
+}
+
+export async function commit(directory, message, options = {}) {
+  return withGitIndexMutationQueue(directory, async () => {
+    const git = await createGit(directory);
+    let temporarilyUnstagedFiles = [];
+
+    try {
     const requestedFiles = Array.isArray(options.files)
       ? options.files
         .map((value) => String(value || '').trim())
         .filter(Boolean)
       : [];
+    const requestedStageFiles = Array.isArray(options.stageFiles)
+      ? options.stageFiles
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+      : null;
     let filesToCommit = requestedFiles;
+    let commitFromIndexOnly = false;
 
     if (options.addAll) {
       await git.add('.');
@@ -2118,15 +2221,32 @@ export async function commit(directory, message, options = {}) {
         throw new Error('No selected files are available to commit. Refresh git status and try again.');
       }
 
-      const filesNeedingAdd = filesToCommit.filter((filePath) => {
-        const fileStatus = fileStatusByPath.get(filePath);
-        if (!fileStatus) {
-          return false;
-        }
+      if (requestedStageFiles) {
+        commitFromIndexOnly = true;
+        const selectedFileSet = new Set(filesToCommit);
+        temporarilyUnstagedFiles = status.files
+          .filter((file) => {
+            const indexStatus = (file.index || '').trim();
+            return indexStatus && indexStatus !== '?' && !selectedFileSet.has(file.path);
+          })
+          .map((file) => file.path);
 
-        const alreadyFullyStaged = fileStatus.index !== ' ' && fileStatus.working_dir === ' ';
-        return !alreadyFullyStaged;
-      });
+        if (temporarilyUnstagedFiles.length > 0) {
+          await git.raw(['restore', '--staged', '--', ...temporarilyUnstagedFiles]);
+        }
+      }
+
+      const filesNeedingAdd = requestedStageFiles
+        ? requestedStageFiles.filter((filePath) => fileStatusByPath.has(filePath))
+        : filesToCommit.filter((filePath) => {
+          const fileStatus = fileStatusByPath.get(filePath);
+          if (!fileStatus) {
+            return false;
+          }
+
+          const alreadyFullyStaged = fileStatus.index !== ' ' && fileStatus.working_dir === ' ';
+          return !alreadyFullyStaged;
+        });
 
       if (filesNeedingAdd.length > 0) {
         await git.add(filesNeedingAdd);
@@ -2134,7 +2254,7 @@ export async function commit(directory, message, options = {}) {
     }
 
     const commitArgs =
-      !options.addAll && filesToCommit.length > 0
+      !commitFromIndexOnly && !options.addAll && filesToCommit.length > 0
         ? filesToCommit
         : undefined;
 
@@ -2152,16 +2272,28 @@ export async function commit(directory, message, options = {}) {
       result = await git.commit(message);
     }
 
-    return {
-      success: true,
-      commit: result.commit,
-      branch: result.branch,
-      summary: result.summary
-    };
-  } catch (error) {
-    console.error('Failed to commit:', error);
-    throw error;
-  }
+    if (temporarilyUnstagedFiles.length > 0) {
+      await git.add(temporarilyUnstagedFiles).catch((restoreError) => {
+        console.error('Failed to restore temporarily unstaged files:', restoreError);
+      });
+    }
+
+      return {
+        success: true,
+        commit: result.commit,
+        branch: result.branch,
+        summary: result.summary
+      };
+    } catch (error) {
+      if (temporarilyUnstagedFiles.length > 0) {
+        await git.add(temporarilyUnstagedFiles).catch((restoreError) => {
+          console.error('Failed to restore temporarily unstaged files after commit failure:', restoreError);
+        });
+      }
+      console.error('Failed to commit:', error);
+      throw error;
+    }
+  });
 }
 
 export async function getBranches(directory) {

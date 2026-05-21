@@ -11,6 +11,8 @@ export const createWebGitAPI = (): GitAPI => ({
   getGitDiff: gitApiHttp.getGitDiff,
   getGitFileDiff: gitApiHttp.getGitFileDiff,
   revertGitFile: gitApiHttp.revertGitFile,
+  stageGitFile: gitApiHttp.stageGitFile,
+  unstageGitFile: gitApiHttp.unstageGitFile,
   isLinkedWorktree: gitApiHttp.isLinkedWorktree,
   getGitBranches: gitApiHttp.getGitBranches,
   deleteGitBranch: gitApiHttp.deleteGitBranch as GitAPI['deleteGitBranch'],

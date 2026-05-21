@@ -2,7 +2,7 @@ import React from 'react';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useFireworksCelebration } from '@/contexts/FireworksContext';
-import type { GitIdentityProfile, CommitFileEntry } from '@/lib/api/types';
+import type { GitIdentityProfile, CommitFileEntry, GitStatus } from '@/lib/api/types';
 import { useGitIdentitiesStore } from '@/stores/useGitIdentitiesStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
@@ -56,6 +56,7 @@ import { ConflictDialog } from './git/ConflictDialog';
 import { StashDialog } from './git/StashDialog';
 import { InProgressOperationBanner } from './git/InProgressOperationBanner';
 import { BranchIntegrationSection, type OperationLogEntry } from './git/BranchIntegrationSection';
+import { createGitIndexMutationQueue, type GitIndexMutationDirection, type GitIndexMutationQueue } from './git/gitIndexMutationQueue';
 import type { GitRemote } from '@/lib/gitApi';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { cn } from '@/lib/utils';
@@ -74,13 +75,13 @@ type HistoryBranchDivider = {
 } | null;
 
 const GIT_ACTION_TAB_STORAGE_KEY = 'oc.git.actionTab';
+const GIT_RECONCILE_DELAY_MS = 15000;
 
 const isActionTab = (value: unknown): value is ActionTab =>
   value === 'commit' || value === 'branch' || value === 'pr';
 
 type GitViewSnapshot = {
   directory?: string;
-  selectedPaths: string[];
   commitMessage: string;
   generatedHighlights: string[];
 };
@@ -220,6 +221,17 @@ const gitViewSnapshots = new Map<string, GitViewSnapshot>();
 const normalizePath = (value?: string | null): string =>
   (value || '').replace(/\\/g, '/').replace(/\/+$/, '');
 
+const isStagedStatusFile = (file: GitStatus['files'][number]): boolean => {
+  const indexStatus = file.index?.trim();
+  return Boolean(indexStatus && indexStatus !== '?');
+};
+
+const isUnstagedStatusFile = (file: GitStatus['files'][number]): boolean => {
+  const workingStatus = file.working_dir?.trim();
+  const indexStatus = file.index?.trim();
+  return Boolean(workingStatus || indexStatus === '?');
+};
+
 export const GitView: React.FC = () => {
   const { t } = useI18n();
   const { git } = useRuntimeAPIs();
@@ -304,11 +316,109 @@ export const GitView: React.FC = () => {
   const fetchIdentity = useGitStore((state) => state.fetchIdentity);
   const prefetchDiffs = useGitStore((state) => state.prefetchDiffs);
   const setLogMaxCount = useGitStore((state) => state.setLogMaxCount);
+  const moveStatusPathsOptimistically = useGitStore((state) => state.moveStatusPathsOptimistically);
   const isMobile = useUIStore((state) => state.isMobile);
   const openContextDiff = useUIStore((state) => state.openContextDiff);
   const navigateToDiff = useUIStore((state) => state.navigateToDiff);
   const setRightSidebarOpen = useUIStore((state) => state.setRightSidebarOpen);
   const previousBootstrapStatusRef = React.useRef<'pending' | 'ready' | 'failed' | null>(null);
+  const gitReconcileTimeoutRef = React.useRef<number | null>(null);
+  const gitMutationFlushTimeoutRef = React.useRef<number | null>(null);
+  const flushQueuedGitMutationsRef = React.useRef<(() => void) | null>(null);
+
+  const clearScheduledGitReconcile = React.useCallback(() => {
+    if (gitReconcileTimeoutRef.current === null) {
+      return;
+    }
+
+    window.clearTimeout(gitReconcileTimeoutRef.current);
+    gitReconcileTimeoutRef.current = null;
+  }, []);
+
+  const scheduleGitReconcile = React.useCallback((directory: string) => {
+    clearScheduledGitReconcile();
+    gitReconcileTimeoutRef.current = window.setTimeout(() => {
+      gitReconcileTimeoutRef.current = null;
+      if (normalizePath(directory) !== normalizePath(currentDirectory)) {
+        return;
+      }
+      void fetchStatus(directory, git, { silent: true });
+    }, GIT_RECONCILE_DELAY_MS);
+  }, [clearScheduledGitReconcile, currentDirectory, fetchStatus, git]);
+
+  React.useEffect(() => clearScheduledGitReconcile, [clearScheduledGitReconcile]);
+
+  const clearScheduledGitMutationFlush = React.useCallback(() => {
+    if (gitMutationFlushTimeoutRef.current === null) {
+      return;
+    }
+
+    window.clearTimeout(gitMutationFlushTimeoutRef.current);
+    gitMutationFlushTimeoutRef.current = null;
+  }, []);
+
+  const scheduleGitMutationFlush = React.useCallback(() => {
+    if (gitMutationFlushTimeoutRef.current !== null) {
+      return;
+    }
+
+    gitMutationFlushTimeoutRef.current = window.setTimeout(() => {
+      gitMutationFlushTimeoutRef.current = null;
+      flushQueuedGitMutationsRef.current?.();
+    }, 0);
+  }, []);
+
+  const runGitIndexMutation = React.useCallback(async (
+    directory: string,
+    direction: GitIndexMutationDirection,
+    paths: string[]
+  ) => {
+    if (direction === 'stage') {
+      if (git.stageGitFiles) {
+        await git.stageGitFiles(directory, paths);
+        return;
+      }
+      await Promise.all(paths.map((filePath) => git.stageGitFile(directory, filePath)));
+      return;
+    }
+
+    if (git.unstageGitFiles) {
+      await git.unstageGitFiles(directory, paths);
+      return;
+    }
+    await Promise.all(paths.map((filePath) => git.unstageGitFile(directory, filePath)));
+  }, [git]);
+
+  const gitIndexMutationQueue = React.useMemo<GitIndexMutationQueue>(() => createGitIndexMutationQueue({
+    runMutation: ({ directory, direction, paths }) => runGitIndexMutation(directory, direction, paths),
+    onMutationComplete: ({ directory }) => scheduleGitReconcile(directory),
+    onMutationError: ({ directory, direction }, error) => {
+      scheduleGitReconcile(directory);
+      const fallback = direction === 'stage'
+        ? t('gitView.toast.stageFileFailed')
+        : t('gitView.toast.unstageFileFailed');
+      toast.error(error instanceof Error ? error.message : fallback);
+    },
+    onPathsComplete: (paths) => {
+      setMovingChangePaths((previous) => {
+        const updated = new Set(previous);
+        paths.forEach((path) => updated.delete(path));
+        return updated;
+      });
+    },
+    scheduleFlush: scheduleGitMutationFlush,
+  }), [runGitIndexMutation, scheduleGitMutationFlush, scheduleGitReconcile, t]);
+
+  React.useEffect(() => {
+    flushQueuedGitMutationsRef.current = gitIndexMutationQueue.flush;
+    return () => {
+      flushQueuedGitMutationsRef.current = null;
+    };
+  }, [gitIndexMutationQueue]);
+
+  React.useEffect(() => () => gitIndexMutationQueue.clear(), [gitIndexMutationQueue]);
+
+  React.useEffect(() => clearScheduledGitMutationFlush, [clearScheduledGitMutationFlush]);
 
   React.useEffect(() => {
     if (!currentDirectory) {
@@ -442,12 +552,12 @@ export const GitView: React.FC = () => {
     }
   }, []);
 
-  const [selectedPaths, setSelectedPaths] = React.useState<Set<string>>(
-    () => new Set(initialSnapshot?.selectedPaths ?? [])
-  );
-  const [hasUserAdjustedSelection, setHasUserAdjustedSelection] = React.useState(false);
   const [revertingPaths, setRevertingPaths] = React.useState<Set<string>>(new Set());
+  const [movingChangePaths, setMovingChangePaths] = React.useState<Set<string>>(new Set());
   const [isRevertingAll, setIsRevertingAll] = React.useState(false);
+  const [gitChangesSplitPercent, setGitChangesSplitPercent] = React.useState(45);
+  const [isResizingGitChangesSplit, setIsResizingGitChangesSplit] = React.useState(false);
+  const gitChangesSplitRef = React.useRef<HTMLDivElement | null>(null);
   const [integrateRefreshKey, setIntegrateRefreshKey] = React.useState(0);
   const [isGeneratingMessage, setIsGeneratingMessage] = React.useState(false);
   const [generatedHighlights, setGeneratedHighlights] = React.useState<string[]>(
@@ -662,11 +772,10 @@ export const GitView: React.FC = () => {
     if (!currentDirectory) return;
     gitViewSnapshots.set(currentDirectory, {
       directory: currentDirectory,
-      selectedPaths: Array.from(selectedPaths),
       commitMessage,
       generatedHighlights,
     });
-  }, [commitMessage, currentDirectory, selectedPaths, generatedHighlights]);
+  }, [commitMessage, currentDirectory, generatedHighlights]);
 
   React.useEffect(() => {
     loadProfiles();
@@ -844,6 +953,16 @@ export const GitView: React.FC = () => {
     return Array.from(unique.values()).sort((a, b) => a.path.localeCompare(b.path));
   }, [status]);
 
+  const stagedChangeEntries = React.useMemo(
+    () => changeEntries.filter(isStagedStatusFile),
+    [changeEntries]
+  );
+
+  const unstagedChangeEntries = React.useMemo(
+    () => changeEntries.filter(isUnstagedStatusFile),
+    [changeEntries]
+  );
+
   React.useEffect(() => {
     if (!currentDirectory || changeEntries.length === 0) {
       return;
@@ -860,7 +979,7 @@ export const GitView: React.FC = () => {
       orderedPaths.push(path);
     };
 
-    Array.from(selectedPaths).forEach(pushPath);
+    stagedChangeEntries.forEach((entry) => pushPath(entry.path));
     visibleChangePaths.forEach(pushPath);
     changeEntries.slice(0, GIT_DIFF_PRIORITY_BASELINE_LIMIT).forEach((entry) => pushPath(entry.path));
 
@@ -875,30 +994,7 @@ export const GitView: React.FC = () => {
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [changeEntries, currentDirectory, git, prefetchDiffs, selectedPaths, visibleChangePaths]);
-
-  React.useEffect(() => {
-    if (!status || changeEntries.length === 0) {
-      setSelectedPaths(new Set());
-      setHasUserAdjustedSelection(false);
-      return;
-    }
-
-    setSelectedPaths((previous) => {
-      const next = new Set<string>();
-      const previousSet = previous ?? new Set<string>();
-
-      for (const file of changeEntries) {
-        if (previousSet.has(file.path)) {
-          next.add(file.path);
-        } else if (!hasUserAdjustedSelection) {
-          next.add(file.path);
-        }
-      }
-
-      return next;
-    });
-  }, [status, changeEntries, hasUserAdjustedSelection]);
+  }, [changeEntries, currentDirectory, git, prefetchDiffs, stagedChangeEntries, visibleChangePaths]);
 
   const handleSyncAction = async (action: Exclude<SyncAction, null>, remote?: GitRemote) => {
     if (!currentDirectory) return;
@@ -1027,9 +1123,9 @@ export const GitView: React.FC = () => {
       return;
     }
 
-    const filesToCommit = Array.from(selectedPaths).sort();
+    const filesToCommit = stagedChangeEntries.map((file) => file.path).sort();
     if (filesToCommit.length === 0) {
-      toast.error(t('gitView.toast.selectFileToCommit'));
+      toast.error(t('gitView.toast.stageFileToCommit'));
       return;
     }
 
@@ -1039,11 +1135,10 @@ export const GitView: React.FC = () => {
     try {
       await git.createGitCommit(currentDirectory, commitMessage.trim(), {
         files: filesToCommit,
+        stageFiles: [],
       });
       toast.success(t('gitView.toast.commitCreated'));
       setCommitMessage('');
-      setSelectedPaths(new Set());
-      setHasUserAdjustedSelection(false);
       clearGeneratedHighlights();
 
       await refreshStatusAndBranches();
@@ -1120,19 +1215,20 @@ export const GitView: React.FC = () => {
 
   const handleGenerateCommitMessage = React.useCallback(async () => {
     if (!currentDirectory) return;
-    if (selectedPaths.size === 0) {
-      toast.error(t('gitView.toast.selectFileToDescribe'));
+    const selectedFilePaths = stagedChangeEntries.map((file) => file.path).sort();
+    if (selectedFilePaths.length === 0) {
+      toast.error(t('gitView.toast.stageFileToDescribe'));
       return;
     }
 
     console.error('[git-generation][browser] generate button clicked', {
       directory: currentDirectory,
-      selectedFiles: selectedPaths.size,
+      selectedFiles: selectedFilePaths.length,
     });
 
     setIsGeneratingMessage(true);
     try {
-      const { message } = await generateSessionCommitMessage(currentDirectory, Array.from(selectedPaths));
+      const { message } = await generateSessionCommitMessage(currentDirectory, selectedFilePaths);
       const subject = message.subject?.trim() ?? '';
       const highlights = Array.isArray(message.highlights) ? message.highlights : [];
 
@@ -1163,7 +1259,7 @@ export const GitView: React.FC = () => {
     } finally {
       setIsGeneratingMessage(false);
     }
-  }, [currentDirectory, selectedPaths, settingsGitmojiEnabled, gitmojiEmojis, scrollActionPanelToBottom, t]);
+  }, [currentDirectory, stagedChangeEntries, settingsGitmojiEnabled, gitmojiEmojis, scrollActionPanelToBottom, t]);
 
   const formatBlockingReason = (reason: ReturnType<typeof getMutationBlockingReasons>[number]): string => {
     if (reason.reason === 'attention') {
@@ -1477,7 +1573,7 @@ export const GitView: React.FC = () => {
     return globalIdentity ?? null;
   }, [currentIdentity, profiles, globalIdentity]);
 
-  const selectedCount = selectedPaths.size;
+  const stagedCount = stagedChangeEntries.length;
   const isBusy = isLoading || syncAction !== null || commitAction !== null;
   const currentBranch = status?.current ?? null;
   const canShowIntegrateCommitsSection = Boolean(
@@ -1571,29 +1667,57 @@ export const GitView: React.FC = () => {
   }, [baseBranch, currentBranch, currentDirectory, git, log, logMaxCountLocal]);
   // Keep these sections stable in layout; individual cards render placeholders when unavailable.
 
-  const toggleFileSelection = (path: string) => {
-    setSelectedPaths((previous) => {
+  const moveChangePaths = React.useCallback((paths: string[], direction: GitIndexMutationDirection) => {
+    if (!currentDirectory || paths.length === 0) return;
+    const uniquePaths = Array.from(new Set(paths));
+    setMovingChangePaths((previous) => {
       const next = new Set(previous);
-      if (next.has(path)) {
-        next.delete(path);
-      } else {
-        next.add(path);
-      }
+      uniquePaths.forEach((path) => next.add(path));
       return next;
     });
-    setHasUserAdjustedSelection(true);
-  };
+    moveStatusPathsOptimistically(currentDirectory, uniquePaths, direction);
 
-  const selectAll = () => {
-    const next = new Set(changeEntries.map((file) => file.path));
-    setSelectedPaths(next);
-    setHasUserAdjustedSelection(true);
-  };
+    gitIndexMutationQueue.enqueue({
+      directory: currentDirectory,
+      direction,
+      paths: new Set(uniquePaths),
+    });
 
-  const clearSelection = () => {
-    setSelectedPaths(new Set());
-    setHasUserAdjustedSelection(true);
-  };
+    scheduleGitMutationFlush();
+  }, [currentDirectory, gitIndexMutationQueue, moveStatusPathsOptimistically, scheduleGitMutationFlush]);
+
+  React.useEffect(() => {
+    if (!isResizingGitChangesSplit) {
+      return;
+    }
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const bounds = gitChangesSplitRef.current?.getBoundingClientRect();
+      if (!bounds || bounds.height <= 0) {
+        return;
+      }
+
+      const rawPercent = ((event.clientY - bounds.top) / bounds.height) * 100;
+      setGitChangesSplitPercent(Math.min(75, Math.max(25, rawPercent)));
+    };
+
+    const handlePointerUp = () => {
+      setIsResizingGitChangesSplit(false);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp, { once: true });
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+    };
+  }, [isResizingGitChangesSplit]);
+
+  const startGitChangesSplitResize = React.useCallback((event: React.PointerEvent) => {
+    setIsResizingGitChangesSplit(true);
+    event.preventDefault();
+  }, []);
 
   const handleRevertFile = React.useCallback(
     async (filePath: string) => {
@@ -2188,37 +2312,122 @@ export const GitView: React.FC = () => {
               preventOverscroll
             >
               {actionTab === 'commit' ? (
-                <div className="space-y-4">
+                <div className="flex h-full min-h-0 flex-col gap-3">
                   {(changeEntries?.length ?? 0) > 0 ? (
                     <>
-                      <ChangesSection
-                        maxListHeightClassName="max-h-[40vh]"
-                        changeEntries={changeEntries}
-                        onVisiblePathsChange={setVisibleChangePaths}
-                        selectedPaths={selectedPaths}
-                        diffStats={status?.diffStats}
-                        revertingPaths={revertingPaths}
-                        onToggleFile={toggleFileSelection}
-                        onSelectAll={selectAll}
-                        onClearSelection={clearSelection}
-                        onRevertAll={handleRevertAll}
-                        onViewDiff={(path) => {
-                          if (currentDirectory && !isMobile) {
-                            openContextDiff(currentDirectory, path);
-                            return;
-                          }
-                          navigateToDiff(path);
-                          if (isMobile) {
-                            setRightSidebarOpen(false);
-                          }
-                        }}
-                        onRevertFile={handleRevertFile}
-                        isRevertingAll={isRevertingAll}
-                        onOpenStashes={() => setIsStashesDialogOpen(true)}
-                      />
+                      <div className="min-h-0 flex-1 overflow-hidden">
+                        {stagedChangeEntries.length > 0 && unstagedChangeEntries.length > 0 ? (
+                          <div
+                            ref={gitChangesSplitRef}
+                            className="flex h-full min-h-[280px] flex-col overflow-hidden"
+                          >
+                          <div
+                            className="flex min-h-0 flex-col overflow-hidden"
+                            style={{ flex: `${gitChangesSplitPercent} 1 0%` }}
+                          >
+                            <ChangesSection
+                              title={t('gitView.changes.stagedTitle')}
+                              changeEntries={stagedChangeEntries}
+                              onVisiblePathsChange={setVisibleChangePaths}
+                              diffStats={status?.diffStats}
+                              revertingPaths={revertingPaths}
+                              actionSymbol="-"
+                              getActionLabel={(path) => t('gitView.changes.unstageFileAria', { path })}
+                              onActionFile={(path) => void moveChangePaths([path], 'unstage')}
+                              onActionAll={(paths) => void moveChangePaths(paths, 'unstage')}
+                              actionBusyPaths={movingChangePaths}
+                              onRevertAll={handleRevertAll}
+                              onViewDiff={(path) => {
+                                if (currentDirectory && !isMobile) {
+                                  openContextDiff(currentDirectory, path, true);
+                                  return;
+                                }
+                                navigateToDiff(path, true);
+                                if (isMobile) {
+                                  setRightSidebarOpen(false);
+                                }
+                              }}
+                              onRevertFile={handleRevertFile}
+                              isRevertingAll={isRevertingAll}
+                              onOpenStashes={() => setIsStashesDialogOpen(true)}
+                            />
+                          </div>
+                          <div
+                            className={cn(
+                              'group my-1 flex h-3 shrink-0 cursor-row-resize items-center justify-center rounded before:h-[3px] before:w-12 before:rounded-full before:bg-[var(--interactive-border)]/50 before:transition-colors hover:before:bg-[var(--interactive-border)]/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]',
+                              isResizingGitChangesSplit && 'bg-[var(--interactive-hover)]/60'
+                            )}
+                            onPointerDown={startGitChangesSplitResize}
+                            role="separator"
+                            aria-orientation="horizontal"
+                            aria-label={t('gitView.changes.resizeSplitAria')}
+                            tabIndex={0}
+                          />
+                          <div
+                            className="flex min-h-0 flex-col overflow-hidden"
+                            style={{ flex: `${100 - gitChangesSplitPercent} 1 0%` }}
+                          >
+                            <ChangesSection
+                              changeEntries={unstagedChangeEntries}
+                              onVisiblePathsChange={setVisibleChangePaths}
+                              diffStats={status?.diffStats}
+                              revertingPaths={revertingPaths}
+                              actionSymbol="+"
+                              getActionLabel={(path) => t('gitView.changes.stageFileAria', { path })}
+                              onActionFile={(path) => void moveChangePaths([path], 'stage')}
+                              onActionAll={(paths) => void moveChangePaths(paths, 'stage')}
+                              actionBusyPaths={movingChangePaths}
+                              onRevertAll={handleRevertAll}
+                              onViewDiff={(path) => {
+                                if (currentDirectory && !isMobile) {
+                                  openContextDiff(currentDirectory, path);
+                                  return;
+                                }
+                                navigateToDiff(path);
+                                if (isMobile) {
+                                  setRightSidebarOpen(false);
+                                }
+                              }}
+                              onRevertFile={handleRevertFile}
+                              isRevertingAll={isRevertingAll}
+                            />
+                          </div>
+                          </div>
+                        ) : (
+                          <ChangesSection
+                            title={stagedChangeEntries.length > 0 ? t('gitView.changes.stagedTitle') : undefined}
+                            changeEntries={stagedChangeEntries.length > 0 ? stagedChangeEntries : unstagedChangeEntries}
+                            onVisiblePathsChange={setVisibleChangePaths}
+                            diffStats={status?.diffStats}
+                            revertingPaths={revertingPaths}
+                            actionSymbol={stagedChangeEntries.length > 0 ? '-' : '+'}
+                            getActionLabel={(path) => stagedChangeEntries.length > 0
+                              ? t('gitView.changes.unstageFileAria', { path })
+                              : t('gitView.changes.stageFileAria', { path })}
+                            onActionFile={(path) => void moveChangePaths([path], stagedChangeEntries.length > 0 ? 'unstage' : 'stage')}
+                            onActionAll={(paths) => void moveChangePaths(paths, stagedChangeEntries.length > 0 ? 'unstage' : 'stage')}
+                            actionBusyPaths={movingChangePaths}
+                            onRevertAll={handleRevertAll}
+                            onViewDiff={(path) => {
+                              const isStagedOnlyPanel = stagedChangeEntries.length > 0;
+                              if (currentDirectory && !isMobile) {
+                                openContextDiff(currentDirectory, path, isStagedOnlyPanel);
+                                return;
+                              }
+                              navigateToDiff(path, isStagedOnlyPanel);
+                              if (isMobile) {
+                                setRightSidebarOpen(false);
+                              }
+                            }}
+                            onRevertFile={handleRevertFile}
+                            isRevertingAll={isRevertingAll}
+                            onOpenStashes={() => setIsStashesDialogOpen(true)}
+                          />
+                        )}
+                      </div>
 
                       <CommitSection
-                        selectedCount={selectedCount}
+                        stagedCount={stagedCount}
                         commitMessage={commitMessage}
                         onCommitMessageChange={setCommitMessage}
                         generatedHighlights={generatedHighlights}
