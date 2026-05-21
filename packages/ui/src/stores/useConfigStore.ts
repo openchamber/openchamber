@@ -1759,10 +1759,6 @@ export const useConfigStore = create<ConfigStore>()(
                             }
                         }
 
-                        if (hasProviderModel(providers, currentProviderId, currentModelId)) {
-                            return;
-                        }
-
                         // If settings has a default model, use it instead of agent's preferred
                         if (settingsDefaultModel) {
                             const parsed = parseModelString(settingsDefaultModel);
