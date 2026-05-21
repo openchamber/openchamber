@@ -29,8 +29,7 @@ import { PendingChangesBar } from './PendingChangesBar';
 import { useChatSurfaceMode } from './useChatSurfaceMode';
 import { MobileAgentButton } from './MobileAgentButton';
 import { MobileModelButton } from './MobileModelButton';
-import { MobileSessionStatusBar } from './MobileSessionStatusBar';
-import { useIsDedicatedMobileApp } from '@/apps/mobileAppContext';
+import { MobileSessionStatusBar, MobileSessionPanelTrigger } from './MobileSessionStatusBar';
 import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
@@ -425,7 +424,6 @@ type ComposerAttachmentControlsProps = {
     fileInputRef: React.RefObject<HTMLInputElement | null>;
     handleLocalFileSelect: (event: React.ChangeEvent<HTMLInputElement>) => void | Promise<void>;
     handlePickLocalFiles: () => void;
-    handleOpenCommandMenu: () => void;
     openIssuePicker: () => void;
     openPrPicker: () => void;
     onOpenSettings?: () => void;
@@ -434,14 +432,12 @@ type ComposerAttachmentControlsProps = {
 const ComposerAttachmentControls = React.memo(function ComposerAttachmentControls(props: ComposerAttachmentControlsProps) {
     const { t } = useI18n();
     const {
-        isMobile,
         isVSCode,
         footerIconButtonClass,
         iconSizeClass,
         fileInputRef,
         handleLocalFileSelect,
         handlePickLocalFiles,
-        handleOpenCommandMenu,
         openIssuePicker,
         openPrPicker,
         onOpenSettings,
@@ -449,27 +445,6 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
 
     return (
         <div className="flex items-center gap-x-1.5">
-            {isMobile ? (
-                <button
-                    type="button"
-                    className={cn(
-                        footerIconButtonClass,
-                        'rounded-md',
-                        'hover:bg-interactive-hover/40'
-                    )}
-                    onPointerDownCapture={(event) => {
-                        if (event.pointerType === 'touch') {
-                            event.preventDefault();
-                            event.stopPropagation();
-                        }
-                    }}
-                    onClick={handleOpenCommandMenu}
-                    title={t('chat.chatInput.actions.commands')}
-                    aria-label={t('chat.chatInput.actions.commands')}
-                >
-                    <Icon name="command" className={cn(iconSizeClass)} />
-                </button>
-            ) : null}
             <input
                 ref={fileInputRef}
                 type="file"
@@ -981,7 +956,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const getVisibleAgents = useConfigStore((state) => state.getVisibleAgents);
     const agents = getVisibleAgents();
     const isMobile = useUIStore((state) => state.isMobile);
-    const isDedicatedMobileApp = useIsDedicatedMobileApp();
     const inputBarOffset = useUIStore((state) => state.inputBarOffset);
     const persistChatDraft = useUIStore((state) => state.persistChatDraft);
     const inputSpellcheckEnabled = useUIStore((state) => state.inputSpellcheckEnabled);
@@ -2471,31 +2445,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         setShowFileMention(tab === 'agents' || tab === 'files');
     }, [applyAutocompletePrefix, isMobile, message, setAutocompleteTab, setCommandQuery, setMentionQuery, setShowCommandAutocomplete, setShowFileMention, setShowSkillAutocomplete]);
 
-    const handleOpenCommandMenu = React.useCallback(() => {
-        if (!isMobile) {
-            return;
-        }
-        const textarea = textareaRef.current;
-        if (textarea) {
-            try {
-                textarea.focus({ preventScroll: true });
-            } catch {
-                textarea.focus();
-            }
-            const len = textarea.value.length;
-            try {
-                textarea.setSelectionRange(len, len);
-            } catch {
-                // ignored
-            }
-        }
-        applyAutocompletePrefix('/');
-        setCommandQuery('');
-        setAutocompleteTab('commands');
-        setShowCommandAutocomplete(true);
-        setShowFileMention(false);
-        setShowSkillAutocomplete(false);
-    }, [applyAutocompletePrefix, isMobile, setAutocompleteTab, setCommandQuery, setShowCommandAutocomplete, setShowFileMention, setShowSkillAutocomplete]);
 
     const insertTextAtSelection = React.useCallback((text: string) => {
         if (!text) {
@@ -4145,6 +4094,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             <>
                                 <div className="flex w-full items-center justify-between gap-x-1.5">
                                     <div className="flex items-center gap-x-1.5">
+                                        <MobileSessionPanelTrigger
+                                            footerIconButtonClass={footerIconButtonClass}
+                                            iconSizeClass={iconSizeClass}
+                                        />
                                         <ComposerAttachmentControls
                                             isMobile={isMobile}
                                             isVSCode={isVSCode}
@@ -4153,7 +4106,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                             fileInputRef={fileInputRef}
                                             handleLocalFileSelect={handleLocalFileSelect}
                                             handlePickLocalFiles={handlePickLocalFiles}
-                                            handleOpenCommandMenu={handleOpenCommandMenu}
                                             openIssuePicker={openIssuePicker}
                                             openPrPicker={openPrPicker}
                                             onOpenSettings={onOpenSettings}
@@ -4211,7 +4163,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                         fileInputRef={fileInputRef}
                                         handleLocalFileSelect={handleLocalFileSelect}
                                         handlePickLocalFiles={handlePickLocalFiles}
-                                        handleOpenCommandMenu={handleOpenCommandMenu}
                                         openIssuePicker={openIssuePicker}
                                         openPrPicker={openPrPicker}
                                         onOpenSettings={onOpenSettings}
@@ -4253,9 +4204,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         )}
                     </div>
 
-                    {/* Mobile Session Status Bar — desktop responsive mobile only;
-                        the dedicated MobileApp root has its own header and no sidebars to bridge into. */}
-                    {isMobile && !isDedicatedMobileApp && <MobileSessionStatusBar />}
+                    {/* Mobile session panel — slide-up overlay anchored above the composer,
+                        toggled by MobileSessionPanelTrigger. Shown in both the desktop-responsive
+                        mobile path and the dedicated MobileApp root. */}
+                    {isMobile && <MobileSessionStatusBar />}
                 </div>
             </div>
         </form>

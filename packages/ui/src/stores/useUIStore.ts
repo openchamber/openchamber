@@ -605,6 +605,7 @@ interface UIStore {
   showSplitAssistantMessageActions: boolean;
   showMobileSessionStatusBar: boolean;
   isMobileSessionStatusBarCollapsed: boolean;
+  mobileSessionPanelOpen: boolean;
   isExpandedInput: boolean;
   reportUsage: boolean;
   shortcutOverrides: Record<string, ShortcutCombo>;
@@ -740,6 +741,7 @@ interface UIStore {
   setShowSplitAssistantMessageActions: (value: boolean) => void;
   setShowMobileSessionStatusBar: (value: boolean) => void;
   setIsMobileSessionStatusBarCollapsed: (value: boolean) => void;
+  setMobileSessionPanelOpen: (value: boolean) => void;
   viewPagerPage: 'left' | 'center' | 'right';
   setViewPagerPage: (page: 'left' | 'center' | 'right') => void;
   toggleExpandedInput: () => void;
@@ -869,6 +871,7 @@ export const useUIStore = create<UIStore>()(
         showSplitAssistantMessageActions: false,
         showMobileSessionStatusBar: true,
         isMobileSessionStatusBarCollapsed: false,
+        mobileSessionPanelOpen: false,
         isExpandedInput: false,
         reportUsage: true,
         shortcutOverrides: {},
@@ -1946,6 +1949,9 @@ export const useUIStore = create<UIStore>()(
         },
         setIsMobileSessionStatusBarCollapsed: (value) => {
           set({ isMobileSessionStatusBarCollapsed: value });
+        },
+        setMobileSessionPanelOpen: (value) => {
+          set({ mobileSessionPanelOpen: value });
         },
         setReportUsage: (value) => {
           set({ reportUsage: value });
