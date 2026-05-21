@@ -7,11 +7,17 @@ import { parse as parseJsonc } from 'jsonc-parser';
 const OPENCODE_CONFIG_DIR = path.join(os.homedir(), '.config', 'opencode');
 const AGENT_DIR = path.join(OPENCODE_CONFIG_DIR, 'agents');
 const COMMAND_DIR = path.join(OPENCODE_CONFIG_DIR, 'commands');
+const GLOBAL_SNIPPET_DIR = path.join(OPENCODE_CONFIG_DIR, 'snippet');
+const GLOBAL_SNIPPET_DIR_ALT = path.join(OPENCODE_CONFIG_DIR, 'snippets');
 const CONFIG_FILE = path.join(OPENCODE_CONFIG_DIR, 'config.json');
 const CUSTOM_CONFIG_FILE = process.env.OPENCODE_CONFIG
   ? path.resolve(process.env.OPENCODE_CONFIG)
   : null;
 const PROMPT_FILE_PATTERN = /^\{file:(.+)\}$/i;
+const SNIPPET_EXTENSION = '.md';
+const SNIPPET_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,79}$/i;
+const HASHTAG_PATTERN = /#([a-z0-9_-]+)/gi;
+const MAX_SNIPPET_EXPANSION_COUNT = 15;
 
 // Scope types (shared by agents and commands)
 export const AGENT_SCOPE = {
@@ -26,6 +32,17 @@ export const COMMAND_SCOPE = {
 
 export type AgentScope = typeof AGENT_SCOPE[keyof typeof AGENT_SCOPE];
 export type CommandScope = typeof COMMAND_SCOPE[keyof typeof COMMAND_SCOPE];
+
+export type SnippetScope = 'global' | 'project';
+
+export type Snippet = {
+  name: string;
+  content: string;
+  aliases: string[];
+  description?: string;
+  filePath: string;
+  source: SnippetScope;
+};
 
 export type ConfigSources = {
   md: { exists: boolean; path: string | null; fields: string[]; scope?: AgentScope | CommandScope | null };
@@ -261,6 +278,174 @@ const getCommandWritePath = (commandName: string, workingDirectory?: string, req
     scope: COMMAND_SCOPE.USER, 
     path: getUserCommandPath(commandName) 
   };
+};
+
+// ============== SNIPPET HELPERS ==============
+
+const getProjectSnippetDirs = (workingDirectory?: string): Array<{ dir: string; source: SnippetScope }> => {
+  if (!workingDirectory) return [];
+  return [
+    { dir: path.join(workingDirectory, '.opencode', 'snippets'), source: 'project' },
+    { dir: path.join(workingDirectory, '.opencode', 'snippet'), source: 'project' },
+  ];
+};
+
+const getGlobalSnippetDirs = (): Array<{ dir: string; source: SnippetScope }> => [
+  { dir: GLOBAL_SNIPPET_DIR_ALT, source: 'global' },
+  { dir: GLOBAL_SNIPPET_DIR, source: 'global' },
+];
+
+const assertValidSnippetName = (name: string): void => {
+  if (typeof name !== 'string' || !SNIPPET_NAME_PATTERN.test(name)) {
+    throw new Error('Snippet name must use letters, numbers, dashes, or underscores');
+  }
+};
+
+const normalizeSnippetAliases = (frontmatter: Record<string, unknown>): string[] => {
+  const raw = frontmatter.aliases ?? frontmatter.alias;
+  if (!raw) return [];
+  const aliases = Array.isArray(raw) ? raw : [raw];
+  return aliases.map((alias) => String(alias).trim()).filter(Boolean);
+};
+
+const loadSnippetFile = (dir: string, filename: string, source: SnippetScope): Snippet | null => {
+  const name = path.basename(filename, SNIPPET_EXTENSION);
+  if (!SNIPPET_NAME_PATTERN.test(name)) return null;
+  const filePath = path.join(dir, filename);
+  const { frontmatter, body } = parseMdFile(filePath);
+  return {
+    name,
+    content: body,
+    aliases: normalizeSnippetAliases(frontmatter),
+    description: typeof frontmatter.description === 'string' ? frontmatter.description : undefined,
+    filePath,
+    source,
+  };
+};
+
+const registerSnippet = (registry: Map<string, Snippet>, snippet: Snippet): void => {
+  const key = snippet.name.toLowerCase();
+  const existing = registry.get(key);
+  if (existing) {
+    for (const alias of existing.aliases) registry.delete(alias.toLowerCase());
+  }
+  registry.set(key, snippet);
+  for (const alias of snippet.aliases) {
+    if (SNIPPET_NAME_PATTERN.test(alias)) registry.set(alias.toLowerCase(), snippet);
+  }
+};
+
+const loadSnippetRegistry = (workingDirectory?: string): Map<string, Snippet> => {
+  const registry = new Map<string, Snippet>();
+  for (const { dir, source } of [...getGlobalSnippetDirs(), ...getProjectSnippetDirs(workingDirectory)]) {
+    if (!fs.existsSync(dir)) continue;
+    for (const filename of fs.readdirSync(dir)) {
+      if (!filename.endsWith(SNIPPET_EXTENSION)) continue;
+      try {
+        const snippet = loadSnippetFile(dir, filename, source);
+        if (snippet) registerSnippet(registry, snippet);
+      } catch (error) {
+        console.warn(`[OpenChamber][VSCode] Failed to load snippet ${path.join(dir, filename)}:`, error);
+      }
+    }
+  }
+  return registry;
+};
+
+const listUniqueSnippets = (registry: Map<string, Snippet>): Snippet[] => {
+  const seen = new Set<string>();
+  const snippets: Snippet[] = [];
+  for (const snippet of registry.values()) {
+    const key = `${snippet.source}:${snippet.filePath}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    snippets.push(snippet);
+  }
+  return snippets.sort((a, b) => a.name.localeCompare(b.name));
+};
+
+const getWritableSnippetDir = (scope: SnippetScope, workingDirectory?: string): string => {
+  if (scope === 'project') {
+    if (!workingDirectory) throw new Error('Project directory is required for project snippets');
+    const preferred = path.join(workingDirectory, '.opencode', 'snippet');
+    const alternate = path.join(workingDirectory, '.opencode', 'snippets');
+    return fs.existsSync(alternate) && !fs.existsSync(preferred) ? alternate : preferred;
+  }
+  return fs.existsSync(GLOBAL_SNIPPET_DIR_ALT) && !fs.existsSync(GLOBAL_SNIPPET_DIR)
+    ? GLOBAL_SNIPPET_DIR_ALT
+    : GLOBAL_SNIPPET_DIR;
+};
+
+const findSnippetByName = (name: string, workingDirectory?: string): Snippet | null => {
+  assertValidSnippetName(name);
+  return loadSnippetRegistry(workingDirectory).get(name.toLowerCase()) ?? null;
+};
+
+const writeSnippetFile = (filePath: string, config: Record<string, unknown>): void => {
+  const aliases = Array.isArray(config.aliases)
+    ? config.aliases.map((alias) => String(alias).trim()).filter(Boolean)
+    : [];
+  const frontmatter: Record<string, unknown> = {};
+  if (aliases.length > 0) frontmatter.aliases = aliases;
+  if (typeof config.description === 'string' && config.description.trim()) {
+    frontmatter.description = config.description.trim();
+  }
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  writeMdFile(filePath, frontmatter, typeof config.content === 'string' ? config.content : '');
+};
+
+const parseSnippetBlocks = (content: string): { inline: string; prepend: string[]; append: string[] } => {
+  const blocks = { prepend: [] as string[], append: [] as string[] };
+  let inline = content;
+  for (const type of ['prepend', 'append'] as const) {
+    const regex = new RegExp(`<${type}>([\\s\\S]*?)(?:<\\/${type}>|$)`, 'gi');
+    inline = inline.replace(regex, (_match, value: string) => {
+      const normalized = String(value).trim();
+      if (normalized) blocks[type].push(normalized);
+      return '';
+    });
+  }
+  inline = inline.replace(/<inject>[\s\S]*?(?:<\/inject>|$)/gi, '').trim();
+  return { inline, prepend: blocks.prepend, append: blocks.append };
+};
+
+const expandSnippetText = (
+  text: string,
+  registry: Map<string, Snippet>,
+  expansionCounts: Map<string, number>,
+  collector: { prepend: string[]; append: string[] },
+): string => {
+  let expanded = text;
+  let changed = true;
+
+  while (changed) {
+    const previous = expanded;
+    let loopDetected = false;
+    HASHTAG_PATTERN.lastIndex = 0;
+
+    expanded = expanded.replace(HASHTAG_PATTERN, (match, name: string, offset: number, input: string) => {
+      if (name.toLowerCase() === 'skill' && input[offset + match.length] === '(') return match;
+      const snippet = registry.get(name.toLowerCase());
+      if (!snippet) return match;
+
+      const key = snippet.name.toLowerCase();
+      const count = (expansionCounts.get(key) || 0) + 1;
+      if (count > MAX_SNIPPET_EXPANSION_COUNT) {
+        loopDetected = true;
+        return match;
+      }
+      expansionCounts.set(key, count);
+
+      const parsed = parseSnippetBlocks(snippet.content);
+      for (const block of parsed.prepend) collector.prepend.push(expandSnippetText(block, registry, expansionCounts, collector));
+      for (const block of parsed.append) collector.append.push(expandSnippetText(block, registry, expansionCounts, collector));
+      return expandSnippetText(parsed.inline, registry, expansionCounts, collector);
+    });
+
+    changed = expanded !== previous && !loopDetected;
+  }
+
+  return expanded;
 };
 
 const isPromptFileReference = (value: unknown): value is string => {
@@ -1282,6 +1467,48 @@ export const deleteCommand = (commandName: string, workingDirectory?: string) =>
   if (!deleted) {
     throw new Error(`Command "${commandName}" not found`);
   }
+};
+
+export const listSnippets = (workingDirectory?: string): Snippet[] => {
+  return listUniqueSnippets(loadSnippetRegistry(workingDirectory));
+};
+
+export const getSnippet = (name: string, workingDirectory?: string): Snippet | null => {
+  return findSnippetByName(name, workingDirectory);
+};
+
+export const createSnippet = (
+  name: string,
+  config: Record<string, unknown>,
+  workingDirectory?: string,
+  scope: SnippetScope = 'global',
+): Snippet | null => {
+  assertValidSnippetName(name);
+  const dir = getWritableSnippetDir(scope, workingDirectory);
+  const filePath = path.join(dir, `${name}${SNIPPET_EXTENSION}`);
+  if (fs.existsSync(filePath)) throw new Error(`Snippet "${name}" already exists`);
+  writeSnippetFile(filePath, config || {});
+  return getSnippet(name, workingDirectory);
+};
+
+export const updateSnippet = (name: string, updates: Record<string, unknown>, workingDirectory?: string): Snippet | null => {
+  const existing = findSnippetByName(name, workingDirectory);
+  if (!existing) throw new Error(`Snippet "${name}" not found`);
+  writeSnippetFile(existing.filePath, { ...existing, ...(updates || {}) });
+  return getSnippet(name, workingDirectory);
+};
+
+export const deleteSnippet = (name: string, workingDirectory?: string): void => {
+  const existing = findSnippetByName(name, workingDirectory);
+  if (!existing) throw new Error(`Snippet "${name}" not found`);
+  fs.unlinkSync(existing.filePath);
+};
+
+export const expandSnippets = (text: string, workingDirectory?: string): string => {
+  const registry = loadSnippetRegistry(workingDirectory);
+  const collector = { prepend: [] as string[], append: [] as string[] };
+  const expanded = expandSnippetText(text || '', registry, new Map(), collector).trim();
+  return [...collector.prepend, expanded, ...collector.append].filter(Boolean).join('\n\n');
 };
 
 // ============== SKILL SCOPE HELPERS ==============

@@ -315,6 +315,16 @@ const headersToRecord = (headers: HeadersInit | undefined): Record<string, strin
   return result;
 };
 
+const getRequestDirectoryHint = (url: URL, init?: RequestInit): string | undefined => {
+  const queryDirectory = url.searchParams.get('directory') || undefined;
+  if (queryDirectory) return queryDirectory;
+  const headers = headersToRecord(init?.headers);
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === 'x-opencode-directory') return value;
+  }
+  return undefined;
+};
+
 const decodeBase64 = (value: string): Uint8Array => {
   const binary = atob(value);
   const bytes = new Uint8Array(binary.length);
@@ -754,6 +764,46 @@ const handleLocalApiRequest = async (url: URL, init?: RequestInit) => {
     const directory = queryDirectory || headerDirectory;
     try {
       const data = await sendBridgeMessage('api:config/mcp', { method: verb, name, body, directory });
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  if (pathname === '/api/config/snippets') {
+    const verb = ((init?.method || 'GET') as string).toUpperCase();
+    const directory = getRequestDirectoryHint(url, init);
+    try {
+      const data = await sendBridgeMessage('api:config/snippets', { method: verb, directory });
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  if (pathname === '/api/config/snippets/expand') {
+    const verb = ((init?.method || 'POST') as string).toUpperCase();
+    const body = init?.body ? JSON.parse(init.body as string) : {};
+    const directory = getRequestDirectoryHint(url, init);
+    try {
+      const data = await sendBridgeMessage('api:config/snippets', { method: verb, body, directory });
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  if (pathname.startsWith('/api/config/snippets/')) {
+    const encodedName = pathname.slice('/api/config/snippets/'.length);
+    const name = decodeURIComponent(encodedName);
+    const verb = ((init?.method || 'GET') as string).toUpperCase();
+    const body = init?.body ? JSON.parse(init.body as string) : {};
+    const directory = getRequestDirectoryHint(url, init);
+    try {
+      const data = await sendBridgeMessage('api:config/snippets', { method: verb, name, body, directory });
       return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
