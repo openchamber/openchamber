@@ -151,6 +151,7 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
   const openaiCompatibleVoice = useConfigStore((state) => state.openaiCompatibleVoice);
   const openaiCompatibleUrl = useConfigStore((state) => state.openaiCompatibleUrl);
   const openaiCompatibleTtsModel = useConfigStore((state) => state.openaiCompatibleTtsModel);
+  const openaiCompatibleApiKey = useConfigStore((state) => state.openaiCompatibleApiKey);
 
   const shouldCheckOpenAIAvailability = voiceModeEnabled && (voiceProvider === 'openai' || voiceProvider === 'openai-compatible');
   const shouldCheckSayAvailability = voiceModeEnabled && voiceProvider === 'say';
@@ -773,6 +774,7 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
         language: sttLanguage || undefined,
         silenceThresholdDb: sttSilenceThresholdDb,
         silenceHoldMs: sttSilenceHoldMs,
+        apiKey: openaiCompatibleApiKey || undefined,
       });
       try {
         await audioStreamService.startListening(language, handleSpeechResult, handleSpeechError);

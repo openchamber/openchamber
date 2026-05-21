@@ -152,6 +152,8 @@ export const VoiceSettings: React.FC = () => {
     const setOpenaiApiKey = useConfigStore((state) => state.setOpenaiApiKey);
     const openaiCompatibleUrl = useConfigStore((state) => state.openaiCompatibleUrl);
     const setOpenaiCompatibleUrl = useConfigStore((state) => state.setOpenaiCompatibleUrl);
+    const openaiCompatibleApiKey = useConfigStore((state) => state.openaiCompatibleApiKey);
+    const setOpenaiCompatibleApiKey = useConfigStore((state) => state.setOpenaiCompatibleApiKey);
     const openaiCompatibleVoice = useConfigStore((state) => state.openaiCompatibleVoice);
     const setOpenaiCompatibleVoice = useConfigStore((state) => state.setOpenaiCompatibleVoice);
     const openaiCompatibleTtsModel = useConfigStore((state) => state.openaiCompatibleTtsModel);
@@ -445,6 +447,7 @@ export const VoiceSettings: React.FC = () => {
                     model: openaiCompatibleTtsModel || undefined,
                     speed: speechRate,
                     baseURL: openaiCompatibleUrl,
+                    apiKey: openaiCompatibleApiKey || undefined,
                 }),
             });
 
@@ -474,7 +477,7 @@ export const VoiceSettings: React.FC = () => {
         } catch {
             setIsCompatiblePreviewPlaying(false);
         }
-    }, [openaiCompatibleUrl, openaiCompatibleVoice, openaiCompatibleTtsModel, speechRate, compatiblePreviewAudio, t]);
+    }, [openaiCompatibleUrl, openaiCompatibleVoice, openaiCompatibleTtsModel, openaiCompatibleApiKey, speechRate, compatiblePreviewAudio, t]);
 
     useEffect(() => {
         return () => {
@@ -631,6 +634,30 @@ export const VoiceSettings: React.FC = () => {
                                                 <button
                                                     type="button"
                                                     onClick={() => setOpenaiCompatibleUrl('')}
+                                                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                                >
+                                                    <Icon name="close" className="w-3.5 h-3.5" />
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <span className="typography-ui-label text-foreground">API Key</span>
+                                        <span className="typography-meta ml-2 text-muted-foreground">
+                                            Optional
+                                        </span>
+                                        <div className="relative mt-1.5 max-w-xs">
+                                            <input
+                                                type="password"
+                                                value={openaiCompatibleApiKey}
+                                                onChange={(e) => setOpenaiCompatibleApiKey(e.target.value)}
+                                                placeholder="sk-..."
+                                                className="w-full h-7 rounded-lg border border-input bg-transparent px-2 typography-ui-label text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/70"
+                                            />
+                                            {openaiCompatibleApiKey && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setOpenaiCompatibleApiKey('')}
                                                     className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                                                 >
                                                     <Icon name="close" className="w-3.5 h-3.5" />

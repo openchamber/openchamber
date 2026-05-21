@@ -550,6 +550,7 @@ interface ConfigStore {
     openaiVoice: string;
     openaiApiKey: string;
     openaiCompatibleUrl: string;
+    openaiCompatibleApiKey: string;
     openaiCompatibleVoice: string;
     openaiCompatibleTtsModel: string;
     // STT (speech-to-text) settings
@@ -744,6 +745,14 @@ export const useConfigStore = create<ConfigStore>()(
                 openaiCompatibleUrl: (() => {
                     if (typeof window !== 'undefined') {
                         const saved = localStorage.getItem('openaiCompatibleUrl');
+                        if (saved) return saved;
+                    }
+                    return '';
+                })(),
+                // OpenAI-compatible custom server API key
+                openaiCompatibleApiKey: (() => {
+                    if (typeof window !== 'undefined') {
+                        const saved = localStorage.getItem('openaiCompatibleApiKey');
                         if (saved) return saved;
                     }
                     return '';
@@ -1883,6 +1892,13 @@ export const useConfigStore = create<ConfigStore>()(
                     set({ openaiCompatibleUrl: url });
                     if (typeof window !== 'undefined') {
                         localStorage.setItem('openaiCompatibleUrl', url);
+                    }
+                },
+
+                setOpenaiCompatibleApiKey: (apiKey: string) => {
+                    set({ openaiCompatibleApiKey: apiKey });
+                    if (typeof window !== 'undefined') {
+                        localStorage.setItem('openaiCompatibleApiKey', apiKey);
                     }
                 },
 
