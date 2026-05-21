@@ -28,6 +28,7 @@ import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { useDeviceInfo } from '@/lib/device';
 import { createWorktreeSessionForNewBranch } from '@/lib/worktreeSessionCreator';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import type { GitHubIssue, GitHubIssueComment, GitHubIssuesListResult, GitHubIssueSummary, GitHubRepoSelector } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 
@@ -101,6 +102,10 @@ export function GitHubIssuePickerDialog({
   const [isLoadingMore, setIsLoadingMore] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
+  const directNumber = React.useMemo(() => parseIssueNumber(query), [query]);
+  const debouncedQuery = useDebouncedValue(query, 350);
+  const isTextSearch = debouncedQuery.trim().length > 0 && !directNumber;
+
   const refresh = React.useCallback(async () => {
     if (!projectDirectory) {
       setResult(null);
@@ -139,6 +144,35 @@ export function GitHubIssuePickerDialog({
     }
   }, [github, githubAuthChecked, githubAuthStatus, projectDirectory, t]);
 
+  React.useEffect(() => {
+    if (!open || !projectDirectory) return;
+    if (githubAuthChecked && githubAuthStatus?.connected === false) return;
+    if (!github?.issuesList) return;
+    if (!debouncedQuery.trim()) return;
+
+    const controller = new AbortController();
+    setIsLoading(true);
+    setError(null);
+
+    github.issuesList(projectDirectory, { page: 1, query: debouncedQuery.trim() })
+      .then((next) => {
+        if (controller.signal.aborted) return;
+        setResult(next);
+        setIssues(next.issues ?? []);
+        setPage(next.page ?? 1);
+        setHasMore(Boolean(next.hasMore));
+      })
+      .catch((e) => {
+        if (controller.signal.aborted) return;
+        setError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setIsLoading(false);
+      });
+
+    return () => controller.abort();
+  }, [open, projectDirectory, github, githubAuthChecked, githubAuthStatus, debouncedQuery, directNumber, t]);
+
   const loadMore = React.useCallback(async () => {
     if (!projectDirectory) return;
     if (!github?.issuesList) return;
@@ -148,7 +182,9 @@ export function GitHubIssuePickerDialog({
     setIsLoadingMore(true);
     try {
       const nextPage = page + 1;
-      const next = await github.issuesList(projectDirectory, { page: nextPage });
+      const next = isTextSearch
+        ? await github.issuesList(projectDirectory, { page: nextPage, query: debouncedQuery.trim() })
+        : await github.issuesList(projectDirectory, { page: nextPage });
       setResult(next);
       setIssues((prev) => [...prev, ...(next.issues ?? [])]);
       setPage(next.page ?? nextPage);
@@ -159,7 +195,7 @@ export function GitHubIssuePickerDialog({
     } finally {
       setIsLoadingMore(false);
     }
-  }, [github, hasMore, isLoading, isLoadingMore, page, projectDirectory, t]);
+  }, [github, hasMore, isLoading, isLoadingMore, isTextSearch, debouncedQuery, page, projectDirectory, t]);
 
   React.useEffect(() => {
     if (!open) {
@@ -195,17 +231,6 @@ export function GitHubIssuePickerDialog({
     setSettingsPage('github');
     setSettingsDialogOpen(true);
   }, [setSettingsDialogOpen, setSettingsPage]);
-
-  const filtered = React.useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return issues;
-    return issues.filter((issue) => {
-      if (String(issue.number) === q.replace(/^#/, '')) return true;
-      return issue.title.toLowerCase().includes(q);
-    });
-  }, [issues, query]);
-
-  const directNumber = React.useMemo(() => parseIssueNumber(query), [query]);
 
   const resolveDefaultAgentName = React.useCallback((): string | undefined => {
     const configState = useConfigStore.getState();
@@ -552,11 +577,11 @@ export function GitHubIssuePickerDialog({
             </div>
           ) : null}
 
-          {filtered.length === 0 && !isLoading && connected && github && projectDirectory ? (
-            <div className="text-center text-muted-foreground py-8">{query ? t('session.githubIssuePicker.empty.noIssuesFound') : t('session.githubIssuePicker.empty.noOpenIssuesFound')}</div>
+          {issues.length === 0 && !isLoading && connected && github && projectDirectory ? (
+            <div className="text-center text-muted-foreground py-8">{debouncedQuery.trim() ? t('session.githubIssuePicker.empty.noIssuesFound') : t('session.githubIssuePicker.empty.noOpenIssuesFound')}</div>
           ) : null}
 
-          {filtered.map((issue) => (
+          {issues.map((issue) => (
             <div
               key={`${issue.sourceRepo?.owner ?? ''}-${issue.sourceRepo?.repo ?? ''}-${issue.number}`}
               className={cn(

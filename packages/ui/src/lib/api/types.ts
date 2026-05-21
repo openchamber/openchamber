@@ -1009,14 +1009,14 @@ export interface GitHubAPI {
   prMerge(payload: GitHubPullRequestMergeInput): Promise<GitHubPullRequestMergeResult>;
   prReady(payload: GitHubPullRequestReadyInput): Promise<GitHubPullRequestReadyResult>;
 
-  prsList(directory: string, options?: { page?: number }): Promise<GitHubPullRequestsListResult>;
+  prsList(directory: string, options?: { page?: number; query?: string }): Promise<GitHubPullRequestsListResult>;
   prContext(
     directory: string,
     number: number,
     options?: { includeDiff?: boolean; includeCheckDetails?: boolean; sourceRepo?: GitHubRepoSelector | null }
   ): Promise<GitHubPullRequestContextResult>;
 
-  issuesList(directory: string, options?: { page?: number }): Promise<GitHubIssuesListResult>;
+  issuesList(directory: string, options?: { page?: number; query?: string }): Promise<GitHubIssuesListResult>;
   issueGet(directory: string, number: number, options?: { sourceRepo?: GitHubRepoSelector | null }): Promise<GitHubIssueGetResult>;
   issueComments(directory: string, number: number, options?: { sourceRepo?: GitHubRepoSelector | null }): Promise<GitHubIssueCommentsResult>;
   repoUpstream(directory: string): Promise<GitHubRepoUpstreamResult>;
