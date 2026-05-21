@@ -39,7 +39,7 @@ export interface AudioStreamConfig {
    * Default: 1500
    */
   silenceHoldMs?: number;
-  /** Optional API key for the OpenAI-compatible STT server. */
+  /** Optional API key for the STT server. */
   apiKey?: string;
 }
 
@@ -80,8 +80,10 @@ class AudioStreamService {
       silenceThresholdDb: -45,
       silenceHoldMs: 1500,
       language: '',
+      apiKey: '',
       ...config,
     };
+    this.cfg.apiKey = config.apiKey ?? '';
   }
 
   /** Whether the browser supports the required APIs. */
@@ -340,7 +342,7 @@ class AudioStreamService {
         'X-Model': this.cfg.model,
       };
       if (this.cfg.apiKey) {
-        headers['X-API-Key'] = this.cfg.apiKey;
+        headers['Authorization'] = `Bearer ${this.cfg.apiKey}`;
       }
       if (this.cfg.language) {
         headers['X-Language'] = this.cfg.language;
