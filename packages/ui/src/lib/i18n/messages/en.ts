@@ -24,6 +24,7 @@ export const dict = {
   'layout.mainTab.diff': 'Diff',
   'layout.mainTab.files': 'Files',
   'layout.mainTab.terminal': 'Terminal',
+  'layout.mainTab.context': 'Context',
   'layout.rightSidebar.git': 'Git',
   'layout.rightSidebar.files': 'Files',
   'layout.rightSidebar.context': 'Context',

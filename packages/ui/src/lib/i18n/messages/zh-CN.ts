@@ -25,6 +25,7 @@ export const dict: Record<I18nKey, string> = {
   'layout.mainTab.diff': '差异',
   'layout.mainTab.files': '文件',
   'layout.mainTab.terminal': '终端',
+  'layout.mainTab.context': '上下文',
   'layout.rightSidebar.git': 'Git',
   'layout.rightSidebar.files': '文件',
   'layout.rightSidebar.context': '上下文',

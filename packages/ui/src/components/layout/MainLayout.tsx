@@ -380,7 +380,7 @@ export const MainLayout: React.FC = () => {
             case 'files':
                 return <React.Suspense fallback={null}><FilesView /></React.Suspense>;
             case 'context':
-                return <ProjectContextPanel />;
+                return <React.Suspense fallback={null}><ProjectContextPanel /></React.Suspense>;
             default:
                 return null;
         }

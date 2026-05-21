@@ -1529,7 +1529,7 @@ export const Header: React.FC<HeaderProps> = ({
         { id: 'diff', label: t('layout.mainTab.diff'), icon: 'diff' },
         { id: 'files', label: t('layout.mainTab.files'), icon: "folder-6" },
         { id: 'terminal', label: t('layout.mainTab.terminal'), icon: "terminal-box" },
-        { id: 'context', label: t('layout.rightSidebar.context'), icon: "file-list-2" },
+        { id: 'context', label: t('layout.mainTab.context'), icon: "file-list-2" },
       );
 
       return base;

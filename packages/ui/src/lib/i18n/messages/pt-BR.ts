@@ -25,6 +25,7 @@ export const dict: Record<I18nKey, string> = {
   "layout.mainTab.diff": "Diff",
   "layout.mainTab.files": "Arquivos",
   "layout.mainTab.terminal": "Terminal",
+  "layout.mainTab.context": "Contexto",
   "layout.rightSidebar.git": "Git",
   "layout.rightSidebar.files": "Arquivos",
   "layout.rightSidebar.context": "Contexto",
