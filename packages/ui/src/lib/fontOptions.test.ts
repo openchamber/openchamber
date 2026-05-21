@@ -30,6 +30,10 @@ describe('font options', () => {
         expect(normalizeCustomFontFamily('  "SF   Pro Text"  ')).toBe('SF Pro Text');
     });
 
+    test('replaces C0 and C1 control characters', () => {
+        expect(sanitizeCustomFontInput('Mono\u0000Lisa\u0085Font')).toBe('Mono Lisa Font');
+    });
+
     test('falls back to preset stack for blank custom font names', () => {
         expect(getUiFontStack(DEFAULT_UI_FONT, '   ')).toBe(UI_FONT_OPTION_MAP[DEFAULT_UI_FONT].stack);
     });

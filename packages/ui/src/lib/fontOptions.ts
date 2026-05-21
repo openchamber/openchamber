@@ -198,7 +198,7 @@ const replaceControlCharacters = (value: string): string => {
 
     for (let index = 0; index < value.length; index += 1) {
         const code = value.charCodeAt(index);
-        const isControl = code <= 31 || code === 127;
+        const isControl = code <= 31 || code === 127 || (code >= 0x80 && code <= 0x9f);
         if (!isControl) {
             if (sanitized !== undefined) {
                 sanitized += value[index];

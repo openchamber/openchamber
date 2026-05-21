@@ -2081,6 +2081,19 @@ export const useUIStore = create<UIStore>()(
 
           return state;
         },
+        merge: (persistedState, currentState) => {
+          if (!persistedState || typeof persistedState !== 'object') {
+            return currentState;
+          }
+
+          const merged = {
+            ...currentState,
+            ...(persistedState as Partial<UIStore>),
+          };
+          merged.customUiFont = sanitizeCustomFontInput(merged.customUiFont);
+          merged.customMonoFont = sanitizeCustomFontInput(merged.customMonoFont);
+          return merged;
+        },
         partialize: (state) => ({
           theme: state.theme,
           isSidebarOpen: state.isSidebarOpen,

@@ -24,7 +24,7 @@ import { isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
 import { useDeviceInfo } from '@/lib/device';
 import { usePwaDetection } from '@/hooks/usePwaDetection';
 import { updateDesktopSettings } from '@/lib/persistence';
-import { CODE_FONT_OPTIONS, DEFAULT_MONO_FONT, DEFAULT_UI_FONT, isMonoFontOption, isUiFontOption, UI_FONT_OPTIONS, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
+import { CODE_FONT_OPTIONS, DEFAULT_MONO_FONT, DEFAULT_UI_FONT, isMonoFontOption, isUiFontOption, sanitizeCustomFontInput, UI_FONT_OPTIONS, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { useI18n, type Locale } from '@/lib/i18n';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { normalizeMobileKeyboardMode, supportsMobileKeyboardResizeContent, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
@@ -543,6 +543,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     );
     const [customUiFontDraft, setCustomUiFontDraft] = React.useState(customUiFont);
     const [customMonoFontDraft, setCustomMonoFontDraft] = React.useState(customMonoFont);
+    const customUiFontDraftFocused = React.useRef(false);
+    const customMonoFontDraftFocused = React.useRef(false);
     const resolvedUiFontSelectValue = customUiFont || selectedUiFontValue === CUSTOM_FONT_SELECT_VALUE
         ? CUSTOM_FONT_SELECT_VALUE
         : uiFont;
@@ -572,11 +574,15 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     }, [customMonoFont, monoFont]);
 
     React.useEffect(() => {
-        setCustomUiFontDraft(customUiFont);
+        if (!customUiFontDraftFocused.current) {
+            setCustomUiFontDraft(customUiFont);
+        }
     }, [customUiFont]);
 
     React.useEffect(() => {
-        setCustomMonoFontDraft(customMonoFont);
+        if (!customMonoFontDraftFocused.current) {
+            setCustomMonoFontDraft(customMonoFont);
+        }
     }, [customMonoFont]);
 
     React.useEffect(() => {
@@ -650,11 +656,17 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     }, [setCustomMonoFont, setMonoFont]);
 
     const commitCustomUiFontDraft = React.useCallback(() => {
-        setCustomUiFont(customUiFontDraft);
+        const sanitized = sanitizeCustomFontInput(customUiFontDraft);
+        customUiFontDraftFocused.current = false;
+        setCustomUiFontDraft(sanitized);
+        setCustomUiFont(sanitized);
     }, [customUiFontDraft, setCustomUiFont]);
 
     const commitCustomMonoFontDraft = React.useCallback(() => {
-        setCustomMonoFont(customMonoFontDraft);
+        const sanitized = sanitizeCustomFontInput(customMonoFontDraft);
+        customMonoFontDraftFocused.current = false;
+        setCustomMonoFontDraft(sanitized);
+        setCustomMonoFont(sanitized);
     }, [customMonoFontDraft, setCustomMonoFont]);
 
     const applyPwaInstallName = React.useCallback(async (value: string) => {
@@ -1105,6 +1117,9 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                     value={customUiFontDraft}
                                                     onChange={(event) => setCustomUiFontDraft(event.target.value)}
                                                     onBlur={commitCustomUiFontDraft}
+                                                    onFocus={() => {
+                                                        customUiFontDraftFocused.current = true;
+                                                    }}
                                                     placeholder={t('settings.openchamber.visual.field.customInterfaceFontPlaceholder')}
                                                     aria-label={t('settings.openchamber.visual.field.customInterfaceFontAria')}
                                                     className={CUSTOM_FONT_INPUT_CLASS}
@@ -1156,6 +1171,9 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                     value={customMonoFontDraft}
                                                     onChange={(event) => setCustomMonoFontDraft(event.target.value)}
                                                     onBlur={commitCustomMonoFontDraft}
+                                                    onFocus={() => {
+                                                        customMonoFontDraftFocused.current = true;
+                                                    }}
                                                     placeholder={t('settings.openchamber.visual.field.customCodeFontPlaceholder')}
                                                     aria-label={t('settings.openchamber.visual.field.customCodeFontAria')}
                                                     className={CUSTOM_FONT_INPUT_CLASS}
