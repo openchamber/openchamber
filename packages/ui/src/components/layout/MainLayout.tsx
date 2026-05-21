@@ -4,7 +4,7 @@ import { Header } from './Header';
 import { BottomTerminalDock } from './BottomTerminalDock';
 import { Sidebar, SIDEBAR_CONTENT_WIDTH } from './Sidebar';
 import { RightSidebar, RIGHT_SIDEBAR_CONTENT_WIDTH } from './RightSidebar';
-import { RightSidebarTabs } from './RightSidebarTabs';
+import { ProjectContextPanel, RightSidebarTabs } from './RightSidebarTabs';
 import { ContextPanel } from './ContextPanel';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { CommandPalette } from '../ui/CommandPalette';
@@ -360,6 +360,13 @@ export const MainLayout: React.FC = () => {
         };
     }, [isMobile, isTablet, setBottomTerminalOpen, setRightSidebarOpen]);
 
+    const handleToggleMobileRightDrawer = React.useCallback(() => {
+        if (mobileLeftDrawerOpen) {
+            setMobileLeftDrawerOpen(false);
+        }
+        setRightSidebarOpen(!isRightSidebarOpen);
+    }, [isRightSidebarOpen, mobileLeftDrawerOpen, setRightSidebarOpen]);
+
     const secondaryView = React.useMemo(() => {
         switch (activeMainTab) {
             case 'plan':
@@ -372,6 +379,8 @@ export const MainLayout: React.FC = () => {
                 return <React.Suspense fallback={null}><TerminalView /></React.Suspense>;
             case 'files':
                 return <React.Suspense fallback={null}><FilesView /></React.Suspense>;
+            case 'context':
+                return <ProjectContextPanel />;
             default:
                 return null;
         }
@@ -413,12 +422,7 @@ export const MainLayout: React.FC = () => {
                         }
                         setMobileLeftDrawerOpen(!mobileLeftDrawerOpen);
                     },
-                    toggleRightDrawer: () => {
-                        if (mobileLeftDrawerOpen) {
-                            setMobileLeftDrawerOpen(false);
-                        }
-                        setRightSidebarOpen(!isRightSidebarOpen);
-                    },
+                    toggleRightDrawer: handleToggleMobileRightDrawer,
                     leftDrawerX,
                     rightDrawerX,
                     leftDrawerWidth,
@@ -435,10 +439,7 @@ export const MainLayout: React.FC = () => {
                             setMobileLeftDrawerOpen(!mobileLeftDrawerOpen);
                         }}
                         onToggleRightDrawer={() => {
-                            if (mobileLeftDrawerOpen) {
-                                setMobileLeftDrawerOpen(false);
-                            }
-                            setRightSidebarOpen(!isRightSidebarOpen);
+                            handleToggleMobileRightDrawer();
                         }}
                         leftDrawerOpen={mobileLeftDrawerOpen}
                         rightDrawerOpen={isRightSidebarOpen}

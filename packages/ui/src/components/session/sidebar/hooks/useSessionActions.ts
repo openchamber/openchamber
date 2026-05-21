@@ -3,6 +3,7 @@ import type { Session } from '@opencode-ai/sdk/v2';
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
+import type { MainTab } from '@/stores/useUIStore';
 
 type DeleteSessionConfirmSetter = React.Dispatch<React.SetStateAction<{
   session: Session;
@@ -24,7 +25,7 @@ type Args = {
   setIsSessionSearchOpen: (open: boolean) => void;
   setActiveProjectIdOnly: (id: string) => void;
   setDirectory: (directory: string, options?: { showOverlay?: boolean }) => void;
-  setActiveMainTab: (tab: 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files') => void;
+  setActiveMainTab: (tab: MainTab) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
   setCurrentSession: (sessionId: string | null, directoryHint?: string | null) => void;
   updateSessionTitle: (id: string, title: string) => Promise<void>;
