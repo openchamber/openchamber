@@ -2066,6 +2066,7 @@ export const Header: React.FC<HeaderProps> = ({
                   aria-label={t('header.navigation.mainAria')}
                 >
                   {tabs.map((tab) => {
+                    const isActive = activeMainTab === tab.id;
                     const isDiffTab = tab.icon === 'diff';
                     const tabIconName = isDiffTab ? null : (tab.icon as IconName);
                     return (
@@ -2081,7 +2082,7 @@ export const Header: React.FC<HeaderProps> = ({
                               setActiveMainTab(tab.id);
                             }}
                             aria-label={tab.label}
-                            aria-selected={mobileActiveHeaderItem === tab.id}
+                            aria-selected={isActive}
                             role="tab"
                             className={cn(
                               mobileHeaderIconButtonClass,

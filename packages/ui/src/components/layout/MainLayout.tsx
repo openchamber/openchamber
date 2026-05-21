@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react';
-import { useMotionValue } from 'motion/react';
+import { animate, motion, useMotionValue } from 'motion/react';
 import { Header } from './Header';
 import { BottomTerminalDock } from './BottomTerminalDock';
 import { Sidebar, SIDEBAR_CONTENT_WIDTH } from './Sidebar';
@@ -106,18 +106,21 @@ export const MainLayout: React.FC = () => {
     // Mobile drawer state
     const [mobileLeftDrawerOpen, setMobileLeftDrawerOpen] = React.useState(false);
     const [mobileRightSidebarOpen, setMobileRightSidebarOpen] = React.useState(false);
+    const [mobileLeftDrawerVisible, setMobileLeftDrawerVisible] = React.useState(false);
+    const [mobileRightDrawerVisible, setMobileRightDrawerVisible] = React.useState(false);
     const setMobileSessionPanelOpen = React.useCallback((open: boolean) => {
         setMobileLeftDrawerOpen(open);
         useUIStore.getState().setSessionSwitcherOpen(open);
     }, []);
     const mobileRightDrawerOpenRef = React.useRef(false);
+    const initialDrawerWidthRef = React.useRef(typeof window === 'undefined' ? 0 : window.innerWidth);
 
     // Left drawer motion value
-    const leftDrawerX = useMotionValue(0);
+    const leftDrawerX = useMotionValue(-initialDrawerWidthRef.current);
     const leftDrawerWidth = useRef(0);
 
     // Right drawer motion value
-    const rightDrawerX = useMotionValue(0);
+    const rightDrawerX = useMotionValue(initialDrawerWidthRef.current);
     const rightDrawerWidth = useRef(0);
 
     // Compute drawer width
@@ -130,15 +133,55 @@ export const MainLayout: React.FC = () => {
 
     // Sync left drawer state and motion value
     useEffect(() => {
-        if (!isMobile) return;
-        leftDrawerX.set(mobileLeftDrawerOpen ? 0 : -leftDrawerWidth.current);
+        if (!isMobile) {
+            setMobileLeftDrawerVisible(false);
+            return;
+        }
+        if (mobileLeftDrawerOpen) {
+            setMobileLeftDrawerVisible(true);
+        }
+        animate(leftDrawerX, mobileLeftDrawerOpen ? 0 : -leftDrawerWidth.current, {
+            type: 'spring',
+            stiffness: 400,
+            damping: 35,
+            mass: 0.8,
+        });
     }, [mobileLeftDrawerOpen, isMobile, leftDrawerX]);
 
     // Sync right drawer state and motion value
     useEffect(() => {
-        if (!isMobile) return;
+        if (!isMobile) {
+            setMobileRightDrawerVisible(false);
+            return;
+        }
         mobileRightDrawerOpenRef.current = mobileRightSidebarOpen;
-        rightDrawerX.set(mobileRightSidebarOpen ? 0 : rightDrawerWidth.current);
+        if (mobileRightSidebarOpen) {
+            setMobileRightDrawerVisible(true);
+        }
+        animate(rightDrawerX, mobileRightSidebarOpen ? 0 : rightDrawerWidth.current, {
+            type: 'spring',
+            stiffness: 400,
+            damping: 35,
+            mass: 0.8,
+        });
+    }, [isMobile, mobileRightSidebarOpen, rightDrawerX]);
+
+    useEffect(() => {
+        if (!isMobile) return;
+        return leftDrawerX.on('change', (value) => {
+            const width = leftDrawerWidth.current || initialDrawerWidthRef.current;
+            const visible = mobileLeftDrawerOpen || value > -width + 0.5;
+            setMobileLeftDrawerVisible((previous) => previous === visible ? previous : visible);
+        });
+    }, [isMobile, leftDrawerX, mobileLeftDrawerOpen]);
+
+    useEffect(() => {
+        if (!isMobile) return;
+        return rightDrawerX.on('change', (value) => {
+            const width = rightDrawerWidth.current || initialDrawerWidthRef.current;
+            const visible = mobileRightSidebarOpen || value < width - 0.5;
+            setMobileRightDrawerVisible((previous) => previous === visible ? previous : visible);
+        });
     }, [isMobile, mobileRightSidebarOpen, rightDrawerX]);
 
     // Sync session switcher close events to left drawer.
@@ -217,13 +260,6 @@ export const MainLayout: React.FC = () => {
             setRightSidebarOpen(false);
         }
     }, [isMobile, isSettingsDialogOpen, isRightSidebarOpen, setMobileSessionPanelOpen, setRightSidebarOpen]);
-
-    // Sync right drawer and git sidebar state
-    useEffect(() => {
-        if (isMobile) {
-            mobileRightDrawerOpenRef.current = mobileRightSidebarOpen;
-        }
-    }, [mobileRightSidebarOpen, isMobile]);
 
     // Trigger initial update check shortly after mount, then repeat using server-suggested cadence.
     const checkForUpdates = useUpdateStore((state) => state.checkForUpdates);
@@ -519,19 +555,19 @@ export const MainLayout: React.FC = () => {
                                     </ErrorBoundary>
                                 </div>
                             )}
-                            {mobileLeftDrawerOpen && (
-                                <div className="absolute inset-0 z-20 bg-sidebar" data-page-scroll-lock="true">
+                            {mobileLeftDrawerVisible && (
+                                <motion.div className="absolute inset-0 z-20 bg-sidebar" data-page-scroll-lock="true" style={{ x: leftDrawerX }} aria-hidden={!mobileLeftDrawerOpen}>
                                     <ErrorBoundary>
                                         <SessionSidebar mobileVariant />
                                     </ErrorBoundary>
-                                </div>
+                                </motion.div>
                             )}
-                            {mobileRightSidebarOpen && (
-                                <div className="absolute inset-0 z-20 bg-sidebar" data-page-scroll-lock="true">
+                            {mobileRightDrawerVisible && (
+                                <motion.div className="absolute inset-0 z-20 bg-sidebar" data-page-scroll-lock="true" style={{ x: rightDrawerX }} aria-hidden={!mobileRightSidebarOpen}>
                                     <ErrorBoundary>
                                         <React.Suspense fallback={null}><GitView /></React.Suspense>
                                     </ErrorBoundary>
-                                </div>
+                                </motion.div>
                             )}
                         </main>
                     </div>
