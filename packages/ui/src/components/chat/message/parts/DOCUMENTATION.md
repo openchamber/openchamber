@@ -8,17 +8,17 @@ Use this doc when you ask an agent to change tool/header/description behavior.
 
 - Message parts are rendered from `MessageBody.tsx`.
 - There are two tool rendering paths:
-  - **Static grouped tools** -> `StaticToolRow` in `ProgressiveGroup.tsx`
-  - **Expandable tools** -> `ToolPart.tsx`
+  - **Expandable named tools** -> `ToolPart.tsx`
+  - **Compact fallback rows** -> `StaticToolRow` in `ProgressiveGroup.tsx` for legacy or malformed tool records
 - Shared tool icon mapping is centralized in `toolPresentation.tsx` (`getToolIcon`).
 
 ## Which file controls what
 
 - `ProgressiveGroup.tsx`
-  - Renders grouped Activity rows and grouped static tools.
+  - Renders grouped Activity rows and compact fallback tool rows.
   - Contains `StaticToolRow`.
   - Contains static tool short description logic (`getToolShortDescription`).
-  - If you want to change how `read/grep/perplexity/webfetch/...` look in compact/grouped mode, edit here.
+  - If you want to change compact fallback copy, edit here.
 
 - `ToolPart.tsx`
   - Renders expandable tool rows (bash/edit/write/question/task + fallback).
@@ -32,10 +32,8 @@ Use this doc when you ask an agent to change tool/header/description behavior.
 - `toolRenderUtils.ts`
   - Core classification helpers:
     - `isExpandableTool`
-    - `isStaticTool`
     - `isStandaloneTool`
-    - `getStaticGroupToolName`
-  - If a tool should switch between static vs expandable, change it here.
+  - If a tool should switch between standalone vs expandable, change it here.
 
 - `ReasoningPart.tsx`
   - Thinking block UI (`ReasoningTimelineBlock`), summary + optional duration.
@@ -45,26 +43,24 @@ Use this doc when you ask an agent to change tool/header/description behavior.
 
 ## Current important behavior
 
-- `read` and most search/fetch tools are treated as **static tools** and usually render via `StaticToolRow`.
-- `bash/edit/write/question/task` are **expandable tools** and render via `ToolPart`.
-- `perplexity` is currently treated as static and grouped into search/web-search style rows (through static grouping + short description extraction).
+- All non-empty, non-task tool names are **expandable tools** and render via `ToolPart`.
+- `task` is standalone and handled by its dedicated rendering flow.
 - Thinking/Justification duration is hidden in `sorted` mode (handled in `ReasoningPart.tsx` + `JustificationBlock.tsx`).
 
 ## "I want to change description for Perplexity" (example recipe)
 
 If task is: "change text shown near Perplexity tool header/description":
 
-1. Edit `ProgressiveGroup.tsx` -> `getToolShortDescription(activity)`.
-2. Update the branch that handles web-search tools (`websearch`, `web-search`, `search_web`, `codesearch`, `perplexity`, etc.).
-3. If needed, update group rendering in `StaticToolRow` (search/fetch specific rendering branches).
-4. Keep icon changes (if any) in `toolPresentation.tsx`.
+1. Edit `ToolPart.tsx` for the expanded header or body.
+2. If the compact fallback row also needs the copy, edit `ProgressiveGroup.tsx` -> `getToolShortDescription(activity)`.
+3. Keep icon changes (if any) in `toolPresentation.tsx`.
 
-Why: in current pipeline Perplexity is static/grouped, so `StaticToolRow` is the primary path.
+Why: named tools, including Perplexity-style tools, render through `ToolPart`.
 
 ## "I want tool to become expandable" (example)
 
 1. Update `toolRenderUtils.ts`:
-   - add/remove tool name in `EXPANDABLE_TOOL_NAMES`
+   - add/remove standalone exclusions as needed
 2. Ensure `ToolPart.tsx` supports desired header + expanded output format for that tool.
 3. Validate both modes (`sorted` and `live`).
 
