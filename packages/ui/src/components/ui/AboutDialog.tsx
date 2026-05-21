@@ -21,6 +21,7 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
   onOpenChange,
 }) => {
   const { t } = useI18n();
+  const showDiagnostics = import.meta.env.DEV;
   const [version, setVersion] = React.useState<string | null>(null);
   const [openCodeVersion, setOpenCodeVersion] = React.useState<string | null>(null);
   const [isCopyingDiagnostics, setIsCopyingDiagnostics] = React.useState(false);
@@ -29,6 +30,7 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
   const [isPreparingDiagnostics, setIsPreparingDiagnostics] = React.useState(false);
 
   const handleCopyDiagnostics = React.useCallback(async () => {
+    if (!showDiagnostics) return;
     if (isCopyingDiagnostics) return;
     setIsCopyingDiagnostics(true);
     setCopiedDiagnostics(false);
@@ -55,7 +57,7 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
     } finally {
       setIsCopyingDiagnostics(false);
     }
-  }, [diagnosticsReport, isCopyingDiagnostics, t]);
+  }, [diagnosticsReport, isCopyingDiagnostics, showDiagnostics, t]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -107,7 +109,7 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
   }, [open]);
 
   React.useEffect(() => {
-    if (!open) {
+    if (!open || !showDiagnostics) {
       setDiagnosticsReport(null);
       setIsPreparingDiagnostics(false);
       return;
@@ -133,7 +135,7 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [open, showDiagnostics]);
 
   const displayVersion = version;
 
@@ -155,54 +157,58 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
             </div>
           </div>
 
-          <div className="flex flex-col items-center gap-2 pt-2">
-            <button
-              onClick={handleCopyDiagnostics}
-              disabled={isCopyingDiagnostics || isPreparingDiagnostics || !diagnosticsReport}
-              className={cn(
-                'typography-meta text-muted-foreground hover:text-foreground',
-                'underline-offset-2 hover:underline',
-                'disabled:opacity-50 disabled:cursor-not-allowed'
-              )}
-            >
-              {copiedDiagnostics
-                ? t('aboutDialog.actions.diagnosticsCopied')
-                : isPreparingDiagnostics
-                  ? t('aboutDialog.actions.preparingDiagnostics')
-                  : t('aboutDialog.actions.copyDiagnostics')}
-            </button>
-            <p className="typography-micro text-muted-foreground">
-              {t('aboutDialog.diagnosticsDescription')}
-            </p>
-          </div>
+          {showDiagnostics && (
+            <div className="flex flex-col items-center gap-2 pt-2">
+              <button
+                onClick={handleCopyDiagnostics}
+                disabled={isCopyingDiagnostics || isPreparingDiagnostics || !diagnosticsReport}
+                className={cn(
+                  'typography-meta text-muted-foreground hover:text-foreground',
+                  'underline-offset-2 hover:underline',
+                  'disabled:opacity-50 disabled:cursor-not-allowed'
+                )}
+              >
+                {copiedDiagnostics
+                  ? t('aboutDialog.actions.diagnosticsCopied')
+                  : isPreparingDiagnostics
+                    ? t('aboutDialog.actions.preparingDiagnostics')
+                    : t('aboutDialog.actions.copyDiagnostics')}
+              </button>
+              <p className="typography-micro text-muted-foreground">
+                {t('aboutDialog.diagnosticsDescription')}
+              </p>
+            </div>
+          )}
 
-          <div className="flex items-center gap-4 pt-2">
+          <div className="flex flex-col items-center gap-2 pt-2">
+            <div className="flex items-center justify-center gap-4">
+              <a
+                href="https://github.com/btriapitsyn/openchamber"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 typography-meta text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <Icon name="github-fill" className="h-4 w-4" />
+                <span>GitHub</span>
+              </a>
+              <a
+                href="https://discord.gg/ZYRSdnwwKA"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 typography-meta text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <Icon name="discord-fill" className="h-4 w-4" />
+                <span>Discord</span>
+              </a>
+            </div>
             <a
-              href="https://github.com/btriapitsyn/openchamber"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 typography-meta text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <Icon name="github-fill" className="h-4 w-4" />
-              <span>GitHub</span>
-            </a>
-            <a
-              href="https://discord.gg/ZYRSdnwwKA"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 typography-meta text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <Icon name="discord-fill" className="h-4 w-4" />
-              <span>Discord</span>
-            </a>
-            <a
-              href="https://x.com/btriapitsyn"
+              href="https://x.com/openchamber_dev"
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-1.5 typography-meta text-muted-foreground hover:text-foreground transition-colors"
             >
               <Icon name="twitter-xfill" className="h-4 w-4" />
-              <span>@btriapitsyn</span>
+              <span>@openchamber_dev</span>
             </a>
           </div>
 

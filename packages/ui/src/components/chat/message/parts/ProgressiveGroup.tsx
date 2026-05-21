@@ -18,9 +18,11 @@ import { isExpandableTool, isStandaloneTool, isStaticTool } from './toolRenderUt
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { useSkillsStore } from '@/stores/useSkillsStore';
 import ReasoningPart from './ReasoningPart';
 import JustificationBlock from './JustificationBlock';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
+import { getExternalFaviconUrl } from '@/lib/url';
 
 interface ProgressiveGroupProps {
     parts: TurnActivityPart[];
@@ -39,6 +41,29 @@ interface ProgressiveGroupProps {
     animatedToolIds?: Set<string>;
     renderJustificationActions?: (activity: TurnActivityPart) => React.ReactNode;
 }
+
+const ExternalLinkFavicon: React.FC<{ href: string }> = ({ href }) => {
+    const [failed, setFailed] = React.useState(false);
+    const faviconUrl = React.useMemo(() => getExternalFaviconUrl(href), [href]);
+
+    if (!faviconUrl || failed) {
+        return null;
+    }
+
+    return (
+        <span className="inline-flex size-[18px] flex-shrink-0 items-center justify-center rounded border border-[var(--border)] bg-[var(--interactive-hover)]">
+            <img
+                src={faviconUrl}
+                alt=""
+                aria-hidden="true"
+                loading="lazy"
+                decoding="async"
+                className="size-3.5 rounded-sm"
+                onError={() => setFailed(true)}
+            />
+        </span>
+    );
+};
 
 const isActivityRunning = (activity: TurnActivityPart): boolean => {
     if (activity.kind !== 'tool') return false;
@@ -599,7 +624,9 @@ const StaticToolRowInner: React.FC<{
     const isReadGroup = toolName.toLowerCase() === 'read';
     const runtime = React.useContext(RuntimeAPIContext);
     const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
+    const skills = useSkillsStore((state) => state.skills);
     const hasRunningActivity = React.useMemo(() => activities.some((activity) => isActivityRunning(activity)), [activities]);
+    const skillByName = React.useMemo(() => new Map(skills.map((skill) => [skill.name, skill])), [skills]);
 
     const descriptions = React.useMemo(() => {
         const descs: string[] = [];
@@ -648,6 +675,15 @@ const StaticToolRowInner: React.FC<{
         uiStore.openContextFile(contextDirectory, absolutePath);
     }, [currentDirectory, runtime]);
 
+    const handleSkillClick = React.useCallback((skillName: string) => {
+        const skill = skillByName.get(skillName);
+        if (!skill?.path) {
+            return;
+        }
+        const uiStore = useUIStore.getState();
+        uiStore.openContextFile(currentDirectory || getContextDirectoryForPath('', skill.path), skill.path);
+    }, [currentDirectory, skillByName]);
+
     const normalizedToolName = toolName.toLowerCase();
     const isSearchGroup = normalizedToolName === 'grep'
         || normalizedToolName === 'search'
@@ -655,6 +691,7 @@ const StaticToolRowInner: React.FC<{
         || normalizedToolName === 'ripgrep'
         || normalizedToolName === 'glob';
     const isFetchGroup = normalizedToolName === 'webfetch' || normalizedToolName === 'fetch' || normalizedToolName === 'curl' || normalizedToolName === 'wget';
+    const isSkillGroup = normalizedToolName === 'skill';
 
     return (
         <div
@@ -715,17 +752,36 @@ const StaticToolRowInner: React.FC<{
                         target="_blank"
                         rel="noopener noreferrer"
                         className={cn(
-                            'min-w-0 flex-1 underline decoration-[color:var(--status-info)] underline-offset-2 hover:opacity-90',
+                            'min-w-0 flex-1 inline-flex items-center gap-1.5 underline decoration-[color:var(--status-info)] underline-offset-2 hover:opacity-90',
                             'truncate whitespace-nowrap typography-meta'
                         )}
                         style={{ color: 'var(--status-info)' }}
                         title={url}
                     >
-                        {url}
+                        <ExternalLinkFavicon href={url} />
+                        <span className="min-w-0 truncate">{url}</span>
                     </a>
                 ))
                 : null}
-            {!isReadGroup && !isSearchGroup && !isFetchGroup && descriptions.length > 0 ? (
+            {isSkillGroup && descriptions.length > 0
+                ? descriptions.map((skillName, index) => (
+                    <button
+                        key={`${skillName}-${index}`}
+                        type="button"
+                        onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            handleSkillClick(skillName);
+                        }}
+                        className="min-w-0 flex-1 truncate whitespace-nowrap typography-meta leading-5 text-left hover:opacity-90"
+                        style={{ color: 'var(--tools-description)' }}
+                        title={skillName}
+                    >
+                        {skillName}
+                    </button>
+                ))
+                : null}
+            {!isReadGroup && !isSearchGroup && !isFetchGroup && !isSkillGroup && descriptions.length > 0 ? (
                 <Text
                     variant={animateTailText ? 'generate-effect' : 'static'}
                     className="min-w-0 flex-1 truncate whitespace-nowrap typography-meta leading-5"

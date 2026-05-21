@@ -79,6 +79,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
   const [loading, setLoading] = React.useState(false);
   const pendingSearchRef = React.useRef(0);
   const [selectedIndex, setSelectedIndex] = React.useState(0);
+  const selectedIndexRef = React.useRef(0);
   const [marqueeWidth, setMarqueeWidth] = React.useState(360);
   const [overflowMap, setOverflowMap] = React.useState<Record<number, boolean>>({});
   const [marqueeDurations, setMarqueeDurations] = React.useState<Record<number, number>>({});
@@ -293,8 +294,11 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
   }, [visibleFiles, visibleDirectories, visibleRecentFiles.length, visibleAgents.length]);
 
   React.useEffect(() => {
+    selectedIndexRef.current = selectedIndex;
+  }, [selectedIndex]);
+
+  React.useEffect(() => {
     itemRefs.current[selectedIndex]?.scrollIntoView({
-      behavior: 'smooth',
       block: 'nearest'
     });
   }, [selectedIndex]);
@@ -397,7 +401,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
       }
 
       if (key === 'Enter' || key === 'Tab') {
-        const safeIndex = ((selectedIndex % total) + total) % total;
+        const safeIndex = ((selectedIndexRef.current % total) + total) % total;
         if (safeIndex < visibleAgents.length) {
           const agent = visibleAgents[safeIndex];
           if (agent) {
@@ -422,7 +426,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
         }
       }
     }
-  }), [visibleFiles, visibleDirectories, visibleRecentFiles, visibleAgents, selectedIndex, onClose, handleFileSelect, handleAgentPick]);
+  }), [visibleFiles, visibleDirectories, visibleRecentFiles, visibleAgents, onClose, handleFileSelect, handleAgentPick]);
 
   const getFileIcon = (file: FileInfo) => {
     const ext = file.extension?.toLowerCase();
@@ -514,7 +518,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
                     isSelected && 'bg-interactive-selection',
                   )}
                   onClick={() => handleAgentPick(agent.name)}
-                  onMouseEnter={() => setSelectedIndex(index)}
+                  onMouseMove={() => setSelectedIndex(index)}
                 >
                   <div className="min-w-0 flex-1">
                     <div className="font-semibold truncate">@{agent.name}</div>
@@ -548,7 +552,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
                     isSelected && "bg-interactive-selection"
                   )}
                   onClick={() => handleFileSelect(dir)}
-                  onMouseEnter={() => setSelectedIndex(rowIndex)}
+                  onMouseMove={() => setSelectedIndex(rowIndex)}
                 >
                   <Icon name="folder-3-fill" className="h-3.5 w-3.5 text-primary/60" />
                   <span className="flex-1 min-w-0 truncate" aria-label={relativePath}>
@@ -577,7 +581,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
                     isSelected && "bg-interactive-selection"
                   )}
                   onClick={() => handleFileSelect(file)}
-                  onMouseEnter={() => setSelectedIndex(rowIndex)}
+                  onMouseMove={() => setSelectedIndex(rowIndex)}
                 >
                   {getFileIcon(file)}
                   <span
@@ -626,9 +630,9 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
                     className={cn(
                       "flex items-center gap-2 px-3 py-1.5 cursor-pointer typography-ui-label rounded-lg",
                       isSelected && "bg-interactive-selection"
-                    )}
+                  )}
                   onClick={() => handleFileSelect(file)}
-                  onMouseEnter={() => setSelectedIndex(rowIndex)}
+                  onMouseMove={() => setSelectedIndex(rowIndex)}
                 >
                   {getFileIcon(file)}
                   <span

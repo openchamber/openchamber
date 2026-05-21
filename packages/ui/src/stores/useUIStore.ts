@@ -496,6 +496,8 @@ interface UIStore {
   isBottomTerminalExpanded: boolean;
   bottomTerminalHeight: number;
   hasManuallyResizedBottomTerminal: boolean;
+  notesPanelHeight: number;
+  todoPanelHeight: number;
   isSessionSwitcherOpen: boolean;
   isSessionDropdownOpen: boolean;
   activeMainTab: MainTab;
@@ -627,6 +629,8 @@ interface UIStore {
   setBottomTerminalOpen: (open: boolean) => void;
   setBottomTerminalExpanded: (expanded: boolean) => void;
   setBottomTerminalHeight: (height: number) => void;
+  setNotesPanelHeight: (height: number) => void;
+  setTodoPanelHeight: (height: number) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
   setSessionDropdownOpen: (open: boolean) => void;
   setActiveMainTab: (tab: MainTab) => void;
@@ -760,6 +764,8 @@ export const useUIStore = create<UIStore>()(
         isBottomTerminalExpanded: false,
         bottomTerminalHeight: 300,
         hasManuallyResizedBottomTerminal: false,
+        notesPanelHeight: 112,
+        todoPanelHeight: 259,
         isSessionSwitcherOpen: false,
         isSessionDropdownOpen: false,
         activeMainTab: 'chat',
@@ -1289,6 +1295,14 @@ export const useUIStore = create<UIStore>()(
 
         setBottomTerminalHeight: (height) => {
           set({ bottomTerminalHeight: height, hasManuallyResizedBottomTerminal: true });
+        },
+
+        setNotesPanelHeight: (height) => {
+          set({ notesPanelHeight: height });
+        },
+
+        setTodoPanelHeight: (height) => {
+          set({ todoPanelHeight: height });
         },
 
         setSessionSwitcherOpen: (open) => {
@@ -1955,12 +1969,22 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createJSONStorage(() => getSafeStorage()),
-        version: 8,
+        version: 9,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
           }
           const state = persistedState as Record<string, unknown>;
+
+          // v8 -> v9: initialize notes/todo panel height fields
+          if (version < 9) {
+            if (typeof state.notesPanelHeight !== 'number' || !Number.isFinite(state.notesPanelHeight)) {
+              state.notesPanelHeight = 112;
+            }
+            if (typeof state.todoPanelHeight !== 'number' || !Number.isFinite(state.todoPanelHeight)) {
+              state.todoPanelHeight = 259;
+            }
+          }
 
           // v0 -> v1: reset legacy notification templates
           if (version < 1) {
@@ -2046,6 +2070,8 @@ export const useUIStore = create<UIStore>()(
           isBottomTerminalOpen: state.isBottomTerminalOpen,
           isBottomTerminalExpanded: state.isBottomTerminalExpanded,
           bottomTerminalHeight: state.bottomTerminalHeight,
+          notesPanelHeight: state.notesPanelHeight,
+          todoPanelHeight: state.todoPanelHeight,
           isSessionSwitcherOpen: state.isSessionSwitcherOpen,
           activeMainTab: state.activeMainTab,
           sidebarSection: state.sidebarSection,

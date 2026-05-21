@@ -2,8 +2,6 @@ export const createNotificationTriggerRuntime = (deps) => {
   const {
     readSettingsFromDisk,
     prepareNotificationLastMessage,
-    summarizeText,
-    resolveZenModel,
     buildTemplateVariables,
     extractLastMessageText,
     fetchLastAssistantMessageText,
@@ -248,11 +246,9 @@ export const createNotificationTriggerRuntime = (deps) => {
             lastMessage = await fetchLastAssistantMessageText(sessionId, messageId);
           }
 
-          const notifZenModel = await resolveZenModel(settings?.zenModel);
           variables.last_message = await prepareNotificationLastMessage({
             message: lastMessage,
             settings,
-            summarize: (text, len) => summarizeText(text, len, notifZenModel),
           });
 
           const resolvedTitle = resolveNotificationTemplate(completionTemplate.title, variables);
@@ -310,11 +306,9 @@ export const createNotificationTriggerRuntime = (deps) => {
             lastMessage = await fetchLastAssistantMessageText(sessionId, errorMessageId);
           }
 
-          const errZenModel = await resolveZenModel(settings?.zenModel);
           variables.last_message = await prepareNotificationLastMessage({
             message: lastMessage,
             settings,
-            summarize: (text, len) => summarizeText(text, len, errZenModel),
           });
 
           const errorTemplate = (settings.notificationTemplates || {}).error || { title: 'Tool error', message: '{last_message}' };

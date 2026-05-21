@@ -267,7 +267,12 @@ export const usePermissionStore = create<PermissionStore>()(
 
                     const directoryList = Array.from(directories);
                     const pendingFromStores = collectPendingFromSyncStores();
-                    const pendingFromApi = await opencodeClient.listPendingPermissions({ directories: Array.from(directories) });
+                    // Best-effort: if listPendingPermissions throws (transient fetch failure),
+                    // proceed with whatever sync-store snapshots gave us. The next SSE event
+                    // or reconnect resync will auto-accept anything we missed.
+                    const pendingFromApi = await opencodeClient
+                      .listPendingPermissions({ directories: Array.from(directories) })
+                      .catch(() => []);
                     const mergedPending = new Map<string, { id: string; sessionID: string }>();
 
                     for (const permission of pendingFromStores) {

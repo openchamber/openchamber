@@ -199,6 +199,37 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  public addContextSelection(selection: { filePath: string; filename: string; text: string }) {
+    if (!this._view) {
+      return;
+    }
+
+    this._view.show(true);
+    this._view.webview.postMessage({
+      type: 'command',
+      command: 'addContextSelection',
+      payload: selection,
+    });
+  }
+
+  public addFileAttachments(files: Array<{ filePath: string; fileName: string; fileSize: number | null }>) {
+    if (!this._view) {
+      return;
+    }
+
+    const cleanedFiles = files.filter((entry) => entry.filePath.trim().length > 0 && entry.fileName.trim().length > 0);
+    if (cleanedFiles.length === 0) {
+      return;
+    }
+
+    this._view.show(true);
+    this._view.webview.postMessage({
+      type: 'command',
+      command: 'addFileAttachments',
+      payload: { files: cleanedFiles },
+    });
+  }
+
   public addFileMentions(paths: string[]) {
     if (!this._view) {
       return;
@@ -272,6 +303,18 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       type: 'command',
       command: 'settingsSynced',
       payload: settings,
+    });
+  }
+
+  public notifyWindowFocusChanged(focused: boolean): void {
+    if (!this._view) {
+      return;
+    }
+
+    this._view.webview.postMessage({
+      type: 'command',
+      command: 'windowFocusChanged',
+      payload: { focused },
     });
   }
 
@@ -354,6 +397,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       status: this._cachedStatus,
       error: this._cachedError,
     });
+    this.notifyWindowFocusChanged(vscode.window.state.focused);
   }
 
   private _scheduleBroadcast(): void {

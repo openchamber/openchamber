@@ -35,6 +35,7 @@ export function shouldSkipSessionPrefetch(input: {
     if (!input.info) return true
     if (input.info.complete) return true
     if (input.info.limit > input.pageSize) return true
+    if (input.info.limit < input.pageSize) return false
   } else {
     if (!input.info) return false
   }

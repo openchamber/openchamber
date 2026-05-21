@@ -895,7 +895,7 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                     ) : null}
                     {isLoading && !diffData && !diffLoadError ? (
                         <div className="flex items-center justify-center gap-2 px-4 py-8 text-sm text-muted-foreground">
-                            <Icon name="loader-4" className="animate-spin" />
+                            <Icon name="loader-4" className="size-4 animate-spin" />
                             Loading diff…
                         </div>
                     ) : null}
@@ -1629,7 +1629,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
         if (isLoadingStatus && !status) {
             return (
                 <div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
-                    <Icon name="loader-4" className="animate-spin" />
+                    <Icon name="loader-4" className="size-4 animate-spin" />
                     {t('diffView.state.loadingRepositoryStatus')}
                 </div>
             );
@@ -1681,7 +1681,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                             </div>
                         ) : (
                             <>
-                                <Icon name="loader-4" className="animate-spin" />
+                                <Icon name="loader-4" className="size-4 animate-spin" />
                                 {t('diffView.state.loadingDiff')}
                             </>
                         )}

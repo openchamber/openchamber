@@ -941,7 +941,7 @@ export const SidebarFilesTree: React.FC = () => {
               onClick={() => void handleDialogSubmit()}
               disabled={isDialogSubmitting || (activeDialog !== 'delete' && !dialogInputValue.trim())}
             >
-              {isDialogSubmitting ? <Icon name="loader-4" className="animate-spin" /> : (
+              {isDialogSubmitting ? <Icon name="loader-4" className="size-4 animate-spin" /> : (
                 activeDialog === 'delete' ? t('sidebarFilesTree.dialog.delete.confirm') : t('sidebarFilesTree.dialog.confirm')
               )}
             </Button>

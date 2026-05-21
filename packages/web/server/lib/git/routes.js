@@ -943,4 +943,30 @@ export function registerGitRoutes(app) {
     }
   });
 
+  app.get('/api/git/commit-file-diff', async (req, res) => {
+    const { getCommitFileDiff } = await getGitLibraries();
+    try {
+      const { directory, hash, path: filePath } = req.query;
+      if (!directory || typeof directory !== 'string') {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+      if (!hash || typeof hash !== 'string') {
+        return res.status(400).json({ error: 'hash parameter is required' });
+      }
+      if (!/^[0-9a-fA-F]{7,40}$/.test(hash)) {
+        return res.status(400).json({ error: 'hash must be a valid commit SHA' });
+      }
+      if (!filePath || typeof filePath !== 'string') {
+        return res.status(400).json({ error: 'path parameter is required' });
+      }
+
+      const isBinary = req.query.binary === 'true';
+      const result = await getCommitFileDiff(directory, hash, filePath, isBinary);
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to get commit file diff:', error);
+      res.status(500).json({ error: error.message || 'Failed to get commit file diff' });
+    }
+  });
+
 }

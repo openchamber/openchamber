@@ -1611,6 +1611,27 @@ const parseIsBinaryFromNumstat = (raw) => {
   return added === '-' || deleted === '-';
 };
 
+const extractGitStatusPath = (status, pathPart) => {
+  if ((status === 'R' || status === 'C') && pathPart.includes('\t')) {
+    return pathPart.split('\t').pop() || pathPart;
+  }
+  return pathPart;
+};
+
+const extractGitNumstatDestinationPath = (filePath) => {
+  if (!filePath.includes(' => ')) {
+    return filePath;
+  }
+
+  const braceMatch = filePath.match(/^(.*)\{([^{}]*)\s=>\s([^{}]*)\}(.*)$/);
+  if (braceMatch) {
+    const [, prefix, , destination, suffix] = braceMatch;
+    return `${prefix}${destination}${suffix}`.replace(/\/+/g, '/');
+  }
+
+  return filePath.split(' => ').pop()?.trim() || filePath;
+};
+
 const looksBinaryBySniff = async (absolutePath) => {
   try {
     const handle = await fsp.open(absolutePath, 'r');
@@ -1731,8 +1752,8 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
   }
 
   return {
-    original,
-    modified,
+    original: typeof original === 'string' ? original.replace(/\r\n/g, '\n') : original,
+    modified: typeof modified === 'string' ? modified.replace(/\r\n/g, '\n') : modified,
     path: filePath,
     isBinary: false,
   };
@@ -2683,14 +2704,52 @@ export async function deleteBranch(directory, branch, options = {}) {
   }
 }
 
+/**
+ * Resolve a log base ref using local-first semantics.
+ *
+ * - If `from` is falsy / whitespace → return undefined.
+ * - If the local ref resolves → return it unchanged (caller's intent preserved).
+ * - If the local ref is absent but `origin/<from>` exists → return `origin/<from>`
+ *   (common when the user has never checked out the base branch locally).
+ * - If neither resolves → return `from` unchanged so git surfaces a meaningful error.
+ *
+ * @param {string | undefined} from   - The raw `from` option value.
+ * @param {(ref: string) => Promise<boolean>} checkRef - Returns true when the ref resolves.
+ * @returns {Promise<string | undefined>}
+ */
+export async function resolveBaseRefForLog(from, checkRef) {
+  const normalized = typeof from === 'string' ? from.trim() : undefined;
+  if (!normalized) return undefined;
+
+  if (await checkRef(normalized)) return normalized;
+
+  const originRef = `refs/remotes/origin/${normalized}`;
+  if (await checkRef(originRef)) return `origin/${normalized}`;
+
+  return normalized;
+}
+
 export async function getLog(directory, options = {}) {
   const git = await createGit(directory);
 
   try {
     const maxCount = options.maxCount || 50;
+
+    // Prefer the local ref; fall back to origin/<from> only when the local ref
+    // cannot be resolved (e.g. user has never checked out the base branch).
+    const checkRef = async (ref) => {
+      try {
+        const out = await git.raw(['rev-parse', '--verify', ref]);
+        return Boolean(out && out.trim());
+      } catch {
+        return false;
+      }
+    };
+    const resolvedFrom = await resolveBaseRefForLog(options.from, checkRef);
+
     const baseLog = await git.log({
       maxCount,
-      from: options.from,
+      from: resolvedFrom,
       to: options.to,
       file: options.file
     });
@@ -2703,10 +2762,10 @@ export async function getLog(directory, options = {}) {
       '--shortstat'
     ];
 
-    if (options.from && options.to) {
-      logArgs.push(`${options.from}..${options.to}`);
-    } else if (options.from) {
-      logArgs.push(`${options.from}..HEAD`);
+    if (resolvedFrom && options.to) {
+      logArgs.push(`${resolvedFrom}..${options.to}`);
+    } else if (resolvedFrom) {
+      logArgs.push(`${resolvedFrom}..HEAD`);
     } else if (options.to) {
       logArgs.push(options.to);
     }
@@ -2990,15 +3049,13 @@ export async function getCommitFiles(directory, commitHash) {
     for (const line of statusLines) {
       const match = line.match(/^([AMDRC])\d*\t(.+)$/);
       if (match) {
-        const [, status, path] = match;
-        statusMap.set(path, status);
+        const [, status, pathPart] = match;
+        statusMap.set(extractGitStatusPath(status, pathPart), status);
       }
     }
 
     for (const file of files) {
-      const basePath = file.path.includes(' => ')
-        ? file.path.split(' => ').pop()?.replace(/[{}]/g, '') || file.path
-        : file.path;
+      const basePath = extractGitNumstatDestinationPath(file.path);
 
       const status = statusMap.get(basePath) || statusMap.get(file.path);
       if (status) {
@@ -3072,6 +3129,9 @@ export async function getRemotes(directory) {
       pushUrl: remote.refs.push
     }));
   } catch (error) {
+    if (isNotGitRepositoryError(error)) {
+      return [];
+    }
     console.error('Failed to get remotes:', error);
     throw error;
   }
@@ -3340,4 +3400,30 @@ export async function getConflictDetails(directory) {
     console.error('Failed to get conflict details:', error);
     throw error;
   }
+}
+
+export async function getCommitFileDiff(directory, hash, filePath, isBinary) {
+  if (!directory || !hash || !filePath) {
+    throw new Error('directory, hash, and path are required for getCommitFileDiff');
+  }
+
+  if (isBinary) {
+    return { original: '', modified: '', isBinary: true };
+  }
+
+  const directoryPath = normalizeDirectoryPath(directory);
+
+  const [originalResult, modifiedResult] = await Promise.all([
+    runGitCommand(directoryPath, ['show', `${hash}^:${filePath}`]),
+    runGitCommand(directoryPath, ['show', `${hash}:${filePath}`]),
+  ]);
+
+  const original = originalResult.success ? originalResult.stdout : '';
+  const modified = modifiedResult.success ? modifiedResult.stdout : '';
+
+  if (!originalResult.success && !modifiedResult.success) {
+    throw new Error(`Failed to read file content at commit ${hash}: ${originalResult.stderr || modifiedResult.stderr}`);
+  }
+
+  return { original, modified, isBinary: false };
 }

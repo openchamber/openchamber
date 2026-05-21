@@ -2414,7 +2414,7 @@ const buildMacMenu = () => {
     {
       label: app.name,
       submenu: [
-        { role: 'about' },
+        { label: 'About OpenChamber', click: () => dispatchAction('about') },
         {
           label: 'Check for Updates',
           click: () => dispatchCheckForUpdates(),
@@ -2461,10 +2461,12 @@ const buildMacMenu = () => {
     {
       label: 'View',
       submenu: [
-        { label: 'Git', accelerator: 'Cmd+G', click: () => dispatchAction('open-git-tab') },
-        { label: 'Diff', accelerator: 'Cmd+E', click: () => dispatchAction('open-diff-tab') },
-        { label: 'Files', click: () => dispatchAction('open-files-tab') },
-        { label: 'Terminal', accelerator: 'Cmd+T', click: () => dispatchAction('open-terminal-tab') },
+        { label: 'Toggle Right Sidebar', accelerator: 'Cmd+B', click: () => dispatchAction('toggle-right-sidebar') },
+        { label: 'Open Git Sidebar', accelerator: 'Cmd+Shift+G', click: () => dispatchAction('open-right-sidebar-git') },
+        { label: 'Open Files Sidebar', accelerator: 'Cmd+Shift+F', click: () => dispatchAction('open-right-sidebar-files') },
+        { type: 'separator' },
+        { label: 'Toggle Terminal Dock', accelerator: 'Cmd+J', click: () => dispatchAction('toggle-terminal') },
+        { label: 'Toggle Terminal Expanded', accelerator: 'Cmd+Shift+J', click: () => dispatchAction('toggle-terminal-expanded') },
         { type: 'separator' },
         { label: 'Light Theme', click: () => dispatchAction('theme-light') },
         { label: 'Dark Theme', click: () => dispatchAction('theme-dark') },
@@ -2575,6 +2577,9 @@ ipcMain.handle('openchamber:dialog:open', async (event, options) => {
   const browserWindow = BrowserWindow.fromWebContents(event.sender);
   const result = await dialog.showOpenDialog(browserWindow || undefined, {
     title: typeof options?.title === 'string' ? options.title : undefined,
+    defaultPath: typeof options?.defaultPath === 'string' && options.defaultPath.trim().length > 0
+      ? options.defaultPath.trim()
+      : undefined,
     filters: Array.isArray(options?.filters)
       ? options.filters
           .filter((filter) => filter && typeof filter === 'object')

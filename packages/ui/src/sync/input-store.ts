@@ -42,6 +42,22 @@ const readFileAsDataUrl = (file: File): Promise<string> => new Promise((resolve,
   reader.readAsDataURL(file)
 })
 
+const getDataUrlByteSize = (url: string): number => {
+  if (!url.startsWith("data:")) return 0
+  const commaIndex = url.indexOf(",")
+  if (commaIndex < 0) return 0
+  const metadata = url.slice(0, commaIndex).toLowerCase()
+  const payload = url.slice(commaIndex + 1)
+  if (!metadata.endsWith(";base64")) return 0
+  let padding = 0
+  if (payload.endsWith("==")) {
+    padding = 2
+  } else if (payload.endsWith("=")) {
+    padding = 1
+  }
+  return Math.max(0, Math.floor((payload.length * 3) / 4) - padding)
+}
+
 const isSameVSCodeActiveEditorFile = (a: VSCodeActiveEditorFile | null, b: VSCodeActiveEditorFile | null): boolean => {
   if (a === b) return true
   if (!a || !b) return false
@@ -225,7 +241,7 @@ export const useInputStore = create<InputState>()((set, get) => ({
       dataUrl: url,
       mimeType,
       filename,
-      size: 0,
+      size: getDataUrlByteSize(url),
       source: "local",
       serverPath: url,
     }

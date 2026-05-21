@@ -6,15 +6,19 @@ const listPendingQuestionsCalls: Array<{ directories?: Array<string | null | und
 const listPendingPermissionsCalls: Array<{ directories?: Array<string | null | undefined> }> = []
 let pendingQuestionsResponse: QuestionRequest[] = []
 let pendingPermissionsResponse: PermissionRequest[] = []
+let pendingQuestionsShouldThrow = false
+let pendingPermissionsShouldThrow = false
 
 mock.module("@/lib/opencode/client", () => ({
   opencodeClient: {
     listPendingQuestions: mock(async (opts?: { directories?: Array<string | null | undefined> }) => {
       listPendingQuestionsCalls.push(opts ?? {})
+      if (pendingQuestionsShouldThrow) throw new Error("question.list failed: simulated")
       return pendingQuestionsResponse
     }),
     listPendingPermissions: mock(async (opts?: { directories?: Array<string | null | undefined> }) => {
       listPendingPermissionsCalls.push(opts ?? {})
+      if (pendingPermissionsShouldThrow) throw new Error("permission.list failed: simulated")
       return pendingPermissionsResponse
     }),
     getDirectory: () => "/repo",
@@ -85,6 +89,8 @@ describe("resyncBlockingRequestsForDirectory", () => {
     listPendingPermissionsCalls.length = 0
     pendingQuestionsResponse = []
     pendingPermissionsResponse = []
+    pendingQuestionsShouldThrow = false
+    pendingPermissionsShouldThrow = false
   })
 
   test("calls listPendingQuestions and listPendingPermissions exactly once for the directory", async () => {
@@ -155,5 +161,48 @@ describe("resyncBlockingRequestsForDirectory", () => {
     await resyncBlockingRequestsForDirectory("/repo", store)
     expect(listPendingQuestionsCalls).toHaveLength(0)
     expect(listPendingPermissionsCalls).toHaveLength(0)
+  })
+
+  // Regression: prior to the fix, listPendingQuestions silently returned [] on
+  // fetch failure, indistinguishable from a successful empty server response.
+  // The resync then walked the candidate set and deleted any question that
+  // wasn't in the (empty) result — wiping legitimate in-flight prompts on a
+  // transient network blip. The client method now throws on failure and the
+  // outer try/catch preserves existing state.
+  test("preserves existing questions when listPendingQuestions throws (transient fetch failure)", async () => {
+    const store = createDirectoryStore({
+      question: { ses_a: [{ ...buildQuestion(), id: "que_in_flight" }] },
+    })
+    pendingQuestionsShouldThrow = true
+
+    await resyncBlockingRequestsForDirectory("/repo", store)
+
+    expect(store.getState().question["ses_a"]).toHaveLength(1)
+    expect(store.getState().question["ses_a"]?.[0]?.id).toBe("que_in_flight")
+  })
+
+  test("preserves existing permissions when listPendingPermissions throws (transient fetch failure)", async () => {
+    const store = createDirectoryStore({
+      permission: { ses_a: [{ ...buildPermission(), id: "perm_in_flight" }] },
+    })
+    pendingPermissionsShouldThrow = true
+
+    await resyncBlockingRequestsForDirectory("/repo", store)
+
+    expect(store.getState().permission["ses_a"]).toHaveLength(1)
+    expect(store.getState().permission["ses_a"]?.[0]?.id).toBe("perm_in_flight")
+  })
+
+  test("permission fetch failure does not block question resync (and vice versa)", async () => {
+    const store = createDirectoryStore({})
+    pendingQuestionsResponse = [buildQuestion()]
+    pendingPermissionsShouldThrow = true
+
+    await resyncBlockingRequestsForDirectory("/repo", store)
+
+    // Question block ran successfully despite permission block failing.
+    expect(store.getState().question["ses_a"]).toHaveLength(1)
+    expect(store.getState().question["ses_a"]?.[0]?.id).toBe("que_1")
+    expect(listPendingPermissionsCalls).toHaveLength(1)
   })
 })

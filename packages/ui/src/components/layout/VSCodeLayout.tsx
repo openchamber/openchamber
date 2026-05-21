@@ -187,6 +187,19 @@ export const VSCodeLayout: React.FC = () => {
     void vscodeApi.executeCommand('openchamber.setActiveSession', currentSessionId, activeSessionTitle);
   }, [activeSessionTitle, currentSessionId, runtimeApis.vscode]);
 
+  React.useEffect(() => {
+    if (viewMode !== 'editor' || !currentSessionId || !activeSessionTitle) {
+      return;
+    }
+
+    const vscodeApi = runtimeApis.vscode;
+    if (!vscodeApi) {
+      return;
+    }
+
+    void vscodeApi.executeCommand('openchamber.updateSessionEditorTitle', currentSessionId, activeSessionTitle);
+  }, [activeSessionTitle, currentSessionId, runtimeApis.vscode, viewMode]);
+
   // If the active session disappears (e.g., deleted), go back to sessions list
   React.useEffect(() => {
     if (viewMode === 'editor') {
@@ -709,7 +722,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
           <button
             type="button"
             aria-label={t('sessions.switcher.openAria')}
-            className="flex min-w-0 flex-1 items-center rounded-md px-1 py-0.5 -my-0.5 text-left transition-colors hover:bg-interactive-hover/60 focus-visible:outline-none focus-visible:bg-interactive-hover/60"
+            className="inline-flex min-w-0 max-w-full items-center rounded-md px-1 py-0.5 -my-0.5 text-left transition-colors hover:bg-interactive-hover/60 focus-visible:outline-none focus-visible:bg-interactive-hover/60"
           >
             <span className="text-sm font-medium truncate" title={title}>{title}</span>
           </button>
@@ -717,6 +730,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
       ) : (
         <h1 className="text-sm font-medium truncate flex-1" title={title}>{title}</h1>
       )}
+      <div className="min-w-0 flex-1" />
       {onNewSession && (
         <button
           onClick={onNewSession}

@@ -279,6 +279,27 @@ async function execGit(args: string[], cwd: string): Promise<{ stdout: string; s
   });
 }
 
+function extractGitStatusPath(status: string, pathPart: string): string {
+  if ((status === 'R' || status === 'C') && pathPart.includes('\t')) {
+    return pathPart.split('\t').pop() || pathPart;
+  }
+  return pathPart;
+}
+
+function extractGitNumstatDestinationPath(filePath: string): string {
+  if (!filePath.includes(' => ')) {
+    return filePath;
+  }
+
+  const braceMatch = filePath.match(/^(.*)\{([^{}]*)\s=>\s([^{}]*)\}(.*)$/);
+  if (braceMatch) {
+    const [, prefix, , destination, suffix] = braceMatch;
+    return `${prefix}${destination}${suffix}`.replace(/\/+/g, '/');
+  }
+
+  return filePath.split(' => ').pop()?.trim() || filePath;
+}
+
 // ============== Repository Operations ==============
 
 /**
@@ -2516,6 +2537,34 @@ export interface GitLogEntry {
 }
 
 /**
+ * Resolve a log base ref using local-first semantics (mirrors web service.js).
+ *
+ * - Returns undefined when `from` is falsy/whitespace.
+ * - Returns `from` unchanged when the local ref resolves.
+ * - Returns `origin/<from>` when local is absent but the remote-tracking ref exists.
+ * - Returns `from` unchanged when neither resolves (lets git surface the error).
+ */
+async function resolveBaseRefForLog(
+  from: string | undefined,
+  directory: string
+): Promise<string | undefined> {
+  const normalized = typeof from === 'string' ? from.trim() : undefined;
+  if (!normalized) return undefined;
+
+  const checkRef = async (ref: string): Promise<boolean> => {
+    const result = await execGit(['rev-parse', '--verify', ref], directory);
+    return result.exitCode === 0 && Boolean(result.stdout.trim());
+  };
+
+  if (await checkRef(normalized)) return normalized;
+
+  const originRef = `refs/remotes/origin/${normalized}`;
+  if (await checkRef(originRef)) return `origin/${normalized}`;
+
+  return normalized;
+}
+
+/**
  * Get git log
  */
 export async function getGitLog(
@@ -2523,6 +2572,11 @@ export async function getGitLog(
   options?: { maxCount?: number; from?: string; to?: string; file?: string }
 ): Promise<{ all: GitLogEntry[]; latest: GitLogEntry | null; total: number }> {
   const maxCount = options?.maxCount || 50;
+
+  // Prefer the local ref; fall back to origin/<from> only when the local ref
+  // cannot be resolved (e.g. user has never checked out the base branch).
+  const resolvedFrom = await resolveBaseRefForLog(options?.from, directory);
+
   const args = [
     'log',
     `--max-count=${maxCount}`,
@@ -2530,8 +2584,12 @@ export async function getGitLog(
     '--shortstat',
   ];
   
-  if (options?.from && options?.to) {
-    args.push(`${options.from}..${options.to}`);
+  if (resolvedFrom && options?.to) {
+    args.push(`${resolvedFrom}..${options.to}`);
+  } else if (resolvedFrom) {
+    args.push(`${resolvedFrom}..HEAD`);
+  } else if (options?.to) {
+    args.push(options.to);
   }
   
   if (options?.file) {
@@ -2541,7 +2599,7 @@ export async function getGitLog(
   const result = await execGit(args, directory);
   
   if (result.exitCode !== 0) {
-    return { all: [], latest: null, total: 0 };
+    throw new Error(result.stderr.trim() || result.stdout.trim() || 'Failed to get git log');
   }
 
   const entries: GitLogEntry[] = [];
@@ -2594,29 +2652,82 @@ export async function getCommitFiles(
   directory: string,
   hash: string
 ): Promise<{ files: Array<{ path: string; insertions: number; deletions: number; isBinary: boolean; changeType: string }> }> {
-  const result = await execGit(['show', '--numstat', '--format=', hash], directory);
-  
-  if (result.exitCode !== 0) {
+  const numstatResult = await execGit(['show', '--numstat', '--format=', hash], directory);
+
+  if (numstatResult.exitCode !== 0) {
     return { files: [] };
   }
 
   const files: Array<{ path: string; insertions: number; deletions: number; isBinary: boolean; changeType: string }> = [];
-  
-  for (const line of result.stdout.trim().split('\n').filter(Boolean)) {
+  const lines = numstatResult.stdout.trim().split('\n').filter(Boolean);
+
+  for (const line of lines) {
     const parts = line.split('\t');
-    if (parts.length >= 3) {
-      const isBinary = parts[0] === '-' && parts[1] === '-';
-      files.push({
-        path: parts[2] || '',
-        insertions: isBinary ? 0 : parseInt(parts[0] || '0', 10),
-        deletions: isBinary ? 0 : parseInt(parts[1] || '0', 10),
-        isBinary,
-        changeType: 'M', // Would need additional parsing for actual change type
-      });
+    if (parts.length < 3) continue;
+
+    const [insertionsRaw, deletionsRaw, ...pathParts] = parts;
+    const filePath = pathParts.join('\t');
+    if (!filePath) continue;
+
+    const isBinary = insertionsRaw === '-' && deletionsRaw === '-';
+    const insertions = isBinary ? 0 : (parseInt(insertionsRaw, 10) || 0);
+    const deletions = isBinary ? 0 : (parseInt(deletionsRaw, 10) || 0);
+
+    let changeType = 'M';
+    if (filePath.includes(' => ')) {
+      changeType = 'R';
+    }
+
+    files.push({ path: filePath, insertions, deletions, isBinary, changeType });
+  }
+
+  // Get accurate change types from --name-status
+  const nameStatusResult = await execGit(['show', '--name-status', '--format=', hash], directory);
+  if (nameStatusResult.exitCode === 0) {
+    const statusMap = new Map<string, string>();
+    for (const line of nameStatusResult.stdout.trim().split('\n').filter(Boolean)) {
+      const match = line.match(/^([AMDRC])\d*\t(.+)$/);
+      if (match) {
+        const [, status, pathPart] = match;
+        statusMap.set(extractGitStatusPath(status, pathPart), status);
+      }
+    }
+    for (const file of files) {
+      const basePath = extractGitNumstatDestinationPath(file.path);
+      const status = statusMap.get(basePath) ?? statusMap.get(file.path);
+      if (status) {
+        file.changeType = status;
+      }
     }
   }
 
   return { files };
+}
+
+export async function getCommitFileDiff(
+  directory: string,
+  hash: string,
+  filePath: string,
+  isBinary: boolean
+): Promise<{ original: string; modified: string; isBinary: boolean }> {
+  if (isBinary) {
+    return { original: '', modified: '', isBinary: true };
+  }
+
+  const [originalResult, modifiedResult] = await Promise.all([
+    execGit(['show', `${hash}^:${filePath}`], directory),
+    execGit(['show', `${hash}:${filePath}`], directory),
+  ]);
+
+  if (originalResult.exitCode !== 0 && modifiedResult.exitCode !== 0) {
+    throw new Error(`Failed to read file content at commit ${hash}`);
+  }
+
+  return {
+    original: originalResult.exitCode === 0 ? originalResult.stdout : '',
+    modified: modifiedResult.exitCode === 0 ? modifiedResult.stdout : '',
+    isBinary: false,
+  };
 }
 
 // ============== Git Identity Operations ==============

@@ -56,6 +56,8 @@ export interface SkillSources {
   projectMd?: { exists: boolean; path: string | null };
   claudeMd?: { exists: boolean; path: string | null };
   userMd?: { exists: boolean; path: string | null };
+  userClaudeMd?: { exists: boolean; path: string | null };
+  userAgentsMd?: { exists: boolean; path: string | null };
 }
 
 export interface DiscoveredSkill {
@@ -102,6 +104,7 @@ export interface SkillConfig {
   instructions?: string;
   scope?: SkillScope;
   source?: SkillSource;
+  targetPath?: string;
   supportingFiles?: Array<{ path: string; content: string }>;
 }
 
@@ -163,6 +166,7 @@ const skillsLoadInFlight = new Map<string, Promise<boolean>>();
 const getSkillsCacheKey = (directory: string | null): string => {
   return directory?.trim() || DEFAULT_SKILLS_CACHE_KEY;
 };
+
 const MAX_HEALTH_WAIT_MS = 20000;
 const FAST_HEALTH_POLL_INTERVAL_MS = 300;
 const FAST_HEALTH_POLL_ATTEMPTS = 4;
@@ -219,7 +223,7 @@ export const useSkillsStore = create<SkillsStore>()(
 
                 const data = await response.json();
                 const rawSkills: RawSkillResponse[] = data.skills || [];
-                const skills: DiscoveredSkill[] = rawSkills.map((s) => ({
+                const configSkills: DiscoveredSkill[] = rawSkills.map((s) => ({
                   name: s.name,
                   path: s.path,
                   scope: s.scope ?? 'user',
@@ -228,7 +232,7 @@ export const useSkillsStore = create<SkillsStore>()(
                   group: parseSkillGroup(s.path),
                 }));
 
-                set({ skills, isLoading: false });
+                set({ skills: configSkills, isLoading: false });
                 skillsLastLoadedAt.set(cacheKey, Date.now());
                 return true;
               } catch (error) {
@@ -329,6 +333,7 @@ export const useSkillsStore = create<SkillsStore>()(
             if (config.description !== undefined) skillConfig.description = config.description;
             if (config.instructions !== undefined) skillConfig.instructions = config.instructions;
             if (config.supportingFiles !== undefined) skillConfig.supportingFiles = config.supportingFiles;
+            if (config.targetPath !== undefined) skillConfig.targetPath = config.targetPath;
 
             const currentDirectory = getCurrentDirectory();
             const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';

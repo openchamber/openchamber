@@ -383,7 +383,11 @@ export const IntegrateCommitsSection: React.FC<{
                 className="w-72 p-0 max-h-[var(--available-height)] flex flex-col overflow-hidden"
               >
                 <Command className="h-full min-h-0">
-                  <CommandInput ref={searchInputRef} placeholder={t('gitView.branch.searchPlaceholder')} />
+                  <CommandInput
+                    ref={searchInputRef}
+                    placeholder={t('gitView.branch.searchPlaceholder')}
+                    onKeyDown={(event) => event.stopPropagation()}
+                  />
                   <CommandList
                     className="h-full min-h-0"
                     scrollbarClassName="overlay-scrollbar--flush overlay-scrollbar--dense overlay-scrollbar--zero"

@@ -29,6 +29,7 @@ import type {
   GitLogResponse,
   GitLogOptions,
   GitCommitFilesResponse,
+  CommitFileDiffResponse,
   GitIdentitySummary,
   GitIdentityProfile,
   GitRemote,
@@ -256,6 +257,15 @@ export const createVSCodeGitAPI = (): GitAPI => ({
     return sendBridgeMessage<GitCommitFilesResponse>('api:git/commit-files', {
       directory,
       hash,
+    });
+  },
+
+  getCommitFileDiff: async (directory: string, hash: string, filePath: string, isBinary: boolean): Promise<CommitFileDiffResponse> => {
+    return sendBridgeMessage<CommitFileDiffResponse>('api:git/commit-file-diff', {
+      directory,
+      hash,
+      path: filePath,
+      binary: isBinary,
     });
   },
 

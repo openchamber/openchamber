@@ -33,6 +33,7 @@ interface HistorySectionProps {
   commitFilesMap: Map<string, CommitFileEntry[]>;
   loadingCommitHashes: Set<string>;
   onCopyHash: (hash: string) => void;
+  directory: string | undefined;
   showHeader?: boolean;
   contentMaxHeightClassName?: string;
   branchDivider?: {
@@ -52,6 +53,7 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
   commitFilesMap,
   loadingCommitHashes,
   onCopyHash,
+  directory,
   showHeader = true,
   contentMaxHeightClassName = 'max-h-[50vh]',
   branchDivider = null,
@@ -92,6 +94,7 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
           files={commitFilesMap.get(entry.hash) ?? []}
           isLoadingFiles={loadingCommitHashes.has(entry.hash)}
           onCopyHash={onCopyHash}
+          directory={directory}
         />
       ))}
     </ul>

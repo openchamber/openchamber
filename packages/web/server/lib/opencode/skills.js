@@ -69,6 +69,14 @@ function getClaudeSkillPath(workingDirectory, skillName) {
   return path.join(getClaudeSkillDir(workingDirectory, skillName), 'SKILL.md');
 }
 
+function getUserClaudeSkillDir(skillName) {
+  return path.join(os.homedir(), '.claude', 'skills', skillName);
+}
+
+function getUserClaudeSkillPath(skillName) {
+  return path.join(getUserClaudeSkillDir(skillName), 'SKILL.md');
+}
+
 function getUserAgentsSkillDir(skillName) {
   return path.join(os.homedir(), '.agents', 'skills', skillName);
 }
@@ -106,6 +114,16 @@ function getSkillScope(skillName, workingDirectory) {
   const userPath = getUserSkillPath(skillName);
   if (fs.existsSync(userPath)) {
     return { scope: SKILL_SCOPE.USER, path: userPath, source: 'opencode' };
+  }
+
+  const userClaudePath = getUserClaudeSkillPath(skillName);
+  if (fs.existsSync(userClaudePath)) {
+    return { scope: SKILL_SCOPE.USER, path: userClaudePath, source: 'claude' };
+  }
+
+  const userAgentsPath = getUserAgentsSkillPath(skillName);
+  if (fs.existsSync(userAgentsPath)) {
+    return { scope: SKILL_SCOPE.USER, path: userAgentsPath, source: 'agents' };
   }
   
   return { scope: null, path: null, source: null };
@@ -226,10 +244,17 @@ function getSkillSources(skillName, workingDirectory, discoveredSkill = null) {
   const claudePath = workingDirectory ? getClaudeSkillPath(workingDirectory, skillName) : null;
   const claudeExists = claudePath && fs.existsSync(claudePath);
   const claudeDir = claudeExists ? path.dirname(claudePath) : null;
+  const userClaudePath = getUserClaudeSkillPath(skillName);
+  const userClaudeExists = fs.existsSync(userClaudePath);
+  const userClaudeDir = userClaudeExists ? path.dirname(userClaudePath) : null;
   
   const userPath = getUserSkillPath(skillName);
   const userExists = fs.existsSync(userPath);
   const userDir = userExists ? path.dirname(userPath) : null;
+
+  const userAgentsPath = getUserAgentsSkillPath(skillName);
+  const userAgentsExists = fs.existsSync(userAgentsPath);
+  const userAgentsDir = userAgentsExists ? path.dirname(userAgentsPath) : null;
 
   const matchedDiscovered = discoveredSkill && discoveredSkill.name === skillName
     ? discoveredSkill
@@ -240,7 +265,12 @@ function getSkillSources(skillName, workingDirectory, discoveredSkill = null) {
   let mdSource = null;
   let mdDir = null;
   
-  if (projectExists) {
+  if (matchedDiscovered?.path) {
+    mdPath = matchedDiscovered.path;
+    mdScope = matchedDiscovered.scope || null;
+    mdSource = matchedDiscovered.source || null;
+    mdDir = path.dirname(matchedDiscovered.path);
+  } else if (projectExists) {
     mdPath = projectPath;
     mdScope = SKILL_SCOPE.PROJECT;
     mdSource = 'opencode';
@@ -255,14 +285,23 @@ function getSkillSources(skillName, workingDirectory, discoveredSkill = null) {
     mdScope = SKILL_SCOPE.USER;
     mdSource = 'opencode';
     mdDir = userDir;
-  } else if (matchedDiscovered?.path) {
-    mdPath = matchedDiscovered.path;
-    mdScope = matchedDiscovered.scope || null;
-    mdSource = matchedDiscovered.source || null;
-    mdDir = path.dirname(matchedDiscovered.path);
+  } else if (userClaudeExists) {
+    mdPath = userClaudePath;
+    mdScope = SKILL_SCOPE.USER;
+    mdSource = 'claude';
+    mdDir = userClaudeDir;
+  } else if (userAgentsExists) {
+    mdPath = userAgentsPath;
+    mdScope = SKILL_SCOPE.USER;
+    mdSource = 'agents';
+    mdDir = userAgentsDir;
   }
   
-  const mdExists = !!mdPath;
+  const mdExists = !!mdPath && fs.existsSync(mdPath);
+  if (!mdExists) {
+    mdPath = null;
+    mdDir = null;
+  }
 
   const sources = {
     md: {
@@ -288,6 +327,16 @@ function getSkillSources(skillName, workingDirectory, discoveredSkill = null) {
       exists: userExists,
       path: userPath,
       dir: userDir
+    },
+    userClaudeMd: {
+      exists: userClaudeExists,
+      path: userClaudePath,
+      dir: userClaudeDir
+    },
+    userAgentsMd: {
+      exists: userAgentsExists,
+      path: userAgentsPath,
+      dir: userAgentsDir
     }
   };
 
@@ -374,22 +423,34 @@ function createSkill(skillName, config, workingDirectory, scope) {
   console.log(`Created new skill: ${skillName} (scope: ${targetScope}, path: ${targetPath})`);
 }
 
-function updateSkill(skillName, updates, workingDirectory) {
+function updateSkill(skillName, updates, workingDirectory, targetPath = null) {
   ensureDirs();
 
-  const existing = getSkillScope(skillName, workingDirectory);
+  const requestedPath = typeof targetPath === 'string' && targetPath.trim()
+    ? path.resolve(targetPath.trim())
+    : null;
+  const existing = requestedPath && fs.existsSync(requestedPath)
+    ? { scope: null, path: requestedPath, source: null }
+    : getSkillScope(skillName, workingDirectory);
   if (!existing.path) {
     throw new Error(`Skill "${skillName}" not found`);
+  }
+  if (path.basename(existing.path) !== 'SKILL.md') {
+    throw new Error(`Skill "${skillName}" target must be a SKILL.md file`);
   }
   
   const mdPath = existing.path;
   const mdDir = path.dirname(mdPath);
   const mdData = parseMdFile(mdPath);
+  const frontmatterName = typeof mdData.frontmatter?.name === 'string' ? mdData.frontmatter.name : skillName;
+  if (frontmatterName !== skillName) {
+    throw new Error(`Skill "${skillName}" does not match ${mdPath}`);
+  }
 
   let mdModified = false;
 
   for (const [field, value] of Object.entries(updates)) {
-    if (field === 'scope') {
+    if (field === 'scope' || field === 'source' || field === 'targetPath') {
       continue;
     }
     
@@ -461,6 +522,13 @@ function deleteSkill(skillName, workingDirectory) {
   if (fs.existsSync(userAgentsDir)) {
     fs.rmSync(userAgentsDir, { recursive: true, force: true });
     console.log(`Deleted user-level agents skill directory: ${userAgentsDir}`);
+    deleted = true;
+  }
+
+  const userClaudeDir = getUserClaudeSkillDir(skillName);
+  if (fs.existsSync(userClaudeDir)) {
+    fs.rmSync(userClaudeDir, { recursive: true, force: true });
+    console.log(`Deleted user-level claude skill directory: ${userClaudeDir}`);
     deleted = true;
   }
 

@@ -1,12 +1,12 @@
 export const clampPercent = (value: number | null): number | null => {
-  if (typeof value !== 'number' || Number.isNaN(value)) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
     return null;
   }
   return Math.max(0, Math.min(100, Math.round(value)));
 };
 
 export const formatPercent = (value: number | null): string => {
-  if (typeof value !== 'number' || Number.isNaN(value)) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
     return '-';
   }
   return `${Math.round(value)}%`;

@@ -25,6 +25,7 @@ import type {
   GitLogOptions,
   GitLogResponse,
   GitCommitFilesResponse,
+  CommitFileDiffResponse,
   GitIdentityProfile,
   GitIdentitySummary,
   DiscoveredGitCredential,
@@ -662,7 +663,8 @@ export async function getGitLog(
     })
   );
   if (!response.ok) {
-    throw new Error(`Failed to get git log: ${response.statusText}`);
+    const errorBody = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(`Failed to get git log: ${errorBody.error || response.statusText}`);
   }
   return response.json();
 }
@@ -676,6 +678,25 @@ export async function getCommitFiles(
   );
   if (!response.ok) {
     throw new Error(`Failed to get commit files: ${response.statusText}`);
+  }
+  return response.json();
+}
+
+export async function getCommitFileDiff(
+  directory: string,
+  hash: string,
+  filePath: string,
+  isBinary: boolean
+): Promise<CommitFileDiffResponse> {
+  const response = await fetch(
+    buildUrl(`${API_BASE}/commit-file-diff`, directory, {
+      hash,
+      path: filePath,
+      binary: isBinary ? 'true' : undefined,
+    })
+  );
+  if (!response.ok) {
+    throw new Error(`Failed to get commit file diff: ${response.statusText}`);
   }
   return response.json();
 }

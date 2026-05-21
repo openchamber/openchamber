@@ -155,7 +155,20 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
           error: payload?.error || response.statusText || 'Failed to upgrade OpenCode',
         });
       }
-      return res.json(payload ?? { success: true });
+
+      try {
+        await refreshOpenCodeAfterConfigChange('OpenCode upgrade');
+      } catch (restartError) {
+        return res.status(500).json({
+          success: false,
+          upgraded: true,
+          error: restartError instanceof Error
+            ? `OpenCode upgraded, but restart failed: ${restartError.message}`
+            : 'OpenCode upgraded, but restart failed',
+        });
+      }
+
+      return res.json({ ...(payload ?? { success: true }), restarted: true });
     } catch (error) {
       console.error('Failed to upgrade OpenCode:', error);
       return res.status(500).json({

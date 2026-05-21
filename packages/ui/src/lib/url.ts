@@ -28,6 +28,15 @@ export const isExternalHttpUrl = (url: string): boolean => {
   return parsed.protocol === 'http:' || parsed.protocol === 'https:';
 };
 
+export const getExternalFaviconUrl = (url: string): string | null => {
+  const parsed = parseUrlSafely(url.trim());
+  if (!parsed || (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')) {
+    return null;
+  }
+
+  return `https://icons.duckduckgo.com/ip3/${parsed.hostname.toLowerCase()}.ico`;
+};
+
 const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1']);
 
 /**

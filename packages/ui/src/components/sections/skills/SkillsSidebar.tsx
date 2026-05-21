@@ -437,6 +437,12 @@ const SkillListItem: React.FC<SkillListItemProps> = ({
 }) => {
   const { t } = useI18n();
   const isMobile = isMobileDeviceViaCSS();
+  const sourceLabel = skill.source === 'claude'
+    ? t('settings.skills.sidebar.badge.claude')
+    : skill.source === 'agents'
+      ? t('settings.skills.sidebar.badge.agents')
+      : t('settings.skills.sidebar.badge.opencode');
+  const badgeClassName = 'typography-micro text-muted-foreground bg-[var(--surface-muted)] px-1 rounded flex-shrink-0 leading-none pb-px border border-[var(--interactive-border)]/50';
   return (
     <div
       className={cn(
@@ -458,19 +464,10 @@ const SkillListItem: React.FC<SkillListItemProps> = ({
             <span className="typography-ui-label font-normal truncate text-foreground">
               {skill.name}
             </span>
-            <span className="typography-micro text-muted-foreground bg-muted px-1 rounded flex-shrink-0 leading-none pb-px border border-border/50">
+            <span className={badgeClassName}>
               {skill.scope}
             </span>
-            {skill.source === 'claude' && (
-              <span className="typography-micro text-muted-foreground bg-muted px-1 rounded flex-shrink-0 leading-none pb-px border border-border/50">
-                {t('settings.skills.sidebar.badge.claude')}
-              </span>
-            )}
-            {skill.source === 'agents' && (
-              <span className="typography-micro text-muted-foreground bg-muted px-1 rounded flex-shrink-0 leading-none pb-px border border-border/50">
-                {t('settings.skills.sidebar.badge.agents')}
-              </span>
-            )}
+            <span className={badgeClassName}>{sourceLabel}</span>
           </div>
         </button>
 
