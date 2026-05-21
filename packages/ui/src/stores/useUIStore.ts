@@ -4,7 +4,7 @@ import type { SidebarSection } from '@/constants/sidebar';
 import { getSafeStorage } from './utils/safeStorage';
 import { SEMANTIC_TYPOGRAPHY, getTypographyVariable, type SemanticTypographyKey } from '@/lib/typography';
 import type { ShortcutCombo } from '@/lib/shortcuts';
-import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
+import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, sanitizeCustomFontInput, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files';
@@ -540,6 +540,8 @@ interface UIStore {
   terminalFontSize: number;
   uiFont: UiFontOption;
   monoFont: MonoFontOption;
+  customUiFont: string;
+  customMonoFont: string;
   padding: number;
   cornerRadius: number;
   inputBarOffset: number;
@@ -672,6 +674,8 @@ interface UIStore {
   setTerminalFontSize: (size: number) => void;
   setUiFont: (font: UiFontOption) => void;
   setMonoFont: (font: MonoFontOption) => void;
+  setCustomUiFont: (font: string) => void;
+  setCustomMonoFont: (font: string) => void;
   setPadding: (size: number) => void;
   setCornerRadius: (radius: number) => void;
   setInputBarOffset: (offset: number) => void;
@@ -806,6 +810,8 @@ export const useUIStore = create<UIStore>()(
         terminalFontSize: 13,
         uiFont: DEFAULT_UI_FONT,
         monoFont: DEFAULT_MONO_FONT,
+        customUiFont: '',
+        customMonoFont: '',
         padding: 100,
         cornerRadius: 18,
         inputBarOffset: 0,
@@ -1498,6 +1504,22 @@ export const useUIStore = create<UIStore>()(
           set({ monoFont: font });
         },
 
+        setCustomUiFont: (font) => {
+          const nextFont = sanitizeCustomFontInput(font);
+          if (get().customUiFont === nextFont) {
+            return;
+          }
+          set({ customUiFont: nextFont });
+        },
+
+        setCustomMonoFont: (font) => {
+          const nextFont = sanitizeCustomFontInput(font);
+          if (get().customMonoFont === nextFont) {
+            return;
+          }
+          set({ customMonoFont: nextFont });
+        },
+
         setPadding: (size) => {
           // Clamp between 50% and 200%
           const clampedSize = Math.max(50, Math.min(200, size));
@@ -2095,6 +2117,8 @@ export const useUIStore = create<UIStore>()(
           terminalFontSize: state.terminalFontSize,
           uiFont: state.uiFont,
           monoFont: state.monoFont,
+          customUiFont: state.customUiFont,
+          customMonoFont: state.customMonoFont,
           padding: state.padding,
           cornerRadius: state.cornerRadius,
           favoriteModels: state.favoriteModels,

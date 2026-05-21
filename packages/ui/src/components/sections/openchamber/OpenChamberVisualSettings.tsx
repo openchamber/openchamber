@@ -15,6 +15,7 @@ import {
     Select,
     SelectContent,
     SelectItem,
+    SelectSeparator,
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
@@ -23,7 +24,7 @@ import { isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
 import { useDeviceInfo } from '@/lib/device';
 import { usePwaDetection } from '@/hooks/usePwaDetection';
 import { updateDesktopSettings } from '@/lib/persistence';
-import { CODE_FONT_OPTIONS, DEFAULT_MONO_FONT, DEFAULT_UI_FONT, UI_FONT_OPTIONS, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
+import { CODE_FONT_OPTIONS, DEFAULT_MONO_FONT, DEFAULT_UI_FONT, isMonoFontOption, isUiFontOption, UI_FONT_OPTIONS, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { useI18n, type Locale } from '@/lib/i18n';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { normalizeMobileKeyboardMode, supportsMobileKeyboardResizeContent, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
@@ -31,6 +32,9 @@ import {
     setDirectoryShowHidden,
     useDirectoryShowHidden,
 } from '@/lib/directoryShowHidden';
+
+const CUSTOM_FONT_SELECT_VALUE = 'custom';
+const CUSTOM_FONT_INPUT_CLASS = 'h-6 w-full rounded-lg bg-transparent px-2 py-0 typography-ui-label shadow-none';
 
 interface Option<T extends string> {
     id: T;
@@ -270,8 +274,12 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setTerminalFontSize = useUIStore(state => state.setTerminalFontSize);
     const uiFont = useUIStore(state => state.uiFont);
     const setUiFont = useUIStore(state => state.setUiFont);
+    const customUiFont = useUIStore(state => state.customUiFont);
+    const setCustomUiFont = useUIStore(state => state.setCustomUiFont);
     const monoFont = useUIStore(state => state.monoFont);
     const setMonoFont = useUIStore(state => state.setMonoFont);
+    const customMonoFont = useUIStore(state => state.customMonoFont);
+    const setCustomMonoFont = useUIStore(state => state.setCustomMonoFont);
     const padding = useUIStore(state => state.padding);
     const setPadding = useUIStore(state => state.setPadding);
     const inputBarOffset = useUIStore(state => state.inputBarOffset);
@@ -527,6 +535,127 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         const option = MOBILE_KEYBOARD_MODE_OPTIONS.find((item) => item.id === mobileKeyboardMode);
         return option ? tUnsafe(option.labelKey) : undefined;
     }, [mobileKeyboardMode, tUnsafe]);
+    const [selectedUiFontValue, setSelectedUiFontValue] = React.useState<UiFontOption | typeof CUSTOM_FONT_SELECT_VALUE>(
+        customUiFont ? CUSTOM_FONT_SELECT_VALUE : uiFont,
+    );
+    const [selectedMonoFontValue, setSelectedMonoFontValue] = React.useState<MonoFontOption | typeof CUSTOM_FONT_SELECT_VALUE>(
+        customMonoFont ? CUSTOM_FONT_SELECT_VALUE : monoFont,
+    );
+    const [customUiFontDraft, setCustomUiFontDraft] = React.useState(customUiFont);
+    const [customMonoFontDraft, setCustomMonoFontDraft] = React.useState(customMonoFont);
+    const resolvedUiFontSelectValue = customUiFont || selectedUiFontValue === CUSTOM_FONT_SELECT_VALUE
+        ? CUSTOM_FONT_SELECT_VALUE
+        : uiFont;
+    const resolvedMonoFontSelectValue = customMonoFont || selectedMonoFontValue === CUSTOM_FONT_SELECT_VALUE
+        ? CUSTOM_FONT_SELECT_VALUE
+        : monoFont;
+    const customFontOptionLabel = t('settings.openchamber.visual.option.font.custom');
+
+    React.useEffect(() => {
+        setSelectedUiFontValue((current) => {
+            if (customUiFont) {
+                return CUSTOM_FONT_SELECT_VALUE;
+            }
+
+            return current === CUSTOM_FONT_SELECT_VALUE ? current : uiFont;
+        });
+    }, [customUiFont, uiFont]);
+
+    React.useEffect(() => {
+        setSelectedMonoFontValue((current) => {
+            if (customMonoFont) {
+                return CUSTOM_FONT_SELECT_VALUE;
+            }
+
+            return current === CUSTOM_FONT_SELECT_VALUE ? current : monoFont;
+        });
+    }, [customMonoFont, monoFont]);
+
+    React.useEffect(() => {
+        setCustomUiFontDraft(customUiFont);
+    }, [customUiFont]);
+
+    React.useEffect(() => {
+        setCustomMonoFontDraft(customMonoFont);
+    }, [customMonoFont]);
+
+    React.useEffect(() => {
+        if (resolvedUiFontSelectValue !== CUSTOM_FONT_SELECT_VALUE || customUiFontDraft === customUiFont) {
+            return;
+        }
+
+        const timeout = window.setTimeout(() => {
+            setCustomUiFont(customUiFontDraft);
+        }, 250);
+
+        return () => window.clearTimeout(timeout);
+    }, [customUiFont, customUiFontDraft, resolvedUiFontSelectValue, setCustomUiFont]);
+
+    React.useEffect(() => {
+        if (resolvedMonoFontSelectValue !== CUSTOM_FONT_SELECT_VALUE || customMonoFontDraft === customMonoFont) {
+            return;
+        }
+
+        const timeout = window.setTimeout(() => {
+            setCustomMonoFont(customMonoFontDraft);
+        }, 250);
+
+        return () => window.clearTimeout(timeout);
+    }, [customMonoFont, customMonoFontDraft, resolvedMonoFontSelectValue, setCustomMonoFont]);
+
+    const handleUiFontSelect = React.useCallback((value: string) => {
+        if (value === CUSTOM_FONT_SELECT_VALUE) {
+            setSelectedUiFontValue(CUSTOM_FONT_SELECT_VALUE);
+            return;
+        }
+
+        if (!isUiFontOption(value)) {
+            return;
+        }
+
+        setSelectedUiFontValue(value);
+        setUiFont(value);
+        setCustomUiFontDraft('');
+        setCustomUiFont('');
+    }, [setCustomUiFont, setUiFont]);
+
+    const handleMonoFontSelect = React.useCallback((value: string) => {
+        if (value === CUSTOM_FONT_SELECT_VALUE) {
+            setSelectedMonoFontValue(CUSTOM_FONT_SELECT_VALUE);
+            return;
+        }
+
+        if (!isMonoFontOption(value)) {
+            return;
+        }
+
+        setSelectedMonoFontValue(value);
+        setMonoFont(value);
+        setCustomMonoFontDraft('');
+        setCustomMonoFont('');
+    }, [setCustomMonoFont, setMonoFont]);
+
+    const resetUiFont = React.useCallback(() => {
+        setSelectedUiFontValue(DEFAULT_UI_FONT);
+        setUiFont(DEFAULT_UI_FONT);
+        setCustomUiFontDraft('');
+        setCustomUiFont('');
+    }, [setCustomUiFont, setUiFont]);
+
+    const resetMonoFont = React.useCallback(() => {
+        setSelectedMonoFontValue(DEFAULT_MONO_FONT);
+        setMonoFont(DEFAULT_MONO_FONT);
+        setCustomMonoFontDraft('');
+        setCustomMonoFont('');
+    }, [setCustomMonoFont, setMonoFont]);
+
+    const commitCustomUiFontDraft = React.useCallback(() => {
+        setCustomUiFont(customUiFontDraft);
+    }, [customUiFontDraft, setCustomUiFont]);
+
+    const commitCustomMonoFontDraft = React.useCallback(() => {
+        setCustomMonoFont(customMonoFontDraft);
+    }, [customMonoFontDraft, setCustomMonoFont]);
 
     const applyPwaInstallName = React.useCallback(async (value: string) => {
         if (typeof window === 'undefined') {
@@ -951,24 +1080,42 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     <div className="flex min-w-0 flex-col w-56 shrink-0">
                                         <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.interfaceFont')}</span>
                                     </div>
-                                    <div className="flex items-center gap-2 w-fit">
-                                        <Select value={uiFont} onValueChange={(value) => setUiFont(value as UiFontOption)}>
-                                            <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectInterfaceFontAria')} className="w-[13rem]">
-                                                <SelectValue>{UI_FONT_OPTIONS.find((option) => option.id === uiFont)?.label}</SelectValue>
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {UI_FONT_OPTIONS.map((option) => (
-                                                    <SelectItem key={option.id} value={option.id}>
-                                                        <span style={{ fontFamily: option.stack }}>{option.label}</span>
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
+                                    <div className="flex items-start gap-2 w-fit">
+                                        <div className="flex w-[13rem] flex-col gap-2">
+                                            <Select value={resolvedUiFontSelectValue} onValueChange={handleUiFontSelect}>
+                                                <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectInterfaceFontAria')} className="w-full">
+                                                    <SelectValue>
+                                                        {resolvedUiFontSelectValue === CUSTOM_FONT_SELECT_VALUE
+                                                            ? customFontOptionLabel
+                                                            : UI_FONT_OPTIONS.find((option) => option.id === uiFont)?.label}
+                                                    </SelectValue>
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {UI_FONT_OPTIONS.map((option) => (
+                                                        <SelectItem key={option.id} value={option.id}>
+                                                            <span style={{ fontFamily: option.stack }}>{option.label}</span>
+                                                        </SelectItem>
+                                                    ))}
+                                                    <SelectSeparator />
+                                                    <SelectItem value={CUSTOM_FONT_SELECT_VALUE}>{customFontOptionLabel}</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                            {resolvedUiFontSelectValue === CUSTOM_FONT_SELECT_VALUE && (
+                                                <Input
+                                                    value={customUiFontDraft}
+                                                    onChange={(event) => setCustomUiFontDraft(event.target.value)}
+                                                    onBlur={commitCustomUiFontDraft}
+                                                    placeholder={t('settings.openchamber.visual.field.customInterfaceFontPlaceholder')}
+                                                    aria-label={t('settings.openchamber.visual.field.customInterfaceFontAria')}
+                                                    className={CUSTOM_FONT_INPUT_CLASS}
+                                                />
+                                            )}
+                                        </div>
                                         <Button size="sm"
                                             type="button"
                                             variant="ghost"
-                                            onClick={() => setUiFont(DEFAULT_UI_FONT)}
-                                            disabled={uiFont === DEFAULT_UI_FONT}
+                                            onClick={resetUiFont}
+                                            disabled={uiFont === DEFAULT_UI_FONT && customUiFont === '' && customUiFontDraft === '' && resolvedUiFontSelectValue !== CUSTOM_FONT_SELECT_VALUE}
                                             className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
                                             aria-label={t('settings.openchamber.visual.actions.resetInterfaceFontAria')}
                                             title={t('settings.common.actions.reset')}
@@ -984,24 +1131,42 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "w-56 shrink-0")}>
                                         <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.codeFont')}</span>
                                     </div>
-                                    <div className={cn("flex items-center gap-2", isMobile ? "w-full" : "w-fit")}>
-                                        <Select value={monoFont} onValueChange={(value) => setMonoFont(value as MonoFontOption)}>
-                                            <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectCodeFontAria')} className="w-[13rem]">
-                                                <SelectValue>{CODE_FONT_OPTIONS.find((option) => option.id === monoFont)?.label}</SelectValue>
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {CODE_FONT_OPTIONS.map((option) => (
-                                                    <SelectItem key={option.id} value={option.id}>
-                                                        <span style={{ fontFamily: option.stack }}>{option.label}</span>
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
+                                    <div className={cn("flex items-start gap-2", isMobile ? "w-full" : "w-fit")}>
+                                        <div className={cn("flex flex-col gap-2", isMobile ? "min-w-0 flex-1" : "w-[13rem]")}>
+                                            <Select value={resolvedMonoFontSelectValue} onValueChange={handleMonoFontSelect}>
+                                                <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectCodeFontAria')} className="w-full">
+                                                    <SelectValue>
+                                                        {resolvedMonoFontSelectValue === CUSTOM_FONT_SELECT_VALUE
+                                                            ? customFontOptionLabel
+                                                            : CODE_FONT_OPTIONS.find((option) => option.id === monoFont)?.label}
+                                                    </SelectValue>
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {CODE_FONT_OPTIONS.map((option) => (
+                                                        <SelectItem key={option.id} value={option.id}>
+                                                            <span style={{ fontFamily: option.stack }}>{option.label}</span>
+                                                        </SelectItem>
+                                                    ))}
+                                                    <SelectSeparator />
+                                                    <SelectItem value={CUSTOM_FONT_SELECT_VALUE}>{customFontOptionLabel}</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                            {resolvedMonoFontSelectValue === CUSTOM_FONT_SELECT_VALUE && (
+                                                <Input
+                                                    value={customMonoFontDraft}
+                                                    onChange={(event) => setCustomMonoFontDraft(event.target.value)}
+                                                    onBlur={commitCustomMonoFontDraft}
+                                                    placeholder={t('settings.openchamber.visual.field.customCodeFontPlaceholder')}
+                                                    aria-label={t('settings.openchamber.visual.field.customCodeFontAria')}
+                                                    className={CUSTOM_FONT_INPUT_CLASS}
+                                                />
+                                            )}
+                                        </div>
                                         <Button size="sm"
                                             type="button"
                                             variant="ghost"
-                                            onClick={() => setMonoFont(DEFAULT_MONO_FONT)}
-                                            disabled={monoFont === DEFAULT_MONO_FONT}
+                                            onClick={resetMonoFont}
+                                            disabled={monoFont === DEFAULT_MONO_FONT && customMonoFont === '' && customMonoFontDraft === '' && resolvedMonoFontSelectValue !== CUSTOM_FONT_SELECT_VALUE}
                                             className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
                                             aria-label={t('settings.openchamber.visual.actions.resetCodeFontAria')}
                                             title={t('settings.common.actions.reset')}

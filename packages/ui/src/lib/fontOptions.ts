@@ -18,6 +18,24 @@ export interface FontOptionDefinition<T extends string> {
     source?: FontFaceSource;
 }
 
+const CUSTOM_FONT_MAX_LENGTH = 120;
+
+const CSS_GENERIC_FONT_FAMILIES = new Set([
+    'serif',
+    'sans-serif',
+    'monospace',
+    'cursive',
+    'fantasy',
+    'system-ui',
+    'ui-serif',
+    'ui-sans-serif',
+    'ui-monospace',
+    'ui-rounded',
+    'math',
+    'emoji',
+    'fangsong',
+]);
+
 export const UI_FONT_OPTIONS: FontOptionDefinition<UiFontOption>[] = [
     {
         id: 'ibm-plex-sans',
@@ -174,3 +192,71 @@ export const isUiFontOption = (value: unknown): value is UiFontOption =>
 
 export const isMonoFontOption = (value: unknown): value is MonoFontOption =>
     typeof value === 'string' && value in CODE_FONT_OPTION_MAP;
+
+const replaceControlCharacters = (value: string): string => {
+    let sanitized: string | undefined;
+
+    for (let index = 0; index < value.length; index += 1) {
+        const code = value.charCodeAt(index);
+        const isControl = code <= 31 || code === 127;
+        if (!isControl) {
+            if (sanitized !== undefined) {
+                sanitized += value[index];
+            }
+            continue;
+        }
+
+        sanitized = sanitized === undefined ? `${value.slice(0, index)} ` : `${sanitized} `;
+    }
+
+    return sanitized ?? value;
+};
+
+export const sanitizeCustomFontInput = (value: unknown): string => {
+    if (typeof value !== 'string') {
+        return '';
+    }
+
+    return replaceControlCharacters(value).slice(0, CUSTOM_FONT_MAX_LENGTH);
+};
+
+export const normalizeCustomFontFamily = (value: unknown): string => {
+    if (typeof value !== 'string') {
+        return '';
+    }
+
+    const normalized = sanitizeCustomFontInput(value)
+        .trim()
+        .replace(/\s+/g, ' ');
+    const unquoted = normalized.length >= 2
+        && ((normalized[0] === '"' && normalized[normalized.length - 1] === '"')
+            || (normalized[0] === "'" && normalized[normalized.length - 1] === "'"))
+        ? normalized.slice(1, -1).trim()
+        : normalized;
+
+    return unquoted.slice(0, CUSTOM_FONT_MAX_LENGTH).trim();
+};
+
+const formatFontFamily = (family: string): string => {
+    const genericFamily = family.toLowerCase();
+    if (CSS_GENERIC_FONT_FAMILIES.has(genericFamily)) {
+        return genericFamily;
+    }
+
+    return `"${family.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+};
+
+const buildCustomFontStack = (customFamily: string, fallbackStack: string): string | null => {
+    const normalized = normalizeCustomFontFamily(customFamily);
+    return normalized ? `${formatFontFamily(normalized)}, ${fallbackStack}` : null;
+};
+
+export const getUiFontStack = (font: UiFontOption, customFont: string): string => {
+    const fallbackStack = UI_FONT_OPTION_MAP[font]?.stack ?? UI_FONT_OPTION_MAP[DEFAULT_UI_FONT].stack;
+    return buildCustomFontStack(customFont, fallbackStack) ?? fallbackStack;
+};
+
+export const getMonoFontStack = (font: MonoFontOption, customFont: string): string => {
+    const fallbackStack = CODE_FONT_OPTION_MAP[font]?.stack ?? CODE_FONT_OPTION_MAP[DEFAULT_MONO_FONT].stack;
+    return buildCustomFontStack(customFont, fallbackStack) ?? fallbackStack;
+};
