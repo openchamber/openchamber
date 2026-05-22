@@ -116,7 +116,7 @@ const getConfigDirectory = (): string | null => {
       return clientDir.trim();
     }
   } catch (err) {
-    console.warn('[McpConfigStore] Error resolving config directory:', err);
+    console.warn('[PluginsStore] Error resolving config directory:', err);
   }
   return null;
 };
