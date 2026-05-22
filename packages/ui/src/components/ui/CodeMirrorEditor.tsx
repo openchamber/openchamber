@@ -5,7 +5,7 @@ import { Compartment, EditorState, RangeSetBuilder, StateField } from '@codemirr
 import { Decoration, type DecorationSet, EditorView, type KeyBinding, ViewPlugin, WidgetType, gutters, keymap, lineNumbers } from '@codemirror/view';
 import { defaultKeymap, indentWithTab, history, historyKeymap } from '@codemirror/commands';
 import { forceParsing, indentUnit } from '@codemirror/language';
-import { search, searchKeymap, openSearchPanel, closeSearchPanel, searchPanelOpen } from '@codemirror/search';
+import { search, searchKeymap, openSearchPanel, closeSearchPanel, searchPanelOpen, getSearchQuery } from '@codemirror/search';
 import { createPortal } from 'react-dom';
 
 import { cn } from '@/lib/utils';
@@ -25,6 +25,8 @@ const checkboxTooltips: Record<string, string> = {
   word: 'Match whole word',
 };
 
+const SEARCH_MATCH_COUNT_LIMIT = 1000;
+
 function patchSearchTooltips(root: HTMLElement) {
   const panel = root.querySelector('.cm-search');
   if (!panel) return;
@@ -39,7 +41,71 @@ function patchSearchTooltips(root: HTMLElement) {
   }
 }
 
+function getSearchMatchStatus(view: EditorView): { current: string; total: string } {
+  const query = getSearchQuery(view.state);
+  if (!query.valid) {
+    return { current: '0', total: '0' };
+  }
 
+  const selection = view.state.selection.main;
+  const cursor = query.getCursor(view.state);
+  let total = 0;
+  let firstMatch = 0;
+  let exactMatch = 0;
+  let overlappingMatch = 0;
+  let nextMatch = 0;
+
+  // Cap the synchronous scan because this runs from the editor update hot path.
+  for (let result = cursor.next(); !result.done; result = cursor.next()) {
+    const match = result.value;
+    total += 1;
+    if (total > SEARCH_MATCH_COUNT_LIMIT) {
+      break;
+    }
+    if (firstMatch === 0) {
+      firstMatch = total;
+    }
+    if (exactMatch === 0 && selection.from === match.from && selection.to === match.to) {
+      exactMatch = total;
+    }
+    if (overlappingMatch === 0 && selection.from < match.to && selection.to > match.from) {
+      overlappingMatch = total;
+    }
+    if (nextMatch === 0 && match.from >= selection.head) {
+      nextMatch = total;
+    }
+  }
+
+  // Prefer the selected match, then fall back to the next match after the cursor.
+  const isCapped = total > SEARCH_MATCH_COUNT_LIMIT;
+  const current = exactMatch || overlappingMatch || nextMatch || firstMatch;
+  const currentLabel = isCapped && exactMatch === 0 && overlappingMatch === 0 && nextMatch === 0
+    ? `${SEARCH_MATCH_COUNT_LIMIT}+`
+    : String(current);
+  return {
+    current: current === 0 ? '0' : currentLabel,
+    total: isCapped ? `${SEARCH_MATCH_COUNT_LIMIT}+` : String(total),
+  };
+}
+
+function syncSearchPanelStatus(root: HTMLElement, view: EditorView) {
+  const panel = root.querySelector('.cm-search');
+  if (!panel) return;
+
+  let status = panel.querySelector<HTMLElement>('.cm-search-message');
+  if (!status) {
+    status = document.createElement('span');
+    status.className = 'cm-search-message';
+    status.setAttribute('aria-live', 'polite');
+
+    const nextButton = panel.querySelector('button[name="next"]');
+    const referenceNode = nextButton?.parentNode === panel ? nextButton : panel.firstChild;
+    panel.insertBefore(status, referenceNode);
+  }
+
+  const { current, total } = getSearchMatchStatus(view);
+  status.textContent = total === '0' ? 'No results' : `${current}/${total}`;
+}
 
 export type BlockWidgetDef = {
   afterLine: number;
@@ -299,6 +365,10 @@ export function CodeMirrorEditor({
           if (wasOpen !== isOpen) {
             onSearchOpenChangeRef.current?.(isOpen);
           }
+          const queryChanged = !getSearchQuery(update.startState).eq(getSearchQuery(update.state));
+          if (isOpen && (wasOpen !== isOpen || queryChanged || update.docChanged || update.selectionSet)) {
+            syncSearchPanelStatus(update.view.dom, update.view);
+          }
           if (!update.docChanged) {
             return;
           }
@@ -375,6 +445,7 @@ export function CodeMirrorEditor({
       // Patch tooltips after panel DOM is mounted
       requestAnimationFrame(() => {
         patchSearchTooltips(view.dom);
+        syncSearchPanelStatus(view.dom, view);
       });
     } else {
       closeSearchPanelCompat(view);
