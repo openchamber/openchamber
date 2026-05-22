@@ -44,6 +44,15 @@ describe('snippets', () => {
     expect(getSnippet('same', projectDir)?.content).toBe('New');
   });
 
+  test('canonical snippet names take precedence over colliding aliases', () => {
+    writeSnippet('.opencode/snippets/review.md', 'Review by name');
+    writeSnippet('.opencode/snippet/helper.md', '---\naliases: [review, help]\n---\nReview by alias');
+
+    expect(getSnippet('review', projectDir)).toEqual(expect.objectContaining({ name: 'review', content: 'Review by name' }));
+    expect(getSnippet('help', projectDir)).toEqual(expect.objectContaining({ name: 'helper', content: 'Review by alias' }));
+    expect(expandSnippets('Use #review and #help', projectDir)).toBe('Use Review by name and Review by alias');
+  });
+
   test('creates updates and deletes snippets', () => {
     expect(createSnippet('custom-one', { content: 'Body', aliases: ['co'] }, projectDir, 'project')).toEqual(
       expect.objectContaining({ name: 'custom-one', content: 'Body', aliases: ['co'] }),
