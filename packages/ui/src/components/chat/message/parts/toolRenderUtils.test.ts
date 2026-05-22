@@ -17,8 +17,11 @@ describe('toolRenderUtils', () => {
 
     test('makes built-in summary tools expandable for input and output inspection', () => {
         expect(isExpandableTool('read')).toBe(true);
+        expect(isExpandableTool('functions.read:1')).toBe(true);
         expect(isExpandableTool('grep')).toBe(true);
+        expect(isExpandableTool('functions.grep:1')).toBe(true);
         expect(isExpandableTool('glob')).toBe(true);
+        expect(isExpandableTool('functions.glob:1')).toBe(true);
         expect(isExpandableTool('websearch')).toBe(true);
         expect(isExpandableTool('todowrite')).toBe(true);
     });

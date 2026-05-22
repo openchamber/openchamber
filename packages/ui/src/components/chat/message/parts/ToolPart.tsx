@@ -450,6 +450,30 @@ const getRelativePath = (absolutePath: string, currentDirectory: string): string
     return normalizedAbsolutePath;
 };
 
+const resolveAbsolutePath = (currentDirectory: string, filePath: string): string | null => {
+    const trimmed = filePath.trim();
+    if (!trimmed) return null;
+    if (trimmed.startsWith('/')) return normalizeDisplayPath(trimmed);
+    return normalizeDisplayPath(currentDirectory.endsWith('/') ? `${currentDirectory}${trimmed}` : `${currentDirectory}/${trimmed}`);
+};
+
+const getContextDirectoryForPath = (currentDirectory: string, absolutePath: string): string => {
+    const normalizedCurrent = normalizeDisplayPath(currentDirectory);
+    const normalizedAbsolute = normalizeDisplayPath(absolutePath);
+    return normalizedCurrent && normalizedAbsolute.startsWith(`${normalizedCurrent}/`)
+        ? normalizedCurrent
+        : normalizedAbsolute.replace(/\/[^/]*$/, '') || normalizedCurrent;
+};
+
+const readPositiveLine = (...values: unknown[]): number | undefined => {
+    for (const value of values) {
+        if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+            return Math.floor(value);
+        }
+    }
+    return undefined;
+};
+
 type ToolDiagnostic = {
     message: string;
     line: number;
@@ -685,6 +709,51 @@ const getToolDescriptionPath = (part: ToolPartType, state: ToolStateUnion, curre
     return null;
 };
 
+const readTrimmedString = (value: unknown): string | null => {
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+};
+
+const truncateDescription = (value: string, maxLength: number): string => (
+    value.length > maxLength ? `${value.slice(0, maxLength)}...` : value
+);
+
+const formatTodoSummary = (todos: unknown[]): string | null => {
+    if (todos.length === 0) return '0 tasks';
+
+    let activeCount = 0;
+    for (const todo of todos) {
+        if (!todo || typeof todo !== 'object') continue;
+        const status = readTrimmedString((todo as { status?: unknown }).status)?.toLowerCase();
+        if (status === 'pending' || status === 'in_progress' || status === 'in progress' || status === 'inprogress') {
+            activeCount += 1;
+        }
+    }
+
+    return `${activeCount} ${activeCount === 1 ? 'task' : 'tasks'}`;
+};
+
+const getTodoDescription = (input: Record<string, unknown> | undefined, output: unknown): string | null => {
+    if (Array.isArray(input?.todos)) return formatTodoSummary(input.todos);
+    if (Array.isArray(output)) return formatTodoSummary(output);
+    if (output && typeof output === 'object' && Array.isArray((output as { todos?: unknown }).todos)) {
+        return formatTodoSummary((output as { todos: unknown[] }).todos);
+    }
+    if (typeof output === 'string' && output.trim().length > 0) {
+        try {
+            const parsed = JSON.parse(output) as unknown;
+            if (Array.isArray(parsed)) return formatTodoSummary(parsed);
+            if (parsed && typeof parsed === 'object' && Array.isArray((parsed as { todos?: unknown }).todos)) {
+                return formatTodoSummary((parsed as { todos: unknown[] }).todos);
+            }
+        } catch {
+            return null;
+        }
+    }
+    return null;
+};
+
 const getToolDescription = (part: ToolPartType, state: ToolStateUnion, currentDirectory: string): string => {
     const stateWithData = state as ToolStateWithMetadata;
     const metadata = stateWithData.metadata;
@@ -716,6 +785,29 @@ const getToolDescription = (part: ToolPartType, state: ToolStateUnion, currentDi
 
     if (part.tool === 'task' && input?.description && typeof input.description === 'string') {
         return input.description.substring(0, 80);
+    }
+
+    if (part.tool === 'grep' || part.tool === 'search' || part.tool === 'find' || part.tool === 'ripgrep' || part.tool === 'glob') {
+        const pattern = readTrimmedString(input?.pattern);
+        if (pattern) return truncateDescription(pattern, 40);
+    }
+
+    if (part.tool === 'webfetch' || part.tool === 'fetch' || part.tool === 'curl' || part.tool === 'wget') {
+        const url = readTrimmedString(input?.url)
+            ?? readTrimmedString(input?.URL)
+            ?? readTrimmedString(metadata?.url)
+            ?? readTrimmedString(metadata?.URL);
+        if (url) return url;
+    }
+
+    if (part.tool === 'skill') {
+        const name = readTrimmedString(input?.name);
+        if (name) return name;
+    }
+
+    if (part.tool === 'todowrite' || part.tool === 'todoread') {
+        const todoSummary = getTodoDescription(input, stateWithData.output);
+        if (todoSummary) return todoSummary;
     }
 
     const desc = input?.description || metadata?.description || ('title' in state && state.title) || '';
@@ -1977,10 +2069,10 @@ const ToolPart: React.FC<ToolPartProps> = ({
     const state = part.state;
     const showToolFileIcons = useUIStore((s) => s.showToolFileIcons);
     const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
-    const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
 
     const normalizedPartTool = normalizeToolName(part.tool);
     const isTaskTool = normalizedPartTool === 'task';
+    const currentSessionId = useSessionUIStore((s) => isTaskTool ? s.currentSessionId : undefined);
 
     const status = state?.status as string | undefined;
     const isFinalized = status === 'completed' || status === 'error' || status === 'aborted' || status === 'failed' || status === 'timeout' || status === 'cancelled';
@@ -2027,6 +2119,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
     const onContentChangeRef = React.useRef(onContentChange);
     onContentChangeRef.current = onContentChange;
     const expandedContentRef = React.useRef<HTMLDivElement>(null);
+    const expandedContentId = React.useId();
     const expandedContentAnimationRef = React.useRef<AnimationPlaybackControls | null>(null);
     const expandedContentMountedRef = React.useRef(false);
 
@@ -2691,7 +2784,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
     const runtime = React.useContext(RuntimeAPIContext);
 
     const handleMainClick = (e: { stopPropagation: () => void }) => {
-        if (isTaskTool || !runtime?.editor) {
+        if (isTaskTool) {
             onToggle(part.id);
             return;
         }
@@ -2699,36 +2792,47 @@ const ToolPart: React.FC<ToolPartProps> = ({
         let filePath: unknown;
         let targetLine: number | undefined;
         let toolDiff: string | undefined;
-        if (part.tool === 'edit' || part.tool === 'multiedit') {
+        if (normalizedPartTool === 'edit' || normalizedPartTool === 'multiedit') {
             filePath = input?.filePath || input?.file_path || input?.path || metadata?.filePath || metadata?.file_path || metadata?.path;
-            targetLine = getFirstChangedLineFromMetadata(part.tool, metadata);
+            targetLine = getFirstChangedLineFromMetadata(normalizedPartTool, metadata);
             if (typeof filePath === 'string') {
-                toolDiff = getPrimaryDiffFromMetadata(part.tool, metadata, filePath);
+                toolDiff = getPrimaryDiffFromMetadata(normalizedPartTool, metadata, filePath);
             }
-        } else if (part.tool === 'apply_patch') {
+        } else if (normalizedPartTool === 'apply_patch') {
             const files = Array.isArray(metadata?.files) ? metadata?.files : [];
             const firstFile = files[0] as { relativePath?: string; filePath?: string } | undefined;
             filePath = firstFile?.relativePath || firstFile?.filePath;
-            targetLine = getFirstChangedLineFromMetadata(part.tool, metadata);
+            targetLine = getFirstChangedLineFromMetadata(normalizedPartTool, metadata);
             if (typeof filePath === 'string') {
-                toolDiff = getPrimaryDiffFromMetadata(part.tool, metadata, filePath);
+                toolDiff = getPrimaryDiffFromMetadata(normalizedPartTool, metadata, filePath);
             }
-        } else if (['write', 'create', 'file_write'].includes(part.tool)) {
+        } else if (['write', 'create', 'file_write', 'read'].includes(normalizedPartTool)) {
             filePath = input?.filePath || input?.file_path || input?.path || metadata?.filePath || metadata?.file_path || metadata?.path;
+            if (normalizedPartTool === 'read') {
+                targetLine = readPositiveLine(input?.offset, input?.line, metadata?.offset, metadata?.line);
+            }
         }
 
         if (typeof filePath === 'string') {
             e.stopPropagation();
-            let absolutePath = filePath;
-            if (!filePath.startsWith('/')) {
-                absolutePath = currentDirectory.endsWith('/') ? currentDirectory + filePath : currentDirectory + '/' + filePath;
-            }
-            if (runtime.runtime.isVSCode && toolDiff && (part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch')) {
+            const absolutePath = resolveAbsolutePath(currentDirectory, filePath);
+            if (!absolutePath) return;
+            if (runtime?.runtime.isVSCode && runtime.editor && toolDiff && (normalizedPartTool === 'edit' || normalizedPartTool === 'multiedit' || normalizedPartTool === 'apply_patch')) {
                 const label = `${getRelativePath(absolutePath, currentDirectory)} (changes)`;
                 void runtime.editor.openDiff('', absolutePath, label, { line: targetLine, patch: toolDiff });
                 return;
             }
-            runtime.editor.openFile(absolutePath, targetLine);
+            if (runtime?.editor) {
+                runtime.editor.openFile(absolutePath, targetLine);
+                return;
+            }
+            const uiStore = useUIStore.getState();
+            const contextDirectory = getContextDirectoryForPath(currentDirectory, absolutePath);
+            if (targetLine) {
+                uiStore.openContextFileAtLine(contextDirectory, absolutePath, targetLine, 1);
+                return;
+            }
+            uiStore.openContextFile(contextDirectory, absolutePath);
         } else {
             onToggle(part.id);
         }
@@ -2755,19 +2859,26 @@ const ToolPart: React.FC<ToolPartProps> = ({
             {}
             <div
                 className={cn(
-                'group/tool flex gap-1.5 pr-2 pl-px py-2 rounded-xl cursor-pointer',
+                'group/tool flex gap-1.5 pr-2 pl-px py-2 rounded-xl cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focusRing)]',
                 isMultiFileApplyPatch ? 'flex-wrap items-start' : 'items-center'
             )}
                 onClick={handleMainClick}
                 onKeyDown={handleMainKeyDown}
                 role="button"
                 tabIndex={0}
+                aria-expanded={!isTaskTool ? isExpanded : undefined}
+                aria-controls={!isTaskTool ? expandedContentId : undefined}
+                aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${displayName} details`}
             >
                 <div className={cn('flex gap-1.5', isMultiFileApplyPatch ? 'w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5' : 'items-center flex-shrink-0')}>
                     {}
-                    <div
-                        className="relative h-3.5 w-3.5 flex-shrink-0 cursor-pointer"
+                    <button
+                        type="button"
+                        className="relative h-3.5 w-3.5 flex-shrink-0 cursor-pointer rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focusRing)]"
                         onClick={(event) => { event.stopPropagation(); onToggle(part.id); }}
+                        aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${displayName} details`}
+                        aria-expanded={isExpanded}
+                        aria-controls={expandedContentId}
                     >
                         {}
                         <div
@@ -2790,7 +2901,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
                         >
                             {isExpanded ? <Icon name="arrow-down-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-right-s" className="h-3.5 w-3.5" />}
                         </div>
-                    </div>
+                    </button>
                     {isMultiFileApplyPatch ? (
                         <>
                             <MinDurationShineText
@@ -2890,6 +3001,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
 
             {!isTaskTool ? (
                 <div
+                    id={expandedContentId}
                     ref={expandedContentRef}
                     aria-hidden={!isExpanded}
                     style={{
