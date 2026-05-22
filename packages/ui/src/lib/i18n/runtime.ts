@@ -1,10 +1,10 @@
-export type Locale = 'en' | 'zh-CN' | 'uk' | 'es' | 'pt-BR' | 'ko' | 'pl';
+export type Locale = 'en' | 'zh-CN' | 'uk' | 'es' | 'pt-BR' | 'ko' | 'pl' | 'ja';
 
-export const LOCALES = ['en', 'zh-CN', 'uk', 'es', 'pt-BR', 'ko', 'pl'] as const satisfies readonly Locale[];
+export const LOCALES = ['en', 'zh-CN', 'uk', 'es', 'pt-BR', 'ko', 'pl', 'ja'] as const satisfies readonly Locale[];
 
 export const DEFAULT_LOCALE: Locale = 'en';
 
-export const LOCALE_LABEL_KEYS: Record<Locale, 'common.language.english' | 'common.language.simplifiedChinese' | 'common.language.ukrainian' | 'common.language.spanish' | 'common.language.brazilianPortuguese' | 'common.language.korean' | 'common.language.polish'> = {
+export const LOCALE_LABEL_KEYS: Record<Locale, 'common.language.english' | 'common.language.simplifiedChinese' | 'common.language.ukrainian' | 'common.language.spanish' | 'common.language.brazilianPortuguese' | 'common.language.korean' | 'common.language.polish' | 'common.language.japanese'> = {
   en: 'common.language.english',
   'zh-CN': 'common.language.simplifiedChinese',
   uk: 'common.language.ukrainian',
@@ -12,6 +12,7 @@ export const LOCALE_LABEL_KEYS: Record<Locale, 'common.language.english' | 'comm
   'pt-BR': 'common.language.brazilianPortuguese',
   ko: 'common.language.korean',
   pl: 'common.language.polish',
+  ja: 'common.language.japanese',
 };
 
 export const LOCALE_STORAGE_KEY = 'openchamber.i18n.v1';
@@ -49,6 +50,9 @@ export function normalizeLocale(value: string | undefined | null): Locale {
   }
   if (normalized === 'pl' || normalized.startsWith('pl-')) {
     return 'pl';
+  }
+  if (normalized === 'ja' || normalized.startsWith('ja-')) {
+    return 'ja';
   }
   return DEFAULT_LOCALE;
 }
