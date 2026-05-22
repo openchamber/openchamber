@@ -193,8 +193,8 @@ export const PluginsSidebar: React.FC<PluginsSidebarProps> = ({
       <SettingsSidebarItem
         key={entry.id}
         title={
-          <span className="inline-flex items-center gap-1.5 min-w-0">
-            <span className="truncate">{entry.spec}</span>
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span className="min-w-0 flex-1 truncate">{entry.spec}</span>
             <RegistryBadge spec={entry.spec} />
           </span>
         }
