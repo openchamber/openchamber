@@ -1,6 +1,7 @@
+import type { I18nKey } from './en';
 import { settingsDict } from './ja.settings';
 
-export const dict = {
+export const dict: Record<I18nKey, string> = {
   ...settingsDict,
   'common.loading': '読み込み中...',
   'common.unavailable': '利用不可',
@@ -2292,6 +2293,4 @@ export const dict = {
   'markdownRenderer.mermaid.actions.copySourceTitle': 'ソースをコピー',
   'markdownRenderer.mermaid.actions.downloadSvgTitle': 'SVGをダウンロード',
   'markdownRenderer.mermaid.toast.downloadFailed': 'ダイアグラムのダウンロードに失敗しました',
-} as const;
-
-export type I18nKey = keyof typeof dict;
+};
