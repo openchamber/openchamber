@@ -7,6 +7,7 @@ import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
+import { RegistryBanner } from './RegistryBanner';
 import {
   usePluginsStore,
   type PluginDraft,
@@ -210,6 +211,8 @@ export const PluginsPage: React.FC = () => {
             />
           </div>
         </div>
+
+        <RegistryBanner entryId={selectedEntry.id} spec={selectedEntry.spec} />
 
         <div className="space-y-1.5">
           <label className="typography-meta text-muted-foreground">

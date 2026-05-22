@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { AddPluginDialog } from './AddPluginDialog';
+import { RegistryBadge } from './RegistryBadge';
 import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
@@ -54,6 +55,11 @@ export const PluginsSidebar: React.FC<PluginsSidebarProps> = ({
       })),
     );
 
+  const registryInfo = usePluginsStore((s) => s.registryInfo);
+  const isLoadingRegistry = usePluginsStore((s) => s.isLoadingRegistry);
+  const loadRegistryInfo = usePluginsStore((s) => s.loadRegistryInfo);
+  const updateToLatest = usePluginsStore((s) => s.updateToLatest);
+
   const [deleteTarget, setDeleteTarget] = React.useState<DeleteTarget>(null);
   const [isDeleting, setIsDeleting] = React.useState(false);
   const [isAddOpen, setIsAddOpen] = React.useState(false);
@@ -61,6 +67,18 @@ export const PluginsSidebar: React.FC<PluginsSidebarProps> = ({
   React.useEffect(() => {
     void loadPlugins();
   }, [loadPlugins]);
+
+  const updateCounts = React.useMemo(() => {
+    const counts = { userEntries: 0, projectEntries: 0 };
+    for (const entry of entries) {
+      const info = registryInfo[entry.spec];
+      if (info?.kind === 'npm-ok' && info.hasUpdate) {
+        if (entry.scope === 'user') counts.userEntries++;
+        else if (entry.scope === 'project') counts.projectEntries++;
+      }
+    }
+    return counts;
+  }, [entries, registryInfo]);
 
   const userEntries = React.useMemo(
     () => entries.filter((e) => e.scope === 'user'),
@@ -98,6 +116,36 @@ export const PluginsSidebar: React.FC<PluginsSidebarProps> = ({
     [onItemSelect, setSelected],
   );
 
+  const handleUpdateToLatest = React.useCallback(
+    async (id: string) => {
+      const entry = entries.find((e) => e.id === id);
+      if (!entry) return;
+      const info = registryInfo[entry.spec];
+      if (!info || info.kind !== 'npm-ok' || !info.hasUpdate || !info.latestVersion) {
+        return;
+      }
+      const latest = info.latestVersion;
+      const result = await updateToLatest(id);
+      if (result.ok) {
+        toast.success(
+          t('settings.plugins.toast.updatedToLatest', { version: latest }),
+        );
+      } else {
+        toast.error(t('settings.plugins.toast.refreshFailed'));
+      }
+    },
+    [entries, registryInfo, t, updateToLatest],
+  );
+
+  const handleRefresh = React.useCallback(async () => {
+    toast.info(t('settings.plugins.toast.refreshing'));
+    try {
+      await loadRegistryInfo({ force: true });
+    } catch {
+      toast.error(t('settings.plugins.toast.refreshFailed'));
+    }
+  }, [loadRegistryInfo, t]);
+
   const handleDelete = React.useCallback(async () => {
     if (!deleteTarget) return;
     setIsDeleting(true);
@@ -117,34 +165,56 @@ export const PluginsSidebar: React.FC<PluginsSidebarProps> = ({
     setIsDeleting(false);
   }, [deleteEntry, deleteFile, deleteTarget, t]);
 
-  const renderEntry = (entry: PluginEntry) => (
-    <SettingsSidebarItem
-      key={entry.id}
-      title={entry.spec}
-      metadata={
-        entry.parsedKind === 'npm'
-          ? t('settings.plugins.sidebar.kind.npm')
-          : t('settings.plugins.sidebar.kind.path')
-      }
-      selected={selectedId === entry.id}
-      onSelect={() => handleSelect(entry.id)}
-      icon={
-        <Icon
-          name={entryIcon(entry)}
-          className="h-4 w-4 flex-shrink-0 text-muted-foreground/70"
-        />
-      }
-      actions={[
-        {
-          label: t('settings.common.actions.delete'),
-          icon: 'delete-bin',
-          destructive: true,
-          onClick: () =>
-            setDeleteTarget({ kind: 'entry', id: entry.id, label: entry.spec }),
-        },
-      ]}
-    />
-  );
+  const renderEntry = (entry: PluginEntry) => {
+    const info = registryInfo[entry.spec];
+    const canUpdate =
+      info?.kind === 'npm-ok' && info.hasUpdate && !!info.latestVersion;
+    const actions: Array<{
+      label: string;
+      icon?: IconName;
+      destructive?: boolean;
+      onClick: () => void;
+    }> = [];
+    if (canUpdate) {
+      actions.push({
+        label: t('settings.plugins.sidebar.actions.updateToLatest'),
+        icon: 'arrow-up-s',
+        onClick: () => void handleUpdateToLatest(entry.id),
+      });
+    }
+    actions.push({
+      label: t('settings.common.actions.delete'),
+      icon: 'delete-bin',
+      destructive: true,
+      onClick: () =>
+        setDeleteTarget({ kind: 'entry', id: entry.id, label: entry.spec }),
+    });
+    return (
+      <SettingsSidebarItem
+        key={entry.id}
+        title={
+          <span className="inline-flex items-center gap-1.5 min-w-0">
+            <span className="truncate">{entry.spec}</span>
+            <RegistryBadge spec={entry.spec} />
+          </span>
+        }
+        metadata={
+          entry.parsedKind === 'npm'
+            ? t('settings.plugins.sidebar.kind.npm')
+            : t('settings.plugins.sidebar.kind.path')
+        }
+        selected={selectedId === entry.id}
+        onSelect={() => handleSelect(entry.id)}
+        icon={
+          <Icon
+            name={entryIcon(entry)}
+            className="h-4 w-4 flex-shrink-0 text-muted-foreground/70"
+          />
+        }
+        actions={actions}
+      />
+    );
+  };
 
   const renderFile = (file: PluginFile) => (
     <SettingsSidebarItem
@@ -171,10 +241,24 @@ export const PluginsSidebar: React.FC<PluginsSidebarProps> = ({
     />
   );
 
-  const renderGroup = (label: string, children: React.ReactNode) => (
+  const renderGroup = (
+    label: string,
+    children: React.ReactNode,
+    updateCount = 0,
+  ) => (
     <>
       <div className="px-2 pb-1.5 pt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         {label}
+        {updateCount > 0 && (
+          <span className="ml-2 normal-case font-normal text-[var(--status-success)]">
+            {t(
+              updateCount === 1
+                ? 'settings.plugins.sidebar.group.updatesAvailable_one'
+                : 'settings.plugins.sidebar.group.updatesAvailable_other',
+              { count: updateCount },
+            )}
+          </span>
+        )}
       </div>
       {children}
     </>
@@ -195,17 +279,36 @@ export const PluginsSidebar: React.FC<PluginsSidebarProps> = ({
               <span className="typography-meta text-muted-foreground">
                 {t('settings.plugins.sidebar.total', { count: total })}
               </span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 -my-1 text-muted-foreground"
-                onClick={handleAdd}
-                aria-label={t('settings.plugins.sidebar.actions.addTitle')}
-                title={t('settings.plugins.sidebar.actions.addTitle')}
-              >
-                <Icon name="add" className="size-4" />
-              </Button>
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 -my-1 text-muted-foreground"
+                  onClick={() => void handleRefresh()}
+                  disabled={isLoadingRegistry}
+                  aria-label={t('settings.plugins.sidebar.actions.refresh')}
+                  title={t('settings.plugins.sidebar.actions.refresh')}
+                >
+                  <Icon
+                    name="refresh"
+                    className={
+                      isLoadingRegistry ? 'size-4 animate-spin' : 'size-4'
+                    }
+                  />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 -my-1 text-muted-foreground"
+                  onClick={handleAdd}
+                  aria-label={t('settings.plugins.sidebar.actions.addTitle')}
+                  title={t('settings.plugins.sidebar.actions.addTitle')}
+                >
+                  <Icon name="add" className="size-4" />
+                </Button>
+              </div>
             </div>
           </div>
         }
@@ -226,6 +329,7 @@ export const PluginsSidebar: React.FC<PluginsSidebarProps> = ({
               renderGroup(
                 t('settings.plugins.sidebar.group.userEntries'),
                 userEntries.map(renderEntry),
+                updateCounts.userEntries,
               )}
             {userFiles.length > 0 &&
               renderGroup(
@@ -236,6 +340,7 @@ export const PluginsSidebar: React.FC<PluginsSidebarProps> = ({
               renderGroup(
                 t('settings.plugins.sidebar.group.projectEntries'),
                 projectEntries.map(renderEntry),
+                updateCounts.projectEntries,
               )}
             {projectFiles.length > 0 &&
               renderGroup(

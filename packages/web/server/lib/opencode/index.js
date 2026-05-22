@@ -89,3 +89,6 @@ export {
   deleteSnippet,
   expandSnippets,
 } from './snippets.js';
+
+export { getNpmInfo, lookupNpmPackage, clearCache as clearNpmCache } from './npm-registry.js';
+export { parseNpmSpec, parsePathSpec, isExactSemver } from './plugin-spec.js';

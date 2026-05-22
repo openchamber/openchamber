@@ -1,7 +1,19 @@
+import fs from 'fs';
+import os from 'os';
+
+import { getNpmInfo as defaultGetNpmInfo } from './npm-registry.js';
+import { isExactSemver as defaultIsExactSemver, parseNpmSpec as defaultParseNpmSpec, parsePathSpec as defaultParsePathSpec } from './plugin-spec.js';
+
 const ENTRY_EXISTS_CODES = new Set(['ENTRY_EXISTS', 'EEXIST']);
 const FILE_EXISTS_CODES = new Set(['FILE_EXISTS', 'EEXIST']);
 const NOT_FOUND_CODES = new Set(['NOT_FOUND', 'ENOENT']);
 const BAD_REQUEST_CODES = new Set(['INVALID_FILENAME', 'INVALID_SCOPE', 'INVALID_SPEC', 'EINVAL']);
+
+const parsedKindForSpec = (spec) => (
+  spec.startsWith('/') || spec.startsWith('./') || spec.startsWith('../') || spec.startsWith('~')
+    ? 'path'
+    : 'npm'
+);
 
 export const registerPluginRoutes = (app, dependencies) => {
   const {
@@ -19,6 +31,10 @@ export const registerPluginRoutes = (app, dependencies) => {
     deletePluginDirFile,
     encodePluginId,
     decodePluginId,
+    getNpmInfo = defaultGetNpmInfo,
+    parseNpmSpec = defaultParseNpmSpec,
+    parsePathSpec = defaultParsePathSpec,
+    isExactSemver = defaultIsExactSemver,
   } = dependencies;
 
   const resolveDirectory = async (req, res) => {
@@ -106,6 +122,116 @@ export const registerPluginRoutes = (app, dependencies) => {
     } catch (error) {
       console.error('[API:GET /api/config/plugins] Failed:', error);
       res.status(500).json({ error: 'Failed to list plugins' });
+    }
+  });
+
+  app.get('/api/config/plugins/registry', async (req, res) => {
+    try {
+      const { directory } = await resolveOptionalProjectDirectory(req);
+      const rawSpecs = (req.query.specs || '').toString();
+      const specs = rawSpecs
+        ? rawSpecs.split(',').map((spec) => {
+          try {
+            return decodeURIComponent(spec);
+          } catch {
+            return spec;
+          }
+        }).filter((spec) => spec.length > 0)
+        : [];
+      const uniqueSpecs = Array.from(new Set(specs));
+      if (uniqueSpecs.length > 100) {
+        return res.status(400).json({ error: 'too many specs' });
+      }
+
+      const refresh = req.query.refresh === 'true';
+      const npmJobs = new Map();
+      const malformedSpecs = new Set();
+
+      for (const spec of uniqueSpecs) {
+        if (parsedKindForSpec(spec) !== 'npm') continue;
+
+        const parsed = parseNpmSpec(spec);
+        if (parsed.malformed) {
+          malformedSpecs.add(spec);
+          continue;
+        }
+
+        const job = npmJobs.get(parsed.name) || { specs: [], parsedBySpec: new Map() };
+        job.specs.push(spec);
+        job.parsedBySpec.set(spec, parsed);
+        npmJobs.set(parsed.name, job);
+      }
+
+      const npmInfoByName = new Map();
+      await Promise.all(Array.from(npmJobs.keys()).map(async (name) => {
+        npmInfoByName.set(name, await getNpmInfo(name, { forceRefresh: refresh }));
+      }));
+
+      const results = [];
+      for (const spec of uniqueSpecs) {
+        if (malformedSpecs.has(spec)) {
+          results.push({ kind: 'npm-malformed', spec, error: 'Spec syntax is malformed' });
+          continue;
+        }
+
+        if (parsedKindForSpec(spec) === 'path') {
+          const { absolutePath } = parsePathSpec(spec, { homedir: os.homedir(), cwd: directory || os.homedir() });
+          try {
+            fs.statSync(absolutePath);
+          } catch {
+            results.push({ kind: 'path-missing', spec, absolutePath });
+            continue;
+          }
+
+          try {
+            fs.accessSync(absolutePath, fs.constants.R_OK);
+            results.push({ kind: 'path-ok', spec, absolutePath });
+          } catch {
+            results.push({ kind: 'path-unreadable', spec, absolutePath });
+          }
+          continue;
+        }
+
+        const parsed = parseNpmSpec(spec);
+        const info = npmInfoByName.get(parsed.name);
+        if (!info.ok) {
+          if (info.status === 404) {
+            results.push({ kind: 'npm-missing-package', spec, name: parsed.name, error: info.error });
+            continue;
+          }
+
+          results.push({ kind: 'npm-network', spec, error: info.status === 'network' ? info.error : `Registry returned ${info.status}` });
+          continue;
+        }
+
+        const currentVersion = parsed.version;
+        if (currentVersion !== null && isExactSemver(currentVersion) && !info.versions.includes(currentVersion)) {
+          results.push({
+            kind: 'npm-missing-version',
+            spec,
+            name: parsed.name,
+            currentVersion,
+            latestVersion: info.latest,
+            versions: info.versions,
+          });
+          continue;
+        }
+
+        results.push({
+          kind: 'npm-ok',
+          spec,
+          name: parsed.name,
+          currentVersion,
+          latestVersion: info.latest,
+          versions: info.versions,
+          hasUpdate: currentVersion !== null && isExactSemver(currentVersion) && currentVersion !== info.latest,
+        });
+      }
+
+      return res.json({ results });
+    } catch (error) {
+      console.error('[API:GET /api/config/plugins/registry]', error);
+      return res.status(500).json({ error: 'Failed to query npm registry' });
     }
   });
 

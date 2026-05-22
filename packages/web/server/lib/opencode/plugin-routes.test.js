@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, test } from 'bun:test';
 import express from 'express';
 import fs from 'fs';
 import os from 'os';
@@ -13,12 +13,15 @@ let rootDir;
 let plugins;
 let refreshOpenCodeAfterConfigChange;
 let app;
+let cleanupPaths;
+
+const testUnlessRoot = typeof process.getuid === 'function' && process.getuid() === 0 ? test.skip : test;
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
 }
 
-function createApp() {
+function createApp(overrides = {}) {
   const testApp = express();
   testApp.use(express.json());
   registerPluginRoutes(testApp, {
@@ -36,8 +39,14 @@ function createApp() {
     deletePluginDirFile: plugins.deletePluginDirFile,
     encodePluginId: plugins.encodePluginId,
     decodePluginId: plugins.decodePluginId,
+    ...overrides,
   });
   return testApp;
+}
+
+function createRegistryApp(getNpmInfo) {
+  app = createApp({ getNpmInfo });
+  return app;
 }
 
 async function createEntry(spec = 'a') {
@@ -67,7 +76,17 @@ describe('opencode plugin routes', () => {
     fs.rmSync(userConfigPath, { force: true });
     fs.rmSync(path.join(rootDir, 'plugins'), { recursive: true, force: true });
     refreshOpenCodeAfterConfigChange = mock(async () => undefined);
+    cleanupPaths = [];
     app = createApp();
+  });
+
+  afterEach(() => {
+    for (const target of cleanupPaths) {
+      try {
+        fs.chmodSync(target, 0o600);
+      } catch {
+      }
+    }
   });
 
   afterAll(() => {
@@ -79,6 +98,156 @@ describe('opencode plugin routes', () => {
     const response = await request(app).get('/api/config/plugins').expect(200);
 
     expect(response.body).toEqual({ entries: [], files: [] });
+  });
+
+  test('GET /registry with empty specs returns empty results', async () => {
+    const getNpmInfo = mock(async () => ({ ok: true, latest: '1.0.0', versions: ['1.0.0'], distTags: { latest: '1.0.0' } }));
+    createRegistryApp(getNpmInfo);
+
+    const response = await request(app).get('/api/config/plugins/registry?specs=').expect(200);
+
+    expect(response.body).toEqual({ results: [] });
+    expect(getNpmInfo).not.toHaveBeenCalled();
+  });
+
+  test('GET /registry reports update for exact npm version behind latest', async () => {
+    createRegistryApp(mock(async () => ({ ok: true, latest: '2.0.0', versions: ['1.0.0', '2.0.0'], distTags: { latest: '2.0.0' } })));
+
+    const response = await request(app).get('/api/config/plugins/registry?specs=foo@1.0.0').expect(200);
+
+    expect(response.body.results[0]).toMatchObject({
+      kind: 'npm-ok',
+      spec: 'foo@1.0.0',
+      name: 'foo',
+      currentVersion: '1.0.0',
+      latestVersion: '2.0.0',
+      hasUpdate: true,
+    });
+  });
+
+  test('GET /registry reports no update when exact npm version matches latest', async () => {
+    createRegistryApp(mock(async () => ({ ok: true, latest: '1.0.0', versions: ['1.0.0'], distTags: { latest: '1.0.0' } })));
+
+    const response = await request(app).get('/api/config/plugins/registry?specs=foo@1.0.0').expect(200);
+
+    expect(response.body.results[0]).toMatchObject({ kind: 'npm-ok', hasUpdate: false, latestVersion: '1.0.0', currentVersion: '1.0.0' });
+  });
+
+  test('GET /registry reports missing exact npm version', async () => {
+    createRegistryApp(mock(async () => ({ ok: true, latest: '2.0.0', versions: ['1.0.0', '2.0.0'], distTags: { latest: '2.0.0' } })));
+
+    const response = await request(app).get('/api/config/plugins/registry?specs=foo@99.99.99').expect(200);
+
+    expect(response.body.results[0]).toMatchObject({ kind: 'npm-missing-version', name: 'foo', currentVersion: '99.99.99', latestVersion: '2.0.0' });
+  });
+
+  test('GET /registry reports missing npm package', async () => {
+    createRegistryApp(mock(async () => ({ ok: false, status: 404, error: 'Package not found' })));
+
+    const response = await request(app).get('/api/config/plugins/registry?specs=nonexistent@1.0.0').expect(200);
+
+    expect(response.body.results[0]).toMatchObject({ kind: 'npm-missing-package', spec: 'nonexistent@1.0.0', name: 'nonexistent', error: 'Package not found' });
+  });
+
+  test('GET /registry reports malformed npm spec', async () => {
+    const getNpmInfo = mock(async () => ({ ok: true, latest: '1.0.0', versions: ['1.0.0'], distTags: { latest: '1.0.0' } }));
+    createRegistryApp(getNpmInfo);
+
+    const response = await request(app).get('/api/config/plugins/registry?specs=%40%40malformed').expect(200);
+
+    expect(response.body.results[0]).toEqual({ kind: 'npm-malformed', spec: '@@malformed', error: 'Spec syntax is malformed' });
+    expect(getNpmInfo).not.toHaveBeenCalled();
+  });
+
+  test('GET /registry reports existing path plugin ok', async () => {
+    createRegistryApp(mock(async () => ({ ok: true, latest: '1.0.0', versions: ['1.0.0'], distTags: { latest: '1.0.0' } })));
+    const tmpFile = path.join(fs.mkdtempSync(path.join(rootDir, 'plugin-path-')), 'plugin.js');
+    fs.writeFileSync(tmpFile, '// plugin', 'utf8');
+
+    const response = await request(app).get(`/api/config/plugins/registry?specs=${encodeURIComponent(tmpFile)}`).expect(200);
+
+    expect(response.body.results[0]).toEqual({ kind: 'path-ok', spec: tmpFile, absolutePath: tmpFile });
+  });
+
+  test('GET /registry reports missing path plugin', async () => {
+    createRegistryApp(mock(async () => ({ ok: true, latest: '1.0.0', versions: ['1.0.0'], distTags: { latest: '1.0.0' } })));
+
+    const response = await request(app).get('/api/config/plugins/registry?specs=%2Fnonexistent%2F__path%2Fxyz.js').expect(200);
+
+    expect(response.body.results[0]).toEqual({ kind: 'path-missing', spec: '/nonexistent/__path/xyz.js', absolutePath: '/nonexistent/__path/xyz.js' });
+  });
+
+  testUnlessRoot('GET /registry reports unreadable path plugin', async () => {
+    createRegistryApp(mock(async () => ({ ok: true, latest: '1.0.0', versions: ['1.0.0'], distTags: { latest: '1.0.0' } })));
+    const tmpFile = path.join(fs.mkdtempSync(path.join(rootDir, 'plugin-unreadable-')), 'plugin.js');
+    fs.writeFileSync(tmpFile, '// plugin', 'utf8');
+    cleanupPaths.push(tmpFile);
+    fs.chmodSync(tmpFile, 0);
+
+    const response = await request(app).get(`/api/config/plugins/registry?specs=${encodeURIComponent(tmpFile)}`).expect(200);
+
+    expect(response.body.results[0]).toEqual({ kind: 'path-unreadable', spec: tmpFile, absolutePath: tmpFile });
+  });
+
+  test('GET /registry reports npm network failure without failing route', async () => {
+    createRegistryApp(mock(async () => ({ ok: false, status: 'network', error: 'socket closed' })));
+
+    const response = await request(app).get('/api/config/plugins/registry?specs=foo@1.0.0').expect(200);
+
+    expect(response.body.results[0]).toMatchObject({ kind: 'npm-network', spec: 'foo@1.0.0', error: 'socket closed' });
+  });
+
+  test('GET /registry deduplicates npm package lookups by name', async () => {
+    const getNpmInfo = mock(async () => ({ ok: true, latest: '3.0.0', versions: ['1', '2', '3'], distTags: { latest: '3.0.0' } }));
+    createRegistryApp(getNpmInfo);
+
+    await request(app).get('/api/config/plugins/registry?specs=foo@1,foo@2,foo@3').expect(200);
+
+    expect(getNpmInfo).toHaveBeenCalledTimes(1);
+    expect(getNpmInfo).toHaveBeenCalledWith('foo', { forceRefresh: false });
+  });
+
+  test('GET /registry forwards refresh true to npm lookup', async () => {
+    const getNpmInfo = mock(async () => ({ ok: true, latest: '1.0.0', versions: ['1.0.0'], distTags: { latest: '1.0.0' } }));
+    createRegistryApp(getNpmInfo);
+
+    await request(app).get('/api/config/plugins/registry?specs=foo&refresh=true').expect(200);
+
+    expect(getNpmInfo).toHaveBeenCalledWith('foo', { forceRefresh: true });
+  });
+
+  test('GET /registry rejects more than 100 unique specs', async () => {
+    const specs = Array.from({ length: 101 }, (_, index) => `pkg-${index}`).join(',');
+
+    const response = await request(app).get(`/api/config/plugins/registry?specs=${specs}`).expect(400);
+
+    expect(response.body).toEqual({ error: 'too many specs' });
+  });
+
+  test('GET /registry reports bare npm name with null current version', async () => {
+    createRegistryApp(mock(async () => ({ ok: true, latest: '2.0.0', versions: ['1.0.0', '2.0.0'], distTags: { latest: '2.0.0' } })));
+
+    const response = await request(app).get('/api/config/plugins/registry?specs=foo').expect(200);
+
+    expect(response.body.results[0]).toMatchObject({ kind: 'npm-ok', spec: 'foo', name: 'foo', currentVersion: null, hasUpdate: false });
+  });
+
+  test('GET /registry accepts non-exact npm range without missing-version noise', async () => {
+    createRegistryApp(mock(async () => ({ ok: true, latest: '2.0.0', versions: ['1.0.0', '2.0.0'], distTags: { latest: '2.0.0' } })));
+
+    const response = await request(app).get('/api/config/plugins/registry?specs=foo@%5E1.0').expect(200);
+
+    expect(response.body.results[0]).toMatchObject({ kind: 'npm-ok', spec: 'foo@^1.0', name: 'foo', currentVersion: '^1.0', hasUpdate: false });
+  });
+
+  test('GET /registry supports scoped npm package specs', async () => {
+    const getNpmInfo = mock(async () => ({ ok: true, latest: '1.0.0', versions: ['1.0.0'], distTags: { latest: '1.0.0' } }));
+    createRegistryApp(getNpmInfo);
+
+    const response = await request(app).get('/api/config/plugins/registry?specs=%40scope%2Ffoo%401.0.0').expect(200);
+
+    expect(getNpmInfo).toHaveBeenCalledWith('@scope/foo', { forceRefresh: false });
+    expect(response.body.results[0]).toMatchObject({ kind: 'npm-ok', spec: '@scope/foo@1.0.0', name: '@scope/foo' });
   });
 
   test('POST /entry creates entry and requires reload', async () => {
