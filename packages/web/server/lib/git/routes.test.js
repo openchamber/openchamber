@@ -1,11 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, mock } from 'bun:test';
 
-const gitLibraries = vi.hoisted(() => ({
-  stageFiles: vi.fn(),
-  unstageFiles: vi.fn(),
-}));
+const gitLibraries = {
+  stageFiles: mock(),
+  unstageFiles: mock(),
+};
 
-vi.mock('./index.js', () => ({
+mock.module('./index.js', () => ({
   stageFiles: gitLibraries.stageFiles,
   unstageFiles: gitLibraries.unstageFiles,
 }));

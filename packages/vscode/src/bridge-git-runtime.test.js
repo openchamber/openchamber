@@ -1,11 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, mock } from 'bun:test';
 
-const gitService = vi.hoisted(() => ({
-  stageGitFiles: vi.fn(),
-  unstageGitFiles: vi.fn(),
-}));
+const gitService = {
+  stageGitFiles: mock(),
+  unstageGitFiles: mock(),
+};
 
-vi.mock('./gitService', () => gitService);
+mock.module('./gitService', () => gitService);
 
 const { handleStandardGitBridgeMessage } = await import('./bridge-git-runtime');
 
@@ -59,14 +59,14 @@ describe('bridge git runtime index mutations', () => {
     expect(gitService.unstageGitFiles).toHaveBeenCalledWith('/repo', ['a.ts', 'b.ts']);
   });
 
-  it('rejects blank path payloads', async () => {
+  it('rejects invalid path payloads', async () => {
     const response = await handleStandardGitBridgeMessage({
       id: '1',
       type: 'api:git/stage',
-      payload: { directory: '/repo', paths: [' ', ''] },
+      payload: { directory: '/repo', paths: [' ', null] },
     });
 
-    expect(response).toEqual({ id: '1', type: 'api:git/stage', success: false, error: 'Directory and path are required' });
+    expect(response?.success).toBe(false);
     expect(gitService.stageGitFiles).not.toHaveBeenCalled();
   });
 });

@@ -59,7 +59,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Trigger openchamber-website docs sync (optional)
-        if: ${{ github.event_name == 'release' || github.event_name == 'workflow_dispatch' }}
+        if: ${{ github.event_name == 'push' || github.event_name == 'release' || github.event_name == 'workflow_dispatch' }}
         env:
           WEBSITE_REPO: openchamber/openchamber-website
           WEBSITE_TOKEN: ${{ secrets.OPENCHAMBER_WEBSITE_REPO_TOKEN }}

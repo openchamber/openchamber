@@ -17,6 +17,7 @@ import { Icon } from "@/components/icon/Icon";
 import { useDeviceInfo } from '@/lib/device';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { primeTerminalInputTransport } from '@/lib/terminalApi';
+import { extractTerminalPreviewUrl, isTerminalPreviewUrlAvailable } from '@/lib/terminalPreview';
 import { useI18n } from '@/lib/i18n';
 import { PROJECT_ACTION_ICON_MAP, type ProjectActionIconKey } from '@/lib/projectActions';
 
@@ -113,6 +114,8 @@ export const TerminalView: React.FC = () => {
     const setTabLifecycle = useTerminalStore((s) => s.setTabLifecycle);
     const setConnecting = useTerminalStore((s) => s.setConnecting);
     const appendToBuffer = useTerminalStore((s) => s.appendToBuffer);
+    const setTabPreviewUrl = useTerminalStore((s) => s.setTabPreviewUrl);
+    const clearBuffer = useTerminalStore((s) => s.clearBuffer);
 
     const openContextPreview = useUIStore((state) => state.openContextPreview);
 
@@ -162,7 +165,7 @@ export const TerminalView: React.FC = () => {
     const [isReconnectPending, setIsReconnectPending] = React.useState(false);
     const [activeModifier, setActiveModifier] = React.useState<Modifier | null>(null);
     const [isRestarting, setIsRestarting] = React.useState(false);
-    const [viewportLayoutVersion, setViewportLayoutVersion] = React.useState(0);
+    const [viewportSizeVersion, setViewportSizeVersion] = React.useState(0);
 
     const streamCleanupRef = React.useRef<(() => void) | null>(null);
     const activeTerminalIdRef = React.useRef<string | null>(null);
@@ -175,6 +178,15 @@ export const TerminalView: React.FC = () => {
     const nudgeOnConnectTerminalIdRef = React.useRef<string | null>(null);
     const rehydratedTerminalIdsRef = React.useRef<Set<string>>(new Set());
     const rehydratedSnapshotTakenRef = React.useRef(false);
+    const previewScanTailRef = React.useRef('');
+    const pendingPreviewProbeUrlsRef = React.useRef<Set<string>>(new Set());
+    const previewProbeGenerationRef = React.useRef(0);
+
+    const resetTerminalPreviewScan = React.useCallback(() => {
+        previewScanTailRef.current = '';
+        pendingPreviewProbeUrlsRef.current.clear();
+        previewProbeGenerationRef.current += 1;
+    }, []);
 
     const focusTerminalWhenWindowActive = React.useCallback(() => {
         if (useTouchTerminalInput) {
@@ -246,7 +258,8 @@ export const TerminalView: React.FC = () => {
 
     React.useEffect(() => {
         activeTabIdRef.current = activeTabId;
-    }, [activeTabId]);
+        resetTerminalPreviewScan();
+    }, [activeTabId, resetTerminalPreviewScan]);
 
     React.useEffect(() => {
         directoryRef.current = effectiveDirectory;
@@ -277,6 +290,47 @@ export const TerminalView: React.FC = () => {
             terminalIdRef.current = null;
         },
         [disconnectStream]
+    );
+
+    const scanTerminalPreviewOutput = React.useCallback(
+        (directory: string, tabId: string, data: string) => {
+            if (!data) {
+                return;
+            }
+
+            const combined = `${previewScanTailRef.current}${data}`.replace(/\r\n|\r/g, '\n');
+            const lines = combined.split('\n');
+            const completeText = combined.endsWith('\n')
+                ? lines.join('\n')
+                : lines.slice(0, -1).join('\n');
+            previewScanTailRef.current = combined.endsWith('\n') ? '' : (lines[lines.length - 1] ?? '').slice(-1024);
+
+            if (!completeText) {
+                return;
+            }
+
+            const candidate = extractTerminalPreviewUrl(completeText);
+            if (!candidate || pendingPreviewProbeUrlsRef.current.has(candidate)) {
+                return;
+            }
+
+            const probeGeneration = previewProbeGenerationRef.current;
+            pendingPreviewProbeUrlsRef.current.add(candidate);
+            void isTerminalPreviewUrlAvailable(candidate).then((available) => {
+                pendingPreviewProbeUrlsRef.current.delete(candidate);
+                if (!available || previewProbeGenerationRef.current !== probeGeneration) {
+                    return;
+                }
+
+                const currentTab = useTerminalStore.getState().getDirectoryState(directory)?.tabs.find((tab) => tab.id === tabId);
+                if (!currentTab || currentTab.previewUrlLocked || currentTab.previewUrl === candidate) {
+                    return;
+                }
+
+                setTabPreviewUrl(directory, tabId, candidate, { locked: false, autoOpened: false });
+            });
+        },
+        [setTabPreviewUrl]
     );
 
     const startStream = React.useCallback(
@@ -331,6 +385,7 @@ export const TerminalView: React.FC = () => {
                             case 'data': {
                                 if (event.data) {
                                     appendToBuffer(directory, tabId, event.data);
+                                    scanTerminalPreviewOutput(directory, tabId, event.data);
                                 }
                                 break;
                             }
@@ -384,6 +439,7 @@ export const TerminalView: React.FC = () => {
                         );
                         setIsFatalError(true);
                         setConnecting(directory, tabId, false);
+                        clearBuffer(directory, tabId);
                         setTabLifecycle(directory, tabId, 'exited');
                         setTabSessionId(directory, tabId, null);
                         disconnectStream();
@@ -399,8 +455,10 @@ export const TerminalView: React.FC = () => {
         },
         [
             appendToBuffer,
+            clearBuffer,
             disconnectStream,
             focusTerminalWhenWindowActive,
+            scanTerminalPreviewOutput,
             setConnecting,
             setTabLifecycle,
             setTabSessionId,
@@ -470,12 +528,16 @@ export const TerminalView: React.FC = () => {
                     return;
                 }
 
+                const size = lastViewportSizeRef.current;
+                if (!size && isTerminalVisibleRef.current) {
+                    return;
+                }
+
                 setConnectionError(null);
                 setIsFatalError(false);
                 setIsReconnectPending(false);
                 setConnecting(directory, tabId, true);
                 try {
-                    const size = lastViewportSizeRef.current;
                     const session = await terminal.createSession({
                         cwd: directory,
                         cols: size?.cols,
@@ -544,6 +606,7 @@ export const TerminalView: React.FC = () => {
         terminalLifecycle,
         activeTabId,
         hasOpenedTerminalViewport,
+        viewportSizeVersion,
         enableTabs,
         terminalHydrated,
         ensureDirectory,
@@ -591,6 +654,8 @@ export const TerminalView: React.FC = () => {
         setIsReconnectPending(false);
 
         disconnectStream();
+        clearBuffer(effectiveDirectory, tabId);
+        resetTerminalPreviewScan();
 
         try {
             await closeTab(effectiveDirectory, tabId);
@@ -603,7 +668,7 @@ export const TerminalView: React.FC = () => {
         } finally {
             setIsRestarting(false);
         }
-    }, [activeTabId, closeTab, disconnectStream, effectiveDirectory, enableTabs, isRestarting, t]);
+    }, [activeTabId, clearBuffer, closeTab, disconnectStream, effectiveDirectory, enableTabs, isRestarting, resetTerminalPreviewScan, t]);
 
     const handleHardRestart = React.useCallback(async () => {
         // Keep semantics: “close tab -> new clean tab”.
@@ -693,7 +758,11 @@ export const TerminalView: React.FC = () => {
 
     const handleViewportResize = React.useCallback(
         (cols: number, rows: number) => {
-            lastViewportSizeRef.current = { cols, rows };
+            const previous = lastViewportSizeRef.current;
+            if (!previous || previous.cols !== cols || previous.rows !== rows) {
+                lastViewportSizeRef.current = { cols, rows };
+                setViewportSizeVersion((version) => version + 1);
+            }
             if (!isTerminalVisibleRef.current) {
                 return;
             }
@@ -834,29 +903,6 @@ export const TerminalView: React.FC = () => {
         const terminalPart = terminalSessionId ?? 'no-terminal';
         return `${directoryPart}::${tabPart}::${terminalPart}`;
     }, [effectiveDirectory, activeTabId, terminalSessionId]);
-
-    const viewportSessionKey = React.useMemo(() => {
-        return `${terminalViewportKey}::layout-${viewportLayoutVersion}`;
-    }, [terminalViewportKey, viewportLayoutVersion]);
-
-    React.useEffect(() => {
-        if (useTouchTerminalInput || !isBottomTerminalOpen || !isTerminalVisible) {
-            return;
-        }
-
-        if (typeof window === 'undefined') {
-            setViewportLayoutVersion((value) => value + 1);
-            return;
-        }
-
-        const timeoutId = window.setTimeout(() => {
-            setViewportLayoutVersion((value) => value + 1);
-        }, 140);
-
-        return () => {
-            window.clearTimeout(timeoutId);
-        };
-    }, [bottomTerminalHeight, isBottomTerminalExpanded, isBottomTerminalOpen, isTerminalVisible, useTouchTerminalInput]);
 
     React.useEffect(() => {
         if (!isTerminalVisible || useTouchTerminalInput) {
@@ -1136,10 +1182,11 @@ export const TerminalView: React.FC = () => {
                 <div className="h-full w-full box-border pl-4 pr-1.5 pt-3 pb-4">
                     {shouldRenderViewport ? (
                         <TerminalViewport
+                            key={terminalViewportKey}
                             ref={(controller) => {
                                 terminalControllerRef.current = controller;
                             }}
-                            sessionKey={viewportSessionKey}
+                            sessionKey={terminalViewportKey}
                             chunks={bufferChunks}
                             onInput={handleViewportInput}
                             onResize={handleViewportResize}

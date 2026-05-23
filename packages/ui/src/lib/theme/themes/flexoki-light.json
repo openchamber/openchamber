@@ -17,19 +17,19 @@
       "base": "#BC5215",
       "hover": "#F9AE77",
       "active": "#DA702C",
-      "foreground": "#FFFCF0",
+      "foreground": "#fffdf4",
       "muted": "#BC521580",
       "emphasis": "#F9AE77"
     },
     "surface": {
-      "background": "#FFFCF0",
+      "background": "#fffdf4",
       "foreground": "#100F0F",
-      "muted": "#F2F0E5",
+      "muted": "#f6f5ee",
       "mutedForeground": "#686663",
-      "elevated": "#fdf6ec",
+      "elevated": "#fbfaf2",
       "elevatedForeground": "#100F0F",
       "overlay": "#100F0F20",
-      "subtle": "#F6F0E6"
+      "subtle": "#f7f4ec"
     },
     "interactive": {
       "border": "#DAD8CE",
@@ -45,19 +45,19 @@
     },
     "status": {
       "error": "#AF3029",
-      "errorForeground": "#FFFCF0",
+      "errorForeground": "#fffdf4",
       "errorBackground": "#D14D4120",
       "errorBorder": "#D14D4150",
       "warning": "#BC5215",
-      "warningForeground": "#FFFCF0",
+      "warningForeground": "#fffdf4",
       "warningBackground": "#DA702C20",
       "warningBorder": "#DA702C50",
       "success": "#66800B",
-      "successForeground": "#FFFCF0",
+      "successForeground": "#fffdf4",
       "successBackground": "#879A3920",
       "successBorder": "#879A3950",
       "info": "#205EA6",
-      "infoForeground": "#FFFCF0",
+      "infoForeground": "#fffdf4",
       "infoBackground": "#4385BE20",
       "infoBorder": "#4385BE50"
     },
@@ -70,7 +70,7 @@
     },
     "syntax": {
       "base": {
-        "background": "#F2F0E5",
+        "background": "#f6f5ee",
         "foreground": "#100F0F",
         "comment": "#6F6E69",
         "keyword": "#205EA6",
@@ -136,21 +136,21 @@
       "link": "#205EA6",
       "linkHover": "#4385BE",
       "inlineCode": "#24837B",
-      "inlineCodeBackground": "#F2F0E5",
+      "inlineCodeBackground": "#f6f5ee",
       "blockquote": "#6F6E69",
       "blockquoteBorder": "#DAD8CE",
       "listMarker": "#AD830199"
     },
     "chat": {
       "userMessage": "#100F0F",
-      "userMessageBackground": "#F6F0E6",
+      "userMessageBackground": "#f7f4ec",
       "assistantMessage": "#100F0F",
-      "assistantMessageBackground": "#FFFCF0",
+      "assistantMessageBackground": "#fffdf4",
       "timestamp": "#6F6E69",
       "divider": "#DAD8CE"
     },
     "tools": {
-      "background": "#F2F0E550",
+      "background": "#f6f5ee50",
       "border": "#b4b2a980",
       "headerHover": "#DAD8CE",
       "icon": "#6F6E69",

@@ -10,6 +10,8 @@ import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { checkIsGitRepository } from '@/lib/gitApi';
 import { useDirectoryStore } from './useDirectoryStore';
 import { useProjectsStore } from './useProjectsStore';
+import { useSnippetsStore } from './useSnippetsStore';
+import { getMultiRunSessionTitle } from '@/lib/multirun/title';
 
 const toGitSafeSlug = (value: string): string => {
   return value
@@ -141,19 +143,21 @@ export const useMultiRunStore = create<MultiRunStore>()(
               modelIndexes.set(key, index);
 
               const modelSlug = toModelSlug(model.providerID, model.modelID);
-              const groupPart = groups.length > 1 ? `g${gi + 1}` : '';
+              const runGroup = groups.length > 1 ? `g${gi + 1}` : undefined;
               const modelPart = count > 1
                 ? generateWorktreeNameSeed(groupSlug, `${modelSlug}/${index}`)
                 : generateWorktreeNameSeed(groupSlug, modelSlug);
-              const preferredName = groupPart
-                ? `${groupPart}/${modelPart}`
+              const preferredName = runGroup
+                ? `${runGroup}/${modelPart}`
                 : modelPart;
 
-              const sessionTitle = count > 1
-                ? `${groupSlug}/${groupPart}/${model.providerID}/${model.modelID}/${index}`
-                : groupPart
-                  ? `${groupSlug}/${groupPart}/${model.providerID}/${model.modelID}`
-                  : `${groupSlug}/${model.providerID}/${model.modelID}`;
+              const sessionTitle = getMultiRunSessionTitle({
+                groupSlug,
+                runGroup,
+                providerID: model.providerID,
+                modelID: model.modelID,
+                index: count > 1 ? index : undefined,
+              });
 
               try {
                 if (!shouldIsolateRuns) {
@@ -235,16 +239,18 @@ export const useMultiRunStore = create<MultiRunStore>()(
 
           void (async () => {
             try {
+              const expandText = useSnippetsStore.getState().expandText;
               await Promise.allSettled(
                 createdRuns.map(async (run) => {
                   try {
+                    const text = await expandText(run.prompt).catch(() => run.prompt);
                     await opencodeClient.withDirectory(run.worktreePath, () =>
                       opencodeClient.sendMessage({
                         id: run.sessionId,
                         providerID: run.providerID,
                         modelID: run.modelID,
                         variant: run.variant,
-                        text: run.prompt,
+                        text,
                         agent,
                         files: filesForMessage,
                       }),

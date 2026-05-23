@@ -18,11 +18,12 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
     createMcpConfig,
     updateMcpConfig,
     deleteMcpConfig,
-    listPromptTemplates,
-    getPromptTemplate,
-    createPromptTemplate,
-    updatePromptTemplate,
-    deletePromptTemplate,
+    listSnippets,
+    getSnippet,
+    createSnippet,
+    updateSnippet,
+    deleteSnippet,
+    expandSnippets,
   } = dependencies;
 
   const completeMcpMutation = async (res, action, name, applyChange) => {
@@ -373,94 +374,112 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
     }
   });
 
-  app.get('/api/config/prompt-templates', async (req, res) => {
+  app.get('/api/config/snippets', async (req, res) => {
     try {
       const { directory, error } = await resolveOptionalProjectDirectory(req);
       if (error) {
         return res.status(400).json({ error });
       }
-      const templates = listPromptTemplates(directory);
-      res.json(templates);
+      res.json(listSnippets(directory));
     } catch (error) {
-      console.error('[API:GET /api/config/prompt-templates] Failed:', error);
-      res.status(500).json({ error: error.message || 'Failed to list prompt templates' });
+      console.error('[API:GET /api/config/snippets] Failed:', error);
+      res.status(500).json({ error: error.message || 'Failed to list snippets' });
     }
   });
 
-  app.get('/api/config/prompt-templates/:id', async (req, res) => {
+  app.post('/api/config/snippets/expand', async (req, res) => {
     try {
-      const id = req.params.id;
       const { directory, error } = await resolveOptionalProjectDirectory(req);
       if (error) {
         return res.status(400).json({ error });
       }
-      const template = getPromptTemplate(id, directory);
-      if (!template) {
-        return res.status(404).json({ error: `Prompt template "${id}" not found` });
-      }
-      res.json(template);
+      res.json({ text: expandSnippets(req.body?.text ?? '', directory) });
     } catch (error) {
-      console.error('[API:GET /api/config/prompt-templates/:id] Failed:', error);
-      res.status(500).json({ error: error.message || 'Failed to get prompt template' });
+      console.error('[API:POST /api/config/snippets/expand] Failed:', error);
+      res.status(500).json({ error: error.message || 'Failed to expand snippets' });
     }
   });
 
-  app.post('/api/config/prompt-templates/:id', async (req, res) => {
+  app.get('/api/config/snippets/:name', async (req, res) => {
     try {
-      const id = req.params.id;
-      const config = req.body || {};
+      const name = req.params.name;
       const { directory, error } = await resolveOptionalProjectDirectory(req);
       if (error) {
         return res.status(400).json({ error });
       }
-      console.log(`[API:POST /api/config/prompt-templates] Creating prompt template: ${id}`);
-      const template = createPromptTemplate(id, config, directory);
-      res.json({ success: true, template });
+      const snippet = getSnippet(name, directory);
+      if (!snippet) {
+        return res.status(404).json({ error: `Snippet "${name}" not found` });
+      }
+      res.json(snippet);
     } catch (error) {
-      console.error('[API:POST /api/config/prompt-templates/:id] Failed:', error);
+      console.error('[API:GET /api/config/snippets/:name] Failed:', error);
+      if (error.message?.includes('Snippet name')) {
+        return res.status(400).json({ error: error.message });
+      }
+      res.status(500).json({ error: error.message || 'Failed to get snippet' });
+    }
+  });
+
+  app.post('/api/config/snippets/:name', async (req, res) => {
+    try {
+      const name = req.params.name;
+      const { directory, error } = await resolveOptionalProjectDirectory(req);
+      if (error) {
+        return res.status(400).json({ error });
+      }
+      const snippet = createSnippet(name, req.body || {}, directory, req.body?.scope || 'global');
+      res.json({ success: true, snippet });
+    } catch (error) {
+      console.error('[API:POST /api/config/snippets/:name] Failed:', error);
       if (error.message?.includes('already exists')) {
         return res.status(409).json({ error: error.message });
       }
-      res.status(500).json({ error: error.message || 'Failed to create prompt template' });
+      if (error.message?.includes('Snippet name') || error.message?.includes('Project directory')) {
+        return res.status(400).json({ error: error.message });
+      }
+      res.status(500).json({ error: error.message || 'Failed to create snippet' });
     }
   });
 
-  app.patch('/api/config/prompt-templates/:id', async (req, res) => {
+  app.patch('/api/config/snippets/:name', async (req, res) => {
     try {
-      const id = req.params.id;
-      const updates = req.body;
+      const name = req.params.name;
       const { directory, error } = await resolveOptionalProjectDirectory(req);
       if (error) {
         return res.status(400).json({ error });
       }
-      console.log(`[API:PATCH /api/config/prompt-templates] Updating prompt template: ${id}`);
-      const template = updatePromptTemplate(id, updates, directory);
-      res.json({ success: true, template });
+      res.json({ success: true, snippet: updateSnippet(name, req.body || {}, directory) });
     } catch (error) {
-      console.error('[API:PATCH /api/config/prompt-templates/:id] Failed:', error);
+      console.error('[API:PATCH /api/config/snippets/:name] Failed:', error);
       if (error.message?.includes('not found')) {
         return res.status(404).json({ error: error.message });
       }
-      res.status(500).json({ error: error.message || 'Failed to update prompt template' });
+      if (error.message?.includes('Snippet name')) {
+        return res.status(400).json({ error: error.message });
+      }
+      res.status(500).json({ error: error.message || 'Failed to update snippet' });
     }
   });
 
-  app.delete('/api/config/prompt-templates/:id', async (req, res) => {
+  app.delete('/api/config/snippets/:name', async (req, res) => {
     try {
-      const id = req.params.id;
+      const name = req.params.name;
       const { directory, error } = await resolveOptionalProjectDirectory(req);
       if (error) {
         return res.status(400).json({ error });
       }
-      console.log(`[API:DELETE /api/config/prompt-templates] Deleting prompt template: ${id}`);
-      deletePromptTemplate(id, directory);
+      deleteSnippet(name, directory);
       res.json({ success: true });
     } catch (error) {
-      console.error('[API:DELETE /api/config/prompt-templates/:id] Failed:', error);
+      console.error('[API:DELETE /api/config/snippets/:name] Failed:', error);
       if (error.message?.includes('not found')) {
         return res.status(404).json({ error: error.message });
       }
-      res.status(500).json({ error: error.message || 'Failed to delete prompt template' });
+      if (error.message?.includes('Snippet name')) {
+        return res.status(400).json({ error: error.message });
+      }
+      res.status(500).json({ error: error.message || 'Failed to delete snippet' });
     }
   });
 };

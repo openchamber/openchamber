@@ -19,6 +19,7 @@ interface CommitSectionProps {
   onCommit: () => void;
   onCommitAndPush: () => void;
   commitAction: CommitAction;
+  hasPendingIndexMutation?: boolean;
   gitmojiEnabled: boolean;
   onOpenGitmojiPicker: () => void;
 }
@@ -34,12 +35,13 @@ export const CommitSection: React.FC<CommitSectionProps> = ({
   onCommit,
   onCommitAndPush,
   commitAction,
+  hasPendingIndexMutation = false,
   gitmojiEnabled,
   onOpenGitmojiPicker,
 }) => {
   const { t } = useI18n();
   const hasStagedFiles = stagedCount > 0;
-  const canCommit = commitMessage.trim() && hasStagedFiles && commitAction === null;
+  const canCommit = commitMessage.trim() && hasStagedFiles && commitAction === null && !hasPendingIndexMutation;
   const { isMobile, hasTouchInput } = useDeviceInfo();
 
   const containerClassName = 'border-0 bg-transparent rounded-none';
@@ -94,6 +96,7 @@ export const CommitSection: React.FC<CommitSectionProps> = ({
             disabled={
               isGeneratingMessage ||
               commitAction !== null ||
+              hasPendingIndexMutation ||
               stagedCount === 0
             }
             type="button"
@@ -165,12 +168,12 @@ export const CommitSection: React.FC<CommitSectionProps> = ({
               {commitAction === 'commitAndPush' ? (
                 <>
                   <Icon name="loader-4" className="size-4 animate-spin" />
-                  <span className="commit-actions__label">{t('gitView.commit.pushing')}</span>
+                  <span className="commit-actions__label commit-actions__label--push">{t('gitView.commit.pushing')}</span>
                 </>
               ) : (
                 <>
                   <Icon name="arrow-up" className="size-3.5" />
-                  <span className="commit-actions__label">{t('gitView.commit.push')}</span>
+                  <span className="commit-actions__label commit-actions__label--push">{t('gitView.commit.push')}</span>
                 </>
               )}
             </Button>

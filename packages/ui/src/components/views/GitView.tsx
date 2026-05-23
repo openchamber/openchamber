@@ -565,6 +565,7 @@ export const GitView: React.FC = () => {
   const [generatedHighlights, setGeneratedHighlights] = React.useState<string[]>(
     initialSnapshot?.generatedHighlights ?? []
   );
+  const hasPendingIndexMutation = movingChangePaths.size > 0 || gitIndexMutationQueue.size() > 0 || gitIndexMutationQueue.isRunning();
 
   const scrollActionPanelToBottom = React.useCallback(() => {
     const scrollTarget = actionPanelScrollRef.current;
@@ -2462,6 +2463,7 @@ export const GitView: React.FC = () => {
                         onCommit={() => handleCommit({ pushAfter: false })}
                         onCommitAndPush={() => handleCommit({ pushAfter: true })}
                         commitAction={commitAction}
+                        hasPendingIndexMutation={hasPendingIndexMutation}
                         gitmojiEnabled={settingsGitmojiEnabled}
                         onOpenGitmojiPicker={() => setIsGitmojiPickerOpen(true)}
                       />
