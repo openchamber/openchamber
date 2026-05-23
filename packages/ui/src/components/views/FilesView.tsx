@@ -282,7 +282,6 @@ const isFileMissingError = (error: unknown): boolean => {
   const message = error instanceof Error ? error.message : String(error ?? '');
   const normalized = message.toLowerCase();
   return normalized.includes('file not found')
-    || normalized.includes('not found')
     || normalized.includes('enoent')
     || normalized.includes('no such file')
     || normalized.includes('does not exist');

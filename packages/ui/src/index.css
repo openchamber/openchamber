@@ -1482,6 +1482,24 @@ input[aria-label="Terminal input"] {
     animation: none;
   }
 
+  .open-file-name-marquee-track {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    will-change: auto;
+  }
+
+  .open-file-name-marquee-track .open-file-name-marquee-item {
+    display: inline;
+    padding-right: 0;
+  }
+
+  .open-file-name-marquee-track .open-file-name-marquee-item[aria-hidden="true"] {
+    display: none;
+  }
+
   .animate-busy-pulse {
     animation: none;
   }
