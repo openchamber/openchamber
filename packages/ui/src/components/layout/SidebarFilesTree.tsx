@@ -19,6 +19,7 @@ import {
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
@@ -230,16 +231,25 @@ const FileRow: React.FC<FileRowProps> = ({
             open={contextMenuPath === node.path}
             onOpenChange={(open) => setContextMenuPath(open ? node.path : null)}
           >
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6"
-                onClick={handleMenuButtonClick}
-              >
-                <Icon name="more-2-fill" className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex">
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      onClick={handleMenuButtonClick}
+                      title={t('sidebarFilesTree.actions.fileMenuTitle')}
+                      aria-label={t('sidebarFilesTree.actions.fileMenuTitle')}
+                    >
+                      <Icon name="more-2-fill" className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" sideOffset={6}>{t('sidebarFilesTree.actions.fileMenuTitle')}</TooltipContent>
+            </Tooltip>
             <DropdownMenuContent align="end" side="bottom" onCloseAutoFocus={() => setContextMenuPath(null)}>
               {canRename && (
                 <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onOpenDialog('rename', node); }}>
@@ -825,30 +835,53 @@ export const SidebarFilesTree: React.FC = () => {
           ) : null}
         </div>
         {canCreateFile && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => handleOpenDialog('createFile', { path: currentDirectory, type: 'directory' })}
-            className="h-8 w-8 p-0 flex-shrink-0"
-            title={t('sidebarFilesTree.actions.newFileTitle')}
-          >
-            <Icon name="file-add" className="h-4 w-4" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex flex-shrink-0">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleOpenDialog('createFile', { path: currentDirectory, type: 'directory' })}
+                  className="h-8 w-8 p-0 flex-shrink-0"
+                  title={t('sidebarFilesTree.actions.newFileTitle')}
+                  aria-label={t('sidebarFilesTree.actions.newFileTitle')}
+                >
+                  <Icon name="file-add" className="h-4 w-4" />
+                </Button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6}>{t('sidebarFilesTree.actions.newFileTitle')}</TooltipContent>
+          </Tooltip>
         )}
         {canCreateFolder && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => handleOpenDialog('createFolder', { path: currentDirectory, type: 'directory' })}
-            className="h-8 w-8 p-0 flex-shrink-0"
-            title={t('sidebarFilesTree.actions.newFolderTitle')}
-          >
-            <Icon name="folder-add" className="h-4 w-4" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex flex-shrink-0">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleOpenDialog('createFolder', { path: currentDirectory, type: 'directory' })}
+                  className="h-8 w-8 p-0 flex-shrink-0"
+                  title={t('sidebarFilesTree.actions.newFolderTitle')}
+                  aria-label={t('sidebarFilesTree.actions.newFolderTitle')}
+                >
+                  <Icon name="folder-add" className="h-4 w-4" />
+                </Button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6}>{t('sidebarFilesTree.actions.newFolderTitle')}</TooltipContent>
+          </Tooltip>
         )}
-        <Button variant="ghost" size="sm" onClick={() => void refreshRoot()} className="h-8 w-8 p-0 flex-shrink-0" title={t('sidebarFilesTree.actions.refreshTitle')}>
-          <Icon name="refresh" className="h-4 w-4" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex flex-shrink-0">
+              <Button variant="ghost" size="sm" onClick={() => void refreshRoot()} className="h-8 w-8 p-0 flex-shrink-0" title={t('sidebarFilesTree.actions.refreshTitle')} aria-label={t('sidebarFilesTree.actions.refreshTitle')}>
+                <Icon name="refresh" className="h-4 w-4" />
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={6}>{t('sidebarFilesTree.actions.refreshTitle')}</TooltipContent>
+        </Tooltip>
       </div>
 
       <ScrollableOverlay outerClassName="flex-1 min-h-0" className="p-2">

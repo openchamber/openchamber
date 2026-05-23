@@ -13,6 +13,7 @@ import {
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { CodeMirrorEditor } from '@/components/ui/CodeMirrorEditor';
 import { GoToLineDialog } from './GoToLineDialog';
 import { PreviewToggleButton } from './PreviewToggleButton';
@@ -2561,6 +2562,17 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       return null;
     }
 
+    const withTooltip = (label: React.ReactNode, trigger: React.ReactElement) => (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex">
+            {trigger}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" sideOffset={6}>{label}</TooltipContent>
+      </Tooltip>
+    );
+
     return (
       <div className="pointer-events-auto flex items-center gap-1 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-1 shadow-sm">
         {canEdit && textViewMode === 'edit' && (
@@ -2575,7 +2587,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                 <Icon name="check" className="size-3.5" />
                 {t('filesView.editor.saved')}
               </span>
-            ) : isDirty ? (
+            ) : isDirty ? withTooltip(t(autoSaveEnabled ? 'filesView.editor.saveNowTitle' : 'filesView.editor.saveNowManualTitle', { shortcut: `${getModifierLabel()}+S` }),
               <Button
                 variant="ghost"
                 size="sm"
@@ -2587,34 +2599,43 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                 <Icon name="save-3" className="size-4" />
               </Button>
             ) : null}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setAutoSaveEnabled((enabled) => !enabled)}
-              className={cn(
-                'size-6 p-0 transition-opacity hover:bg-transparent focus-visible:bg-transparent active:bg-transparent',
-                autoSaveEnabled ? 'text-foreground opacity-100' : 'text-muted-foreground opacity-65 hover:opacity-100'
-              )}
-              title={autoSaveEnabled ? t('filesView.editor.autoSaveOn') : t('filesView.editor.manualSave')}
-              aria-label={autoSaveEnabled ? t('filesView.editor.autoSaveOn') : t('filesView.editor.manualSave')}
-            >
-              {autoSaveEnabled ? <Icon name="file-check-fill" className="size-4" /> : <Icon name="file-check" className="size-4" />}
-            </Button>
+            {withTooltip(autoSaveEnabled ? t('filesView.editor.autoSaveOn') : t('filesView.editor.manualSave'),
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setAutoSaveEnabled((enabled) => !enabled)}
+                className={cn(
+                  'size-6 p-0 transition-opacity hover:bg-transparent focus-visible:bg-transparent active:bg-transparent',
+                  autoSaveEnabled ? 'text-foreground opacity-100' : 'text-muted-foreground opacity-65 hover:opacity-100'
+                )}
+                title={autoSaveEnabled ? t('filesView.editor.autoSaveOn') : t('filesView.editor.manualSave')}
+                aria-label={autoSaveEnabled ? t('filesView.editor.autoSaveOn') : t('filesView.editor.manualSave')}
+              >
+                {autoSaveEnabled ? <Icon name="file-check-fill" className="size-4" /> : <Icon name="file-check" className="size-4" />}
+              </Button>
+            )}
           </>
         )}
 
         <DropdownMenu onOpenChange={handleToolbarDropdownOpenChange}>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="size-6 p-0 text-foreground opacity-100 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
-              title={t('filesView.editor.openInDesktopApp')}
-              aria-label={t('filesView.editor.openInDesktopApp')}
-            >
-              <Icon name="file-transfer" className="size-4" />
-            </Button>
-          </DropdownMenuTrigger>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex">
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="size-6 p-0 text-foreground opacity-100 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
+                    title={t('filesView.editor.openInDesktopApp')}
+                    aria-label={t('filesView.editor.openInDesktopApp')}
+                  >
+                    <Icon name="file-transfer" className="size-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6}>{t('filesView.editor.openInDesktopApp')}</TooltipContent>
+          </Tooltip>
           <DropdownMenuContent align="end" className="w-56 max-h-[70vh] overflow-y-auto">
             {openInApps.map((app) => (
               <DropdownMenuItem
@@ -2640,44 +2661,50 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
         {!isSelectedImage && (
           <>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setWrapLines(!wrapLines)}
-              className={cn(
-                'size-6 p-0 transition-opacity hover:bg-transparent focus-visible:bg-transparent active:bg-transparent',
-                wrapLines ? 'text-foreground opacity-100' : 'text-muted-foreground opacity-65 hover:opacity-100'
-              )}
-              title={wrapLines ? t('filesView.editor.disableLineWrap') : t('filesView.editor.enableLineWrap')}
-            >
-              <Icon name="text-wrap" className="size-4" />
-            </Button>
+            {withTooltip(wrapLines ? t('filesView.editor.disableLineWrap') : t('filesView.editor.enableLineWrap'),
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setWrapLines(!wrapLines)}
+                className={cn(
+                  'size-6 p-0 transition-opacity hover:bg-transparent focus-visible:bg-transparent active:bg-transparent',
+                  wrapLines ? 'text-foreground opacity-100' : 'text-muted-foreground opacity-65 hover:opacity-100'
+                )}
+                title={wrapLines ? t('filesView.editor.disableLineWrap') : t('filesView.editor.enableLineWrap')}
+              >
+                <Icon name="text-wrap" className="size-4" />
+              </Button>
+            )}
             {textViewMode === 'edit' && (
               <>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={(event) => {
-                    setIsSearchOpen(!isSearchOpen);
-                    event.currentTarget.blur();
-                  }}
-                  className="size-6 p-0 text-foreground opacity-100 transition-opacity hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
-                  title={t('filesView.editor.findInFile')}
-                >
-                  <Icon name="search" className="size-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={(event) => {
-                    setIsGoToLineOpen((open) => !open);
-                    event.currentTarget.blur();
-                  }}
-                  className="size-6 p-0 text-foreground opacity-100 transition-opacity hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
-                  title={t('filesView.editor.goToLine')}
-                >
-                  <Icon name="menu-fold-2" className="size-4" />
-                </Button>
+                {withTooltip(t('filesView.editor.findInFile'),
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={(event) => {
+                      setIsSearchOpen(!isSearchOpen);
+                      event.currentTarget.blur();
+                    }}
+                    className="size-6 p-0 text-foreground opacity-100 transition-opacity hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
+                    title={t('filesView.editor.findInFile')}
+                  >
+                    <Icon name="search" className="size-4" />
+                  </Button>
+                )}
+                {withTooltip(t('filesView.editor.goToLine'),
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={(event) => {
+                      setIsGoToLineOpen((open) => !open);
+                      event.currentTarget.blur();
+                    }}
+                    className="size-6 p-0 text-foreground opacity-100 transition-opacity hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
+                    title={t('filesView.editor.goToLine')}
+                  >
+                    <Icon name="menu-fold-2" className="size-4" />
+                  </Button>
+                )}
                 <GoToLineDialog
                   open={isGoToLineOpen}
                   onOpenChange={setIsGoToLineOpen}
@@ -2712,123 +2739,135 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         )}
 
         {isJson && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => saveJsonViewMode(jsonViewMode === 'tree' ? 'text' : 'tree')}
-            className="size-6 p-0 text-muted-foreground opacity-65 hover:bg-transparent hover:opacity-100 focus-visible:bg-transparent active:bg-transparent"
-            title={jsonViewMode === 'tree' ? t('filesView.editor.switchToTextView') : t('filesView.editor.switchToTreeView')}
-          >
-            {jsonViewMode === 'tree' ? (
-              <Icon name="code-sslash" className="size-4" />
-            ) : (
-              <Icon name="node-tree" className="size-4" />
-            )}
-          </Button>
+          withTooltip(jsonViewMode === 'tree' ? t('filesView.editor.switchToTextView') : t('filesView.editor.switchToTreeView'),
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => saveJsonViewMode(jsonViewMode === 'tree' ? 'text' : 'tree')}
+              className="size-6 p-0 text-muted-foreground opacity-65 hover:bg-transparent hover:opacity-100 focus-visible:bg-transparent active:bg-transparent"
+              title={jsonViewMode === 'tree' ? t('filesView.editor.switchToTextView') : t('filesView.editor.switchToTreeView')}
+            >
+              {jsonViewMode === 'tree' ? (
+                <Icon name="code-sslash" className="size-4" />
+              ) : (
+                <Icon name="node-tree" className="size-4" />
+              )}
+            </Button>
+          )
         )}
 
         {canCopy && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={async () => {
-              const result = await copyTextToClipboard(fileContent);
-              if (result.ok) {
-                setCopiedContent(true);
-                if (copiedContentTimeoutRef.current !== null) {
-                  window.clearTimeout(copiedContentTimeoutRef.current);
+          withTooltip(t('filesView.editor.copyFileContents'),
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={async () => {
+                const result = await copyTextToClipboard(fileContent);
+                if (result.ok) {
+                  setCopiedContent(true);
+                  if (copiedContentTimeoutRef.current !== null) {
+                    window.clearTimeout(copiedContentTimeoutRef.current);
+                  }
+                  copiedContentTimeoutRef.current = window.setTimeout(() => {
+                    setCopiedContent(false);
+                  }, 1200);
+                } else {
+                  toast.error(t('filesView.toast.copyFailed'));
                 }
-                copiedContentTimeoutRef.current = window.setTimeout(() => {
-                  setCopiedContent(false);
-                }, 1200);
-              } else {
-                toast.error(t('filesView.toast.copyFailed'));
-              }
-            }}
-            className="size-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
-            title={t('filesView.editor.copyFileContents')}
-            aria-label={t('filesView.editor.copyFileContents')}
-          >
-            {copiedContent ? (
-              <Icon name="check" className="size-4 text-[color:var(--status-success)]" />
-            ) : (
-              <Icon name="clipboard" className="size-4" />
-            )}
-          </Button>
+              }}
+              className="size-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
+              title={t('filesView.editor.copyFileContents')}
+              aria-label={t('filesView.editor.copyFileContents')}
+            >
+              {copiedContent ? (
+                <Icon name="check" className="size-4 text-[color:var(--status-success)]" />
+              ) : (
+                <Icon name="clipboard" className="size-4" />
+              )}
+            </Button>
+          )
         )}
 
         {canCopyPath && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={async () => {
-              const result = await copyTextToClipboard(displaySelectedPath);
-              if (result.ok) {
-                setCopiedPath(true);
-                if (copiedPathTimeoutRef.current !== null) {
-                  window.clearTimeout(copiedPathTimeoutRef.current);
+          withTooltip(t('filesView.editor.copyFilePathTitle', { path: displaySelectedPath }),
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={async () => {
+                const result = await copyTextToClipboard(displaySelectedPath);
+                if (result.ok) {
+                  setCopiedPath(true);
+                  if (copiedPathTimeoutRef.current !== null) {
+                    window.clearTimeout(copiedPathTimeoutRef.current);
+                  }
+                  copiedPathTimeoutRef.current = window.setTimeout(() => {
+                    setCopiedPath(false);
+                  }, 1200);
+                } else {
+                  toast.error(t('filesView.toast.copyFailed'));
                 }
-                copiedPathTimeoutRef.current = window.setTimeout(() => {
-                  setCopiedPath(false);
-                }, 1200);
-              } else {
-                toast.error(t('filesView.toast.copyFailed'));
-              }
-            }}
-            className="size-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
-            title={t('filesView.editor.copyFilePathTitle', { path: displaySelectedPath })}
-            aria-label={t('filesView.editor.copyFilePathTitle', { path: displaySelectedPath })}
-          >
-            {copiedPath ? (
-              <Icon name="check" className="size-4 text-[color:var(--status-success)]" />
-            ) : (
-              <Icon name="file-copy-2" className="size-4" />
-            )}
-          </Button>
+              }}
+              className="size-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
+              title={t('filesView.editor.copyFilePathTitle', { path: displaySelectedPath })}
+              aria-label={t('filesView.editor.copyFilePathTitle', { path: displaySelectedPath })}
+            >
+              {copiedPath ? (
+                <Icon name="check" className="size-4 text-[color:var(--status-success)]" />
+              ) : (
+                <Icon name="file-copy-2" className="size-4" />
+              )}
+            </Button>
+          )
         )}
 
         {files.downloadFile && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              const fn = files.downloadFile;
-              if (fn) void fn(selectedFile.path);
-            }}
-            className="size-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
-            title={t('filesView.editor.saveFile')}
-            aria-label={t('filesView.editor.saveFile')}
-          >
-            <Icon name="download" className="size-4" />
-          </Button>
+          withTooltip(t('filesView.editor.saveFile'),
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                const fn = files.downloadFile;
+                if (fn) void fn(selectedFile.path);
+              }}
+              className="size-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
+              title={t('filesView.editor.saveFile')}
+              aria-label={t('filesView.editor.saveFile')}
+            >
+              <Icon name="download" className="size-4" />
+            </Button>
+          )
         )}
 
         {exitFullscreenOnly ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setIsFullscreen(false)}
-            className="size-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
-            title={t('filesView.editor.exitFullscreen')}
-            aria-label={t('filesView.editor.exitFullscreen')}
-          >
-            <Icon name="fullscreen-exit" className="size-4" />
-          </Button>
-        ) : (!isMobile && mode === 'full' && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setIsFullscreen(!isFullscreen)}
-            className="size-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
-            title={isFullscreen ? t('filesView.editor.exitFullscreen') : t('filesView.editor.fullscreen')}
-            aria-label={isFullscreen ? t('filesView.editor.exitFullscreen') : t('filesView.editor.fullscreen')}
-          >
-            {isFullscreen ? (
+          withTooltip(t('filesView.editor.exitFullscreen'),
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsFullscreen(false)}
+              className="size-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
+              title={t('filesView.editor.exitFullscreen')}
+              aria-label={t('filesView.editor.exitFullscreen')}
+            >
               <Icon name="fullscreen-exit" className="size-4" />
-            ) : (
-              <Icon name="fullscreen" className="size-4" />
-            )}
-          </Button>
+            </Button>
+          )
+        ) : (!isMobile && mode === 'full' && (
+          withTooltip(isFullscreen ? t('filesView.editor.exitFullscreen') : t('filesView.editor.fullscreen'),
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsFullscreen(!isFullscreen)}
+              className="size-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
+              title={isFullscreen ? t('filesView.editor.exitFullscreen') : t('filesView.editor.fullscreen')}
+              aria-label={isFullscreen ? t('filesView.editor.exitFullscreen') : t('filesView.editor.fullscreen')}
+            >
+              {isFullscreen ? (
+                <Icon name="fullscreen-exit" className="size-4" />
+              ) : (
+                <Icon name="fullscreen" className="size-4" />
+              )}
+            </Button>
+          )
         ))}
       </div>
     );
@@ -3024,16 +3063,23 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             {isFloatingToolbarOpen ? (
               renderFloatingFileControls()
             ) : (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setIsFloatingToolbarOpen(true)}
-                className="size-8 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-0 text-muted-foreground shadow-sm hover:text-foreground"
-                aria-label={t('filesView.editor.showControlsAria')}
-                title={t('filesView.editor.controlsTitle')}
-              >
-                <Icon name="more-2-fill" className="size-4" />
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setIsFloatingToolbarOpen(true)}
+                      className="size-8 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-0 text-muted-foreground shadow-sm hover:text-foreground"
+                      aria-label={t('filesView.editor.showControlsAria')}
+                      title={t('filesView.editor.controlsTitle')}
+                    >
+                      <Icon name="more-2-fill" className="size-4" />
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" sideOffset={6}>{t('filesView.editor.controlsTitle')}</TooltipContent>
+              </Tooltip>
             )}
           </div>
         )}
@@ -3267,27 +3313,50 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
               </button>
             )}
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => handleOpenDialog('createFile', { path: currentDirectory, type: 'directory' })}
-            className="size-8 p-0 flex-shrink-0"
-            title={t('filesView.tree.actions.newFileTitle')}
-          >
-            <Icon name="file-add" className="size-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => handleOpenDialog('createFolder', { path: currentDirectory, type: 'directory' })}
-            className="size-8 p-0 flex-shrink-0"
-            title={t('filesView.tree.actions.newFolderTitle')}
-          >
-            <Icon name="folder-add" className="size-4" />
-          </Button>
-          <Button variant="ghost" size="sm" onClick={() => void refreshRoot()} className="size-8 p-0 flex-shrink-0">
-            <Icon name="refresh" className="size-4" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex flex-shrink-0">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleOpenDialog('createFile', { path: currentDirectory, type: 'directory' })}
+                  className="size-8 p-0 flex-shrink-0"
+                  title={t('filesView.tree.actions.newFileTitle')}
+                  aria-label={t('filesView.tree.actions.newFileTitle')}
+                >
+                  <Icon name="file-add" className="size-4" />
+                </Button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6}>{t('filesView.tree.actions.newFileTitle')}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex flex-shrink-0">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleOpenDialog('createFolder', { path: currentDirectory, type: 'directory' })}
+                  className="size-8 p-0 flex-shrink-0"
+                  title={t('filesView.tree.actions.newFolderTitle')}
+                  aria-label={t('filesView.tree.actions.newFolderTitle')}
+                >
+                  <Icon name="folder-add" className="size-4" />
+                </Button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6}>{t('filesView.tree.actions.newFolderTitle')}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex flex-shrink-0">
+                <Button variant="ghost" size="sm" onClick={() => void refreshRoot()} className="size-8 p-0 flex-shrink-0" title={t('filesView.tree.actions.refreshTitle')} aria-label={t('filesView.tree.actions.refreshTitle')}>
+                  <Icon name="refresh" className="size-4" />
+                </Button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6}>{t('filesView.tree.actions.refreshTitle')}</TooltipContent>
+          </Tooltip>
         </div>
       </div>
 
