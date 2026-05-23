@@ -341,13 +341,21 @@ function SessionItem({
   }, [isEditing]);
 
   return (
-    <button
-      type="button"
+    <div
+      role={isEditing ? undefined : 'button'}
+      tabIndex={isEditing ? undefined : 0}
       onClick={isEditing ? undefined : onClick}
       onDoubleClick={(e) => {
         if (isEditing) return;
         e.stopPropagation();
         onDoubleClick?.(session.id, sessionTitle);
+      }}
+      onKeyDown={(e) => {
+        if (isEditing) return;
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onClick();
+        }
       }}
       className={cn(
         "flex items-center gap-0.5 px-1.5 py-px text-left transition-colors",
@@ -396,7 +404,7 @@ function SessionItem({
           }}
           className={cn(
             "flex-1 min-w-0 text-[13px] leading-tight px-1 py-px rounded",
-            "bg-[var(--surface-base)] border border-[var(--interactive-border)]",
+            "bg-background border border-[var(--interactive-border)]",
             "text-[var(--surface-foreground)] outline-none",
             "focus:border-[var(--primary-base)]"
           )}
@@ -437,7 +445,7 @@ function SessionItem({
           <span className="text-[10px]">]</span>
         </div>
       )}
-    </button>
+    </div>
   );
 }
 
@@ -517,9 +525,17 @@ function SessionStatusHeader({
   }, [isEditing]);
 
   return (
-    <button
-      type="button"
+    <div
+      role={isEditing ? undefined : 'button'}
+      tabIndex={isEditing ? undefined : 0}
       onClick={isEditing ? undefined : onToggle}
+      onKeyDown={(e) => {
+        if (isEditing) return;
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onToggle();
+        }
+      }}
       className="w-full flex flex-col px-2 py-0.5 text-left transition-colors hover:bg-[var(--interactive-hover)]"
     >
       {!isExpanded && currentProjectLabel && (
@@ -584,7 +600,7 @@ function SessionStatusHeader({
             }}
             className={cn(
               "flex-1 min-w-0 text-[13px] leading-none px-1 py-0.5 rounded",
-              "bg-[var(--surface-base)] border border-[var(--interactive-border)]",
+              "bg-background border border-[var(--interactive-border)]",
               "text-[var(--surface-foreground)] outline-none",
               "focus:border-[var(--primary-base)]"
             )}
@@ -631,7 +647,7 @@ function SessionStatusHeader({
           </div>
         )}
       </div>
-    </button>
+    </div>
   );
 }
 
