@@ -452,7 +452,7 @@ export const dict: Record<I18nKey, string> = {
   "gitView.changes.reverting": "Revertiendo...",
   "gitView.changes.selectAllAria": "Seleccionar todos los archivos",
   "gitView.changes.selectFileAria": "Seleccionar archivo",
-  "gitView.changes.stagedTitle": "Cambios preparados",
+  "gitView.changes.stagedTitle": "Preparados",
   "gitView.changes.resizeSplitAria": "Ajustar tamaño de cambios preparados y sin preparar",
   "gitView.changes.stageAllAria": "Preparar todos los cambios",
   "gitView.changes.stageDirectoryAria": "Preparar todos los cambios en {path}",

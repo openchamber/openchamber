@@ -2054,7 +2054,12 @@ export async function stashPush(directory, options = {}) {
 export async function stashApply(directory, options = {}) {
   const { git } = await createRepositoryGitContext(directory);
   const ref = typeof options.ref === 'string' && options.ref.trim() ? options.ref.trim() : 'stash@{0}';
-  await git.raw(['stash', 'apply', ref]);
+  // Prefer --index so the staged/unstaged split captured in the stash is restored
+  // faithfully. Fall back to a plain apply when the index can't be reinstated
+  // cleanly (e.g. conflicts), which is the prior behavior.
+  await git.raw(['stash', 'apply', '--index', ref]).catch(async () => {
+    await git.raw(['stash', 'apply', ref]);
+  });
   return { success: true, ref };
 }
 
@@ -2267,7 +2272,29 @@ export async function stageFiles(directory, paths) {
       return fileContext.repoPath;
     }))));
     validateRepositoryFilePaths(repoRoot, repoPaths);
-    await git.raw(['add', '--', ...repoPaths]);
+    await git.raw(['add', '--', ...repoPaths]).catch(async (error) => {
+      const gitErrorText = parseGitErrorText(error);
+      const isPathspecError = gitErrorText.includes('pathspec') && gitErrorText.includes('did not match any files');
+      if (!isPathspecError) {
+        throw error;
+      }
+
+      // During rapid stage/unstage toggling the optimistic UI can request staging a
+      // path that a prior queued mutation already staged (most visibly a deletion,
+      // whose file is gone from the working tree). `git add` aborts the whole batch
+      // on a single unmatched pathspec, so retry per-path and skip the ones already
+      // in their target state rather than failing the entire "stage all".
+      for (const repoPath of repoPaths) {
+        await git.raw(['add', '--', repoPath]).catch((perPathError) => {
+          const perPathText = parseGitErrorText(perPathError);
+          const perPathIsPathspecError =
+            perPathText.includes('pathspec') && perPathText.includes('did not match any files');
+          if (!perPathIsPathspecError) {
+            throw perPathError;
+          }
+        });
+      }
+    });
   });
 }
 

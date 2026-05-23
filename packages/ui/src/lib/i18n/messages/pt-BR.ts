@@ -452,7 +452,7 @@ export const dict: Record<I18nKey, string> = {
   "gitView.changes.reverting": "Revertiendo...",
   "gitView.changes.selectAllAria": "Selecionar todos os arquivos",
   "gitView.changes.selectFileAria": "Selecionar arquivo",
-  "gitView.changes.stagedTitle": "Alterações staged",
+  "gitView.changes.stagedTitle": "Staged",
   "gitView.changes.resizeSplitAria": "Ajustar tamanho das alterações staged e unstaged",
   "gitView.changes.stageAllAria": "Adicionar todas as alterações ao stage",
   "gitView.changes.stageDirectoryAria": "Adicionar todas as alterações em {path} ao stage",

@@ -452,7 +452,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.changes.reverting': '正在还原...',
   'gitView.changes.selectAllAria': '全选文件',
   'gitView.changes.selectFileAria': '选择 {path}',
-  'gitView.changes.stagedTitle': '已暂存更改',
+  'gitView.changes.stagedTitle': '已暂存',
   'gitView.changes.resizeSplitAria': '调整已暂存和未暂存更改区域大小',
   'gitView.changes.stageAllAria': '暂存所有更改',
   'gitView.changes.stageDirectoryAria': '暂存 {path} 中的所有更改',

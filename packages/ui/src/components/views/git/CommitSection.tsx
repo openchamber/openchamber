@@ -45,22 +45,21 @@ export const CommitSection: React.FC<CommitSectionProps> = ({
   const { isMobile, hasTouchInput } = useDeviceInfo();
 
   const containerClassName = 'border-0 bg-transparent rounded-none';
-  const headerClassName = 'flex w-full items-center justify-between px-0 pt-2 pb-1';
+  const headerClassName = 'flex w-full items-baseline gap-2 px-0 pt-2 pb-1';
   const contentClassName = 'flex flex-col gap-3 px-0 pt-1 pb-3';
 
   return (
     <section className={containerClassName}>
       <div className={headerClassName}>
         <h3 className="typography-ui-header font-semibold text-foreground">{t('gitView.commit.title')}</h3>
+        {!hasStagedFiles ? (
+          <span className="min-w-0 truncate typography-meta text-muted-foreground">
+            {t('gitView.commit.stageFilesHint')}
+          </span>
+        ) : null}
       </div>
 
       <div className={contentClassName}>
-        {!hasStagedFiles ? (
-          <p className="typography-meta text-muted-foreground">
-            {t('gitView.commit.stageFilesHint')}
-          </p>
-        ) : null}
-
         <AIHighlightsBox
           highlights={generatedHighlights}
           onInsert={onInsertHighlights}

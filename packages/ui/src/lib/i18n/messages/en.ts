@@ -451,7 +451,7 @@ export const dict = {
   'gitView.changes.reverting': 'Reverting...',
   'gitView.changes.selectAllAria': 'Select all files',
   'gitView.changes.selectFileAria': 'Select File  aria label',
-  'gitView.changes.stagedTitle': 'Staged changes',
+  'gitView.changes.stagedTitle': 'Staged',
   'gitView.changes.resizeSplitAria': 'Resize staged and unstaged changes',
   'gitView.changes.stageAllAria': 'Stage all changes',
   'gitView.changes.stageDirectoryAria': 'Stage all changes in {path}',

@@ -38,6 +38,7 @@ interface GitHeaderProps {
   isApplyingIdentity: boolean;
   isWorktreeMode: boolean;
   onOpenHistory?: () => void;
+  onOpenStashes?: () => void;
   actionTabItems?: SortableTabsStripItem[];
   activeActionTab?: string;
   onSelectActionTab?: (tabID: string) => void;
@@ -197,6 +198,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
   isApplyingIdentity,
   isWorktreeMode,
   onOpenHistory,
+  onOpenStashes,
   actionTabItems,
   activeActionTab,
   onSelectActionTab,
@@ -208,20 +210,38 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
 
   const managementButtons = (
     <div className="flex items-center gap-1 shrink-0">
-      {onOpenHistory ? (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 w-8 px-0"
-              onClick={onOpenHistory}
-            >
-              <Icon name="history" className="size-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent sideOffset={8}>{t('gitView.history.title')}</TooltipContent>
-        </Tooltip>
+      {onOpenHistory || onOpenStashes ? (
+        <DropdownMenu>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 px-0"
+                  aria-label={t('gitView.history.title')}
+                >
+                  <Icon name="git-repository" className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent sideOffset={8}>{t('gitView.history.title')}</TooltipContent>
+          </Tooltip>
+          <DropdownMenuContent align="end">
+            {onOpenHistory ? (
+              <DropdownMenuItem onSelect={onOpenHistory}>
+                <Icon name="history" className="size-4" />
+                {t('gitView.history.title')}
+              </DropdownMenuItem>
+            ) : null}
+            {onOpenStashes ? (
+              <DropdownMenuItem onSelect={onOpenStashes}>
+                <Icon name="archive-stack" className="size-4" />
+                {t('gitView.stashes.title')}
+              </DropdownMenuItem>
+            ) : null}
+          </DropdownMenuContent>
+        </DropdownMenu>
       ) : null}
     </div>
   );

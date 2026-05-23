@@ -1421,7 +1421,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.changes.reverting': 'Cofanie...',
   'gitView.changes.selectAllAria': 'Zaznacz wszystkie pliki',
   'gitView.changes.selectFileAria': 'Zaznacz plik',
-  'gitView.changes.stagedTitle': 'Zmiany w indeksie',
+  'gitView.changes.stagedTitle': 'W indeksie',
   'gitView.changes.resizeSplitAria': 'Zmień rozmiar zmian w indeksie i poza indeksem',
   'gitView.changes.stageAllAria': 'Dodaj wszystkie zmiany do indeksu',
   'gitView.changes.stageDirectoryAria': 'Dodaj do indeksu wszystkie zmiany w {path}',

@@ -48,6 +48,8 @@ interface ChangeRowProps {
   stats?: { insertions: number; deletions: number };
   rowPaddingClassName?: string;
   indentPx?: number;
+  /** Place the stage/unstage action at the row start (flat view) instead of the end (tree view). */
+  actionAtStart?: boolean;
 }
 
 export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
@@ -61,6 +63,7 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
   stats,
   rowPaddingClassName,
   indentPx = 0,
+  actionAtStart = false,
 }) {
   const descriptor = useMemo(() => describeChange(file), [file]);
   const { t } = useI18n();
@@ -99,6 +102,18 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
     [onRevert]
   );
 
+  const actionButton = (
+    <button
+      type="button"
+      onClick={handleActionClick}
+      className="flex size-5 shrink-0 items-center justify-center rounded typography-micro font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]"
+      aria-label={actionLabel}
+      title={actionLabel}
+    >
+      {actionSymbol}
+    </button>
+  );
+
   return (
     <div
       className={`group flex items-center gap-2 py-1.5 hover:bg-sidebar/40 cursor-pointer ${rowPaddingClassName ?? 'px-3'}`}
@@ -108,6 +123,7 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
       onKeyDown={handleKeyDown}
       style={indentPx > 0 ? { paddingLeft: `${indentPx}px` } : undefined}
     >
+        {actionAtStart ? actionButton : null}
         <span
           className="typography-micro font-semibold w-4 text-center uppercase"
           style={{ color: descriptor.color }}
@@ -149,15 +165,6 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
           <span className="text-muted-foreground mx-0.5">/</span>
           <span style={{ color: 'var(--status-error)' }}>-{deletions}</span>
         </span>
-        <button
-          type="button"
-          onClick={handleActionClick}
-          className="flex size-5 shrink-0 items-center justify-center rounded typography-micro font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]"
-          aria-label={actionLabel}
-          title={actionLabel}
-        >
-          {actionSymbol}
-        </button>
         <Tooltip>
           <TooltipTrigger asChild>
             <button
@@ -176,6 +183,7 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
           </TooltipTrigger>
           <TooltipContent sideOffset={8}>{t('gitView.changes.revertFileTooltip')}</TooltipContent>
         </Tooltip>
+        {actionAtStart ? null : actionButton}
     </div>
   );
 });

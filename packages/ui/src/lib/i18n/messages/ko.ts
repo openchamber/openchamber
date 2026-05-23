@@ -452,7 +452,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.changes.reverting': '되돌리는 중…',
   'gitView.changes.selectAllAria': '모든 파일 선택',
   'gitView.changes.selectFileAria': '파일 선택',
-  'gitView.changes.stagedTitle': '스테이징된 변경사항',
+  'gitView.changes.stagedTitle': '스테이징됨',
   'gitView.changes.resizeSplitAria': '스테이징 및 미스테이징 변경사항 크기 조정',
   'gitView.changes.stageAllAria': '모든 변경사항 스테이징',
   'gitView.changes.stageDirectoryAria': '{path}의 모든 변경사항 스테이징',
