@@ -97,6 +97,30 @@ export const registerServerStatusRoutes = (app, dependencies) => {
     return port;
   };
 
+  const parseLoopbackUrl = (rawUrl) => {
+    if (typeof rawUrl !== 'string') {
+      return null;
+    }
+
+    let url;
+    try {
+      url = new URL(rawUrl);
+    } catch {
+      return null;
+    }
+
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      return null;
+    }
+
+    const host = url.hostname;
+    if (host !== 'localhost' && host !== '127.0.0.1' && host !== '::1' && host !== '0.0.0.0') {
+      return null;
+    }
+
+    return url;
+  };
+
   const killListenPort = async (port) => {
     if (!Number.isFinite(port) || port <= 0) {
       return;
@@ -237,6 +261,28 @@ export const registerServerStatusRoutes = (app, dependencies) => {
       return res.json({ port });
     } catch (error) {
       return res.status(500).json({ error: (error && error.message) || 'Failed to allocate port' });
+    }
+  });
+
+  app.post('/api/system/probe-url', express.json({ limit: '16kb' }), async (req, res) => {
+    if (!isSameOriginRequest(req)) {
+      return res.status(403).json({ ok: false, error: 'Invalid origin' });
+    }
+
+    const url = parseLoopbackUrl(req.body?.url);
+    if (!url) {
+      return res.status(400).json({ ok: false, error: 'Invalid loopback URL' });
+    }
+
+    try {
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        redirect: 'manual',
+        signal: AbortSignal.timeout(1500),
+      });
+      return res.json({ ok: response.ok, status: response.status });
+    } catch (error) {
+      return res.json({ ok: false, error: error?.message || 'Probe failed' });
     }
   });
 };

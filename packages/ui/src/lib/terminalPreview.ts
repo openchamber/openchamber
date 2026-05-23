@@ -94,8 +94,19 @@ export const isTerminalPreviewUrlAvailable = async (url: string, timeoutMs = 150
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
-    await fetch(parsed.toString(), { method: 'GET', mode: 'no-cors', cache: 'no-store', signal: controller.signal });
-    return true;
+    const response = await fetch('/api/system/probe-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: parsed.toString() }),
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      return false;
+    }
+
+    const result = await response.json().catch(() => null) as { ok?: unknown } | null;
+    return result?.ok === true;
   } catch {
     return false;
   } finally {

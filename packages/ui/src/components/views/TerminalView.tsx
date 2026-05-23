@@ -180,6 +180,13 @@ export const TerminalView: React.FC = () => {
     const rehydratedSnapshotTakenRef = React.useRef(false);
     const previewScanTailRef = React.useRef('');
     const pendingPreviewProbeUrlsRef = React.useRef<Set<string>>(new Set());
+    const previewProbeGenerationRef = React.useRef(0);
+
+    const resetTerminalPreviewScan = React.useCallback(() => {
+        previewScanTailRef.current = '';
+        pendingPreviewProbeUrlsRef.current.clear();
+        previewProbeGenerationRef.current += 1;
+    }, []);
 
     const focusTerminalWhenWindowActive = React.useCallback(() => {
         if (useTouchTerminalInput) {
@@ -251,9 +258,8 @@ export const TerminalView: React.FC = () => {
 
     React.useEffect(() => {
         activeTabIdRef.current = activeTabId;
-        previewScanTailRef.current = '';
-        pendingPreviewProbeUrlsRef.current.clear();
-    }, [activeTabId]);
+        resetTerminalPreviewScan();
+    }, [activeTabId, resetTerminalPreviewScan]);
 
     React.useEffect(() => {
         directoryRef.current = effectiveDirectory;
@@ -308,10 +314,11 @@ export const TerminalView: React.FC = () => {
                 return;
             }
 
+            const probeGeneration = previewProbeGenerationRef.current;
             pendingPreviewProbeUrlsRef.current.add(candidate);
             void isTerminalPreviewUrlAvailable(candidate).then((available) => {
                 pendingPreviewProbeUrlsRef.current.delete(candidate);
-                if (!available) {
+                if (!available || previewProbeGenerationRef.current !== probeGeneration) {
                     return;
                 }
 
@@ -648,6 +655,7 @@ export const TerminalView: React.FC = () => {
 
         disconnectStream();
         clearBuffer(effectiveDirectory, tabId);
+        resetTerminalPreviewScan();
 
         try {
             await closeTab(effectiveDirectory, tabId);
@@ -660,7 +668,7 @@ export const TerminalView: React.FC = () => {
         } finally {
             setIsRestarting(false);
         }
-    }, [activeTabId, clearBuffer, closeTab, disconnectStream, effectiveDirectory, enableTabs, isRestarting, t]);
+    }, [activeTabId, clearBuffer, closeTab, disconnectStream, effectiveDirectory, enableTabs, isRestarting, resetTerminalPreviewScan, t]);
 
     const handleHardRestart = React.useCallback(async () => {
         // Keep semantics: “close tab -> new clean tab”.

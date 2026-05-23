@@ -230,13 +230,13 @@ export function createTerminalRuntime({
     }
   };
 
-  const sendTerminalOutputWsData = (socket, sessionId, replayChunk) => {
+  const sendTerminalOutputWsData = (socket, sessionId, replayChunk, data = replayChunk?.data) => {
     if (!socket || socket.readyState !== 1 || !replayChunk) {
       return false;
     }
 
     try {
-      socket.send(createTerminalInputWsControlFrame({ t: 'd', s: sessionId, i: replayChunk.id, d: replayChunk.data }), { binary: true });
+      socket.send(createTerminalInputWsControlFrame({ t: 'd', s: sessionId, i: replayChunk.id, d: data }), { binary: true });
       return true;
     } catch {
       return false;
@@ -456,7 +456,7 @@ export function createTerminalRuntime({
           continue;
         }
 
-        if (sendTerminalOutputWsData(wsConnection.socket, sessionId, replayChunk)) {
+        if (sendTerminalOutputWsData(wsConnection.socket, sessionId, replayChunk, data)) {
           wsConnection.replayCursorBySession.set(sessionId, replayChunk.id);
         }
       }
