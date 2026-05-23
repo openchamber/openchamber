@@ -31,6 +31,7 @@ interface DirectoryGitState {
   log: GitLogResponse | null;
   identity: GitIdentitySummary | null;
   diffCache: Map<string, { original: string; modified: string; fetchedAt: number; isBinary?: boolean }>;
+  indexRevision: number;
   lastRepoCheckAt: number;
   lastStatusFetch: number;
   lastStatusChange: number;
@@ -63,6 +64,7 @@ interface GitStore {
   ensureAll: (directory: string, git: GitAPI) => Promise<void>;
   moveStatusPathsOptimistically: (directory: string, paths: string[], direction: 'stage' | 'unstage') => GitStatus | null;
   restoreStatus: (directory: string, status: GitStatus | null) => void;
+  bumpIndexRevision: (directory: string) => void;
 
   getDiff: (directory: string, filePath: string) => { original: string; modified: string; fetchedAt: number; isBinary?: boolean } | null;
   setDiff: (directory: string, filePath: string, diff: { original: string; modified: string; isBinary?: boolean }) => void;
@@ -124,6 +126,7 @@ const createEmptyDirectoryState = (): DirectoryGitState => ({
   log: null,
   identity: null,
   diffCache: new Map(),
+  indexRevision: 0,
   lastRepoCheckAt: 0,
   lastStatusFetch: 0,
   lastStatusChange: 0,
@@ -280,6 +283,30 @@ const getChangedFilePaths = (oldStatus: GitStatus | null, newStatus: GitStatus |
   return changed;
 };
 
+const hasIndexStatusChanged = (oldStatus: GitStatus | null, newStatus: GitStatus | null): boolean => {
+  if (!oldStatus && !newStatus) return false;
+  if (!oldStatus || !newStatus) return true;
+
+  const oldFiles = oldStatus.files ?? [];
+  const newFiles = newStatus.files ?? [];
+  const normalizeIndexStatus = (value?: string | null): string => {
+    const trimmed = value?.trim() ?? '';
+    return trimmed === '?' ? '' : trimmed;
+  };
+
+  const oldIndexByPath = new Map(oldFiles.map((file) => [file.path, normalizeIndexStatus(file.index)] as const));
+  const newIndexByPath = new Map(newFiles.map((file) => [file.path, normalizeIndexStatus(file.index)] as const));
+  const paths = new Set<string>([...oldIndexByPath.keys(), ...newIndexByPath.keys()]);
+
+  for (const path of paths) {
+    if ((oldIndexByPath.get(path) ?? '') !== (newIndexByPath.get(path) ?? '')) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
 const isBlankStatusCode = (value?: string | null): boolean => !value || value.trim().length === 0;
 const isConflictStatusCode = (value?: string | null): boolean => (value || '').trim() === 'U';
 
@@ -413,6 +440,7 @@ export const useGitStore = create<GitStore>()(
               const currentDirState = newDirectories.get(directory) ?? createEmptyDirectoryState();
 
               const changedPaths = getChangedFilePaths(currentDirState.status, newStatus);
+              const indexStatusChanged = hasIndexStatusChanged(currentDirState.status, newStatus);
 
               const oldPaths = new Set((currentDirState.status?.files ?? []).map((f) => f.path));
               const newPaths = new Set((newStatus.files ?? []).map((f) => f.path));
@@ -446,6 +474,7 @@ export const useGitStore = create<GitStore>()(
                 isGitRepo: true,
                 status: mergedStatus,
                 diffCache: nextDiffCache,
+                indexRevision: indexStatusChanged ? currentDirState.indexRevision + 1 : currentDirState.indexRevision,
                 lastRepoCheckAt: shouldProbeRepository ? now : currentDirState.lastRepoCheckAt,
                 lastStatusFetch: Date.now(),
                 lastStatusChange: hasFileContentChange ? Date.now() : currentDirState.lastStatusChange,
@@ -538,6 +567,7 @@ export const useGitStore = create<GitStore>()(
             files: nextFiles,
             isClean: nextFiles.length === 0,
           },
+          indexRevision: dirState.indexRevision + 1,
           lastStatusChange: Date.now(),
         });
         set({ directories: nextDirectories });
@@ -556,7 +586,23 @@ export const useGitStore = create<GitStore>()(
         nextDirectories.set(directory, {
           ...dirState,
           status,
+          indexRevision: dirState.indexRevision + 1,
           lastStatusChange: Date.now(),
+        });
+        set({ directories: nextDirectories });
+      },
+
+      bumpIndexRevision: (directory) => {
+        const { directories } = get();
+        const dirState = directories.get(directory);
+        if (!dirState) {
+          return;
+        }
+
+        const nextDirectories = new Map(directories);
+        nextDirectories.set(directory, {
+          ...dirState,
+          indexRevision: dirState.indexRevision + 1,
         });
         set({ directories: nextDirectories });
       },

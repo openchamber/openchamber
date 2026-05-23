@@ -996,7 +996,6 @@ export const useUIStore = create<UIStore>()(
             dedupeKey: staged ? 'staged' : null,
             stagedDiff: staged,
           });
-          set({ pendingDiffFile: normalizedFilePath, pendingDiffStaged: staged });
         },
 
         openContextFile: (directory, filePath) => {

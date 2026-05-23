@@ -318,6 +318,7 @@ export const GitView: React.FC = () => {
   const setLogMaxCount = useGitStore((state) => state.setLogMaxCount);
   const moveStatusPathsOptimistically = useGitStore((state) => state.moveStatusPathsOptimistically);
   const restoreStatus = useGitStore((state) => state.restoreStatus);
+  const bumpIndexRevision = useGitStore((state) => state.bumpIndexRevision);
   const isMobile = useUIStore((state) => state.isMobile);
   const openContextDiff = useUIStore((state) => state.openContextDiff);
   const navigateToDiff = useUIStore((state) => state.navigateToDiff);
@@ -392,9 +393,13 @@ export const GitView: React.FC = () => {
 
   const gitIndexMutationQueue = React.useMemo<GitIndexMutationQueue>(() => createGitIndexMutationQueue({
     runMutation: ({ directory, direction, paths }) => runGitIndexMutation(directory, direction, paths),
-    onMutationComplete: ({ directory }) => scheduleGitReconcile(directory),
+    onMutationComplete: ({ directory }) => {
+      bumpIndexRevision(directory);
+      scheduleGitReconcile(directory);
+    },
     onMutationError: ({ directory, direction, rollback }, error) => {
       rollback?.();
+      bumpIndexRevision(directory);
       scheduleGitReconcile(directory);
       const fallback = direction === 'stage'
         ? t('gitView.toast.stageFileFailed')
@@ -409,7 +414,7 @@ export const GitView: React.FC = () => {
       });
     },
     scheduleFlush: scheduleGitMutationFlush,
-  }), [runGitIndexMutation, scheduleGitMutationFlush, scheduleGitReconcile, t]);
+  }), [bumpIndexRevision, runGitIndexMutation, scheduleGitMutationFlush, scheduleGitReconcile, t]);
 
   React.useEffect(() => {
     flushQueuedGitMutationsRef.current = gitIndexMutationQueue.flush;
@@ -1137,6 +1142,7 @@ export const GitView: React.FC = () => {
         files: filesToCommit,
         stageFiles: [],
       });
+      bumpIndexRevision(currentDirectory);
       toast.success(t('gitView.toast.commitCreated'));
       setCommitMessage('');
       clearGeneratedHighlights();
@@ -1697,8 +1703,13 @@ export const GitView: React.FC = () => {
         return next;
       });
 
+      const touchesStagedIndex = stagedChangeEntries.some((entry) => entry.path === filePath);
+
       try {
         await git.revertGitFile(currentDirectory, filePath);
+        if (touchesStagedIndex) {
+          bumpIndexRevision(currentDirectory);
+        }
         toast.success(t('gitView.toast.revertedFile', { path: filePath }));
         await refreshStatusAndBranches(false);
       } catch (err) {
@@ -1712,7 +1723,7 @@ export const GitView: React.FC = () => {
         });
       }
     },
-    [currentDirectory, refreshStatusAndBranches, git, t]
+    [bumpIndexRevision, currentDirectory, refreshStatusAndBranches, git, stagedChangeEntries, t]
   );
 
   const handleRevertAll = React.useCallback(
@@ -1722,6 +1733,8 @@ export const GitView: React.FC = () => {
       }
 
       const uniquePaths = Array.from(new Set(paths));
+      const stagedPaths = new Set(stagedChangeEntries.map((entry) => entry.path));
+      const touchesStagedIndex = uniquePaths.some((path) => stagedPaths.has(path));
       setIsRevertingAll(true);
       setRevertingPaths((previous) => {
         const next = new Set(previous);
@@ -1742,6 +1755,10 @@ export const GitView: React.FC = () => {
             });
           }
         }));
+
+        if (touchesStagedIndex && failed.length < uniquePaths.length) {
+          bumpIndexRevision(currentDirectory);
+        }
 
         await refreshStatusAndBranches(false);
 
@@ -1770,7 +1787,7 @@ export const GitView: React.FC = () => {
         setIsRevertingAll(false);
       }
     },
-    [currentDirectory, git, isRevertingAll, refreshStatusAndBranches, t]
+    [bumpIndexRevision, currentDirectory, git, isRevertingAll, refreshStatusAndBranches, stagedChangeEntries, t]
   );
 
   const handleViewChangeDiff = React.useCallback((path: string, staged: boolean) => {
@@ -2156,6 +2173,7 @@ export const GitView: React.FC = () => {
       const currentBranch = status?.current;
       const operation = stashDialogOperation;
       const branch = stashDialogBranch;
+      const hadStagedChanges = (status?.files ?? []).some(isStagedStatusFile);
 
       // Stash changes
       try {
@@ -2163,6 +2181,9 @@ export const GitView: React.FC = () => {
           message: `Auto-stash before ${operation} with ${branch}`,
           includeUntracked: true,
         });
+        if (hadStagedChanges) {
+          bumpIndexRevision(currentDirectory);
+        }
       } catch (stashErr) {
         const msg = stashErr instanceof Error ? stashErr.message : 'Failed to stash changes';
         toast.error(msg);
@@ -2202,6 +2223,7 @@ export const GitView: React.FC = () => {
         if (restoreAfter && operationSucceeded) {
           try {
             await git.stashPop(currentDirectory);
+            bumpIndexRevision(currentDirectory);
             toast.success(t('gitView.toast.stashedRestored'));
           } catch (popErr) {
             const popMessage = popErr instanceof Error ? popErr.message : t('gitView.toast.restoreStashFailed');
@@ -2218,6 +2240,7 @@ export const GitView: React.FC = () => {
         if (restoreAfter) {
           try {
             await git.stashPop(currentDirectory);
+            bumpIndexRevision(currentDirectory);
           } catch {
             // Ignore stash pop errors in this case
           }
@@ -2225,7 +2248,7 @@ export const GitView: React.FC = () => {
         throw err;
       }
     },
-    [currentDirectory, git, status, stashDialogOperation, stashDialogBranch, refreshStatusAndBranches, refreshLog, t]
+    [bumpIndexRevision, currentDirectory, git, status, stashDialogOperation, stashDialogBranch, refreshStatusAndBranches, refreshLog, t]
   );
 
   if (!currentDirectory) {
@@ -2475,8 +2498,12 @@ export const GitView: React.FC = () => {
         onOpenChange={setIsStashesDialogOpen}
         directory={currentDirectory}
         hasUncommittedChanges={(status?.files?.length ?? 0) > 0}
+        hasStagedChanges={stagedChangeEntries.length > 0}
         uncommittedFileCount={status?.files?.length ?? 0}
-        onChanged={async () => {
+        onChanged={async (change) => {
+          if (currentDirectory && change?.affectsIndex) {
+            bumpIndexRevision(currentDirectory);
+          }
           await refreshStatusAndBranches(false);
           await refreshLog();
         }}

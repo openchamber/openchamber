@@ -38,6 +38,7 @@ const createDirectoryState = (status: GitStatus): DirectoryGitState => ({
   log: null,
   identity: null,
   diffCache: new Map(),
+  indexRevision: 0,
   lastRepoCheckAt: 0,
   lastStatusFetch: 0,
   lastStatusChange: 0,
@@ -128,6 +129,7 @@ describe('useGitStore', () => {
 
     const previousStatus = useGitStore.getState().moveStatusPathsOptimistically('/repo', ['src/index.ts'], 'stage');
     const status = useGitStore.getState().getDirectoryState('/repo')?.status;
+    const state = useGitStore.getState().getDirectoryState('/repo');
 
     expect(previousStatus).toBe(initialStatus);
     expect(status?.files).toEqual([
@@ -135,6 +137,7 @@ describe('useGitStore', () => {
       untouched,
     ]);
     expect(status?.files[1]).toBe(untouched);
+    expect(state?.indexRevision).toBe(1);
   });
 
   test('optimistically stages untracked files as added files', () => {
@@ -209,6 +212,7 @@ describe('useGitStore', () => {
 
     expect(previousStatus).toBe(initialStatus);
     expect(useGitStore.getState().getDirectoryState('/repo')?.status).toBe(initialStatus);
+    expect(useGitStore.getState().getDirectoryState('/repo')?.indexRevision).toBe(0);
   });
 
   test('does nothing without status for optimistic moves', () => {
