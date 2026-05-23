@@ -118,6 +118,16 @@ const isNewStatusFile = (file: GitStatus['files'][number]): boolean => {
     return index === 'A' || workingDir === 'A' || index === '?' || workingDir === '?';
 };
 
+const isStagedStatusFile = (file: GitStatus['files'][number]): boolean => {
+    const indexCode = file.index?.trim();
+    return Boolean(indexCode && indexCode !== '?');
+};
+
+const isWorkingStatusFile = (file: GitStatus['files'][number]): boolean => {
+    const workingCode = file.working_dir?.trim();
+    return Boolean(workingCode) || file.index === '?';
+};
+
 const isAbsolutePath = (value: string): boolean => {
     return value.startsWith('/') || value.startsWith('//') || /^[A-Za-z]:\//.test(value);
 };
@@ -1097,8 +1107,10 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const changedFiles: FileEntry[] = React.useMemo(() => {
         if (!status?.files) return [];
         const diffStats = status.diffStats ?? {};
+        const includeFile = selectedFileStaged ? isStagedStatusFile : isWorkingStatusFile;
 
         return status.files
+            .filter(includeFile)
             .map((file) => ({
                 ...file,
                 insertions: diffStats[file.path]?.insertions ?? 0,
@@ -1106,7 +1118,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 isNew: isNewStatusFile(file),
             }))
             .sort((a, b) => a.path.localeCompare(b.path));
-    }, [status]);
+    }, [selectedFileStaged, status]);
 
     const selectedFileEntry = React.useMemo(() => {
         if (!selectedFile) return null;
@@ -1618,7 +1630,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                     <div className="flex flex-col gap-3">
                         {changedFiles.map((file, index) => (
                             <MultiFileDiffEntry
-                                key={`${selectedFileStaged && file.path === selectedFile ? 'staged' : 'unstaged'}:${file.path}`}
+                                key={`${selectedFileStaged ? 'staged' : 'unstaged'}:${file.path}`}
                                 directory={effectiveDirectory}
                                 file={file}
                                 layout={getLayoutForFile(file)}
@@ -1635,7 +1647,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                                 onOpenInEditor={(filePath, diffData) => {
                                     void openFileInEditorAtChange(filePath, diffData);
                                 }}
-                                staged={selectedFileStaged && file.path === selectedFile}
+                                staged={selectedFileStaged}
                             />
                         ))}
                     </div>
