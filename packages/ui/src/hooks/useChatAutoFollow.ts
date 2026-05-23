@@ -584,10 +584,19 @@ export const useChatAutoFollow = ({
 
         const observer = new ResizeObserver(() => {
             updateOverflowAndButton();
-            // Keep the height baseline fresh so the layout-shrink heuristic
-            // in handleScrollEvent has a previous value to compare against
-            // when a scroll event fires right after a content reflow.
-            lastScrollHeightRef.current = container.scrollHeight;
+            // Baseline the height for handleScrollEvent's layout-shrink
+            // heuristic, but ONLY on growth. Browsers fire ResizeObserver
+            // synchronously after layout, before the scroll event from a
+            // clamp reaches the event loop — so writing the post-shrink
+            // height here would overwrite the pre-shrink baseline and
+            // turn the heuristic back into the bug it was meant to fix
+            // (handleScrollEvent would see previousHeight === currentHeight,
+            // miss the shrink, and false-release on the clamp). On a
+            // shrink, leave the baseline alone; the scroll event will
+            // update it once it has consumed the layoutShrunk signal.
+            if (container.scrollHeight > lastScrollHeightRef.current) {
+                lastScrollHeightRef.current = container.scrollHeight;
+            }
             if (stateRef.current === 'following') {
                 startFollowLoop();
             }
