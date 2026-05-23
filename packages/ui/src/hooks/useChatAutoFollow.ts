@@ -619,7 +619,7 @@ export const useChatAutoFollow = ({
         if (cached) return cached;
 
         const kick = () => {
-            if (stateRef.current === 'following' && sessionWorkingRef.current) {
+            if (stateRef.current === 'following') {
                 startFollowLoop();
             }
         };

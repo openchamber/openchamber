@@ -766,12 +766,24 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
             return;
         }
 
+        // Track the rAF + a cancellation flag so an effect re-run (session
+        // switch, new message arrival, container re-mount) tears down the
+        // pending restore from the previous run. Without this, a stale rAF
+        // — or its microtask `.then()` — could fire after a fresh effect
+        // run and write `sessionAtScheduleTime` (an old session id) into
+        // the guard ref, leaving it pointing at the wrong session and
+        // triggering a spurious re-restore that overwrites user scroll.
+        let rafId: number | null = null;
+        let cancelled = false;
+
         const run = () => {
+            rafId = null;
             // Only mark this session as restored once the restore actually
             // applied scroll (container was attached). On failure
             // (container un-mount race), leave the guard untouched so the
             // effect retries when the container re-mounts.
             void restoreSnapshot().then((containerWasReady) => {
+                if (cancelled) return;
                 if (containerWasReady) {
                     lastScrolledSessionRef.current = sessionAtScheduleTime;
                 }
@@ -780,8 +792,15 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         if (typeof window === 'undefined') {
             run();
         } else {
-            window.requestAnimationFrame(run);
+            rafId = window.requestAnimationFrame(run);
         }
+
+        return () => {
+            cancelled = true;
+            if (rafId !== null && typeof window !== 'undefined') {
+                window.cancelAnimationFrame(rafId);
+            }
+        };
     }, [currentSessionId, releaseAutoFollow, restoreSnapshot, sessionMessages.length, scrollContainerEl]);
 
     React.useEffect(() => {
