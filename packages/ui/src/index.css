@@ -1442,6 +1442,23 @@ input[aria-label="Terminal input"] {
   100% { transform: translateX(-100%); }
 }
 
+@keyframes open-file-name-marquee-scroll {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.open-file-name-marquee-track {
+  display: inline-flex;
+  min-width: max-content;
+  animation: open-file-name-marquee-scroll var(--open-file-name-marquee-duration, 14s) linear infinite;
+  will-change: transform;
+}
+
+.open-file-name-marquee-item {
+  flex-shrink: 0;
+  padding-right: 2rem;
+}
+
 .marquee-text {
   display: inline-block;
   white-space: nowrap;
@@ -1459,6 +1476,7 @@ input[aria-label="Terminal input"] {
 
 @media (prefers-reduced-motion: reduce) {
   .marquee-text--auto,
+  .open-file-name-marquee-track,
   .group:hover .marquee-text--active,
   .marquee-text--active:hover {
     animation: none;

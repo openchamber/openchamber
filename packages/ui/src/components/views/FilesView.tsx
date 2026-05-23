@@ -224,6 +224,47 @@ const FileStatusDot: React.FC<{ status: FileStatus }> = ({ status }) => {
   return <span className="size-2 rounded-full" style={{ backgroundColor: color }} />;
 };
 
+const ScrollingFileName: React.FC<{ name: string }> = ({ name }) => {
+  const containerRef = React.useRef<HTMLSpanElement | null>(null);
+  const textRef = React.useRef<HTMLSpanElement | null>(null);
+  const [overflowing, setOverflowing] = React.useState(false);
+
+  React.useLayoutEffect(() => {
+    const container = containerRef.current;
+    const text = textRef.current;
+    if (!container || !text) {
+      return;
+    }
+
+    const updateOverflow = () => {
+      setOverflowing(text.scrollWidth > container.clientWidth + 1);
+    };
+
+    updateOverflow();
+    const resizeObserver = new ResizeObserver(updateOverflow);
+    resizeObserver.observe(container);
+    resizeObserver.observe(text);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [name]);
+
+  return (
+    <span ref={containerRef} className="relative block min-w-0 flex-1 overflow-hidden whitespace-nowrap">
+      <span ref={textRef} aria-hidden="true" className="invisible absolute whitespace-nowrap">{name}</span>
+      {overflowing ? (
+        <span className="open-file-name-marquee-track">
+          <span className="open-file-name-marquee-item">{name}</span>
+          <span className="open-file-name-marquee-item" aria-hidden="true">{name}</span>
+        </span>
+      ) : (
+        <span className="block min-w-0 truncate">{name}</span>
+      )}
+    </span>
+  );
+};
+
 const shouldIgnoreEntryName = (name: string): boolean => DEFAULT_IGNORED_DIR_NAMES.has(name);
 
 const shouldIgnorePath = (path: string): boolean => {
@@ -235,6 +276,16 @@ const isDirectoryReadError = (error: unknown): boolean => {
   const message = error instanceof Error ? error.message : String(error ?? '');
   const normalized = message.toLowerCase();
   return normalized.includes('is a directory') || normalized.includes('eisdir');
+};
+
+const isFileMissingError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  const normalized = message.toLowerCase();
+  return normalized.includes('file not found')
+    || normalized.includes('not found')
+    || normalized.includes('enoent')
+    || normalized.includes('no such file')
+    || normalized.includes('does not exist');
 };
 
 const MAX_VIEW_CHARS = 200_000;
@@ -1347,6 +1398,32 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     return null;
   }, [files]);
 
+  React.useEffect(() => {
+    if (!root || !files.statFile || openPaths.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+    const paths = [...openPaths];
+
+    void Promise.all(paths.map(async (path) => {
+      try {
+        const stat = await files.statFile?.(path);
+        if (!cancelled && stat && !stat.isFile) {
+          removeOpenPathsByPrefix(root, path);
+        }
+      } catch (error) {
+        if (!cancelled && isFileMissingError(error)) {
+          removeOpenPathsByPrefix(root, path);
+        }
+      }
+    }));
+
+    return () => {
+      cancelled = true;
+    };
+  }, [files, openPaths, removeOpenPathsByPrefix, root]);
+
   const displayedContent = React.useMemo(() =>
     fileContent.length > MAX_VIEW_CHARS
       ? `${fileContent.slice(0, MAX_VIEW_CHARS)}\n\n… truncated …`
@@ -1592,6 +1669,19 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           }
           return;
         }
+        if (isFileMissingError(error)) {
+          if (root) {
+            removeOpenPathsByPrefix(root, node.path);
+          }
+          setFileContent('');
+          setDraftContent('');
+          setFileError(null);
+          lastLoadedFileStatRef.current = null;
+          if (isMobile) {
+            setShowMobilePageContent(false);
+          }
+          return;
+        }
         setFileContent('');
         setDraftContent('');
         setFileError(error instanceof Error ? error.message : t('filesView.error.readFileFailed'));
@@ -1602,7 +1692,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           setFileLoading(false);
         }
       });
-  }, [expandPaths, isMobile, loadDirectory, mode, readFile, readFileStat, root, runtime.isDesktop, searchQuery, setSelectedPath, t]);
+  }, [expandPaths, isMobile, loadDirectory, mode, readFile, readFileStat, removeOpenPathsByPrefix, root, runtime.isDesktop, searchQuery, setSelectedPath, t]);
 
   const ensurePathVisible = React.useCallback(async (targetPath: string, includeTarget: boolean) => {
     if (!root) {
@@ -2889,11 +2979,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                     aria-label={t('filesView.editor.openFilesAria')}
                   >
                     <FileTypeIcon filePath={selectedFile.path} extension={selectedFile.extension} className="size-3.5 flex-shrink-0" />
-                    <span className="min-w-0 flex-1 truncate">{selectedFile.name}</span>
+                    <ScrollingFileName name={selectedFile.name} />
                     <Icon name="arrow-down-s" className="size-4 flex-shrink-0 text-muted-foreground" />
                   </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="min-w-[16rem]">
+                <DropdownMenuContent align="start" className="w-[min(24rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)]">
                   {openFiles.map((file) => {
                     const isActive = selectedFile?.path === file.path;
                     return (
@@ -2910,13 +3000,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                           }
                         }}
                         className={cn(
-                          'flex items-center justify-between gap-2',
+                          'flex min-w-0 items-center justify-between gap-2 overflow-hidden',
                           isActive && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]'
                         )}
                       >
-                        <span className="flex min-w-0 flex-1 items-center gap-2 truncate">
+                        <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
                           <FileTypeIcon filePath={file.path} extension={file.extension} className="size-3.5 flex-shrink-0" />
-                          <span className="min-w-0 flex-1 truncate">{file.name}</span>
+                          <ScrollingFileName name={file.name} />
                         </span>
                         <button
                           type="button"
@@ -2930,7 +3020,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                             event.stopPropagation();
                             handleCloseFile(file.path);
                           }}
-                          className="inline-flex size-6 items-center justify-center rounded-md text-[var(--surface-muted-foreground)] hover:text-[var(--surface-foreground)]"
+                          className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-[var(--surface-muted-foreground)] hover:text-[var(--surface-foreground)]"
                           aria-label={t('filesView.editor.closeFileAria', { name: file.name })}
                         >
                           <Icon name="close" className="size-3.5" />
