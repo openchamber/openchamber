@@ -446,6 +446,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.changes.revertAllDescriptionPlural': '선택한 파일 {count}개의 변경 사항을 되돌립니다.',
   'gitView.changes.revertAllDescriptionSingle': '선택한 파일 {count}개의 변경 사항을 되돌립니다.',
   'gitView.changes.revertAllDialogTitle': '모든 변경 사항을 되돌릴까요?',
+  'gitView.changes.revertDirectoryAria': '{path} 디렉터리의 변경 사항 되돌리기',
   'gitView.changes.revertFileAria': '파일 변경 사항 되돌리기',
   'gitView.changes.revertFileTooltip': '변경 사항 되돌리기',
   'gitView.changes.reverting': '되돌리는 중…',

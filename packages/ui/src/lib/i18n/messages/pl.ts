@@ -1414,6 +1414,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.changes.revertAllDescriptionPlural': 'Zmiany we wszystkich plikach z listy zostaną odrzucone.',
   'gitView.changes.revertAllDescriptionSingle': 'Zmiany w wybranym pliku zostaną odrzucone.',
   'gitView.changes.revertAllDialogTitle': 'Cofnąć wszystkie zmiany?',
+  'gitView.changes.revertDirectoryAria': 'Cofnij zmiany w katalogu {path}',
   'gitView.changes.revertFileAria': 'Cofnij plik',
   'gitView.changes.revertFileTooltip': 'Cofnij zmiany',
   'gitView.changes.reverting': 'Cofanie...',

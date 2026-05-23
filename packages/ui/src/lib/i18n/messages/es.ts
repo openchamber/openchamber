@@ -446,6 +446,7 @@ export const dict: Record<I18nKey, string> = {
   "gitView.changes.revertAllDescriptionPlural": "Se descartarán los cambios locales de todos los archivos de la lista.",
   "gitView.changes.revertAllDescriptionSingle": "Se descartarán los cambios locales del archivo seleccionado.",
   "gitView.changes.revertAllDialogTitle": "¿Revertir todos los cambios?",
+  "gitView.changes.revertDirectoryAria": "Revertir cambios en {path}",
   "gitView.changes.revertFileAria": "Revertir archivo",
   "gitView.changes.revertFileTooltip": "Revertir cambios",
   "gitView.changes.reverting": "Revertiendo...",

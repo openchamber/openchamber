@@ -445,6 +445,7 @@ export const dict = {
   'gitView.changes.revertAllDescriptionPlural': 'Revert All Description Plural',
   'gitView.changes.revertAllDescriptionSingle': 'Revert All Description Single',
   'gitView.changes.revertAllDialogTitle': 'Revert all changes?',
+  'gitView.changes.revertDirectoryAria': 'Revert changes in {path}',
   'gitView.changes.revertFileAria': 'Revert File  aria label',
   'gitView.changes.revertFileTooltip': 'Revert changes',
   'gitView.changes.reverting': 'Reverting...',

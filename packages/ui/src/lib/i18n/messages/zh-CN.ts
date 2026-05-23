@@ -446,6 +446,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.changes.revertAllDescriptionPlural': '这将丢弃列表中 {count} 个文件的本地更改。',
   'gitView.changes.revertAllDescriptionSingle': '这将丢弃列表中 {count} 个文件的本地更改。',
   'gitView.changes.revertAllDialogTitle': '还原所有更改？',
+  'gitView.changes.revertDirectoryAria': '还原 {path} 中的更改',
   'gitView.changes.revertFileAria': '还原 {path} 的更改',
   'gitView.changes.revertFileTooltip': '还原更改',
   'gitView.changes.reverting': '正在还原...',

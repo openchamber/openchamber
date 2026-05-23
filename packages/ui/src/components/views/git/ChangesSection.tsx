@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/dialog';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
 import { ChangeRow } from './ChangeRow';
 import type { GitStatus } from '@/lib/api/types';
@@ -28,6 +29,7 @@ interface ChangesSectionProps {
   onSelectAll: () => void;
   onClearSelection: () => void;
   onRevertAll?: (paths: string[]) => Promise<void> | void;
+  onRevertDirectory: (paths: string[]) => Promise<void> | void;
   onViewDiff: (path: string) => void;
   onRevertFile: (path: string) => void;
   isRevertingAll?: boolean;
@@ -179,6 +181,7 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
   onSelectAll,
   onClearSelection,
   onRevertAll,
+  onRevertDirectory,
   onViewDiff,
   onRevertFile,
   isRevertingAll = false,
@@ -341,6 +344,12 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
     }
   }, [onToggleFile, selectedPaths]);
 
+  const handleRevertDirectoryClick = React.useCallback((event: React.MouseEvent, directory: ChangesTreeDirectoryNode) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onRevertDirectory(directory.files.map((file) => file.path));
+  }, [onRevertDirectory]);
+
   const renderRow = React.useCallback((item: GitStatus['files'][number] | FlattenedTreeRow) => {
     if (!isTreeView) {
       const file = item as GitStatus['files'][number];
@@ -380,6 +389,7 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
     const directory = row.directory;
     const isExpanded = expandedDirectories.has(directory.path);
     const selectionState = getDirectorySelectionState(directory, selectedPaths);
+    const isDirectoryReverting = isRevertingAll || directory.files.some((file) => revertingPaths.has(file.path));
 
     return (
       <div
@@ -414,6 +424,24 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
           </span>
           <span className="ml-auto shrink-0 typography-micro text-muted-foreground">{directory.files.length}</span>
         </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={(event) => handleRevertDirectoryClick(event, directory)}
+              disabled={isDirectoryReverting}
+              className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
+              aria-label={t('gitView.changes.revertDirectoryAria', { path: directory.path })}
+            >
+              {isDirectoryReverting ? (
+                <Icon name="loader-4" className="size-3.5 animate-spin" />
+              ) : (
+                <Icon name="arrow-go-back" className="size-3.5" />
+              )}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent sideOffset={8}>{t('gitView.changes.revertFileTooltip')}</TooltipContent>
+        </Tooltip>
       </div>
     );
   }, [
@@ -421,6 +449,7 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
     expandedDirectories,
     isRevertingAll,
     isTreeView,
+    handleRevertDirectoryClick,
     onRevertFile,
     onToggleFile,
     onViewDiff,
