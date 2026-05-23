@@ -1625,11 +1625,15 @@ export const GitView: React.FC = () => {
 
   const handleRevertPaths = React.useCallback(
     async (paths: string[], setGlobalReverting: boolean) => {
-      if (!currentDirectory || paths.length === 0 || (setGlobalReverting && isRevertingAll)) {
+      if (!currentDirectory || paths.length === 0) {
         return;
       }
 
       const uniquePaths = Array.from(new Set(paths));
+      if (isRevertingAll || uniquePaths.some((path) => revertingPaths.has(path))) {
+        return;
+      }
+
       if (setGlobalReverting) {
         setIsRevertingAll(true);
       }
@@ -1682,7 +1686,7 @@ export const GitView: React.FC = () => {
         }
       }
     },
-    [currentDirectory, git, isRevertingAll, refreshStatusAndBranches, t]
+    [currentDirectory, git, isRevertingAll, refreshStatusAndBranches, revertingPaths, t]
   );
 
   const handleRevertAll = React.useCallback(
