@@ -264,7 +264,7 @@ const getFileNameFromPath = (path: string | null): string | null => {
 };
 
 const getTabLabel = (
-  tab: { mode: ContextPanelMode; label: string | null; targetPath: string | null },
+  tab: { mode: ContextPanelMode; label: string | null; targetPath: string | null; stagedDiff?: boolean },
   t: TranslateFn
 ): string => {
   if (tab.label) {
@@ -286,6 +286,10 @@ const getTabLabel = (
       }
     }
     return t('contextPanel.mode.preview');
+  }
+
+  if (tab.mode === 'diff') {
+    return tab.stagedDiff ? t('contextPanel.mode.stagedDiff') : t('contextPanel.mode.workingDiff');
   }
 
   return getModeLabel(tab.mode, t);

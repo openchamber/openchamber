@@ -798,6 +798,8 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.mode.chat": "Чат",
   "contextPanel.mode.files": "Файли",
   "contextPanel.mode.diff": "Diff",
+  "contextPanel.mode.stagedDiff": "Staged Diff",
+  "contextPanel.mode.workingDiff": "Working Diff",
   "contextPanel.mode.plan": "План",
   "contextPanel.mode.context": "Контекст",
   "contextPanel.mode.preview": "Перегляд",

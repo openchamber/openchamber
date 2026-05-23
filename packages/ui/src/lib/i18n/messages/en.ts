@@ -797,6 +797,8 @@ export const dict = {
   'contextPanel.mode.chat': 'Chat',
   'contextPanel.mode.files': 'Files',
   'contextPanel.mode.diff': 'Diff',
+  'contextPanel.mode.stagedDiff': 'Staged Diff',
+  'contextPanel.mode.workingDiff': 'Working Diff',
   'contextPanel.mode.plan': 'Plan',
   'contextPanel.mode.context': 'Context',
   'contextPanel.mode.preview': 'Preview',
