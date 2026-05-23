@@ -16,6 +16,8 @@ export const registerSkillRoutes = (app, dependencies) => {
     getOpenCodeAuthHeaders,
     getOpenCodePort,
     getSkillSources,
+    discoverSkills,
+    mergeDiscoveredSkills,
     createSkill,
     updateSkill,
     deleteSkill,
@@ -139,17 +141,32 @@ export const registerSkillRoutes = (app, dependencies) => {
           const name = typeof item?.name === 'string' ? item.name.trim() : '';
           const location = typeof item?.location === 'string' ? item.location : '';
           const description = typeof item?.description === 'string' ? item.description : '';
-          if (!name || !location || location === '<built-in>') {
+          const content = typeof item?.content === 'string' ? item.content : '';
+          if (!name || !location) {
             return null;
           }
+          if (location === '<built-in>') {
+            return {
+              name,
+              path: location,
+              scope: SKILL_SCOPE.USER,
+              source: 'opencode',
+              description,
+              content,
+            };
+          }
           const inferred = inferSkillScopeAndSourceFromPath(location, workingDirectory);
-          return {
+          const skill = {
             name,
             path: location,
             scope: inferred.scope,
             source: inferred.source,
             description,
           };
+          if (content) {
+            skill.content = content;
+          }
+          return skill;
         })
         .filter(Boolean);
     } catch (error) {
@@ -189,7 +206,9 @@ export const registerSkillRoutes = (app, dependencies) => {
       if (error) {
         return res.status(400).json({ error });
       }
-      const skills = await fetchOpenCodeDiscoveredSkills(directory);
+      const openCodeSkills = await fetchOpenCodeDiscoveredSkills(directory);
+      const localSkills = discoverSkills(directory);
+      const skills = mergeDiscoveredSkills(openCodeSkills, localSkills);
 
       const enrichedSkills = skills.map((skill) => {
         const sources = getSkillSources(skill.name, directory, skill);
@@ -271,8 +290,11 @@ export const registerSkillRoutes = (app, dependencies) => {
         return res.status(404).json({ ok: false, error: { kind: 'invalidSource', message: 'Unknown source' } });
       }
 
-      const discovered = await fetchOpenCodeDiscoveredSkills(directory);
-      const installedByName = new Map(discovered.map((s) => [s.name, s]));
+      const resolvedDiscovered = mergeDiscoveredSkills(
+        await fetchOpenCodeDiscoveredSkills(directory),
+        discoverSkills(directory),
+      );
+      const installedByName = new Map(resolvedDiscovered.map((s) => [s.name, s]));
 
       if (src.sourceType === 'clawdhub' || isClawdHubSource(src.source)) {
         const scanned = await scanClawdHubPage({ cursor: cursor || null });

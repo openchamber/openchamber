@@ -1,0 +1,347 @@
+---
+title: 反向代理
+description: 在 Nginx、Nginx Proxy Manager 或其他反向代理后正确配置 OpenChamber。
+---
+
+# 反向代理
+
+如果你在 Nginx、Nginx Proxy Manager、Caddy、Cloudflare 或其他反向代理后运行 OpenChamber，请使用本页。
+
+## 在代理之前
+
+1. 先确认 OpenChamber 可以直接工作。
+2. 从同一网络打开 `http://<server-ip>:3000` 或你的自定义端口。
+3. 只有在直接连接可用之后，才添加反向代理。
+
+## 代理必须支持的内容
+
+- 用于实时消息传输的 WebSocket：
+  - `/api/event/ws`
+  - `/api/global/event/ws`
+  - `/api/terminal/ws`
+- 不带缓冲的 SSE：
+  - `/api/event`
+  - `/api/global/event`
+  - `/api/notifications/stream`
+  - `/api/openchamber/events`
+  - `/api/terminal/:sessionId/stream`
+- 用于附件和文件操作的大请求体
+- 用于实时流和终端会话的长读取超时
+
+## 重要规则
+
+- 启用 WebSocket 代理。
+- 在 SSE 路由上禁用缓冲。
+- 如果 OpenChamber 已经压缩响应，请在代理上禁用 gzip。
+- 仅在一层中保持压缩开启。
+- 转发常规代理标头，例如 `Host`、`X-Forwarded-For` 和 `X-Forwarded-Proto`。
+- 如果用户上传文件，请增大请求体大小限制。
+
+## 快速检查清单
+
+- OpenChamber 可在 LAN 内直接访问
+- 代理中已启用 WebSocket
+- SSE 路由已关闭缓冲
+- 代理主机上 `gzip off`，或以其他方式禁用代理压缩
+- `client_max_body_size` 足够大以容纳附件
+- `proxy_read_timeout` 足够长以容纳流
+
+## 示例：Nginx
+
+<details>
+<summary>显示示例配置</summary>
+
+```nginx
+client_max_body_size 50M;
+client_body_buffer_size 50M;
+proxy_request_buffering off;
+
+proxy_http_version 1.1;
+proxy_set_header Connection "";
+proxy_set_header Host $host;
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-Proto $scheme;
+proxy_set_header X-Forwarded-Host $host;
+
+gzip off;
+
+location = /api/terminal/ws {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
+
+location = /api/global/event/ws {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
+
+location = /api/event/ws {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
+
+location ~ ^/api/(event|global/event|notifications/stream|openchamber/events)$ {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Accept "text/event-stream";
+    proxy_set_header Cache-Control "no-cache";
+    proxy_buffering off;
+    proxy_cache off;
+    gzip off;
+    add_header X-Accel-Buffering "no" always;
+    add_header Cache-Control "no-cache, no-transform" always;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
+
+location ~ ^/api/terminal/.+/stream$ {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Accept "text/event-stream";
+    proxy_set_header Cache-Control "no-cache";
+    proxy_buffering off;
+    proxy_cache off;
+    gzip off;
+    add_header X-Accel-Buffering "no" always;
+    add_header Cache-Control "no-cache, no-transform" always;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
+
+location /api {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
+
+location / {
+    proxy_pass http://127.0.0.1:3000;
+}
+```
+
+</details>
+
+## 示例：Nginx Proxy Manager
+
+<details>
+<summary>显示 Advanced 选项卡示例</summary>
+
+```nginx
+client_max_body_size 50M;
+client_body_buffer_size 50M;
+proxy_request_buffering off;
+
+proxy_http_version 1.1;
+proxy_set_header Connection "";
+proxy_set_header Host $host;
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-Proto $scheme;
+proxy_set_header X-Forwarded-Host $host;
+
+gzip off;
+
+location = /api/terminal/ws {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
+
+location = /api/global/event/ws {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
+
+location = /api/event/ws {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
+
+location = /api/event {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Accept "text/event-stream";
+    proxy_set_header Cache-Control "no-cache";
+    proxy_buffering off;
+    proxy_cache off;
+    gzip off;
+    add_header X-Accel-Buffering "no" always;
+    add_header Cache-Control "no-cache, no-transform" always;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
+
+location = /api/global/event {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Accept "text/event-stream";
+    proxy_set_header Cache-Control "no-cache";
+    proxy_buffering off;
+    proxy_cache off;
+    gzip off;
+    add_header X-Accel-Buffering "no" always;
+    add_header Cache-Control "no-cache, no-transform" always;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
+
+location = /api/notifications/stream {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Accept "text/event-stream";
+    proxy_set_header Cache-Control "no-cache";
+    proxy_buffering off;
+    proxy_cache off;
+    gzip off;
+    add_header X-Accel-Buffering "no" always;
+    add_header Cache-Control "no-cache, no-transform" always;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
+
+location = /api/openchamber/events {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Accept "text/event-stream";
+    proxy_set_header Cache-Control "no-cache";
+    proxy_buffering off;
+    proxy_cache off;
+    gzip off;
+    add_header X-Accel-Buffering "no" always;
+    add_header Cache-Control "no-cache, no-transform" always;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
+
+location ~ ^/api/terminal/.+/stream$ {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Accept "text/event-stream";
+    proxy_set_header Cache-Control "no-cache";
+    proxy_buffering off;
+    proxy_cache off;
+    gzip off;
+    add_header X-Accel-Buffering "no" always;
+    add_header Cache-Control "no-cache, no-transform" always;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
+
+location /api {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
+
+location / {
+    proxy_pass http://127.0.0.1:3000;
+}
+```
+
+</details>
+
+另外，请在 Nginx Proxy Manager 中为此主机启用 `Websockets Support`。
+
+## 常见故障迹象
+
+### 页面能加载，但发送消息失败
+
+- 代理中未启用 WebSocket
+- `/api/event/ws` 或 `/api/global/event/ws` 未正确传递
+
+### 通知或实时状态不更新
+
+- 某个 SSE 路由被缓冲或缓存
+- 缺少 `X-Accel-Buffering "no"`
+
+### 文件上传失败
+
+- `client_max_body_size` 太小
+
+### 本地一切正常，但仅在代理后出问题
+
+- 代理正在压缩和缓冲实时流量
+- 代理缺少 WebSocket 支持
+
+## 示例：Caddy
+
+<details>
+<summary>显示示例配置</summary>
+
+```caddy
+reverse_proxy 127.0.0.1:3000 {
+    # WebSocket support is automatic in Caddy
+
+    # Flush SSE responses immediately
+    flush_interval -1
+
+    # Pass through Host and proxy headers
+    header_up Host {host}
+    header_up X-Real-IP {remote_host}
+    header_up X-Forwarded-For {remote_host}
+    header_up X-Forwarded-Proto {scheme}
+
+    # Increase timeouts for long-lived streams
+    transport http {
+        read_timeout 3600s
+        write_timeout 3600s
+    }
+}
+```
+
+</details>
+
+Caddy 会自动处理 WebSocket 升级 — 无需额外配置。`flush_interval -1` 指令可确保 SSE 数据块立即转发，不带缓冲。
+
+## CDN 与双重压缩警告
+
+如果你在反向代理前面放置 CDN（例如 Cloudflare），请注意双重压缩：
+
+- OpenChamber 使用 gzip 压缩 HTTP 响应（阈值 1 KB）。
+- Cloudflare 和其他 CDN 默认也会压缩响应。
+- 这可能导致响应被双重压缩或 `Content-Encoding` 标头不正确。
+
+为避免这种情况，请在**一**层中禁用压缩：
+
+- **Cloudflare：** Rules → Compression → disable（或使用 "Passthrough" 模式）。
+- **Nginx：** `gzip off`（上面的示例已展示）。
+- **Caddy：** 如果上游已发送压缩内容，Caddy 默认不会重新压缩。
+
+SSE 流式路由已被 OpenChamber 排除在压缩之外，但 CDN 仍可能缓冲它们。请查阅你的 CDN 文档，了解如何在 SSE 路径上禁用缓冲。
+
+## 相关
+
+- [隧道](/zh-cn/tunnels/)
+- [问题排查](/zh-cn/troubleshooting/)

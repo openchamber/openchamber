@@ -7,13 +7,14 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Icon } from "@/components/icon/Icon";
+import type { IconName } from "@/components/icon/icons";
 import { cn } from '@/lib/utils';
 
 export interface SettingsSidebarItemAction {
   /** Label shown in dropdown menu */
   label: string;
   /** Icon component to show before label */
-  icon?: string;
+  icon?: IconName;
   /** Callback when action is clicked */
   onClick: () => void;
   /** If true, uses destructive styling (red text) */

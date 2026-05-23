@@ -10,6 +10,7 @@ import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { MarkdownRenderer } from '../../MarkdownRenderer';
 import { useStreamingTextThrottle } from '../../hooks/useStreamingTextThrottle';
+import type { StreamPhase } from '../types';
 
 type PartWithText = Part & { text?: string; content?: string; time?: { start?: number; end?: number } };
 
@@ -89,12 +90,14 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
     variant,
     onContentChange,
     blockId,
+    time,
     isStreaming = false,
     actions,
     defaultExpanded,
 }) => {
     const { t } = useI18n();
-    const [isExpanded, setIsExpanded] = React.useState(defaultExpanded ?? isStreaming);
+    const hasEnded = typeof time?.end === 'number';
+    const [isExpanded, setIsExpanded] = React.useState(hasEnded ? false : (defaultExpanded ?? isStreaming));
     const contentId = React.useId();
     const scrollRef = React.useRef<HTMLElement>(null);
     const contentRef = React.useRef<HTMLDivElement>(null);
@@ -124,12 +127,12 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
     React.useEffect(() => {
         const wasStreaming = prevIsStreamingRef.current;
         prevIsStreamingRef.current = isStreaming;
-        // Auto-collapse only when streaming ends (true → false).
-        // Do not fire on mount so that defaultExpanded is respected.
-        if (wasStreaming && !isStreaming) {
+        // Auto-collapse when live streaming ends or when an end timestamp arrives.
+        // Completed blocks initialize collapsed, so historical loads do not animate closed.
+        if (hasEnded || (wasStreaming && !isStreaming)) {
             setIsExpanded(false);
         }
-    }, [isStreaming]);
+    }, [hasEnded, isStreaming]);
 
     React.useEffect(() => {
         if (text.trim().length === 0) {
@@ -364,19 +367,22 @@ type ReasoningPartProps = {
     part: Part;
     onContentChange?: (reason?: ContentChangeReason) => void;
     messageId: string;
+    streamPhase?: StreamPhase;
 };
 
 const ReasoningPart = React.memo(({
     part,
     onContentChange,
     messageId,
+    streamPhase,
 }: ReasoningPartProps) => {
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
     const partWithText = part as PartWithText;
     const rawText = partWithText.text || partWithText.content || '';
     const textContent = React.useMemo(() => cleanReasoningText(rawText), [rawText]);
     const time = partWithText.time;
-    const isStreaming = chatRenderMode === 'live' && typeof time?.end !== 'number';
+    const canBeStreaming = streamPhase === undefined || streamPhase !== 'completed';
+    const isStreaming = chatRenderMode === 'live' && canBeStreaming && typeof time?.end !== 'number';
     const throttledText = useStreamingTextThrottle({
         text: textContent,
         isStreaming,
@@ -405,6 +411,7 @@ type MergedReasoningPartProps = {
     parts: Part[];
     onContentChange?: (reason?: ContentChangeReason) => void;
     messageId: string;
+    streamPhase?: StreamPhase;
 };
 
 /**
@@ -416,6 +423,7 @@ export const MergedReasoningPart = React.memo(({
     parts,
     onContentChange,
     messageId,
+    streamPhase,
 }: MergedReasoningPartProps) => {
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
 
@@ -450,7 +458,8 @@ export const MergedReasoningPart = React.memo(({
         return earliestStart !== undefined ? { start: earliestStart, end: latestEnd } : undefined;
     }, [parts]);
 
-    const isStreaming = chatRenderMode === 'live' && parts.some(
+    const canBeStreaming = streamPhase === undefined || streamPhase !== 'completed';
+    const isStreaming = chatRenderMode === 'live' && canBeStreaming && parts.some(
         (part) => typeof (part as PartWithText).time?.end !== 'number',
     );
 

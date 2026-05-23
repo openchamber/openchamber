@@ -1,0 +1,347 @@
+---
+title: Proxy inverso
+description: Configura OpenChamber correctamente detrás de Nginx, Nginx Proxy Manager u otro proxy inverso.
+---
+
+# Proxy inverso
+
+Usa esta página si ejecutas OpenChamber detrás de Nginx, Nginx Proxy Manager, Caddy, Cloudflare u otro proxy inverso.
+
+## Antes de ponerle un proxy
+
+1. Confirma primero que OpenChamber funciona directamente.
+2. Abre `http://<server-ip>:3000` o tu puerto personalizado desde la misma red.
+3. Añade el proxy inverso solo después de que la conexión directa funcione.
+
+## Qué debe admitir el proxy
+
+- WebSockets para el transporte de mensajes en vivo:
+  - `/api/event/ws`
+  - `/api/global/event/ws`
+  - `/api/terminal/ws`
+- SSE sin búfer:
+  - `/api/event`
+  - `/api/global/event`
+  - `/api/notifications/stream`
+  - `/api/openchamber/events`
+  - `/api/terminal/:sessionId/stream`
+- Cuerpos de solicitud grandes para adjuntos y operaciones de archivos
+- Tiempos de espera de lectura prolongados para streams en vivo y sesiones de terminal
+
+## Reglas que importan
+
+- Habilita el proxy de WebSockets.
+- Desactiva el búfer en las rutas SSE.
+- Desactiva gzip en el proxy si OpenChamber ya comprime las respuestas.
+- Mantén la compresión activada en una sola capa.
+- Reenvía las cabeceras de proxy habituales como `Host`, `X-Forwarded-For` y `X-Forwarded-Proto`.
+- Aumenta los límites de tamaño del cuerpo si los usuarios suben archivos.
+
+## Lista de comprobación rápida
+
+- OpenChamber accesible directamente en la LAN
+- WebSockets habilitados en el proxy
+- las rutas SSE tienen el búfer desactivado
+- `gzip off` en el host del proxy, o compresión del proxy desactivada de otro modo
+- `client_max_body_size` suficientemente grande para los adjuntos
+- `proxy_read_timeout` suficientemente largo para los streams
+
+## Ejemplo: Nginx
+
+<details>
+<summary>Mostrar configuración de ejemplo</summary>
+
+```nginx
+client_max_body_size 50M;
+client_body_buffer_size 50M;
+proxy_request_buffering off;
+
+proxy_http_version 1.1;
+proxy_set_header Connection "";
+proxy_set_header Host $host;
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-Proto $scheme;
+proxy_set_header X-Forwarded-Host $host;
+
+gzip off;
+
+location = /api/terminal/ws {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
+
+location = /api/global/event/ws {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
+
+location = /api/event/ws {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
+
+location ~ ^/api/(event|global/event|notifications/stream|openchamber/events)$ {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Accept "text/event-stream";
+    proxy_set_header Cache-Control "no-cache";
+    proxy_buffering off;
+    proxy_cache off;
+    gzip off;
+    add_header X-Accel-Buffering "no" always;
+    add_header Cache-Control "no-cache, no-transform" always;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
+
+location ~ ^/api/terminal/.+/stream$ {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Accept "text/event-stream";
+    proxy_set_header Cache-Control "no-cache";
+    proxy_buffering off;
+    proxy_cache off;
+    gzip off;
+    add_header X-Accel-Buffering "no" always;
+    add_header Cache-Control "no-cache, no-transform" always;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
+
+location /api {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
+
+location / {
+    proxy_pass http://127.0.0.1:3000;
+}
+```
+
+</details>
+
+## Ejemplo: Nginx Proxy Manager
+
+<details>
+<summary>Mostrar ejemplo de la pestaña Advanced</summary>
+
+```nginx
+client_max_body_size 50M;
+client_body_buffer_size 50M;
+proxy_request_buffering off;
+
+proxy_http_version 1.1;
+proxy_set_header Connection "";
+proxy_set_header Host $host;
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-Proto $scheme;
+proxy_set_header X-Forwarded-Host $host;
+
+gzip off;
+
+location = /api/terminal/ws {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
+
+location = /api/global/event/ws {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
+
+location = /api/event/ws {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
+
+location = /api/event {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Accept "text/event-stream";
+    proxy_set_header Cache-Control "no-cache";
+    proxy_buffering off;
+    proxy_cache off;
+    gzip off;
+    add_header X-Accel-Buffering "no" always;
+    add_header Cache-Control "no-cache, no-transform" always;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
+
+location = /api/global/event {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Accept "text/event-stream";
+    proxy_set_header Cache-Control "no-cache";
+    proxy_buffering off;
+    proxy_cache off;
+    gzip off;
+    add_header X-Accel-Buffering "no" always;
+    add_header Cache-Control "no-cache, no-transform" always;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
+
+location = /api/notifications/stream {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Accept "text/event-stream";
+    proxy_set_header Cache-Control "no-cache";
+    proxy_buffering off;
+    proxy_cache off;
+    gzip off;
+    add_header X-Accel-Buffering "no" always;
+    add_header Cache-Control "no-cache, no-transform" always;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
+
+location = /api/openchamber/events {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Accept "text/event-stream";
+    proxy_set_header Cache-Control "no-cache";
+    proxy_buffering off;
+    proxy_cache off;
+    gzip off;
+    add_header X-Accel-Buffering "no" always;
+    add_header Cache-Control "no-cache, no-transform" always;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
+
+location ~ ^/api/terminal/.+/stream$ {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Accept "text/event-stream";
+    proxy_set_header Cache-Control "no-cache";
+    proxy_buffering off;
+    proxy_cache off;
+    gzip off;
+    add_header X-Accel-Buffering "no" always;
+    add_header Cache-Control "no-cache, no-transform" always;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
+
+location /api {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
+
+location / {
+    proxy_pass http://127.0.0.1:3000;
+}
+```
+
+</details>
+
+Habilita también `Websockets Support` en Nginx Proxy Manager para este host.
+
+## Señales habituales de fallo
+
+### La página carga, pero el envío de mensajes falla
+
+- los WebSockets no están habilitados en el proxy
+- `/api/event/ws` o `/api/global/event/ws` no pasa correctamente
+
+### Las notificaciones o el estado en vivo no se actualizan
+
+- una de las rutas SSE está en búfer o en caché
+- falta `X-Accel-Buffering "no"`
+
+### Las subidas de archivos fallan
+
+- `client_max_body_size` es demasiado pequeño
+
+### Todo funciona en local, pero solo falla detrás del proxy
+
+- el proxy está comprimiendo y almacenando en búfer el tráfico en vivo
+- al proxy le falta soporte de WebSockets
+
+## Ejemplo: Caddy
+
+<details>
+<summary>Mostrar configuración de ejemplo</summary>
+
+```caddy
+reverse_proxy 127.0.0.1:3000 {
+    # WebSocket support is automatic in Caddy
+
+    # Flush SSE responses immediately
+    flush_interval -1
+
+    # Pass through Host and proxy headers
+    header_up Host {host}
+    header_up X-Real-IP {remote_host}
+    header_up X-Forwarded-For {remote_host}
+    header_up X-Forwarded-Proto {scheme}
+
+    # Increase timeouts for long-lived streams
+    transport http {
+        read_timeout 3600s
+        write_timeout 3600s
+    }
+}
+```
+
+</details>
+
+Caddy gestiona las actualizaciones de WebSocket automáticamente: no hace falta configuración adicional. La directiva `flush_interval -1` garantiza que los fragmentos SSE se reenvíen de inmediato sin búfer.
+
+## Advertencia sobre CDN y doble compresión
+
+Si colocas una CDN (como Cloudflare) delante de tu proxy inverso, ten en cuenta la doble compresión:
+
+- OpenChamber comprime las respuestas HTTP con gzip (umbral de 1 KB).
+- Cloudflare y otras CDN también comprimen las respuestas por defecto.
+- Esto puede provocar respuestas con doble compresión o cabeceras `Content-Encoding` incorrectas.
+
+Para evitarlo, desactiva la compresión en **una** capa:
+
+- **Cloudflare:** Rules → Compression → disable (o usa el modo "Passthrough").
+- **Nginx:** `gzip off` (ya mostrado en los ejemplos anteriores).
+- **Caddy:** Caddy no recomprime por defecto si el upstream ya envía contenido comprimido.
+
+Las rutas de streaming SSE están excluidas de la compresión por OpenChamber, pero la CDN aún puede almacenarlas en búfer. Consulta la documentación de tu CDN para saber cómo desactivar el búfer en las rutas SSE.
+
+## Relacionado
+
+- [Túneles](/es/tunnels/)
+- [Resolución de problemas](/es/troubleshooting/)

@@ -2,24 +2,125 @@
   "sections": [
     {
       "label": "Start here",
+      "translations": {
+        "uk": "Почніть тут",
+        "zh-CN": "从这里开始",
+        "es": "Empieza aquí",
+        "pt-BR": "Comece aqui",
+        "ko": "여기서 시작",
+        "pl": "Zacznij tutaj"
+      },
       "items": [
-        { "label": "Overview", "link": "/" },
-        { "label": "Install", "link": "/install/" },
-        { "label": "Quickstart", "link": "/quickstart/" },
-        { "label": "Tunnels", "link": "/tunnels/" }
+        {
+          "label": "Overview",
+          "link": "/",
+          "translations": {
+            "uk": "Огляд",
+            "zh-CN": "概览",
+            "es": "Visión general",
+            "pt-BR": "Visão geral",
+            "ko": "개요",
+            "pl": "Przegląd"
+          }
+        },
+        {
+          "label": "Install",
+          "link": "/install/",
+          "translations": {
+            "uk": "Встановлення",
+            "zh-CN": "安装",
+            "es": "Instalación",
+            "pt-BR": "Instalação",
+            "ko": "설치",
+            "pl": "Instalacja"
+          }
+        },
+        {
+          "label": "Quickstart",
+          "link": "/quickstart/",
+          "translations": {
+            "uk": "Швидкий старт",
+            "zh-CN": "快速开始",
+            "es": "Inicio rápido",
+            "pt-BR": "Início rápido",
+            "ko": "빠른 시작",
+            "pl": "Szybki start"
+          }
+        },
+        {
+          "label": "Tunnels",
+          "link": "/tunnels/",
+          "translations": {
+            "uk": "Тунелі",
+            "zh-CN": "隧道",
+            "es": "Túneles",
+            "pt-BR": "Túneis",
+            "ko": "터널",
+            "pl": "Tunele"
+          }
+        }
       ]
     },
     {
       "label": "Customize",
+      "translations": {
+        "uk": "Налаштування",
+        "zh-CN": "自定义",
+        "es": "Personalizar",
+        "pt-BR": "Personalizar",
+        "ko": "맞춤 설정",
+        "pl": "Dostosuj"
+      },
       "items": [
-        { "label": "Themes", "link": "/themes/" }
+        {
+          "label": "Themes",
+          "link": "/themes/",
+          "translations": {
+            "uk": "Теми",
+            "zh-CN": "主题",
+            "es": "Temas",
+            "pt-BR": "Temas",
+            "ko": "테마",
+            "pl": "Motywy"
+          }
+        }
       ]
     },
     {
       "label": "Help",
+      "translations": {
+        "uk": "Допомога",
+        "zh-CN": "帮助",
+        "es": "Ayuda",
+        "pt-BR": "Ajuda",
+        "ko": "도움말",
+        "pl": "Pomoc"
+      },
       "items": [
-        { "label": "Reverse Proxy", "link": "/reverse-proxy/" },
-        { "label": "Troubleshooting", "link": "/troubleshooting/" }
+        {
+          "label": "Reverse Proxy",
+          "link": "/reverse-proxy/",
+          "translations": {
+            "uk": "Зворотний проксі",
+            "zh-CN": "反向代理",
+            "es": "Proxy inverso",
+            "pt-BR": "Proxy reverso",
+            "ko": "리버스 프록시",
+            "pl": "Reverse proxy"
+          }
+        },
+        {
+          "label": "Troubleshooting",
+          "link": "/troubleshooting/",
+          "translations": {
+            "uk": "Усунення несправностей",
+            "zh-CN": "问题排查",
+            "es": "Resolución de problemas",
+            "pt-BR": "Solução de problemas",
+            "ko": "문제 해결",
+            "pl": "Rozwiązywanie problemów"
+          }
+        }
       ]
     }
   ]

@@ -19,11 +19,9 @@ import { DrawerProvider } from '@/contexts/DrawerContext';
 import { useUIStore } from '@/stores/useUIStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useDeviceInfo } from '@/lib/device';
-import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useVisualViewport } from '@/hooks/useVisualViewport';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
-import { isDesktopShell } from '@/lib/desktop';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 
 import { ChatView } from '@/components/views/ChatView';
@@ -40,29 +38,10 @@ const MultiRunWindow = lazyWithChunkRecovery(() => import('@/components/views/Mu
 
 // Mobile drawer width as screen percentage
 const MOBILE_DRAWER_WIDTH_PERCENT = 85;
-const DESKTOP_SIDEBAR_MIN_WIDTH = 250;
+const DESKTOP_SIDEBAR_MIN_WIDTH = 280;
 const DESKTOP_SIDEBAR_MAX_WIDTH = 500;
-const DESKTOP_RIGHT_SIDEBAR_MIN_WIDTH = 400;
+const DESKTOP_RIGHT_SIDEBAR_MIN_WIDTH = 360;
 const DESKTOP_RIGHT_SIDEBAR_MAX_WIDTH = 860;
-
-const normalizeDirectoryKey = (value: string): string => {
-    if (!value) return '';
-
-    const raw = value.replace(/\\/g, '/');
-    const hadUncPrefix = raw.startsWith('//');
-    let normalized = raw.replace(/\/+$/g, '');
-    normalized = normalized.replace(/\/+/g, '/');
-
-    if (hadUncPrefix && !normalized.startsWith('//')) {
-        normalized = `/${normalized}`;
-    }
-
-    if (normalized === '') {
-        return raw.startsWith('/') ? '/' : '';
-    }
-
-    return normalized;
-};
 
 export const MainLayout: React.FC = () => {
     const { t } = useI18n();
@@ -86,25 +65,10 @@ export const MainLayout: React.FC = () => {
 
     const { isMobile, isTablet } = useDeviceInfo();
     const visualViewport = useVisualViewport();
-    const isDesktopShellRuntime = React.useMemo(() => isDesktopShell(), []);
     const sidebarWidth = useUIStore((state) => state.sidebarWidth);
     const rightSidebarWidth = useUIStore((state) => state.rightSidebarWidth);
-    const [desktopRightSidebarActionsHost, setDesktopRightSidebarActionsHost] = React.useState<HTMLDivElement | null>(null);
-    const effectiveDirectory = useEffectiveDirectory() ?? '';
-    const directoryKey = React.useMemo(() => normalizeDirectoryKey(effectiveDirectory), [effectiveDirectory]);
-    const isContextPanelOpen = useUIStore((state) => {
-        if (!directoryKey) {
-            return false;
-        }
-        const panelState = state.contextPanelByDirectory[directoryKey];
-        const tabs = panelState?.tabs ?? [];
-        const activeTab = tabs.find((tab) => tab.id === panelState?.activeTabId) ?? tabs[tabs.length - 1];
-        return Boolean(panelState?.isOpen && activeTab);
-    });
-    const setSidebarOpen = useUIStore((state) => state.setSidebarOpen);
     const rightSidebarAutoClosedRef = React.useRef(false);
     const bottomTerminalAutoClosedRef = React.useRef(false);
-    const leftSidebarAutoClosedByContextRef = React.useRef(false);
 
     // Mobile drawer state
     const [mobileLeftDrawerOpen, setMobileLeftDrawerOpen] = React.useState(false);
@@ -249,22 +213,6 @@ export const MainLayout: React.FC = () => {
             }
         };
     }, []);
-
-    React.useEffect(() => {
-        if (isContextPanelOpen) {
-            const currentlyOpen = useUIStore.getState().isSidebarOpen;
-            if (currentlyOpen) {
-                setSidebarOpen(false);
-                leftSidebarAutoClosedByContextRef.current = true;
-            }
-            return;
-        }
-
-        if (leftSidebarAutoClosedByContextRef.current) {
-            setSidebarOpen(true);
-            leftSidebarAutoClosedByContextRef.current = false;
-        }
-    }, [isContextPanelOpen, setSidebarOpen]);
 
     React.useEffect(() => {
         if (typeof window === 'undefined') {
@@ -606,76 +554,58 @@ export const MainLayout: React.FC = () => {
                 </DrawerProvider>
             ) : (
                 <>
-                    {/* Desktop: Sidebar is a left column; header belongs to content column */}
-                    <div className="flex flex-1 overflow-hidden relative">
-                        <div className={cn(
-                            'absolute inset-0 flex overflow-hidden',
-                            isDesktopShellRuntime ? 'bg-sidebar' : 'bg-sidebar'
-                        )} data-page-scroll-lock="true">
-                            {isSidebarOpen ? (
-                                <>
-                                    <div
-                                        aria-hidden
-                                        className={cn(
-                                            'pointer-events-none absolute top-0 z-0',
-                                            isDesktopShellRuntime ? 'bg-sidebar' : 'bg-sidebar'
-                                        )}
-                                        style={{
-                                            left: `${visibleSidebarWidth}px`,
-                                            width: '10px',
-                                            height: '10px',
-                                            WebkitMaskImage: 'radial-gradient(circle at 100% 100%, transparent calc(10px - 1px), black 10px)',
-                                            maskImage: 'radial-gradient(circle at 100% 100%, transparent calc(10px - 1px), black 10px)',
-                                        }}
-                                    />
-                                    <div
-                                        aria-hidden
-                                        className={cn(
-                                            'pointer-events-none absolute bottom-0 z-0',
-                                            isDesktopShellRuntime ? 'bg-sidebar' : 'bg-sidebar'
-                                        )}
-                                        style={{
-                                            left: `${visibleSidebarWidth}px`,
-                                            width: '10px',
-                                            height: '10px',
-                                            WebkitMaskImage: 'radial-gradient(circle at 100% 0%, transparent calc(10px - 1px), black 10px)',
-                                            maskImage: 'radial-gradient(circle at 100% 0%, transparent calc(10px - 1px), black 10px)',
-                                        }}
-                                    />
-                                </>
-                            ) : null}
-                            {isRightSidebarOpen ? (
-                                <>
-                                    <div
-                                        aria-hidden
-                                        className={cn(
-                                            'pointer-events-none absolute top-0 z-0',
-                                            isDesktopShellRuntime ? 'bg-sidebar' : 'bg-sidebar'
-                                        )}
-                                        style={{
-                                            right: `${visibleRightSidebarWidth}px`,
-                                            width: '10px',
-                                            height: '10px',
-                                            WebkitMaskImage: 'radial-gradient(circle at 0 100%, transparent calc(10px - 1px), black 10px)',
-                                            maskImage: 'radial-gradient(circle at 0 100%, transparent calc(10px - 1px), black 10px)',
-                                        }}
-                                    />
-                                    <div
-                                        aria-hidden
-                                        className={cn(
-                                            'pointer-events-none absolute bottom-0 z-0',
-                                            isDesktopShellRuntime ? 'bg-sidebar' : 'bg-sidebar'
-                                        )}
-                                        style={{
-                                            right: `${visibleRightSidebarWidth}px`,
-                                            width: '10px',
-                                            height: '10px',
-                                            WebkitMaskImage: 'radial-gradient(circle at 0 0, transparent calc(10px - 1px), black 10px)',
-                                            maskImage: 'radial-gradient(circle at 0 0, transparent calc(10px - 1px), black 10px)',
-                                        }}
-                                    />
-                                </>
-                            ) : null}
+                    {/* Desktop: full-width Header above [Sidebar | chat-frame | RightSidebar] row */}
+                    <div className="flex flex-1 flex-col overflow-hidden">
+                        <Header />
+                        <div className="relative flex flex-1 min-h-0 overflow-hidden bg-sidebar" data-page-scroll-lock="true">
+                            <div
+                                aria-hidden
+                                className="pointer-events-none absolute top-0 z-0 bg-sidebar transition-[left,opacity] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
+                                style={{
+                                    left: `${isSidebarOpen ? visibleSidebarWidth : 0}px`,
+                                    opacity: isSidebarOpen ? 1 : 0,
+                                    width: '10px',
+                                    height: '10px',
+                                    WebkitMaskImage: 'radial-gradient(circle at 100% 100%, transparent calc(10px - 1px), black 10px)',
+                                    maskImage: 'radial-gradient(circle at 100% 100%, transparent calc(10px - 1px), black 10px)',
+                                }}
+                            />
+                            <div
+                                aria-hidden
+                                className="pointer-events-none absolute bottom-0 z-0 bg-sidebar transition-[left,opacity] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
+                                style={{
+                                    left: `${isSidebarOpen ? visibleSidebarWidth : 0}px`,
+                                    opacity: isSidebarOpen ? 1 : 0,
+                                    width: '10px',
+                                    height: '10px',
+                                    WebkitMaskImage: 'radial-gradient(circle at 100% 0%, transparent calc(10px - 1px), black 10px)',
+                                    maskImage: 'radial-gradient(circle at 100% 0%, transparent calc(10px - 1px), black 10px)',
+                                }}
+                            />
+                            <div
+                                aria-hidden
+                                className="pointer-events-none absolute top-0 z-0 bg-sidebar transition-[right,opacity] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
+                                style={{
+                                    right: `${isRightSidebarOpen ? visibleRightSidebarWidth : 0}px`,
+                                    opacity: isRightSidebarOpen ? 1 : 0,
+                                    width: '10px',
+                                    height: '10px',
+                                    WebkitMaskImage: 'radial-gradient(circle at 0 100%, transparent calc(10px - 1px), black 10px)',
+                                    maskImage: 'radial-gradient(circle at 0 100%, transparent calc(10px - 1px), black 10px)',
+                                }}
+                            />
+                            <div
+                                aria-hidden
+                                className="pointer-events-none absolute bottom-0 z-0 bg-sidebar transition-[right,opacity] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
+                                style={{
+                                    right: `${isRightSidebarOpen ? visibleRightSidebarWidth : 0}px`,
+                                    opacity: isRightSidebarOpen ? 1 : 0,
+                                    width: '10px',
+                                    height: '10px',
+                                    WebkitMaskImage: 'radial-gradient(circle at 0 0, transparent calc(10px - 1px), black 10px)',
+                                    maskImage: 'radial-gradient(circle at 0 0, transparent calc(10px - 1px), black 10px)',
+                                }}
+                            />
                             <Sidebar
                                 isOpen={isSidebarOpen}
                                 isMobile={isMobile}
@@ -685,16 +615,12 @@ export const MainLayout: React.FC = () => {
                             </Sidebar>
                             <div className={cn(
                                 'relative flex flex-1 min-w-0 flex-col overflow-hidden',
-                                'bg-sidebar',
-                                isSidebarOpen && 'border-l border-border/50 rounded-tl-[10px] rounded-bl-[10px]',
-                                isRightSidebarOpen && 'border-r border-border/50 rounded-tr-[10px] rounded-br-[10px]'
+                                'bg-background',
+                                'border border-border/50 rounded-[10px]',
+                                !isSidebarOpen && 'border-l-transparent',
+                                !isRightSidebarOpen && 'border-r-transparent'
                             )} data-page-scroll-lock="true">
-                                <Header desktopRightSidebarActionsHost={desktopRightSidebarActionsHost} />
-                                <div className={cn(
-                                    'flex flex-1 min-h-0 overflow-hidden',
-                                    isSidebarOpen || isChatActive ? '' : 'border-l border-border/50',
-                                    isRightSidebarOpen ? '' : 'border-r border-border/50'
-                                )} data-page-scroll-lock="true">
+                                <div className="flex flex-1 min-h-0 overflow-hidden" data-page-scroll-lock="true">
                                     <div className="relative flex flex-1 min-h-0 min-w-0 overflow-hidden" data-page-scroll-lock="true">
                                         <main className="flex-1 overflow-hidden bg-background relative" data-page-scroll-lock="true">
                                             <div className={cn('absolute inset-0', !isChatActive && 'invisible')}>
@@ -722,12 +648,10 @@ export const MainLayout: React.FC = () => {
                             <RightSidebar
                                 isOpen={isRightSidebarOpen}
                                 className="border-0"
-                                onTopActionsHostChange={setDesktopRightSidebarActionsHost}
                             >
                                 <ErrorBoundary><RightSidebarTabs /></ErrorBoundary>
                             </RightSidebar>
                         </div>
-
                     </div>
 
                     {/* Desktop settings: windowed dialog with blur */}

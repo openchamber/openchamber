@@ -1,14 +1,4 @@
 import React from 'react';
-import {
-    DndContext,
-    PointerSensor,
-    closestCenter,
-    useSensor,
-    useSensors,
-    type DragEndEvent,
-} from '@dnd-kit/core';
-import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
-import { CSS as DndCSS } from '@dnd-kit/utilities';
 import type { EditPermissionMode } from '@/stores/types/sessionTypes';
 import type { ModelMetadata } from '@/types';
 import {
@@ -23,14 +13,15 @@ import { Input } from '@/components/ui/input';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
-import { TextLoop } from '@/components/ui/TextLoop';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
 import type { IconName } from "@/components/icon/icons";
+import { ModelPickerList, type ModelPickerEntry, type ModelPickerProvider } from '@/components/model-picker/ModelPickerList';
 import { useIsVSCodeRuntime } from '@/hooks/useRuntimeAPIs';
 import { isDesktopShell } from '@/lib/desktop';
 import { getAgentColor } from '@/lib/agentColors';
 import { useDeviceInfo } from '@/lib/device';
+import { mergeModelMetadataWithLiveModel } from '@/lib/modelMetadata';
 import { getEditModeColors } from '@/lib/permissions/editModeColors';
 import { cn, fuzzyMatch } from '@/lib/utils';
 import { useContextStore } from '@/stores/contextStore';
@@ -46,7 +37,7 @@ import { useIsTextTruncated } from '@/hooks/useIsTextTruncated';
 import { formatEffortLabel, getCycledPrimaryAgentName, type MobileControlsPanel } from './mobileControlsUtils';
 import { useI18n } from '@/lib/i18n';
 import { useOpenCodeReadiness } from '@/hooks/useOpenCodeReadiness';
-import { eventMatchesShortcut, formatShortcutForDisplay, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
+import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
 
  
 type IconComponent = IconName;
@@ -55,45 +46,10 @@ type ProviderModel = Record<string, unknown> & { id?: string; name?: string };
 
 type PermissionAction = 'allow' | 'ask' | 'deny';
 type PermissionRule = { permission: string; pattern: string; action: PermissionAction };
-type SortableFavoriteHandleProps = {
-    attributes: ReturnType<typeof useSortable>['attributes'];
-    listeners: ReturnType<typeof useSortable>['listeners'];
-    setActivatorNodeRef: ReturnType<typeof useSortable>['setActivatorNodeRef'];
-    isDragging: boolean;
-};
 type MobileVariantTarget = { providerId: string; modelId: string };
 
 const buildModelRefKey = (providerID: string, modelID: string) => `${providerID}:${modelID}`;
 const MAX_INLINE_MOBILE_VARIANT_OPTIONS = 6;
-
-const SortableFavoriteModelRow: React.FC<{
-    id: string;
-    disabled?: boolean;
-    children: (dragHandleProps: SortableFavoriteHandleProps) => React.ReactNode;
-}> = ({ id, disabled = false, children }) => {
-    const {
-        attributes,
-        listeners,
-        setNodeRef,
-        setActivatorNodeRef,
-        transform,
-        transition,
-        isDragging,
-    } = useSortable({ id, disabled });
-
-    return (
-        <div
-            ref={setNodeRef}
-            style={{
-                transform: DndCSS.Transform.toString(transform),
-                transition,
-            }}
-            className={cn(isDragging && 'opacity-60')}
-        >
-            {children({ attributes, listeners, setActivatorNodeRef, isDragging })}
-        </div>
-    );
-};
 
 const asPermissionRuleset = (value: unknown): PermissionRule[] | null => {
     if (!Array.isArray(value)) {
@@ -281,28 +237,6 @@ const formatCost = (value?: number | null) => {
     return CURRENCY_FORMATTER.format(value);
 };
 
-const formatCompactPrice = (metadata?: ModelMetadata): string | null => {
-    if (!metadata?.cost) {
-        return null;
-    }
-
-    const inputCost = metadata.cost.input;
-    const outputCost = metadata.cost.output;
-    const hasInput = typeof inputCost === 'number' && Number.isFinite(inputCost);
-    const hasOutput = typeof outputCost === 'number' && Number.isFinite(outputCost);
-
-    if (hasInput && hasOutput) {
-        return `In ${formatCost(inputCost)} · Out ${formatCost(outputCost)}`;
-    }
-    if (hasInput) {
-        return `In ${formatCost(inputCost)}`;
-    }
-    if (hasOutput) {
-        return `Out ${formatCost(outputCost)}`;
-    }
-    return null;
-};
-
 const getCapabilityIcons = (metadata?: ModelMetadata) => {
     const result: { key: string; icon: IconComponent; label: string }[] = [];
     for (const definition of CAPABILITY_DEFINITIONS) {
@@ -419,9 +353,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const toggleFavoriteModel = useUIStore((state) => state.toggleFavoriteModel);
     const reorderFavoriteModel = useUIStore((state) => state.reorderFavoriteModel);
     const isFavoriteModel = useUIStore((state) => state.isFavoriteModel);
-    const collapsedModelProviders = useUIStore((state) => state.collapsedModelProviders);
-    const toggleModelProviderCollapsed = useUIStore((state) => state.toggleModelProviderCollapsed);
-    const setModelProvidersCollapsed = useUIStore((state) => state.setModelProvidersCollapsed);
     const addRecentModel = useUIStore((state) => state.addRecentModel);
     const addRecentAgent = useUIStore((state) => state.addRecentAgent);
     const addRecentEffort = useUIStore((state) => state.addRecentEffort);
@@ -434,24 +365,12 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const cycleAgentShortcut = React.useMemo(() => (
         getEffectiveShortcutCombo('cycle_agent', cycleAgentShortcutOverride ? { cycle_agent: cycleAgentShortcutOverride } : undefined)
     ), [cycleAgentShortcutOverride]);
-    const cycleAgentShortcutLabel = React.useMemo(() => formatShortcutForDisplay(cycleAgentShortcut), [cycleAgentShortcut]);
-    const collapsedProviderSet = React.useMemo(() => {
-        const result = new Set<string>();
-        for (const providerId of collapsedModelProviders) {
-            const trimmed = providerId.trim();
-            if (trimmed) {
-                result.add(trimmed);
-            }
-        }
-        return result;
-    }, [collapsedModelProviders]);
 
     // Separate state for agent selector to avoid conflict with model selector
     const [isAgentSelectorOpen, setIsAgentSelectorOpen] = React.useState(false);
     const { favoriteModelsList, recentModelsList } = useModelLists();
 
-    const { isMobile, isTablet } = useDeviceInfo();
-    const alwaysShowHoverDetails = isMobile || isTablet;
+    const { isMobile } = useDeviceInfo();
     const isDesktop = React.useMemo(() => isDesktopShell(), []);
     const isVSCodeRuntime = useIsVSCodeRuntime();
     // Only use mobile panels on actual mobile devices, VSCode uses desktop dropdowns
@@ -486,15 +405,12 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         closeMobilePanel();
     }, [setSelectedProvider, setSettingsPage, setSettingsDialogOpen, setAgentMenuOpen, closeMobilePanel]);
     const [desktopModelQuery, setDesktopModelQuery] = React.useState('');
-    const [modelSelectedIndex, setModelSelectedIndex] = React.useState(0);
-    const modelItemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
     const keyboardOwnsModelSelectionRef = React.useRef(false);
     const lastModelPointerPositionRef = React.useRef<{ x: number; y: number } | null>(null);
+    const activeModelPickerEntryRef = React.useRef<ModelPickerEntry | undefined>(undefined);
     const [pendingThinkingVariants, setPendingThinkingVariants] = React.useState<Map<string, string | undefined>>(new Map());
     const [adjustedThinkingModels, setAdjustedThinkingModels] = React.useState<Set<string>>(new Set());
-    const favoriteRowSensors = useSensors(
-        useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-    );
+    const [modelPickerRenderVersion, setModelPickerRenderVersion] = React.useState(0);
 
     React.useEffect(() => {
         if (activeMobilePanel === 'model') {
@@ -532,7 +448,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
         if (!isModelSelectorOpen) {
             setDesktopModelQuery('');
-            setModelSelectedIndex(0);
             keyboardOwnsModelSelectionRef.current = false;
             lastModelPointerPositionRef.current = null;
             setPendingThinkingVariants(new Map());
@@ -653,82 +568,14 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         );
     }, [normalizeModelSearchValue]);
 
-    const getDesktopModelPickerSelectedIndex = React.useCallback((query: string) => {
-        const normalizedQuery = query.trim();
-        const forceExpandProviders = normalizedQuery.length > 0;
-        const matchesQuery = (modelName: string, providerName: string) => {
-            if (!normalizedQuery) return true;
-            return matchesModelSearch(modelName, normalizedQuery) || matchesModelSearch(providerName, normalizedQuery);
-        };
-        const providersById = new Map(providers.map((p) => [p.id, p]));
-
-        let flatIndex = 0;
-
-        for (const { model, providerID, modelID } of favoriteModelsList) {
-            const provider = providersById.get(providerID);
-            const providerName = provider?.name || providerID;
-            const modelName = getModelDisplayName(model);
-            if (!matchesQuery(modelName, providerName)) {
-                continue;
-            }
-            if (providerID === currentProviderId && modelID === currentModelId) {
-                return flatIndex;
-            }
-            flatIndex += 1;
-        }
-
-        for (const { model, providerID, modelID } of recentModelsList) {
-            const provider = providersById.get(providerID);
-            const providerName = provider?.name || providerID;
-            const modelName = getModelDisplayName(model);
-            if (!matchesQuery(modelName, providerName)) {
-                continue;
-            }
-            if (providerID === currentProviderId && modelID === currentModelId) {
-                return flatIndex;
-            }
-            flatIndex += 1;
-        }
-
-        for (const provider of visibleProviders) {
-            const providerId = typeof provider.id === 'string' ? provider.id : '';
-            const providerName = provider.name || providerId;
-            const providerModels = Array.isArray(provider.models) ? (provider.models as ProviderModel[]) : [];
-            const filteredModels = providerModels.filter((model) => matchesQuery(getModelDisplayName(model), providerName));
-            const isExpanded = forceExpandProviders || !collapsedProviderSet.has(providerId);
-            if (!isExpanded) {
-                continue;
-            }
-            for (const model of filteredModels) {
-                const modelId = typeof model.id === 'string' ? model.id : '';
-                if (providerId === currentProviderId && modelId === currentModelId) {
-                    return flatIndex;
-                }
-                flatIndex += 1;
-            }
-        }
-
-        return 0;
-    }, [
-        collapsedProviderSet,
-        currentModelId,
-        currentProviderId,
-        favoriteModelsList,
-        matchesModelSearch,
-        providers,
-        recentModelsList,
-        visibleProviders,
-    ]);
-
-    React.useEffect(() => {
-        if (!isModelSelectorOpen) {
-            return;
-        }
-        setModelSelectedIndex(getDesktopModelPickerSelectedIndex(desktopModelQuery));
-    }, [desktopModelQuery, getDesktopModelPickerSelectedIndex, isModelSelectorOpen]);
-
-    const currentMetadata =
-        currentProviderId && currentModelId ? getModelMetadata(currentProviderId, currentModelId) : undefined;
+    const currentModelForMetadata = currentModelId
+        ? models.find((model: ProviderModel) => model.id === currentModelId)
+        : undefined;
+    const currentMetadata = currentProviderId && currentModelId && currentModelForMetadata
+        ? mergeModelMetadataWithLiveModel(currentProviderId, currentModelForMetadata, getModelMetadata(currentProviderId, currentModelId))
+        : currentProviderId && currentModelId
+            ? getModelMetadata(currentProviderId, currentModelId)
+            : undefined;
     const localizeMetaLabel = React.useCallback((label: string) => {
         if (label === 'Tool calling') return t('chat.modelControls.capability.toolCalling');
         if (label === 'Reasoning') return t('chat.modelControls.capability.reasoning');
@@ -1735,7 +1582,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         }) => {
             const rowKey = buildModelRefKey(providerId, modelId);
             const isSelected = providerId === currentProviderId && modelId === currentModelId;
-            const metadata = getModelMetadata(providerId, modelId);
+            const metadata = mergeModelMetadataWithLiveModel(providerId, model, getModelMetadata(providerId, modelId));
             const variantOptions = getModelVariantOptions(providerId, modelId);
             const hasVariants = variantOptions.length > 0;
             const resolvedVariant = resolveModelVariantSelection(providerId, modelId);
@@ -2252,416 +2099,66 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         </TooltipContent>
     );
 
-    // Helper to render a single model row in the flat dropdown
-    const renderModelRow = (
-        model: ProviderModel,
-        providerID: string,
-        modelID: string,
-        keyPrefix: string,
-        flatIndex: number,
-        isHighlighted: boolean,
-        dragHandleProps?: SortableFavoriteHandleProps | null,
-    ) => {
-        const metadata = getModelMetadata(providerID, modelID);
-        const capabilityIcons = getCapabilityIcons(metadata).map((icon) => ({
-            ...icon,
-            label: localizeMetaLabel(icon.label),
-            id: `cap-${icon.key}`,
-        }));
-        const modalityIcons = [
-            ...getModalityIcons(metadata, 'input').map((icon) => ({ ...icon, label: localizeMetaLabel(icon.label) })),
-            ...getModalityIcons(metadata, 'output').map((icon) => ({ ...icon, label: localizeMetaLabel(icon.label) })),
-        ];
-        const uniqueModalityIcons = Array.from(
-            new Map(modalityIcons.map((icon) => [icon.key, icon])).values()
-        ).map((icon) => ({ ...icon, id: `mod-${icon.key}` }));
-        const indicatorIcons = [...capabilityIcons, ...uniqueModalityIcons];
-        const contextTokens = formatTokens(metadata?.limit?.context);
-        const isSelected = currentProviderId === providerID && currentModelId === modelID;
-        const isFavorite = isFavoriteModel(providerID, modelID);
-
-        const showProviderLogo = keyPrefix === 'fav' || keyPrefix === 'recent';
-
-        // Check if model supports thinking variants - variants are on the model object, not metadata
-        const modelVariants = (model as { variants?: Record<string, unknown> } | undefined)?.variants;
-        const hasThinkingVariants = modelVariants && Object.keys(modelVariants).length > 0;
-        const mapKey = buildModelRefKey(providerID, modelID);
-        const wasAdjusted = adjustedThinkingModels.has(mapKey);
-        const pendingVariant = pendingThinkingVariants.get(mapKey);
-        const effectiveVariant = pendingVariant ?? (isSelected ? currentVariant : undefined);
-
-        // Build thinking variant display - only show for models that were adjusted with arrow keys
-        let thinkingDisplay: React.ReactNode = null;
-        if (hasThinkingVariants && wasAdjusted && (isHighlighted || isSelected)) {
-            const displayLabel = effectiveVariant
-                ? effectiveVariant.charAt(0).toUpperCase() + effectiveVariant.slice(1)
-                : 'Default';
-            thinkingDisplay = (
-                <span key="thinking" className="typography-micro text-muted-foreground whitespace-nowrap">
-                    Thinking: {displayLabel}
-                </span>
-            );
-        }
-
-        // Build animated metadata slides for desktop (price/capabilities) - only shown when not showing thinking
-        const priceText = formatCompactPrice(metadata);
-        const hasPrice = priceText !== null;
-        const hasCapabilities = indicatorIcons.length > 0;
-
-        const slides: React.ReactNode[] = [];
-        if (hasPrice) {
-            slides.push(
-                <span key="price" className="typography-micro text-muted-foreground whitespace-nowrap">
-                    {priceText}
-                </span>
-            );
-        }
-        if (hasCapabilities) {
-            slides.push(
-                <div key="capabilities" className="flex items-center gap-0.5">
-                    {indicatorIcons.map(({ id, icon: iconName, label }) => (
-                        <span
-                            key={id}
-                            className="flex size-3.5 items-center justify-center text-muted-foreground"
-                            aria-label={label}
-                            role="img"
-                            title={label}
-                        >
-                            <Icon name={iconName} className="size-2.5" />
-                        </span>
-                    ))}
-                </div>
-            );
-        }
-
-        const supportsRotatingMetadata = !isVSCodeRuntime;
-        const shouldShowThinking = hasThinkingVariants && wasAdjusted;
-        const shouldAnimate = supportsRotatingMetadata && slides.length > 1 && (isHighlighted || isSelected) && !shouldShowThinking;
-        const staticSlideIndex = !supportsRotatingMetadata && hasCapabilities && hasPrice ? 1 : 0;
-        const staticMetadataSlide = slides[staticSlideIndex];
-
-        const handlePointerActivity = (event: React.MouseEvent) => {
-            const nextPosition = { x: event.clientX, y: event.clientY };
-            const previousPosition = lastModelPointerPositionRef.current;
-            const pointerMoved = !previousPosition
-                || previousPosition.x !== nextPosition.x
-                || previousPosition.y !== nextPosition.y;
-
-            lastModelPointerPositionRef.current = nextPosition;
-
-            if (keyboardOwnsModelSelectionRef.current && !pointerMoved) {
-                return;
-            }
-
-            if (keyboardOwnsModelSelectionRef.current && pointerMoved) {
-                keyboardOwnsModelSelectionRef.current = false;
-            }
-
-            setModelSelectedIndex(flatIndex);
-        };
-
-        return (
-            <div
-                key={`${keyPrefix}-${providerID}-${modelID}`}
-                ref={(el) => { modelItemRefs.current[flatIndex] = el; }}
-                role="option"
-                aria-selected={isSelected}
-                className={cn(
-                    "typography-meta group flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer",
-                     isHighlighted ? "bg-interactive-selection" : "hover:bg-interactive-hover/50"
-                )}
-                onClick={() => handleProviderAndModelChange(providerID, modelID)}
-                onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        handleProviderAndModelChange(providerID, modelID);
-                    }
-                }}
-                onMouseEnter={handlePointerActivity}
-                onMouseMove={handlePointerActivity}
-            >
-                {dragHandleProps ? (
-                    <button
-                        type="button"
-                        ref={dragHandleProps.setActivatorNodeRef}
-                        {...dragHandleProps.attributes}
-                        {...dragHandleProps.listeners}
-                        onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                        }}
-                        className="model-favorite-drag-handle flex size-4 flex-shrink-0 items-center justify-center text-muted-foreground hover:text-foreground"
-                        aria-label={t('chat.modelControls.reorderFavoriteAria')}
-                        title={t('chat.modelControls.reorderFavoriteTitle')}
-                    >
-                        <Icon name="draggable" className="size-3.5" />
-                    </button>
-                ) : null}
-                <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                    {showProviderLogo && (
-                        <ProviderLogo providerId={providerID} className="size-3.5 flex-shrink-0" />
-                    )}
-                    <span className="font-medium truncate">
-                        {getModelDisplayName(model)}
-                    </span>
-                    {metadata?.limit?.context ? (
-                        <span className="typography-micro text-muted-foreground flex-shrink-0">
-                            {contextTokens}
-                        </span>
-                    ) : null}
-                </div>
-                <div className="flex items-center gap-1 flex-shrink-0">
-                    {/* Metadata slot: thinking variant for adjusted models, otherwise price/capabilities carousel */}
-                    {shouldShowThinking && (isHighlighted || isSelected) ? (
-                        <div className="flex w-[140px] justify-end items-center">
-                            {thinkingDisplay}
-                        </div>
-                    ) : slides.length > 0 ? (
-                        <div className={cn(
-                            "items-center",
-                            shouldAnimate ? "flex w-[140px] justify-end" : ((isHighlighted || isSelected || alwaysShowHoverDetails) ? "flex" : "hidden group-hover:flex")
-                        )}>
-                            {shouldAnimate ? (
-                                <TextLoop interval={2.1} transition={{ duration: 0.25 }} trigger={shouldAnimate}>
-                                    {slides}
-                                </TextLoop>
-                            ) : (
-                                <>
-                                    {/* In static runtimes (VS Code), prefer capabilities over price when both exist. */}
-                                    {staticMetadataSlide}
-                                </>
-                            )}
-                        </div>
-                    ) : null}
-                    {isSelected && (
-                        <Icon name="check" className="size-4 text-primary" />
-                    )}
-                    <button
-                        onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            toggleFavoriteModel(providerID, modelID);
-                        }}
-                        className={cn(
-                            "model-favorite-button flex size-4 items-center justify-center hover:text-primary/80",
-                            isFavorite ? "text-primary" : "text-muted-foreground"
-                        )}
-                        aria-label={isFavorite
-                            ? t('chat.modelControls.unfavoriteAria')
-                            : t('chat.modelControls.favoriteAria')}
-                        title={isFavorite
-                            ? t('chat.modelControls.removeFromFavorites')
-                            : t('chat.modelControls.addToFavorites')}
-                    >
-                        {isFavorite ? (
-                            <Icon name="star-fill" className="size-3.5" />
-                        ) : (
-                            <Icon name="star" className="size-3.5" />
-                        )}
-                    </button>
-                </div>
-            </div>
-        );
-    };
-
-    type FlatModelItem = { model: ProviderModel; providerID: string; modelID: string; section: string };
-
-    const modelSelectorData = React.useMemo(() => {
-        const filterByQuery = (modelName: string, providerName: string, query: string) => {
-            if (!query.trim()) return true;
-            return (
-                matchesModelSearch(modelName, query) ||
-                matchesModelSearch(providerName, query)
-            );
-        };
-
-        const normalizedDesktopQuery = desktopModelQuery.trim();
-        const forceExpandProviders = normalizedDesktopQuery.length > 0;
-
-        const filteredFavorites = favoriteModelsList.filter(({ model, providerID }) => {
-            const provider = providers.find(p => p.id === providerID);
-            const providerName = provider?.name || providerID;
-            const modelName = getModelDisplayName(model);
-            return filterByQuery(modelName, providerName, desktopModelQuery);
-        });
-        const favoriteSortingEnabled = normalizedDesktopQuery.length === 0 && filteredFavorites.length > 1;
-
-        const filteredRecents = recentModelsList.filter(({ model, providerID }) => {
-            const provider = providers.find(p => p.id === providerID);
-            const providerName = provider?.name || providerID;
-            const modelName = getModelDisplayName(model);
-            return filterByQuery(modelName, providerName, desktopModelQuery);
-        });
-
-        const filteredProviders: typeof visibleProviders = [];
-        for (const provider of visibleProviders) {
-            const providerModels = Array.isArray(provider.models) ? provider.models : [];
-            const filteredModels = providerModels.filter((model: ProviderModel) => {
-                const modelName = getModelDisplayName(model);
-                return filterByQuery(modelName, provider.name || provider.id || '', desktopModelQuery);
-            });
-            if (filteredModels.length > 0) {
-                filteredProviders.push({ ...provider, models: filteredModels });
-            }
-        }
-
-        const providerSections = filteredProviders.map((provider) => {
-            const providerId = typeof provider.id === 'string' ? provider.id : '';
-            const isExpanded = forceExpandProviders || !collapsedProviderSet.has(providerId);
-            const models = Array.isArray(provider.models) ? (provider.models as ProviderModel[]) : [];
-            return {
-                provider,
-                isExpanded,
-                models,
-                visibleModels: isExpanded ? models : [],
-            };
-        });
-
-        const hasResults =
-            filteredFavorites.length > 0 ||
-            filteredRecents.length > 0 ||
-            filteredProviders.length > 0;
-
-        const filteredProviderIds: string[] = [];
-        for (const provider of filteredProviders) {
-            if (typeof provider.id === 'string' && provider.id) {
-                filteredProviderIds.push(provider.id);
-            }
-        }
-
-        const favoriteModelLookup = new Map(
-            filteredFavorites.map(({ providerID, modelID }) => [buildModelRefKey(providerID, modelID), { providerID, modelID }])
-        );
-        const flatModelList: FlatModelItem[] = [];
-
-        filteredFavorites.forEach(({ model, providerID, modelID }) => {
-            flatModelList.push({ model, providerID, modelID, section: 'fav' });
-        });
-        filteredRecents.forEach(({ model, providerID, modelID }) => {
-            flatModelList.push({ model, providerID, modelID, section: 'recent' });
-        });
-        providerSections.forEach(({ provider, visibleModels }) => {
-            visibleModels.forEach((model) => {
-                flatModelList.push({ model, providerID: provider.id as string, modelID: model.id as string, section: 'provider' });
-            });
-        });
-
-        return {
-            filteredFavorites,
-            filteredRecents,
-            filteredProviders,
-            providerSections,
-            flatModelList,
-            hasResults,
-            forceExpandProviders,
-            favoriteSortingEnabled,
-            filteredProviderIds,
-            favoriteModelLookup,
-        };
-    }, [desktopModelQuery, favoriteModelsList, recentModelsList, visibleProviders, providers, collapsedProviderSet, matchesModelSearch]);
-
     const renderModelSelector = () => {
-        const {
-            filteredFavorites,
-            filteredRecents,
-            filteredProviders,
-            providerSections,
-            flatModelList,
-            hasResults,
-            forceExpandProviders,
-            favoriteSortingEnabled,
-            filteredProviderIds,
-            favoriteModelLookup,
-        } = modelSelectorData;
-
-        const totalItems = flatModelList.length;
-
-        // Check if currently highlighted model supports thinking variants
-        const highlightedItem = flatModelList[modelSelectedIndex];
-        const highlightedSupportsThinking = highlightedItem ? (() => {
-            const modelVariants = (highlightedItem.model as { variants?: Record<string, unknown> } | undefined)?.variants;
-            return modelVariants && Object.keys(modelVariants).length > 0;
-        })() : false;
-
-        // Handle keyboard navigation
-        const handleModelKeyDown = (e: React.KeyboardEvent) => {
-            e.stopPropagation();
+        const handleThinkingVariantKey = (e: React.KeyboardEvent, selectedItem: ModelPickerEntry) => {
             keyboardOwnsModelSelectionRef.current = true;
+            if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return false;
 
+            const { providerID, modelID } = selectedItem;
+            const canonicalProvider = useConfigStore.getState().providers.find((provider) => provider.id === providerID);
+            const canonicalModel = canonicalProvider?.models.find((model) => model.id === modelID) as { variants?: Record<string, unknown> } | undefined;
+            const variantKeys = canonicalModel?.variants ? Object.keys(canonicalModel.variants) : getModelVariantOptions(providerID, modelID);
+            if (variantKeys.length === 0) return false;
+
+            e.preventDefault();
+            e.stopPropagation();
+
+            const mapKey = buildModelRefKey(providerID, modelID);
+            const hasPendingVariant = pendingThinkingVariants.has(mapKey);
+            const currentPending = pendingThinkingVariants.get(mapKey);
+            const activeModelVariant = hasPendingVariant ? currentPending : (currentProviderId === providerID && currentModelId === modelID ? currentVariant : undefined);
+
+            const variantsWithDefault: Array<string | undefined> = [undefined, ...variantKeys];
+            const currentVariantIndex = variantsWithDefault.indexOf(activeModelVariant);
+            const safeCurrentIndex = currentVariantIndex >= 0 ? currentVariantIndex : 0;
+            const direction = e.key === 'ArrowRight' ? 1 : -1;
+            const nextVariantIndex = (safeCurrentIndex + direction + variantsWithDefault.length) % variantsWithDefault.length;
+            const nextVariant = variantsWithDefault[nextVariantIndex];
+
+            setPendingThinkingVariants((prev) => {
+                const next = new Map(prev);
+                next.set(mapKey, nextVariant);
+                return next;
+            });
+            setAdjustedThinkingModels((prev) => {
+                const next = new Set(prev);
+                next.add(mapKey);
+                return next;
+            });
+            setModelPickerRenderVersion((version) => version + 1);
+            return true;
+        };
+
+        const handleModelPickerKeyDown = (e: React.KeyboardEvent, selectedItem: ModelPickerEntry | undefined) => {
             const cycleAgentDirection = getCycleAgentDirectionFromEvent(e);
             if (cycleAgentDirection) {
                 e.preventDefault();
                 handleCycleAgentFromModelPicker(cycleAgentDirection);
-            } else if (e.key === 'ArrowDown') {
-                e.preventDefault();
-                setModelSelectedIndex((prev) => (prev + 1) % Math.max(1, totalItems));
-                // Scroll into view
-                setTimeout(() => {
-                    const nextIndex = (modelSelectedIndex + 1) % Math.max(1, totalItems);
-                    modelItemRefs.current[nextIndex]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                }, 0);
-            } else if (e.key === 'ArrowUp') {
-                e.preventDefault();
-                setModelSelectedIndex((prev) => (prev - 1 + Math.max(1, totalItems)) % Math.max(1, totalItems));
-                // Scroll into view
-                setTimeout(() => {
-                    const prevIndex = (modelSelectedIndex - 1 + Math.max(1, totalItems)) % Math.max(1, totalItems);
-                    modelItemRefs.current[prevIndex]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                }, 0);
-            } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-                e.preventDefault();
-                const selectedItem = flatModelList[modelSelectedIndex];
-                if (!selectedItem) return;
-
-                const { providerID, modelID, model } = selectedItem;
-                const modelVariants = (model as { variants?: Record<string, unknown> } | undefined)?.variants;
-                if (!modelVariants) return;
-
-                const variantKeys = Object.keys(modelVariants);
-                if (variantKeys.length === 0) return;
-
-                const mapKey = buildModelRefKey(providerID, modelID);
-                const currentPending = pendingThinkingVariants.get(mapKey);
-                const activeModelVariant = currentPending ?? (currentProviderId === providerID && currentModelId === modelID ? currentVariant : undefined);
-
-                const variantsWithDefault: Array<string | undefined> = [undefined, ...variantKeys];
-                const currentVariantIndex = variantsWithDefault.indexOf(activeModelVariant);
-                const safeCurrentIndex = currentVariantIndex >= 0 ? currentVariantIndex : 0;
-                const direction = e.key === 'ArrowRight' ? 1 : -1;
-                const nextVariantIndex = Math.min(
-                    variantsWithDefault.length - 1,
-                    Math.max(0, safeCurrentIndex + direction),
-                );
-                const nextVariant = variantsWithDefault[nextVariantIndex];
-
-                setPendingThinkingVariants((prev) => {
-                    const next = new Map(prev);
-                    next.set(mapKey, nextVariant);
-                    return next;
-                });
-                setAdjustedThinkingModels((prev) => {
-                    const next = new Set(prev);
-                    next.add(mapKey);
-                    return next;
-                });
-            } else if (e.key === 'Enter') {
-                e.preventDefault();
-                const selectedItem = flatModelList[modelSelectedIndex];
-                if (selectedItem) {
-                    const { providerID, modelID } = selectedItem;
-                    const mapKey = buildModelRefKey(providerID, modelID);
-                    const pendingVariant = pendingThinkingVariants.get(mapKey);
-                    const wasAdjusted = adjustedThinkingModels.has(mapKey);
-                    const effectiveAgentName = resolveLiveAgentName();
-
-                    handleProviderAndModelChange(providerID, modelID, wasAdjusted
-                        ? { applyVariant: true, variant: pendingVariant, agentName: effectiveAgentName }
-                        : { agentName: effectiveAgentName });
-                }
-            } else if (e.key === 'Escape') {
-                e.preventDefault();
-                setAgentMenuOpen(false);
+                return;
             }
+
+            if (selectedItem) handleThinkingVariantKey(e, selectedItem);
+        };
+
+        const handleSharedModelSelect = (entry: ModelPickerEntry) => {
+            const mapKey = buildModelRefKey(entry.providerID, entry.modelID);
+            const pendingVariant = pendingThinkingVariants.get(mapKey);
+            const wasAdjusted = adjustedThinkingModels.has(mapKey);
+            const effectiveAgentName = resolveLiveAgentName();
+
+            handleProviderAndModelChange(entry.providerID, entry.modelID, wasAdjusted
+                ? { applyVariant: true, variant: pendingVariant, agentName: effectiveAgentName }
+                : { agentName: effectiveAgentName });
         };
 
         const handleModelShortcutKeyDownCapture = (e: React.KeyboardEvent) => {
@@ -2676,40 +2173,45 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             handleCycleAgentFromModelPicker(cycleAgentDirection);
         };
 
-        const handleFavoriteDragEnd = (event: DragEndEvent) => {
-            const { active, over } = event;
-            if (!over || active.id === over.id) {
-                return;
-            }
-
-            const activeFavorite = favoriteModelLookup.get(String(active.id));
-            const overFavorite = favoriteModelLookup.get(String(over.id));
-            if (!activeFavorite || !overFavorite) {
-                return;
-            }
-
-            reorderFavoriteModel(
-                activeFavorite.providerID,
-                activeFavorite.modelID,
-                overFavorite.providerID,
-                overFavorite.modelID,
-            );
-        };
-
-        const handleProviderSectionToggle = (expand: boolean) => {
-            if (filteredProviderIds.length === 0) {
-                return;
-            }
-            setModelProvidersCollapsed(filteredProviderIds, !expand);
-            setModelSelectedIndex(0);
-        };
-
         const handleModelMenuOpenChange = (nextOpen: boolean) => {
             setAgentMenuOpen(nextOpen);
         };
 
-        // Build index mapping for rendering
-        let currentFlatIndex = 0;
+        const modelPickerLabels = {
+            searchPlaceholder: t('chat.modelControls.searchModels'),
+            noResults: t('chat.modelControls.noModelsFound'),
+            favorites: t('chat.modelControls.favorites'),
+            recent: t('chat.modelControls.recent'),
+            keyboardHint: t('chat.modelControls.keyboardHintNavigate'),
+            favorite: t('chat.modelControls.favoriteAria'),
+            unfavorite: t('chat.modelControls.unfavoriteAria'),
+            capabilities: t('chat.modelControls.capabilities'),
+            capabilityToolCalling: t('chat.modelControls.capability.toolCalling'),
+            capabilityReasoning: t('chat.modelControls.capability.reasoning'),
+            input: t('chat.modelControls.input'),
+            output: t('chat.modelControls.output'),
+            costPerMillion: t('chat.modelControls.costPerMillion'),
+        };
+
+        const renderThinkingSlot = (entry: ModelPickerEntry, { isHighlighted, isSelected }: { isHighlighted: boolean; isSelected: boolean }) => {
+            const hasThinkingVariants = getModelVariantOptions(entry.providerID, entry.modelID).length > 0;
+            const mapKey = buildModelRefKey(entry.providerID, entry.modelID);
+            const wasAdjusted = adjustedThinkingModels.has(mapKey);
+            if (!hasThinkingVariants || (!isHighlighted && !isSelected)) return null;
+
+            const hasPendingVariant = pendingThinkingVariants.has(mapKey);
+            const pendingVariant = pendingThinkingVariants.get(mapKey);
+            const effectiveVariant = hasPendingVariant ? pendingVariant : (isSelected ? currentVariant : undefined);
+            const displayLabel = effectiveVariant
+                ? effectiveVariant.charAt(0).toUpperCase() + effectiveVariant.slice(1)
+                : 'Default';
+
+            return (
+                <span className={cn('typography-micro whitespace-nowrap', wasAdjusted ? 'text-foreground' : 'text-muted-foreground')}>
+                    Thinking: {displayLabel}
+                </span>
+            );
+        };
 
         return (
             <Tooltip delayDuration={600}>
@@ -2770,201 +2272,60 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                             alignOffset={-40}
                             onKeyDownCapture={handleModelShortcutKeyDownCapture}
                         >
-                            {/* Search Input */}
-                            <div className="p-2 border-b border-border/40">
-                                <div className="relative">
-                                    <Icon name="search" className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
-                                    <Input
-                                        type="text"
-                                        placeholder={t('chat.modelControls.searchModels')}
-                                        value={desktopModelQuery}
-                                        onChange={(e) => setDesktopModelQuery(e.target.value)}
-                                        onKeyDown={handleModelKeyDown}
-                                        className="pl-8 h-8 typography-meta"
-                                    />
-                                </div>
-                            </div>
-
-                            {/* Scrollable content */}
-                            <ScrollableOverlay
-                                outerClassName="max-h-[min(400px,calc(100dvh-12rem))] flex-1"
-                                className="overlay-scrollbar-target--no-gutter"
-                            >
-                                <div className="p-1">
-                                    <div
-                                        role="button"
-                                        tabIndex={0}
-                                        onClick={openAddProviderSettings}
-                                        onKeyDown={(e) => {
-                                            if (e.key === 'Enter' || e.key === ' ') {
-                                                e.preventDefault();
-                                                openAddProviderSettings();
-                                            }
-                                        }}
-                                        className="typography-meta group flex items-center gap-1 rounded-md px-2 py-1.5 cursor-pointer hover:bg-interactive-hover/50"
-                                    >
-                                        <span className="flex size-4 items-center justify-center text-muted-foreground">
-                                            <Icon name="add" className="size-4 -mr-0.5" />
-                                        </span>
-                                        <span className="font-medium text-foreground">{t('chat.modelControls.addNewProvider')}</span>
-                                    </div>
-
-                                    <DropdownMenuSeparator />
-
-                                    {!hasResults && (
-                                        <div className="px-2 py-4 text-center typography-meta text-muted-foreground">
-                                            {t('chat.modelControls.noModelsFound')}
-                                        </div>
-                                    )}
-
-                                    {/* Favorites Section */}
-                                    {filteredFavorites.length > 0 && (
-                                        <div>
-                                            <DropdownMenuLabel
-                                                className="typography-micro font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2 -mx-1 px-3 py-1.5 border-b border-border/30"
-                                            >
-                                                <Icon name="star-fill" className="size-4 text-primary" />
-                                                {t('chat.modelControls.favorites')}
-                                            </DropdownMenuLabel>
-                                            {favoriteSortingEnabled ? (
-                                                <DndContext
-                                                    sensors={favoriteRowSensors}
-                                                    collisionDetection={closestCenter}
-                                                    onDragEnd={handleFavoriteDragEnd}
-                                                >
-                                                    <SortableContext
-                                                        items={filteredFavorites.map(({ providerID, modelID }) => buildModelRefKey(providerID, modelID))}
-                                                        strategy={verticalListSortingStrategy}
-                                                    >
-                                                        {filteredFavorites.map(({ model, providerID, modelID }) => {
-                                                            const idx = currentFlatIndex++;
-                                                            return (
-                                                                <SortableFavoriteModelRow
-                                                                    key={buildModelRefKey(providerID, modelID)}
-                                                                    id={buildModelRefKey(providerID, modelID)}
-                                                                >
-                                                                    {(dragHandleProps) => renderModelRow(
-                                                                        model,
-                                                                        providerID,
-                                                                        modelID,
-                                                                        'fav',
-                                                                        idx,
-                                                                        modelSelectedIndex === idx,
-                                                                        dragHandleProps,
-                                                                    )}
-                                                                </SortableFavoriteModelRow>
-                                                            );
-                                                        })}
-                                                    </SortableContext>
-                                                </DndContext>
-                                            ) : (
-                                                filteredFavorites.map(({ model, providerID, modelID }) => {
-                                                    const idx = currentFlatIndex++;
-                                                    return renderModelRow(model, providerID, modelID, 'fav', idx, modelSelectedIndex === idx);
-                                                })
-                                            )}
-                                        </div>
-                                    )}
-
-                                    {/* Recents Section */}
-                                    {filteredRecents.length > 0 && (
-                                        <div>
-                                            {filteredFavorites.length > 0 && <DropdownMenuSeparator />}
-                                            <DropdownMenuLabel
-                                                className="typography-micro font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2 -mx-1 px-3 py-1.5 border-b border-border/30"
-                                            >
-                                                <Icon name="time" className="size-4" />
-                                                {t('chat.modelControls.recent')}
-                                            </DropdownMenuLabel>
-                                            {filteredRecents.map(({ model, providerID, modelID }) => {
-                                                const idx = currentFlatIndex++;
-                                                return renderModelRow(model, providerID, modelID, 'recent', idx, modelSelectedIndex === idx);
-                                            })}
-                                        </div>
-                                    )}
-
-                                    {/* Separator before providers */}
-                                    {(filteredFavorites.length > 0 || filteredRecents.length > 0) && filteredProviders.length > 0 && (
-                                        <DropdownMenuSeparator />
-                                    )}
-
-                                    {/* All Providers - Flat List */}
-                                    {providerSections.map(({ provider, isExpanded, visibleModels }, index) => (
-                                        <div key={provider.id}>
-                                            {index > 0 && <DropdownMenuSeparator />}
-                                            <div
-                                                role="button"
-                                                tabIndex={forceExpandProviders ? -1 : 0}
-                                                aria-disabled={forceExpandProviders}
-                                                onClick={(event) => {
-                                                    if (forceExpandProviders) {
-                                                        return;
-                                                    }
-
-                                                    if (event.metaKey || event.ctrlKey) {
-                                                        handleProviderSectionToggle(!isExpanded);
-                                                        return;
-                                                    }
-
-                                                    toggleModelProviderCollapsed(String(provider.id));
-                                                    setModelSelectedIndex(0);
-                                                }}
-                                                onKeyDown={(event) => {
-                                                    if (forceExpandProviders) {
-                                                        return;
-                                                    }
-                                                    if (event.key === 'Enter' || event.key === ' ') {
-                                                        event.preventDefault();
-                                                        toggleModelProviderCollapsed(String(provider.id));
-                                                        setModelSelectedIndex(0);
-                                                    }
-                                                }}
-                                                className={cn(
-                                                    'typography-micro font-semibold text-muted-foreground uppercase tracking-wider flex w-full items-center gap-2 -mx-1 px-3 py-1.5 border-b border-border/30',
-                                                    'text-left transition-colors',
-                                                    forceExpandProviders ? 'cursor-default' : 'cursor-pointer'
-                                                )}
-                                                aria-expanded={isExpanded}
-                                                title={forceExpandProviders
-                                                    ? undefined
-                                                    : (isExpanded
-                                                        ? t('chat.modelControls.collapseProvider')
-                                                        : t('chat.modelControls.expandProvider'))}
-                                            >
-                                                <div className="flex min-w-0 items-center gap-2">
-                                                    <ProviderLogo
-                                                        providerId={provider.id}
-                                                        className="size-4 flex-shrink-0"
-                                                    />
-                                                    <span className="min-w-0 truncate">{provider.name}</span>
-                                                    <span className="flex size-4 flex-shrink-0 items-center justify-center text-muted-foreground">
-                                                        {isExpanded ? (
-                                                            <Icon name="arrow-down-s" className="size-4" />
-                                                        ) : (
-                                                            <Icon name="arrow-right-s" className="size-4" />
-                                                        )}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                            {isExpanded && visibleModels.map((model: ProviderModel) => {
-                                                const idx = currentFlatIndex++;
-                                                return renderModelRow(model, provider.id as string, model.id as string, 'provider', idx, modelSelectedIndex === idx);
-                                            })}
-                                        </div>
-                                    ))}
-                                </div>
-                            </ScrollableOverlay>
-
-                            {/* Keyboard hints footer */}
-                            <div className="px-3 pt-1 pb-1.5 border-t border-border/40 typography-micro text-muted-foreground">
-                                <div className="flex items-center gap-x-2 whitespace-nowrap overflow-hidden">
-                                    <span>{t('chat.modelControls.keyboardHintNavigate')}</span>
-                                    <span>{t('chat.modelControls.keyboardHintSwitchAgent', { shortcut: cycleAgentShortcutLabel })}</span>
-                                    <span className={cn(!highlightedSupportsThinking && 'invisible')}>
-                                        {t('chat.modelControls.keyboardHintThinking')}
+                            <div className="p-1 border-b border-border/40">
+                                <button
+                                    type="button"
+                                    onClick={openAddProviderSettings}
+                                    className="typography-meta group flex w-full items-center gap-1 rounded-md px-2 py-1.5 cursor-pointer hover:bg-interactive-hover/50"
+                                >
+                                    <span className="flex size-4 items-center justify-center text-muted-foreground">
+                                        <Icon name="add" className="size-4 -mr-0.5" />
                                     </span>
-                                </div>
+                                    <span className="font-medium text-foreground">{t('chat.modelControls.addNewProvider')}</span>
+                                </button>
                             </div>
+                            <ModelPickerList
+                                providers={providers as ModelPickerProvider[]}
+                                favoriteModels={favoriteModelsList}
+                                recentModels={recentModelsList}
+                                modelsMetadata={useConfigStore.getState().modelsMetadata}
+                                searchQuery={desktopModelQuery}
+                                onSearchQueryChange={setDesktopModelQuery}
+                                onSelect={handleSharedModelSelect}
+                                labels={modelPickerLabels}
+                                selectedModel={currentProviderId && currentModelId ? { providerID: currentProviderId, modelID: currentModelId } : null}
+                                hiddenModels={hiddenModels}
+                                onActiveKeyDown={handleModelPickerKeyDown}
+                                onActiveEntryChange={(entry) => { activeModelPickerEntryRef.current = entry; }}
+                                onVariantKey={handleThinkingVariantKey}
+                                isFavorite={(entry) => isFavoriteModel(entry.providerID, entry.modelID)}
+                                onToggleFavorite={(entry) => toggleFavoriteModel(entry.providerID, entry.modelID)}
+                                renderRowEnd={renderThinkingSlot}
+                                renderVersion={modelPickerRenderVersion}
+                                onReorderFavorite={(active, over) => reorderFavoriteModel(
+                                    active.providerID,
+                                    active.modelID,
+                                    over.providerID,
+                                    over.modelID,
+                                )}
+                                reorderFavoriteAriaLabel={t('chat.modelControls.reorderFavoriteAria')}
+                                reorderFavoriteTitle={t('chat.modelControls.reorderFavoriteTitle')}
+                                footerContent={(activeEntry) => {
+                                    const activeHasThinkingVariants = activeEntry
+                                        ? getModelVariantOptions(activeEntry.providerID, activeEntry.modelID).length > 0
+                                        : false;
+
+                                    return (
+                                        <div className="flex items-center gap-x-2 whitespace-nowrap overflow-hidden">
+                                            <span>{t('chat.modelControls.keyboardHintNavigate')}</span>
+                                            <span>{t('chat.modelControls.keyboardHintSwitchAgent', { shortcut: 'Tab' })}</span>
+                                            {activeHasThinkingVariants ? <span>{t('chat.modelControls.keyboardHintThinking')}</span> : null}
+                                        </div>
+                                    );
+                                }}
+                                tooltipsEnabled={agentMenuOpen}
+                                onEscape={() => setAgentMenuOpen(false)}
+                            />
                         </DropdownMenuContent>
                     </DropdownMenu>
                 ) : (

@@ -1415,7 +1415,7 @@ class OpencodeService {
       for (const item of data as Array<Record<string, unknown>>) {
           const name = typeof item.name === 'string' ? item.name.trim() : '';
           const location = typeof item.location === 'string' ? item.location : '';
-          if (!name || !location || location === '<built-in>') {
+          if (!name || !location) {
             continue;
           }
           const skill: { name: string; description?: string; location: string; content?: string } = { name, location };

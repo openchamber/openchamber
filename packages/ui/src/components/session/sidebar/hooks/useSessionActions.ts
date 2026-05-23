@@ -99,16 +99,19 @@ export const useSessionActions = (args: Args) => {
     [args],
   );
 
-  const handleSessionDoubleClick = React.useCallback(() => {
-    args.setActiveMainTab('chat');
+  const handleSessionDoubleClick = React.useCallback((sessionId: string, sessionTitle: string) => {
+    args.setEditingId(sessionId);
+    args.setEditTitle(sessionTitle);
   }, [args]);
 
   const handleSaveEdit = React.useCallback(async () => {
-    if (args.editingId && args.editTitle.trim()) {
-      await args.updateSessionTitle(args.editingId, args.editTitle.trim());
-      args.setEditingId(null);
-      args.setEditTitle('');
+    if (!args.editingId) return;
+    const trimmed = args.editTitle.trim();
+    if (trimmed) {
+      await args.updateSessionTitle(args.editingId, trimmed);
     }
+    args.setEditingId(null);
+    args.setEditTitle('');
   }, [args]);
 
   const handleCancelEdit = React.useCallback(() => {

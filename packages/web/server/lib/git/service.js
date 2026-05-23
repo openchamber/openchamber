@@ -307,6 +307,63 @@ const normalizeDirectoryPath = (value) => {
   return trimmed;
 };
 
+const toGitPath = (value) => value.replace(/\\/g, '/');
+
+const isInsideOrSameDirectory = (root, target) => {
+  const relative = path.relative(root, target);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+};
+
+const resolveGitRepositoryRoot = async (directoryPath, git) => {
+  const topLevel = await git.raw(['rev-parse', '--show-toplevel']);
+  const normalizedTopLevel = topLevel.trim();
+  return path.isAbsolute(normalizedTopLevel)
+    ? path.resolve(normalizedTopLevel)
+    : path.resolve(directoryPath, normalizedTopLevel);
+};
+
+const createRepositoryGitContext = async (directory) => {
+  const directoryPath = normalizeDirectoryPath(directory);
+  const directoryGit = await createGit(directoryPath);
+  const repoRoot = await resolveGitRepositoryRoot(directoryPath, directoryGit);
+  const git = path.resolve(directoryPath) === repoRoot ? directoryGit : await createGit(repoRoot);
+  return { directoryPath, directoryGit, repoRoot, git };
+};
+
+const resolveGitInternalPath = async (repoRoot, git, gitPath) => {
+  const resolved = await git.raw(['rev-parse', '--git-path', gitPath]);
+  return path.resolve(repoRoot, resolved.trim());
+};
+
+const resolveGitFileContext = async (directoryPath, git, filePath, repoRootOverride = null) => {
+  const repoRoot = repoRootOverride || await resolveGitRepositoryRoot(directoryPath, git);
+  const candidates = Array.from(new Set([
+    path.resolve(repoRoot, filePath),
+    path.resolve(directoryPath, filePath),
+  ]));
+
+  for (const absolutePath of candidates) {
+    if (!isInsideOrSameDirectory(repoRoot, absolutePath)) {
+      continue;
+    }
+
+    const repoPath = toGitPath(path.relative(repoRoot, absolutePath));
+    const existsInWorktree = await fsp.stat(absolutePath).then((stat) => stat.isFile()).catch(() => false);
+    const existsInIndex = await git.raw(['cat-file', '-e', `:${repoPath}`]).then(() => true).catch(() => false);
+    const existsInHead = await git.raw(['cat-file', '-e', `HEAD:${repoPath}`]).then(() => true).catch(() => false);
+
+    if (existsInWorktree || existsInIndex || existsInHead) {
+      return {
+        absolutePath,
+        repoPath,
+        repoRoot,
+      };
+    }
+  }
+
+  throw new Error('Invalid file path');
+};
+
 const cleanBranchName = (branch) => {
   if (!branch) {
     return branch;
@@ -593,6 +650,21 @@ const runGitCommand = async (cwd, args) => {
       message: parseGitErrorText(error),
     };
   }
+};
+
+const resolveGitCommitFilePath = async (repoRoot, hash, candidates) => {
+  for (const candidate of candidates) {
+    const [originalTreeResult, modifiedTreeResult] = await Promise.all([
+      runGitCommand(repoRoot, ['ls-tree', '--name-only', `${hash}^`, '--', candidate]),
+      runGitCommand(repoRoot, ['ls-tree', '--name-only', hash, '--', candidate]),
+    ]);
+
+    if ((originalTreeResult.success && originalTreeResult.stdout.trim()) || (modifiedTreeResult.success && modifiedTreeResult.stdout.trim())) {
+      return candidate;
+    }
+  }
+
+  throw new Error('Invalid file path');
 };
 
 const runGitCommandOrThrow = async (cwd, args, fallbackMessage) => {
@@ -1212,11 +1284,11 @@ export async function setLocalIdentity(directory, profile) {
 }
 
 export async function getStatus(directory, options = {}) {
-  const directoryPath = normalizeDirectoryPath(directory);
-  const git = await createGit(directoryPath);
   const lightMode = options.mode === 'light';
 
   try {
+    const { repoRoot, git } = await createRepositoryGitContext(directory);
+
     // Use -uall to show all untracked files individually, not just directories
     const status = await git.status(['-uall']);
 
@@ -1285,7 +1357,7 @@ export async function getStatus(directory, options = {}) {
           continue;
         }
 
-        const absolutePath = path.join(directoryPath, file.path);
+        const absolutePath = path.join(repoRoot, file.path);
 
         try {
           const stat = await fsp.stat(absolutePath);
@@ -1403,7 +1475,8 @@ export async function getStatus(directory, options = {}) {
         const headSha = mergeHead.trim().slice(0, 7);
         // Only set mergeInProgress if we actually have a valid head SHA
         if (headSha) {
-          const mergeMsg = await fsp.readFile(path.join(directoryPath, '.git', 'MERGE_MSG'), 'utf8').catch(() => '');
+          const mergeMsgPath = await resolveGitInternalPath(repoRoot, git, 'MERGE_MSG').catch(() => '');
+          const mergeMsg = mergeMsgPath ? await fsp.readFile(mergeMsgPath, 'utf8').catch(() => '') : '';
           mergeInProgress = {
             head: headSha,
             message: mergeMsg.split('\n')[0] || '',
@@ -1416,13 +1489,15 @@ export async function getStatus(directory, options = {}) {
 
     try {
       // Check for rebase in progress (.git/rebase-merge or .git/rebase-apply)
-      const rebaseMergeExists = await fsp.stat(path.join(directoryPath, '.git', 'rebase-merge')).then(() => true).catch(() => false);
-      const rebaseApplyExists = await fsp.stat(path.join(directoryPath, '.git', 'rebase-apply')).then(() => true).catch(() => false);
+      const rebaseMergePath = await resolveGitInternalPath(repoRoot, git, 'rebase-merge').catch(() => '');
+      const rebaseApplyPath = await resolveGitInternalPath(repoRoot, git, 'rebase-apply').catch(() => '');
+      const rebaseMergeExists = rebaseMergePath ? await fsp.stat(rebaseMergePath).then(() => true).catch(() => false) : false;
+      const rebaseApplyExists = rebaseApplyPath ? await fsp.stat(rebaseApplyPath).then(() => true).catch(() => false) : false;
       
       if (rebaseMergeExists || rebaseApplyExists) {
-        const rebaseDir = rebaseMergeExists ? 'rebase-merge' : 'rebase-apply';
-        const headName = await fsp.readFile(path.join(directoryPath, '.git', rebaseDir, 'head-name'), 'utf8').catch(() => '');
-        const onto = await fsp.readFile(path.join(directoryPath, '.git', rebaseDir, 'onto'), 'utf8').catch(() => '');
+        const rebasePath = rebaseMergeExists ? rebaseMergePath : rebaseApplyPath;
+        const headName = await fsp.readFile(path.join(rebasePath, 'head-name'), 'utf8').catch(() => '');
+        const onto = await fsp.readFile(path.join(rebasePath, 'onto'), 'utf8').catch(() => '');
         
         const headNameTrimmed = headName.trim().replace('refs/heads/', '');
         const ontoTrimmed = onto.trim().slice(0, 7);
@@ -1462,11 +1537,12 @@ export async function getStatus(directory, options = {}) {
   }
 }
 
-export async function getDiff(directory, { path, staged = false, contextLines = 3 } = {}) {
-  const git = await createGit(directory);
+export async function getDiff(directory, { path: filePath, staged = false, contextLines = 3 } = {}) {
+  const { directoryPath, directoryGit, repoRoot, git } = await createRepositoryGitContext(directory);
 
   try {
     const args = ['diff', '--no-color'];
+    const fileContext = filePath ? await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot) : null;
 
     if (typeof contextLines === 'number' && !Number.isNaN(contextLines)) {
       args.push(`-U${Math.max(0, contextLines)}`);
@@ -1476,8 +1552,8 @@ export async function getDiff(directory, { path, staged = false, contextLines = 
       args.push('--cached');
     }
 
-    if (path) {
-      args.push('--', path);
+    if (fileContext) {
+      args.push('--', fileContext.repoPath);
     }
 
     const diff = await git.raw(args);
@@ -1489,15 +1565,19 @@ export async function getDiff(directory, { path, staged = false, contextLines = 
       return diff;
     }
 
+    if (!fileContext) {
+      return diff;
+    }
+
     try {
-      await git.raw(['ls-files', '--error-unmatch', path]);
+      await git.raw(['ls-files', '--error-unmatch', '--', fileContext.repoPath]);
       return diff;
     } catch {
       const noIndexArgs = ['diff', '--no-color'];
       if (typeof contextLines === 'number' && !Number.isNaN(contextLines)) {
         noIndexArgs.push(`-U${Math.max(0, contextLines)}`);
       }
-      noIndexArgs.push('--no-index', '--', '/dev/null', path);
+      noIndexArgs.push('--no-index', '--', '/dev/null', fileContext.repoPath);
       try {
         const noIndexDiff = await git.raw(noIndexArgs);
         return noIndexDiff;
@@ -1515,8 +1595,8 @@ export async function getDiff(directory, { path, staged = false, contextLines = 
   }
 }
 
-export async function getRangeDiff(directory, { base, head, path, contextLines = 3 } = {}) {
-  const git = await createGit(directory);
+export async function getRangeDiff(directory, { base, head, path: filePath, contextLines = 3 } = {}) {
+  const { directoryPath, directoryGit, repoRoot, git } = await createRepositoryGitContext(directory);
   const baseRef = typeof base === 'string' ? base.trim() : '';
   const headRef = typeof head === 'string' ? head.trim() : '';
   if (!baseRef || !headRef) {
@@ -1541,15 +1621,16 @@ export async function getRangeDiff(directory, { base, head, path, contextLines =
     args.push(`-U${Math.max(0, contextLines)}`);
   }
   args.push(`${resolvedBase}...${headRef}`);
-  if (path) {
-    args.push('--', path);
+  if (filePath) {
+    const fileContext = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
+    args.push('--', fileContext.repoPath);
   }
   const diff = await git.raw(args);
   return diff;
 }
 
 export async function getRangeFiles(directory, { base, head } = {}) {
-  const git = await createGit(directory);
+  const { git } = await createRepositoryGitContext(directory);
   const baseRef = typeof base === 'string' ? base.trim() : '';
   const headRef = typeof head === 'string' ? head.trim() : '';
   if (!baseRef || !headRef) {
@@ -1686,15 +1767,14 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
     throw new Error('directory and path are required for getFileDiff');
   }
 
-  const directoryPath = normalizeDirectoryPath(directory);
-  const git = await createGit(directoryPath);
+  const { directoryPath, directoryGit, repoRoot, git } = await createRepositoryGitContext(directory);
   const isImage = isImageFile(filePath);
   const mimeType = isImage ? getImageMimeType(filePath) : null;
+  const { absolutePath, repoPath } = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
 
   if (!isImage) {
-    const absolutePath = path.join(directoryPath, filePath);
     const isBinaryBySniff = await looksBinaryBySniff(absolutePath);
-    const isBinary = isBinaryBySniff || (await isBinaryDiff(directoryPath, filePath, staged));
+    const isBinary = isBinaryBySniff || (await isBinaryDiff(repoRoot, repoPath, staged));
     if (isBinary) {
       return {
         original: '',
@@ -1710,8 +1790,8 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
     if (isImage) {
       // For images, use git show with raw output and convert to base64
       try {
-        const { stdout } = await execFileAsync(getGitBinary(), ['show', `HEAD:${filePath}`], {
-          cwd: directoryPath,
+        const { stdout } = await execFileAsync(getGitBinary(), ['show', `HEAD:${repoPath}`], {
+          cwd: repoRoot,
           encoding: 'buffer',
           windowsHide: true,
           maxBuffer: 50 * 1024 * 1024, // 50MB max
@@ -1723,23 +1803,22 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
         original = '';
       }
     } else {
-      original = await git.show([`HEAD:${filePath}`]);
+      original = await git.show([`HEAD:${repoPath}`]);
     }
   } catch {
     original = '';
   }
 
-  const fullPath = path.join(directoryPath, filePath);
   let modified = '';
   try {
-    const stat = await fsp.stat(fullPath);
+    const stat = await fsp.stat(absolutePath);
     if (stat.isFile()) {
       if (isImage) {
         // For images, read as binary and convert to data URL
-        const buffer = await fsp.readFile(fullPath);
+        const buffer = await fsp.readFile(absolutePath);
         modified = `data:${mimeType};base64,${buffer.toString('base64')}`;
       } else {
-        modified = await fsp.readFile(fullPath, 'utf8');
+        modified = await fsp.readFile(absolutePath, 'utf8');
       }
     }
   } catch (error) {
@@ -1761,26 +1840,23 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
 
 export async function revertFile(directory, filePath) {
   const directoryPath = normalizeDirectoryPath(directory);
-  const git = await createGit(directoryPath);
-  const repoRoot = path.resolve(directoryPath);
-  const absoluteTarget = path.resolve(repoRoot, filePath);
-
-  if (!absoluteTarget.startsWith(repoRoot + path.sep) && absoluteTarget !== repoRoot) {
-    throw new Error('Invalid file path');
-  }
+  const directoryGit = await createGit(directoryPath);
+  const repoRoot = await resolveGitRepositoryRoot(directoryPath, directoryGit);
+  const { absolutePath, repoPath } = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
+  const git = await createGit(repoRoot);
 
   const isTracked = await git
-    .raw(['ls-files', '--error-unmatch', filePath])
+    .raw(['ls-files', '--error-unmatch', '--', repoPath])
     .then(() => true)
     .catch(() => false);
 
   if (!isTracked) {
     try {
-      await git.raw(['clean', '-f', '-d', '--', filePath]);
+      await git.raw(['clean', '-f', '-d', '--', repoPath]);
       return;
     } catch (cleanError) {
       try {
-        await fsp.rm(absoluteTarget, { recursive: true, force: true });
+        await fsp.rm(absolutePath, { recursive: true, force: true });
         return;
       } catch (fsError) {
         if (fsError && typeof fsError === 'object' && fsError.code === 'ENOENT') {
@@ -1793,16 +1869,16 @@ export async function revertFile(directory, filePath) {
   }
 
   try {
-    await git.raw(['restore', '--staged', filePath]);
+    await git.raw(['restore', '--staged', '--', repoPath]);
   } catch (error) {
-    await git.raw(['reset', 'HEAD', '--', filePath]).catch(() => {});
+    await git.raw(['reset', 'HEAD', '--', repoPath]).catch(() => {});
   }
 
   try {
-    await git.raw(['restore', filePath]);
+    await git.raw(['restore', '--', repoPath]);
   } catch (error) {
     try {
-      await git.raw(['checkout', '--', filePath]);
+      await git.raw(['checkout', '--', repoPath]);
     } catch (fallbackError) {
       console.error('Failed to revert git file:', fallbackError);
       throw fallbackError;
@@ -1826,7 +1902,7 @@ export async function collectDiffs(directory, files = []) {
 }
 
 export async function pull(directory, options = {}) {
-  const git = await createGit(directory);
+  const { git } = await createRepositoryGitContext(directory);
   const pullOptions = options.rebase === true
     ? { ...(options.options && typeof options.options === 'object' && !Array.isArray(options.options) ? options.options : {}), '--rebase': null }
     : options.options || {};
@@ -1852,7 +1928,7 @@ export async function pull(directory, options = {}) {
 }
 
 export async function listStashes(directory) {
-  const git = await createGit(directory);
+  const { git } = await createRepositoryGitContext(directory);
   const output = await git.raw(['stash', 'list', '--format=%gd%x1f%gs%x1f%cr%x1f%H']);
   return String(output || '')
     .split('\n')
@@ -1866,7 +1942,7 @@ export async function listStashes(directory) {
 }
 
 export async function countStashFiles(directory, refs = []) {
-  const git = await createGit(directory);
+  const { git } = await createRepositoryGitContext(directory);
   const uniqueRefs = Array.from(new Set((Array.isArray(refs) ? refs : []).map((ref) => String(ref || '').trim()).filter(Boolean)));
   const counts = {};
   const concurrency = 4;
@@ -1889,7 +1965,7 @@ export async function countStashFiles(directory, refs = []) {
   return counts;
 }
 export async function stashPush(directory, options = {}) {
-  const git = await createGit(directory);
+  const { git } = await createRepositoryGitContext(directory);
   const message = typeof options.message === 'string' && options.message.trim()
     ? options.message.trim()
     : `OpenChamber stash ${new Date().toISOString()}`;
@@ -1903,14 +1979,14 @@ export async function stashPush(directory, options = {}) {
 }
 
 export async function stashApply(directory, options = {}) {
-  const git = await createGit(directory);
+  const { git } = await createRepositoryGitContext(directory);
   const ref = typeof options.ref === 'string' && options.ref.trim() ? options.ref.trim() : 'stash@{0}';
   await git.raw(['stash', 'apply', ref]);
   return { success: true, ref };
 }
 
 export async function stashDrop(directory, options = {}) {
-  const git = await createGit(directory);
+  const { git } = await createRepositoryGitContext(directory);
   const ref = typeof options.ref === 'string' && options.ref.trim() ? options.ref.trim() : 'stash@{0}';
   await git.raw(['stash', 'drop', ref]);
   return { success: true, ref };
@@ -1924,7 +2000,7 @@ export async function stashPop(directory, options = {}) {
 }
 
 export async function push(directory, options = {}) {
-  const git = await createGit(directory);
+  const { git } = await createRepositoryGitContext(directory);
 
   const describePushError = (error) => {
     const fromNestedGit = error?.git && typeof error.git === 'object'
@@ -2064,7 +2140,7 @@ export async function deleteRemoteBranch(directory, options = {}) {
     throw new Error('branch is required to delete remote branch');
   }
 
-  const git = await createGit(directory);
+  const { git } = await createRepositoryGitContext(directory);
   const targetBranch = branch.startsWith('refs/heads/')
     ? branch.substring('refs/heads/'.length)
     : branch;
@@ -2080,7 +2156,7 @@ export async function deleteRemoteBranch(directory, options = {}) {
 }
 
 export async function fetch(directory, options = {}) {
-  const git = await createGit(directory);
+  const { git } = await createRepositoryGitContext(directory);
 
   try {
     await git.fetch(
@@ -2097,7 +2173,7 @@ export async function fetch(directory, options = {}) {
 }
 
 export async function commit(directory, message, options = {}) {
-  const git = await createGit(directory);
+  const { directoryPath, directoryGit, repoRoot, git } = await createRepositoryGitContext(directory);
 
   try {
     const requestedFiles = Array.isArray(options.files)
@@ -2105,14 +2181,19 @@ export async function commit(directory, message, options = {}) {
         .map((value) => String(value || '').trim())
         .filter(Boolean)
       : [];
-    let filesToCommit = requestedFiles;
+    let filesToCommit = [];
 
     if (options.addAll) {
       await git.add('.');
     } else if (requestedFiles.length > 0) {
+      filesToCommit = Array.from(new Set(await Promise.all(requestedFiles.map(async (filePath) => {
+        const fileContext = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
+        return fileContext.repoPath;
+      }))));
+
       const status = await git.status();
       const fileStatusByPath = new Map(status.files.map((file) => [file.path, file]));
-      filesToCommit = requestedFiles.filter((filePath) => fileStatusByPath.has(filePath));
+      filesToCommit = filesToCommit.filter((filePath) => fileStatusByPath.has(filePath));
 
       if (filesToCommit.length === 0) {
         throw new Error('No selected files are available to commit. Refresh git status and try again.');
@@ -2165,7 +2246,7 @@ export async function commit(directory, message, options = {}) {
 }
 
 export async function getBranches(directory) {
-  const git = await createGit(directory);
+  const { git } = await createRepositoryGitContext(directory);
 
   try {
     const result = await git.branch();
@@ -2226,7 +2307,7 @@ async function filterActiveRemoteBranches(git, remoteBranches) {
 }
 
 export async function createBranch(directory, branchName, options = {}) {
-  const git = await createGit(directory);
+  const { git } = await createRepositoryGitContext(directory);
 
   try {
     await git.checkoutBranch(branchName, options.startPoint || 'HEAD');
@@ -2238,7 +2319,7 @@ export async function createBranch(directory, branchName, options = {}) {
 }
 
 export async function checkoutBranch(directory, branchName) {
-  const git = await createGit(directory);
+  const { git } = await createRepositoryGitContext(directory);
 
   try {
     await git.checkout(branchName);
@@ -2251,12 +2332,14 @@ export async function checkoutBranch(directory, branchName) {
 
 export async function getWorktrees(directory) {
   const directoryPath = normalizeDirectoryPath(directory);
-  if (!directoryPath || !fs.existsSync(directoryPath) || !fs.existsSync(path.join(directoryPath, '.git'))) {
+  if (!directoryPath || !fs.existsSync(directoryPath)) {
     return [];
   }
   try {
+    const directoryGit = await createGit(directoryPath);
+    const repoRoot = await resolveGitRepositoryRoot(directoryPath, directoryGit);
     const result = await runGitCommandOrThrow(
-      directoryPath,
+      repoRoot,
       ['worktree', 'list', '--porcelain'],
       'Failed to list git worktrees'
     );
@@ -2689,7 +2772,7 @@ export async function removeWorktree(directory, input = {}) {
 }
 
 export async function deleteBranch(directory, branch, options = {}) {
-  const git = await createGit(directory);
+  const { git } = await createRepositoryGitContext(directory);
 
   try {
     const branchName = branch.startsWith('refs/heads/')
@@ -2730,10 +2813,13 @@ export async function resolveBaseRefForLog(from, checkRef) {
 }
 
 export async function getLog(directory, options = {}) {
-  const git = await createGit(directory);
+  const { directoryPath, directoryGit, repoRoot, git } = await createRepositoryGitContext(directory);
 
   try {
     const maxCount = options.maxCount || 50;
+    const filePath = options.file
+      ? (await resolveGitFileContext(directoryPath, directoryGit, options.file, repoRoot)).repoPath
+      : undefined;
 
     // Prefer the local ref; fall back to origin/<from> only when the local ref
     // cannot be resolved (e.g. user has never checked out the base branch).
@@ -2751,7 +2837,7 @@ export async function getLog(directory, options = {}) {
       maxCount,
       from: resolvedFrom,
       to: options.to,
-      file: options.file
+      file: filePath
     });
 
     const logArgs = [
@@ -2770,8 +2856,8 @@ export async function getLog(directory, options = {}) {
       logArgs.push(options.to);
     }
 
-    if (options.file) {
-      logArgs.push('--', options.file);
+    if (filePath) {
+      logArgs.push('--', filePath);
     }
 
     const rawLog = await git.raw(logArgs);
@@ -2922,6 +3008,7 @@ export async function canonicalizeWorktreeState(directory) {
 
   const cwd = await canonicalPath(directoryPath);
   const git = await createGit(directoryPath);
+  const repoRoot = await resolveGitRepositoryRoot(directoryPath, git).catch(() => directoryPath);
 
   let worktreeRoot = null;
   let worktreeStatus = 'ready';
@@ -2962,13 +3049,17 @@ export async function canonicalizeWorktreeState(directory) {
     if (status.current && (await git.raw(['rev-parse', '--verify', 'MERGE_HEAD']).then(() => true).catch(() => false))) {
       attentionReason = 'merge';
     } else {
-      const rebaseMerge = await fsp.stat(path.join(directoryPath, '.git', 'rebase-merge')).then(() => true).catch(() => false);
-      const rebaseApply = await fsp.stat(path.join(directoryPath, '.git', 'rebase-apply')).then(() => true).catch(() => false);
+      const rebaseMergePath = await resolveGitInternalPath(repoRoot, git, 'rebase-merge').catch(() => '');
+      const rebaseApplyPath = await resolveGitInternalPath(repoRoot, git, 'rebase-apply').catch(() => '');
+      const rebaseMerge = rebaseMergePath ? await fsp.stat(rebaseMergePath).then(() => true).catch(() => false) : false;
+      const rebaseApply = rebaseApplyPath ? await fsp.stat(rebaseApplyPath).then(() => true).catch(() => false) : false;
       if (rebaseMerge || rebaseApply) {
         attentionReason = 'rebase';
       } else if (status.conflicted && status.conflicted.length > 0) {
-        const cherryPickHead = await fsp.stat(path.join(directoryPath, '.git', 'CHERRY_PICK_HEAD')).then(() => true).catch(() => false);
-        const revertHead = await fsp.stat(path.join(directoryPath, '.git', 'REVERT_HEAD')).then(() => true).catch(() => false);
+        const cherryPickHeadPath = await resolveGitInternalPath(repoRoot, git, 'CHERRY_PICK_HEAD').catch(() => '');
+        const revertHeadPath = await resolveGitInternalPath(repoRoot, git, 'REVERT_HEAD').catch(() => '');
+        const cherryPickHead = cherryPickHeadPath ? await fsp.stat(cherryPickHeadPath).then(() => true).catch(() => false) : false;
+        const revertHead = revertHeadPath ? await fsp.stat(revertHeadPath).then(() => true).catch(() => false) : false;
         if (cherryPickHead) attentionReason = 'cherry-pick';
         else if (revertHead) attentionReason = 'revert';
       }
@@ -2990,7 +3081,7 @@ export async function canonicalizeWorktreeState(directory) {
 }
 
 export async function getCommitFiles(directory, commitHash) {
-  const git = await createGit(directory);
+  const { git } = await createRepositoryGitContext(directory);
 
   try {
 
@@ -3071,7 +3162,7 @@ export async function getCommitFiles(directory, commitHash) {
 }
 
 export async function renameBranch(directory, oldName, newName) {
-  const git = await createGit(directory);
+  const { git, repoRoot } = await createRepositoryGitContext(directory);
 
   try {
     const normalizedOldName = cleanBranchName(String(oldName || '').trim());
@@ -3100,12 +3191,12 @@ export async function renameBranch(directory, oldName, newName) {
       if (upstream) {
         try {
           await runGitCommandOrThrow(
-            directory,
+            repoRoot,
             ['branch', `--set-upstream-to=${upstream.full}`, normalizedNewName],
             `Failed to set upstream to ${upstream.full}`
           );
         } catch {
-          await setBranchTrackingFallback(directory, normalizedNewName, upstream);
+          await setBranchTrackingFallback(repoRoot, normalizedNewName, upstream);
         }
       }
     }
@@ -3118,7 +3209,7 @@ export async function renameBranch(directory, oldName, newName) {
 }
 
 export async function getRemotes(directory) {
-  const git = await createGit(directory);
+  const { git } = await createRepositoryGitContext(directory);
 
   try {
     const remotes = await git.getRemotes(true);
@@ -3146,7 +3237,7 @@ export async function removeRemote(directory, options = {}) {
     throw new Error('Cannot remove origin remote');
   }
 
-  const git = await createGit(directory);
+  const { git } = await createRepositoryGitContext(directory);
 
   try {
     await git.removeRemote(remoteName);
@@ -3158,7 +3249,7 @@ export async function removeRemote(directory, options = {}) {
 }
 
 export async function rebase(directory, options = {}) {
-  const git = await createGit(directory);
+  const { git } = await createRepositoryGitContext(directory);
 
   try {
     const { onto } = options;
@@ -3194,7 +3285,7 @@ export async function rebase(directory, options = {}) {
 }
 
 export async function abortRebase(directory) {
-  const git = await createGit(directory);
+  const { git } = await createRepositoryGitContext(directory);
 
   try {
     await git.rebase(['--abort']);
@@ -3206,7 +3297,7 @@ export async function abortRebase(directory) {
 }
 
 export async function merge(directory, options = {}) {
-  const git = await createGit(directory);
+  const { git } = await createRepositoryGitContext(directory);
 
   try {
     const { branch } = options;
@@ -3242,7 +3333,7 @@ export async function merge(directory, options = {}) {
 }
 
 export async function abortMerge(directory) {
-  const git = await createGit(directory);
+  const { git } = await createRepositoryGitContext(directory);
 
   try {
     await git.merge(['--abort']);
@@ -3254,8 +3345,7 @@ export async function abortMerge(directory) {
 }
 
 export async function continueRebase(directory) {
-  const directoryPath = normalizeDirectoryPath(directory);
-  const git = await createGit(directoryPath);
+  const { git } = await createRepositoryGitContext(directory);
 
   try {
     // Set GIT_EDITOR to prevent editor prompts
@@ -3295,8 +3385,7 @@ export async function continueRebase(directory) {
 }
 
 export async function continueMerge(directory) {
-  const directoryPath = normalizeDirectoryPath(directory);
-  const git = await createGit(directoryPath);
+  const { git } = await createRepositoryGitContext(directory);
 
   try {
     // Check if there are still unmerged files
@@ -3341,8 +3430,7 @@ export async function continueMerge(directory) {
 }
 
 export async function getConflictDetails(directory) {
-  const directoryPath = normalizeDirectoryPath(directory);
-  const git = await createGit(directoryPath);
+  const { repoRoot, git } = await createRepositoryGitContext(directory);
 
   try {
     // Get git status --porcelain
@@ -3371,9 +3459,8 @@ export async function getConflictDetails(directory) {
     if (mergeHeadExists) {
       operation = 'merge';
       const mergeHead = await git.raw(['rev-parse', 'MERGE_HEAD']).catch(() => '');
-      const mergeMsg = await fsp
-        .readFile(path.join(directoryPath, '.git', 'MERGE_MSG'), 'utf8')
-        .catch(() => '');
+      const mergeMsgPath = await resolveGitInternalPath(repoRoot, git, 'MERGE_MSG').catch(() => '');
+      const mergeMsg = mergeMsgPath ? await fsp.readFile(mergeMsgPath, 'utf8').catch(() => '') : '';
       headInfo = `MERGE_HEAD: ${mergeHead.trim()}\n${mergeMsg}`;
     } else {
       // Check for REBASE_HEAD (rebase in progress)
@@ -3411,12 +3498,35 @@ export async function getCommitFileDiff(directory, hash, filePath, isBinary) {
     return { original: '', modified: '', isBinary: true };
   }
 
-  const directoryPath = normalizeDirectoryPath(directory);
+  const { directoryPath, repoRoot } = await createRepositoryGitContext(directory);
+  const candidates = Array.from(new Set([
+    toGitPath(path.relative(repoRoot, path.resolve(repoRoot, filePath))),
+    toGitPath(path.relative(repoRoot, path.resolve(directoryPath, filePath))),
+  ])).filter((candidate) => candidate && !candidate.startsWith('..') && !path.isAbsolute(candidate));
 
-  const [originalResult, modifiedResult] = await Promise.all([
-    runGitCommand(directoryPath, ['show', `${hash}^:${filePath}`]),
-    runGitCommand(directoryPath, ['show', `${hash}:${filePath}`]),
-  ]);
+  let originalResult = null;
+  let modifiedResult = null;
+
+  for (const candidate of candidates) {
+    const [candidateOriginalResult, candidateModifiedResult] = await Promise.all([
+      runGitCommand(repoRoot, ['show', `${hash}^:${candidate}`]),
+      runGitCommand(repoRoot, ['show', `${hash}:${candidate}`]),
+    ]);
+
+    if (candidateOriginalResult.success || candidateModifiedResult.success) {
+      originalResult = candidateOriginalResult;
+      modifiedResult = candidateModifiedResult;
+      break;
+    }
+  }
+
+  if (!originalResult || !modifiedResult) {
+    const resolvedPath = await resolveGitCommitFilePath(repoRoot, hash, candidates);
+    [originalResult, modifiedResult] = await Promise.all([
+      runGitCommand(repoRoot, ['show', `${hash}^:${resolvedPath}`]),
+      runGitCommand(repoRoot, ['show', `${hash}:${resolvedPath}`]),
+    ]);
+  }
 
   const original = originalResult.success ? originalResult.stdout : '';
   const modified = modifiedResult.success ? modifiedResult.stdout : '';

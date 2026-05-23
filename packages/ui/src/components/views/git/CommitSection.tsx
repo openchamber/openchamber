@@ -165,12 +165,12 @@ export const CommitSection: React.FC<CommitSectionProps> = ({
               {commitAction === 'commitAndPush' ? (
                 <>
                   <Icon name="loader-4" className="size-4 animate-spin" />
-                  <span className="commit-actions__label">{t('gitView.commit.pushing')}</span>
+                  <span className="commit-actions__label commit-actions__label--push">{t('gitView.commit.pushing')}</span>
                 </>
               ) : (
                 <>
                   <Icon name="arrow-up" className="size-3.5" />
-                  <span className="commit-actions__label">{t('gitView.commit.push')}</span>
+                  <span className="commit-actions__label commit-actions__label--push">{t('gitView.commit.push')}</span>
                 </>
               )}
             </Button>

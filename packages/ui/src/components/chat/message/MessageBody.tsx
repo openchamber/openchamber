@@ -42,7 +42,6 @@ import TurnActivity from '../components/TurnActivity';
 import { createProjectPlanFile } from '@/lib/openchamberConfig';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
-import { useSessions } from '@/sync/sync-context';
 import { useI18n } from '@/lib/i18n';
 import { extractLoopbackUrls } from '@/lib/url';
 import { useDeviceInfo } from '@/lib/device';
@@ -986,8 +985,16 @@ const AssistantMessageBody = React.memo(({
     const suggestedPlanTitle = React.useMemo(() => suggestPlanTitleFromText(assistantPlanText), [assistantPlanText]);
 
     const openContextPreview = useUIStore((state) => state.openContextPreview);
+    const isVSCode = isVSCodeRuntime();
+    const isMiniChatSurface = chatSurfaceMode === 'mini-chat';
+    const canUseProjectPlanActions = !isVSCode && !isMiniChatSurface && !isMobile;
+    const canShowMultiRunAction = !isVSCode && !isMiniChatSurface && !isMobile;
 
     const messagePreviewUrl = React.useMemo(() => {
+        if (isVSCode || isMobile || isMiniChatSurface) {
+            return null;
+        }
+
         for (const part of assistantTextParts) {
             const text = (part as { text?: unknown }).text;
             if (typeof text !== 'string' || text.length === 0) {
@@ -1013,14 +1020,14 @@ const AssistantMessageBody = React.memo(({
             return url.includes('0.0.0.0') ? url.replace('0.0.0.0', '127.0.0.1') : url;
         }
         return null;
-    }, [assistantTextParts, toolParts]);
+    }, [assistantTextParts, isMobile, isMiniChatSurface, isVSCode, toolParts]);
 
     const createSessionFromAssistantMessage = useSessionUIStore((state) => state.createSessionFromAssistantMessage);
     const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+    const getDirectoryForSession = useSessionUIStore((state) => state.getDirectoryForSession);
     const openMultiRunLauncherWithPrompt = useUIStore((state) => state.openMultiRunLauncherWithPrompt);
     const projects = useProjectsStore((state) => state.projects);
     const effectiveDirectory = useEffectiveDirectory();
-    const sessions = useSessions();
     const [isPlanDialogOpen, setIsPlanDialogOpen] = React.useState(false);
     const [isSavingPlan, setIsSavingPlan] = React.useState(false);
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
@@ -1028,25 +1035,22 @@ const AssistantMessageBody = React.memo(({
     const groupReasoningBlocks = useUIStore((state) => state.groupReasoningBlocks);
     const showSplitAssistantMessageActions = useUIStore((state) => state.showSplitAssistantMessageActions);
     const isSortedRenderMode = chatRenderMode === 'sorted';
-    const isMiniChatSurface = chatSurfaceMode === 'mini-chat';
     const collapsedPreviewCount = 7;
     const isLastAssistantInTurn = turnGroupingContext?.isLastAssistantInTurn ?? false;
     const hasStopFinish = messageFinish === 'stop';
 
-    const currentSession = React.useMemo(() => {
-        if (!currentSessionId) {
-            return null;
-        }
-        return sessions.find((session) => session.id === currentSessionId) ?? null;
-    }, [currentSessionId, sessions]);
-
     const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
     const currentProjectRef = React.useMemo(() => {
+        if (!canUseProjectPlanActions) {
+            return null;
+        }
+
         const directory = effectiveDirectory
-            ?? (typeof currentSession?.directory === 'string' ? currentSession.directory : '');
+            ?? (currentSessionId ? getDirectoryForSession(currentSessionId) : null)
+            ?? '';
         const resolved = resolveProjectForSessionDirectory(projects, availableWorktreesByProject, directory);
         return resolved ? { id: resolved.id, path: resolved.path } : null;
-    }, [availableWorktreesByProject, currentSession?.directory, effectiveDirectory, projects]);
+    }, [availableWorktreesByProject, canUseProjectPlanActions, currentSessionId, effectiveDirectory, getDirectoryForSession, projects]);
 
     const hasTools = toolParts.length > 0;
 
@@ -1595,6 +1599,7 @@ const AssistantMessageBody = React.memo(({
                                     key={`reasoning-merged-${messageId}`}
                                     parts={flatReasoningParts}
                                     messageId={messageId}
+                                    streamPhase={streamPhase}
                                     onContentChange={onContentChange}
                                 />
                             );
@@ -1606,6 +1611,7 @@ const AssistantMessageBody = React.memo(({
                                 key={`reasoning-${messageId}-${i}`}
                                 part={part}
                                 messageId={messageId}
+                                streamPhase={streamPhase}
                                 onContentChange={onContentChange}
                             />
                         );
@@ -1741,7 +1747,6 @@ const AssistantMessageBody = React.memo(({
     }, [messageCompletedAt, messageCreatedAt]);
 
     const footerTimestampClassName = 'text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1';
-    const isVSCode = isVSCodeRuntime();
     const canOpenMessagePreview = !isMiniChatSurface && !isMobile && !isVSCode;
 
     const finalTurnActionButtons = (
@@ -1758,7 +1763,7 @@ const AssistantMessageBody = React.memo(({
                             onPointerDown={(event) => event.stopPropagation()}
                             onClick={() => {
                                 const directory = effectiveDirectory
-                                    ?? (typeof currentSession?.directory === 'string' ? currentSession.directory : null);
+                                    ?? (currentSessionId ? getDirectoryForSession(currentSessionId) : null);
                                 if (!directory) {
                                     return;
                                 }
@@ -1771,7 +1776,7 @@ const AssistantMessageBody = React.memo(({
                     <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.openPreview')}</TooltipContent>
                 </Tooltip>
             ) : null}
-            {!isMiniChatSurface && !isVSCode ? (
+            {canUseProjectPlanActions ? (
                 <Tooltip>
                     <TooltipTrigger asChild>
                         <Button
@@ -1807,7 +1812,7 @@ const AssistantMessageBody = React.memo(({
                 </TooltipTrigger>
                 <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.startNewSession')}</TooltipContent>
             </Tooltip> : null}
-            {!isMiniChatSurface && !isVSCode ? (
+            {canShowMultiRunAction ? (
                 <Tooltip>
                     <TooltipTrigger asChild>
                         <Button
@@ -1838,14 +1843,16 @@ const AssistantMessageBody = React.memo(({
               style={CONTAIN_LAYOUT_STYLE}
           >
               <TextSelectionMenu containerRef={messageContentRef} />
-             <SaveProjectPlanDialog
-                 open={isPlanDialogOpen}
-                 onOpenChange={setIsPlanDialogOpen}
-                 initialTitle={suggestedPlanTitle}
-                 sourceText={assistantPlanText}
-                 saving={isSavingPlan}
-                 onSave={handleConfirmSaveAsPlan}
-             />
+             {canUseProjectPlanActions ? (
+                 <SaveProjectPlanDialog
+                     open={isPlanDialogOpen}
+                     onOpenChange={setIsPlanDialogOpen}
+                     initialTitle={suggestedPlanTitle}
+                     sourceText={assistantPlanText}
+                     saving={isSavingPlan}
+                     onSave={handleConfirmSaveAsPlan}
+                 />
+             ) : null}
               <div>
                  <div
                      className="message-content-text leading-relaxed overflow-hidden text-foreground/90 [&_p:last-child]:mb-0 [&_ul:last-child]:mb-0 [&_ol:last-child]:mb-0"

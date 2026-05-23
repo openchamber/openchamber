@@ -146,26 +146,6 @@ const extractBestUrl = (value: string): string | null => {
   return normalized[0] ?? null;
 };
 
-const formatActionButtonLabel = (value: string, fallbackLabel: string): string => {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return fallbackLabel;
-  }
-
-  const words = trimmed.split(/\s+/).filter(Boolean);
-  if (words.length >= 2) {
-    const first = words[0];
-    const second = words[1].slice(0, 3);
-    const shortTwoWord = `${first} ${second}`.trim();
-    if (words.length > 2 || shortTwoWord.length < trimmed.length) {
-      return `${shortTwoWord}...`;
-    }
-    return shortTwoWord;
-  }
-
-  return trimmed.length > 12 ? `${trimmed.slice(0, 9).trimEnd()}...` : trimmed;
-};
-
 export const ProjectActionsButton = ({
   projectRef,
   directory,
@@ -732,10 +712,6 @@ export const ProjectActionsButton = ({
   const selectedIconName = resolvedSelected.id === AUTO_DISCOVER_ACTION_ID
     ? 'search'
     : PROJECT_ACTION_ICON_MAP[selectedIconKey] || 'play';
-  const selectedButtonLabel = formatActionButtonLabel(
-    resolvedSelected.name,
-    t('projectActions.label.fallbackAction'),
-  );
   const selectedRunKey = toProjectActionRunKey(normalizedDirectory, resolvedSelected.id);
   const selectedRunning = projectActionRuns[selectedRunKey];
   const isStoppingSelected = selectedRunning?.status === 'stopping';
@@ -855,8 +831,8 @@ export const ProjectActionsButton = ({
         onClick={handlePrimaryClick}
         disabled={isLoading || isStoppingSelected}
         className={cn(
-          'inline-flex h-full items-center typography-ui-label font-medium text-foreground hover:bg-interactive-hover',
-          compact ? 'w-9 justify-center px-0' : 'gap-2 px-3',
+          'inline-flex h-full items-center justify-center typography-ui-label font-medium text-foreground hover:bg-interactive-hover',
+          compact ? 'w-9 px-0' : 'px-2.5',
           'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed'
         )}
         aria-label={selectedRunning
@@ -870,7 +846,6 @@ export const ProjectActionsButton = ({
               ? <Icon name="stop" className="h-4 w-4 text-[var(--status-warning)]" />
               : <Icon name={selectedIconName} className="h-4 w-4" />}
         </span>
-        {!compact ? <span className="header-open-label whitespace-nowrap">{selectedButtonLabel}</span> : null}
       </button>
 
       {showSelectedPreviewButton ? (
@@ -907,7 +882,7 @@ export const ProjectActionsButton = ({
             <Icon name="arrow-down-s" className="h-4 w-4" />
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="center" className="w-52 max-h-[70vh] overflow-y-auto" style={{ translate: '-30px 0' }}>
+        <DropdownMenuContent align="start" className="w-52 max-h-[70vh] overflow-y-auto">
           <DropdownMenuItem className="flex items-center gap-2" onClick={openProjectActionsSettings}>
             <Icon name="add" className="h-4 w-4" />
             <span className="typography-ui-label text-foreground">{t('projectActions.actions.addNewAction')}</span>
@@ -928,7 +903,7 @@ export const ProjectActionsButton = ({
                 key={entry.id}
                 className="flex items-center gap-2"
                 onClick={() => {
-                  handleSelectAction(entry);
+                  handleSelectAction(entry, true);
                 }}
               >
                 <Icon name={iconName} className="h-4 w-4" />

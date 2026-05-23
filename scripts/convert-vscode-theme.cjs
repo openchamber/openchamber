@@ -32,6 +32,7 @@
  *   - colors (UI colors)
  *   - tokenColors (TextMate scopes)
  *   - semanticTokenColors (optional, LSP tokens)
+ *   Also accepts Zed themes with a `themes[].style` object.
  */
 
 const fs = require('fs');
@@ -50,11 +51,49 @@ const THEMES_DIR = path.join(
 const PRESETS_PATH = path.join(THEMES_DIR, 'presets.ts');
 
 function stripJsonComments(jsonString) {
-  // Remove single-line comments (// ...)
-  jsonString = jsonString.replace(/\/\/.*$/gm, '');
-  // Remove multi-line comments (/* ... */)
-  jsonString = jsonString.replace(/\/\*[\s\S]*?\*\//g, '');
-  return jsonString;
+  let output = '';
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < jsonString.length; i++) {
+    const char = jsonString[i];
+    const next = jsonString[i + 1];
+
+    if (inString) {
+      output += char;
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+      output += char;
+      continue;
+    }
+
+    if (char === '/' && next === '/') {
+      while (i < jsonString.length && jsonString[i] !== '\n') i++;
+      output += '\n';
+      continue;
+    }
+
+    if (char === '/' && next === '*') {
+      i += 2;
+      while (i < jsonString.length && !(jsonString[i] === '*' && jsonString[i + 1] === '/')) i++;
+      i++;
+      continue;
+    }
+
+    output += char;
+  }
+
+  return output;
 }
 
 function convertVsCodeTheme(vscodeThemePath) {
@@ -63,14 +102,15 @@ function convertVsCodeTheme(vscodeThemePath) {
   const cleanContent = stripJsonComments(rawContent);
   const vscodeTheme = JSON.parse(cleanContent);
   
-  const colors = vscodeTheme.colors || {};
-  const tokenColors = vscodeTheme.tokenColors || [];
-  const semanticTokenColors = vscodeTheme.semanticTokenColors || {};
+  const normalizedTheme = normalizeThemeSource(vscodeTheme);
+  const colors = normalizedTheme.colors || {};
+  const tokenColors = normalizedTheme.tokenColors || [];
+  const semanticTokenColors = normalizedTheme.semanticTokenColors || {};
   
   // Determine variant
-  const isDark = vscodeTheme.type === 'dark' || 
-                 colors['editor.background']?.toLowerCase() < '#808080' ||
-                 colors['workbench.colorTheme']?.includes('dark');
+  const isDark = normalizedTheme.type === 'dark' ||
+                  colors['editor.background']?.toLowerCase() < '#808080' ||
+                  colors['workbench.colorTheme']?.includes('dark');
   
   const variant = isDark ? 'dark' : 'light';
   
@@ -82,7 +122,7 @@ function convertVsCodeTheme(vscodeThemePath) {
       .replace(/\b\w/g, (c) => c.toUpperCase());  // Capitalize each word
   };
   
-  const themeName = toTitleCase(vscodeTheme.name || 'Untitled Theme');
+  const themeName = toTitleCase(normalizedTheme.name || 'Untitled Theme');
   
   // Extract color sets for derived sections
   const primaryColors = extractPrimaryColors(colors, semanticTokenColors);
@@ -93,18 +133,20 @@ function convertVsCodeTheme(vscodeThemePath) {
   // Build OpenChamber theme
   const openchamberTheme = {
     metadata: {
-      id: vscodeTheme.name?.toLowerCase().replace(/[^a-z0-9]+/g, '-') + `-${variant}`,
+      id: makeThemeId(normalizedTheme.name || 'untitled-theme', variant),
       name: themeName,
-      description: vscodeTheme.description || `Converted from VS Code theme`,
-      version: vscodeTheme.version || '1.0.0',
+      description: normalizedTheme.description || `Converted from ${normalizedTheme.sourceFormat} theme`,
+      author: normalizedTheme.author,
+      version: normalizedTheme.version || '1.0.0',
       variant: variant,
-      tags: [variant, 'converted', 'vscode']
+      tags: [variant, 'converted', normalizedTheme.sourceFormat]
     },
     colors: {
       primary: primaryColors,
       surface: surfaceColors,
       interactive: extractInteractiveColors(colors),
       status: statusColors,
+      pr: generatePrColors(statusColors, syntaxColors),
       syntax: syntaxColors,
       markdown: generateMarkdownColors(primaryColors, surfaceColors, syntaxColors),
       chat: generateChatColors(surfaceColors),
@@ -114,6 +156,92 @@ function convertVsCodeTheme(vscodeThemePath) {
   };
   
   return openchamberTheme;
+}
+
+function generatePrColors(status, syntax) {
+  return {
+    open: status.success,
+    draft: syntax.base.comment,
+    blocked: status.warning,
+    merged: syntax.tokens?.interface || syntax.base.type,
+    closed: status.error,
+  };
+}
+
+function makeThemeId(name, variant) {
+  const base = name
+    .toLowerCase()
+    .replace(/\b(light|dark)\b/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+  return `${base || 'theme'}-${variant}`;
+}
+
+function normalizeThemeSource(theme) {
+  if (Array.isArray(theme.themes) && theme.themes[0]?.style) {
+    return normalizeZedTheme(theme);
+  }
+
+  return {
+    ...theme,
+    sourceFormat: 'vscode',
+  };
+}
+
+function normalizeZedTheme(theme) {
+  const zedTheme = theme.themes[0];
+  const style = zedTheme.style || {};
+  const syntax = style.syntax || {};
+  const syntaxColor = (key) => syntax[key]?.color || undefined;
+
+  return {
+    name: zedTheme.name || theme.name,
+    author: theme.author,
+    description: `Converted from Zed theme ${zedTheme.name || theme.name}`,
+    version: theme.version || '1.0.0',
+    type: zedTheme.appearance === 'light' ? 'light' : 'dark',
+    sourceFormat: 'zed',
+    colors: {
+      'button.background': style['text.accent'] || style['border.focused'],
+      'button.hoverBackground': style['border.selected'] || style['text.accent'],
+      'button.foreground': style.background,
+      'activityBarBadge.background': style['text.accent'],
+      'editor.background': style['editor.background'] || style.background,
+      'editor.foreground': style['editor.foreground'] || style.text,
+      'editor.lineHighlightBackground': style['editor.active_line.background'] || style['element.selected'],
+      'editor.selectionBackground': style['element.selected'],
+      'editorCursor.foreground': style['text.accent'] || style.text,
+      'editorWhitespace.foreground': style['editor.invisible'] || style.border,
+      'editorLineNumber.foreground': style['editor.line_number'],
+      'editorLineNumber.activeForeground': style['editor.active_line_number'],
+      'focusBorder': style['border.focused'],
+      'input.border': style.border,
+      'inputOption.activeBorder': style['border.selected'] || style['border.focused'],
+      'sideBar.background': style['panel.background'] || style['surface.background'],
+      'editorError.foreground': style.error,
+      'editorWarning.foreground': style.warning,
+      'editorInfo.foreground': style.info,
+      'gitDecoration.addedResourceForeground': style.created || style['version_control.added'],
+      'gitDecoration.deletedResourceForeground': style.deleted || style['version_control.deleted'],
+    },
+    tokenColors: [],
+    semanticTokenColors: {
+      comment: syntaxColor('comment'),
+      keyword: syntaxColor('keyword'),
+      string: syntaxColor('string'),
+      number: syntaxColor('number'),
+      function: syntaxColor('function'),
+      method: syntaxColor('function.definition') || syntaxColor('function'),
+      variable: syntaxColor('variable'),
+      type: syntaxColor('type'),
+      class: syntaxColor('type'),
+      interface: syntaxColor('type.interface'),
+      property: syntaxColor('property'),
+      operator: syntaxColor('operator'),
+      enumMember: syntaxColor('type.enum.member') || syntaxColor('boolean'),
+    },
+  };
 }
 
 // Generate markdown colors from theme palette
@@ -323,19 +451,40 @@ function extractSyntaxColors(tokenColors, semanticTokenColors, colors) {
       method: getColor('method', ['entity.name.function.method'], '#879A39'),
       variableProperty: getColor('property', ['variable.other.object.property'], '#de956a'),
       variableOther: getColor('variable', ['variable.other'], '#879A39'),
+      variableGlobal: getColor('variable', ['variable.other.global'], '#CE5D97'),
+      variableLocal: getColor('variable', ['variable.other.local'], editorFg),
+      parameter: getColor('parameter', ['variable.parameter'], editorFg),
+      constant: getColor('constant', ['constant'], editorFg),
       class: getColor('class', ['entity.name.type.class'], '#e0a98eff'),
       className: getColor('class', ['entity.name.type.class'], '#e0a98eff'),
       interface: getColor('interface', ['entity.name.type.interface'], '#e0a98eff'),
+      struct: getColor('struct', ['entity.name.type.struct'], '#e0a98eff'),
+      enum: getColor('enum', ['entity.name.type.enum'], '#e0a98eff'),
+      typeParameter: getColor('typeParameter', ['entity.name.type.parameter'], '#e0a98eff'),
+      namespace: getColor('namespace', ['entity.name.namespace'], '#D0A215'),
+      module: getColor('module', ['entity.name.module'], '#D14D41'),
       tag: getColor('function', ['entity.name.tag'], '#4385BE'),
+      jsxTag: getColor('function', ['entity.name.tag'], '#CE5D97'),
+      tagAttribute: getColor('attribute', ['entity.other.attribute-name'], '#D0A215'),
+      tagAttributeValue: getColor('string', ['string'], '#3AA99F'),
       boolean: getColor('enumMember', ['constant.language.boolean'], '#e2ad4a'),
+      decorator: getColor('decorator', ['meta.decorator'], '#D0A215'),
+      label: getColor('label', ['entity.name.label'], '#CE5D97'),
+      punctuation: getColor('punctuation', ['punctuation'], '#878580'),
+      macro: getColor('macro', ['entity.name.function.preprocessor'], '#4385BE'),
+      preprocessor: getColor('preprocessor', ['keyword.control.directive'], '#CE5D97'),
+      regex: getColor('string', ['string.regexp'], '#3AA99F'),
       url: getColor('string', ['string.other.link'], '#4385BE'),
-      key: getColor('property', ['meta.object-literal.key'], '#DA702C')
+      key: getColor('property', ['meta.object-literal.key'], '#DA702C'),
+      exception: getColor('exception', ['entity.name.exception'], '#CE5D97')
     },
     highlights: {
       diffAdded: colors['gitDecoration.addedResourceForeground'] || '#879A39',
       diffAddedBackground: (colors['gitDecoration.addedResourceForeground'] || '#879A39') + '20',
       diffRemoved: colors['gitDecoration.deletedResourceForeground'] || '#D14D41',
       diffRemovedBackground: (colors['gitDecoration.deletedResourceForeground'] || '#D14D41') + '20',
+      diffModified: colors['editorInfo.foreground'] || '#4385BE',
+      diffModifiedBackground: (colors['editorInfo.foreground'] || '#4385BE') + '20',
       lineNumber: colors['editorLineNumber.foreground'] || '#878580',
       lineNumberActive: colors['editorLineNumber.activeForeground'] || editorFg
     }
@@ -432,7 +581,7 @@ function registerThemeInPresets(themeId) {
     }
 
     const arrayEndIndex = lines.findIndex(
-      (line, index) => index > arrayStartIndex && /^\s*\];\s*$/.test(line),
+      (line, index) => index > arrayStartIndex && /^\s*\](?:\.map\(|;)/.test(line),
     );
     if (arrayEndIndex === -1) {
       throw new Error('Unable to find presetThemes array end (];) in presets.ts');

@@ -40,7 +40,7 @@ export const SIDEBAR_SECTIONS: SidebarSectionConfig[] = [
         id: 'mcp',
         label: 'MCP',
         description: 'Manage Model Context Protocol servers and their configurations.',
-        icon: "plug-line",
+        icon: "plug-2",
     },
     {
         id: 'providers',

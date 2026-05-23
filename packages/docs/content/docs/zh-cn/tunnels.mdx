@@ -1,0 +1,83 @@
+---
+title: 隧道
+description: 安全地将 OpenChamber 开放给远程和移动访问。
+---
+
+# 隧道
+
+隧道是指向你的 OpenChamber 的一个公开链接，让你可以从手机或另一个网络访问它。使用 `openchamber tunnel` 为正在运行的实例创建一个隧道。
+
+## 快速开始（Cloudflare 快速模式）
+
+1. 启动 OpenChamber：
+
+```bash
+openchamber
+```
+
+2. 启动隧道：
+
+```bash
+openchamber tunnel start --provider cloudflare --mode quick
+```
+
+3. 查看状态：
+
+```bash
+openchamber tunnel status
+```
+
+隧道建立后，`status` 会显示一个公开 URL。打开它，或扫描二维码，即可从任何地方访问 OpenChamber。
+
+默认情况下，OpenChamber 会在交互式 TTY 会话中输出二维码。使用 `--qr` 强制输出二维码，或使用 `--no-qr` 将其禁用。
+
+## 托管模式
+
+### 托管远程
+
+使用由 Cloudflare 托管的令牌 + 主机名：
+
+```bash
+openchamber tunnel start --provider cloudflare --mode managed-remote --token-file ~/.secrets/cf-token --hostname app.example.com
+```
+
+### 托管本地
+
+使用本地的 `cloudflared` 配置：
+
+```bash
+openchamber tunnel start --provider cloudflare --mode managed-local --config ~/.cloudflared/config.yml
+```
+
+## 配置文件（managed-remote）
+
+保存一个可重用的配置文件：
+
+```bash
+openchamber tunnel profile add --provider cloudflare --mode managed-remote --name prod-main --hostname app.example.com --token-file ~/.secrets/cf-token
+```
+
+使用已保存的配置文件启动：
+
+```bash
+openchamber tunnel start --profile prod-main
+```
+
+## 实用命令
+
+```bash
+openchamber tunnel providers
+openchamber tunnel ready --provider cloudflare
+openchamber tunnel doctor --provider cloudflare
+openchamber tunnel stop --port 3000
+```
+
+## 行为说明
+
+- 每个 OpenChamber 实例（端口）只有一个活动隧道
+- 在同一实例上启动新的模式/提供商会替换之前的隧道
+- 生成新的连接链接会吊销之前未使用的链接
+
+## 相关内容
+
+- [问题排查](/zh-cn/troubleshooting/) — 如果隧道链接无法使用

@@ -984,10 +984,31 @@ const StaticHistoryList: React.FC<{
         ? Math.max(0, totalSize - (virtualRows[virtualRows.length - 1]?.end ?? 0))
         : 0;
 
-    if (!shouldVirtualize || (virtualRows.length === 0 && entries.length > 0)) {
+    if (!shouldVirtualize) {
         return (
             <div ref={contentRef} className="relative w-full">
                 {entries.map((entry) => (
+                    <div
+                        key={entry.key}
+                        data-turn-entry={entry.key}
+                    >
+                        {renderEntry(entry)}
+                    </div>
+                ))}
+            </div>
+        );
+    }
+
+    if (virtualRows.length === 0 && entries.length > 0) {
+        const fallbackStart = Math.max(0, entries.length - MESSAGE_LIST_OVERSCAN * 2);
+        const fallbackEntries = entries.slice(fallbackStart);
+        const fallbackHeight = fallbackEntries.reduce((total, entry) => total + estimateHistoryEntryHeight(entry), 0);
+        const fallbackPaddingTop = Math.max(0, totalSize - fallbackHeight);
+
+        return (
+            <div ref={contentRef} className="relative w-full">
+                {fallbackPaddingTop > 0 ? <div aria-hidden="true" style={{ height: `${fallbackPaddingTop}px` }} /> : null}
+                {fallbackEntries.map((entry) => (
                     <div
                         key={entry.key}
                         data-turn-entry={entry.key}

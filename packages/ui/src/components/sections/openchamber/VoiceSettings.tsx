@@ -21,6 +21,7 @@ import { wasmSttService, WASM_MODELS } from '@/lib/voice/wasmSttService';
 import type { WasmModelStatus } from '@/lib/voice/wasmSttService';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
+import { disposePreviewAudio } from './voicePreviewAudio';
 const LANGUAGE_OPTIONS = [
     { value: 'en-US', label: 'English' },
     { value: 'es-ES', label: 'Español' },
@@ -313,14 +314,14 @@ export const VoiceSettings: React.FC = () => {
 
     const previewVoice = useCallback(async () => {
         if (previewAudio) {
-            previewAudio.pause();
-            previewAudio.currentTime = 0;
+            disposePreviewAudio(previewAudio);
             setPreviewAudio(null);
             setIsPreviewPlaying(false);
             return;
         }
 
         setIsPreviewPlaying(true);
+        let audio: HTMLAudioElement | null = null;
         try {
             const response = await fetch('/api/tts/say/speak', {
                 method: 'POST',
@@ -336,16 +337,16 @@ export const VoiceSettings: React.FC = () => {
 
             const blob = await response.blob();
             const url = URL.createObjectURL(blob);
-            const audio = new Audio(url);
+            audio = new Audio(url);
 
             audio.onended = () => {
-                URL.revokeObjectURL(url);
+                disposePreviewAudio(audio);
                 setPreviewAudio(null);
                 setIsPreviewPlaying(false);
             };
 
             audio.onerror = () => {
-                URL.revokeObjectURL(url);
+                disposePreviewAudio(audio);
                 setPreviewAudio(null);
                 setIsPreviewPlaying(false);
             };
@@ -353,28 +354,28 @@ export const VoiceSettings: React.FC = () => {
             setPreviewAudio(audio);
             await audio.play();
         } catch {
+            disposePreviewAudio(audio);
+            setPreviewAudio(null);
             setIsPreviewPlaying(false);
         }
     }, [sayVoice, speechRate, previewAudio, t]);
 
     useEffect(() => {
         return () => {
-            if (previewAudio) {
-                previewAudio.pause();
-            }
+            disposePreviewAudio(previewAudio);
         };
     }, [previewAudio]);
 
     const previewOpenAIVoice = useCallback(async () => {
         if (openaiPreviewAudio) {
-            openaiPreviewAudio.pause();
-            openaiPreviewAudio.currentTime = 0;
+            disposePreviewAudio(openaiPreviewAudio);
             setOpenaiPreviewAudio(null);
             setIsOpenAIPreviewPlaying(false);
             return;
         }
 
         setIsOpenAIPreviewPlaying(true);
+        let audio: HTMLAudioElement | null = null;
         try {
             const response = await fetch('/api/tts/speak', {
                 method: 'POST',
@@ -394,16 +395,16 @@ export const VoiceSettings: React.FC = () => {
 
             const blob = await response.blob();
             const url = URL.createObjectURL(blob);
-            const audio = new Audio(url);
+            audio = new Audio(url);
 
             audio.onended = () => {
-                URL.revokeObjectURL(url);
+                disposePreviewAudio(audio);
                 setOpenaiPreviewAudio(null);
                 setIsOpenAIPreviewPlaying(false);
             };
 
             audio.onerror = () => {
-                URL.revokeObjectURL(url);
+                disposePreviewAudio(audio);
                 setOpenaiPreviewAudio(null);
                 setIsOpenAIPreviewPlaying(false);
             };
@@ -411,22 +412,21 @@ export const VoiceSettings: React.FC = () => {
             setOpenaiPreviewAudio(audio);
             await audio.play();
         } catch {
+            disposePreviewAudio(audio);
+            setOpenaiPreviewAudio(null);
             setIsOpenAIPreviewPlaying(false);
         }
     }, [openaiVoice, speechRate, openaiPreviewAudio, openaiApiKey, t]);
 
     useEffect(() => {
         return () => {
-            if (openaiPreviewAudio) {
-                openaiPreviewAudio.pause();
-            }
+            disposePreviewAudio(openaiPreviewAudio);
         };
     }, [openaiPreviewAudio]);
 
     const previewCompatibleVoice = useCallback(async () => {
         if (compatiblePreviewAudio) {
-            compatiblePreviewAudio.pause();
-            compatiblePreviewAudio.currentTime = 0;
+            disposePreviewAudio(compatiblePreviewAudio);
             setCompatiblePreviewAudio(null);
             setIsCompatiblePreviewPlaying(false);
             return;
@@ -435,6 +435,7 @@ export const VoiceSettings: React.FC = () => {
         if (!openaiCompatibleUrl.trim()) return;
 
         setIsCompatiblePreviewPlaying(true);
+        let audio: HTMLAudioElement | null = null;
         try {
             const response = await fetch('/api/tts/speak', {
                 method: 'POST',
@@ -455,16 +456,16 @@ export const VoiceSettings: React.FC = () => {
 
             const blob = await response.blob();
             const url = URL.createObjectURL(blob);
-            const audio = new Audio(url);
+            audio = new Audio(url);
 
             audio.onended = () => {
-                URL.revokeObjectURL(url);
+                disposePreviewAudio(audio);
                 setCompatiblePreviewAudio(null);
                 setIsCompatiblePreviewPlaying(false);
             };
 
             audio.onerror = () => {
-                URL.revokeObjectURL(url);
+                disposePreviewAudio(audio);
                 setCompatiblePreviewAudio(null);
                 setIsCompatiblePreviewPlaying(false);
             };
@@ -472,15 +473,15 @@ export const VoiceSettings: React.FC = () => {
             setCompatiblePreviewAudio(audio);
             await audio.play();
         } catch {
+            disposePreviewAudio(audio);
+            setCompatiblePreviewAudio(null);
             setIsCompatiblePreviewPlaying(false);
         }
     }, [openaiCompatibleUrl, openaiCompatibleVoice, openaiCompatibleTtsModel, speechRate, compatiblePreviewAudio, t]);
 
     useEffect(() => {
         return () => {
-            if (compatiblePreviewAudio) {
-                compatiblePreviewAudio.pause();
-            }
+            disposePreviewAudio(compatiblePreviewAudio);
         };
     }, [compatiblePreviewAudio]);
 

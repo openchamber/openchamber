@@ -36,6 +36,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
             return;
         }
 
+        sidebar.style.width = `${nextWidth}px`;
+        sidebar.style.minWidth = `${nextWidth}px`;
+        sidebar.style.maxWidth = `${nextWidth}px`;
         sidebar.style.setProperty('--oc-left-sidebar-width', `${nextWidth}px`);
     }, []);
 
@@ -56,10 +59,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
         return null;
     }
 
-    const appliedWidth = isOpen ? Math.min(
+    const openWidth = Math.min(
         SIDEBAR_MAX_WIDTH,
         Math.max(SIDEBAR_MIN_WIDTH, sidebarWidth || SIDEBAR_CONTENT_WIDTH)
-    ) : 0;
+    );
+    const appliedWidth = isOpen ? openWidth : 0;
 
     const handlePointerDown = (event: React.PointerEvent) => {
         if (!isOpen) {
@@ -114,22 +118,26 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
         setSidebarWidth(finalWidth);
     };
 
+    const currentWidth = isResizing ? (resizingWidthRef.current ?? appliedWidth) : appliedWidth;
+
     return (
         <aside
             ref={sidebarRef}
             className={cn(
-                'relative flex h-full overflow-hidden border-r border-border/40',
+                'relative flex h-full overflow-hidden border-r border-border/40 will-change-[width] motion-reduce:transition-none',
                 'bg-sidebar',
-                isResizing ? 'transition-none' : 'transition-[width] duration-300 ease-in-out',
                 !isOpen && 'border-r-0',
                 className,
             )}
             style={{
-                width: 'var(--oc-left-sidebar-width)',
-                minWidth: 'var(--oc-left-sidebar-width)',
-                maxWidth: 'var(--oc-left-sidebar-width)',
-                ['--oc-left-sidebar-width' as string]: `${isResizing ? (resizingWidthRef.current ?? appliedWidth) : appliedWidth}px`,
+                width: `${currentWidth}px`,
+                minWidth: `${currentWidth}px`,
+                maxWidth: `${currentWidth}px`,
+                ['--oc-left-sidebar-width' as string]: `${isResizing ? currentWidth : openWidth}px`,
                 overflowX: 'clip',
+                transitionProperty: isResizing ? 'none' : 'width, min-width, max-width',
+                transitionDuration: '200ms',
+                transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
             }}
             aria-hidden={!isOpen || appliedWidth === 0}
         >
@@ -150,7 +158,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
             )}
             <div
                 className={cn(
-                    'relative z-10 flex h-full flex-col transition-opacity duration-300 ease-in-out',
+                    'relative z-10 flex h-full shrink-0 flex-col transition-opacity duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
                     isResizing && 'pointer-events-none',
                     !isOpen && 'pointer-events-none select-none opacity-0'
                 )}

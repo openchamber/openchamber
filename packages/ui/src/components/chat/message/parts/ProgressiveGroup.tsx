@@ -803,14 +803,16 @@ export const StaticToolRow = React.memo(StaticToolRowInner, (prev, next) => {
 /**
  * Inline reasoning text block — rendered as dimmed italic markdown.
  */
-const InlineReasoningBlock = React.memo(({ activity, onContentChange }: {
+const InlineReasoningBlock = React.memo(({ activity, onContentChange, streamPhase }: {
     activity: TurnActivityPart;
     onContentChange?: (reason?: ContentChangeReason) => void;
+    streamPhase: StreamPhase;
 }) => {
     return (
         <ReasoningPart
             part={activity.part}
             messageId={activity.messageId}
+            streamPhase={streamPhase}
             onContentChange={onContentChange}
         />
     );
@@ -845,13 +847,12 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
     onToggleTool,
     onShowPopup,
     onContentChange,
-    streamPhase: _streamPhase,
+    streamPhase,
     showHeader,
     animateRows = true,
     animatedToolIds,
     renderJustificationActions,
 }) => {
-    void _streamPhase;
     const previewCount = showHeader && !isExpanded
         ? Math.max(0, Math.floor(collapsedPreviewCount))
         : 0;
@@ -905,6 +906,7 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                     <>
                         <InlineReasoningBlock
                             activity={row.activity}
+                            streamPhase={streamPhase}
                             onContentChange={onContentChange}
                         />
                     </>
