@@ -775,6 +775,68 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         // triggering a spurious re-restore that overwrites user scroll.
         let rafId: number | null = null;
         let cancelled = false;
+        let settleObserver: ResizeObserver | null = null;
+        let settleTimer: number | null = null;
+
+        const teardownSettle = () => {
+            if (settleObserver) {
+                settleObserver.disconnect();
+                settleObserver = null;
+            }
+            if (settleTimer !== null && typeof window !== 'undefined') {
+                window.clearTimeout(settleTimer);
+                settleTimer = null;
+            }
+        };
+
+        const setupSettleObserver = (container: HTMLElement) => {
+            // The relaxed restore gate (`sessionMessages.length > 0`) lets
+            // the initial restore fire before tool parts (mermaid SVG, lazy
+            // markdown chunks, syntax highlighter, image dimensions) have
+            // finished materializing. The first `restoreSnapshot()` is
+            // therefore calibrated against an intermediate layout, so the
+            // user lands at a scrollTop whose visible region will drift
+            // away from the saved position as parts settle. Watch
+            // scrollHeight for a brief window and re-apply the saved
+            // snapshot whenever it changes — but only while the user has
+            // not scrolled away from where we placed them.
+            if (cancelled) return;
+            if (typeof ResizeObserver === 'undefined' || typeof window === 'undefined') return;
+
+            const SETTLE_TOLERANCE_PX = 4;
+            const SETTLE_MAX_MS = 1500;
+            let lastAppliedTop = container.scrollTop;
+
+            settleObserver = new ResizeObserver(() => {
+                if (cancelled || !settleObserver) return;
+                const currentTop = container.scrollTop;
+                if (Math.abs(currentTop - lastAppliedTop) > SETTLE_TOLERANCE_PX) {
+                    // User scrolled away from our placement — they have
+                    // intent, stop tracking. Also catches the at-bottom
+                    // path's follow-loop / settle-burst writes, which
+                    // disconnect this observer on the first growth event
+                    // and let the existing chase mechanism handle the
+                    // tail.
+                    teardownSettle();
+                    return;
+                }
+                // Layout shifted while user is still where we put them.
+                // Re-apply the saved snapshot against the new scrollHeight
+                // so the visible region matches the original save.
+                void restoreSnapshot().then((ready) => {
+                    if (cancelled || !ready) return;
+                    lastAppliedTop = container.scrollTop;
+                });
+            });
+            settleObserver.observe(container);
+            const inner = container.firstElementChild;
+            if (inner instanceof Element) {
+                settleObserver.observe(inner);
+            }
+            settleTimer = window.setTimeout(() => {
+                teardownSettle();
+            }, SETTLE_MAX_MS);
+        };
 
         const run = () => {
             rafId = null;
@@ -784,9 +846,9 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
             // effect retries when the container re-mounts.
             void restoreSnapshot().then((containerWasReady) => {
                 if (cancelled) return;
-                if (containerWasReady) {
-                    lastScrolledSessionRef.current = sessionAtScheduleTime;
-                }
+                if (!containerWasReady) return;
+                lastScrolledSessionRef.current = sessionAtScheduleTime;
+                setupSettleObserver(scrollContainerEl);
             });
         };
         if (typeof window === 'undefined') {
@@ -800,6 +862,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
             if (rafId !== null && typeof window !== 'undefined') {
                 window.cancelAnimationFrame(rafId);
             }
+            teardownSettle();
         };
     }, [currentSessionId, releaseAutoFollow, restoreSnapshot, sessionMessages.length, scrollContainerEl]);
 
