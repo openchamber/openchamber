@@ -135,6 +135,7 @@ export const useChatAutoFollow = ({
     const followRafRef = React.useRef<number | null>(null);
     const settledFramesRef = React.useRef(0);
     const lastScrollTopRef = React.useRef(0);
+    const lastScrollHeightRef = React.useRef(0);
     const saveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const pendingSaveRef = React.useRef<{ sessionId: string; anchor: number } | null>(null);
     const settleBurstRafRef = React.useRef<number | null>(null);
@@ -186,7 +187,15 @@ export const useChatAutoFollow = ({
             stopFollowLoop();
             return;
         }
-        if (stateRef.current !== 'following' || !sessionWorkingRef.current) {
+        // Gate on pinned state only. `sessionWorking` used to gate here too,
+        // but that hard-stopped chasing the bottom the instant a message
+        // completed — and late reflows (async markdown chunk load, code
+        // highlighter hydration, image height adjustment, reasoning
+        // auto-collapse on stream end) keep changing scrollHeight for
+        // hundreds of ms after `time.completed` arrives. The loop now self-
+        // terminates only when content has actually settled (SETTLE_EPSILON
+        // for SETTLE_FRAMES), regardless of stream phase.
+        if (stateRef.current !== 'following') {
             stopFollowLoop();
             return;
         }
@@ -221,7 +230,7 @@ export const useChatAutoFollow = ({
     const startFollowLoop = React.useCallback(() => {
         if (typeof window === 'undefined') return;
         if (followRafRef.current !== null) return;
-        if (stateRef.current !== 'following' || !sessionWorkingRef.current) return;
+        if (stateRef.current !== 'following') return;
         settledFramesRef.current = 0;
         setIsFollowingProgrammatically(true);
         followRafRef.current = window.requestAnimationFrame(tickFollow);
@@ -408,12 +417,24 @@ export const useChatAutoFollow = ({
     }, [currentSessionId, flushSave, markProgrammaticWrite, stopFollowLoop, stopSettleBurst]);
 
     React.useEffect(() => {
-        if (!sessionIsWorking) {
-            stopFollowLoop();
-        } else if (stateRef.current === 'following') {
-            startFollowLoop();
+        if (sessionIsWorking) {
+            if (stateRef.current === 'following') {
+                startFollowLoop();
+            }
+            return;
         }
-    }, [sessionIsWorking, startFollowLoop, stopFollowLoop]);
+        // sessionIsWorking just flipped to false. Don't hard-stop the
+        // follow loop — late reflows after `time.completed` (async markdown
+        // chunk load, code highlighter hydration, image height adjustment,
+        // reasoning auto-collapse) keep changing scrollHeight, and a pinned
+        // user expects to stay glued through that tail. tickFollow self-
+        // terminates once content settles; the settle burst snaps to the
+        // new bottom each frame for SETTLE_BURST_DURATION_MS to nail the
+        // immediate post-completion reflow window.
+        if (stateRef.current === 'following') {
+            startSettleBurst();
+        }
+    }, [sessionIsWorking, startFollowLoop, startSettleBurst]);
 
     const updateOverflowAndButton = React.useCallback(() => {
         const container = scrollRef.current;
@@ -438,8 +459,11 @@ export const useChatAutoFollow = ({
 
         const programmatic = isInProgrammaticWindow();
         const currentTop = container.scrollTop;
+        const currentHeight = container.scrollHeight;
         const previousTop = lastScrollTopRef.current;
+        const previousHeight = lastScrollHeightRef.current;
         lastScrollTopRef.current = currentTop;
+        lastScrollHeightRef.current = currentHeight;
 
         updateOverflowAndButton();
 
@@ -447,7 +471,18 @@ export const useChatAutoFollow = ({
             return;
         }
 
-        if (currentTop < previousTop && stateRef.current === 'following') {
+        // Distinguish a real user scroll-up from a browser auto-clamp
+        // triggered by shrinking scrollHeight (reasoning block auto-collapse
+        // on stream end, tool placeholder replaced by a shorter output,
+        // image height adjustment after load). On a clamp, the browser
+        // moves scrollTop *down* to fit the new max scroll — which the
+        // raw `currentTop < previousTop` test below would mis-read as a
+        // user release. A real scroll-up arrives with scrollHeight
+        // unchanged; suppress the release path when scrollHeight has
+        // strictly decreased since the last observation.
+        const layoutShrunk = previousHeight > 0 && currentHeight < previousHeight;
+
+        if (!layoutShrunk && currentTop < previousTop && stateRef.current === 'following') {
             stopFollowLoop();
             stopSettleBurst();
             lastUserReleaseAtRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now();
@@ -458,9 +493,7 @@ export const useChatAutoFollow = ({
         const inGrace = (now - lastUserReleaseAtRef.current) < REPIN_GRACE_AFTER_RELEASE_MS;
         if (stateRef.current === 'released' && isNearBottom(container, isMobile) && !inGrace) {
             setStateValue('following');
-            if (sessionWorkingRef.current) {
-                startFollowLoop();
-            }
+            startFollowLoop();
         }
 
         queueSave();
@@ -551,7 +584,11 @@ export const useChatAutoFollow = ({
 
         const observer = new ResizeObserver(() => {
             updateOverflowAndButton();
-            if (stateRef.current === 'following' && sessionWorkingRef.current) {
+            // Keep the height baseline fresh so the layout-shrink heuristic
+            // in handleScrollEvent has a previous value to compare against
+            // when a scroll event fires right after a content reflow.
+            lastScrollHeightRef.current = container.scrollHeight;
+            if (stateRef.current === 'following') {
                 startFollowLoop();
             }
         });
@@ -570,7 +607,7 @@ export const useChatAutoFollow = ({
     const notifyContentChange = React.useCallback((_reason?: ContentChangeReason) => {
         void _reason;
         updateOverflowAndButton();
-        if (stateRef.current === 'following' && sessionWorkingRef.current) {
+        if (stateRef.current === 'following') {
             startFollowLoop();
         }
     }, [startFollowLoop, updateOverflowAndButton]);
