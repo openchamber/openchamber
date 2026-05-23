@@ -39,6 +39,7 @@ export interface ChangesGroupConfig {
   onActionAll: (paths: string[]) => void;
   onViewDiff: (path: string) => void;
   onRevertFile: (path: string) => void;
+  showRevertActions?: boolean;
   /** Visually mark this group as "ready to commit". */
   accent?: boolean;
 }
@@ -419,6 +420,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
           rowPaddingClassName={ROW_PADDING_CLASSNAME}
           indentPx={row.depth * TREE_INDENT_PX}
           actionAtStart={!isTreeView}
+          showRevert={group.showRevertActions !== false}
         />
       );
     },

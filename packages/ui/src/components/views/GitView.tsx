@@ -1703,13 +1703,8 @@ export const GitView: React.FC = () => {
         return next;
       });
 
-      const touchesStagedIndex = stagedChangeEntries.some((entry) => entry.path === filePath);
-
       try {
-        await git.revertGitFile(currentDirectory, filePath);
-        if (touchesStagedIndex) {
-          bumpIndexRevision(currentDirectory);
-        }
+        await git.revertGitFile(currentDirectory, filePath, { scope: 'working' });
         toast.success(t('gitView.toast.revertedFile', { path: filePath }));
         await refreshStatusAndBranches(false);
       } catch (err) {
@@ -1723,7 +1718,7 @@ export const GitView: React.FC = () => {
         });
       }
     },
-    [bumpIndexRevision, currentDirectory, refreshStatusAndBranches, git, stagedChangeEntries, t]
+    [currentDirectory, refreshStatusAndBranches, git, t]
   );
 
   const handleRevertAll = React.useCallback(
@@ -1818,6 +1813,7 @@ export const GitView: React.FC = () => {
         onActionAll: (paths) => void moveChangePaths(paths, 'unstage'),
         onViewDiff: (path) => handleViewChangeDiff(path, true),
         onRevertFile: handleRevertFile,
+        showRevertActions: false,
         accent: true,
       });
     }

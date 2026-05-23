@@ -2112,20 +2112,42 @@ export async function getGitFileDiff(
 /**
  * Revert a file to its last committed state
  */
-export async function revertGitFile(directory: string, filePath: string): Promise<void> {
-  const repo = await getRepository(directory);
-  
-  if (repo) {
-    try {
-      await repo.revert([filePath]);
-      return;
-    } catch (error) {
-      console.error('[GitService] Failed to revert via API:', error);
+export async function revertGitFile(
+  directory: string,
+  filePath: string,
+  options: { scope?: 'all' | 'working' } = {},
+): Promise<void> {
+  const scope = options.scope === 'working' ? 'working' : 'all';
+  const tracked = await execGit(['ls-files', '--error-unmatch', '--', filePath], directory);
+  if (tracked.exitCode !== 0) {
+    const clean = await execGit(['clean', '-f', '-d', '--', filePath], directory);
+    if (clean.exitCode !== 0) {
+      const root = path.resolve(directory);
+      const target = path.resolve(directory, filePath);
+      if (target !== root && !target.startsWith(root + path.sep)) {
+        throw new Error(`Path is outside repository: ${filePath}`);
+      }
+      await fs.promises.rm(target, { recursive: true, force: true });
+    }
+    return;
+  }
+
+  if (scope === 'all') {
+    const unstage = await execGit(['restore', '--staged', '--', filePath], directory);
+    if (unstage.exitCode !== 0) {
+      await execGit(['reset', 'HEAD', '--', filePath], directory);
     }
   }
 
-  // Fallback to raw git
-  await execGit(['checkout', '--', filePath], directory);
+  const restore = await execGit(['restore', '--', filePath], directory);
+  if (restore.exitCode === 0) {
+    return;
+  }
+
+  const fallback = await execGit(['checkout', '--', filePath], directory);
+  if (fallback.exitCode !== 0) {
+    throw new Error(fallback.stderr || restore.stderr || 'Failed to revert git file');
+  }
 }
 
 export async function stageGitFile(directory: string, filePath: string): Promise<void> {

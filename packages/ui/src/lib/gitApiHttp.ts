@@ -200,7 +200,11 @@ export async function getGitFileDiff(directory: string, options: GetGitFileDiffO
   return response.json();
 }
 
-export async function revertGitFile(directory: string, filePath: string): Promise<void> {
+export async function revertGitFile(
+  directory: string,
+  filePath: string,
+  options?: { scope?: 'all' | 'working' }
+): Promise<void> {
   if (!filePath) {
     throw new Error('path is required to revert git changes');
   }
@@ -208,7 +212,7 @@ export async function revertGitFile(directory: string, filePath: string): Promis
   const response = await fetch(buildUrl(`${API_BASE}/revert`, directory), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path: filePath }),
+    body: JSON.stringify({ path: filePath, scope: options?.scope }),
   });
 
   if (!response.ok) {

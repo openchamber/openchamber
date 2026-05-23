@@ -291,12 +291,12 @@ export function registerGitRoutes(app) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const { path } = req.body || {};
+      const { path, scope } = req.body || {};
       if (!path || typeof path !== 'string') {
         return res.status(400).json({ error: 'path parameter is required' });
       }
 
-      await revertFile(directory, path);
+      await revertFile(directory, path, { scope });
       res.json({ success: true });
     } catch (error) {
       console.error('Failed to revert git file:', error);

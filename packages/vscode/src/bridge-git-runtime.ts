@@ -217,11 +217,11 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
     }
 
     case 'api:git/revert': {
-      const { directory, path: filePath } = (payload || {}) as { directory?: string; path?: string };
+      const { directory, path: filePath, scope } = (payload || {}) as { directory?: string; path?: string; scope?: 'all' | 'working' };
       if (!directory || !filePath) {
         return { id, type, success: false, error: 'Directory and path are required' };
       }
-      await gitService.revertGitFile(directory, filePath);
+      await gitService.revertGitFile(directory, filePath, { scope });
       return { id, type, success: true, data: { success: true } };
     }
 

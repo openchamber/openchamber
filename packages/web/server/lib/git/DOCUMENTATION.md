@@ -30,7 +30,7 @@ The following functions are exported and used by the web server:
 - `getRangeFiles(directory, { base, head })`: Get list of changed files between two refs.
 - `getFileDiff(directory, { path, staged })`: Get original and modified file contents for a single file (handles images as data URLs).
 - `collectDiffs(directory, files)`: Collect diff output for multiple files.
-- `revertFile(directory, filePath)`: Revert a file to HEAD state.
+- `revertFile(directory, filePath, options)`: Revert a file. Default scope `all` discards staged and working-tree changes; scope `working` discards only unstaged/working-tree changes.
 - `stageFile(directory, filePath)`: Add one file path to the index.
 - `unstageFile(directory, filePath)`: Remove one file path from the index while preserving working-tree content.
 

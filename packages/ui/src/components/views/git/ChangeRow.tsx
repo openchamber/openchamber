@@ -50,6 +50,7 @@ interface ChangeRowProps {
   indentPx?: number;
   /** Place the stage/unstage action at the row start (flat view) instead of the end (tree view). */
   actionAtStart?: boolean;
+  showRevert?: boolean;
 }
 
 export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
@@ -64,6 +65,7 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
   rowPaddingClassName,
   indentPx = 0,
   actionAtStart = false,
+  showRevert = true,
 }) {
   const descriptor = useMemo(() => describeChange(file), [file]);
   const { t } = useI18n();
@@ -165,24 +167,26 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
           <span className="text-muted-foreground mx-0.5">/</span>
           <span style={{ color: 'var(--status-error)' }}>-{deletions}</span>
         </span>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              onClick={handleRevertClick}
-              disabled={isReverting}
-              className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
-              aria-label={t('gitView.changes.revertFileAria', { path: file.path })}
-            >
-              {isReverting ? (
-                <Icon name="loader-4" className="size-3.5 animate-spin" />
-              ) : (
-                <Icon name="arrow-go-back" className="size-3.5" />
-              )}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent sideOffset={8}>{t('gitView.changes.revertFileTooltip')}</TooltipContent>
-        </Tooltip>
+        {showRevert ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={handleRevertClick}
+                disabled={isReverting}
+                className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
+                aria-label={t('gitView.changes.revertFileAria', { path: file.path })}
+              >
+                {isReverting ? (
+                  <Icon name="loader-4" className="size-3.5 animate-spin" />
+                ) : (
+                  <Icon name="arrow-go-back" className="size-3.5" />
+                )}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent sideOffset={8}>{t('gitView.changes.revertFileTooltip')}</TooltipContent>
+          </Tooltip>
+        ) : null}
         {actionAtStart ? null : actionButton}
     </div>
   );

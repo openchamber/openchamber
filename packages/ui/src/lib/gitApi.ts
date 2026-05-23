@@ -126,10 +126,14 @@ export async function getGitFileDiff(
   return gitHttp.getGitFileDiff(directory, options);
 }
 
-export async function revertGitFile(directory: string, filePath: string): Promise<void> {
+export async function revertGitFile(
+  directory: string,
+  filePath: string,
+  options?: { scope?: 'all' | 'working' }
+): Promise<void> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtime.revertGitFile(directory, filePath);
-  return gitHttp.revertGitFile(directory, filePath);
+  if (runtime) return runtime.revertGitFile(directory, filePath, options);
+  return gitHttp.revertGitFile(directory, filePath, options);
 }
 
 export async function stageGitFile(directory: string, filePath: string): Promise<void> {

@@ -63,8 +63,8 @@ export const createVSCodeGitAPI = (): GitAPI => ({
     });
   },
 
-  revertGitFile: async (directory: string, filePath: string): Promise<void> => {
-    await sendBridgeMessage('api:git/revert', { directory, path: filePath });
+  revertGitFile: async (directory: string, filePath: string, options?: { scope?: 'all' | 'working' }): Promise<void> => {
+    await sendBridgeMessage('api:git/revert', { directory, path: filePath, scope: options?.scope });
   },
 
   stageGitFile: async (directory: string, filePath: string): Promise<void> => {

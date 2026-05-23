@@ -1909,8 +1909,9 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
   };
 }
 
-export async function revertFile(directory, filePath) {
+export async function revertFile(directory, filePath, options = {}) {
   return withGitIndexMutationQueue(directory, async () => {
+    const scope = options?.scope === 'working' ? 'working' : 'all';
     const directoryPath = normalizeDirectoryPath(directory);
     const directoryGit = await createGit(directoryPath);
     const repoRoot = await resolveGitRepositoryRoot(directoryPath, directoryGit);
@@ -1940,10 +1941,12 @@ export async function revertFile(directory, filePath) {
       }
     }
 
-    try {
-      await git.raw(['restore', '--staged', '--', repoPath]);
-    } catch (error) {
-      await git.raw(['reset', 'HEAD', '--', repoPath]).catch(() => {});
+    if (scope === 'all') {
+      try {
+        await git.raw(['restore', '--staged', '--', repoPath]);
+      } catch (error) {
+        await git.raw(['reset', 'HEAD', '--', repoPath]).catch(() => {});
+      }
     }
 
     try {
