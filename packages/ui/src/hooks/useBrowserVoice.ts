@@ -860,7 +860,7 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
         isActiveRef.current = false;
       }
     }
-  }, [isSupported, currentSessionId, language, handleSpeechResult, handleSpeechError, isMobile, unlockServerTTSAudio, unlockSayTTSAudio, sttProvider, sttServerUrl, sttModel, wasmSttModel, sttLanguage, sttSilenceThresholdDb, sttSilenceHoldMs]);
+  }, [isSupported, currentSessionId, language, handleSpeechResult, handleSpeechError, isMobile, unlockServerTTSAudio, unlockSayTTSAudio, sttProvider, sttServerUrl, sttModel, sttApiKey, wasmSttModel, sttLanguage, sttSilenceThresholdDb, sttSilenceHoldMs]);
 
   // Stop voice mode
   const stopVoice = useCallback(() => {
