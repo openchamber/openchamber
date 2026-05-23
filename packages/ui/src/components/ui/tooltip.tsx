@@ -139,6 +139,7 @@ function Tooltip({
       if (suppressClickRef.current) {
         clearCloseTimeout()
         closeTimeoutRef.current = window.setTimeout(() => {
+          suppressClickRef.current = false
           setTooltipOpen(false)
         }, MOBILE_LONG_PRESS_CLOSE_DELAY)
       }
