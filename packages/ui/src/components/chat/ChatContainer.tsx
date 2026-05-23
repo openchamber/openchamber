@@ -810,19 +810,24 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
             settleObserver = new ResizeObserver(() => {
                 if (cancelled || !settleObserver) return;
                 const currentTop = container.scrollTop;
+                // Tolerance catches a real user scroll-up (their scrollTop
+                // diverges from where we placed them by more than a few px)
+                // and tears the observer down so user intent wins. Sub-px
+                // drift from browser clamps stays under the tolerance, so
+                // routine reflows trigger a re-apply.
                 if (Math.abs(currentTop - lastAppliedTop) > SETTLE_TOLERANCE_PX) {
-                    // User scrolled away from our placement — they have
-                    // intent, stop tracking. Also catches the at-bottom
-                    // path's follow-loop / settle-burst writes, which
-                    // disconnect this observer on the first growth event
-                    // and let the existing chase mechanism handle the
-                    // tail.
                     teardownSettle();
                     return;
                 }
                 // Layout shifted while user is still where we put them.
                 // Re-apply the saved snapshot against the new scrollHeight
-                // so the visible region matches the original save.
+                // so the visible region matches the original save. In the
+                // at-bottom restore case the re-apply snaps to the new
+                // bottom, which is consistent with the existing settle-
+                // burst behavior (just extended past its 280ms window);
+                // the follow loop and settle burst continue running but
+                // their writes target the same scrollTop, so the chase
+                // stays coherent.
                 void restoreSnapshot().then((ready) => {
                     if (cancelled || !ready) return;
                     lastAppliedTop = container.scrollTop;
