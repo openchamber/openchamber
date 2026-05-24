@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.11.4] - 2026-05-22
+
+- Desktop: Electron is now the desktop release target, with updated macOS menu actions for the right sidebar and terminal dock.
+- Chat: added reusable snippets with `#` autocomplete in the composer and a Snippets settings page for global and project snippets with [opencode-snippets](https://github.com/JosXa/opencode-snippets) plugin compatibility.
+- Multi-Run: runs can now be split into separate prompt/model groups, and Multi-Run prompts support command, file, agent, and snippet autocomplete (thanks to @tomzx).
+- UI: refreshed the desktop workspace shell with a full-width header, framed chat area, and smooth left/right sidebar open and close states.
+- Chat: completed reasoning blocks stay collapsed without replaying the collapse animation when you reopen a session.
+- Files: file search and mention results avoid mixing entries from similar query/cache keys (thanks to @isanchez404).
+- VSCode: switching between chat sessions is less likely to stall on very large conversations.
+- Voice: preview audio now stops and cleans up correctly when you stop playback or leave Voice settings (thanks to @isanchez404).
+- UI/Localization: refreshed Simplified Chinese terminology across the interface (thanks to @luojiyin).
+
 ## [1.11.3] - 2026-05-19
 
 - Chat: question cards now include copy buttons for Markdown and JSON (thanks to @robertoberto).
@@ -176,7 +188,7 @@ All notable changes to this project will be documented in this file.
 - Chat/Requests: restored blocking request visibility in sub-sessions, scoped auto-approve to the active session tree, and reduced noisy auto-approved notifications during multi-session work.
 - Desktop: added quick open and a LAN access toggle, plus safer quit behavior around scheduled tasks (thanks to @An-jinu).
 - Chat/Markdown: added LaTeX rendering support for clearer math and technical notation in messages (thanks to @ricautomation).
-- Settings/Skills: skills are now sorted within groups (thanks to @roctom).
+- Settings/Skills: skills are now sorted within groups (thanks to @tomzx).
 
 ## [1.9.5] - 2026-04-14
 
@@ -898,7 +910,7 @@ All notable changes to this project will be documented in this file.
 ## [1.1.4] - 2025-12-15
 
 - Flexoki themes for Shiki syntax highlighting for consistency with the app color schema.
-- Enchanced VSCode extension theming with editor themes.
+- Enhanced VSCode extension theming with editor themes.
 - Fixed mobile view model/agent selection.
 
 ## [1.1.3] - 2025-12-14

@@ -4,6 +4,13 @@
 > designed will not be around when the cutover happens — read this file top to
 > bottom and execute; do not assume prior context.
 
+> Current status: the release workflow cutover is implemented. Desktop releases
+> now build Electron and repackage that Electron `.app` into the old Tauri
+> updater format for existing Tauri installs. The next safe engineering step is
+> [Step 5 — Remove Tauri-specific code](#step-5--remove-tauri-specific-code),
+> but only after the transition release has shipped and lived for at least 2
+> weeks with no rollback.
+
 ## What this is
 
 OpenChamber historically shipped as a Tauri app. A parallel Electron shell was
@@ -13,7 +20,7 @@ and each has its own auto-update channel:
 
 | Shell    | Manifest          | Update format       | Secret used to sign |
 |----------|-------------------|---------------------|---------------------|
-| Tauri    | `latest.json`     | `.tar.gz` + `.sig`  | `TAURI_SIGNING_PRIVATE_KEY` (minisign) |
+| Tauri    | `latest.json`     | `.tar.gz` + `.sig`  | `TAURI_SIGNING_PRIVATE_KEY` (Tauri signer / minisign format) |
 | Electron | `latest-mac.yml`  | `.zip` + `blockmap` | Developer ID codesign (APPLE_* secrets) |
 
 Existing Tauri installs keep their own auto-update path (`latest.json`).
@@ -72,11 +79,55 @@ Check all of these before making any release:
 5. **`minisign` CLI is available on the macOS runner** (or installable via
    brew). Used to sign the Electron tarball with the Tauri key.
 
-## Release workflow changes
+## Current release workflow
 
-The file to edit: `.github/workflows/release.yml`.
+The release workflow no longer builds a Tauri desktop app. It now does this:
 
-Today it has these jobs (simplified):
+```text
+create-release
+├── build-desktop-electron-macos        (Electron .dmg/.zip/blockmap/latest-mac.yml)
+├── repackage-electron-as-tauri-update  (Electron .app -> Tauri .app.tar.gz/.sig)
+├── publish-npm
+├── combine-manifests                   (Tauri latest.json for migration only)
+├── combine-electron-manifests          (Electron latest-mac.yml)
+└── finalize-release
+```
+
+The transition works like this:
+
+1. `build-desktop-electron-macos` builds, signs, and notarizes the Electron app.
+2. It wraps the signed `OpenChamber.app` in a tarball and uploads that tarball
+   as a short-lived Actions artifact.
+3. `repackage-electron-as-tauri-update` downloads that Electron `.app`.
+4. It packs it into `OpenChamber-<version>-darwin-*.app.tar.gz`.
+5. It signs that tarball with `tauri signer sign` and the existing Tauri signing key.
+6. It uploads the tarball and `.sig` to the GitHub release.
+7. It generates Tauri-compatible manifests and `combine-manifests` merges them into `latest.json`.
+
+So old Tauri installs still see the update contract they expect:
+
+```text
+latest.json -> .app.tar.gz -> .sig
+```
+
+But the payload inside the `.app.tar.gz` is Electron, not Tauri. Tauri's updater
+only verifies the signature and extracts the bundle over the existing
+`/Applications/OpenChamber.app`. After restart, the app is Electron and future
+updates use `latest-mac.yml` through `electron-updater`.
+
+Note: do not upload the `.app` directory directly with `actions/upload-artifact`.
+That action can flatten the app to its inner `Contents/` folder and can also
+normalize file modes. Losing the executable bit on `Contents/MacOS/*` makes the
+updated app fail to launch with a permissions/package error. The workflow wraps
+the `.app` in a tarball before upload so permissions survive the handoff between
+jobs, then verifies the app executable is still executable before creating the
+Tauri updater tarball.
+
+## Historical release workflow changes
+
+The file edited for the cutover was `.github/workflows/release.yml`.
+
+Before the cutover it had these jobs (simplified):
 
 ```
 create-release
@@ -90,6 +141,8 @@ create-release
 
 ### Step 1 — Remove the Tauri build
 
+Status: done.
+
 Delete these jobs entirely:
 - `build-desktop-macos`
 - `combine-manifests`
@@ -98,6 +151,8 @@ They are replaced by the repackage job (below). `finalize-release` `needs:`
 list must be updated to drop both.
 
 ### Step 2 — Add a repackage job
+
+Status: done.
 
 Insert after `build-desktop-electron-macos`:
 
@@ -132,13 +187,10 @@ repackage-electron-as-tauri-update:
         name: electron-app-${{ matrix.arch }}
         path: staged
 
-    - name: Install minisign
-      run: brew install minisign
-
     - name: Tar and sign Electron .app as Tauri update payload
       env:
-        TAURI_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-        TAURI_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         VERSION: ${{ needs.create-release.outputs.version }}
       run: |
         set -euo pipefail
@@ -149,16 +201,13 @@ repackage-electron-as-tauri-update:
         TARBALL="OpenChamber.app.tar.gz"
         tar -czf "$TARBALL" OpenChamber.app
 
-        # minisign needs the private key written to a file and a non-interactive
-        # password via -W (or env). The key in the secret is a minisign secret
-        # key block (base64-ish multi-line blob). Write to a file verbatim.
-        echo "$TAURI_KEY" > ../tauri-signing.key
-        echo "$TAURI_KEY_PASSWORD" | minisign -S -s ../tauri-signing.key \
-          -m "$TARBALL" -W
+        # Use Tauri's signer instead of minisign directly. The CI secret is in
+        # the format consumed by TAURI_SIGNING_PRIVATE_KEY.
+        bun run --cwd ../packages/desktop tauri signer sign "$PWD/$TARBALL"
 
         # Rename per platform so the release has distinct names for arm64/x64.
         mv "$TARBALL" "OpenChamber-${VERSION}-${{ matrix.platform }}.app.tar.gz"
-        mv "${TARBALL}.minisig" "OpenChamber-${VERSION}-${{ matrix.platform }}.app.tar.gz.sig"
+        mv "${TARBALL}.sig" "OpenChamber-${VERSION}-${{ matrix.platform }}.app.tar.gz.sig"
 
     - name: Generate Tauri latest-<platform>.json
       env:
@@ -201,6 +250,8 @@ repackage-electron-as-tauri-update:
 
 ### Step 3 — Re-add the `combine-manifests` job
 
+Status: done.
+
 Bring it back (it was deleted in Step 1) but sourcing artifacts from the
 repackage job instead of the old Tauri build. The merging logic is identical
 to what the old job did. Minimum job shape:
@@ -232,6 +283,8 @@ combine-manifests:
 
 ### Step 4 — Update `finalize-release.needs`
 
+Status: done.
+
 ```yaml
 finalize-release:
   needs: [create-release, build-desktop-electron-macos, repackage-electron-as-tauri-update, publish-npm, combine-manifests, combine-electron-manifests]
@@ -239,8 +292,11 @@ finalize-release:
 
 ### Step 5 — Remove Tauri-specific code
 
-After the transition release ships and has been out at least 2 weeks with no
-rollback, remove:
+Status: next safe refactoring step, after the transition release ships and has
+been out at least 2 weeks with no rollback.
+
+Do not do this in the same release as the migration. Once the transition release
+has proved stable, remove:
 
 - `packages/desktop/` (entire package — Tauri Rust + UI glue)
 - Any `isTauriShell()` branches that are now dead code in
@@ -249,9 +305,18 @@ rollback, remove:
   audit each before removing).
 - This file (`docs/TAURI_TO_ELECTRON_CUTOVER.md`) — mission accomplished.
 
-Do this in a separate PR. Keep the transition release workflow intact until
-the cleanup lands; rolling the cleanup into the transition release itself
-makes debugging much harder if the migration misbehaves for a user.
+Do this in a separate PR. Keep the transition release workflow intact until the
+cleanup lands; rolling the cleanup into the transition release itself makes
+debugging much harder if the migration misbehaves for a user.
+
+The manual arm64 macOS DMG workflow has already been changed to build Electron
+only, so there should be no GitHub Actions path that accidentally produces a new
+Tauri DMG.
+
+When rerunning the same release version with `workflow_dispatch`, use
+`dry_run=true` if npm and marketplace packages are already published. In that
+mode the workflow still rebuilds release assets, but skips publishing to npm and
+skips re-uploading the npm tarball asset.
 
 ## Validation before tagging the transition release
 

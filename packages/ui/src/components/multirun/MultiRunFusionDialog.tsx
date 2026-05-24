@@ -113,6 +113,7 @@ export function MultiRunFusionDialog({
       .map((candidate): FusionSource | null => {
         const candidateParsed = parseMultiRunSessionTitle(candidate.title);
         if (!candidateParsed || candidateParsed.groupSlug !== parsed.groupSlug || candidateParsed.fusion) return null;
+        if ((candidateParsed.runGroup ?? null) !== (parsed.runGroup ?? null)) return null;
         const directory = useSessionUIStore.getState().getDirectoryForSession(candidate.id)
           ?? resolveGlobalSessionDirectory(candidate);
         const projectDirectory = getSessionProjectDirectory(candidate.id, directory);
@@ -154,7 +155,7 @@ export function MultiRunFusionDialog({
       }
 
       const directory = sources[0]?.projectDirectory ?? sources[0]?.directory ?? null;
-      const fusionTitle = getFusionSessionTitle(parsed.groupSlug, providerID, modelID);
+      const fusionTitle = getFusionSessionTitle(parsed.groupSlug, providerID, modelID, parsed.runGroup);
       const [visiblePrompt, instructionsPrompt] = await Promise.all([
         renderMagicPrompt('session.fusion.visible'),
         renderMagicPrompt('session.fusion.instructions'),

@@ -97,11 +97,12 @@ export const PendingChangesBar: React.FC = React.memo(() => {
         }
 
         const store = useUIStore.getState();
+        const openStagedDiff = file.hasStagedChanges && !file.hasWorkingChanges;
         if (!store.isMobile) {
-            store.openContextDiff(currentDirectory, file.relativePath);
+            store.openContextDiff(currentDirectory, file.relativePath, openStagedDiff);
             return;
         }
-        store.navigateToDiff(file.relativePath);
+        store.navigateToDiff(file.relativePath, openStagedDiff);
         store.setRightSidebarOpen(false);
     };
 

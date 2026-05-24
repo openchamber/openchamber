@@ -760,6 +760,12 @@ html:not(.dark) .chat-scroll {
   }
 }
 
+@container commit-actions (max-width: 22rem) {
+  .commit-actions__label--push {
+    display: none;
+  }
+}
+
 @container commit-actions (max-width: 19rem) {
   .commit-actions__label {
     display: none;

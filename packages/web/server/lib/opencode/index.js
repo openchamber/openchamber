@@ -35,6 +35,7 @@ export {
   getSkillSources,
   getSkillScope,
   discoverSkills,
+  mergeDiscoveredSkills,
   createSkill,
   updateSkill,
   deleteSkill,
@@ -64,3 +65,12 @@ export {
   updateMcpConfig,
   deleteMcpConfig,
 } from './mcp.js';
+
+export {
+  listSnippets,
+  getSnippet,
+  createSnippet,
+  updateSnippet,
+  deleteSnippet,
+  expandSnippets,
+} from './snippets.js';

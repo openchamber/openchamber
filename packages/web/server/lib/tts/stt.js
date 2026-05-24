@@ -16,10 +16,11 @@ import { normalizeCustomOpenAIBaseURL } from './base-url.js';
  * @param {string} opts.mimeType     - MIME type of the audio (e.g. 'audio/webm')
  * @param {string} opts.model        - Model name accepted by the remote server
  * @param {string} [opts.baseURL]    - Base URL of the compatible server (including /v1)
+ * @param {string} [opts.apiKey]     - Optional API key for the compatible server
  * @param {string} [opts.language]   - Optional BCP-47 language hint (e.g. 'en')
  * @returns {Promise<string>} Transcribed text
  */
-export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, language }) {
+export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, apiKey, language }) {
   const normalizedBaseURLResult = normalizeCustomOpenAIBaseURL(baseURL);
   if (normalizedBaseURLResult.error) {
     throw new Error(normalizedBaseURLResult.error);
@@ -31,7 +32,7 @@ export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, l
   }
 
   const clientOpts = {
-    apiKey: process.env.OPENAI_API_KEY || 'not-required',
+    apiKey: apiKey || process.env.OPENAI_API_KEY || 'not-required',
   };
   clientOpts.baseURL = normalizedBaseURL;
 

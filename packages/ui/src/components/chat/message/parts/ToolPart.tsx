@@ -17,6 +17,7 @@ import { getSyncChildStores } from '@/sync/sync-refs';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionActivity } from '@/hooks/useSessionActivity';
 import { opencodeClient } from '@/lib/opencode/client';
+import { isVSCodeRuntime } from '@/lib/desktop';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { Text } from '@/components/ui/text';
@@ -162,6 +163,9 @@ const TASK_TOOL_POLL_HIDDEN_MS = 6000;
 const TASK_TOOL_INITIAL_FETCH_LIMIT = 500;
 const TASK_TOOL_ACTIVE_FETCH_LIMIT = 160;
 const TASK_TOOL_IDLE_FETCH_LIMIT = 80;
+const VSCODE_TASK_TOOL_INITIAL_FETCH_LIMIT = 30;
+const VSCODE_TASK_TOOL_ACTIVE_FETCH_LIMIT = 30;
+const VSCODE_TASK_TOOL_IDLE_FETCH_LIMIT = 30;
 const TASK_TOOL_NO_CHANGE_BACKOFF_AFTER_POLLS = 3;
 const TASK_TOOL_SETTLE_GRACE_MS = 2500;
 const TASK_TOOL_FALLBACK_RETRY_MS = 3000;
@@ -222,13 +226,19 @@ const parseDiffStats = (metadata?: Record<string, unknown>): { added: number; re
         ?? getPatchText(metadata?.diff);
     if (!diffText) return null;
 
-    const lines = diffText.split('\n');
     let added = 0;
     let removed = 0;
+    let lineStart = 0;
 
-    for (const line of lines) {
+    for (let index = 0; index <= diffText.length; index += 1) {
+        if (index < diffText.length && diffText.charCodeAt(index) !== 10) {
+            continue;
+        }
+
+        const line = diffText.slice(lineStart, index);
         if (line.startsWith('+') && !line.startsWith('+++')) added++;
         if (line.startsWith('-') && !line.startsWith('---')) removed++;
+        lineStart = index + 1;
     }
 
     if (added === 0 && removed === 0) return null;
@@ -237,8 +247,13 @@ const parseDiffStats = (metadata?: Record<string, unknown>): { added: number; re
 
 const parseWriteLineCount = (input?: Record<string, unknown>): number | null => {
     if (!input?.content || typeof input.content !== 'string') return null;
-    const lines = input.content.split('\n');
-    return lines.length;
+    let lines = 1;
+    for (let index = 0; index < input.content.length; index += 1) {
+        if (input.content.charCodeAt(index) === 10) {
+            lines += 1;
+        }
+    }
+    return lines;
 };
 
 const extractFirstChangedLineFromDiff = (diffText: string): number | undefined => {
@@ -291,15 +306,13 @@ const extractFirstChangedLineFromDiff = (diffText: string): number | undefined =
 
 const getPatchText = (value: unknown): string | undefined => {
     if (typeof value === 'string') {
-        const trimmed = value.trim();
-        return trimmed.length > 0 ? trimmed : undefined;
+        return /\S/.test(value) ? value : undefined;
     }
 
     if (value && typeof value === 'object') {
         const patch = (value as { patch?: unknown }).patch;
         if (typeof patch === 'string') {
-            const trimmed = patch.trim();
-            return trimmed.length > 0 ? trimmed : undefined;
+            return /\S/.test(patch) ? patch : undefined;
         }
     }
 
@@ -2073,6 +2086,24 @@ const ToolPart: React.FC<ToolPartProps> = ({
     // When true, resolveFallbackTaskSessionId widens its time window (3s → 8s).
     const [taskFallbackRetried, setTaskFallbackRetried] = React.useState(false);
 
+    const metadataTaskSummaryEntries = React.useMemo<TaskToolSummaryEntry[]>(() => {
+        if (!isTaskTool) {
+            return [];
+        }
+        const candidateSummary = (metadata as { summary?: unknown; entries?: unknown; tools?: unknown; calls?: unknown } | undefined);
+        const normalized = normalizeTaskSummaryEntries(
+            candidateSummary?.summary ?? candidateSummary?.entries ?? candidateSummary?.tools ?? candidateSummary?.calls
+        );
+
+        if (normalized.length > 0) {
+            return normalized;
+        }
+
+        return parsedTaskMetadata.summaryEntries;
+    }, [isTaskTool, metadata, parsedTaskMetadata.summaryEntries]);
+
+    const hasFinalMetadataTaskSummary = isFinalized && metadataTaskSummaryEntries.length > 0;
+
     const explicitTaskSessionId = React.useMemo<string | undefined>(() => {
         if (!isTaskTool) {
             return undefined;
@@ -2114,25 +2145,10 @@ const ToolPart: React.FC<ToolPartProps> = ({
     );
 
     const taskSessionId = explicitTaskSessionId ?? fallbackTaskSessionId;
+    const childSessionLookupId = hasFinalMetadataTaskSummary ? '' : (taskSessionId ?? '');
 
-    const childSessionMessages = useSessionMessageRecords(taskSessionId ?? '', currentDirectory);
-    useEnsureSessionMessages(taskSessionId ?? '', currentDirectory);
-
-    const metadataTaskSummaryEntries = React.useMemo<TaskToolSummaryEntry[]>(() => {
-        if (!isTaskTool) {
-            return [];
-        }
-        const candidateSummary = (metadata as { summary?: unknown; entries?: unknown; tools?: unknown; calls?: unknown } | undefined);
-        const normalized = normalizeTaskSummaryEntries(
-            candidateSummary?.summary ?? candidateSummary?.entries ?? candidateSummary?.tools ?? candidateSummary?.calls
-        );
-
-        if (normalized.length > 0) {
-            return normalized;
-        }
-
-        return parsedTaskMetadata.summaryEntries;
-    }, [isTaskTool, metadata, parsedTaskMetadata.summaryEntries]);
+    const childSessionMessages = useSessionMessageRecords(childSessionLookupId, currentDirectory);
+    useEnsureSessionMessages(childSessionLookupId, currentDirectory);
 
     const childSessionTaskSummaryEntries = React.useMemo<TaskToolSummaryEntry[]>(() => {
         if (!isTaskTool || !taskSessionId) {
@@ -2224,7 +2240,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
     ]);
 
     React.useEffect(() => {
-        if (!isTaskTool || !taskSessionId) {
+        if (hasFinalMetadataTaskSummary || !isTaskTool || !taskSessionId) {
             return;
         }
 
@@ -2293,6 +2309,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
         childSessionHasInFlightTools,
         childSessionTaskSummaryEntries.length,
         currentDirectory,
+        hasFinalMetadataTaskSummary,
         activeLatched,
         isFinalized,
         isTaskTool,
@@ -2303,7 +2320,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
     ]);
 
     React.useEffect(() => {
-        if (!isTaskTool || !taskSessionId || !taskChildPollingStopped || !taskPendingFinalFetch || taskFinalFetchDoneRef.current) {
+        if (hasFinalMetadataTaskSummary || !isTaskTool || !taskSessionId || !taskChildPollingStopped || !taskPendingFinalFetch || taskFinalFetchDoneRef.current) {
             return;
         }
 
@@ -2315,7 +2332,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
                 const scopedClient = opencodeClient.getScopedSdkClient(currentDirectory);
                 const response = await scopedClient.session.messages({
                     sessionID: capturedSessionId,
-                    limit: TASK_TOOL_INITIAL_FETCH_LIMIT,
+                    limit: isVSCodeRuntime() ? VSCODE_TASK_TOOL_INITIAL_FETCH_LIMIT : TASK_TOOL_INITIAL_FETCH_LIMIT,
                 });
 
                 if (cancelled) {
@@ -2357,6 +2374,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
         };
     }, [
         currentDirectory,
+        hasFinalMetadataTaskSummary,
         isTaskTool,
         taskChildPollingStopped,
         taskPendingFinalFetch,
@@ -2402,6 +2420,10 @@ const ToolPart: React.FC<ToolPartProps> = ({
         }
 
         const childSessionActive = childSessionActivity.phase === 'busy' || childSessionActivity.phase === 'retry';
+        if (hasFinalMetadataTaskSummary) {
+            return;
+        }
+
         const shouldPoll =
             !taskChildPollingStopped
             && (childSessionHasInFlightTools || childSessionActive || childSessionTaskSummaryEntries.length === 0);
@@ -2421,6 +2443,16 @@ const ToolPart: React.FC<ToolPartProps> = ({
         };
 
         const resolveFetchLimit = (isInitialFetch: boolean) => {
+            if (isVSCodeRuntime()) {
+                if (isInitialFetch && childSessionTaskSummaryEntries.length === 0) {
+                    return VSCODE_TASK_TOOL_INITIAL_FETCH_LIMIT;
+                }
+                if (isActive || childSessionHasInFlightTools || childSessionActive) {
+                    return VSCODE_TASK_TOOL_ACTIVE_FETCH_LIMIT;
+                }
+                return VSCODE_TASK_TOOL_IDLE_FETCH_LIMIT;
+            }
+
             if (isInitialFetch && childSessionTaskSummaryEntries.length === 0) {
                 return TASK_TOOL_INITIAL_FETCH_LIMIT;
             }
@@ -2503,6 +2535,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
         childSessionHasInFlightTools,
         childSessionTaskSummaryEntries.length,
         currentDirectory,
+        hasFinalMetadataTaskSummary,
         isActive,
         isTaskTool,
         taskPendingFinalFetch,
@@ -2522,8 +2555,14 @@ const ToolPart: React.FC<ToolPartProps> = ({
         onContentChange?.('structural');
     }, [isTaskTool, onContentChange, taskSummaryEntries.length]);
 
-    const diffStats = (normalizedPartTool === 'edit' || normalizedPartTool === 'multiedit' || normalizedPartTool === 'apply_patch') ? parseDiffStats(metadata) : null;
-    const writeLineCount = normalizedPartTool === 'write' ? parseWriteLineCount(input) : null;
+    const diffStats = React.useMemo(() => {
+        return (normalizedPartTool === 'edit' || normalizedPartTool === 'multiedit' || normalizedPartTool === 'apply_patch')
+            ? parseDiffStats(metadata)
+            : null;
+    }, [metadata, normalizedPartTool]);
+    const writeLineCount = React.useMemo(() => {
+        return normalizedPartTool === 'write' ? parseWriteLineCount(input) : null;
+    }, [input, normalizedPartTool]);
     const isMultiFileApplyPatch = normalizedPartTool === 'apply_patch' && Array.isArray(metadata?.files) && (metadata?.files as []).length > 1;
     const normalizedPart = normalizedPartTool !== part.tool ? ({ ...part, tool: normalizedPartTool } as ToolPartType) : part;
     const descriptionPath = getToolDescriptionPath(normalizedPart, state, currentDirectory);

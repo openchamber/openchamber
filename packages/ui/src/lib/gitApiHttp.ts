@@ -200,7 +200,11 @@ export async function getGitFileDiff(directory: string, options: GetGitFileDiffO
   return response.json();
 }
 
-export async function revertGitFile(directory: string, filePath: string): Promise<void> {
+export async function revertGitFile(
+  directory: string,
+  filePath: string,
+  options?: { scope?: 'all' | 'working' }
+): Promise<void> {
   if (!filePath) {
     throw new Error('path is required to revert git changes');
   }
@@ -208,7 +212,7 @@ export async function revertGitFile(directory: string, filePath: string): Promis
   const response = await fetch(buildUrl(`${API_BASE}/revert`, directory), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path: filePath }),
+    body: JSON.stringify({ path: filePath, scope: options?.scope }),
   });
 
   if (!response.ok) {
@@ -216,6 +220,52 @@ export async function revertGitFile(directory: string, filePath: string): Promis
       .json()
       .catch(() => ({ error: response.statusText }));
     throw new Error(message.error || 'Failed to revert git changes');
+  }
+}
+
+export async function stageGitFile(directory: string, filePath: string): Promise<void> {
+  await stageGitFiles(directory, [filePath]);
+}
+
+export async function stageGitFiles(directory: string, filePaths: string[]): Promise<void> {
+  const paths = filePaths.map((path) => path.trim()).filter(Boolean);
+
+  if (paths.length === 0) {
+    throw new Error('path is required to stage git changes');
+  }
+
+  const response = await fetch(buildUrl(`${API_BASE}/stage`, directory), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paths }),
+  });
+
+  if (!response.ok) {
+    const message = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(message.error || 'Failed to stage git changes');
+  }
+}
+
+export async function unstageGitFile(directory: string, filePath: string): Promise<void> {
+  await unstageGitFiles(directory, [filePath]);
+}
+
+export async function unstageGitFiles(directory: string, filePaths: string[]): Promise<void> {
+  const paths = filePaths.map((path) => path.trim()).filter(Boolean);
+
+  if (paths.length === 0) {
+    throw new Error('path is required to unstage git changes');
+  }
+
+  const response = await fetch(buildUrl(`${API_BASE}/unstage`, directory), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paths }),
+  });
+
+  if (!response.ok) {
+    const message = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(message.error || 'Failed to unstage git changes');
   }
 }
 
@@ -494,6 +544,7 @@ export async function createGitCommit(
       message,
       addAll: options.addAll ?? false,
       files: options.files,
+      stageFiles: options.stageFiles,
     }),
   });
   if (!response.ok) {

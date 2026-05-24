@@ -38,6 +38,7 @@ import type { PermissionRequest } from "@/types/permission"
 import type { QuestionRequest } from "@/types/question"
 import * as sessionActions from "./session-actions"
 import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./materialization"
+import { setSessionPrefetch } from "./session-prefetch-cache"
 
 // ---------------------------------------------------------------------------
 // Context
@@ -195,6 +196,14 @@ async function materializeSessionFromServer(
   )
   const records = (result.data ?? []).filter((record: { info?: { id?: string } }) => !!record?.info?.id)
   if (records.length === 0) return
+  const cursor = result.response?.headers?.get?.("x-next-cursor") ?? undefined
+  setSessionPrefetch({
+    directory,
+    sessionID,
+    limit: records.length,
+    cursor,
+    complete: !cursor,
+  })
 
   store.setState((state: DirectoryStore) => {
     const materialized = materializeSessionSnapshots(
@@ -937,6 +946,14 @@ async function resyncDirectoryAfterReconnect(
     const session = sessionResponse?.data
     const records = messageResponse?.data
     if (!session || !records) return
+    const cursor = messageResponse.response?.headers?.get?.("x-next-cursor") ?? undefined
+    setSessionPrefetch({
+      directory,
+      sessionID: sessionId,
+      limit: records.length,
+      cursor,
+      complete: !cursor,
+    })
 
     const nextSession = stripSessionDiffSnapshots(session)
     const nextMessages = records
@@ -1562,10 +1579,16 @@ export function useSessionRevertMessageID(sessionID: string, directory?: string)
 
 /** Get session messages for a specific session */
 export function useSessionMessages(sessionID: string, directory?: string) {
-  return useDirectorySync(
-    useCallback((state: State) => state.message[sessionID] ?? EMPTY_MESSAGES, [sessionID]),
-    directory,
-  )
+  const store = useDirectoryStore(directory)
+  const getSnapshot = useCallback(() => {
+    if (!sessionID) return EMPTY_MESSAGES
+    return store.getState().message[sessionID] ?? EMPTY_MESSAGES
+  }, [sessionID, store])
+  const subscribe = useCallback((notify: () => void) => {
+    if (!sessionID) return () => undefined
+    return store.subscribe(notify)
+  }, [sessionID, store])
+  return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
 /**
@@ -1602,18 +1625,30 @@ export function useSessionParts(messageID: string, directory?: string) {
 
 /** Get status for a specific session */
 export function useSessionStatus(sessionID: string, directory?: string) {
-  return useDirectorySync(
-    useCallback((state: State) => state.session_status?.[sessionID], [sessionID]),
-    directory,
-  )
+  const store = useDirectoryStore(directory)
+  const getSnapshot = useCallback(() => {
+    if (!sessionID) return undefined
+    return store.getState().session_status?.[sessionID]
+  }, [sessionID, store])
+  const subscribe = useCallback((notify: () => void) => {
+    if (!sessionID) return () => undefined
+    return store.subscribe(notify)
+  }, [sessionID, store])
+  return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
 /** Get permissions for a specific session */
 export function useSessionPermissions(sessionID: string, directory?: string) {
-  return useDirectorySync(
-    useCallback((state: State) => state.permission[sessionID] ?? EMPTY_PERMISSION_REQUESTS, [sessionID]),
-    directory,
-  )
+  const store = useDirectoryStore(directory)
+  const getSnapshot = useCallback(() => {
+    if (!sessionID) return EMPTY_PERMISSION_REQUESTS
+    return store.getState().permission[sessionID] ?? EMPTY_PERMISSION_REQUESTS
+  }, [sessionID, store])
+  const subscribe = useCallback((notify: () => void) => {
+    if (!sessionID) return () => undefined
+    return store.subscribe(notify)
+  }, [sessionID, store])
+  return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
 /** Get questions for a specific session */
@@ -1812,14 +1847,119 @@ const getFirstTextFromParts = (parts: Part[]): string => {
 }
 
 type SessionMessageRecord = { info: Message; parts: Part[] }
+const EMPTY_SESSION_MESSAGE_RECORDS: SessionMessageRecord[] = []
 
 type SessionMessageRecordsSnapshot = {
   sessionID: string
   sourceMessages: Message[]
   visibleMessages: Message[]
   revertMessageID?: string
+  suspendPartUpdates: boolean
   list: SessionMessageRecord[]
   byId: Map<string, SessionMessageRecord>
+}
+
+const SESSION_MESSAGE_RECORDS_CACHE_MAX = 40
+const VSCODE_SESSION_MESSAGE_RECORDS_CACHE_MAX = 4
+const VSCODE_SESSION_MESSAGE_RECORDS_CACHE_MAX_MESSAGES = 30
+const sessionMessageRecordsCache = new WeakMap<StoreApi<DirectoryStore>, Map<string, SessionMessageRecordsSnapshot>>()
+
+const getSessionMessageRecordsCacheKey = (sessionID: string, suspendPartUpdates: boolean): string => (
+  `${sessionID}\u0000${suspendPartUpdates ? 1 : 0}`
+)
+
+const getSessionMessageRecordsCache = (store: StoreApi<DirectoryStore>): Map<string, SessionMessageRecordsSnapshot> => {
+  let cache = sessionMessageRecordsCache.get(store)
+  if (!cache) {
+    cache = new Map()
+    sessionMessageRecordsCache.set(store, cache)
+  }
+  return cache
+}
+
+const readCachedSessionMessageRecordsSnapshot = (
+  store: StoreApi<DirectoryStore>,
+  sessionID: string,
+  suspendPartUpdates: boolean,
+): SessionMessageRecordsSnapshot | undefined => {
+  const cache = sessionMessageRecordsCache.get(store)
+  if (!cache) return undefined
+  const key = getSessionMessageRecordsCacheKey(sessionID, suspendPartUpdates)
+  const cached = cache.get(key)
+  if (!cached) return undefined
+  cache.delete(key)
+  cache.set(key, cached)
+  return cached
+}
+
+const rememberSessionMessageRecordsSnapshot = (
+  store: StoreApi<DirectoryStore>,
+  snapshot: SessionMessageRecordsSnapshot,
+): void => {
+  if (!snapshot.sessionID) return
+  const cache = getSessionMessageRecordsCache(store)
+  const key = getSessionMessageRecordsCacheKey(snapshot.sessionID, snapshot.suspendPartUpdates)
+  if (isVSCodeRuntime() && snapshot.list.length > VSCODE_SESSION_MESSAGE_RECORDS_CACHE_MAX_MESSAGES) {
+    cache.delete(key)
+    return
+  }
+  cache.delete(key)
+  cache.set(key, snapshot)
+  const max = isVSCodeRuntime() ? VSCODE_SESSION_MESSAGE_RECORDS_CACHE_MAX : SESSION_MESSAGE_RECORDS_CACHE_MAX
+  while (cache.size > max) {
+    const oldest = cache.keys().next().value
+    if (typeof oldest !== "string") break
+    cache.delete(oldest)
+  }
+}
+
+export function dropCachedSessionMessageRecordsSnapshots(
+  store: StoreApi<DirectoryStore>,
+  sessionIDs: Iterable<string>,
+): void {
+  const cache = sessionMessageRecordsCache.get(store)
+  if (!cache) return
+  for (const sessionID of sessionIDs) {
+    if (!sessionID) continue
+    cache.delete(getSessionMessageRecordsCacheKey(sessionID, false))
+    cache.delete(getSessionMessageRecordsCacheKey(sessionID, true))
+  }
+}
+
+const snapshotPartsMatchState = (snapshot: SessionMessageRecordsSnapshot, state: State): boolean => {
+  if (snapshot.suspendPartUpdates) {
+    return true
+  }
+
+  for (const record of snapshot.list) {
+    if ((state.part[record.info.id] ?? EMPTY_PARTS) !== record.parts) {
+      return false
+    }
+  }
+
+  return true
+}
+
+const getReusableSessionMessageRecordsSnapshot = (
+  store: StoreApi<DirectoryStore>,
+  state: State,
+  sessionID: string,
+  suspendPartUpdates: boolean,
+): SessionMessageRecordsSnapshot | undefined => {
+  const cached = readCachedSessionMessageRecordsSnapshot(store, sessionID, suspendPartUpdates)
+  if (!cached) return undefined
+  const sourceMessages = state.message[sessionID] ?? EMPTY_MESSAGES
+  const session = state.session.find((candidate) => candidate.id === sessionID)
+  const revertMessageID = (session as { revert?: { messageID?: string } } | undefined)?.revert?.messageID
+  if (
+    cached.sourceMessages === sourceMessages
+    && cached.revertMessageID === revertMessageID
+    && cached.suspendPartUpdates === suspendPartUpdates
+    && snapshotPartsMatchState(cached, state)
+  ) {
+    return cached
+  }
+  return undefined
 }
 
 function getVisibleMessagesForSession(state: State, sessionID: string, previous?: SessionMessageRecordsSnapshot): {
@@ -1886,6 +2026,7 @@ export function buildSessionMessageRecordsSnapshot(
     sourceMessages,
     visibleMessages,
     revertMessageID,
+    suspendPartUpdates,
     list: nextList,
     byId: nextById,
   }
@@ -1949,22 +2090,45 @@ export function useSessionMessageRecords(
     sourceMessages: EMPTY_MESSAGES,
     visibleMessages: EMPTY_MESSAGES,
     revertMessageID: undefined,
+    suspendPartUpdates: Boolean(options?.suspendPartUpdates),
     list: [],
     byId: new Map(),
   })
 
   const getSnapshot = useCallback(() => {
+    if (!sessionID) {
+      return EMPTY_SESSION_MESSAGE_RECORDS
+    }
+
+    const state = store.getState()
+    const suspendPartUpdates = Boolean(options?.suspendPartUpdates)
+    const reusableSnapshot = getReusableSessionMessageRecordsSnapshot(store, state, sessionID, suspendPartUpdates)
+    if (reusableSnapshot) {
+      snapshotRef.current = reusableSnapshot
+      return reusableSnapshot.list
+    }
+
+    const previousSnapshot = snapshotRef.current.sessionID === sessionID
+      ? snapshotRef.current
+      : readCachedSessionMessageRecordsSnapshot(store, sessionID, suspendPartUpdates)
+
     const nextSnapshot = buildSessionMessageRecordsSnapshot(
-      store.getState(),
+      state,
       sessionID,
-      snapshotRef.current.sessionID === sessionID ? snapshotRef.current : undefined,
-      Boolean(options?.suspendPartUpdates),
+      previousSnapshot,
+      suspendPartUpdates,
     )
     snapshotRef.current = nextSnapshot
+    rememberSessionMessageRecordsSnapshot(store, nextSnapshot)
     return nextSnapshot.list
   }, [options?.suspendPartUpdates, sessionID, store])
 
-  return React.useSyncExternalStore(store.subscribe, getSnapshot, getSnapshot)
+  const subscribe = useCallback((notify: () => void) => {
+    if (!sessionID) return () => undefined
+    return store.subscribe(notify)
+  }, [sessionID, store])
+
+  return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
 /**

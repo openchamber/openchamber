@@ -126,10 +126,38 @@ export async function getGitFileDiff(
   return gitHttp.getGitFileDiff(directory, options);
 }
 
-export async function revertGitFile(directory: string, filePath: string): Promise<void> {
+export async function revertGitFile(
+  directory: string,
+  filePath: string,
+  options?: { scope?: 'all' | 'working' }
+): Promise<void> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtime.revertGitFile(directory, filePath);
-  return gitHttp.revertGitFile(directory, filePath);
+  if (runtime) return runtime.revertGitFile(directory, filePath, options);
+  return gitHttp.revertGitFile(directory, filePath, options);
+}
+
+export async function stageGitFile(directory: string, filePath: string): Promise<void> {
+  const runtime = getRuntimeGit();
+  if (runtime?.stageGitFile) return runtime.stageGitFile(directory, filePath);
+  return gitHttp.stageGitFile(directory, filePath);
+}
+
+export async function stageGitFiles(directory: string, filePaths: string[]): Promise<void> {
+  const runtime = getRuntimeGit();
+  if (runtime?.stageGitFiles) return runtime.stageGitFiles(directory, filePaths);
+  return gitHttp.stageGitFiles(directory, filePaths);
+}
+
+export async function unstageGitFile(directory: string, filePath: string): Promise<void> {
+  const runtime = getRuntimeGit();
+  if (runtime?.unstageGitFile) return runtime.unstageGitFile(directory, filePath);
+  return gitHttp.unstageGitFile(directory, filePath);
+}
+
+export async function unstageGitFiles(directory: string, filePaths: string[]): Promise<void> {
+  const runtime = getRuntimeGit();
+  if (runtime?.unstageGitFiles) return runtime.unstageGitFiles(directory, filePaths);
+  return gitHttp.unstageGitFiles(directory, filePaths);
 }
 
 export async function isLinkedWorktree(directory: string): Promise<boolean> {

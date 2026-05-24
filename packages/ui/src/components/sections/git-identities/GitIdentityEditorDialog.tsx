@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
+import type { IconName } from "@/components/icon/icons";
 import { useGitIdentitiesStore, type GitIdentityProfile, type GitIdentityAuthType } from '@/stores/useGitIdentitiesStore';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
@@ -24,7 +25,7 @@ const PROFILE_COLORS = [
   { key: 'type', label: 'Yellow', cssVar: 'var(--syntax-type)' },
 ];
 
-const PROFILE_ICONS = [
+const PROFILE_ICONS: Array<{ key: string; Icon: IconName; label: string }> = [
   { key: 'branch', Icon: 'git-branch', label: 'Branch' },
   { key: 'briefcase', Icon: 'briefcase', label: 'Work' },
   { key: 'house', Icon: 'home', label: 'Personal' },

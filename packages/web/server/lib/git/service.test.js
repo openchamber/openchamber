@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { resolveBaseRefForLog } from './service.js';
+import { resolveBaseRefForLog, stageFiles, unstageFiles } from './service.js';
 
 describe('resolveBaseRefForLog', () => {
   it('returns the local ref unchanged when it exists, even if origin also exists', async () => {
@@ -35,5 +35,15 @@ describe('resolveBaseRefForLog', () => {
   it('returns undefined when from is a whitespace-only string', async () => {
     const checkRef = async () => true;
     expect(await resolveBaseRefForLog('   ', checkRef)).toBeUndefined();
+  });
+});
+
+describe('git index path validation', () => {
+  it('rejects stage paths outside the repository before invoking git', async () => {
+    await expect(stageFiles('/repo', ['../secret.txt'])).rejects.toThrow('Path is outside repository: ../secret.txt');
+  });
+
+  it('rejects unstage paths outside the repository before invoking git', async () => {
+    await expect(unstageFiles('/repo', ['../secret.txt'])).rejects.toThrow('Path is outside repository: ../secret.txt');
   });
 });

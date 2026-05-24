@@ -1,11 +1,9 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { toast } from '@/components/ui';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
-import { useDeviceInfo, useTabletStandalonePwaRuntime } from '@/lib/device';
+import { useDeviceInfo } from '@/lib/device';
 import { isDesktopShell } from '@/lib/desktop';
-import { isDesktopWindowFullscreen as getDesktopWindowFullscreen, onDesktopWindowResized, startDesktopWindowDrag } from '@/lib/desktopNative';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { formatDirectoryName, cn } from '@/lib/utils';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -37,7 +35,6 @@ import { useStickyProjectHeaders } from './sidebar/hooks/useStickyProjectHeaders
 import { getGitHubPrStatusKey, usePrVisualSummaryByKeys, useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
 import { ProjectEditDialog } from '@/components/layout/ProjectEditDialog';
 import { UpdateDialog } from '@/components/ui/UpdateDialog';
-import { Icon } from "@/components/icon/Icon";
 import { SessionGroupSection } from './sidebar/SessionGroupSection';
 import { SidebarHeader } from './sidebar/SidebarHeader';
 import { SidebarActivitySections } from './sidebar/SidebarActivitySections';
@@ -262,7 +259,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const setAboutDialogOpen = useUIStore((state) => state.setAboutDialogOpen);
   const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
   const setScheduledTasksDialogOpen = useUIStore((state) => state.setScheduledTasksDialogOpen);
-  const toggleSidebar = useUIStore((state) => state.toggleSidebar);
   const openMultiRunLauncher = useUIStore((state) => state.openMultiRunLauncher);
   const notifyOnSubtasks = useUIStore((state) => state.notifyOnSubtasks);
   const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
@@ -431,83 +427,10 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   }, []);
 
   const isDesktopShellRuntime = React.useMemo(() => isDesktopShell(), []);
-  const isTabletStandalonePwa = useTabletStandalonePwaRuntime();
-  const [isDesktopWindowFullscreen, setIsDesktopWindowFullscreen] = React.useState(false);
 
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
   const { isTablet } = useDeviceInfo();
   const alwaysShowSidebarActions = mobileVariant || isTablet;
-  const isMacPlatform = React.useMemo(() => {
-    if (typeof navigator === 'undefined') {
-      return false;
-    }
-    return /Macintosh|Mac OS X/.test(navigator.userAgent || '');
-  }, []);
-  const isWebRuntime = !mobileVariant && !isVSCode && !isDesktopShellRuntime;
-  const showDesktopSidebarChrome = !mobileVariant && !isVSCode && !isWebRuntime;
-  const desktopSidebarTopPaddingClass = (isDesktopShellRuntime && isMacPlatform && !isDesktopWindowFullscreen) || isTabletStandalonePwa ? 'pl-[5.5rem]' : 'pl-3';
-  const desktopSidebarToggleButtonClass = 'app-region-no-drag inline-flex h-8 w-8 items-center justify-center rounded-md typography-ui-label font-medium text-foreground transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50';
-
-  React.useEffect(() => {
-    if (!isDesktopShellRuntime || !isMacPlatform) {
-      setIsDesktopWindowFullscreen(false);
-      return;
-    }
-
-    let disposed = false;
-    let unlistenResize: (() => void) | null = null;
-
-    const syncFullscreenState = async () => {
-      try {
-        const fullscreen = await getDesktopWindowFullscreen();
-        if (!disposed) {
-          setIsDesktopWindowFullscreen(fullscreen);
-        }
-      } catch {
-        if (!disposed) {
-          setIsDesktopWindowFullscreen(false);
-        }
-      }
-    };
-
-    const attach = async () => {
-      try {
-        unlistenResize = onDesktopWindowResized(() => {
-          void syncFullscreenState();
-        });
-      } catch {
-        // Ignore listener setup failures; fallback state remains false.
-      }
-    };
-
-    void syncFullscreenState();
-    void attach();
-
-    return () => {
-      disposed = true;
-      if (unlistenResize) {
-        unlistenResize();
-      }
-    };
-  }, [isDesktopShellRuntime, isMacPlatform]);
-
-  const handleDesktopSidebarDragStart = React.useCallback(async (event: React.MouseEvent) => {
-    const target = event.target as HTMLElement;
-    if (target.closest('.app-region-no-drag')) {
-      return;
-    }
-    if (target.closest('button, a, input, select, textarea')) {
-      return;
-    }
-    if (event.button !== 0) {
-      return;
-    }
-    if (!isDesktopShellRuntime) {
-      return;
-    }
-
-    await startDesktopWindowDrag();
-  }, [isDesktopShellRuntime]);
 
   const {
     buildGroupSearchText,
@@ -907,8 +830,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       <p className="typography-meta mt-1">{t('sessions.sidebar.empty.noMatches.description')}</p>
     </div>
   );
-
-  const reserveHeaderActionsSpace = true;
 
   const { currentSessionDirectory } = useProjectSessionSelection({
     projectSections,
@@ -1591,14 +1512,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     window.addEventListener('keydown', listener);
     return () => window.removeEventListener('keydown', listener);
   }, [handleBulkDelete, isInlineEditing, multiSelectStoreApi, selectionModeEnabled]);
-  const handleSidebarNewSession = React.useCallback(() => {
-    setActiveMainTab('chat');
-    if (mobileVariant) {
-      setSessionSwitcherOpen(false);
-    }
-    openNewSessionDraft();
-  }, [mobileVariant, openNewSessionDraft, setActiveMainTab, setSessionSwitcherOpen]);
-
   const handleOpenMultiRunFromHeader = React.useCallback(() => {
     setActiveMainTab('chat');
     if (mobileVariant) {
@@ -1615,40 +1528,12 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         mobileVariant ? '' : 'bg-transparent',
       )}
     >
-      {showDesktopSidebarChrome ? (
-        <div
-          onMouseDown={handleDesktopSidebarDragStart}
-          className={cn(
-            'app-region-drag flex h-[var(--oc-header-height,56px)] flex-shrink-0 items-center pr-3',
-            desktopSidebarTopPaddingClass,
-          )}
-        >
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={toggleSidebar}
-                className={desktopSidebarToggleButtonClass}
-                aria-label={t('sessions.sidebar.header.actions.closeSessions')}
-              >
-                <Icon name="layout-left" className="h-[18px] w-[18px]" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>{t('sessions.sidebar.header.actions.closeSessions')}</p>
-            </TooltipContent>
-          </Tooltip>
-        </div>
-      ) : null}
-
       <SidebarHeader
         hideDirectoryControls={hideDirectoryControls}
         handleOpenDirectoryDialog={handleOpenDirectoryDialog}
-        handleNewSession={handleSidebarNewSession}
         canOpenMultiRun={projects.length > 0}
         openMultiRunLauncher={handleOpenMultiRunFromHeader}
         headerActionIconClass={headerActionIconClass}
-        reserveHeaderActionsSpace={reserveHeaderActionsSpace}
         headerActionButtonClass={headerActionButtonClass}
         isSessionSearchOpen={isSessionSearchOpen}
         setIsSessionSearchOpen={setIsSessionSearchOpen}
@@ -1662,9 +1547,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         openScheduledTasksDialog={() => setScheduledTasksDialogOpen(true)}
         selectionModeEnabled={selectionModeEnabled}
         onToggleSelectionMode={handleToggleSelectionMode}
-        showSidebarToggle={isWebRuntime}
-        onToggleSidebar={toggleSidebar}
-        avoidWindowControlsOverlay={isTabletStandalonePwa}
       />
 
       <SidebarProjectsList

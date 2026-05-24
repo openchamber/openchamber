@@ -327,10 +327,14 @@ const decodeBase64 = (value: string): Uint8Array => {
 const isNullBodyStatus = (status: number): boolean => status === 204 || status === 205 || status === 304;
 
 const buildProxiedResponse = (
-  proxied: { status: number; headers: Record<string, string>; bodyBase64?: string }
+  proxied: { status: number; headers: Record<string, string>; bodyBase64?: string; bodyText?: string }
 ): Response => {
   if (isNullBodyStatus(proxied.status)) {
     return new Response(null, { status: proxied.status, headers: proxied.headers });
+  }
+
+  if (typeof proxied.bodyText === 'string') {
+    return new Response(proxied.bodyText, { status: proxied.status, headers: proxied.headers });
   }
 
   const body = proxied.bodyBase64 ? decodeBase64(proxied.bodyBase64) : new Uint8Array();

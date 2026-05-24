@@ -139,6 +139,7 @@ export function useServerTTS(options: UseServerTTSOptions = {}): UseServerTTSRet
   const currentModelId = useConfigStore((state) => state.currentModelId);
   const openaiApiKey = useConfigStore((state) => state.openaiApiKey);
   const openaiCompatibleUrl = useConfigStore((state) => state.openaiCompatibleUrl);
+  const openaiCompatibleApiKey = useConfigStore((state) => state.openaiCompatibleApiKey);
 
   // Check if server TTS is available
   const checkAvailability = useCallback(async (): Promise<boolean> => {
@@ -277,7 +278,7 @@ export function useServerTTS(options: UseServerTTSOptions = {}): UseServerTTSRet
           providerId: options?.providerId || currentProviderId || undefined,
           modelId: options?.modelId || currentModelId || undefined,
           // Send API key from settings if available
-          apiKey: openaiApiKey || undefined,
+          apiKey: options?.baseURL ? (openaiCompatibleApiKey || undefined) : (openaiApiKey || undefined),
           // Send custom base URL for OpenAI-compatible servers
           baseURL: options?.baseURL || undefined,
         }),
@@ -342,7 +343,7 @@ export function useServerTTS(options: UseServerTTSOptions = {}): UseServerTTSRet
       options?.onError?.(errorMsg);
       setIsPlaying(false);
     }
-  }, [stop, currentProviderId, currentModelId, openaiApiKey]);
+  }, [stop, currentProviderId, currentModelId, openaiApiKey, openaiCompatibleApiKey]);
 
   // Cleanup on unmount
   useEffect(() => {

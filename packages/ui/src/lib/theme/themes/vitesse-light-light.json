@@ -33,7 +33,7 @@
     "interactive": {
       "border": "#d4d0d0",
       "borderHover": "#cbc7c7",
-      "borderFocus": "#00000013",
+      "borderFocus": "#635454b8",
       "selection": "#22222218",
       "selectionForeground": "#393a34",
       "focus": "#00000000",

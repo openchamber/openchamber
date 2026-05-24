@@ -89,4 +89,16 @@ describe('useFileSearchStore', () => {
     expect(cacheEntries).toHaveLength(1);
     expect(cacheEntries[0]?.files).toEqual([{ path: 'fresh.ts' }]);
   });
+
+  test('keeps directory and query separators from colliding in cache keys', async () => {
+    const firstPromise = useFileSearchStore.getState().searchFiles('/project::nested', 'foo');
+    searchRequests[0].resolve([{ path: 'first.ts' }]);
+    await firstPromise;
+
+    const secondPromise = useFileSearchStore.getState().searchFiles('/project', 'nested::foo');
+    expect(searchRequests).toHaveLength(2);
+
+    searchRequests[1].resolve([{ path: 'second.ts' }]);
+    expect(await secondPromise).toEqual([{ path: 'second.ts' }]);
+  });
 });
