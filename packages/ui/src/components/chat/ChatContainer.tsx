@@ -193,7 +193,11 @@ const ChatViewport = React.memo(({
         }
 
         scrollRef.current?.focus({ preventScroll: true });
-    }, [scrollRef]);
+
+        if (isMobile && !useUIStore.getState().isMobileSessionStatusBarCollapsed) {
+            useUIStore.getState().setIsMobileSessionStatusBarCollapsed(true);
+        }
+    }, [scrollRef, isMobile]);
 
     return (
         <div

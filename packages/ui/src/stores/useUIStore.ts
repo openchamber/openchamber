@@ -867,7 +867,7 @@ export const useUIStore = create<UIStore>()(
         stickyUserHeader: true,
         showSplitAssistantMessageActions: false,
         showMobileSessionStatusBar: true,
-        isMobileSessionStatusBarCollapsed: false,
+        isMobileSessionStatusBarCollapsed: true,
         isExpandedInput: false,
         reportUsage: true,
         shortcutOverrides: {},
