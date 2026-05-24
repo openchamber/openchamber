@@ -27,6 +27,7 @@
     "build:web-assets": "node ./scripts/build-web-assets.mjs",
     "build": "bun -e \"process.exit(0)\"",
     "bundle:main": "bun ./scripts/bundle-main.mjs",
+    "generate:macos-icon": "node ./scripts/generate-macos-icon-assets.cjs",
     "rebuild:native": "node ./scripts/rebuild-native.mjs",
     "package": "bun run build:web-assets && bun run bundle:main && bun run rebuild:native && electron-builder",
     "finalize:latest-yml": "node ./scripts/finalize-latest-yml.mjs",
@@ -46,6 +47,7 @@
         "to": "web-dist"
       }
     ],
+    "afterPack": "scripts/after-pack.cjs",
     "directories": {
       "buildResources": "resources/icons",
       "output": "dist"
@@ -55,6 +57,9 @@
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "resources/icons/icon.icns",
+      "extendInfo": {
+        "CFBundleIconName": "AppIcon"
+      },
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "entitlements": "resources/entitlements.mac.plist",
