@@ -113,6 +113,10 @@ function Tooltip({
       startPointRef.current = { x: event.clientX, y: event.clientY }
 
       longPressTimeoutRef.current = window.setTimeout(() => {
+        if (controlled) {
+          return
+        }
+
         suppressClickRef.current = true
         setTooltipOpen(true)
       }, MOBILE_LONG_PRESS_DELAY)
@@ -160,7 +164,7 @@ function Tooltip({
 
       event.preventDefault()
     },
-  }), [clearCloseTimeout, clearLongPressTimeout, setTooltipOpen])
+  }), [clearCloseTimeout, clearLongPressTimeout, controlled, setTooltipOpen])
 
   React.useEffect(() => {
     return () => {
