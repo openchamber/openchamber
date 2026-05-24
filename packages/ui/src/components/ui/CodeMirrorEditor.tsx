@@ -39,45 +39,69 @@ function patchSearchTooltips(root: HTMLElement) {
   }
 }
 
-function getSearchMatchStatus(view: EditorView): { current: number; total: number } {
+type SearchQuery = ReturnType<typeof getSearchQuery>;
+type SearchMatchCountCache = {
+  query: SearchQuery;
+  doc: EditorState['doc'];
+  total: number;
+};
+
+const searchMatchCountCache = new WeakMap<EditorView, SearchMatchCountCache>();
+
+function getSearchMatchTotal(view: EditorView, refresh: boolean): number {
   const query = getSearchQuery(view.state);
   if (!query.valid) {
-    return { current: 0, total: 0 };
+    searchMatchCountCache.delete(view);
+    return 0;
+  }
+
+  const cached = searchMatchCountCache.get(view);
+  if (!refresh && cached?.doc === view.state.doc && cached.query.eq(query)) {
+    return cached.total;
+  }
+
+  const cursor = query.getCursor(view.state);
+  let total = 0;
+  for (let result = cursor.next(); !result.done; result = cursor.next()) {
+    total += 1;
+  }
+
+  searchMatchCountCache.set(view, { query, doc: view.state.doc, total });
+  return total;
+}
+
+function getSearchMatchCurrent(view: EditorView): number {
+  const query = getSearchQuery(view.state);
+  if (!query.valid) {
+    return 0;
   }
 
   const selection = view.state.selection.main;
   const cursor = query.getCursor(view.state);
-  let total = 0;
+  let index = 0;
   let firstMatch = 0;
-  let exactMatch = 0;
-  let overlappingMatch = 0;
-  let nextMatch = 0;
 
   for (let result = cursor.next(); !result.done; result = cursor.next()) {
     const match = result.value;
-    total += 1;
+    index += 1;
     if (firstMatch === 0) {
-      firstMatch = total;
+      firstMatch = index;
     }
-    if (exactMatch === 0 && selection.from === match.from && selection.to === match.to) {
-      exactMatch = total;
+    if (selection.from === match.from && selection.to === match.to) {
+      return index;
     }
-    if (overlappingMatch === 0 && selection.from < match.to && selection.to > match.from) {
-      overlappingMatch = total;
+    if (selection.from < match.to && selection.to > match.from) {
+      return index;
     }
-    if (nextMatch === 0 && match.from >= selection.head) {
-      nextMatch = total;
+    if (match.from >= selection.head) {
+      return index;
     }
   }
 
-  // Prefer the selected match, then fall back to the next match after the cursor.
-  return {
-    current: exactMatch || overlappingMatch || nextMatch || firstMatch,
-    total,
-  };
+  return firstMatch;
 }
 
-function syncSearchPanelStatus(root: HTMLElement, view: EditorView) {
+function syncSearchPanelStatus(root: HTMLElement, view: EditorView, refreshTotal = false) {
   const panel = root.querySelector('.cm-search');
   if (!panel) return;
 
@@ -92,8 +116,9 @@ function syncSearchPanelStatus(root: HTMLElement, view: EditorView) {
     panel.insertBefore(status, referenceNode);
   }
 
-  const { current, total } = getSearchMatchStatus(view);
-  status.textContent = `${current}/${total}`;
+  const total = getSearchMatchTotal(view, refreshTotal);
+  const current = total === 0 ? 0 : getSearchMatchCurrent(view);
+  status.textContent = total === 0 ? '' : `${current}/${total}`;
 }
 
 export type BlockWidgetDef = {
@@ -356,7 +381,7 @@ export function CodeMirrorEditor({
           }
           const queryChanged = !getSearchQuery(update.startState).eq(getSearchQuery(update.state));
           if (isOpen && (wasOpen !== isOpen || queryChanged || update.docChanged || update.selectionSet)) {
-            syncSearchPanelStatus(update.view.dom, update.view);
+            syncSearchPanelStatus(update.view.dom, update.view, wasOpen !== isOpen || queryChanged || update.docChanged);
           }
           if (!update.docChanged) {
             return;
@@ -434,7 +459,7 @@ export function CodeMirrorEditor({
       // Patch tooltips after panel DOM is mounted
       requestAnimationFrame(() => {
         patchSearchTooltips(view.dom);
-        syncSearchPanelStatus(view.dom, view);
+        syncSearchPanelStatus(view.dom, view, true);
       });
     } else {
       closeSearchPanelCompat(view);
