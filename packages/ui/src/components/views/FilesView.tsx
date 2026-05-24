@@ -77,6 +77,12 @@ type SelectedLineRange = {
   end: number;
 };
 
+type EditorTabMenuState = {
+  path: string;
+  x: number;
+  y: number;
+};
+
 const getParentDirectoryPath = (path: string): string => {
   const normalized = normalizePath(path);
   if (!normalized) return '';
@@ -752,7 +758,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const [dialogInputValue, setDialogInputValue] = React.useState('');
   const [isDialogSubmitting, setIsDialogSubmitting] = React.useState(false);
   const [contextMenuPath, setContextMenuPath] = React.useState<string | null>(null);
-  const [editorTabMenuPath, setEditorTabMenuPath] = React.useState<string | null>(null);
+  const [editorTabMenu, setEditorTabMenu] = React.useState<EditorTabMenuState | null>(null);
   const [copiedContent, setCopiedContent] = React.useState(false);
   const [copiedPath, setCopiedPath] = React.useState(false);
   const [isGoToLineOpen, setIsGoToLineOpen] = React.useState(false);
@@ -1931,26 +1937,23 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     }
   }, []);
 
-  const startEditorTabLongPressForPath = React.useCallback((path: string) => {
+  const startEditorTabPointerLongPress = React.useCallback((event: React.PointerEvent, path: string) => {
+    if (event.pointerType === 'mouse') {
+      return;
+    }
+
     if (!isMobile) {
       return;
     }
 
     clearEditorTabLongPress();
     editorTabLongPressTriggeredRef.current = false;
+    const { clientX, clientY } = event;
     editorTabLongPressTimerRef.current = setTimeout(() => {
       editorTabLongPressTriggeredRef.current = true;
-      setEditorTabMenuPath(path);
+      setEditorTabMenu({ path, x: clientX, y: clientY });
     }, 550);
   }, [clearEditorTabLongPress, isMobile]);
-
-  const startEditorTabPointerLongPress = React.useCallback((event: React.PointerEvent, path: string) => {
-    if (event.pointerType === 'mouse') {
-      return;
-    }
-
-    startEditorTabLongPressForPath(path);
-  }, [startEditorTabLongPressForPath]);
 
   const handleEditorTabClickAfterLongPress = React.useCallback((event: React.MouseEvent) => {
     if (!editorTabLongPressTriggeredRef.current) {
@@ -2647,7 +2650,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     const relativePath = getDisplayPath(root, file.path) || file.path;
 
     return (
-      <DropdownMenuContent align="start" className="w-56" onCloseAutoFocus={() => setEditorTabMenuPath(null)}>
+      <DropdownMenuContent align="start" className="w-56" onCloseAutoFocus={() => setEditorTabMenu(null)}>
         <DropdownMenuItem onClick={() => handleCloseFile(file.path)}>
           <Icon name="close" className="mr-2 size-4" />
           {t('filesView.editor.tabMenu.close')}
@@ -3028,9 +3031,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           {isMobile ? (
             selectedFile ? (
               <div className="relative min-w-0 max-w-full">
-                <DropdownMenu open={editorTabMenuPath === selectedFile.path} onOpenChange={(open) => setEditorTabMenuPath(open ? selectedFile.path : null)}>
+                <DropdownMenu open={editorTabMenu?.path === selectedFile.path} onOpenChange={(open) => setEditorTabMenu(open ? (editorTabMenu ?? { path: selectedFile.path, x: 0, y: 0 }) : null)}>
                   <DropdownMenuTrigger asChild>
-                    <button type="button" tabIndex={-1} aria-hidden="true" className="pointer-events-none absolute left-0 top-0 size-px opacity-0" />
+                    <button type="button" tabIndex={-1} aria-hidden="true" style={{ left: editorTabMenu?.x ?? 0, top: editorTabMenu?.y ?? 0 }} className="pointer-events-none fixed size-px opacity-0" />
                   </DropdownMenuTrigger>
                   {renderEditorTabContextMenu(selectedFile)}
                 </DropdownMenu>
@@ -3043,9 +3046,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                       onPointerDown={(event) => startEditorTabPointerLongPress(event, selectedFile.path)}
                       onPointerUp={clearEditorTabLongPress}
                       onPointerCancel={clearEditorTabLongPress}
-                      onTouchStart={() => startEditorTabLongPressForPath(selectedFile.path)}
-                      onTouchEnd={clearEditorTabLongPress}
-                      onTouchCancel={clearEditorTabLongPress}
                       onContextMenu={(event) => {
                         if (!isMobile) {
                           return;
@@ -3053,7 +3053,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                         event.preventDefault();
                         event.stopPropagation();
                         clearEditorTabLongPress();
-                        setEditorTabMenuPath(selectedFile.path);
+                        setEditorTabMenu({ path: selectedFile.path, x: event.clientX, y: event.clientY });
                       }}
                       onClick={(event) => {
                         handleEditorTabClickAfterLongPress(event);
@@ -3132,13 +3132,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                   {openFiles.map((file) => {
                     const isActive = selectedFile?.path === file.path;
                     return (
-                      <DropdownMenu key={file.path} open={editorTabMenuPath === file.path} onOpenChange={(open) => setEditorTabMenuPath(open ? file.path : null)}>
+                      <DropdownMenu key={file.path} open={editorTabMenu?.path === file.path} onOpenChange={(open) => setEditorTabMenu(open ? (editorTabMenu ?? { path: file.path, x: 0, y: 0 }) : null)}>
                         <div
                           title={getDisplayPath(root, file.path)}
                           onContextMenu={(event) => {
                             event.preventDefault();
                             event.stopPropagation();
-                            setEditorTabMenuPath(file.path);
+                            setEditorTabMenu({ path: file.path, x: event.clientX, y: event.clientY });
                           }}
                           className={cn(
                             'group relative inline-flex items-center gap-1 rounded-md border px-2 py-1 typography-ui-label transition-colors whitespace-nowrap',
@@ -3148,7 +3148,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                           )}
                         >
                           <DropdownMenuTrigger asChild>
-                            <button type="button" tabIndex={-1} aria-hidden="true" className="pointer-events-none absolute left-0 top-0 size-px opacity-0" />
+                            <button type="button" tabIndex={-1} aria-hidden="true" style={{ left: editorTabMenu?.x ?? 0, top: editorTabMenu?.y ?? 0 }} className="pointer-events-none fixed size-px opacity-0" />
                           </DropdownMenuTrigger>
                           <FileTypeIcon filePath={file.path} extension={file.extension} className="size-3.5 flex-shrink-0" />
                           <button
