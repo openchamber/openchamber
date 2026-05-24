@@ -45,7 +45,13 @@ import { resolveFallbackTaskSessionId } from './resolveFallbackTaskSessionId';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
 import { useI18n } from '@/lib/i18n';
 
-type ToolStateWithMetadata = ToolStateUnion & { metadata?: Record<string, unknown>; input?: Record<string, unknown>; output?: string; error?: string; time?: { start: number; end?: number } };
+type ToolStateWithMetadata = ToolStateUnion & {
+    metadata?: Record<string, unknown>;
+    input?: Record<string, unknown>;
+    output?: unknown;
+    error?: string;
+    time?: { start: number; end?: number };
+};
 
 interface ToolPartProps {
     part: ToolPartType;
@@ -444,6 +450,30 @@ const getRelativePath = (absolutePath: string, currentDirectory: string): string
     return normalizedAbsolutePath;
 };
 
+const resolveAbsolutePath = (currentDirectory: string, filePath: string): string | null => {
+    const trimmed = filePath.trim();
+    if (!trimmed) return null;
+    if (trimmed.startsWith('/')) return normalizeDisplayPath(trimmed);
+    return normalizeDisplayPath(currentDirectory.endsWith('/') ? `${currentDirectory}${trimmed}` : `${currentDirectory}/${trimmed}`);
+};
+
+const getContextDirectoryForPath = (currentDirectory: string, absolutePath: string): string => {
+    const normalizedCurrent = normalizeDisplayPath(currentDirectory);
+    const normalizedAbsolute = normalizeDisplayPath(absolutePath);
+    return normalizedCurrent && normalizedAbsolute.startsWith(`${normalizedCurrent}/`)
+        ? normalizedCurrent
+        : normalizedAbsolute.replace(/\/[^/]*$/, '') || normalizedCurrent;
+};
+
+const readPositiveLine = (...values: unknown[]): number | undefined => {
+    for (const value of values) {
+        if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+            return Math.floor(value);
+        }
+    }
+    return undefined;
+};
+
 type ToolDiagnostic = {
     message: string;
     line: number;
@@ -679,6 +709,51 @@ const getToolDescriptionPath = (part: ToolPartType, state: ToolStateUnion, curre
     return null;
 };
 
+const readTrimmedString = (value: unknown): string | null => {
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+};
+
+const truncateDescription = (value: string, maxLength: number): string => (
+    value.length > maxLength ? `${value.slice(0, maxLength)}...` : value
+);
+
+const formatTodoSummary = (todos: unknown[]): string | null => {
+    if (todos.length === 0) return '0 tasks';
+
+    let activeCount = 0;
+    for (const todo of todos) {
+        if (!todo || typeof todo !== 'object') continue;
+        const status = readTrimmedString((todo as { status?: unknown }).status)?.toLowerCase();
+        if (status === 'pending' || status === 'in_progress' || status === 'in progress' || status === 'inprogress') {
+            activeCount += 1;
+        }
+    }
+
+    return `${activeCount} ${activeCount === 1 ? 'task' : 'tasks'}`;
+};
+
+const getTodoDescription = (input: Record<string, unknown> | undefined, output: unknown): string | null => {
+    if (Array.isArray(input?.todos)) return formatTodoSummary(input.todos);
+    if (Array.isArray(output)) return formatTodoSummary(output);
+    if (output && typeof output === 'object' && Array.isArray((output as { todos?: unknown }).todos)) {
+        return formatTodoSummary((output as { todos: unknown[] }).todos);
+    }
+    if (typeof output === 'string' && output.trim().length > 0) {
+        try {
+            const parsed = JSON.parse(output) as unknown;
+            if (Array.isArray(parsed)) return formatTodoSummary(parsed);
+            if (parsed && typeof parsed === 'object' && Array.isArray((parsed as { todos?: unknown }).todos)) {
+                return formatTodoSummary((parsed as { todos: unknown[] }).todos);
+            }
+        } catch {
+            return null;
+        }
+    }
+    return null;
+};
+
 const getToolDescription = (part: ToolPartType, state: ToolStateUnion, currentDirectory: string): string => {
     const stateWithData = state as ToolStateWithMetadata;
     const metadata = stateWithData.metadata;
@@ -710,6 +785,29 @@ const getToolDescription = (part: ToolPartType, state: ToolStateUnion, currentDi
 
     if (part.tool === 'task' && input?.description && typeof input.description === 'string') {
         return input.description.substring(0, 80);
+    }
+
+    if (part.tool === 'grep' || part.tool === 'search' || part.tool === 'find' || part.tool === 'ripgrep' || part.tool === 'glob') {
+        const pattern = readTrimmedString(input?.pattern);
+        if (pattern) return truncateDescription(pattern, 40);
+    }
+
+    if (part.tool === 'webfetch' || part.tool === 'fetch' || part.tool === 'curl' || part.tool === 'wget') {
+        const url = readTrimmedString(input?.url)
+            ?? readTrimmedString(input?.URL)
+            ?? readTrimmedString(metadata?.url)
+            ?? readTrimmedString(metadata?.URL);
+        if (url) return url;
+    }
+
+    if (part.tool === 'skill') {
+        const name = readTrimmedString(input?.name);
+        if (name) return name;
+    }
+
+    if (part.tool === 'todowrite' || part.tool === 'todoread') {
+        const todoSummary = getTodoDescription(input, stateWithData.output);
+        if (todoSummary) return todoSummary;
     }
 
     const desc = input?.description || metadata?.description || ('title' in state && state.title) || '';
@@ -748,17 +846,77 @@ const ToolScrollableSection: React.FC<ToolScrollableSectionProps> = ({
     </div>
 );
 
+const isStructuredValue = (value: unknown): value is Record<string, unknown> | unknown[] => {
+    if (Array.isArray(value)) {
+        return true;
+    }
+
+    return isRecord(value);
+};
+
+const hasNonEmptyStructuredValue = (value: unknown): value is Record<string, unknown> | unknown[] => {
+    if (Array.isArray(value)) {
+        return value.length > 0;
+    }
+
+    return isRecord(value) && Object.keys(value).length > 0;
+};
+
+const renderJsonTreeBlock = (data: unknown) => {
+    return (
+        <div className="tool-output-surface p-2 rounded-xl w-full min-w-0">
+            <JsonTreeViewer
+                data={data}
+                initiallyExpandedDepth={1}
+                maxHeight="400px"
+            />
+        </div>
+    );
+};
+
+const shouldRenderToolOutputAsMarkdown = (toolName: string): boolean => {
+    const normalizedToolName = normalizeToolName(toolName);
+    // Task output is handled by its dedicated renderer below because it also
+    // carries child-session summary behavior that should stay centralized there.
+    if (!normalizedToolName || normalizedToolName === 'task') {
+        return false;
+    }
+
+    return getToolMetadata(normalizedToolName).outputLanguage === 'markdown';
+};
+
+const isEditLikeTool = (toolName: string): boolean => {
+    return toolName === 'edit' || toolName === 'multiedit' || toolName === 'apply_patch';
+};
+
+const shouldSkipGenericInputRendering = (
+    toolName: string,
+    hideToolInputPreview: boolean,
+    isWriteLikeTool: boolean,
+): boolean => {
+    return hideToolInputPreview
+        || isWriteLikeTool
+        || toolName === 'bash'
+        || toolName === 'question'
+        || toolName === 'task';
+};
+
 const getToolOutputLanguage = (
     output: string,
     part: ToolPartType,
     metadata: Record<string, unknown> | undefined,
     input: Record<string, unknown> | undefined,
 ): string => {
-    if (part.tool === 'bash') {
+    const normalizedToolName = normalizeToolName(part.tool);
+    if (normalizedToolName === 'bash') {
         return 'bash';
     }
 
-    return detectLanguageFromOutput(formatEditOutput(output, part.tool, metadata), part.tool, input);
+    return detectLanguageFromOutput(
+        formatEditOutput(output, normalizedToolName || part.tool, metadata),
+        normalizedToolName || part.tool,
+        input,
+    );
 };
 
 const getToolOutputText = (
@@ -766,11 +924,12 @@ const getToolOutputText = (
     part: ToolPartType,
     metadata: Record<string, unknown> | undefined,
 ): string => {
-    if (part.tool === 'bash') {
+    const normalizedToolName = normalizeToolName(part.tool);
+    if (normalizedToolName === 'bash') {
         return output;
     }
 
-    return formatEditOutput(output, part.tool, metadata);
+    return formatEditOutput(output, normalizedToolName || part.tool, metadata);
 };
 
 const ToolScrollableTextOutput: React.FC<{
@@ -785,15 +944,7 @@ const ToolScrollableTextOutput: React.FC<{
     const jsonResult = React.useMemo(() => tryParseJsonOutput(renderedOutput), [renderedOutput]);
 
     if (jsonResult.isJson) {
-        return (
-            <div className="tool-output-surface p-2 rounded-xl w-full min-w-0">
-                <JsonTreeViewer
-                    data={jsonResult.data}
-                    initiallyExpandedDepth={1}
-                    maxHeight="400px"
-                />
-            </div>
-        );
+        return renderJsonTreeBlock(jsonResult.data);
     }
 
     return (
@@ -1548,12 +1699,15 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     const { t } = useI18n();
     const { pierreTheme, pierreThemeType } = usePierreThemeConfig();
     const [diffViewMode, setDiffViewMode] = React.useState<DiffViewMode>('unified');
+    const normalizedToolName = normalizeToolName(part.tool);
     const stateWithData = state as ToolStateWithMetadata;
     const metadata = stateWithData.metadata;
     const input = stateWithData.input;
     const rawOutput = stateWithData.output;
     const hasStringOutput = typeof rawOutput === 'string' && rawOutput.length > 0;
     const outputString = typeof rawOutput === 'string' ? rawOutput : '';
+    const hasStructuredOutput = !hasStringOutput && isStructuredValue(rawOutput);
+    const hasMarkdownOutput = hasStringOutput && shouldRenderToolOutputAsMarkdown(normalizedToolName || part.tool);
 
     const diffContent = getPatchText((metadata as { patch?: unknown } | undefined)?.patch)
         ?? getPatchText(metadata?.diff)
@@ -1562,9 +1716,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         () => (diffContent ? getDiffPatchEntries(metadata, diffContent, currentDirectory) : []),
         [currentDirectory, diffContent, metadata]
     );
-    const hideToolInputPreview = part.tool === 'apply_patch'
-        || part.tool === 'edit'
-        || part.tool === 'multiedit';
+    const hideToolInputPreview = isEditLikeTool(normalizedToolName);
     const diagnosticSection = React.useMemo(
         () => getToolDiagnosticSection(part.tool, input, metadata, currentDirectory),
         [currentDirectory, input, metadata, part.tool],
@@ -1575,7 +1727,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
             return '';
         }
 
-        if ('command' in input && typeof input.command === 'string' && part.tool === 'bash') {
+        if ('command' in input && typeof input.command === 'string' && normalizedToolName === 'bash') {
             return formatInputForDisplay(input, part.tool);
         }
 
@@ -1584,9 +1736,16 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         }
 
         return formatInputForDisplay(input, part.tool);
-    }, [input, part.tool]);
-    const hasInputText = !hideToolInputPreview && inputTextContent.trim().length > 0;
-    const isWriteLikeTool = part.tool === 'write' || part.tool === 'create' || part.tool === 'file_write';
+    }, [input, normalizedToolName, part.tool]);
+    const isWriteLikeTool = normalizedToolName === 'write' || normalizedToolName === 'create' || normalizedToolName === 'file_write';
+    const genericStructuredInput = React.useMemo(() => {
+        if (shouldSkipGenericInputRendering(normalizedToolName, hideToolInputPreview, isWriteLikeTool)) {
+            return null;
+        }
+
+        return hasNonEmptyStructuredValue(input) ? input : null;
+    }, [hideToolInputPreview, input, isWriteLikeTool, normalizedToolName]);
+    const hasInputText = !genericStructuredInput && !hideToolInputPreview && inputTextContent.trim().length > 0;
     const writeLikeInputPatch = React.useMemo(() => {
         if (!isWriteLikeTool || !hasInputText) {
             return undefined;
@@ -1665,7 +1824,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         };
 
         // Question tool: show parsed Q&A summary or question content from input
-        if (part.tool === 'question') {
+        if (normalizedToolName === 'question') {
             if (state.status === 'completed' && hasStringOutput) {
                 const parsedQA = parseQuestionOutput(outputString);
                 if (parsedQA && parsedQA.length > 0) {
@@ -1730,7 +1889,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
             return <div className="typography-meta text-muted-foreground">{t('chat.toolPart.awaitingResponse')}</div>;
         }
 
-        if (part.tool === 'task' && hasStringOutput) {
+        if (normalizedToolName === 'task' && hasStringOutput) {
             return renderScrollableBlock(
                 <div className="w-full min-w-0">
                     <SimpleMarkdownRenderer content={outputString} variant="tool" onShowPopup={onShowPopup} />
@@ -1738,7 +1897,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
             );
         }
 
-        if ((part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch' || part.tool === 'write') && (diffEntries.length > 0 || !!diagnosticSection)) {
+        if ((isEditLikeTool(normalizedToolName) || normalizedToolName === 'write') && (diffEntries.length > 0 || !!diagnosticSection)) {
             return renderScrollableBlock(
                 <div className="space-y-3">
                     {diffEntries.map((entry) => (
@@ -1762,7 +1921,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
             );
         }
 
-        if (part.tool === 'write' && diagnosticSection) {
+        if (normalizedToolName === 'write' && diagnosticSection) {
             return renderScrollableBlock(
                 <div className="space-y-3">
                     {renderDiagnosticsSection()}
@@ -1773,6 +1932,21 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
 
         if (isWriteLikeTool) {
             return null;
+        }
+
+        if (hasStructuredOutput) {
+            return renderScrollableBlock(
+                renderJsonTreeBlock(rawOutput),
+                { className: 'p-1', maxHeightClass: 'max-h-[50vh]' },
+            );
+        }
+
+        if (hasMarkdownOutput && outputString.trim()) {
+            return renderScrollableBlock(
+                <div className="w-full min-w-0">
+                    <SimpleMarkdownRenderer content={outputString} variant="tool" onShowPopup={onShowPopup} />
+                </div>
+            );
         }
 
         if (hasStringOutput && outputString.trim()) {
@@ -1803,14 +1977,26 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                 'relative pr-2 pb-2 pt-2 space-y-2 pl-4'
             )}
         >
-            {part.tool === 'question' ? (
+            {normalizedToolName === 'question' ? (
                 renderResultContent()
             ) : (
                 <>
+                    {genericStructuredInput ? (
+                        <div className="my-1">
+                            {renderScrollableBlock(
+                                renderJsonTreeBlock(genericStructuredInput),
+                                {
+                                    maxHeightClass: 'max-h-60',
+                                    className: 'tool-input-surface p-1',
+                                }
+                            )}
+                        </div>
+                    ) : null}
+
                     {hasInputText ? (
                         <div className="my-1">
                             {renderScrollableBlock(
-                                part.tool === 'bash' ? (
+                                normalizedToolName === 'bash' ? (
                                     <pre className="tool-input-text whitespace-pre-wrap break-words typography-code text-muted-foreground/90 m-0 p-0">
                                         {inputTextContent}
                                     </pre>
@@ -1828,7 +2014,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                                 ),
                                 {
                                     maxHeightClass: 'max-h-60',
-                                    className: part.tool === 'bash' ? 'tool-input-surface p-0 rounded-none' : 'tool-input-surface',
+                                    className: normalizedToolName === 'bash' ? 'tool-input-surface p-0 rounded-none' : 'tool-input-surface',
                                 }
                             )}
                         </div>
@@ -1836,7 +2022,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
 
                     {state.status === 'completed' && 'output' in state && (
                         <div>
-                            {(part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch' || part.tool === 'write') && diffContent ? (
+                            {(isEditLikeTool(normalizedToolName) || normalizedToolName === 'write') && diffContent ? (
                                 <div className="mb-1 flex items-center justify-end gap-2">
                                     <DiffViewToggle
                                         mode={diffViewMode}
@@ -1883,10 +2069,10 @@ const ToolPart: React.FC<ToolPartProps> = ({
     const state = part.state;
     const showToolFileIcons = useUIStore((s) => s.showToolFileIcons);
     const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
-    const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
 
     const normalizedPartTool = normalizeToolName(part.tool);
     const isTaskTool = normalizedPartTool === 'task';
+    const currentSessionId = useSessionUIStore((s) => isTaskTool ? s.currentSessionId : undefined);
 
     const status = state?.status as string | undefined;
     const isFinalized = status === 'completed' || status === 'error' || status === 'aborted' || status === 'failed' || status === 'timeout' || status === 'cancelled';
@@ -1933,6 +2119,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
     const onContentChangeRef = React.useRef(onContentChange);
     onContentChangeRef.current = onContentChange;
     const expandedContentRef = React.useRef<HTMLDivElement>(null);
+    const expandedContentId = React.useId();
     const expandedContentAnimationRef = React.useRef<AnimationPlaybackControls | null>(null);
     const expandedContentMountedRef = React.useRef(false);
 
@@ -2597,7 +2784,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
     const runtime = React.useContext(RuntimeAPIContext);
 
     const handleMainClick = (e: { stopPropagation: () => void }) => {
-        if (isTaskTool || !runtime?.editor) {
+        if (isTaskTool) {
             onToggle(part.id);
             return;
         }
@@ -2605,36 +2792,47 @@ const ToolPart: React.FC<ToolPartProps> = ({
         let filePath: unknown;
         let targetLine: number | undefined;
         let toolDiff: string | undefined;
-        if (part.tool === 'edit' || part.tool === 'multiedit') {
+        if (normalizedPartTool === 'edit' || normalizedPartTool === 'multiedit') {
             filePath = input?.filePath || input?.file_path || input?.path || metadata?.filePath || metadata?.file_path || metadata?.path;
-            targetLine = getFirstChangedLineFromMetadata(part.tool, metadata);
+            targetLine = getFirstChangedLineFromMetadata(normalizedPartTool, metadata);
             if (typeof filePath === 'string') {
-                toolDiff = getPrimaryDiffFromMetadata(part.tool, metadata, filePath);
+                toolDiff = getPrimaryDiffFromMetadata(normalizedPartTool, metadata, filePath);
             }
-        } else if (part.tool === 'apply_patch') {
+        } else if (normalizedPartTool === 'apply_patch') {
             const files = Array.isArray(metadata?.files) ? metadata?.files : [];
             const firstFile = files[0] as { relativePath?: string; filePath?: string } | undefined;
             filePath = firstFile?.relativePath || firstFile?.filePath;
-            targetLine = getFirstChangedLineFromMetadata(part.tool, metadata);
+            targetLine = getFirstChangedLineFromMetadata(normalizedPartTool, metadata);
             if (typeof filePath === 'string') {
-                toolDiff = getPrimaryDiffFromMetadata(part.tool, metadata, filePath);
+                toolDiff = getPrimaryDiffFromMetadata(normalizedPartTool, metadata, filePath);
             }
-        } else if (['write', 'create', 'file_write'].includes(part.tool)) {
+        } else if (['write', 'create', 'file_write', 'read'].includes(normalizedPartTool)) {
             filePath = input?.filePath || input?.file_path || input?.path || metadata?.filePath || metadata?.file_path || metadata?.path;
+            if (normalizedPartTool === 'read') {
+                targetLine = readPositiveLine(input?.offset, input?.line, metadata?.offset, metadata?.line);
+            }
         }
 
         if (typeof filePath === 'string') {
             e.stopPropagation();
-            let absolutePath = filePath;
-            if (!filePath.startsWith('/')) {
-                absolutePath = currentDirectory.endsWith('/') ? currentDirectory + filePath : currentDirectory + '/' + filePath;
-            }
-            if (runtime.runtime.isVSCode && toolDiff && (part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch')) {
+            const absolutePath = resolveAbsolutePath(currentDirectory, filePath);
+            if (!absolutePath) return;
+            if (runtime?.runtime.isVSCode && runtime.editor && toolDiff && (normalizedPartTool === 'edit' || normalizedPartTool === 'multiedit' || normalizedPartTool === 'apply_patch')) {
                 const label = `${getRelativePath(absolutePath, currentDirectory)} (changes)`;
                 void runtime.editor.openDiff('', absolutePath, label, { line: targetLine, patch: toolDiff });
                 return;
             }
-            runtime.editor.openFile(absolutePath, targetLine);
+            if (runtime?.editor) {
+                runtime.editor.openFile(absolutePath, targetLine);
+                return;
+            }
+            const uiStore = useUIStore.getState();
+            const contextDirectory = getContextDirectoryForPath(currentDirectory, absolutePath);
+            if (targetLine) {
+                uiStore.openContextFileAtLine(contextDirectory, absolutePath, targetLine, 1);
+                return;
+            }
+            uiStore.openContextFile(contextDirectory, absolutePath);
         } else {
             onToggle(part.id);
         }
@@ -2661,19 +2859,26 @@ const ToolPart: React.FC<ToolPartProps> = ({
             {}
             <div
                 className={cn(
-                'group/tool flex gap-1.5 pr-2 pl-px py-2 rounded-xl cursor-pointer',
+                'group/tool flex gap-1.5 pr-2 pl-px py-2 rounded-xl cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focusRing)]',
                 isMultiFileApplyPatch ? 'flex-wrap items-start' : 'items-center'
             )}
                 onClick={handleMainClick}
                 onKeyDown={handleMainKeyDown}
                 role="button"
                 tabIndex={0}
+                aria-expanded={!isTaskTool ? isExpanded : undefined}
+                aria-controls={!isTaskTool ? expandedContentId : undefined}
+                aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${displayName} details`}
             >
                 <div className={cn('flex gap-1.5', isMultiFileApplyPatch ? 'w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5' : 'items-center flex-shrink-0')}>
                     {}
-                    <div
-                        className="relative h-3.5 w-3.5 flex-shrink-0 cursor-pointer"
+                    <button
+                        type="button"
+                        className="relative h-3.5 w-3.5 flex-shrink-0 cursor-pointer rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focusRing)]"
                         onClick={(event) => { event.stopPropagation(); onToggle(part.id); }}
+                        aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${displayName} details`}
+                        aria-expanded={isExpanded}
+                        aria-controls={expandedContentId}
                     >
                         {}
                         <div
@@ -2696,7 +2901,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
                         >
                             {isExpanded ? <Icon name="arrow-down-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-right-s" className="h-3.5 w-3.5" />}
                         </div>
-                    </div>
+                    </button>
                     {isMultiFileApplyPatch ? (
                         <>
                             <MinDurationShineText
@@ -2796,6 +3001,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
 
             {!isTaskTool ? (
                 <div
+                    id={expandedContentId}
                     ref={expandedContentRef}
                     aria-hidden={!isExpanded}
                     style={{
