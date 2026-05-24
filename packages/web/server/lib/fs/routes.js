@@ -1,3 +1,5 @@
+import { createRealpathCache } from '../path-realpath-cache.js';
+
 const EXEC_JOB_TTL_MS = 30 * 60 * 1000;
 
 const createCommandTimeoutMs = () => {
@@ -240,6 +242,9 @@ export const registerFsRoutes = (app, dependencies) => {
     resolveGitBinaryForSpawn,
     openchamberUserConfigRoot,
   } = dependencies;
+  const realpathCache = createRealpathCache({
+    realpath: fsPromises.realpath.bind(fsPromises),
+  });
 
   const execJobs = new Map();
   const commandTimeoutMs = createCommandTimeoutMs();
@@ -914,7 +919,7 @@ export const registerFsRoutes = (app, dependencies) => {
     };
 
     try {
-      resolvedPath = await fsPromises.realpath(path.resolve(normalizeDirectoryPath(rawPath)));
+      resolvedPath = await realpathCache.resolve(path.resolve(normalizeDirectoryPath(rawPath)));
 
       const stats = await fsPromises.stat(resolvedPath);
       if (!stats.isDirectory()) {

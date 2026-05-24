@@ -1,3 +1,5 @@
+import { createRealpathCache } from '../path-realpath-cache.js';
+
 export const createProjectDirectoryRuntime = (dependencies) => {
   const {
     fsPromises,
@@ -7,6 +9,9 @@ export const createProjectDirectoryRuntime = (dependencies) => {
     getReadSettingsFromDiskMigrated,
     sanitizeProjects,
   } = dependencies;
+  const realpathCache = createRealpathCache({
+    realpath: fsPromises.realpath.bind(fsPromises),
+  });
 
   const resolveDirectoryCandidate = (value) => {
     if (typeof value !== 'string') {
@@ -30,7 +35,7 @@ export const createProjectDirectoryRuntime = (dependencies) => {
       if (!stats.isDirectory()) {
         return { ok: false, error: 'Specified path is not a directory' };
       }
-      const realPath = await fsPromises.realpath(resolved);
+      const realPath = await realpathCache.resolve(resolved);
       return { ok: true, directory: realPath };
     } catch (error) {
       const err = error;

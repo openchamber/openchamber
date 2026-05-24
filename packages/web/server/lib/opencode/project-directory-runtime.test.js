@@ -94,6 +94,19 @@ describe('project directory runtime', () => {
 
       expect(result).toEqual({ ok: false, error: 'Access to directory denied' });
     });
+
+    it('returns error when realpath fails after stat succeeds', async () => {
+      const runtime = createTestRuntime({
+        fsPromises: {
+          stat: async () => ({ isDirectory: () => true }),
+          realpath: async () => { throw { code: 'ENOENT' }; },
+        },
+      });
+
+      const result = await runtime.validateDirectoryPath('/deleted-after-stat');
+
+      expect(result).toEqual({ ok: false, error: 'Directory not found' });
+    });
   });
 
   describe('resolveProjectDirectory', () => {
