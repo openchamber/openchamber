@@ -1,0 +1,30 @@
+---
+title: Skills
+description: 创建可复用的指令，让智能体按需加载。
+---
+
+# Skills
+
+Skill 是一组可复用的指令，智能体可以在相关时引入它 — 例如“我们如何编写提交信息”或“我们的 API 规范”。你在 **Settings → Skills** 中管理它们。
+
+如果想安装现成的 skill 而不是自己编写，请参阅 [Skills 目录](/zh-cn/skills-catalog/)。
+
+## 创建 skill
+
+1. 打开 **Settings → Skills**。
+2. 创建一个 skill，并给它一个名称和一段简短的描述。智能体正是根据描述来判断该 skill 何时适用，因此请写得具体。
+3. 编写指令。如果该 skill 需要支持文件，可以添加它们。
+4. 选择它所在的位置：
+   - **personal** — 在每个项目中都可用
+   - **project** — 仅在当前项目中可用
+
+## 在聊天中使用 skill
+
+在消息中间输入 `/` 可调出 skill 选择器，然后选择一个。智能体会为该次回复加载该 skill 的指令。
+
+位于消息最开头的 `/` 会改为打开 [命令](/zh-cn/commands-snippets/)。
+
+## 相关内容
+
+- [Skills 目录](/zh-cn/skills-catalog/) — 安装他人发布的 skill
+- [命令与代码片段](/zh-cn/commands-snippets/) — 在聊天中复用文本的其他方式

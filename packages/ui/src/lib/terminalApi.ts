@@ -48,7 +48,10 @@ type TerminalControlMessage = {
   t: string;
   s?: string;
   c?: string;
+  d?: string;
   f?: boolean;
+  i?: number;
+  r?: number;
   v?: number;
   exitCode?: number;
   signal?: number | null;
@@ -152,6 +155,7 @@ class TerminalTransportManager {
   private closed = false;
   private subscriptions = new Map<symbol, StreamSubscription>();
   private activeSubscriptionToken: symbol | null = null;
+  private replayCursorBySession = new Map<string, number>();
 
   configure(socketUrl: string): void {
     if (!socketUrl) {
@@ -233,7 +237,7 @@ class TerminalTransportManager {
     try {
       if (this.boundSessionId !== sessionId) {
         this.requestedSessionId = sessionId;
-        socket.send(encodeControlFrame({ t: 'b', s: sessionId, v: 2 }));
+        socket.send(encodeControlFrame({ t: 'b', s: sessionId, r: this.replayCursorBySession.get(sessionId) ?? 0, v: 2 }));
       }
       socket.send(data);
       return true;
@@ -265,6 +269,7 @@ class TerminalTransportManager {
     this.socketUrl = '';
     this.subscriptions.clear();
     this.activeSubscriptionToken = null;
+    this.replayCursorBySession.clear();
   }
 
   prime(): void {
@@ -438,7 +443,7 @@ class TerminalTransportManager {
     this.requestedSessionId = activeSubscription.sessionId;
 
     try {
-      this.socket.send(encodeControlFrame({ t: 'b', s: activeSubscription.sessionId, v: 2 }));
+      this.socket.send(encodeControlFrame({ t: 'b', s: activeSubscription.sessionId, r: this.replayCursorBySession.get(activeSubscription.sessionId) ?? 0, v: 2 }));
     } catch {
       this.handleSocketFailure(new Error('Terminal websocket bind failed'));
     }
@@ -569,6 +574,21 @@ class TerminalTransportManager {
         return;
       case 'po':
         return;
+      case 'd': {
+        const sessionId = payload.s ?? this.boundSessionId ?? this.requestedSessionId;
+        if (!activeSubscription || !sessionId || sessionId !== activeSubscription.sessionId) {
+          return;
+        }
+
+        if (typeof payload.i === 'number' && Number.isFinite(payload.i)) {
+          this.replayCursorBySession.set(sessionId, Math.max(this.replayCursorBySession.get(sessionId) ?? 0, Math.trunc(payload.i)));
+        }
+
+        if (typeof payload.d === 'string' && payload.d.length > 0) {
+          activeSubscription.onEvent({ type: 'data', data: payload.d });
+        }
+        return;
+      }
       case 'bok': {
         this.boundSessionId = payload.s ?? this.requestedSessionId;
         if (!activeSubscription) {
@@ -598,6 +618,7 @@ class TerminalTransportManager {
         this.clearConnectionTimeout(activeSubscription);
         this.boundSessionId = null;
         this.requestedSessionId = null;
+        this.replayCursorBySession.delete(activeSubscription.sessionId);
         activeSubscription.onEvent({
           type: 'exit',
           exitCode: payload.exitCode,

@@ -1,0 +1,85 @@
+---
+title: Тунелі
+description: Безпечно відкрийте OpenChamber для віддаленого та мобільного доступу.
+---
+
+# Тунелі
+
+Тунель — це публічне посилання на ваш OpenChamber, щоб дістатися до нього з телефона чи з іншої мережі. Скористайтеся `openchamber tunnel`, щоб створити його для запущеного інстансу.
+
+## Швидкий старт (швидкий режим Cloudflare)
+
+1. Запустіть OpenChamber:
+
+```bash
+openchamber
+```
+
+2. Запустіть тунель:
+
+```bash
+openchamber tunnel start --provider cloudflare --mode quick
+```
+
+3. Перевірте статус:
+
+```bash
+openchamber tunnel status
+```
+
+Коли тунель піднято, `status` показує публічний URL. Відкрийте його або відскануйте QR-код, щоб дістатися до OpenChamber звідусіль.
+
+Типово OpenChamber виводить QR-код в інтерактивних TTY-сесіях. Використовуйте `--qr`, щоб примусово вивести QR, або `--no-qr`, щоб вимкнути його.
+
+## Керовані режими
+
+### Кероване віддалене
+
+Використовуйте токен + хостнейм, керовані Cloudflare:
+
+```bash
+openchamber tunnel start --provider cloudflare --mode managed-remote --token-file ~/.secrets/cf-token --hostname app.example.com
+```
+
+### Кероване локальне
+
+Використовуйте локальний конфіг `cloudflared`:
+
+```bash
+openchamber tunnel start --provider cloudflare --mode managed-local --config ~/.cloudflared/config.yml
+```
+
+## Профілі (managed-remote)
+
+Збережіть багаторазовий профіль:
+
+```bash
+openchamber tunnel profile add --provider cloudflare --mode managed-remote --name prod-main --hostname app.example.com --token-file ~/.secrets/cf-token
+```
+
+Запуск зі збереженим профілем:
+
+```bash
+openchamber tunnel start --profile prod-main
+```
+
+## Корисні команди
+
+```bash
+openchamber tunnel providers
+openchamber tunnel ready --provider cloudflare
+openchamber tunnel doctor --provider cloudflare
+openchamber tunnel stop --port 3000
+```
+
+## Нотатки щодо поведінки
+
+- один активний тунель на інстанс OpenChamber (порт)
+- запуск нового режиму/провайдера на тому самому інстансі замінює попередній тунель
+- генерація нового посилання для підключення відкликає попереднє невикористане
+
+## Пов'язане
+
+- [Безпека](/uk/security/) — захистіть інтерфейс перед відкриттям доступу
+- [PWA та мобільний доступ](/uk/mobile/) — відкривайте OpenChamber з телефона
+- [Усунення несправностей](/uk/troubleshooting/) — якщо посилання тунелю не працює

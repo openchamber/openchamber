@@ -18,7 +18,7 @@ export type SettingsPageSlug =
   | 'shortcuts'
   | 'sessions'
   | 'magic-prompts'
-  | 'prompt-templates'
+  | 'snippets'
   | 'notifications'
   | 'voice'
   | 'tunnel';
@@ -186,8 +186,8 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
-    slug: 'prompt-templates',
-    title: 'Prompt Templates',
+    slug: 'snippets',
+    title: 'Snippets',
     group: 'general',
     kind: 'split',
     keywords: ['prompt', 'templates', 'multi-run', 'strategy', 'approach'],

@@ -388,6 +388,7 @@ export interface GitRemoveRemotePayload {
 export interface CreateGitCommitOptions {
   addAll?: boolean;
   files?: string[];
+  stageFiles?: string[];
 }
 
 export interface GitLogOptions {
@@ -421,7 +422,11 @@ export interface GitAPI {
   getGitStatus(directory: string, options?: { mode?: 'light' }): Promise<GitStatus>;
   getGitDiff(directory: string, options: GetGitDiffOptions): Promise<GitDiffResponse>;
   getGitFileDiff(directory: string, options: GetGitFileDiffOptions): Promise<GitFileDiffResponse>;
-  revertGitFile(directory: string, filePath: string): Promise<void>;
+  revertGitFile(directory: string, filePath: string, options?: { scope?: 'all' | 'working' }): Promise<void>;
+  stageGitFile(directory: string, filePath: string): Promise<void>;
+  stageGitFiles?(directory: string, filePaths: string[]): Promise<void>;
+  unstageGitFile(directory: string, filePath: string): Promise<void>;
+  unstageGitFiles?(directory: string, filePaths: string[]): Promise<void>;
   isLinkedWorktree(directory: string): Promise<boolean>;
   getGitBranches(directory: string): Promise<GitBranch>;
   deleteGitBranch(directory: string, payload: GitDeleteBranchPayload): Promise<{ success: boolean }>;

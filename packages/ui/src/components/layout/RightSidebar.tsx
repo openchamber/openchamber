@@ -4,7 +4,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
 
 export const RIGHT_SIDEBAR_CONTENT_WIDTH = 420;
-const RIGHT_SIDEBAR_MIN_WIDTH = 400;
+const RIGHT_SIDEBAR_MIN_WIDTH = 360;
 const RIGHT_SIDEBAR_MAX_WIDTH = 860;
 
 interface RightSidebarProps {
@@ -19,7 +19,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ isOpen, children, cl
   const setRightSidebarWidth = useUIStore((state) => state.setRightSidebarWidth);
   const [isResizing, setIsResizing] = React.useState(false);
   const startXRef = React.useRef(0);
-  const startWidthRef = React.useRef(rightSidebarWidth || 420);
+  const startWidthRef = React.useRef(rightSidebarWidth || RIGHT_SIDEBAR_CONTENT_WIDTH);
   const resizingWidthRef = React.useRef<number | null>(null);
   const activeResizePointerIDRef = React.useRef<number | null>(null);
   const sidebarRef = React.useRef<HTMLElement | null>(null);

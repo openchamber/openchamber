@@ -1,0 +1,54 @@
+---
+title: OpenCode Server
+description: Conecta OpenChamber a un servidor de OpenCode local o remoto.
+---
+
+# OpenCode Server
+
+OpenChamber se ejecuta sobre un servidor de OpenCode. De forma predeterminada inicia uno por ti, así que no tienes que hacer nada. Solo necesitas esta página si quieres apuntar OpenChamber a un servidor que ya ejecutas, o gestionar el que él inicia.
+
+## Cómo encuentra OpenChamber un servidor
+
+Cuando OpenChamber arranca, busca un servidor en este orden:
+
+1. reutilizar un servidor que ya inició
+2. conectarse a uno externo si se lo indicaste (ver más abajo)
+3. detectar automáticamente un servidor en el puerto predeterminado (`4096`)
+4. de lo contrario, iniciar y gestionar el suyo propio
+
+Si no hay nada configurado, el paso 4 ocurre automáticamente y ya tienes todo en marcha.
+
+## Conéctate a un servidor que ya ejecutas
+
+Define esto antes de iniciar OpenChamber:
+
+```bash
+OPENCODE_HOST=http://localhost:4096 OPENCODE_SKIP_START=true openchamber
+```
+
+- `OPENCODE_HOST` — la dirección completa de tu servidor de OpenCode, incluido el puerto (un valor como `http://localhost:4096`). No debe tener una ruta al final.
+- `OPENCODE_SKIP_START=true` — le indica a OpenChamber que no inicie su propio servidor.
+
+Si solo necesitas cambiar el puerto, define `OPENCODE_PORT` en lugar de `OPENCODE_HOST`.
+
+Si a `OPENCODE_HOST` le falta el puerto o tiene una ruta, OpenChamber lo ignora y recurre a iniciar su propio servidor. Observa los registros de arranque por si aparece una advertencia `[config]` cuando una conexión que esperabas no ocurrió.
+
+## Gestiona el servidor desde la CLI
+
+```bash
+openchamber status
+openchamber logs
+openchamber restart
+openchamber stop
+```
+
+`openchamber` por sí solo inicia el servidor en segundo plano. Añade `--foreground` para mantenerlo asociado a tu terminal.
+
+## "OpenCode is restarting"
+
+Mientras el servidor se inicia o reinicia, OpenChamber muestra un estado "OpenCode is restarting" y pausa las solicitudes hasta que esté listo. Esto es normal justo después de iniciar o reiniciar. Si nunca desaparece, consulta [Conexión de OpenCode](/es/troubleshooting/opencode-connection/).
+
+## Relacionado
+
+- [Proveedores, modelos y agentes](/es/providers/) — configura con qué se comunica el servidor
+- [Conexión de OpenCode](/es/troubleshooting/opencode-connection/) — si no se conecta

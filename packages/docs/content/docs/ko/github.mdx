@@ -1,0 +1,34 @@
+---
+title: GitHub 이슈 및 PR
+description: GitHub를 연결하고 이슈와 풀 리퀘스트에서 세션을 시작하세요.
+---
+
+# GitHub 이슈 및 PR
+
+GitHub 계정을 연결하면 OpenChamber가 이슈와 풀 리퀘스트를 가져오고, 그중 하나에서 바로 세션을 시작하고, PR을 열거나 업데이트할 수 있습니다.
+
+## GitHub 연결하기
+
+1. **Settings → Git**를 엽니다.
+2. GitHub 아래에서 **Connect**를 선택합니다. OpenChamber가 링크와 짧은 코드를 표시합니다.
+3. 링크를 열고 코드를 입력한 뒤 승인합니다.
+
+연결되면 GitHub 섹션 아래에 계정이 표시됩니다. 계정을 여러 개 연결해 전환할 수 있으며, 언제든 연결을 해제할 수 있습니다.
+
+## 이슈나 PR에서 작업 시작하기
+
+GitHub가 연결된 상태에서 [worktree 세션](/ko/worktrees/)을 만들면 **Start from GitHub issue/PR**을 선택할 수 있습니다.
+
+- **issue**를 선택하면 OpenChamber가 그 이슈에 따라 브랜치 이름을 짓고, 이슈와 그 댓글을 첫 메시지로 하여 세션을 엽니다
+- **pull request**를 선택하면 PR의 브랜치를 체크아웃합니다. PR의 diff를 포함하면 에이전트가 전체 변경 사항을 갖게 됩니다
+
+이렇게 하면 컨텍스트가 이미 로드된 세션으로 바로 들어갑니다.
+
+## 풀 리퀘스트 열기 및 관리
+
+[git 보기](/ko/git/)의 **PR** 탭에서 풀 리퀘스트를 만들고, 업데이트하고, 초안을 준비 완료로 표시하거나 병합할 수 있습니다. OpenChamber는 변경 사항에서 PR 제목과 설명을 생성할 수 있습니다.
+
+## 관련 항목
+
+- [Git & GitHub Workflows](/ko/git/) — 커밋하고 브랜치를 관리하세요
+- [Worktree Sessions](/ko/worktrees/) — 이슈 및 PR 세션이 시작되는 곳

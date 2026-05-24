@@ -14,7 +14,6 @@ export interface MultiRunFileAttachment {
 export interface MultiRunGroup {
   prompt: string;
   models: MultiRunModelSelection[];
-  templateId?: string;
 }
 
 export interface CreateMultiRunParams {

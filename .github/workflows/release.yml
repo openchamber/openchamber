@@ -104,6 +104,7 @@ jobs:
         run: npm pack
 
       - name: Upload npm tarball to release
+        if: ${{ github.event.inputs.dry_run != 'true' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.create-release.outputs.version }}
@@ -258,12 +259,13 @@ jobs:
           rm -rf electron-app-artifact
           mkdir -p electron-app-artifact
           cp -R "$APP_PATH" electron-app-artifact/OpenChamber.app
+          tar -C electron-app-artifact -czf electron-app-${{ matrix.arch }}.tar.gz OpenChamber.app
 
       - name: Upload signed Electron app for Tauri updater repackage
         uses: actions/upload-artifact@v4
         with:
           name: electron-app-${{ matrix.arch }}
-          path: electron-app-artifact/OpenChamber.app
+          path: electron-app-${{ matrix.arch }}.tar.gz
           retention-days: 1
 
       - name: Upload per-arch latest-mac.yml for merge
@@ -287,22 +289,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
       - name: Download signed Electron app
         uses: actions/download-artifact@v4
         with:
           name: electron-app-${{ matrix.arch }}
           path: staged
 
-      - name: Install minisign
-        run: brew install minisign
-
       - name: Tar and sign Electron app as Tauri update payload
         env:
-          TAURI_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           VERSION: ${{ needs.create-release.outputs.version }}
         run: |
           set -euo pipefail
+
+          if [ -f staged/electron-app-${{ matrix.arch }}.tar.gz ]; then
+            tar -C staged -xzf staged/electron-app-${{ matrix.arch }}.tar.gz
+          elif [ ! -d staged/OpenChamber.app ] && [ -d staged/Contents ]; then
+            mkdir -p staged/OpenChamber.app
+            mv staged/Contents staged/OpenChamber.app/Contents
+          fi
 
           if [ ! -d staged/OpenChamber.app ]; then
             echo "Error: staged/OpenChamber.app not found"
@@ -310,15 +322,21 @@ jobs:
             exit 1
           fi
 
+          APP_EXECUTABLE=$(find staged/OpenChamber.app/Contents/MacOS -type f -maxdepth 1 -print -quit)
+          if [ -z "$APP_EXECUTABLE" ] || [ ! -x "$APP_EXECUTABLE" ]; then
+            echo "Error: Electron app executable is missing or not executable"
+            ls -la staged/OpenChamber.app/Contents/MacOS
+            exit 1
+          fi
+
           cd staged
           TARBALL="OpenChamber.app.tar.gz"
           tar -czf "$TARBALL" OpenChamber.app
 
-          printf '%s\n' "$TAURI_KEY" > ../tauri-signing.key
-          printf '%s\n' "$TAURI_KEY_PASSWORD" | minisign -S -s ../tauri-signing.key -m "$TARBALL" -W
+          bun run --cwd ../packages/desktop tauri signer sign "$PWD/$TARBALL"
 
           mv "$TARBALL" "OpenChamber-${VERSION}-${{ matrix.platform }}.app.tar.gz"
-          mv "${TARBALL}.minisig" "OpenChamber-${VERSION}-${{ matrix.platform }}.app.tar.gz.sig"
+          mv "${TARBALL}.sig" "OpenChamber-${VERSION}-${{ matrix.platform }}.app.tar.gz.sig"
 
       - name: Generate Tauri latest platform manifest
         env:

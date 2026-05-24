@@ -396,6 +396,10 @@ function mapStatus(status: Status): string {
   return statusMap[status] || ' ';
 }
 
+function getRepositoryRelativePath(repo: Repository, uri: vscode.Uri): string {
+  return path.relative(repo.rootUri.fsPath, uri.fsPath).replace(/\\/g, '/');
+}
+
 /**
  * Get git status for a directory
  */
@@ -417,7 +421,7 @@ export async function getGitStatus(directory: string, options?: GitStatusOptions
   
   // Process index changes (staged)
   for (const change of state.indexChanges) {
-    const relativePath = vscode.workspace.asRelativePath(change.uri, false);
+    const relativePath = getRepositoryRelativePath(repo, change.uri);
     files.push({
       path: relativePath,
       index: mapStatus(change.status),
@@ -427,7 +431,7 @@ export async function getGitStatus(directory: string, options?: GitStatusOptions
   
   // Process working tree changes (unstaged)
   for (const change of state.workingTreeChanges) {
-    const relativePath = vscode.workspace.asRelativePath(change.uri, false);
+    const relativePath = getRepositoryRelativePath(repo, change.uri);
     const existing = files.find(f => f.path === relativePath);
     if (existing) {
       existing.working_dir = mapStatus(change.status);
@@ -2085,10 +2089,15 @@ export async function getGitFileDiff(
         }
       }
       
-      // Read the current file content
-      const fileUri = vscode.Uri.file(path.join(directory, filePath));
-      const modifiedBytes = await vscode.workspace.fs.readFile(fileUri);
-      const modified = Buffer.from(modifiedBytes).toString('utf8');
+      let modified: string;
+      if (staged) {
+        const stagedResult = await execGit(['show', `:${filePath}`], directory);
+        modified = stagedResult.exitCode === 0 ? stagedResult.stdout : '';
+      } else {
+        const fileUri = vscode.Uri.file(path.join(directory, filePath));
+        const modifiedBytes = await vscode.workspace.fs.readFile(fileUri);
+        modified = Buffer.from(modifiedBytes).toString('utf8');
+      }
       
       return { original, modified, path: filePath };
     } catch (error) {
@@ -2103,20 +2112,101 @@ export async function getGitFileDiff(
 /**
  * Revert a file to its last committed state
  */
-export async function revertGitFile(directory: string, filePath: string): Promise<void> {
-  const repo = await getRepository(directory);
-  
-  if (repo) {
-    try {
-      await repo.revert([filePath]);
-      return;
-    } catch (error) {
-      console.error('[GitService] Failed to revert via API:', error);
+export async function revertGitFile(
+  directory: string,
+  filePath: string,
+  options: { scope?: 'all' | 'working' } = {},
+): Promise<void> {
+  const scope = options.scope === 'working' ? 'working' : 'all';
+  const tracked = await execGit(['ls-files', '--error-unmatch', '--', filePath], directory);
+  if (tracked.exitCode !== 0) {
+    const clean = await execGit(['clean', '-f', '-d', '--', filePath], directory);
+    if (clean.exitCode !== 0) {
+      const root = path.resolve(directory);
+      const target = path.resolve(directory, filePath);
+      if (target !== root && !target.startsWith(root + path.sep)) {
+        throw new Error(`Path is outside repository: ${filePath}`);
+      }
+      await fs.promises.rm(target, { recursive: true, force: true });
+    }
+    return;
+  }
+
+  if (scope === 'all') {
+    const unstage = await execGit(['restore', '--staged', '--', filePath], directory);
+    if (unstage.exitCode !== 0) {
+      await execGit(['reset', 'HEAD', '--', filePath], directory);
     }
   }
 
-  // Fallback to raw git
-  await execGit(['checkout', '--', filePath], directory);
+  const restore = await execGit(['restore', '--', filePath], directory);
+  if (restore.exitCode === 0) {
+    return;
+  }
+
+  const fallback = await execGit(['checkout', '--', filePath], directory);
+  if (fallback.exitCode !== 0) {
+    throw new Error(fallback.stderr || restore.stderr || 'Failed to revert git file');
+  }
+}
+
+export async function stageGitFile(directory: string, filePath: string): Promise<void> {
+  await stageGitFiles(directory, [filePath]);
+}
+
+export async function stageGitFiles(directory: string, filePaths: string[]): Promise<void> {
+  const paths = filePaths.map((path) => path.trim()).filter(Boolean);
+
+  if (paths.length === 0) {
+    throw new Error('path is required');
+  }
+  const result = await execGit(['add', '--', ...paths], directory);
+  if (result.exitCode === 0) {
+    return;
+  }
+
+  const isPathspecError =
+    /pathspec/.test(result.stderr) && /did not match any files/.test(result.stderr);
+  if (!isPathspecError) {
+    throw new Error(result.stderr || 'Failed to stage git file');
+  }
+
+  // During rapid stage/unstage toggling the optimistic UI can request staging a
+  // path that a prior queued mutation already staged (most visibly a deletion,
+  // whose file is gone from the working tree). `git add` aborts the whole batch on
+  // a single unmatched pathspec, so retry per-path and skip the ones already in
+  // their target state rather than failing the entire "stage all".
+  for (const path of paths) {
+    const perPath = await execGit(['add', '--', path], directory);
+    if (perPath.exitCode === 0) {
+      continue;
+    }
+    const perPathIsPathspecError =
+      /pathspec/.test(perPath.stderr) && /did not match any files/.test(perPath.stderr);
+    if (!perPathIsPathspecError) {
+      throw new Error(perPath.stderr || 'Failed to stage git file');
+    }
+  }
+}
+
+export async function unstageGitFile(directory: string, filePath: string): Promise<void> {
+  await unstageGitFiles(directory, [filePath]);
+}
+
+export async function unstageGitFiles(directory: string, filePaths: string[]): Promise<void> {
+  const paths = filePaths.map((path) => path.trim()).filter(Boolean);
+
+  if (paths.length === 0) {
+    throw new Error('path is required');
+  }
+  const result = await execGit(['restore', '--staged', '--', ...paths], directory);
+  if (result.exitCode === 0) {
+    return;
+  }
+  const fallback = await execGit(['reset', 'HEAD', '--', ...paths], directory);
+  if (fallback.exitCode !== 0) {
+    throw new Error(fallback.stderr || result.stderr || 'Failed to unstage git file');
+  }
 }
 
 // ============== Commit Operations ==============
@@ -2138,8 +2228,49 @@ export interface GitCommitResult {
 export async function createGitCommit(
   directory: string,
   message: string,
-  options?: { addAll?: boolean; files?: string[] }
+  options?: { addAll?: boolean; files?: string[]; stageFiles?: string[] }
 ): Promise<GitCommitResult> {
+  if (options?.files?.length && options.stageFiles) {
+    const selectedFiles = new Set(options.files);
+    const stagedResult = await execGit(['diff', '--cached', '--name-only'], directory);
+    const temporarilyUnstagedFiles = stagedResult.stdout
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((filePath) => filePath && !selectedFiles.has(filePath));
+
+    try {
+      if (temporarilyUnstagedFiles.length > 0) {
+        await execGit(['restore', '--staged', '--', ...temporarilyUnstagedFiles], directory);
+      }
+      if (options.stageFiles.length > 0) {
+        await execGit(['add', '--', ...options.stageFiles], directory);
+      }
+
+      const result = await execGit(['commit', '-m', message], directory);
+      if (result.exitCode !== 0) {
+        return {
+          success: false,
+          commit: '',
+          branch: '',
+          summary: { changes: 0, insertions: 0, deletions: 0 },
+        };
+      }
+
+      const hashResult = await execGit(['rev-parse', 'HEAD'], directory);
+      const branchResult = await execGit(['rev-parse', '--abbrev-ref', 'HEAD'], directory);
+      return {
+        success: true,
+        commit: hashResult.stdout.trim(),
+        branch: branchResult.stdout.trim(),
+        summary: { changes: 0, insertions: 0, deletions: 0 },
+      };
+    } finally {
+      if (temporarilyUnstagedFiles.length > 0) {
+        await execGit(['add', '--', ...temporarilyUnstagedFiles], directory);
+      }
+    }
+  }
+
   const repo = await getRepository(directory);
   
   if (repo) {
@@ -2147,7 +2278,10 @@ export async function createGitCommit(
       if (options?.addAll) {
         await repo.add(['.']);
       } else if (options?.files?.length) {
-        await repo.add(options.files);
+        const filesToStage = options.stageFiles ?? options.files;
+        if (filesToStage.length > 0) {
+          await repo.add(filesToStage);
+        }
       }
       
       await repo.commit(message);
@@ -2168,7 +2302,10 @@ export async function createGitCommit(
   if (options?.addAll) {
     await execGit(['add', '-A'], directory);
   } else if (options?.files?.length) {
-    await execGit(['add', ...options.files], directory);
+    const filesToStage = options.stageFiles ?? options.files;
+    if (filesToStage.length > 0) {
+      await execGit(['add', ...filesToStage], directory);
+    }
   }
 
   const result = await execGit(['commit', '-m', message], directory);
@@ -2475,6 +2612,13 @@ export async function stashGitChanges(directory: string, options: { message?: st
 
 export async function applyGitStash(directory: string, options: { ref: string }): Promise<{ success: boolean; ref: string }> {
   const ref = options.ref || 'stash@{0}';
+  // Prefer --index so the staged/unstaged split captured in the stash is restored
+  // faithfully. Fall back to a plain apply when the index can't be reinstated
+  // cleanly (e.g. conflicts), which is the prior behavior.
+  const withIndex = await execGit(['stash', 'apply', '--index', ref], directory);
+  if (withIndex.exitCode === 0) {
+    return { success: true, ref };
+  }
   const result = await execGit(['stash', 'apply', ref], directory);
   if (result.exitCode !== 0) throw new Error(result.stderr.trim() || result.stdout.trim() || 'Failed to apply stash');
   return { success: true, ref };

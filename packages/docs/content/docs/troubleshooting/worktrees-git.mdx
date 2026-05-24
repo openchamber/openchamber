@@ -1,0 +1,35 @@
+---
+title: Worktrees & Git
+description: Fix common worktree and git problems.
+---
+
+# Worktrees & Git
+
+Issues that come up with [worktree sessions](/worktrees/) and the [git view](/git/), and how to clear them.
+
+## A worktree needs attention
+
+OpenChamber flags a worktree when something's off:
+
+- **folder missing** — the worktree's folder was deleted or moved outside OpenChamber; remove the session and create a fresh worktree
+- **detached or unborn branch** — the worktree isn't on a normal branch; check it out onto one
+- **merge, rebase, or cherry-pick in progress** — an operation was left half-finished; finish or abort it from the git view
+
+## Can't create a worktree
+
+- **branch already exists** — pick a different branch name, or use the existing-branch option
+- **name already in use** — choose a different worktree name
+
+## Commit or PR generation fails
+
+Generating a commit message or PR description runs in your active session, so you need a session open with a working model selected. Open or pick a session and try again.
+
+## SSH or Windows path issues
+
+- make sure the SSH key the repo uses is the one set in your [git identity](/git-identities/)
+- on Windows, git uses Unix-style paths (like `/c/Users/...`) — OpenChamber handles this, but custom SSH key paths should follow the same form
+
+## Related
+
+- [Worktree Sessions](/worktrees/) — how worktrees are created and removed
+- [Git Identities](/git-identities/) — set the right key and identity per repo

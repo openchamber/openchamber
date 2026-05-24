@@ -1,0 +1,30 @@
+---
+title: Git Identities
+description: Commit as the right name and email for each repository.
+---
+
+# Git Identities
+
+A git identity is the name and email your commits are signed with. If you work across personal and work repos, you can save identities and apply the right one per repository, instead of relying on a single global setting. Manage them at **Settings → Git**.
+
+## Add an identity
+
+1. Open **Settings → Git** and choose **New**.
+2. Enter the **name** and **email** to commit with.
+3. Pick how it authenticates with the remote:
+   - **SSH** — point it at an SSH key
+   - **token** — use a saved credential for a host
+4. Optionally give it a color and icon so it's easy to spot.
+
+Your system's global identity is shown too, as read-only.
+
+## Apply an identity to a repo
+
+Applying an identity writes it to that repository's **local** git config — it only affects that repo, not your global setting. SSH identities also set the SSH command to use your key; token identities set up credential storage for the host.
+
+You can import identities OpenChamber discovers from your existing git credentials and save them as token identities.
+
+## Related
+
+- [Git & GitHub Workflows](/git/) — commit using the identity you set
+- [GitHub Issues & PRs](/github/) — connect a GitHub account for PRs

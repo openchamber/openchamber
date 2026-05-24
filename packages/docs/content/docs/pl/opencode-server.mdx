@@ -1,0 +1,54 @@
+---
+title: OpenCode Server
+description: Połącz OpenChamber z lokalnym lub zdalnym serwerem OpenCode.
+---
+
+# OpenCode Server
+
+OpenChamber działa na bazie serwera OpenCode. Domyślnie uruchamia go za Ciebie, więc nie musisz robić nic dodatkowego. Ta strona jest potrzebna tylko wtedy, gdy chcesz wskazać OpenChamber serwer, który już uruchamiasz, albo zarządzać tym, który sam startuje.
+
+## Jak OpenChamber znajduje serwer
+
+Gdy OpenChamber się uruchamia, szuka serwera w tej kolejności:
+
+1. ponownie używa serwera, który już uruchomił
+2. łączy się z zewnętrznym, jeśli mu to wskazałeś (zobacz niżej)
+3. automatycznie wykrywa serwer na domyślnym porcie (`4096`)
+4. w przeciwnym razie uruchamia i obsługuje własny
+
+Jeśli nic nie jest skonfigurowane, krok 4 dzieje się automatycznie i od razu możesz pracować.
+
+## Połącz się z serwerem, który już uruchamiasz
+
+Ustaw te wartości przed uruchomieniem OpenChamber:
+
+```bash
+OPENCODE_HOST=http://localhost:4096 OPENCODE_SKIP_START=true openchamber
+```
+
+- `OPENCODE_HOST` — pełny adres Twojego serwera OpenCode, wraz z portem (wartość taka jak `http://localhost:4096`). Nie może zawierać ścieżki na końcu.
+- `OPENCODE_SKIP_START=true` — informuje OpenChamber, aby nie uruchamiał własnego serwera.
+
+Jeśli chcesz zmienić tylko port, ustaw `OPENCODE_PORT` zamiast `OPENCODE_HOST`.
+
+Jeśli w `OPENCODE_HOST` brakuje portu lub zawiera ścieżkę, OpenChamber go zignoruje i wróci do uruchamiania własnego serwera. Obserwuj logi startowe pod kątem ostrzeżenia `[config]`, jeśli oczekiwane połączenie nie nastąpiło.
+
+## Zarządzaj serwerem z poziomu CLI
+
+```bash
+openchamber status
+openchamber logs
+openchamber restart
+openchamber stop
+```
+
+Samo `openchamber` uruchamia serwer w tle. Dodaj `--foreground`, aby pozostał dołączony do Twojego terminala.
+
+## „OpenCode uruchamia się ponownie”
+
+Gdy serwer startuje lub uruchamia się ponownie, OpenChamber pokazuje stan „OpenCode uruchamia się ponownie” i wstrzymuje żądania, aż będzie gotowy. To normalne tuż po uruchomieniu lub restarcie. Jeśli ten stan nigdy nie znika, zobacz [Połączenie z OpenCode](/pl/troubleshooting/opencode-connection/).
+
+## Powiązane
+
+- [Dostawcy, modele i agenci](/pl/providers/) — skonfiguruj to, z czym serwer się komunikuje
+- [Połączenie z OpenCode](/pl/troubleshooting/opencode-connection/) — jeśli nie chce się połączyć

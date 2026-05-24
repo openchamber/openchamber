@@ -1,0 +1,40 @@
+---
+title: Solução de problemas
+description: Problemas comuns de configuração e execução com soluções rápidas.
+---
+
+# Solução de problemas
+
+Topou com um problema? Encontre o sintoma abaixo e tente a solução.
+
+## O comando OpenChamber encerra ou não inicia
+
+- confirme o Node.js `>=20`
+- execute `openchamber --version`
+- reinstale a CLI mais recente se necessário
+
+## A UI web não está acessível
+
+- verifique os logs do servidor com `openchamber logs`
+- confira a porta ativa (padrão `3000`)
+- abra `http://localhost:3000` diretamente primeiro, antes de testar links de túnel
+
+## O link remoto/de túnel não funciona
+
+- execute `openchamber tunnel status --all`
+- reinicie o túnel a partir da mesma instância/porta
+- gere um novo link de conexão se o token anterior já tiver sido usado
+
+Veja [Túneis](/pt-br/tunnels/) para a configuração completa e [Proxy reverso](/pt-br/reverse-proxy/) se você usar um.
+
+## A extensão do VS Code não conecta
+
+- confirme que o servidor do OpenChamber está em execução
+- verifique se a extensão está atualizada
+- recarregue a janela do VS Code e tente conectar de novo
+
+## Relacionado
+
+- [Início rápido](/pt-br/quickstart/)
+- [Túneis](/pt-br/tunnels/)
+- [Proxy reverso](/pt-br/reverse-proxy/)

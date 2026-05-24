@@ -21,6 +21,7 @@ import React from 'react';
 import type { BrowserVoiceStatus } from '@/hooks/useBrowserVoice';
 import { useI18n } from '@/lib/i18n';
 import { Icon } from "@/components/icon/Icon";
+import type { IconName } from "@/components/icon/icons";
 
 export interface VoiceStatusIndicatorProps {
     /** Current voice status */
@@ -53,7 +54,7 @@ const sizeClasses = {
 const statusConfig: Record<
     BrowserVoiceStatus,
     {
-        icon: string;
+        icon: IconName;
         color: string;
         labelKey:
           | 'voice.status.idle'

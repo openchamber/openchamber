@@ -1,3 +1,5 @@
+import { createRealpathCache } from '../path-realpath-cache.js';
+
 const EXEC_JOB_TTL_MS = 30 * 60 * 1000;
 
 const createCommandTimeoutMs = () => {
@@ -5,6 +7,36 @@ const createCommandTimeoutMs = () => {
   if (Number.isFinite(raw) && raw > 0) return raw;
   return 5 * 60 * 1000;
 };
+
+// How long a cached git-read result stays fresh. The location of a repo's git
+// directory is effectively static while the app runs, so a short TTL safely
+// absorbs the burst of identical lookups a fresh client (e.g. right after a
+// page reload) fires for every project. Set to 0 to disable caching.
+const createGitReadCacheTtlMs = () => {
+  const raw = Number(process.env.OPENCHAMBER_GIT_READ_CACHE_TTL_MS);
+  if (Number.isFinite(raw) && raw >= 0) return raw;
+  return 30 * 1000;
+};
+
+// Only deterministic, side-effect-free git plumbing path queries are cacheable.
+// Anything outside this allowlist (including any non-git command) runs normally
+// — we never cache arbitrary exec.
+const normalizeCommand = (command) =>
+  typeof command === 'string' ? command.trim().replace(/\s+/g, ' ') : '';
+
+const isCacheableGitReadCommand = (command) => {
+  const normalized = normalizeCommand(command);
+  return /^git rev-parse(?: --(?:absolute-git-dir|git-common-dir|show-toplevel)){1,3}$/.test(normalized);
+};
+
+// Dual-constraint bound per the project's caching policy (count + bytes). Git
+// rev-parse outputs are tiny, so these ceilings are generous and only guard
+// against pathological growth on long-lived, many-directory deployments.
+const GIT_READ_CACHE_MAX_ENTRIES = 500;
+const GIT_READ_CACHE_MAX_BYTES = 1024 * 1024;
+
+const gitReadEntryBytes = (key, result) =>
+  key.length + (result?.stdout?.length || 0) + (result?.stderr?.length || 0);
 
 const isPathWithinRoot = (resolvedPath, rootPath, path, os) => {
   const resolvedRoot = path.resolve(rootPath || os.homedir());
@@ -240,9 +272,15 @@ export const registerFsRoutes = (app, dependencies) => {
     resolveGitBinaryForSpawn,
     openchamberUserConfigRoot,
   } = dependencies;
+  const realpathCache = createRealpathCache({
+    realpath: fsPromises.realpath.bind(fsPromises),
+  });
 
   const execJobs = new Map();
   const commandTimeoutMs = createCommandTimeoutMs();
+  const gitReadCacheTtlMs = createGitReadCacheTtlMs();
+  const gitReadCache = new Map();
+  const inFlightGitReadCache = new Map();
 
   const pruneExecJobs = () => {
     const now = Date.now();
@@ -258,6 +296,94 @@ export const registerFsRoutes = (app, dependencies) => {
     }
   };
 
+  const pruneGitReadCache = () => {
+    if (gitReadCacheTtlMs <= 0) {
+      return;
+    }
+    const now = Date.now();
+    for (const [key, entry] of gitReadCache.entries()) {
+      if (!entry || now - entry.at > gitReadCacheTtlMs) {
+        gitReadCache.delete(key);
+      }
+    }
+  };
+
+  // Insert with LRU (oldest-first) eviction enforcing both count and byte caps.
+  // Map iteration order is insertion order, so deleting+re-setting a key moves
+  // it to the most-recently-used position.
+  const setGitReadCacheEntry = (key, result) => {
+    gitReadCache.delete(key);
+    gitReadCache.set(key, { result, at: Date.now() });
+
+    let totalBytes = 0;
+    for (const [k, entry] of gitReadCache) {
+      totalBytes += gitReadEntryBytes(k, entry.result);
+    }
+    while (
+      gitReadCache.size > GIT_READ_CACHE_MAX_ENTRIES ||
+      (totalBytes > GIT_READ_CACHE_MAX_BYTES && gitReadCache.size > 1)
+    ) {
+      const oldest = gitReadCache.entries().next().value;
+      if (!oldest) {
+        break;
+      }
+      totalBytes -= gitReadEntryBytes(oldest[0], oldest[1].result);
+      gitReadCache.delete(oldest[0]);
+    }
+  };
+
+  // Runs a command, transparently serving/storing cacheable git-read results.
+  // Non-cacheable commands always execute and are never stored.
+  const runCommandWithGitReadCache = async ({ shell, shellFlag, command, resolvedCwd }) => {
+    const cacheable = gitReadCacheTtlMs > 0 && isCacheableGitReadCommand(command);
+    const cacheKey = cacheable ? `${resolvedCwd} ${normalizeCommand(command)}` : null;
+
+    if (cacheKey) {
+      const cached = gitReadCache.get(cacheKey);
+      if (cached && Date.now() - cached.at < gitReadCacheTtlMs) {
+        // Refresh recency for LRU without altering the entry's age/TTL.
+        gitReadCache.delete(cacheKey);
+        gitReadCache.set(cacheKey, cached);
+        return { ...cached.result, command };
+      }
+      if (cached) {
+        gitReadCache.delete(cacheKey);
+      }
+
+      const inFlight = inFlightGitReadCache.get(cacheKey);
+      if (inFlight) {
+        const result = await inFlight;
+        return { ...result, command };
+      }
+    }
+
+    const runPromise = runCommandInDirectory({
+      shell,
+      shellFlag,
+      command,
+      resolvedCwd,
+      spawn,
+      buildAugmentedPath,
+      commandTimeoutMs,
+    }).then((result) => {
+      // Only cache successful results — failures may be transient.
+      if (cacheKey && result && result.success) {
+        setGitReadCacheEntry(cacheKey, result);
+      }
+      return result;
+    }).finally(() => {
+      if (cacheKey && inFlightGitReadCache.get(cacheKey) === runPromise) {
+        inFlightGitReadCache.delete(cacheKey);
+      }
+    });
+
+    if (cacheKey) {
+      inFlightGitReadCache.set(cacheKey, runPromise);
+    }
+
+    return runPromise;
+  };
+
   const runExecJob = async (job) => {
     job.status = 'running';
     job.updatedAt = Date.now();
@@ -270,14 +396,11 @@ export const registerFsRoutes = (app, dependencies) => {
       }
 
       try {
-        const result = await runCommandInDirectory({
+        const result = await runCommandWithGitReadCache({
           shell: job.shell,
           shellFlag: job.shellFlag,
           command,
           resolvedCwd: job.resolvedCwd,
-          spawn,
-          buildAugmentedPath,
-          commandTimeoutMs,
         });
         results.push(result);
       } catch (error) {
@@ -816,6 +939,7 @@ export const registerFsRoutes = (app, dependencies) => {
     }
 
     pruneExecJobs();
+    pruneGitReadCache();
 
     try {
       const resolvedCwd = path.resolve(normalizeDirectoryPath(cwd));
@@ -914,7 +1038,7 @@ export const registerFsRoutes = (app, dependencies) => {
     };
 
     try {
-      resolvedPath = path.resolve(normalizeDirectoryPath(rawPath));
+      resolvedPath = await realpathCache.resolve(path.resolve(normalizeDirectoryPath(rawPath)));
 
       const stats = await fsPromises.stat(resolvedPath);
       if (!stats.isDirectory()) {

@@ -1,0 +1,85 @@
+---
+title: Tunele
+description: Bezpiecznie udostępnij OpenChamber do dostępu zdalnego i mobilnego.
+---
+
+# Tunele
+
+Tunel to publiczny link do Twojego OpenChamber, dzięki któremu możesz dotrzeć do niego z telefonu lub z innej sieci. Użyj `openchamber tunnel`, aby utworzyć go dla działającej instancji.
+
+## Szybki start (tryb szybki Cloudflare)
+
+1. Uruchom OpenChamber:
+
+```bash
+openchamber
+```
+
+2. Uruchom tunel:
+
+```bash
+openchamber tunnel start --provider cloudflare --mode quick
+```
+
+3. Sprawdź status:
+
+```bash
+openchamber tunnel status
+```
+
+Gdy tunel działa, `status` pokazuje publiczny adres URL. Otwórz go lub zeskanuj kod QR, aby dotrzeć do OpenChamber z dowolnego miejsca.
+
+Domyślnie OpenChamber wypisuje kod QR w interaktywnych sesjach TTY. Użyj `--qr`, aby wymusić wyświetlenie kodu QR, lub `--no-qr`, aby je wyłączyć.
+
+## Tryby zarządzane
+
+### Zarządzany zdalny
+
+Użyj tokenu + nazwy hosta zarządzanych przez Cloudflare:
+
+```bash
+openchamber tunnel start --provider cloudflare --mode managed-remote --token-file ~/.secrets/cf-token --hostname app.example.com
+```
+
+### Zarządzany lokalny
+
+Użyj lokalnej konfiguracji `cloudflared`:
+
+```bash
+openchamber tunnel start --provider cloudflare --mode managed-local --config ~/.cloudflared/config.yml
+```
+
+## Profile (managed-remote)
+
+Zapisz profil wielokrotnego użytku:
+
+```bash
+openchamber tunnel profile add --provider cloudflare --mode managed-remote --name prod-main --hostname app.example.com --token-file ~/.secrets/cf-token
+```
+
+Uruchom z zapisanym profilem:
+
+```bash
+openchamber tunnel start --profile prod-main
+```
+
+## Przydatne polecenia
+
+```bash
+openchamber tunnel providers
+openchamber tunnel ready --provider cloudflare
+openchamber tunnel doctor --provider cloudflare
+openchamber tunnel stop --port 3000
+```
+
+## Uwagi dotyczące zachowania
+
+- jeden aktywny tunel na instancję OpenChamber (port)
+- uruchomienie nowego trybu/dostawcy na tej samej instancji zastępuje poprzedni tunel
+- wygenerowanie nowego linku połączenia unieważnia poprzedni nieużyty
+
+## Powiązane
+
+- [Bezpieczeństwo](/pl/security/) — zabezpiecz interfejs przed udostępnieniem
+- [PWA i dostęp z telefonu](/pl/mobile/) — korzystaj z OpenChamber z telefonu
+- [Rozwiązywanie problemów](/pl/troubleshooting/) — jeśli link tunelu nie działa

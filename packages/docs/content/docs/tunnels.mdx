@@ -5,7 +5,7 @@ description: Expose OpenChamber safely for remote and mobile access.
 
 # Tunnels
 
-Use `openchamber tunnel` to expose a running OpenChamber instance.
+A tunnel is a public link to your OpenChamber, so you can reach it from your phone or another network. Use `openchamber tunnel` to create one for a running instance.
 
 ## Quick start (Cloudflare quick mode)
 
@@ -26,6 +26,8 @@ openchamber tunnel start --provider cloudflare --mode quick
 ```bash
 openchamber tunnel status
 ```
+
+When the tunnel is up, `status` shows a public URL. Open it, or scan the QR code, to reach OpenChamber from anywhere.
 
 By default, OpenChamber prints a QR code in interactive TTY sessions. Use `--qr` to force QR output, or `--no-qr` to disable it.
 
@@ -75,3 +77,9 @@ openchamber tunnel stop --port 3000
 - one active tunnel per OpenChamber instance (port)
 - starting a new mode/provider on same instance replaces previous tunnel
 - generating a new connect link revokes previous unused one
+
+## Related
+
+- [Security](/security/) — protect the UI before exposing it
+- [PWA & Mobile](/mobile/) — reach OpenChamber from your phone
+- [Troubleshooting](/troubleshooting/) — if the tunnel link doesn't work

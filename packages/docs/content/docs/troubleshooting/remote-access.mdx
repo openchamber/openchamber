@@ -1,0 +1,38 @@
+---
+title: Remote Access
+description: Fix tunnels, remote instances, and reaching OpenChamber from another device.
+---
+
+# Remote Access
+
+When you can't reach OpenChamber from your phone or another machine, the fix depends on how you're connecting.
+
+## Check the basics first
+
+- open `http://localhost:3000` on the same computer first — if that fails, it's not a remote problem; see [OpenCode connection](/troubleshooting/opencode-connection/)
+- confirm the server is running with `openchamber status`
+
+## Tunnel link doesn't work
+
+- run `openchamber tunnel status --all`
+- restart the tunnel from the same instance and port
+- regenerate the connect link if the previous one was already used
+
+See [Tunnels](/tunnels/) for the full setup.
+
+## Remote instance won't connect (desktop)
+
+When a [remote instance](/remote-instances/) stalls, OpenChamber names the step that failed:
+
+- **auth** — your SSH or UI password was rejected; re-enter it
+- **install / start** — OpenChamber couldn't set up or start the server on the remote machine; check that machine's requirements
+- **forwarding** — the connection is up but the port isn't reaching you; try a different local port
+
+## Behind your own server
+
+If you put OpenChamber behind a reverse proxy and it loads oddly or won't connect, see [Reverse Proxy](/reverse-proxy/).
+
+## Related
+
+- [Tunnels](/tunnels/) · [Remote Instances](/remote-instances/) · [Reverse Proxy](/reverse-proxy/)
+- [Security](/security/) — protect the UI before exposing it

@@ -1,0 +1,26 @@
+---
+title: Magic Prompts
+description: Personaliza los prompts integrados detrás de los flujos automatizados de OpenChamber.
+---
+
+# Magic Prompts
+
+OpenChamber usa prompts integrados en segundo plano cada vez que hace algo automáticamente: escribir un mensaje de commit, redactar un PR, revisar una issue, resolver un conflicto, resumir una sesión. Magic Prompts es donde lees y reescribes esos prompts. Ábrelo en **Settings → Magic Prompts**.
+
+No necesitas esta página para el uso normal. Recurre a ella cuando quieras que un flujo se comporte de otra manera; por ejemplo, mensajes de commit con un estilo particular.
+
+## Edita un prompt
+
+1. Abre **Settings → Magic Prompts**.
+2. Elige un prompt de los grupos en la barra lateral: Git, GitHub, Planning y Session.
+3. Edita el texto y guarda.
+
+Algunos prompts tienen una parte visible (el mensaje que verías) y una parte de instrucciones (guía oculta para el agente). Los prompts pueden incluir `{{placeholders}}` que OpenChamber rellena, como el diff o el título de la issue; mantenlos en su sitio.
+
+## Restablecer
+
+¿Cambiaste de opinión? Cada prompt tiene **reset to default**, y hay un **reset all** si quieres empezar de cero en todas partes.
+
+## Relacionado
+
+- [Flujos de trabajo de Git y GitHub](/es/git/) — muchos de estos prompts impulsan los flujos de git

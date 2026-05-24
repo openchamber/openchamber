@@ -1,0 +1,49 @@
+---
+title: Proveedores, modelos y agentes
+description: Conecta proveedores de IA, elige modelos y configura agentes.
+---
+
+# Proveedores, modelos y agentes
+
+Antes de que OpenChamber pueda hacer algo, necesita al menos un proveedor de IA conectado. Esta página cubre cómo conectar un proveedor, elegir un modelo y ajustar los agentes.
+
+## Conecta un proveedor
+
+1. Abre **Settings → Providers**.
+2. Abre el menú **Add provider** y elige un proveedor que aún no esté conectado.
+3. Inicia sesión de una de estas dos formas, según el proveedor:
+   - **Clave de API** — pega tu clave y guarda.
+   - **Inicio de sesión (flujo de dispositivo)** — OpenChamber muestra un enlace y un código corto. Abre el enlace, introduce el código y aprueba. OpenChamber termina de conectarse por su cuenta.
+
+Cuando un proveedor aparece como conectado, sus modelos quedan disponibles en el chat.
+
+Para desconectar, abre el proveedor y elige eliminar su inicio de sesión.
+
+## Elige un modelo
+
+Eliges el modelo en el lugar donde trabajas:
+
+- en el chat, usa el selector de modelo de la barra de mensajes para fijar el proveedor y el modelo de esa sesión
+- por agente, define un modelo predeterminado (más abajo)
+
+## Configura agentes
+
+Un agente es una configuración con nombre: un modelo, una personalidad y lo que se le permite hacer.
+
+1. Abre **Settings → Agents**.
+2. Elige un agente o crea uno nuevo.
+3. Edita cualquiera de estos campos:
+   - **description** — para qué sirve el agente
+   - **model** — su modelo predeterminado
+   - **temperature** — qué tan creativas son sus respuestas
+   - **prompt** — instrucciones permanentes que siempre sigue
+   - **tool rules** — qué herramientas puede usar
+
+## Dónde se guardan tus inicios de sesión
+
+Los inicios de sesión de los proveedores los guarda OpenCode, no OpenChamber, así que se comparten con la CLI de OpenCode. Si configuras el mismo proveedor en más de un lugar, gana el ajuste más específico: un ajuste por proyecto anula el personal.
+
+## Relacionado
+
+- [Servidores MCP](/es/mcp/) — añade herramientas extra para los agentes
+- [Uso y cuotas](/es/usage/) — controla cuánto has consumido

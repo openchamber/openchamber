@@ -20,7 +20,7 @@ and each has its own auto-update channel:
 
 | Shell    | Manifest          | Update format       | Secret used to sign |
 |----------|-------------------|---------------------|---------------------|
-| Tauri    | `latest.json`     | `.tar.gz` + `.sig`  | `TAURI_SIGNING_PRIVATE_KEY` (minisign) |
+| Tauri    | `latest.json`     | `.tar.gz` + `.sig`  | `TAURI_SIGNING_PRIVATE_KEY` (Tauri signer / minisign format) |
 | Electron | `latest-mac.yml`  | `.zip` + `blockmap` | Developer ID codesign (APPLE_* secrets) |
 
 Existing Tauri installs keep their own auto-update path (`latest.json`).
@@ -96,10 +96,11 @@ create-release
 The transition works like this:
 
 1. `build-desktop-electron-macos` builds, signs, and notarizes the Electron app.
-2. It uploads the signed `OpenChamber.app` as a short-lived Actions artifact.
+2. It wraps the signed `OpenChamber.app` in a tarball and uploads that tarball
+   as a short-lived Actions artifact.
 3. `repackage-electron-as-tauri-update` downloads that Electron `.app`.
 4. It packs it into `OpenChamber-<version>-darwin-*.app.tar.gz`.
-5. It signs that tarball with the existing Tauri minisign private key.
+5. It signs that tarball with `tauri signer sign` and the existing Tauri signing key.
 6. It uploads the tarball and `.sig` to the GitHub release.
 7. It generates Tauri-compatible manifests and `combine-manifests` merges them into `latest.json`.
 
@@ -113,6 +114,14 @@ But the payload inside the `.app.tar.gz` is Electron, not Tauri. Tauri's updater
 only verifies the signature and extracts the bundle over the existing
 `/Applications/OpenChamber.app`. After restart, the app is Electron and future
 updates use `latest-mac.yml` through `electron-updater`.
+
+Note: do not upload the `.app` directory directly with `actions/upload-artifact`.
+That action can flatten the app to its inner `Contents/` folder and can also
+normalize file modes. Losing the executable bit on `Contents/MacOS/*` makes the
+updated app fail to launch with a permissions/package error. The workflow wraps
+the `.app` in a tarball before upload so permissions survive the handoff between
+jobs, then verifies the app executable is still executable before creating the
+Tauri updater tarball.
 
 ## Historical release workflow changes
 
@@ -178,13 +187,10 @@ repackage-electron-as-tauri-update:
         name: electron-app-${{ matrix.arch }}
         path: staged
 
-    - name: Install minisign
-      run: brew install minisign
-
     - name: Tar and sign Electron .app as Tauri update payload
       env:
-        TAURI_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-        TAURI_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         VERSION: ${{ needs.create-release.outputs.version }}
       run: |
         set -euo pipefail
@@ -195,16 +201,13 @@ repackage-electron-as-tauri-update:
         TARBALL="OpenChamber.app.tar.gz"
         tar -czf "$TARBALL" OpenChamber.app
 
-        # minisign needs the private key written to a file and a non-interactive
-        # password via -W (or env). The key in the secret is a minisign secret
-        # key block (base64-ish multi-line blob). Write to a file verbatim.
-        echo "$TAURI_KEY" > ../tauri-signing.key
-        echo "$TAURI_KEY_PASSWORD" | minisign -S -s ../tauri-signing.key \
-          -m "$TARBALL" -W
+        # Use Tauri's signer instead of minisign directly. The CI secret is in
+        # the format consumed by TAURI_SIGNING_PRIVATE_KEY.
+        bun run --cwd ../packages/desktop tauri signer sign "$PWD/$TARBALL"
 
         # Rename per platform so the release has distinct names for arm64/x64.
         mv "$TARBALL" "OpenChamber-${VERSION}-${{ matrix.platform }}.app.tar.gz"
-        mv "${TARBALL}.minisig" "OpenChamber-${VERSION}-${{ matrix.platform }}.app.tar.gz.sig"
+        mv "${TARBALL}.sig" "OpenChamber-${VERSION}-${{ matrix.platform }}.app.tar.gz.sig"
 
     - name: Generate Tauri latest-<platform>.json
       env:
@@ -309,6 +312,11 @@ debugging much harder if the migration misbehaves for a user.
 The manual arm64 macOS DMG workflow has already been changed to build Electron
 only, so there should be no GitHub Actions path that accidentally produces a new
 Tauri DMG.
+
+When rerunning the same release version with `workflow_dispatch`, use
+`dry_run=true` if npm and marketplace packages are already published. In that
+mode the workflow still rebuilds release assets, but skips publishing to npm and
+skips re-uploading the npm tarball asset.
 
 ## Validation before tagging the transition release
 

@@ -302,27 +302,60 @@ function SessionItem({
   getSessionTitle,
   onClick,
   onDoubleClick,
-  needsAttention
+  needsAttention,
+  isEditing = false,
+  editingTitle = '',
+  onEditingTitleChange,
+  onEditSave,
+  onEditCancel,
 }: {
   session: SessionWithStatus;
   isCurrent: boolean;
   getSessionAgentName: (s: Session) => string;
   getSessionTitle: (s: Session) => string;
   onClick: () => void;
-  onDoubleClick?: () => void;
+  onDoubleClick?: (sessionId: string, sessionTitle: string) => void;
   needsAttention: (sessionId: string) => boolean;
+  isEditing?: boolean;
+  editingTitle?: string;
+  onEditingTitleChange?: (value: string) => void;
+  onEditSave?: () => void;
+  onEditCancel?: () => void;
 }) {
   const agentName = getSessionAgentName(session);
   const agentColor = getAgentColor(agentName);
   const extraCount = (session._runningChildrenCount || 0) + (session._statusType !== 'idle' ? 1 : 0) - 1 - (session._childIndicators?.length || 0);
+  const sessionTitle = getSessionTitle(session);
+  const editInputRef = React.useRef<HTMLInputElement>(null);
+  const editCancelledRef = React.useRef(false);
+
+  React.useEffect(() => {
+    if (isEditing) {
+      editCancelledRef.current = false;
+      const node = editInputRef.current;
+      if (node) {
+        node.focus();
+        node.select();
+      }
+    }
+  }, [isEditing]);
 
   return (
-    <button
-      type="button"
-      onClick={onClick}
+    <div
+      role={isEditing ? undefined : 'button'}
+      tabIndex={isEditing ? undefined : 0}
+      onClick={isEditing ? undefined : onClick}
       onDoubleClick={(e) => {
+        if (isEditing) return;
         e.stopPropagation();
-        onDoubleClick?.();
+        onDoubleClick?.(session.id, sessionTitle);
+      }}
+      onKeyDown={(e) => {
+        if (isEditing) return;
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onClick();
+        }
       }}
       className={cn(
         "flex items-center gap-0.5 px-1.5 py-px text-left transition-colors",
@@ -342,12 +375,48 @@ function SessionItem({
         style={{ backgroundColor: `var(${agentColor.var})` }}
       />
 
-      <span className={cn(
-        "text-[13px] truncate leading-tight",
-        isCurrent ? "text-[var(--interactive-selection-foreground)] font-medium" : "text-[var(--surface-foreground)]"
-      )}>
-        {getSessionTitle(session)}
-      </span>
+      {isEditing ? (
+        <input
+          ref={editInputRef}
+          type="text"
+          value={editingTitle}
+          onChange={(e) => onEditingTitleChange?.(e.target.value)}
+          onClick={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              e.stopPropagation();
+              onEditSave?.();
+            } else if (e.key === 'Escape') {
+              e.preventDefault();
+              e.stopPropagation();
+              editCancelledRef.current = true;
+              onEditCancel?.();
+            }
+          }}
+          onBlur={() => {
+            if (editCancelledRef.current) {
+              editCancelledRef.current = false;
+              return;
+            }
+            onEditSave?.();
+          }}
+          className={cn(
+            "flex-1 min-w-0 text-[13px] leading-tight px-1 py-px rounded",
+            "bg-background border border-[var(--interactive-border)]",
+            "text-[var(--surface-foreground)] outline-none",
+            "focus:border-[var(--primary-base)]"
+          )}
+        />
+      ) : (
+        <span className={cn(
+          "text-[13px] truncate leading-tight",
+          isCurrent ? "text-[var(--interactive-selection-foreground)] font-medium" : "text-[var(--surface-foreground)]"
+        )}>
+          {sessionTitle}
+        </span>
+      )}
 
       {(session._childIndicators?.length || 0) > 0 && (
         <div className="flex items-center gap-0.5 text-[var(--surface-mutedForeground)]">
@@ -376,7 +445,7 @@ function SessionItem({
           <span className="text-[10px]">]</span>
         </div>
       )}
-    </button>
+    </div>
   );
 }
 
@@ -396,6 +465,7 @@ function TokenUsageIndicator({ contextUsage }: { contextUsage: SessionContextUsa
 }
 
 interface SessionStatusHeaderProps {
+  currentSessionId?: string | null;
   currentSessionTitle: string;
   currentProjectLabel?: string;
   currentProjectIcon?: string | null;
@@ -405,9 +475,16 @@ interface SessionStatusHeaderProps {
   onToggle: () => void;
   isExpanded?: boolean;
   childIndicators?: Array<{ session: Session; isRunning: boolean }>;
+  isEditing?: boolean;
+  editingTitle?: string;
+  onTitleDoubleClick?: (sessionId: string, sessionTitle: string) => void;
+  onEditingTitleChange?: (value: string) => void;
+  onEditSave?: () => void;
+  onEditCancel?: () => void;
 }
 
 function SessionStatusHeader({
+  currentSessionId,
   currentSessionTitle,
   currentProjectLabel,
   currentProjectIcon,
@@ -416,22 +493,49 @@ function SessionStatusHeader({
   currentProjectColor,
   onToggle,
   isExpanded = false,
-  childIndicators = []
+  childIndicators = [],
+  isEditing = false,
+  editingTitle = '',
+  onTitleDoubleClick,
+  onEditingTitleChange,
+  onEditSave,
+  onEditCancel,
 }: SessionStatusHeaderProps) {
   const [imageFailed, setImageFailed] = React.useState(false);
   const projectIconName = currentProjectIcon ? PROJECT_ICON_MAP[currentProjectIcon] : null;
   const imageUrl = !imageFailed ? currentProjectIconImageUrl : null;
   const projectColorVar = currentProjectColor ? (PROJECT_COLOR_MAP[currentProjectColor] ?? null) : null;
   const extraCount = childIndicators.length > 3 ? childIndicators.length - 3 : 0;
+  const editInputRef = React.useRef<HTMLInputElement>(null);
+  const editCancelledRef = React.useRef(false);
 
   React.useEffect(() => {
     setImageFailed(false);
   }, [currentProjectIconImageUrl]);
 
+  React.useEffect(() => {
+    if (isEditing) {
+      editCancelledRef.current = false;
+      const node = editInputRef.current;
+      if (node) {
+        node.focus();
+        node.select();
+      }
+    }
+  }, [isEditing]);
+
   return (
-    <button
-      type="button"
-      onClick={onToggle}
+    <div
+      role={isEditing ? undefined : 'button'}
+      tabIndex={isEditing ? undefined : 0}
+      onClick={isEditing ? undefined : onToggle}
+      onKeyDown={(e) => {
+        if (isEditing) return;
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onToggle();
+        }
+      }}
       className="w-full flex flex-col px-2 py-0.5 text-left transition-colors hover:bg-[var(--interactive-hover)]"
     >
       {!isExpanded && currentProjectLabel && (
@@ -467,9 +571,53 @@ function SessionStatusHeader({
         </div>
       )}
       <div className="flex items-center gap-1.5 min-w-0">
-        <span className="flex-1 min-w-0 text-[13px] text-[var(--surface-foreground)] truncate leading-none">
-          {currentSessionTitle}
-        </span>
+        {isEditing ? (
+          <input
+            ref={editInputRef}
+            type="text"
+            value={editingTitle}
+            onChange={(e) => onEditingTitleChange?.(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                e.stopPropagation();
+                onEditSave?.();
+              } else if (e.key === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation();
+                editCancelledRef.current = true;
+                onEditCancel?.();
+              }
+            }}
+            onBlur={() => {
+              if (editCancelledRef.current) {
+                editCancelledRef.current = false;
+                return;
+              }
+              onEditSave?.();
+            }}
+            className={cn(
+              "flex-1 min-w-0 text-[13px] leading-none px-1 py-0.5 rounded",
+              "bg-background border border-[var(--interactive-border)]",
+              "text-[var(--surface-foreground)] outline-none",
+              "focus:border-[var(--primary-base)]"
+            )}
+          />
+        ) : (
+          <span
+            className="flex-1 min-w-0 text-[13px] text-[var(--surface-foreground)] truncate leading-none"
+            onDoubleClick={(e) => {
+              if (!currentSessionId || !onTitleDoubleClick) return;
+              e.preventDefault();
+              e.stopPropagation();
+              onTitleDoubleClick(currentSessionId, currentSessionTitle);
+            }}
+          >
+            {currentSessionTitle}
+          </span>
+        )}
         {childIndicators.length > 0 && (
           <div className="flex items-center gap-0.5 text-[var(--surface-mutedForeground)]">
             <span className="text-[10px]">[</span>
@@ -499,7 +647,7 @@ function SessionStatusHeader({
           </div>
         )}
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -1142,6 +1290,7 @@ function ProjectBar({
 function CollapsedView({
   runningCount,
   unreadCount,
+  currentSessionId,
   currentSessionTitle,
   currentProjectLabel,
   currentProjectIcon,
@@ -1152,9 +1301,16 @@ function CollapsedView({
   onNewSession,
   contextUsage,
   childIndicators = [],
+  editingSessionId = null,
+  editingTitle = '',
+  onTitleDoubleClick,
+  onEditingTitleChange,
+  onEditSave,
+  onEditCancel,
 }: {
   runningCount: number;
   unreadCount: number;
+  currentSessionId?: string | null;
   currentSessionTitle: string;
   currentProjectLabel?: string;
   currentProjectIcon?: string | null;
@@ -1165,6 +1321,12 @@ function CollapsedView({
   onNewSession: () => void;
   contextUsage: SessionContextUsage | null;
   childIndicators?: Array<{ session: Session; isRunning: boolean }>;
+  editingSessionId?: string | null;
+  editingTitle?: string;
+  onTitleDoubleClick?: (sessionId: string, sessionTitle: string) => void;
+  onEditingTitleChange?: (value: string) => void;
+  onEditSave?: () => void;
+  onEditCancel?: () => void;
 }) {
   const { t } = useI18n();
   const { handleTouchStart, handleTouchMove, handleTouchEnd } = useDrawerSwipe();
@@ -1182,6 +1344,7 @@ function CollapsedView({
     >
       <div className="flex-1 min-w-0 mr-1">
         <SessionStatusHeader
+          currentSessionId={currentSessionId}
           currentSessionTitle={currentSessionTitle}
           currentProjectLabel={currentProjectLabel}
           currentProjectIcon={currentProjectIcon}
@@ -1190,6 +1353,12 @@ function CollapsedView({
           currentProjectColor={currentProjectColor}
           onToggle={onToggle}
           childIndicators={childIndicators}
+          isEditing={Boolean(currentSessionId) && editingSessionId === currentSessionId}
+          editingTitle={editingTitle}
+          onTitleDoubleClick={onTitleDoubleClick}
+          onEditingTitleChange={onEditingTitleChange}
+          onEditSave={onEditSave}
+          onEditCancel={onEditCancel}
         />
       </div>
       <div className="flex items-center gap-2 flex-shrink-0">
@@ -1245,6 +1414,11 @@ function ExpandedView({
   getProjectStatus,
   homeDirectory,
   childIndicators = [],
+  editingSessionId = null,
+  editingTitle = '',
+  onEditingTitleChange,
+  onEditSave,
+  onEditCancel,
 }: {
   sessions: SessionWithStatus[];
   currentSessionId: string;
@@ -1260,7 +1434,7 @@ function ExpandedView({
   onToggleCollapse: () => void;
   onNewSession: () => void;
   onSessionClick: (id: string) => void;
-  onSessionDoubleClick?: () => void;
+  onSessionDoubleClick?: (sessionId: string, sessionTitle: string) => void;
   onProjectSwitch: (projectId: string) => void;
   onAddProject: () => void;
   onRemoveProject?: (projectId: string) => void;
@@ -1273,6 +1447,11 @@ function ExpandedView({
   getProjectStatus: (path: string) => { hasRunning: boolean; hasUnread: boolean };
   homeDirectory: string | null;
   childIndicators?: Array<{ session: Session; isRunning: boolean }>;
+  editingSessionId?: string | null;
+  editingTitle?: string;
+  onEditingTitleChange?: (value: string) => void;
+  onEditSave?: () => void;
+  onEditCancel?: () => void;
 }) {
   const { t } = useI18n();
   const containerRef = React.useRef<HTMLDivElement>(null);
@@ -1334,6 +1513,7 @@ function ExpandedView({
       <div className="flex items-center justify-between px-2 py-1.5 border-b border-[var(--interactive-border)]">
         <div className="flex-1 min-w-0 mr-1">
           <SessionStatusHeader
+            currentSessionId={currentSessionId}
             currentSessionTitle={currentSessionTitle}
             currentProjectLabel={currentProjectLabel}
             currentProjectIcon={currentProjectIcon}
@@ -1343,6 +1523,12 @@ function ExpandedView({
             onToggle={onToggleCollapse}
             isExpanded={true}
             childIndicators={childIndicators}
+            isEditing={editingSessionId === currentSessionId}
+            editingTitle={editingTitle}
+            onTitleDoubleClick={onSessionDoubleClick}
+            onEditingTitleChange={onEditingTitleChange}
+            onEditSave={onEditSave}
+            onEditCancel={onEditCancel}
           />
         </div>
         <div
@@ -1395,18 +1581,30 @@ function ExpandedView({
             <span>{t('chat.mobileStatus.noSessionsInProject')}</span>
           </div>
         ) : (
-          displaySessions.map((session) => (
-            <SessionItem
-              key={session.id}
-              session={session}
-              isCurrent={session.id === currentSessionId}
-              getSessionAgentName={getSessionAgentName}
-              getSessionTitle={getSessionTitle}
-              onClick={() => onSessionClick(session.id)}
-              onDoubleClick={onSessionDoubleClick}
-              needsAttention={needsAttention}
-            />
-          ))
+          displaySessions.map((session) => {
+            // When the current session is being edited, the sticky header
+            // already renders the rename input; suppress the duplicate
+            // input on this row to avoid two simultaneous editors.
+            const isCurrent = session.id === currentSessionId;
+            const isEditingHere = editingSessionId === session.id && !isCurrent;
+            return (
+              <SessionItem
+                key={session.id}
+                session={session}
+                isCurrent={isCurrent}
+                getSessionAgentName={getSessionAgentName}
+                getSessionTitle={getSessionTitle}
+                onClick={() => onSessionClick(session.id)}
+                onDoubleClick={onSessionDoubleClick}
+                needsAttention={needsAttention}
+                isEditing={isEditingHere}
+                editingTitle={editingTitle}
+                onEditingTitleChange={onEditingTitleChange}
+                onEditSave={onEditSave}
+                onEditCancel={onEditCancel}
+              />
+            );
+          })
         )}
       </div>
     </div>
@@ -1424,13 +1622,13 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
   const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
   const getContextUsage = useSessionUIStore((state) => state.getContextUsage);
+  const updateSessionTitle = useSessionUIStore((state) => state.updateSessionTitle);
   const agents = useConfigStore((state) => state.agents);
   const getCurrentModel = useConfigStore((state) => state.getCurrentModel);
   const isMobile = useUIStore((state) => state.isMobile);
   const showMobileSessionStatusBar = useUIStore((state) => state.showMobileSessionStatusBar);
   const isMobileSessionStatusBarCollapsed = useUIStore((state) => state.isMobileSessionStatusBarCollapsed);
   const setIsMobileSessionStatusBarCollapsed = useUIStore((state) => state.setIsMobileSessionStatusBarCollapsed);
-  const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
 
   // Project store
   const projects = useProjectsStore((state) => state.projects);
@@ -1478,20 +1676,44 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
   const contextUsage = getContextUsage(contextLimit, outputLimit);
 
   const [isExpanded, setIsExpanded] = React.useState(false);
+  const [editingSessionId, setEditingSessionId] = React.useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = React.useState('');
 
   if (!isMobile || !showMobileSessionStatusBar || totalCount === 0) {
     return null;
   }
 
   const handleSessionClick = (sessionId: string) => {
+    if (editingSessionId) return;
     setCurrentSession(sessionId);
     onSessionSwitch?.(sessionId);
     setIsExpanded(false);
   };
 
-  const handleSessionDoubleClick = () => {
-    // On double-tap, switch to the Chat tab
-    setActiveMainTab('chat');
+  const handleSessionDoubleClick = (sessionId: string, sessionTitle: string) => {
+    setEditingSessionId(sessionId);
+    setEditingTitle(sessionTitle);
+  };
+
+  const handleEditCancel = () => {
+    setEditingSessionId(null);
+    setEditingTitle('');
+  };
+
+  const handleEditSave = () => {
+    if (!editingSessionId) return;
+    const trimmed = editingTitle.trim();
+    const target = sessions.find((s) => s.id === editingSessionId);
+    const originalTitle = target ? getSessionTitle(target) : '';
+    if (trimmed && trimmed !== originalTitle) {
+      void updateSessionTitle(editingSessionId, trimmed);
+    }
+    setEditingSessionId(null);
+    setEditingTitle('');
+  };
+
+  const handleEditingTitleChange = (value: string) => {
+    setEditingTitle(value);
   };
 
   const handleCreateSession = () => {
@@ -1533,6 +1755,7 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
       <CollapsedView
         runningCount={totalRunning}
         unreadCount={totalUnread}
+        currentSessionId={currentSessionId}
         currentSessionTitle={currentSessionTitle}
         currentProjectLabel={currentProjectLabel}
         currentProjectIcon={currentProjectIcon}
@@ -1543,6 +1766,12 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
         onNewSession={handleCreateSession}
         contextUsage={contextUsage}
         childIndicators={currentSessionChildIndicators}
+        editingSessionId={editingSessionId}
+        editingTitle={editingTitle}
+        onTitleDoubleClick={handleSessionDoubleClick}
+        onEditingTitleChange={handleEditingTitleChange}
+        onEditSave={handleEditSave}
+        onEditCancel={handleEditCancel}
       />
     );
   }
@@ -1579,6 +1808,11 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
       getProjectStatus={getProjectStatus}
       homeDirectory={homeDirectory}
       childIndicators={currentSessionChildIndicators}
+      editingSessionId={editingSessionId}
+      editingTitle={editingTitle}
+      onEditingTitleChange={handleEditingTitleChange}
+      onEditSave={handleEditSave}
+      onEditCancel={handleEditCancel}
     />
   );
 };

@@ -1,0 +1,36 @@
+---
+title: Sesje worktree
+description: Daj sesji jej własną gałąź i folder, aby praca pozostała odizolowana.
+---
+
+# Sesje worktree
+
+Sesja worktree działa we własnej wyewidencjonowanej kopii Twojego repozytorium, na własnej gałęzi (worktree git). Dzięki temu równoległe sesje nie wchodzą sobie w paradę przy plikach — jedna może refaktoryzować, a druga naprawiać błąd, bez przełączania się tam i z powrotem.
+
+## Utwórz sesję
+
+1. Otwórz okno nowego worktree z przycisku u góry paska bocznego sesji.
+2. Wybierz punkt startowy:
+   - **new branch** — nazwij gałąź i wybierz, od której gałęzi zacząć
+   - **existing branch** — wyewidencjonuj gałąź, którą już masz
+3. Potwierdź folder worktree (OpenChamber proponuje jeden na podstawie nazwy gałęzi).
+4. Utwórz go.
+
+OpenChamber tworzy gałąź, konfiguruje folder i uruchamia w nim sesję. Możesz też wystartować jedną prosto z [zadania](/pl/notes-todos-plans/) albo z [issue lub PR na GitHub](/pl/github/).
+
+## Przywróć pracę
+
+Gdy praca jest gotowa, użyj **Integrate** w widoku Git, aby przenieść commity worktree na inną gałąź (jak `main`). Jeśli zmiana powoduje konflikt, możesz przekazać konflikt agentowi do rozwiązania.
+
+## Posprzątaj
+
+Usunięcie lub zarchiwizowanie sesji może usunąć worktree. Sam decydujesz, czy usunąć również gałąź — lokalną, a zdalną, jeśli istnieje. Nic nie jest usuwane bez Twojej zgody.
+
+## Jeśli coś wygląda nie tak
+
+Worktree może wymagać uwagi, jeśli jego folder zniknął, jego gałąź jest w stanie odłączonym (detached) albo scalanie lub rebase jest niedokończone. OpenChamber to oznacza, byś mógł to naprawić — zobacz [Worktree i Git](/pl/troubleshooting/worktrees-git/).
+
+## Powiązane
+
+- [Multi-run](/pl/multi-run/) — uruchom wiele sesji worktree naraz
+- [Przepływy Git i GitHub](/pl/git/) — commituj i integruj z wnętrza OpenChamber

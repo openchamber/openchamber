@@ -1,0 +1,85 @@
+---
+title: Túneles
+description: Expón OpenChamber de forma segura para acceso remoto y móvil.
+---
+
+# Túneles
+
+Un túnel es un enlace público a tu OpenChamber, para que puedas acceder a él desde tu teléfono u otra red. Usa `openchamber tunnel` para crear uno para una instancia en marcha.
+
+## Inicio rápido (modo rápido de Cloudflare)
+
+1. Inicia OpenChamber:
+
+```bash
+openchamber
+```
+
+2. Inicia un túnel:
+
+```bash
+openchamber tunnel start --provider cloudflare --mode quick
+```
+
+3. Comprueba el estado:
+
+```bash
+openchamber tunnel status
+```
+
+Cuando el túnel está activo, `status` muestra una URL pública. Ábrela, o escanea el código QR, para acceder a OpenChamber desde cualquier lugar.
+
+Por defecto, OpenChamber imprime un código QR en sesiones TTY interactivas. Usa `--qr` para forzar la salida del QR, o `--no-qr` para desactivarla.
+
+## Modos gestionados
+
+### Gestionado remoto
+
+Usa un token + nombre de host gestionados por Cloudflare:
+
+```bash
+openchamber tunnel start --provider cloudflare --mode managed-remote --token-file ~/.secrets/cf-token --hostname app.example.com
+```
+
+### Gestionado local
+
+Usa una configuración local de `cloudflared`:
+
+```bash
+openchamber tunnel start --provider cloudflare --mode managed-local --config ~/.cloudflared/config.yml
+```
+
+## Perfiles (managed-remote)
+
+Guarda un perfil reutilizable:
+
+```bash
+openchamber tunnel profile add --provider cloudflare --mode managed-remote --name prod-main --hostname app.example.com --token-file ~/.secrets/cf-token
+```
+
+Inicia usando el perfil guardado:
+
+```bash
+openchamber tunnel start --profile prod-main
+```
+
+## Comandos útiles
+
+```bash
+openchamber tunnel providers
+openchamber tunnel ready --provider cloudflare
+openchamber tunnel doctor --provider cloudflare
+openchamber tunnel stop --port 3000
+```
+
+## Notas de comportamiento
+
+- un único túnel activo por instancia de OpenChamber (puerto)
+- iniciar un nuevo modo/proveedor en la misma instancia reemplaza el túnel anterior
+- generar un nuevo enlace de conexión revoca el anterior sin usar
+
+## Relacionado
+
+- [Seguridad](/es/security/) — protege la interfaz antes de exponerla
+- [PWA y acceso móvil](/es/mobile/) — accede a OpenChamber desde tu teléfono
+- [Resolución de problemas](/es/troubleshooting/) — si el enlace del túnel no funciona

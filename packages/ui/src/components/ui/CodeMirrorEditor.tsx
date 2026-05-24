@@ -5,7 +5,7 @@ import { Compartment, EditorState, RangeSetBuilder, StateField } from '@codemirr
 import { Decoration, type DecorationSet, EditorView, type KeyBinding, ViewPlugin, WidgetType, gutters, keymap, lineNumbers } from '@codemirror/view';
 import { defaultKeymap, indentWithTab, history, historyKeymap } from '@codemirror/commands';
 import { forceParsing, indentUnit } from '@codemirror/language';
-import { search, searchKeymap, openSearchPanel, closeSearchPanel, searchPanelOpen } from '@codemirror/search';
+import { search, searchKeymap, openSearchPanel, closeSearchPanel, searchPanelOpen, getSearchQuery } from '@codemirror/search';
 import { createPortal } from 'react-dom';
 
 import { cn } from '@/lib/utils';
@@ -39,7 +39,87 @@ function patchSearchTooltips(root: HTMLElement) {
   }
 }
 
+type SearchQuery = ReturnType<typeof getSearchQuery>;
+type SearchMatchCountCache = {
+  query: SearchQuery;
+  doc: EditorState['doc'];
+  total: number;
+};
 
+const searchMatchCountCache = new WeakMap<EditorView, SearchMatchCountCache>();
+
+function getSearchMatchTotal(view: EditorView, refresh: boolean): number {
+  const query = getSearchQuery(view.state);
+  if (!query.valid) {
+    searchMatchCountCache.delete(view);
+    return 0;
+  }
+
+  const cached = searchMatchCountCache.get(view);
+  if (!refresh && cached?.doc === view.state.doc && cached.query.eq(query)) {
+    return cached.total;
+  }
+
+  const cursor = query.getCursor(view.state);
+  let total = 0;
+  for (let result = cursor.next(); !result.done; result = cursor.next()) {
+    total += 1;
+  }
+
+  searchMatchCountCache.set(view, { query, doc: view.state.doc, total });
+  return total;
+}
+
+function getSearchMatchCurrent(view: EditorView): number {
+  const query = getSearchQuery(view.state);
+  if (!query.valid) {
+    return 0;
+  }
+
+  const selection = view.state.selection.main;
+  const cursor = query.getCursor(view.state);
+  let index = 0;
+  let firstMatch = 0;
+
+  for (let result = cursor.next(); !result.done; result = cursor.next()) {
+    const match = result.value;
+    index += 1;
+    if (firstMatch === 0) {
+      firstMatch = index;
+    }
+    if (selection.from === match.from && selection.to === match.to) {
+      return index;
+    }
+    if (selection.from < match.to && selection.to > match.from) {
+      return index;
+    }
+    if (match.from >= selection.head) {
+      return index;
+    }
+  }
+
+  return firstMatch;
+}
+
+function syncSearchPanelStatus(root: HTMLElement, view: EditorView, refreshTotal = false) {
+  const panel = root.querySelector('.cm-search');
+  if (!panel) return;
+
+  let status = panel.querySelector<HTMLElement>('.cm-search-message');
+  if (!status) {
+    status = document.createElement('span');
+    status.className = 'cm-search-message';
+    status.setAttribute('aria-live', 'polite');
+
+    const nextButton = panel.querySelector('button[name="next"]');
+    const referenceNode = nextButton?.parentNode === panel ? nextButton : panel.firstChild;
+    panel.insertBefore(status, referenceNode);
+  }
+
+  const total = getSearchMatchTotal(view, refreshTotal);
+  const current = total === 0 ? 0 : getSearchMatchCurrent(view);
+  status.textContent = total === 0 ? '' : `${current}/${total}`;
+}
 
 export type BlockWidgetDef = {
   afterLine: number;
@@ -299,6 +379,10 @@ export function CodeMirrorEditor({
           if (wasOpen !== isOpen) {
             onSearchOpenChangeRef.current?.(isOpen);
           }
+          const queryChanged = !getSearchQuery(update.startState).eq(getSearchQuery(update.state));
+          if (isOpen && (wasOpen !== isOpen || queryChanged || update.docChanged || update.selectionSet)) {
+            syncSearchPanelStatus(update.view.dom, update.view, wasOpen !== isOpen || queryChanged || update.docChanged);
+          }
           if (!update.docChanged) {
             return;
           }
@@ -375,6 +459,7 @@ export function CodeMirrorEditor({
       // Patch tooltips after panel DOM is mounted
       requestAnimationFrame(() => {
         patchSearchTooltips(view.dom);
+        syncSearchPanelStatus(view.dom, view, true);
       });
     } else {
       closeSearchPanelCompat(view);
