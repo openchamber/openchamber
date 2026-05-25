@@ -20,14 +20,19 @@ function getBestPartText(part: Record<string, unknown>): string {
 }
 
 /**
- * Strips fenced code blocks (```...```) and inline code (`...`) from markdown
- * text so the data-layer match count mirrors what the rehype plugin highlights
- * (which skips <code> and <pre> elements).
+ * Strips fenced code blocks (```...```) from markdown text so the data-layer
+ * match count mirrors what the rehype plugin highlights.
+ *
+ * Fenced blocks are rendered by SyntaxHighlighter (inside <pre>) and are NOT
+ * highlighted by the rehype plugin, so we exclude them from the count too.
+ *
+ * Inline code (`...`) IS now highlighted by the rehype plugin (it traverses
+ * <code> elements), so we do NOT strip it here — matches inside inline code
+ * must be counted.
  */
 function stripMarkdownCode(text: string): string {
   return text
-    .replace(/```[\s\S]*?```/gm, ' ')
-    .replace(/`[^`\n]+`/g, ' ');
+    .replace(/```[\s\S]*?```/gm, ' ');
 }
 
 /**

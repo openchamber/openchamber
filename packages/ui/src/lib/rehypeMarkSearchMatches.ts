@@ -86,7 +86,12 @@ function splitHastTextNode(node: HastText, regex: RegExp): HastChild[] {
 
 /**
  * Recursively transforms HAST node children, splitting text nodes at match
- * boundaries and inserting <mark> elements. Skips code/pre subtrees.
+ * boundaries and inserting <mark> elements.
+ *
+ * Only <pre> subtrees (fenced code blocks rendered by SyntaxHighlighter) are
+ * skipped — injecting <mark> nodes into the string that SyntaxHighlighter
+ * receives would corrupt its output.  Inline <code> elements ARE traversed so
+ * that searches like `showPredValues` are highlighted in prose.
  */
 function transformChildren(children: HastChild[], regex: RegExp): HastChild[] {
   return children.flatMap((child) => {
@@ -95,8 +100,8 @@ function transformChildren(children: HastChild[], regex: RegExp): HastChild[] {
     }
     if (child.type === 'element') {
       const el = child as HastElement;
-      if (el.tagName === 'code' || el.tagName === 'pre') {
-        return [el]; // skip code blocks
+      if (el.tagName === 'pre') {
+        return [el]; // skip fenced code blocks — content goes to SyntaxHighlighter
       }
       return [{ ...el, children: transformChildren(el.children, regex) }];
     }

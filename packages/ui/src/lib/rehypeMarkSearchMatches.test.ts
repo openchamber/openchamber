@@ -112,7 +112,9 @@ describe('rehypeMarkSearchMatches plugin', () => {
     expect((p[2] as Text).value).toBe('b');
   });
 
-  test('does not mark text inside <code> elements', () => {
+  test('marks text inside inline <code> elements (inline code is searchable)', () => {
+    // Inline code like `foo` IS highlighted — only <pre> subtrees (fenced
+    // blocks rendered by SyntaxHighlighter) are excluded from highlighting.
     const codeTree: Root = {
       type: 'root',
       children: [
@@ -134,7 +136,8 @@ describe('rehypeMarkSearchMatches plugin', () => {
       ],
     };
     const result = run(codeTree, 'foo');
-    expect(collectMarks(result)).toHaveLength(0);
+    expect(collectMarks(result)).toHaveLength(1);
+    expect((collectMarks(result)[0].children[0] as Text).value).toBe('foo');
   });
 
   test('does not mark text inside <pre> elements', () => {
