@@ -3026,7 +3026,7 @@ export async function getLog(directory, options = {}) {
         '--all',
         '--topo-order',
         '--date=iso',
-        '--pretty=format:%H%x1f%P%x1f%an%x1f%ae%x1f%ad%x1f%s%x1f%D%x1e',
+        '--pretty=format:%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%ad%x1f%s%x1f%D',
         '--shortstat',
       ];
 
@@ -3104,7 +3104,7 @@ export async function getLog(directory, options = {}) {
       'log',
       `--max-count=${maxCount}`,
       '--date=iso',
-      '--pretty=format:%H%x1f%P%x1f%an%x1f%ae%x1f%ad%x1f%s%x1e',
+      '--pretty=format:%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%ad%x1f%s',
       '--shortstat'
     ];
 
