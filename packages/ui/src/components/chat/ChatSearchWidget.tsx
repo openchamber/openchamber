@@ -187,7 +187,7 @@ export const ChatSearchWidget: React.FC<ChatSearchWidgetProps> = ({
 
       {/* Match count */}
       <span
-        className="text-xs tabular-nums min-w-[52px] text-center text-[var(--surface-mutedForeground)] shrink-0"
+        className="text-xs tabular-nums w-[76px] text-center text-[var(--surface-mutedForeground)] shrink-0"
         aria-live="polite"
         aria-atomic="true"
       >
