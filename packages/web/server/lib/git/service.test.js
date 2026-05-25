@@ -4,7 +4,7 @@ import os from 'os';
 import path from 'path';
 import simpleGit from 'simple-git';
 
-import { resolveBaseRefForLog, stageFiles, unstageFiles, checkoutCommit, cherryPick, revertCommit } from './service.js';
+import { resolveBaseRefForLog, stageFiles, unstageFiles, checkoutCommit, cherryPick, revertCommit, resetToCommit } from './service.js';
 
 async function createTempRepo() {
   const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'git-test-'));
@@ -208,6 +208,150 @@ describe('revertCommit', () => {
       expect(result.conflict).toBe(true);
       expect(Array.isArray(result.conflictFiles)).toBe(true);
       expect(result.conflictFiles.length).toBeGreaterThan(0);
+    } finally {
+      await cleanupTempRepo(tmpDir);
+    }
+  });
+});
+
+describe('resetToCommit', () => {
+  it('soft reset moves HEAD without touching the working tree', async () => {
+    const { tmpDir, git } = await createTempRepo();
+    try {
+      const filePath = path.join(tmpDir, 'file.txt');
+      await fs.promises.writeFile(filePath, 'first\n', 'utf8');
+      await git.add('file.txt');
+      const firstCommit = await git.commit('First commit');
+
+      await fs.promises.writeFile(filePath, 'second\n', 'utf8');
+      await git.add('file.txt');
+      await git.commit('Second commit');
+
+      // Soft reset to first commit
+      const result = await resetToCommit(tmpDir, firstCommit.commit, 'soft');
+      expect(result).toEqual({ success: true });
+
+      // HEAD should be at first commit, but working tree should still have 'second'
+      const log = await git.log();
+      expect(log.latest.hash).toBe(firstCommit.commit);
+      const content = await fs.promises.readFile(filePath, 'utf8');
+      expect(content).toBe('second\n');
+
+      // Changes should be staged
+      const status = await git.status();
+      expect(status.staged.length).toBeGreaterThan(0);
+    } finally {
+      await cleanupTempRepo(tmpDir);
+    }
+  });
+
+  it('mixed reset moves HEAD and unstages changes', async () => {
+    const { tmpDir, git } = await createTempRepo();
+    try {
+      const filePath = path.join(tmpDir, 'file.txt');
+      await fs.promises.writeFile(filePath, 'first\n', 'utf8');
+      await git.add('file.txt');
+      const firstCommit = await git.commit('First commit');
+
+      await fs.promises.writeFile(filePath, 'second\n', 'utf8');
+      await git.add('file.txt');
+      await git.commit('Second commit');
+
+      // Mixed reset to first commit
+      const result = await resetToCommit(tmpDir, firstCommit.commit, 'mixed');
+      expect(result).toEqual({ success: true });
+
+      // HEAD should be at first commit, working tree should still have 'second'
+      const log = await git.log();
+      expect(log.latest.hash).toBe(firstCommit.commit);
+      const content = await fs.promises.readFile(filePath, 'utf8');
+      expect(content).toBe('second\n');
+
+      // Changes should NOT be staged
+      const status = await git.status();
+      expect(status.staged.length).toBe(0);
+      expect(status.modified.length).toBeGreaterThan(0);
+    } finally {
+      await cleanupTempRepo(tmpDir);
+    }
+  });
+
+  it('hard reset with clean working tree succeeds', async () => {
+    const { tmpDir, git } = await createTempRepo();
+    try {
+      const filePath = path.join(tmpDir, 'file.txt');
+      await fs.promises.writeFile(filePath, 'first\n', 'utf8');
+      await git.add('file.txt');
+      const firstCommit = await git.commit('First commit');
+
+      await fs.promises.writeFile(filePath, 'second\n', 'utf8');
+      await git.add('file.txt');
+      await git.commit('Second commit');
+
+      // Hard reset to first commit
+      const result = await resetToCommit(tmpDir, firstCommit.commit, 'hard');
+      expect(result).toEqual({ success: true });
+
+      // HEAD should be at first commit, working tree should be 'first'
+      const log = await git.log();
+      expect(log.latest.hash).toBe(firstCommit.commit);
+      const content = await fs.promises.readFile(filePath, 'utf8');
+      expect(content).toBe('first\n');
+
+      // Working tree should be clean
+      const status = await git.status();
+      expect(status.isClean()).toBe(true);
+    } finally {
+      await cleanupTempRepo(tmpDir);
+    }
+  });
+
+  it('hard reset with dirty working tree without force throws', async () => {
+    const { tmpDir, git } = await createTempRepo();
+    try {
+      const filePath = path.join(tmpDir, 'file.txt');
+      await fs.promises.writeFile(filePath, 'first\n', 'utf8');
+      await git.add('file.txt');
+      const firstCommit = await git.commit('First commit');
+
+      await fs.promises.writeFile(filePath, 'second\n', 'utf8');
+      await git.add('file.txt');
+      await git.commit('Second commit');
+
+      // Make working tree dirty (uncommitted change)
+      await fs.promises.writeFile(filePath, 'dirty\n', 'utf8');
+
+      await expect(resetToCommit(tmpDir, firstCommit.commit, 'hard')).rejects.toThrow(
+        'Cannot hard reset: uncommitted changes in working tree'
+      );
+    } finally {
+      await cleanupTempRepo(tmpDir);
+    }
+  });
+
+  it('hard reset with dirty working tree with force succeeds', async () => {
+    const { tmpDir, git } = await createTempRepo();
+    try {
+      const filePath = path.join(tmpDir, 'file.txt');
+      await fs.promises.writeFile(filePath, 'first\n', 'utf8');
+      await git.add('file.txt');
+      const firstCommit = await git.commit('First commit');
+
+      await fs.promises.writeFile(filePath, 'second\n', 'utf8');
+      await git.add('file.txt');
+      await git.commit('Second commit');
+
+      // Make working tree dirty (uncommitted change)
+      await fs.promises.writeFile(filePath, 'dirty\n', 'utf8');
+
+      const result = await resetToCommit(tmpDir, firstCommit.commit, 'hard', true);
+      expect(result).toEqual({ success: true });
+
+      // HEAD should be at first commit, working tree should be 'first'
+      const log = await git.log();
+      expect(log.latest.hash).toBe(firstCommit.commit);
+      const content = await fs.promises.readFile(filePath, 'utf8');
+      expect(content).toBe('first\n');
     } finally {
       await cleanupTempRepo(tmpDir);
     }

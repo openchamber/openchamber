@@ -2592,6 +2592,26 @@ export async function revertCommit(directory, hash) {
   }
 }
 
+export async function resetToCommit(directory, hash, mode, force = false) {
+  const { git } = await createRepositoryGitContext(directory);
+
+  if (mode === 'hard' && !force) {
+    const status = await git.status();
+    const isDirty = !status.isClean();
+    if (isDirty) {
+      throw new Error('Cannot hard reset: uncommitted changes in working tree. Stash or commit first, or use force.');
+    }
+  }
+
+  try {
+    await git.raw(['reset', `--${mode}`, hash]);
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to reset to commit:', error);
+    throw error;
+  }
+}
+
 export async function getWorktrees(directory) {
   const directoryPath = normalizeDirectoryPath(directory);
   if (!directoryPath || !fs.existsSync(directoryPath)) {

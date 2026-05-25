@@ -823,6 +823,28 @@ export function registerGitRoutes(app) {
     }
   });
 
+  app.post('/api/git/reset-to-commit', async (req, res) => {
+    const { resetToCommit } = await getGitLibraries();
+    try {
+      const directory = req.query.directory;
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+      const { hash, mode, force } = req.body;
+      if (!hash) {
+        return res.status(400).json({ error: 'hash is required' });
+      }
+      if (!['soft', 'mixed', 'hard'].includes(mode)) {
+        return res.status(400).json({ error: 'mode must be soft, mixed, or hard' });
+      }
+      const result = await resetToCommit(directory, hash, mode, force === true);
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to reset to commit:', error);
+      res.status(500).json({ error: error.message || 'Failed to reset' });
+    }
+  });
+
   app.get('/api/git/worktrees', async (req, res) => {
     const { getWorktrees } = await getGitLibraries();
     try {
