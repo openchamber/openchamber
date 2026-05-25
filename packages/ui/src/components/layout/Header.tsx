@@ -514,10 +514,9 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
                                               className="h-1.5"
                                               expectedMarkerPercent={expectedMarker}
                                             />
-                                             {paceInfo && showPredValues ? <PaceIndicator paceInfo={paceInfo} compact /> : null}
-                                           </div>
-                                         );
-
+                                            {paceInfo && showPredValues ? <PaceIndicator paceInfo={paceInfo} compact /> : null}
+                                          </div>
+                                        );
                                       })}
                                     </div>
                                   </CollapsibleContent>
@@ -2350,14 +2349,14 @@ export const Header: React.FC<HeaderProps> = ({
                                                       className="h-1.5"
                                                       expectedMarkerPercent={expectedMarker}
                                                     />
-                                                     {paceInfo && showPredValues ? (
-                                                       <PaceIndicator paceInfo={paceInfo} compact />
-                                                     ) : null}
-                                                   </div>
-                                                 );
-                                               })}
-                                             </div>
-                                           </CollapsibleContent>
+                                                    {paceInfo && showPredValues ? (
+                                                      <PaceIndicator paceInfo={paceInfo} compact />
+                                                    ) : null}
+                                                  </div>
+                                                );
+                                              })}
+                                            </div>
+                                          </CollapsibleContent>
                                         </Collapsible>
                                       );
                                     })}
