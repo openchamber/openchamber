@@ -618,6 +618,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     ];
 
     const prevAgentNameRef = React.useRef<string | undefined>(undefined);
+    const explicitAgentSwitchRef = React.useRef<string | null>(null);
     const latestLoadedUserChoiceRestoreRef = React.useRef<string | null>(null);
 
     const currentSessionDirectory = currentSessionId ? getDirectoryForSession(currentSessionId) : undefined;
@@ -1007,6 +1008,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     prevAgentNameRef.current = currentAgentName;
 
                     if (currentAgentName && currentSessionId) {
+                        const shouldPreferAgentModel = explicitAgentSwitchRef.current === currentAgentName;
+                        explicitAgentSwitchRef.current = null;
+
                         await new Promise<void>((resolve) => {
                             const timer = setTimeout(resolve, 50);
                             abortController.signal.addEventListener('abort', () => {
@@ -1019,7 +1023,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                             return;
                         }
 
-                        const selectedAgent = agents.find((agent) => agent.name === currentAgentName);
+                        const selectedAgent = shouldPreferAgentModel
+                            ? agents.find((agent) => agent.name === currentAgentName)
+                            : undefined;
                         if (selectedAgent?.model?.providerID && selectedAgent.model.modelID) {
                             const result = tryApplyModelSelection(
                                 selectedAgent.model.providerID,
@@ -1027,6 +1033,19 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 currentAgentName,
                             );
                             if (result === 'applied' || result === 'provider-missing') {
+                                if (result === 'applied') {
+                                    saveSessionModelSelection(
+                                        currentSessionId,
+                                        selectedAgent.model.providerID,
+                                        selectedAgent.model.modelID,
+                                    );
+                                    saveAgentModelForSession(
+                                        currentSessionId,
+                                        currentAgentName,
+                                        selectedAgent.model.providerID,
+                                        selectedAgent.model.modelID,
+                                    );
+                                }
                                 return;
                             }
                         }
@@ -1055,7 +1074,16 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         return () => {
             abortController.abort();
         };
-    }, [agents, currentAgentName, currentSessionId, getAgentModelForSession, tryApplyModelSelection, contextHydrated]);
+    }, [
+        agents,
+        currentAgentName,
+        currentSessionId,
+        getAgentModelForSession,
+        saveAgentModelForSession,
+        saveSessionModelSelection,
+        tryApplyModelSelection,
+        contextHydrated,
+    ]);
 
     React.useEffect(() => {
         if (!contextHydrated || !currentAgentName) {
@@ -1131,6 +1159,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
     const handleAgentChange = React.useCallback((agentName: string, options?: { closeModelSelector?: boolean }) => {
         try {
+            explicitAgentSwitchRef.current = agentName;
             setAgent(agentName);
             addRecentAgent(agentName);
             if (options?.closeModelSelector ?? true) {
