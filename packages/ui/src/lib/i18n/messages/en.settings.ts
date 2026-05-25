@@ -940,6 +940,7 @@ export const settingsDict = {
   'settings.usage.sidebar.field.displayModePlaceholder': 'Display mode',
   'settings.usage.sidebar.field.displayModeUsage': 'Usage',
   'settings.usage.sidebar.field.displayModeRemaining': 'Quota remaining',
+  'settings.usage.sidebar.field.showPredictions': 'Show predictions',
   'settings.usage.sidebar.status.notSet': 'Not set',
   'settings.usage.page.empty.selectProvider': 'Select a provider to view usage details.',
   'settings.usage.page.header.providerUsage': '{provider} Usage',

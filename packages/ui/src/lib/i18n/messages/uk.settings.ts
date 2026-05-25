@@ -907,6 +907,7 @@ export const settingsDict = {
   "settings.usage.sidebar.field.displayModePlaceholder": "Режим відображення",
   "settings.usage.sidebar.field.displayModeUsage": "Використання",
   "settings.usage.sidebar.field.displayModeRemaining": "Залишок квоти",
+  "settings.usage.sidebar.field.showPredictions": "Показувати прогнози",
   "settings.usage.sidebar.status.notSet": "Не встановлено",
   "settings.usage.page.empty.selectProvider": "Виберіть провайдера, щоб переглянути деталі використання.",
   "settings.usage.page.header.providerUsage": "Використання {provider}",

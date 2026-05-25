@@ -907,6 +907,7 @@ export const settingsDict = {
   "settings.usage.sidebar.field.displayModePlaceholder": "Modo de visualización",
   "settings.usage.sidebar.field.displayModeUsage": "Uso",
   "settings.usage.sidebar.field.displayModeRemaining": "Cuota restante",
+  "settings.usage.sidebar.field.showPredictions": "Mostrar predicciones",
   "settings.usage.sidebar.status.notSet": "No establecido",
   "settings.usage.page.empty.selectProvider": "Selecciona un proveedor para ver detalles de uso.",
   "settings.usage.page.header.providerUsage": "Uso de {provider}",

@@ -1592,6 +1592,7 @@ export const settingsDict = {
   'settings.usage.sidebar.field.display': 'Wyświetlanie',
   'settings.usage.sidebar.field.displayModePlaceholder': 'Tryb wyświetlania',
   'settings.usage.sidebar.field.displayModeRemaining': 'Pozostała kwota',
+  'settings.usage.sidebar.field.showPredictions': 'Pokaż prognozy',
   'settings.usage.sidebar.field.displayModeUsage': 'Użycie',
   'settings.usage.sidebar.field.intervalPlaceholder': 'Interwał',
   'settings.usage.sidebar.status.notSet': 'Nie ustawiono',
