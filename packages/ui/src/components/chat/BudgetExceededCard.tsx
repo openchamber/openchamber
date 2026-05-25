@@ -21,8 +21,7 @@ export function BudgetExceededCard({ sessionId }: { sessionId: string }) {
         <span className="font-medium text-sm">Budget Reached</span>
       </div>
       <p className="text-sm text-muted-foreground mb-3">
-        Session cost (${budget.cumulativeCostUsd.toFixed(2)}) has reached the set budget of
-        {maxBudgetDisplay}. The agent has been paused.
+        Session cost (${budget.cumulativeCostUsd.toFixed(2)}) has reached the set budget of {maxBudgetDisplay}. The agent has been paused.
       </p>
       <div className="flex gap-2 flex-wrap">
         <Button size="sm" onClick={() => increaseBudget(sessionId, 5)}>
