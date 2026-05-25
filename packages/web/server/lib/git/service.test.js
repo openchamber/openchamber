@@ -12,6 +12,8 @@ async function createTempRepo() {
   await git.init();
   await git.addConfig('user.name', 'Test User', false, 'local');
   await git.addConfig('user.email', 'test@example.com', false, 'local');
+  // Force HEAD to refs/heads/main so every test starts on a deterministic branch
+  await git.raw(['symbolic-ref', 'HEAD', 'refs/heads/main']);
   return { tmpDir, git };
 }
 
@@ -154,6 +156,15 @@ describe('cherryPick', () => {
       await cleanupTempRepo(tmpDir);
     }
   });
+
+  it('throws for an invalid/nonexistent hash', async () => {
+    const { tmpDir } = await createTempRepo();
+    try {
+      await expect(cherryPick(tmpDir, 'deadbeef00000000')).rejects.toThrow();
+    } finally {
+      await cleanupTempRepo(tmpDir);
+    }
+  });
 });
 
 describe('revertCommit', () => {
@@ -208,6 +219,15 @@ describe('revertCommit', () => {
       expect(result.conflict).toBe(true);
       expect(Array.isArray(result.conflictFiles)).toBe(true);
       expect(result.conflictFiles.length).toBeGreaterThan(0);
+    } finally {
+      await cleanupTempRepo(tmpDir);
+    }
+  });
+
+  it('throws for an invalid/nonexistent hash', async () => {
+    const { tmpDir } = await createTempRepo();
+    try {
+      await expect(revertCommit(tmpDir, 'deadbeef00000000')).rejects.toThrow();
     } finally {
       await cleanupTempRepo(tmpDir);
     }
