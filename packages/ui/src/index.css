@@ -1511,3 +1511,16 @@ input[aria-label="Terminal input"] {
 [data-settings-view="true"] .overlay-scrollbar {
   display: none;
 }
+
+/* ── Chat search highlight ──────────────────────────────────────────────── */
+mark[data-search-match] {
+  background-color: var(--status-warning-background);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+mark[data-search-match].active {
+  background-color: var(--status-warning);
+  color: var(--status-warning-foreground);
+}

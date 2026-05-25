@@ -2,6 +2,7 @@ import React from 'react';
 import type { Message, Part, Session } from '@opencode-ai/sdk/v2';
 
 import { ChatInput } from './ChatInput';
+import { ChatSearchWidget } from './ChatSearchWidget';
 import { useUIStore } from '@/stores/useUIStore';
 import { Skeleton } from '@/components/ui/skeleton';
 import ChatEmptyState from './ChatEmptyState';
@@ -884,6 +885,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 	return (
 		<div className="relative flex flex-col h-full bg-background">
 			{returnToParentButton}
+			<ChatSearchWidget scrollRef={scrollRef} messageListRef={messageListRef} />
 			<ChatViewport
 				key={currentSessionId}
 				currentSessionId={currentSessionId}

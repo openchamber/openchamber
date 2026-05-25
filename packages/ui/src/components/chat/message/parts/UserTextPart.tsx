@@ -7,6 +7,8 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { Icon } from "@/components/icon/Icon";
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useChatSearchStore, type SearchContext } from '@/stores/useChatSearchStore';
+import { buildSearchRegex, splitByHighlight } from '@/lib/splitByHighlight';
 
 type PartWithText = Part & { text?: string; content?: string; value?: string };
 
@@ -213,6 +215,51 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
         });
     }, [agentMention, openSkill, skillByName, textContent]);
 
+    // Search highlighting — read only isOpen/query/flags (NOT activeIndex/totalMatches)
+    // so navigation never causes this component to re-render.
+    const searchIsOpen = useChatSearchStore((s) => s.isOpen);
+    const searchQuery = useChatSearchStore((s) => s.query);
+    const searchFlags = useChatSearchStore((s) => s.flags);
+
+    const searchContext = React.useMemo<SearchContext | undefined>(
+        () =>
+            searchIsOpen && searchQuery
+                ? {
+                    query: searchQuery,
+                    caseSensitive: searchFlags.caseSensitive,
+                    wholeWord: searchFlags.wholeWord,
+                    isRegex: searchFlags.regex,
+                }
+                : undefined,
+        [searchIsOpen, searchQuery, searchFlags.caseSensitive, searchFlags.wholeWord, searchFlags.regex],
+    );
+
+    // For plain text mode: split string segments in plainTextContent by match spans.
+    // React elements (skill buttons, agent mention links) are passed through unchanged.
+    const highlightNodes = React.useMemo<React.ReactNode[]>(() => {
+        if (!searchContext) return plainTextContent;
+        const regex = buildSearchRegex(searchContext.query, {
+            caseSensitive: searchContext.caseSensitive,
+            wholeWord: searchContext.wholeWord,
+            regex: searchContext.isRegex,
+        });
+        if (!regex) return plainTextContent;
+
+        return plainTextContent.flatMap<React.ReactNode>((node, i) => {
+            if (typeof node !== 'string') return [node];
+            const parts = splitByHighlight(node, regex);
+            return parts.map((part, j) =>
+                part.isMatch ? (
+                    <mark key={`hl-${i}-${j}`} data-search-match>
+                        {part.text}
+                    </mark>
+                ) : (
+                    part.text
+                ),
+            );
+        });
+    }, [plainTextContent, searchContext]);
+
     if (!textContent || textContent.trim().length === 0) {
         return null;
     }
@@ -244,10 +291,11 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
                     <SimpleMarkdownRenderer
                         content={processedMarkdownContent}
                         className="[&_.markdown-content>*:first-child]:mt-0 [&_.markdown-content>*:last-child]:mb-0"
-                        disableLinkSafety 
+                        disableLinkSafety
+                        searchContext={searchContext}
                     />
                 ) : (
-                    plainTextContent
+                    highlightNodes
                 )}
             </div>
         </div>

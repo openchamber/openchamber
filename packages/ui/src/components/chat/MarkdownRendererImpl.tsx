@@ -2,7 +2,9 @@ import React from 'react';
 import 'katex/dist/katex.min.css';
 import { renderMermaidASCII, renderMermaidSVG } from 'beautiful-mermaid';
 import ReactMarkdown from 'react-markdown';
-import type { Components } from 'react-markdown';
+import type { Components, Options as ReactMarkdownOptions } from 'react-markdown';
+import type { SearchContext } from '@/stores/useChatSearchStore';
+import rehypeMarkSearchMatches from '@/lib/rehypeMarkSearchMatches';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
@@ -1017,13 +1019,35 @@ const buildMarkdownComponents = ({
 const MarkdownBlockView: React.FC<{
   block: MarkdownStreamBlock;
   components: Components;
-}> = React.memo(({ block, components }) => {
+  searchContext?: SearchContext;
+}> = React.memo(({ block, components, searchContext }) => {
+  const rehypePlugins: ReactMarkdownOptions['rehypePlugins'] = [
+    [rehypeKatex, { throwOnError: false, errorColor: 'var(--destructive)' }],
+  ];
+  if (searchContext && searchContext.query) {
+    rehypePlugins.push([
+      rehypeMarkSearchMatches,
+      {
+        query: searchContext.query,
+        caseSensitive: searchContext.caseSensitive,
+        wholeWord: searchContext.wholeWord,
+        isRegex: searchContext.isRegex,
+      },
+    ]);
+  }
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[[rehypeKatex, { throwOnError: false, errorColor: 'var(--destructive)' }]]} components={components}>
+    <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={rehypePlugins} components={components}>
       {block.src}
     </ReactMarkdown>
   );
-}, (prev, next) => prev.block === next.block && prev.components === next.components);
+}, (prev, next) =>
+  prev.block === next.block &&
+  prev.components === next.components &&
+  prev.searchContext?.query === next.searchContext?.query &&
+  prev.searchContext?.caseSensitive === next.searchContext?.caseSensitive &&
+  prev.searchContext?.wholeWord === next.searchContext?.wholeWord &&
+  prev.searchContext?.isRegex === next.searchContext?.isRegex,
+);
 
 MarkdownBlockView.displayName = 'MarkdownBlockView';
 
@@ -1039,6 +1063,7 @@ interface MarkdownRendererProps {
   variant?: MarkdownVariant;
   onShowPopup?: (content: ToolPopupContent) => void;
   enableFileReferences?: boolean;
+  searchContext?: SearchContext;
 }
 
 const MERMAID_BLOCK_SELECTOR = '[data-markdown="mermaid-block"]';
@@ -1684,6 +1709,7 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   variant = 'assistant',
   onShowPopup,
   enableFileReferences = true,
+  searchContext,
 }) => {
   const currentTheme = useCurrentMermaidTheme();
   const { editor, runtime } = useRuntimeAPIs();
@@ -1730,7 +1756,7 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
     <div className={cn('break-words w-full min-w-0', className)} ref={containerRef}>
       <div className={markdownClassName}>
         {markdownBlocks.map((block) => (
-          <MarkdownBlockView key={block.key} block={block} components={markdownComponents} />
+          <MarkdownBlockView key={block.key} block={block} components={markdownComponents} searchContext={searchContext} />
         ))}
       </div>
     </div>
@@ -1757,7 +1783,11 @@ export const MarkdownRenderer = React.memo(MarkdownRendererImpl, (prev, next) =>
     && prev.className === next.className
     && prev.messageId === next.messageId
     && prev.onShowPopup === next.onShowPopup
-    && prev.part?.id === next.part?.id;
+    && prev.part?.id === next.part?.id
+    && prev.searchContext?.query === next.searchContext?.query
+    && prev.searchContext?.caseSensitive === next.searchContext?.caseSensitive
+    && prev.searchContext?.wholeWord === next.searchContext?.wholeWord
+    && prev.searchContext?.isRegex === next.searchContext?.isRegex;
 });
 
 const SimpleMarkdownRendererImpl: React.FC<{
@@ -1770,6 +1800,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
   mermaidControls?: MermaidControlOptions;
   allowMermaidWheelZoom?: boolean;
   enableFileReferences?: boolean;
+  searchContext?: SearchContext;
 }> = ({
   content,
   className,
@@ -1779,6 +1810,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
   onShowPopup,
   allowMermaidWheelZoom = false,
   enableFileReferences = true,
+  searchContext,
 }) => {
   const { editor, runtime } = useRuntimeAPIs();
   const renderedContent = React.useMemo(
@@ -1817,7 +1849,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
     <div className={cn('break-words w-full min-w-0', className)} ref={containerRef}>
       <div className={markdownClassName}>
         {markdownBlocks.map((block) => (
-          <MarkdownBlockView key={block.key} block={block} components={markdownComponents} />
+          <MarkdownBlockView key={block.key} block={block} components={markdownComponents} searchContext={searchContext} />
         ))}
       </div>
     </div>
@@ -1831,6 +1863,10 @@ export const SimpleMarkdownRenderer = React.memo(SimpleMarkdownRendererImpl, (pr
     && prev.disableLinkSafety === next.disableLinkSafety
     && prev.stripFrontmatter === next.stripFrontmatter
     && prev.onShowPopup === next.onShowPopup
+    && prev.searchContext?.query === next.searchContext?.query
+    && prev.searchContext?.caseSensitive === next.searchContext?.caseSensitive
+    && prev.searchContext?.wholeWord === next.searchContext?.wholeWord
+    && prev.searchContext?.isRegex === next.searchContext?.isRegex
     && prev.allowMermaidWheelZoom === next.allowMermaidWheelZoom
     && prev.enableFileReferences === next.enableFileReferences;
 });

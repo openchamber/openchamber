@@ -1,4 +1,5 @@
 
+
 import React from 'react';
 import { animate, type AnimationPlaybackControls } from 'motion';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
@@ -6,6 +7,8 @@ import { PatchDiff } from '@pierre/diffs/react';
 import { cn } from '@/lib/utils';
 import { SimpleMarkdownRenderer } from '../../MarkdownRenderer';
 import { getToolMetadata } from '@/lib/toolHelpers';
+import { useChatSearchStore, type SearchContext } from '@/stores/useChatSearchStore';
+import { buildSearchRegex, splitByHighlight } from '@/lib/splitByHighlight';
 import type { ToolPart as ToolPartType, ToolState as ToolStateUnion } from '@opencode-ai/sdk/v2';
 import { toolDisplayStyles } from '@/lib/typography';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -1605,6 +1608,53 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         return buildWritePreviewPatch(filePath, inputTextContent);
     }, [hasInputText, input?.filePath, input?.file_path, input?.path, inputTextContent, isWriteLikeTool]);
 
+    // Search highlighting for scope 'all' — tool input text.
+    const searchIsOpen = useChatSearchStore((s) => s.isOpen);
+    const searchQuery = useChatSearchStore((s) => s.query);
+    const searchFlags = useChatSearchStore((s) => s.flags);
+    const searchScope = useChatSearchStore((s) => s.scope);
+
+    const toolSearchContext: SearchContext | undefined =
+        searchIsOpen && searchQuery && searchScope === 'all'
+            ? {
+                query: searchQuery,
+                caseSensitive: searchFlags.caseSensitive,
+                wholeWord: searchFlags.wholeWord,
+                isRegex: searchFlags.regex,
+            }
+            : undefined;
+
+    const toolSearchRegex = React.useMemo(
+        () =>
+            toolSearchContext
+                ? buildSearchRegex(toolSearchContext.query, {
+                    caseSensitive: toolSearchContext.caseSensitive,
+                    wholeWord: toolSearchContext.wholeWord,
+                    regex: toolSearchContext.isRegex,
+                })
+                : null,
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [toolSearchContext?.query, toolSearchContext?.caseSensitive, toolSearchContext?.wholeWord, toolSearchContext?.isRegex],
+    );
+
+    const highlightedInput = React.useMemo(() => {
+        if (!toolSearchRegex || !inputTextContent) return inputTextContent;
+        const parts = splitByHighlight(inputTextContent, toolSearchRegex);
+        return (
+            <>
+                {parts.map((p, i) =>
+                    p.isMatch ? (
+                        <mark key={i} data-search-match>
+                            {p.text}
+                        </mark>
+                    ) : (
+                        p.text
+                    ),
+                )}
+            </>
+        );
+    }, [inputTextContent, toolSearchRegex]);
+
     React.useEffect(() => {
         setDiffViewMode('unified');
     }, [part.id]);
@@ -1737,7 +1787,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         if (part.tool === 'task' && hasStringOutput) {
             return renderScrollableBlock(
                 <div className="w-full min-w-0">
-                    <SimpleMarkdownRenderer content={outputString} variant="tool" onShowPopup={onShowPopup} />
+                    <SimpleMarkdownRenderer content={outputString} variant="tool" onShowPopup={onShowPopup} searchContext={toolSearchContext} />
                 </div>
             );
         }
@@ -1816,7 +1866,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                             {renderScrollableBlock(
                                 part.tool === 'bash' ? (
                                     <pre className="tool-input-text whitespace-pre-wrap break-words typography-code text-muted-foreground/90 m-0 p-0">
-                                        {inputTextContent}
+                                        {highlightedInput}
                                     </pre>
                                 ) : isWriteLikeTool && writeLikeInputPatch ? (
                                     <DiffPreview
@@ -1827,7 +1877,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                                     />
                                 ) : (
                                     <blockquote className="tool-input-text whitespace-pre-wrap break-words typography-meta italic text-muted-foreground/70">
-                                        {inputTextContent}
+                                        {highlightedInput}
                                     </blockquote>
                                 ),
                                 {

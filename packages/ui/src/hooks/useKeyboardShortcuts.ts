@@ -13,6 +13,7 @@ import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from 
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { getCycledPrimaryAgentName } from '@/components/chat/mobileControlsUtils';
+import { useChatSearchStore } from '@/stores/useChatSearchStore';
 
 export const useKeyboardShortcuts = () => {
   const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
@@ -105,6 +106,14 @@ export const useKeyboardShortcuts = () => {
       const isChatInputTarget = (target: EventTarget | null) => {
         return target instanceof HTMLTextAreaElement && target.getAttribute('data-chat-input') === 'true';
       };
+
+      if (eventMatchesShortcut(e, combo('open_chat_search'))) {
+        if (useUIStore.getState().activeMainTab === 'chat') {
+          e.preventDefault();
+          useChatSearchStore.getState().open();
+          return;
+        }
+      }
 
       if (eventMatchesShortcut(e, combo('open_command_palette'))) {
         e.preventDefault();
