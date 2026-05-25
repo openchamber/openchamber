@@ -3,6 +3,7 @@ import type { Message, Part, Session } from '@opencode-ai/sdk/v2';
 
 import { ChatInput } from './ChatInput';
 import { ChatSearchWidget } from './ChatSearchWidget';
+import { useChatSearchMatcher } from './hooks/useChatSearchMatcher';
 import { useUIStore } from '@/stores/useUIStore';
 import { Skeleton } from '@/components/ui/skeleton';
 import ChatEmptyState from './ChatEmptyState';
@@ -602,6 +603,10 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         showScrollButton,
     });
     const { loadEarlier } = timelineController;
+
+    // Data-driven search matcher: keeps the store's match list up to date
+    // whenever the loaded messages or search parameters change.
+    useChatSearchMatcher(timelineController.renderedMessages);
 
     const resumeToLatestInstant = React.useCallback(() => {
         goToBottom('instant');

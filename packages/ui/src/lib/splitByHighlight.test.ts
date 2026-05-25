@@ -43,6 +43,37 @@ describe('buildSearchRegex', () => {
   test('returns null for invalid regex', () => {
     expect(buildSearchRegex('[unclosed', rx)).toBeNull();
   });
+
+  test('returns null for patterns over the length limit', () => {
+    const longPattern = 'a'.repeat(501);
+    expect(buildSearchRegex(longPattern, rx)).toBeNull();
+  });
+
+  test('returns null for nested-quantifier ReDoS patterns', () => {
+    // (a+)+ is a classic catastrophic backtracking pattern
+    expect(buildSearchRegex('(a+)+', rx)).toBeNull();
+    expect(buildSearchRegex('(.+)*', rx)).toBeNull();
+  });
+
+  test('allows safe regex patterns', () => {
+    expect(buildSearchRegex('[a-z]+', rx)).not.toBeNull();
+    expect(buildSearchRegex('\\d{3}', rx)).not.toBeNull();
+  });
+
+  test('returns null for zero-length-only patterns like ^', () => {
+    // A bare ^ produces a zero-length match at position 0
+    expect(buildSearchRegex('^', rx)).toBeNull();
+  });
+});
+
+describe('splitByHighlight zero-length safety', () => {
+  test('does not create empty isMatch segments for patterns that could produce zero-length matches', () => {
+    // Use a raw RegExp since buildSearchRegex would reject pure zero-length patterns
+    const re = /x*/g;
+    const result = splitByHighlight('abc', re);
+    // Only non-empty segments should appear (the zero-length matches should be skipped)
+    expect(result.every((s) => s.text.length > 0)).toBe(true);
+  });
 });
 
 describe('splitByHighlight', () => {

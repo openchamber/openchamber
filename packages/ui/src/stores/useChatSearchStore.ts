@@ -13,13 +13,25 @@ export interface SearchContext {
   isRegex: boolean;
 }
 
+/**
+ * One entry per match found in the message data layer.
+ * `messageId` is used to scroll the virtualised list to the right message
+ * before the widget activates the corresponding DOM <mark> element.
+ */
+export interface MatchRecord {
+  messageId: string;
+}
+
 interface ChatSearchState {
   isOpen: boolean;
   query: string;
   flags: SearchFlags;
   scope: 'text' | 'all';
-  activeIndex: number;
+  /** Ordered list of all matches from the data layer. Length = totalMatches. */
+  matches: MatchRecord[];
+  /** Derived from matches.length; kept as a field so selectors stay cheap. */
   totalMatches: number;
+  activeIndex: number;
   open: () => void;
   // close preserves query/flags so reopening restores the previous search
   close: () => void;
@@ -29,7 +41,11 @@ interface ChatSearchState {
   // navigate wraps around: 'next' on the last match goes to index 0, 'prev' on index 0 goes to last
   navigate: (dir: 'prev' | 'next') => void;
   setActiveIndex: (n: number) => void;
-  setTotalMatches: (n: number) => void;
+  /**
+   * Called by useChatSearchMatcher with the freshly computed match list.
+   * Also resets activeIndex to 0 so navigation starts from the top.
+   */
+  setMatches: (matches: MatchRecord[]) => void;
 }
 
 export const useChatSearchStore = create<ChatSearchState>((set, get) => ({
@@ -37,8 +53,9 @@ export const useChatSearchStore = create<ChatSearchState>((set, get) => ({
   query: '',
   flags: { caseSensitive: false, wholeWord: false, regex: false },
   scope: 'text',
-  activeIndex: 0,
+  matches: [],
   totalMatches: 0,
+  activeIndex: 0,
 
   open: () => set({ isOpen: true }),
   close: () => set({ isOpen: false }),
@@ -57,5 +74,6 @@ export const useChatSearchStore = create<ChatSearchState>((set, get) => ({
     set({ activeIndex: next });
   },
   setActiveIndex: (n) => set({ activeIndex: n }),
-  setTotalMatches: (n) => set({ totalMatches: n }),
+  setMatches: (newMatches) =>
+    set({ matches: newMatches, totalMatches: newMatches.length, activeIndex: 0 }),
 }));

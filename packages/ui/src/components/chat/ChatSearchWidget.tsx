@@ -17,6 +17,7 @@ export const ChatSearchWidget: React.FC<ChatSearchWidgetProps> = ({
   const flags = useChatSearchStore((s) => s.flags);
   const scope = useChatSearchStore((s) => s.scope);
   const activeIndex = useChatSearchStore((s) => s.activeIndex);
+  const matches = useChatSearchStore((s) => s.matches);
   const totalMatches = useChatSearchStore((s) => s.totalMatches);
 
   const inputRef = React.useRef<HTMLInputElement>(null);
@@ -28,66 +29,67 @@ export const ChatSearchWidget: React.FC<ChatSearchWidgetProps> = ({
     }
   }, [isOpen]);
 
-  // Single helper that clears all .active marks, applies .active to `index`,
-  // and scrolls it into view. Used by both the recount and navigation effects.
-  const applyActiveMark = React.useCallback(
-    (index: number) => {
+  /**
+   * Data-driven navigation (CR-001 fix):
+   *
+   * 1. Look up which message contains the active match from the data layer.
+   * 2. Scroll the virtualised list to bring that message into the viewport.
+   * 3. Retry (up to 8 rAFs) until the <mark> elements for that message are
+   *    painted, then activate marks[activeIndex].
+   *
+   * This works because the data-layer match order is the same as DOM mark
+   * order (both iterate messages/parts in document order), so the Nth data
+   * match corresponds to the Nth <mark data-search-match> in the scroll container.
+   */
+  React.useEffect(() => {
+    if (!isOpen || matches.length === 0) {
+      // Clear any leftover active mark when search closes or produces no results.
       const container = scrollRef.current;
-      if (!container) return;
-      const marks = Array.from(
-        container.querySelectorAll<HTMLElement>('mark[data-search-match]'),
-      );
-      marks.forEach((m) => m.classList.remove('active'));
-      if (marks.length === 0) return;
-      const clamped = Math.max(0, Math.min(index, marks.length - 1));
-      const target = marks[clamped];
-      target.classList.add('active');
-      const messageAncestor = target.closest<HTMLElement>('[data-message-id]');
-      const messageId = messageAncestor?.dataset.messageId;
-      if (messageId && messageListRef.current) {
-        messageListRef.current.scrollToMessageId(messageId, { behavior: 'smooth' });
-        requestAnimationFrame(() => {
-          target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-        });
-      } else {
-        target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      if (container) {
+        container
+          .querySelectorAll<HTMLElement>('mark[data-search-match].active')
+          .forEach((el) => el.classList.remove('active'));
       }
-    },
-    [scrollRef, messageListRef],
-  );
+      return;
+    }
 
-  // Recount marks and activate first match when query/flags/scope change.
-  // Debounced 350ms to let React re-render text components with new marks first.
-  React.useEffect(() => {
-    if (!isOpen) return;
-    const timer = setTimeout(() => {
-      const container = scrollRef.current;
-      if (!container) return;
-      const marks = Array.from(
+    const match = matches[activeIndex];
+    if (!match) return;
+
+    const container = scrollRef.current;
+    if (!container) return;
+
+    // Scroll the virtualised list to ensure the target message is rendered.
+    if (messageListRef.current) {
+      messageListRef.current.scrollToMessageId(match.messageId, { behavior: 'smooth' });
+    }
+
+    // Retry until the mark is painted (virtualised messages need 1-3 frames).
+    const activate = (attempt: number) => {
+      const allMarks = Array.from(
         container.querySelectorAll<HTMLElement>('mark[data-search-match]'),
       );
-      useChatSearchStore.getState().setTotalMatches(marks.length);
-      useChatSearchStore.getState().setActiveIndex(0);
-      // Always apply directly here — setActiveIndex(0) does not fire the
-      // navigation effect below when activeIndex was already 0.
-      applyActiveMark(0);
-    }, 350);
-    return () => clearTimeout(timer);
-  }, [query, flags.caseSensitive, flags.wholeWord, flags.regex, scope, isOpen, scrollRef, applyActiveMark]);
+      // Clear previous active.
+      allMarks.forEach((m) => m.classList.remove('active'));
 
-  // Activate correct mark when user navigates (prev / next).
-  React.useEffect(() => {
-    if (!isOpen) return;
-    applyActiveMark(activeIndex);
-  }, [activeIndex, isOpen, applyActiveMark]);
+      const target = allMarks[activeIndex];
+      if (target) {
+        target.classList.add('active');
+        target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      } else if (attempt < 8) {
+        // Message not yet rendered; wait another frame.
+        requestAnimationFrame(() => activate(attempt + 1));
+      }
+    };
 
-  // Clean up .active marks when widget closes.
+    requestAnimationFrame(() => activate(0));
+  }, [activeIndex, isOpen, matches, scrollRef, messageListRef]);
+
+  // Clean up active marks when the widget closes.
   React.useEffect(() => {
     if (!isOpen) {
-      const container = scrollRef.current;
-      if (!container) return;
-      container
-        .querySelectorAll<HTMLElement>('mark[data-search-match].active')
+      scrollRef.current
+        ?.querySelectorAll<HTMLElement>('mark[data-search-match].active')
         .forEach((el) => el.classList.remove('active'));
     }
   }, [isOpen, scrollRef]);
@@ -95,12 +97,7 @@ export const ChatSearchWidget: React.FC<ChatSearchWidgetProps> = ({
   if (!isOpen) return null;
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      e.stopPropagation(); // prevent global double-ESC abort handler
-      useChatSearchStore.getState().close();
-      return;
-    }
+    // Escape is handled by the widget root div's onKeyDown to cover all focused elements.
     if (e.key === 'Enter') {
       e.preventDefault();
       useChatSearchStore.getState().navigate(e.shiftKey ? 'prev' : 'next');
@@ -126,6 +123,15 @@ export const ChatSearchWidget: React.FC<ChatSearchWidgetProps> = ({
     <div
       className="absolute top-2 right-3 z-50 flex items-center gap-1 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] px-2 py-1.5 shadow-lg"
       style={{ minWidth: 284 }}
+      // Capture Escape from any focused element inside the widget and stop
+      // propagation so the global double-ESC abort handler is never reached.
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          e.stopPropagation();
+          useChatSearchStore.getState().close();
+        }
+      }}
     >
       {/* Search input */}
       <input
@@ -141,13 +147,14 @@ export const ChatSearchWidget: React.FC<ChatSearchWidgetProps> = ({
             ? { color: 'var(--status-error)' }
             : undefined
         }
-        aria-label="Search chat"
+        aria-label="Search chat messages"
       />
 
       {/* Flag toggles */}
       <button
         type="button"
-        title="Case sensitive"
+        title="Match case"
+        aria-label="Match case"
         className={flagButtonClass(flags.caseSensitive)}
         onClick={() => useChatSearchStore.getState().setFlag('caseSensitive', !flags.caseSensitive)}
         aria-pressed={flags.caseSensitive}
@@ -156,7 +163,8 @@ export const ChatSearchWidget: React.FC<ChatSearchWidgetProps> = ({
       </button>
       <button
         type="button"
-        title="Whole word"
+        title="Match whole word"
+        aria-label="Match whole word"
         className={flagButtonClass(flags.wholeWord)}
         onClick={() => useChatSearchStore.getState().setFlag('wholeWord', !flags.wholeWord)}
         aria-pressed={flags.wholeWord}
@@ -167,6 +175,7 @@ export const ChatSearchWidget: React.FC<ChatSearchWidgetProps> = ({
       <button
         type="button"
         title="Use regular expression"
+        aria-label="Use regular expression"
         className={flagButtonClass(flags.regex)}
         onClick={() => useChatSearchStore.getState().setFlag('regex', !flags.regex)}
         aria-pressed={flags.regex}
@@ -174,14 +183,18 @@ export const ChatSearchWidget: React.FC<ChatSearchWidgetProps> = ({
         .*
       </button>
 
-      {/* Scope toggle */}
+      {/* Scope toggle
+          CR-006 / CR-007: tooltip accurately describes what IS searched.
+          Code blocks and most tool outputs (bash, JSON, diffs) are not
+          highlighted due to renderer limitations.  */}
       <button
         type="button"
         title={
           scope === 'text'
-            ? 'Searching user + assistant text. Click to search all content including tool outputs.'
-            : 'Searching all content. Click to search text only.'
+            ? 'Scope: user + assistant text (excludes tool outputs and code blocks). Click to include tool inputs.'
+            : 'Scope: user + assistant text + tool inputs (excludes code blocks and most tool outputs). Click to search text only.'
         }
+        aria-label={scope === 'text' ? 'Search scope: text only' : 'Search scope: all content'}
         className={flagButtonClass(scope === 'all')}
         onClick={() => useChatSearchStore.getState().toggleScope()}
         aria-pressed={scope === 'all'}
@@ -196,6 +209,7 @@ export const ChatSearchWidget: React.FC<ChatSearchWidgetProps> = ({
       <span
         className="text-xs tabular-nums min-w-[52px] text-center text-[var(--surface-mutedForeground)] shrink-0"
         aria-live="polite"
+        aria-atomic="true"
       >
         {countLabel}
       </span>

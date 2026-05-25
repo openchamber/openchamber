@@ -57,6 +57,11 @@ function splitHastTextNode(node: HastText, regex: RegExp): HastChild[] {
 
   let match: RegExpExecArray | null;
   while ((match = re.exec(text)) !== null) {
+    // Skip zero-length matches — they produce invisible marks.
+    if (match[0].length === 0) {
+      re.lastIndex++;
+      continue;
+    }
     if (match.index > lastIndex) {
       parts.push({ type: 'text', value: text.slice(lastIndex, match.index) });
     }
@@ -68,8 +73,6 @@ function splitHastTextNode(node: HastText, regex: RegExp): HastChild[] {
     };
     parts.push(mark);
     lastIndex = match.index + match[0].length;
-    // Guard against infinite loop on zero-length matches.
-    if (match[0].length === 0) re.lastIndex++;
   }
 
   if (parts.length === 0) return [node]; // no matches
