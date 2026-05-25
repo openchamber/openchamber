@@ -214,7 +214,7 @@ export const HistoryCommitRow = React.memo(({
   };
 
   const handleReset = async (mode: 'soft' | 'mixed' | 'hard', force = false) => {
-    if (!directory) return;
+    if (!directory || actionLoading !== null) return;
     if (mode === 'hard' && !force) {
       setPendingHardReset(true);
       return;
@@ -352,9 +352,9 @@ export const HistoryCommitRow = React.memo(({
                     className={cn(
                       'inline-flex items-center px-1.5 py-0 typography-micro rounded font-medium',
                       badge.isHead
-                        ? 'bg-[var(--chart-1)] text-white'
+                        ? 'bg-[var(--chart-1)] text-[var(--primary-foreground)]'
                         : badge.isTag
-                        ? 'bg-[var(--chart-5)] text-white'
+                        ? 'bg-[var(--chart-5)] text-[var(--primary-foreground)]'
                         : 'bg-[var(--interactive-hover)] text-[var(--foreground)]'
                     )}>
                     {badge.label}
@@ -444,7 +444,7 @@ export const HistoryCommitRow = React.memo(({
               {showResetOptions && (
                 <div className="absolute top-full left-0 mt-1 z-50 bg-popover border border-border/60 rounded shadow-md min-w-max">
                   {(['soft', 'mixed', 'hard'] as const).map((mode) => (
-                    <button key={mode} type="button" className="block w-full text-left px-3 py-1.5 typography-micro hover:bg-[var(--interactive-hover)] transition-colors"
+                    <button key={mode} type="button" disabled={actionLoading !== null} className="block w-full text-left px-3 py-1.5 typography-micro hover:bg-[var(--interactive-hover)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       onClick={() => { setShowResetOptions(false); void handleReset(mode); }}>
                       {t(`gitView.history.actions.reset${mode.charAt(0).toUpperCase() + mode.slice(1)}` as never)}
                     </button>
@@ -456,10 +456,10 @@ export const HistoryCommitRow = React.memo(({
             {pendingHardReset && (
               <div className="w-full flex items-center gap-2 mt-1 p-2 bg-[var(--status-error)]/10 rounded text-xs">
                 <span className="flex-1">{t('gitView.history.actions.resetHardConfirm')}</span>
-                <Button variant="destructive" size="xs" className="h-6" onClick={() => void handleReset('hard', true)}>
+                <Button variant="destructive" size="xs" className="h-6" disabled={actionLoading !== null} onClick={() => void handleReset('hard', true)}>
                   {t('gitView.history.actions.resetHardConfirmButton')}
                 </Button>
-                <Button variant="ghost" size="xs" className="h-6" onClick={() => setPendingHardReset(false)}>
+                <Button variant="ghost" size="xs" className="h-6" disabled={actionLoading !== null} onClick={() => setPendingHardReset(false)}>
                   <Icon name="close" className="size-3" />
                 </Button>
               </div>
