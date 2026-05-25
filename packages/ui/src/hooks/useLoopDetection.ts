@@ -33,7 +33,7 @@ export function useLoopDetection(sessionId: string | null | undefined) {
   const detectorRef = useRef<LoopDetector | null>(null)
   const processedPartIdsRef = useRef<Set<string>>(new Set())
   const processedReasoningIdsRef = useRef<Set<string>>(new Set())
-  const lastProcessedUserMessageIdRef = useRef<string | undefined>()
+  const lastProcessedUserMessageIdRef = useRef<string | undefined>(undefined)
   const isAfkRunningRef = useRef(false)
   const sessionIdRef = useRef(sessionId)
   const prevLoopDetectedRef = useRef(false)
@@ -56,6 +56,12 @@ export function useLoopDetection(sessionId: string | null | undefined) {
   )
   const loopRetryCount = useLoopDetectionStore((s) =>
     sessionId ? s.loopRetryCount[sessionId] ?? 0 : 0,
+  )
+  const reactiveLastCleanMessageId = useLoopDetectionStore((s) =>
+    sessionId ? s.lastCleanMessageId[sessionId] : undefined,
+  )
+  const reactiveLoopPattern = useLoopDetectionStore((s) =>
+    sessionId ? (s.loopPattern[sessionId] ?? null) : (null as LoopPattern | null),
   )
 
   const messages: Message[] = useDirectorySync(
@@ -163,9 +169,11 @@ export function useLoopDetection(sessionId: string | null | undefined) {
         detector.reset()
 
         import("@/sync/session-actions").then(({ forceNextStep }) => {
-          forceNextStep(sessionId).finally(() => {
+          return forceNextStep(sessionId).finally(() => {
             isAfkRunningRef.current = false
           })
+        }).catch(() => {
+          isAfkRunningRef.current = false
         })
       }
     }
@@ -188,12 +196,8 @@ export function useLoopDetection(sessionId: string | null | undefined) {
   return {
     loopDetected: loopDetectionEnabled ? loopDetected : false,
     loopRetryCount,
-    lastCleanMessageId: sessionId
-      ? useLoopDetectionStore.getState().lastCleanMessageId[sessionId]
-      : undefined,
-    loopPattern: sessionId
-      ? (useLoopDetectionStore.getState().loopPattern[sessionId] ?? null)
-      : (null as LoopPattern | null),
+    lastCleanMessageId: reactiveLastCleanMessageId,
+    loopPattern: reactiveLoopPattern,
     isAfkActive,
     showIntervention,
   }

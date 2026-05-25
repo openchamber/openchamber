@@ -835,5 +835,6 @@ export async function forceNextStep(sessionId: string): Promise<void> {
     })
   } catch (error) {
     console.error("[session-actions] forceNextStep failed", error)
+    throw error
   }
 }

@@ -4,6 +4,7 @@ import { Icon } from "@/components/icon/Icon"
 import { Button } from "@/components/ui/button"
 import { useSessionUIStore } from "@/sync/session-ui-store"
 import { DEFAULT_LOOP_DETECTION_CONFIG } from "@/lib/loop-detection/config"
+import { toast } from "@/components/ui"
 
 const MAX_AFK_RETRIES = DEFAULT_LOOP_DETECTION_CONFIG.maxAfkRetries
 
@@ -13,24 +14,52 @@ export function LoopInterventionCard({ sessionId }: { sessionId: string }) {
   const loopRetryCount = useLoopDetectionStore((s) => s.loopRetryCount[sessionId] ?? 0)
   const forkFromMessage = useSessionUIStore((s) => s.forkFromMessage)
 
+  const [pendingAction, setPendingAction] = React.useState<string | null>(null)
+
   const handleForceContinue = React.useCallback(async () => {
-    const { forceNextStep } = await import("@/sync/session-actions")
-    await forceNextStep(sessionId)
-    resetLoopState(sessionId)
-  }, [sessionId, resetLoopState])
+    if (pendingAction) return
+    setPendingAction("continue")
+    try {
+      const { forceNextStep } = await import("@/sync/session-actions")
+      await forceNextStep(sessionId)
+      resetLoopState(sessionId)
+    } catch {
+      toast.error("Failed to force continue")
+    } finally {
+      setPendingAction(null)
+    }
+  }, [sessionId, resetLoopState, pendingAction])
 
   const handleFork = React.useCallback(async () => {
+    if (pendingAction) return
     const cleanId = lastCleanMessageId
     if (!cleanId) return
-    await forkFromMessage(sessionId, cleanId)
-    resetLoopState(sessionId)
-  }, [sessionId, lastCleanMessageId, forkFromMessage, resetLoopState])
+    setPendingAction("fork")
+    try {
+      await forkFromMessage(sessionId, cleanId)
+      resetLoopState(sessionId)
+    } catch {
+      toast.error("Failed to fork session")
+    } finally {
+      setPendingAction(null)
+    }
+  }, [sessionId, lastCleanMessageId, forkFromMessage, resetLoopState, pendingAction])
 
   const handleTerminate = React.useCallback(async () => {
-    const { abortCurrentOperation } = await import("@/sync/session-actions")
-    await abortCurrentOperation(sessionId)
-    resetLoopState(sessionId)
-  }, [sessionId, resetLoopState])
+    if (pendingAction) return
+    setPendingAction("terminate")
+    try {
+      const { abortCurrentOperation } = await import("@/sync/session-actions")
+      await abortCurrentOperation(sessionId)
+      resetLoopState(sessionId)
+    } catch {
+      toast.error("Failed to terminate")
+    } finally {
+      setPendingAction(null)
+    }
+  }, [sessionId, resetLoopState, pendingAction])
+
+  const isPending = pendingAction !== null
 
   return (
     <div className="mx-4 my-2 p-3 rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-background)]">
@@ -45,19 +74,31 @@ export function LoopInterventionCard({ sessionId }: { sessionId: string }) {
         )}
       </p>
       <div className="flex gap-2 flex-wrap">
-        <Button size="sm" onClick={handleForceContinue}>
-          Force Continue
+        <Button
+          type="button"
+          size="sm"
+          onClick={handleForceContinue}
+          disabled={isPending}
+        >
+          {pendingAction === "continue" ? "Continuing..." : "Force Continue"}
         </Button>
         <Button
+          type="button"
           size="sm"
           variant="outline"
           onClick={handleFork}
-          disabled={!lastCleanMessageId}
+          disabled={!lastCleanMessageId || isPending}
         >
-          Fork from Last Clean
+          {pendingAction === "fork" ? "Forking..." : "Fork from Last Clean"}
         </Button>
-        <Button size="sm" variant="outline" onClick={handleTerminate}>
-          Terminate
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={handleTerminate}
+          disabled={isPending}
+        >
+          {pendingAction === "terminate" ? "Terminating..." : "Terminate"}
         </Button>
       </div>
     </div>

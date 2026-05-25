@@ -754,9 +754,7 @@ const LoopDetectionToggle = React.memo(function LoopDetectionToggle(props: LoopD
 type AfkAutoResumeToggleProps = {
     footerIconButtonClass: string;
     iconSizeClass: string;
-    loopScopeSessionId: string | null;
     afkAutoResumeEnabled: boolean;
-    loopDetectionEnabled: boolean;
     handleAfkAutoResumeToggle: () => void;
     withTooltip?: boolean;
 };
@@ -765,15 +763,10 @@ const AfkAutoResumeToggle = React.memo(function AfkAutoResumeToggle(props: AfkAu
     const {
         footerIconButtonClass,
         iconSizeClass,
-        loopScopeSessionId,
         afkAutoResumeEnabled,
-        loopDetectionEnabled,
         handleAfkAutoResumeToggle,
         withTooltip = false,
     } = props;
-
-    const visible = loopDetectionEnabled && !!loopScopeSessionId;
-    if (!visible) return null;
 
     const ariaLabel = afkAutoResumeEnabled
         ? 'Disable AFK auto-resume'
@@ -4568,14 +4561,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                             loopDetectionEnabled={loopDetectionEnabled}
                                             handleLoopDetectionToggle={handleLoopDetectionToggle}
                                         />
-                                        <AfkAutoResumeToggle
-                                            footerIconButtonClass={footerIconButtonClass}
-                                            iconSizeClass={iconSizeClass}
-                                            loopScopeSessionId={loopScopeSessionId}
-                                            afkAutoResumeEnabled={afkAutoResumeEnabled}
-                                            loopDetectionEnabled={loopDetectionEnabled}
-                                            handleAfkAutoResumeToggle={handleAfkAutoResumeToggle}
-                                        />
+                                        {loopDetectionEnabled && loopScopeSessionId && (
+                                            <AfkAutoResumeToggle
+                                                footerIconButtonClass={footerIconButtonClass}
+                                                iconSizeClass={iconSizeClass}
+                                                afkAutoResumeEnabled={afkAutoResumeEnabled}
+                                                handleAfkAutoResumeToggle={handleAfkAutoResumeToggle}
+                                            />
+                                        )}
                                     </div>
                                     <div className="flex items-center min-w-0 gap-x-1 justify-end">
                                         <div className="flex items-center gap-x-1 min-w-0 max-w-[60vw] flex-shrink">
@@ -4649,15 +4642,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                         handleLoopDetectionToggle={handleLoopDetectionToggle}
                                         withTooltip
                                     />
-                                    <AfkAutoResumeToggle
-                                        footerIconButtonClass={footerIconButtonClass}
-                                        iconSizeClass={iconSizeClass}
-                                        loopScopeSessionId={loopScopeSessionId}
-                                        afkAutoResumeEnabled={afkAutoResumeEnabled}
-                                        loopDetectionEnabled={loopDetectionEnabled}
-                                        handleAfkAutoResumeToggle={handleAfkAutoResumeToggle}
-                                        withTooltip
-                                    />
+                                    {loopDetectionEnabled && loopScopeSessionId && (
+                                        <AfkAutoResumeToggle
+                                            footerIconButtonClass={footerIconButtonClass}
+                                            iconSizeClass={iconSizeClass}
+                                            afkAutoResumeEnabled={afkAutoResumeEnabled}
+                                            handleAfkAutoResumeToggle={handleAfkAutoResumeToggle}
+                                            withTooltip
+                                        />
+                                    )}
                                 </div>
                                 <div className={cn('flex items-center flex-1 justify-end', footerGapClass, 'md:gap-x-3')}>
                                     <MemoModelControls className={cn('flex-1 min-w-0 justify-end')} />

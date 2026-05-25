@@ -21,6 +21,7 @@ interface LoopDetectionState {
   ) => void
   incrementRetryCount: (sessionId: string) => number
   resetLoopState: (sessionId: string) => void
+  cleanupForDeletedSession: (sessionId: string) => void
   isLoopDetectionEnabled: (sessionId: string) => boolean
   isAfkAutoResumeEnabled: (sessionId: string) => boolean
   isLoopDetected: (sessionId: string) => boolean
@@ -112,6 +113,31 @@ export const useLoopDetectionStore = create<LoopDetectionStore>()(
             const loopPattern = { ...state.loopPattern }
             delete loopPattern[sessionId]
             return {
+              loopDetectedSessions,
+              loopRetryCount,
+              lastCleanMessageId,
+              loopPattern,
+            }
+          })
+        },
+
+        cleanupForDeletedSession: (sessionId) => {
+          set((state) => {
+            const loopDetectionEnabled = { ...state.loopDetectionEnabled }
+            delete loopDetectionEnabled[sessionId]
+            const afkAutoResumeEnabled = { ...state.afkAutoResumeEnabled }
+            delete afkAutoResumeEnabled[sessionId]
+            const loopDetectedSessions = { ...state.loopDetectedSessions }
+            delete loopDetectedSessions[sessionId]
+            const loopRetryCount = { ...state.loopRetryCount }
+            delete loopRetryCount[sessionId]
+            const lastCleanMessageId = { ...state.lastCleanMessageId }
+            delete lastCleanMessageId[sessionId]
+            const loopPattern = { ...state.loopPattern }
+            delete loopPattern[sessionId]
+            return {
+              loopDetectionEnabled,
+              afkAutoResumeEnabled,
               loopDetectedSessions,
               loopRetryCount,
               lastCleanMessageId,
