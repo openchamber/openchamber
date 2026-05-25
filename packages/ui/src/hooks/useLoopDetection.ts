@@ -33,6 +33,7 @@ export function useLoopDetection(sessionId: string | null | undefined) {
   const detectorRef = useRef<LoopDetector | null>(null)
   const processedPartIdsRef = useRef<Set<string>>(new Set())
   const processedReasoningIdsRef = useRef<Set<string>>(new Set())
+  const lastProcessedUserMessageIdRef = useRef<string | undefined>()
   const isAfkRunningRef = useRef(false)
   const sessionIdRef = useRef(sessionId)
   const prevLoopDetectedRef = useRef(false)
@@ -88,6 +89,7 @@ export function useLoopDetection(sessionId: string | null | undefined) {
     detectorRef.current?.fullReset()
     processedPartIdsRef.current = new Set()
     processedReasoningIdsRef.current = new Set()
+    lastProcessedUserMessageIdRef.current = undefined
     isAfkRunningRef.current = false
     prevLoopDetectedRef.current = false
   }, [sessionId])
@@ -97,8 +99,8 @@ export function useLoopDetection(sessionId: string | null | undefined) {
 
     const detector = detectorRef.current
 
-    if (latestUserMessageId && !processedPartIdsRef.current.has(`user:${latestUserMessageId}`)) {
-      processedPartIdsRef.current.add(`user:${latestUserMessageId}`)
+    if (latestUserMessageId && latestUserMessageId !== lastProcessedUserMessageIdRef.current) {
+      lastProcessedUserMessageIdRef.current = latestUserMessageId
       detector.recordUserMessage()
       useLoopDetectionStore.getState().resetLoopState(sessionId)
       processedPartIdsRef.current = new Set()
