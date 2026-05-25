@@ -10,6 +10,10 @@ export function BudgetExceededCard({ sessionId }: { sessionId: string }) {
 
   if (!budget?.hardCapHit) return null
 
+  const maxBudgetDisplay = budget.maxBudgetUsd != null
+    ? `$${budget.maxBudgetUsd.toFixed(2)}`
+    : "N/A"
+
   return (
     <div className="mx-4 my-2 p-3 rounded-lg border border-[var(--status-error-border)] bg-[var(--status-error-background)]">
       <div className="flex items-center gap-2 mb-2">
@@ -18,7 +22,7 @@ export function BudgetExceededCard({ sessionId }: { sessionId: string }) {
       </div>
       <p className="text-sm text-muted-foreground mb-3">
         Session cost (${budget.cumulativeCostUsd.toFixed(2)}) has reached the set budget of
-        ${budget.maxBudgetUsd?.toFixed(2)}. The agent has been paused.
+        {maxBudgetDisplay}. The agent has been paused.
       </p>
       <div className="flex gap-2 flex-wrap">
         <Button size="sm" onClick={() => increaseBudget(sessionId, 5)}>

@@ -41,8 +41,6 @@ import {
 import { createFsSearchRuntime as createFsSearchRuntimeFactory } from './lib/fs/search.js';
 import { createOpenCodeLifecycleRuntime } from './lib/opencode/lifecycle.js';
 import { createOpenCodeEnvRuntime } from './lib/opencode/env-runtime.js';
-import { createCostTracker } from './lib/budget/cost-tracker.js';
-import { registerBudgetRoutes } from './lib/budget/routes.js';
 import { resolveOpenCodeEnvConfig } from './lib/opencode/env-config.js';
 import { createHmrStateRuntime } from './lib/opencode/hmr-state-runtime.js';
 import { createOpenCodeNetworkRuntime } from './lib/opencode/network-runtime.js';
@@ -52,6 +50,8 @@ import { createSettingsNormalizationRuntime } from './lib/opencode/settings-norm
 import { createSettingsHelpers } from './lib/opencode/settings-helpers.js';
 import { createThemeRuntime } from './lib/opencode/theme-runtime.js';
 import { createFeatureRoutesRuntime } from './lib/opencode/feature-routes-runtime.js';
+import { createCostTracker } from './lib/budget/cost-tracker.js';
+import { registerBudgetRoutes } from './lib/budget/routes.js';
 import { parseServeCliOptions } from './lib/opencode/cli-options.js';
 import {
   registerAuthAndAccessRoutes,

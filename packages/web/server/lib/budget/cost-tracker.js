@@ -19,6 +19,25 @@ export const createCostTracker = (deps) => {
     }
   };
 
+  const resumeSessionOnServer = async (sessionId) => {
+    try {
+      const url = buildOpenCodeUrl(`/session/${sessionId}/prompt_async`, '');
+      const headers = getOpenCodeAuthHeaders();
+      await fetchImpl(url, {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          parts: [{
+            type: 'text',
+            text: 'The previous response was interrupted by a budget cap. Continue from where you left off.',
+            synthetic: true,
+          }],
+        }),
+      });
+    } catch {
+    }
+  };
+
   return {
     setBudget: (sessionId, maxBudgetUsd) => {
       if (!sessionId || typeof sessionId !== 'string') return false;
@@ -44,6 +63,10 @@ export const createCostTracker = (deps) => {
       return sessionBudgets.get(sessionId) ?? null;
     },
 
+    isBudgetLocked: (sessionId) => {
+      return budgetLocked.has(sessionId);
+    },
+
     increaseBudget: (sessionId, additionalUsd) => {
       if (!sessionId || typeof additionalUsd !== 'number' || additionalUsd <= 0) return false;
       const budget = sessionBudgets.get(sessionId);
@@ -66,6 +89,10 @@ export const createCostTracker = (deps) => {
       return true;
     },
 
+    resumeSession: (sessionId) => {
+      void resumeSessionOnServer(sessionId);
+    },
+
     processMessageCost: (payload) => {
       if (!payload || payload.type !== 'message.updated') return;
 
@@ -84,10 +111,15 @@ export const createCostTracker = (deps) => {
       if (!budget || budget.maxBudgetUsd == null) return;
       if (budgetLocked.has(sessionId)) return;
 
-      const lastCost = lastSeenCost.get(info.id) ?? 0;
+      let sessionCosts = lastSeenCost.get(sessionId);
+      if (!sessionCosts) {
+        sessionCosts = new Map();
+        lastSeenCost.set(sessionId, sessionCosts);
+      }
+      const lastCost = sessionCosts.get(info.id) ?? 0;
       const delta = cost - lastCost;
       if (delta <= 0) return;
-      lastSeenCost.set(info.id, cost);
+      sessionCosts.set(info.id, cost);
 
       budget.cumulativeCostUsd += delta;
 
@@ -129,6 +161,12 @@ export const createCostTracker = (deps) => {
           });
         }
       }
+    },
+
+    cleanupSession: (sessionId) => {
+      sessionBudgets.delete(sessionId);
+      budgetLocked.delete(sessionId);
+      lastSeenCost.delete(sessionId);
     },
   };
 };

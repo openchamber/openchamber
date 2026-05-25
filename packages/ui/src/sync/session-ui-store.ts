@@ -54,6 +54,7 @@ import { useSelectionStore } from "./selection-store"
 import { useViewportStore } from "./viewport-store"
 import { useSessionWorktreeStore } from "./session-worktree-store"
 import { getAttachedSessionDirectory } from "./session-worktree-contract"
+import { toast } from "@/components/ui"
 
 export type { AttachedFile }
 
@@ -227,13 +228,13 @@ export type SessionUIState = {
   pendingChangesBarDismissed: Map<string, string>
   dismissPendingChangesBar: (sessionId: string, signature: string | null) => void
 
-  // Budget cap tracking - per-session spend + cap
+  // Budget cap tracking — per-session spend + cap
   sessionBudget: Map<string, SessionBudgetState>
   getSessionBudget: (sessionId: string) => SessionBudgetState | undefined
   setSessionBudget: (sessionId: string, maxBudgetUsd: number | null) => void
   incrementSessionCost: (sessionId: string, costUsd: number) => void
   markBudgetSoftCapHit: (sessionId: string, cost: number) => void
-  markBudgetHardCapHit: (sessionId: string, cost: number) => void
+  markBudgetHardCapHit: (sessionId: string, cost: number, maxBudgetUsd?: number | null) => void
   increaseBudget: (sessionId: string, additionalUsd: number) => Promise<void>
   removeBudgetCap: (sessionId: string) => Promise<void>
 
@@ -394,8 +395,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   isLoading: false,
   lastLoadedDirectory: null,
   sessionPlanAvailable: new Map(),
-  pendingChangesBarDismissed: new Map(),
   sessionBudget: new Map(),
+  pendingChangesBarDismissed: new Map(),
 
   // ---------------------------------------------------------------------------
   // setCurrentSession
@@ -1300,10 +1301,13 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     })
   },
 
-  markBudgetHardCapHit: (sessionId, cost) => {
+  markBudgetHardCapHit: (sessionId, cost, maxBudgetUsd) => {
     set((state) => {
       const existing = state.sessionBudget.get(sessionId) ?? {
-        maxBudgetUsd: null, cumulativeCostUsd: 0, softCapHit: false, hardCapHit: false,
+        maxBudgetUsd: maxBudgetUsd ?? null,
+        cumulativeCostUsd: 0,
+        softCapHit: false,
+        hardCapHit: false,
       }
       const next = new Map(state.sessionBudget)
       next.set(sessionId, { ...existing, hardCapHit: true, cumulativeCostUsd: cost })
@@ -1319,7 +1323,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         body: JSON.stringify({ additionalUsd }),
       })
       if (!res.ok) {
-        const { toast } = await import("sonner")
         toast.error("Failed to increase budget. Please try again.")
         return
       }
@@ -1338,7 +1341,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         })
       }
     } catch {
-      const { toast } = await import("sonner")
       toast.error("Failed to increase budget. Please try again.")
     }
   },
@@ -1347,12 +1349,10 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     try {
       const res = await fetch(`/api/sessions/${sessionId}/budget/remove-cap`, { method: 'POST' })
       if (!res.ok) {
-        const { toast } = await import("sonner")
         toast.error("Failed to remove budget cap. Please try again.")
         return
       }
     } catch {
-      const { toast } = await import("sonner")
       toast.error("Failed to remove budget cap. Please try again.")
       return
     }

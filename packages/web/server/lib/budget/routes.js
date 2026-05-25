@@ -43,10 +43,15 @@ export const registerBudgetRoutes = (app, deps) => {
       return;
     }
 
+    const wasLocked = costTracker.isBudgetLocked(sessionId);
     const ok = costTracker.increaseBudget(sessionId, additionalUsd);
     if (!ok) {
       res.status(404).json({ error: 'No budget configured for this session' });
       return;
+    }
+
+    if (wasLocked) {
+      costTracker.resumeSession(sessionId);
     }
 
     res.json({ ok: true, budget: costTracker.getBudget(sessionId) });
@@ -54,11 +59,18 @@ export const registerBudgetRoutes = (app, deps) => {
 
   app.post('/api/sessions/:sessionId/budget/remove-cap', requireAuth, (req, res) => {
     const { sessionId } = req.params;
+
+    const wasLocked = costTracker.isBudgetLocked(sessionId);
     const ok = costTracker.removeCap(sessionId);
     if (!ok) {
       res.status(404).json({ error: 'No budget configured for this session' });
       return;
     }
+
+    if (wasLocked) {
+      costTracker.resumeSession(sessionId);
+    }
+
     res.json({ ok: true });
   });
 };

@@ -272,7 +272,7 @@ function pruneExternallyViewedSessions(now = Date.now()) {
 }
 const pendingQuestionToastIds = new Set<string>()
 const pendingPermissionToastIds = new Set<string>()
-const lastSeenCostPerMessage = new Map<string, number>()
+const lastSeenCostPerMessage = new Map<string, Map<string, number>>()
 
 const getQuestionToastKey = (sessionID?: string, requestID?: string) => {
   if (!sessionID || !requestID) return null
@@ -1240,7 +1240,7 @@ function handleEvent(
   }
 
   // Budget warning — non-blocking toast, update budget store
-  // We rely on sonner's built-in id-based dedup to avoid duplicate toasts.
+  // sonner's built-in id-based dedup prevents duplicate toasts.
   const payloadType = (payload as Record<string, unknown>).type
   if (payloadType === "openchamber:budget-warning") {
     const rawProps = ((payload as Record<string, unknown>).properties ?? {}) as Record<string, unknown>
@@ -1264,13 +1264,16 @@ function handleEvent(
   }
 
   // Budget exceeded — update store to show intervention card. No toast needed
-  // since the UI card is more prominent.
+  // since the UI card is more prominent. Prune cost history since the session
+  // is aborted and further cost accumulation is blocked server-side.
   if (payloadType === "openchamber:budget-exceeded") {
     const rawProps = ((payload as Record<string, unknown>).properties ?? {}) as Record<string, unknown>
     const sessionID = typeof rawProps.sessionID === "string" ? rawProps.sessionID : ""
     const cumulativeCost = typeof rawProps.cumulativeCost === "number" ? rawProps.cumulativeCost : 0
+    const maxBudget = typeof rawProps.maxBudget === "number" ? rawProps.maxBudget : null
     if (!sessionID) return
-    useSessionUIStore.getState().markBudgetHardCapHit(sessionID, cumulativeCost)
+    lastSeenCostPerMessage.delete(sessionID)
+    useSessionUIStore.getState().markBudgetHardCapHit(sessionID, cumulativeCost, maxBudget)
     return
   }
 
@@ -1396,16 +1399,18 @@ function handleEvent(
       }
 
       // Accumulate cost from assistant messages on the client as a fallback.
-      // The server-side cost tracker also does this and enforces hard cap,
+      // Server-side cost tracker also does this and enforces hard cap,
       // but the client needs cumulative cost for immediate UI feedback.
       // Use delta from last-seen cost per message to avoid double-counting
       // on repeated message.updated events during streaming.
       if (info.role === "assistant" && typeof (info as { cost?: unknown }).cost === "number") {
         const cost = (info as { cost: number }).cost
-        const lastCost = lastSeenCostPerMessage.get(messageID) ?? 0
+        const sessionCosts = lastSeenCostPerMessage.get(sessionID) ?? new Map()
+        lastSeenCostPerMessage.set(sessionID, sessionCosts)
+        const lastCost = sessionCosts.get(messageID) ?? 0
         const delta = cost - lastCost
         if (delta > 0) {
-          lastSeenCostPerMessage.set(messageID, cost)
+          sessionCosts.set(messageID, cost)
           useSessionUIStore.getState().incrementSessionCost(sessionID, delta)
         }
       }

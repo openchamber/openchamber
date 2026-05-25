@@ -10,6 +10,7 @@ import { PermissionCard } from './PermissionCard';
 import { QuestionCard } from './QuestionCard';
 import { StatusRowContainer } from './StatusRowContainer';
 import ScrollToBottomButton from './components/ScrollToBottomButton';
+import { LoopInterventionCard } from './LoopInterventionCard';
 import { ChatCostTracker } from './ChatCostTracker';
 import { BudgetExceededCard } from './BudgetExceededCard';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
@@ -44,6 +45,7 @@ import { useSync } from '@/sync/use-sync';
 import { getSessionPrefetch, subscribeSessionPrefetch } from '@/sync/session-prefetch-cache';
 import { getSessionMaterializationStatus } from '@/sync/materialization';
 import { usePlanDetection } from '@/hooks/usePlanDetection';
+import { useLoopDetection } from '@/hooks/useLoopDetection';
 import { getAllSyncSessions } from '@/sync/sync-refs';
 import { useI18n } from '@/lib/i18n';
 
@@ -408,6 +410,11 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 
     // Plan detection - watches messages for plan creation and signals store
     usePlanDetection(currentSessionId ?? '', sessionMessages);
+
+    // Loop detection - watches for repetitive tool calls or reasoning
+    const {
+        showIntervention: showLoopIntervention,
+    } = useLoopDetection(currentSessionId);
 
     // Session status from sync system
     const sessionStatusForCurrent = useSessionStatus(currentSessionId ?? '') ?? IDLE_SESSION_STATUS;
@@ -911,6 +918,10 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 sessionPermissions={sessionPermissions}
                 isProgrammaticFollowActive={isFollowingProgrammatically}
             />
+
+            {showLoopIntervention && currentSessionId && (
+                <LoopInterventionCard sessionId={currentSessionId} />
+            )}
 
             {currentSessionId && (
                 <ChatCostTracker sessionId={currentSessionId} />
