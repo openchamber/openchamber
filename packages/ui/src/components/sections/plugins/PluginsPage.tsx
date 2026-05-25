@@ -104,6 +104,7 @@ export const PluginsPage: React.FC = () => {
 
   const [isSaving, setIsSaving] = React.useState(false);
   const [isLoadingFile, setIsLoadingFile] = React.useState(false);
+  const originalFileContentById = React.useRef(new Map<string, string>());
 
   React.useEffect(() => {
     let cancelled = false;
@@ -121,11 +122,9 @@ export const PluginsPage: React.FC = () => {
         const result = await readFile(selectedFile.id);
         if (cancelled) return;
         setIsLoadingFile(false);
-        if (result) {
-          setDraft(buildFileDraft(selectedFile, result.content));
-        } else {
-          setDraft(buildFileDraft(selectedFile, ''));
-        }
+        const content = result?.content ?? '';
+        originalFileContentById.current.set(selectedFile.id, content);
+        setDraft(buildFileDraft(selectedFile, content));
       })();
       return () => {
         cancelled = true;
@@ -240,7 +239,7 @@ export const PluginsPage: React.FC = () => {
             }
             rows={10}
             className={cn(
-              'font-mono typography-meta resize-y min-h-[200px]',
+              'font-mono typography-meta min-h-[200px]',
               !optionsValid && 'border-[var(--status-error-border)]',
             )}
             spellCheck={false}
@@ -276,14 +275,17 @@ export const PluginsPage: React.FC = () => {
   }
 
   if (selectedFile && draft && draft.mode === 'file') {
-    const isDirty = draft.content !== (readFileCache.current?.get(selectedFile.id) ?? '') || draft.fileName !== selectedFile.fileName;
+    const originalContent = originalFileContentById.current.get(selectedFile.id) ?? '';
+    const isDirty = draft.content !== originalContent || draft.fileName !== selectedFile.fileName;
 
     const handleFileDiscard = () => {
       void (async () => {
         setIsLoadingFile(true);
         const result = await readFile(selectedFile.id);
+        const content = result?.content ?? '';
         setIsLoadingFile(false);
-        setDraft(buildFileDraft(selectedFile, result?.content ?? ''));
+        originalFileContentById.current.set(selectedFile.id, content);
+        setDraft(buildFileDraft(selectedFile, content));
       })();
     };
 
@@ -292,6 +294,7 @@ export const PluginsPage: React.FC = () => {
       try {
         const result = await updateFile(selectedFile.id, { content: draft.content });
         if (result.ok) {
+          originalFileContentById.current.set(selectedFile.id, draft.content);
           if (result.reloadFailed) {
             toast.warning(
               result.message || t('settings.plugins.toast.reloadFailed'),
@@ -345,7 +348,7 @@ export const PluginsPage: React.FC = () => {
               setDraft({ ...draft, content: e.target.value })
             }
             rows={16}
-            className="font-mono typography-meta resize-y min-h-[320px]"
+            className="font-mono typography-meta min-h-[320px]"
             spellCheck={false}
             disabled={isLoadingFile}
           />

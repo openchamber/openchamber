@@ -177,6 +177,19 @@ describe('opencode plugin routes', () => {
     expect(response.body.results[0]).toEqual({ kind: 'path-missing', spec: '/nonexistent/__path/xyz.js', absolutePath: '/nonexistent/__path/xyz.js' });
   });
 
+  test('GET /registry treats Windows absolute paths as local paths', async () => {
+    const getNpmInfo = mock(async () => ({ ok: true, latest: '1.0.0', versions: ['1.0.0'], distTags: { latest: '1.0.0' } }));
+    createRegistryApp(getNpmInfo);
+
+    const windowsPath = 'C:\\Users\\me\\plugin.js';
+    const response = await request(app)
+      .get(`/api/config/plugins/registry?specs=${encodeURIComponent(windowsPath)}`)
+      .expect(200);
+
+    expect(response.body.results[0]).toEqual({ kind: 'path-missing', spec: windowsPath, absolutePath: windowsPath });
+    expect(getNpmInfo).not.toHaveBeenCalled();
+  });
+
   testUnlessRoot('GET /registry reports unreadable path plugin', async () => {
     createRegistryApp(mock(async () => ({ ok: true, latest: '1.0.0', versions: ['1.0.0'], distTags: { latest: '1.0.0' } })));
     const tmpFile = path.join(fs.mkdtempSync(path.join(rootDir, 'plugin-unreadable-')), 'plugin.js');

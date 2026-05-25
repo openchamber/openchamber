@@ -6,6 +6,7 @@ import {
   readConfigFile,
   writeConfig,
 } from './shared.js';
+import { isPathSpec } from './plugin-spec.js';
 
 const PLUGIN_FILE_NAME_PATTERN = /^[a-z0-9][a-z0-9-_.]*\.(js|ts|mjs|cjs)$/;
 
@@ -59,11 +60,9 @@ function hasOptions(options) {
 }
 
 function parsedKindForSpec(spec) {
-  // Path indicators: leading '/', './', '../', '~'.
+  // Path indicators must include Windows paths; scoped npm packages also contain '/'.
   // Do NOT use `includes(path.sep)` — scoped npm packages legitimately contain '/' (e.g. `@gitlab/opencode-gitlab-auth`).
-  return spec.startsWith('/') || spec.startsWith('./') || spec.startsWith('../') || spec.startsWith('~')
-    ? 'path'
-    : 'npm';
+  return isPathSpec(spec) ? 'path' : 'npm';
 }
 
 function getActiveOpencodeConfigDir() {

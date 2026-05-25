@@ -67,6 +67,21 @@ export function isExactSemver(version) {
 }
 
 /**
+ * Check whether a plugin spec is path-like instead of an npm package spec.
+ * Includes Windows absolute paths so local paths are never queried against npm.
+ *
+ * @param {string} spec
+ * @returns {boolean}
+ */
+export function isPathSpec(spec) {
+  return spec.startsWith('/')
+    || spec.startsWith('./')
+    || spec.startsWith('../')
+    || spec.startsWith('~')
+    || path.win32.isAbsolute(spec);
+}
+
+/**
  * Resolve a path-style plugin spec to an absolute path.
  * Supports `~` (home), `./`, `../` (relative to cwd), and absolute paths.
  * Pure — no filesystem access; uses only `path.resolve`.
@@ -84,6 +99,9 @@ export function parsePathSpec(spec, { homedir, cwd }) {
   }
   if (spec.startsWith('./') || spec.startsWith('../')) {
     return { absolutePath: path.resolve(cwd, spec) };
+  }
+  if (path.win32.isAbsolute(spec)) {
+    return { absolutePath: spec };
   }
   return { absolutePath: path.resolve(spec) };
 }

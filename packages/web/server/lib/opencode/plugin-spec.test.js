@@ -110,6 +110,12 @@ describe('isExactSemver', () => {
 });
 
 describe('parsePathSpec', () => {
+  test('identifies Windows absolute paths as path specs', () => {
+    expect(spec.isPathSpec('C:\\Users\\me\\plugin.js')).toBe(true);
+    expect(spec.isPathSpec('\\\\server\\share\\plugin.js')).toBe(true);
+    expect(spec.isPathSpec('@scope/plugin')).toBe(false);
+  });
+
   test('tilde home shorthand with subpath', () => {
     expect(spec.parsePathSpec('~/x.js', { homedir: '/home/u', cwd: '/p' })).toEqual({
       absolutePath: '/home/u/x.js',
@@ -137,6 +143,12 @@ describe('parsePathSpec', () => {
   test('absolute path passthrough', () => {
     expect(spec.parsePathSpec('/abs/x.js', { homedir: '/home/u', cwd: '/p' })).toEqual({
       absolutePath: '/abs/x.js',
+    });
+  });
+
+  test('Windows absolute path passthrough', () => {
+    expect(spec.parsePathSpec('C:\\Users\\me\\plugin.js', { homedir: '/home/u', cwd: '/p' })).toEqual({
+      absolutePath: 'C:\\Users\\me\\plugin.js',
     });
   });
 });

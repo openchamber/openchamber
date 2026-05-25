@@ -13,8 +13,9 @@ import { Textarea } from '@/components/ui/textarea';
 import { Radio } from '@/components/ui/radio';
 import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
+import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
 import { cn } from '@/lib/utils';
-import { useI18n, type I18nKey } from '@/lib/i18n';
+import { useI18n } from '@/lib/i18n';
 import { usePluginsStore, type PluginScope } from '@/stores/usePluginsStore';
 
 type TabKey = 'npm' | 'path' | 'file';
@@ -121,11 +122,11 @@ export const AddPluginDialog: React.FC<AddPluginDialogProps> = ({
     }
   };
 
-  const tabs: { key: TabKey; labelKey: I18nKey }[] = [
-    { key: 'npm', labelKey: 'settings.plugins.dialog.add.tab.npm' },
-    { key: 'path', labelKey: 'settings.plugins.dialog.add.tab.path' },
-    { key: 'file', labelKey: 'settings.plugins.dialog.add.tab.file' },
-  ];
+  const tabs = React.useMemo<SortableTabsStripItem[]>(() => [
+    { id: 'npm', label: t('settings.plugins.dialog.add.tab.npm') },
+    { id: 'path', label: t('settings.plugins.dialog.add.tab.path') },
+    { id: 'file', label: t('settings.plugins.dialog.add.tab.file') },
+  ], [t]);
 
   return (
     <Dialog
@@ -143,33 +144,15 @@ export const AddPluginDialog: React.FC<AddPluginDialogProps> = ({
           </DialogDescription>
         </DialogHeader>
 
-        <div
-          role="tablist"
-          aria-label={t('settings.plugins.dialog.add.title')}
-          className="flex items-center gap-1 border-b border-[var(--interactive-border)]"
-        >
-          {tabs.map((entry) => {
-            const active = entry.key === tab;
-            return (
-              <button
-                key={entry.key}
-                type="button"
-                role="tab"
-                aria-selected={active}
-                onClick={() => handleTabChange(entry.key)}
-                className={cn(
-                  'relative -mb-px px-3 py-2 typography-ui-label font-medium outline-none transition-colors',
-                  'focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)] rounded-sm',
-                  active
-                    ? 'text-foreground border-b-2 border-[var(--primary-base)]'
-                    : 'text-muted-foreground hover:text-foreground',
-                )}
-              >
-                {t(entry.labelKey)}
-              </button>
-            );
-          })}
-        </div>
+        <SortableTabsStrip
+          items={tabs}
+          activeId={tab}
+          onSelect={(id) => handleTabChange(id as TabKey)}
+          layoutMode="fit"
+          variant="active-pill"
+          activePillLowercase={false}
+          className="h-10"
+        />
 
         <div className="flex flex-col gap-4">
           {(tab === 'npm' || tab === 'path') && (
@@ -261,8 +244,8 @@ export const AddPluginDialog: React.FC<AddPluginDialogProps> = ({
                 const selected = scope === value;
                 const label =
                   value === 'user'
-                    ? t('settings.plugins.sidebar.group.userFiles').split(' · ')[0]
-                    : t('settings.plugins.sidebar.group.projectFiles').split(' · ')[0];
+                    ? t('settings.plugins.scope.user')
+                    : t('settings.plugins.scope.project');
                 return (
                   <button
                     key={value}

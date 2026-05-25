@@ -2,18 +2,12 @@ import fs from 'fs';
 import os from 'os';
 
 import { getNpmInfo as defaultGetNpmInfo } from './npm-registry.js';
-import { isExactSemver as defaultIsExactSemver, parseNpmSpec as defaultParseNpmSpec, parsePathSpec as defaultParsePathSpec } from './plugin-spec.js';
+import { isExactSemver as defaultIsExactSemver, isPathSpec as defaultIsPathSpec, parseNpmSpec as defaultParseNpmSpec, parsePathSpec as defaultParsePathSpec } from './plugin-spec.js';
 
 const ENTRY_EXISTS_CODES = new Set(['ENTRY_EXISTS', 'EEXIST']);
 const FILE_EXISTS_CODES = new Set(['FILE_EXISTS', 'EEXIST']);
 const NOT_FOUND_CODES = new Set(['NOT_FOUND', 'ENOENT']);
 const BAD_REQUEST_CODES = new Set(['INVALID_FILENAME', 'INVALID_SCOPE', 'INVALID_SPEC', 'EINVAL']);
-
-const parsedKindForSpec = (spec) => (
-  spec.startsWith('/') || spec.startsWith('./') || spec.startsWith('../') || spec.startsWith('~')
-    ? 'path'
-    : 'npm'
-);
 
 export const registerPluginRoutes = (app, dependencies) => {
   const {
@@ -35,7 +29,10 @@ export const registerPluginRoutes = (app, dependencies) => {
     parseNpmSpec = defaultParseNpmSpec,
     parsePathSpec = defaultParsePathSpec,
     isExactSemver = defaultIsExactSemver,
+    isPathSpec = defaultIsPathSpec,
   } = dependencies;
+
+  const parsedKindForSpec = (spec) => (isPathSpec(spec) ? 'path' : 'npm');
 
   const resolveDirectory = async (req, res) => {
     const { directory, error } = await resolveOptionalProjectDirectory(req);
