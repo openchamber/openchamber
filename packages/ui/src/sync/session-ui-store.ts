@@ -1318,7 +1318,11 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ additionalUsd }),
       })
-      if (!res.ok) return
+      if (!res.ok) {
+        const { toast } = await import("sonner")
+        toast.error("Failed to increase budget. Please try again.")
+        return
+      }
       const data = await res.json()
       const b = data.budget
       if (b) {
@@ -1333,13 +1337,25 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           return { sessionBudget: next }
         })
       }
-    } catch { /* ignore fetch error */ }
+    } catch {
+      const { toast } = await import("sonner")
+      toast.error("Failed to increase budget. Please try again.")
+    }
   },
 
   removeBudgetCap: async (sessionId) => {
     try {
-      await fetch(`/api/sessions/${sessionId}/budget/remove-cap`, { method: 'POST' })
-    } catch { /* ignore fetch error */ }
+      const res = await fetch(`/api/sessions/${sessionId}/budget/remove-cap`, { method: 'POST' })
+      if (!res.ok) {
+        const { toast } = await import("sonner")
+        toast.error("Failed to remove budget cap. Please try again.")
+        return
+      }
+    } catch {
+      const { toast } = await import("sonner")
+      toast.error("Failed to remove budget cap. Please try again.")
+      return
+    }
     set((state) => {
       const existing = state.sessionBudget.get(sessionId) ?? {
         maxBudgetUsd: null, cumulativeCostUsd: 0, softCapHit: false, hardCapHit: false,

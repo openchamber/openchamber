@@ -272,7 +272,7 @@ function pruneExternallyViewedSessions(now = Date.now()) {
 }
 const pendingQuestionToastIds = new Set<string>()
 const pendingPermissionToastIds = new Set<string>()
-const pendingBudgetWarningIds = new Set<string>()
+const lastSeenCostPerMessage = new Map<string, number>()
 
 const getQuestionToastKey = (sessionID?: string, requestID?: string) => {
   if (!sessionID || !requestID) return null
@@ -1240,6 +1240,7 @@ function handleEvent(
   }
 
   // Budget warning — non-blocking toast, update budget store
+  // We rely on sonner's built-in id-based dedup to avoid duplicate toasts.
   const payloadType = (payload as Record<string, unknown>).type
   if (payloadType === "openchamber:budget-warning") {
     const rawProps = ((payload as Record<string, unknown>).properties ?? {}) as Record<string, unknown>
@@ -1249,9 +1250,7 @@ function handleEvent(
     const percentUsed = typeof rawProps.percentUsed === "number" ? rawProps.percentUsed : 0
     if (!sessionID) return
     const budgetToastKey = `budget-warning-${sessionID}`
-    const isViewed = isViewedInCurrentSession(resolvedDirectory, sessionID)
-    if (!isViewed && !pendingBudgetWarningIds.has(budgetToastKey)) {
-      pendingBudgetWarningIds.add(budgetToastKey)
+    if (!isViewedInCurrentSession(resolvedDirectory, sessionID)) {
       toast.warning(`Budget warning: ${percentUsed}% of $${maxBudget.toFixed(2)} used ($${cumulativeCost.toFixed(2)})`, {
         id: budgetToastKey,
         action: {
@@ -1399,10 +1398,15 @@ function handleEvent(
       // Accumulate cost from assistant messages on the client as a fallback.
       // The server-side cost tracker also does this and enforces hard cap,
       // but the client needs cumulative cost for immediate UI feedback.
+      // Use delta from last-seen cost per message to avoid double-counting
+      // on repeated message.updated events during streaming.
       if (info.role === "assistant" && typeof (info as { cost?: unknown }).cost === "number") {
         const cost = (info as { cost: number }).cost
-        if (cost > 0) {
-          useSessionUIStore.getState().incrementSessionCost(sessionID, cost)
+        const lastCost = lastSeenCostPerMessage.get(messageID) ?? 0
+        const delta = cost - lastCost
+        if (delta > 0) {
+          lastSeenCostPerMessage.set(messageID, cost)
+          useSessionUIStore.getState().incrementSessionCost(sessionID, delta)
         }
       }
     }

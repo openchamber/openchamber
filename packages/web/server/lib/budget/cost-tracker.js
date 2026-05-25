@@ -8,6 +8,7 @@ export const createCostTracker = (deps) => {
 
   const sessionBudgets = new Map();
   const budgetLocked = new Set();
+  const lastSeenCost = new Map();
 
   const abortSessionOnServer = async (sessionId) => {
     try {
@@ -83,7 +84,12 @@ export const createCostTracker = (deps) => {
       if (!budget || budget.maxBudgetUsd == null) return;
       if (budgetLocked.has(sessionId)) return;
 
-      budget.cumulativeCostUsd += cost;
+      const lastCost = lastSeenCost.get(info.id) ?? 0;
+      const delta = cost - lastCost;
+      if (delta <= 0) return;
+      lastSeenCost.set(info.id, cost);
+
+      budget.cumulativeCostUsd += delta;
 
       const pct = budget.maxBudgetUsd > 0
         ? (budget.cumulativeCostUsd / budget.maxBudgetUsd) * 100
