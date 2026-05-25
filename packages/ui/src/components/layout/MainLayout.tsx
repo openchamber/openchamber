@@ -20,7 +20,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useDeviceInfo } from '@/lib/device';
-import { useVisualViewport } from '@/hooks/useVisualViewport';
+import { useVisualViewport, deriveMobileRootStyle } from '@/hooks/useVisualViewport';
 import { cn } from '@/lib/utils';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 
@@ -434,7 +434,11 @@ export const MainLayout: React.FC = () => {
                     isMobile ? 'flex flex-col' : 'flex h-[100dvh]',
                     'bg-background'
                 )}
-                style={isMobile && visualViewport.height > 0 ? { height: visualViewport.height } : undefined}
+                style={deriveMobileRootStyle({
+                    isMobile: !!isMobile,
+                    viewport: visualViewport,
+                    scrollY: typeof window !== 'undefined' ? window.scrollY : 0,
+                })}
             >
                 <CommandPalette />
                 <HelpDialog />
