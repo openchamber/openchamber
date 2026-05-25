@@ -650,6 +650,9 @@ export const GitView: React.FC = () => {
   const [conflictDialogOpen, setConflictDialogOpen] = React.useState(false);
   const [conflictFiles, setConflictFiles] = React.useState<string[]>([]);
   const [conflictOperation, setConflictOperation] = React.useState<'merge' | 'rebase'>('merge');
+  const [graphLog, setGraphLog] = React.useState<import('@/lib/api/types').GitLogResponse | null>(null);
+  const [graphLogLoading, setGraphLogLoading] = React.useState(false);
+  const [graphLogMaxCount, setGraphLogMaxCount] = React.useState(100);
 
   // Conflict state persistence key
   const conflictStorageKey = React.useMemo(() => {
@@ -1671,6 +1674,32 @@ export const GitView: React.FC = () => {
       cancelled = true;
     };
   }, [baseBranch, currentBranch, currentDirectory, git, log, logMaxCountLocal]);
+
+  // Clear graph log when directory changes
+  React.useEffect(() => {
+    setGraphLog(null);
+  }, [currentDirectory]);
+
+  React.useEffect(() => {
+    if (!isHistoryDialogOpen || !currentDirectory) {
+      if (!isHistoryDialogOpen) setGraphLog(null);
+      return;
+    }
+    let cancelled = false;
+    setGraphLogLoading(true);
+    git.getGitLog(currentDirectory, { maxCount: graphLogMaxCount, all: true })
+      .then((result) => {
+        if (!cancelled) setGraphLog(result);
+      })
+      .catch((err) => {
+        console.error('Failed to fetch graph log:', err);
+      })
+      .finally(() => {
+        if (!cancelled) setGraphLogLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [isHistoryDialogOpen, currentDirectory, graphLogMaxCount, git]);
+
   // Keep these sections stable in layout; individual cards render placeholders when unavailable.
 
   const moveChangePaths = React.useCallback((paths: string[], direction: GitIndexMutationDirection) => {
@@ -2247,6 +2276,45 @@ export const GitView: React.FC = () => {
     [bumpIndexRevision, currentDirectory, git, status, stashDialogOperation, stashDialogBranch, refreshStatusAndBranches, refreshLog, t]
   );
 
+  const handleGraphLogMaxCountChange = React.useCallback((count: number) => {
+    setGraphLogMaxCount(count);
+  }, []);
+
+  const handleGraphActionSuccess = React.useCallback(() => {
+    setIsHistoryDialogOpen(false);
+    if (currentDirectory) {
+      fetchStatus(currentDirectory, git);
+      fetchBranches(currentDirectory, git);
+      fetchLog(currentDirectory, git, logMaxCountLocal);
+    }
+  }, [currentDirectory, fetchStatus, fetchBranches, fetchLog, logMaxCountLocal, git]);
+
+  const handleGraphConflict = React.useCallback((result: {
+    conflict: boolean;
+    conflictFiles?: string[];
+    operation: 'cherry-pick' | 'revert' | 'merge' | 'rebase';
+  }) => {
+    if (!result.conflict) return;
+
+    if (result.operation === 'cherry-pick' || result.operation === 'revert') {
+      // Cherry-pick and revert conflicts are not supported by the shared ConflictDialog
+      // Show a toast with manual resolution instructions
+      toast({
+        title: `${result.operation} conflict`,
+        description: `Conflicts in: ${result.conflictFiles?.join(', ') ?? 'unknown files'}. Resolve manually and commit, or abort with git ${result.operation} --abort.`,
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setConflictFiles(result.conflictFiles ?? []);
+    setConflictOperation(result.operation);
+    setConflictDialogOpen(true);
+    if (currentDirectory) {
+      persistConflictState(currentDirectory, result.conflictFiles ?? [], result.operation);
+    }
+  }, [setConflictFiles, setConflictOperation, setConflictDialogOpen, persistConflictState, currentDirectory]);
+
   if (!currentDirectory) {
     return (
       <div className="flex h-full items-center justify-center px-4 text-center">
@@ -2471,10 +2539,10 @@ export const GitView: React.FC = () => {
           </DialogHeader>
           <div className="flex-1 min-h-0">
             <HistorySection
-              log={log}
-              isLogLoading={isLogLoading}
-              logMaxCount={logMaxCountLocal}
-              onLogMaxCountChange={handleLogMaxCountChange}
+              log={graphLog ?? log}
+              isLogLoading={graphLogLoading || isLogLoading}
+              logMaxCount={graphLogMaxCount}
+              onLogMaxCountChange={handleGraphLogMaxCountChange}
               expandedCommitHashes={expandedCommitHashes}
               onToggleCommit={handleToggleCommit}
               commitFilesMap={commitFilesMap}
@@ -2483,7 +2551,9 @@ export const GitView: React.FC = () => {
               directory={currentDirectory ?? undefined}
               showHeader={false}
               contentMaxHeightClassName="h-full max-h-none"
-              branchDivider={historyBranchDivider}
+              branchDivider={null}
+              onConflict={handleGraphConflict}
+              onActionSuccess={handleGraphActionSuccess}
             />
           </div>
         </DialogContent>

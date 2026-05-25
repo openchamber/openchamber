@@ -529,6 +529,8 @@ export const dict: Record<I18nKey, string> = {
   "gitView.history.largeDiffTitle": "Diff grande ({count} líneas cambiadas)",
   "gitView.history.loadingDiff": "Cargando diff...",
   "gitView.history.loadingFiles": "Cargando archivos...",
+  "gitView.history.loadMore": "Cargar más",
+  "gitView.history.loadingMore": "Cargando...",
   "gitView.history.logSize100": "100 commits",
   "gitView.history.logSize25": "25 commits",
   "gitView.history.logSize50": "50 commits",

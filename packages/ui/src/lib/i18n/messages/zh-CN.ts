@@ -529,6 +529,8 @@ export const dict: Record<I18nKey, string> = {
   'gitView.history.largeDiffTitle': '大型差异（{count} 行变更）',
   'gitView.history.loadingDiff': '正在加载差异...',
   'gitView.history.loadingFiles': '正在加载文件...',
+  'gitView.history.loadMore': '加载更多',
+  'gitView.history.loadingMore': '加载中...',
   'gitView.history.logSize100': '100 个提交',
   'gitView.history.logSize25': '25 个提交',
   'gitView.history.logSize50': '50 个提交',

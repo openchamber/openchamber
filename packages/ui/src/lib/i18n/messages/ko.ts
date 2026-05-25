@@ -529,6 +529,8 @@ export const dict: Record<I18nKey, string> = {
   'gitView.history.largeDiffTitle': '큰 diff({count}개 변경된 줄)',
   'gitView.history.loadingDiff': 'diff 로드 중…',
   'gitView.history.loadingFiles': '파일 로드 중…',
+  'gitView.history.loadMore': '더 불러오기',
+  'gitView.history.loadingMore': '로드 중...',
   'gitView.history.logSize100': '최근 100개',
   'gitView.history.logSize25': '최근 25개',
   'gitView.history.logSize50': '최근 50개',

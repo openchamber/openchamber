@@ -528,6 +528,8 @@ export const dict = {
   'gitView.history.largeDiffTitle': 'Large diff ({count} changed lines)',
   'gitView.history.loadingDiff': 'Loading diff...',
   'gitView.history.loadingFiles': 'Loading files...',
+  'gitView.history.loadMore': 'Load more',
+  'gitView.history.loadingMore': 'Loading...',
   'gitView.history.logSize100': 'Log Size100',
   'gitView.history.logSize25': 'Log Size25',
   'gitView.history.logSize50': 'Log Size50',

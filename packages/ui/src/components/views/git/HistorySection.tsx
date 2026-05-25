@@ -16,6 +16,8 @@ import { Icon } from "@/components/icon/Icon";
 import { HistoryCommitRow } from './HistoryCommitRow';
 import type { GitLogEntry, CommitFileEntry } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
+import { assignLanes } from './gitGraph';
+import type { LanedCommit } from './gitGraph';
 
 const LOG_SIZE_OPTIONS = [
   { labelKey: 'gitView.history.logSize25', value: 25 },
@@ -41,6 +43,8 @@ interface HistorySectionProps {
     branchName: string;
     direction: 'up' | 'down';
   } | null;
+  onConflict?: (result: { conflict: boolean; conflictFiles?: string[]; operation: 'cherry-pick' | 'revert' | 'merge' | 'rebase' }) => void;
+  onActionSuccess?: () => void;
 }
 
 export const HistorySection: React.FC<HistorySectionProps> = ({
@@ -57,10 +61,29 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
   showHeader = true,
   contentMaxHeightClassName = 'max-h-[50vh]',
   branchDivider = null,
+  onConflict,
+  onActionSuccess,
 }) => {
   const { t } = useI18n();
   const [isOpen, setIsOpen] = React.useState(true);
 
+  // Compute lanes unconditionally (handle null log)
+  const laned: LanedCommit[] = React.useMemo(
+    () => (log ? assignLanes(log.all) : []),
+    [log]
+  );
+
+  const maxLanes = React.useMemo(
+    () => Math.max(1, ...laned.map((l) => l.lane + 1)),
+    [laned]
+  );
+
+  const lanedByHash = React.useMemo(
+    () => new Map(laned.map((l) => [l.commit.hash, l])),
+    [laned]
+  );
+
+  // Early return AFTER all hooks
   if (!log) {
     return null;
   }
@@ -84,20 +107,45 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
     : <Icon name="arrow-up" className="size-3.5" />;
 
   const renderCommitList = (entries: GitLogEntry[]) => (
-    <ul className="divide-y divide-border/60">
-      {entries.map((entry) => (
-        <HistoryCommitRow
-          key={entry.hash}
-          entry={entry}
-          isExpanded={expandedCommitHashes.has(entry.hash)}
-          onToggle={() => onToggleCommit(entry.hash)}
-          files={commitFilesMap.get(entry.hash) ?? []}
-          isLoadingFiles={loadingCommitHashes.has(entry.hash)}
-          onCopyHash={onCopyHash}
-          directory={directory}
-        />
-      ))}
-    </ul>
+    <>
+      <ul className="divide-y divide-border/60">
+        {entries.map((entry) => (
+          <HistoryCommitRow
+            key={entry.hash}
+            entry={entry}
+            laned={lanedByHash.get(entry.hash)}
+            totalLanes={maxLanes}
+            isExpanded={expandedCommitHashes.has(entry.hash)}
+            onToggle={() => onToggleCommit(entry.hash)}
+            files={commitFilesMap.get(entry.hash) ?? []}
+            isLoadingFiles={loadingCommitHashes.has(entry.hash)}
+            onCopyHash={onCopyHash}
+            directory={directory}
+            onConflict={onConflict}
+            onActionSuccess={onActionSuccess}
+          />
+        ))}
+      </ul>
+      {entries.length >= logMaxCount && (
+        <div className="flex justify-center py-2 border-t border-border/40">
+          <button
+            type="button"
+            onClick={() => onLogMaxCountChange(logMaxCount + 25)}
+            disabled={isLogLoading}
+            className="typography-micro text-muted-foreground hover:text-foreground transition-colors px-3 py-1 rounded hover:bg-[var(--interactive-hover)]"
+          >
+            {isLogLoading ? (
+              <span className="flex items-center gap-1">
+                <Icon name="loader-4" className="size-3 animate-spin" />
+                {t('gitView.history.loadingMore')}
+              </span>
+            ) : (
+              t('gitView.history.loadMore')
+            )}
+          </button>
+        </div>
+      )}
+    </>
   );
 
   const content = (
