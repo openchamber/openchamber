@@ -1331,27 +1331,6 @@ export const GitView: React.FC = () => {
     }
   };
 
-  const handleRenameBranch = async (oldName: string, newName: string) => {
-    if (!currentDirectory) return;
-
-    const blockingReasons = getMutationBlockingReasons(worktreeAttachment);
-    if (blockingReasons.length > 0) {
-      toast.error(t('gitView.toast.cannotRenameBranch', { reason: formatBlockingReason(blockingReasons[0]) }));
-      return;
-    }
-
-    try {
-      await git.renameBranch(currentDirectory, oldName, newName);
-      toast.success(t('gitView.toast.renamedBranch', { oldName, newName }));
-      await refreshStatusAndBranches();
-      await refreshLog();
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : t('gitView.toast.renameBranchFailed', { oldName, newName });
-      toast.error(message);
-    }
-  };
-
   const handleCheckoutBranch = async (branch: string) => {
     if (!currentDirectory) return;
 
@@ -2303,7 +2282,7 @@ export const GitView: React.FC = () => {
 
   return (
     <div className={cn('flex h-full flex-col overflow-hidden', 'bg-sidebar')}>
-          <GitHeader
+      <GitHeader
         status={status}
         localBranches={localBranches}
         remoteBranches={remoteBranches}
@@ -2316,18 +2295,16 @@ export const GitView: React.FC = () => {
         removingRemoteName={removingRemoteName}
         onCheckoutBranch={handleCheckoutBranch}
         onCreateBranch={handleCreateBranch}
-        onRenameBranch={handleRenameBranch}
         activeIdentityProfile={activeIdentityProfile}
         availableIdentities={availableIdentities}
         onSelectIdentity={handleApplyIdentity}
         isApplyingIdentity={isSettingIdentity}
-            isWorktreeMode={!!worktreeMetadata}
-            onOpenHistory={() => setIsHistoryDialogOpen(true)}
-            onOpenStashes={openStashes}
-            actionTabItems={actionTabItems}
-            activeActionTab={actionTab}
-            onSelectActionTab={(tabID) => setActionTab(tabID as ActionTab)}
-          />
+        onOpenHistory={() => setIsHistoryDialogOpen(true)}
+        onOpenStashes={openStashes}
+        actionTabItems={actionTabItems}
+        activeActionTab={actionTab}
+        onSelectActionTab={(tabID) => setActionTab(tabID as ActionTab)}
+      />
 
       {/* In-progress operation banner */}
       {currentDirectory && (
