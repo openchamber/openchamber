@@ -3,6 +3,9 @@ import { useLoopDetectionStore } from "@/stores/loopDetectionStore"
 import { Icon } from "@/components/icon/Icon"
 import { Button } from "@/components/ui/button"
 import { useSessionUIStore } from "@/sync/session-ui-store"
+import { DEFAULT_LOOP_DETECTION_CONFIG } from "@/lib/loop-detection/config"
+
+const MAX_AFK_RETRIES = DEFAULT_LOOP_DETECTION_CONFIG.maxAfkRetries
 
 export function LoopInterventionCard({ sessionId }: { sessionId: string }) {
   const resetLoopState = useLoopDetectionStore((s) => s.resetLoopState)
@@ -38,7 +41,7 @@ export function LoopInterventionCard({ sessionId }: { sessionId: string }) {
       <p className="text-sm text-muted-foreground mb-3">
         The agent appears stuck in a repeating pattern.
         {loopRetryCount > 0 && (
-          <span> Auto-retry attempt {loopRetryCount}/3 used.</span>
+          <span> Auto-retry attempt {loopRetryCount}/{MAX_AFK_RETRIES} used.</span>
         )}
       </p>
       <div className="flex gap-2 flex-wrap">

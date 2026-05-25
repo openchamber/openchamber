@@ -1,10 +1,11 @@
-import { useRef, useEffect, useCallback, useMemo } from "react"
+import { useRef, useEffect, useCallback } from "react"
 import type { Part, ToolPart, Message } from "@opencode-ai/sdk/v2/client"
 import { useLoopDetectionStore } from "@/stores/loopDetectionStore"
 import { useDirectorySync } from "@/sync/sync-context"
 import { useSyncDirectory } from "@/sync/sync-context"
 import { LoopDetector } from "@/lib/loop-detection/detector"
 import { extractToolCallInput } from "@/lib/loop-detection/types"
+import { DEFAULT_LOOP_DETECTION_CONFIG } from "@/lib/loop-detection/config"
 import type { LoopPattern } from "@/lib/loop-detection/types"
 import type { State } from "@/sync/types"
 
@@ -41,25 +42,19 @@ export function useLoopDetection(sessionId: string | null | undefined) {
     detectorRef.current = new LoopDetector()
   }
 
-  const store = useLoopDetectionStore
+  const maxRetries = DEFAULT_LOOP_DETECTION_CONFIG.maxAfkRetries
 
-  useEffect(() => {
-    if (!sessionIdRef.current) return
-    store.getState().resetLoopState(sessionIdRef.current)
-    detectorRef.current?.fullReset()
-    processedPartIdsRef.current = new Set()
-    processedReasoningIdsRef.current = new Set()
-    isAfkRunningRef.current = false
-    prevLoopDetectedRef.current = false
-  }, [sessionId, store])
-
-  const loopDetectionEnabled = useMemo(
-    () => (sessionId ? store.getState().isLoopDetectionEnabled(sessionId) : false),
-    [sessionId, store],
+  const loopDetectionEnabled = useLoopDetectionStore((s) =>
+    sessionId ? s.loopDetectionEnabled[sessionId] === true : false,
   )
-  const afkAutoResume = useMemo(
-    () => (sessionId ? store.getState().isAfkAutoResumeEnabled(sessionId) : false),
-    [sessionId, store],
+  const afkAutoResume = useLoopDetectionStore((s) =>
+    sessionId ? s.afkAutoResumeEnabled[sessionId] === true : false,
+  )
+  const loopDetected = useLoopDetectionStore((s) =>
+    sessionId ? s.loopDetectedSessions[sessionId] === true : false,
+  )
+  const loopRetryCount = useLoopDetectionStore((s) =>
+    sessionId ? s.loopRetryCount[sessionId] ?? 0 : 0,
   )
 
   const messages: Message[] = useDirectorySync(
@@ -73,14 +68,8 @@ export function useLoopDetection(sessionId: string | null | undefined) {
     directory,
   )
 
-  const latestAssistantMessageId = useMemo(() => {
-    if (!messages || messages.length === 0) return null
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i]
-      if (m.role === "assistant") return m.id
-    }
-    return null
-  }, [messages])
+  const latestAssistantMessageId = getLatestAssistantMessageId(messages)
+  const latestUserMessageId = getLatestUserMessageId(messages)
 
   const parts: Part[] = useDirectorySync(
     useCallback(
@@ -93,25 +82,15 @@ export function useLoopDetection(sessionId: string | null | undefined) {
     directory,
   )
 
-  const latestUserMessageId = useMemo(() => {
-    if (!messages || messages.length === 0) return null
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i]
-      if (m.role === "user") return m.id
-    }
-    return null
-  }, [messages])
-
-  const loopDetected = useMemo(
-    () => (sessionId ? store.getState().isLoopDetected(sessionId) : false),
-    [sessionId, store],
-  )
-  const loopRetryCount = useMemo(
-    () => (sessionId ? store.getState().loopRetryCount[sessionId] ?? 0 : 0),
-    [sessionId, store],
-  )
-
-  const maxRetries = 3
+  useEffect(() => {
+    if (!sessionIdRef.current) return
+    useLoopDetectionStore.getState().resetLoopState(sessionIdRef.current)
+    detectorRef.current?.fullReset()
+    processedPartIdsRef.current = new Set()
+    processedReasoningIdsRef.current = new Set()
+    isAfkRunningRef.current = false
+    prevLoopDetectedRef.current = false
+  }, [sessionId])
 
   useEffect(() => {
     if (!sessionId || !loopDetectionEnabled || !detectorRef.current) return
@@ -120,8 +99,8 @@ export function useLoopDetection(sessionId: string | null | undefined) {
 
     if (latestUserMessageId && !processedPartIdsRef.current.has(`user:${latestUserMessageId}`)) {
       processedPartIdsRef.current.add(`user:${latestUserMessageId}`)
-      detector.recordUserMessage(latestUserMessageId)
-      store.getState().resetLoopState(sessionId)
+      detector.recordUserMessage()
+      useLoopDetectionStore.getState().resetLoopState(sessionId)
       processedPartIdsRef.current = new Set()
       processedReasoningIdsRef.current = new Set()
       isAfkRunningRef.current = false
@@ -152,7 +131,11 @@ export function useLoopDetection(sessionId: string | null | undefined) {
         const text = (part as Record<string, unknown>).text as string
         if (!text) continue
 
-        detector.recordReasoning(sessionId, text, (part as Record<string, unknown>).messageID as string)
+        detector.recordReasoning(
+          sessionId,
+          text,
+          (part as Record<string, unknown>).messageID as string,
+        )
       }
     }
 
@@ -161,7 +144,7 @@ export function useLoopDetection(sessionId: string | null | undefined) {
 
     if (snapshot.loopDetected !== prevDetected) {
       prevLoopDetectedRef.current = snapshot.loopDetected
-      store.getState().setLoopDetected(
+      useLoopDetectionStore.getState().setLoopDetected(
         sessionId,
         snapshot.loopDetected,
         snapshot.lastCleanMessageId,
@@ -170,10 +153,10 @@ export function useLoopDetection(sessionId: string | null | undefined) {
     }
 
     if (afkAutoResume && !isAfkRunningRef.current && snapshot.loopDetected) {
-      const retryCount = store.getState().loopRetryCount[sessionId] ?? 0
+      const retryCount = useLoopDetectionStore.getState().loopRetryCount[sessionId] ?? 0
       if (retryCount < maxRetries) {
         isAfkRunningRef.current = true
-        store.getState().incrementRetryCount(sessionId)
+        useLoopDetectionStore.getState().incrementRetryCount(sessionId)
         prevLoopDetectedRef.current = false
         detector.reset()
 
@@ -184,17 +167,48 @@ export function useLoopDetection(sessionId: string | null | undefined) {
         })
       }
     }
-  }, [sessionId, loopDetectionEnabled, afkAutoResume, parts, latestUserMessageId, latestAssistantMessageId, maxRetries, store])
+  }, [
+    sessionId,
+    loopDetectionEnabled,
+    afkAutoResume,
+    parts,
+    latestUserMessageId,
+    latestAssistantMessageId,
+    maxRetries,
+  ])
 
   const isAfkActive = afkAutoResume && loopDetected && loopRetryCount < maxRetries
-  const showIntervention = loopDetectionEnabled && (!afkAutoResume || (loopDetected && loopRetryCount >= maxRetries))
+  const showIntervention =
+    loopDetectionEnabled &&
+    loopDetected &&
+    (!afkAutoResume || loopRetryCount >= maxRetries)
 
   return {
     loopDetected: loopDetectionEnabled ? loopDetected : false,
     loopRetryCount,
-    lastCleanMessageId: sessionId ? store.getState().lastCleanMessageId[sessionId] : undefined,
-    loopPattern: sessionId ? store.getState().loopPattern[sessionId] ?? null : null as LoopPattern | null,
+    lastCleanMessageId: sessionId
+      ? useLoopDetectionStore.getState().lastCleanMessageId[sessionId]
+      : undefined,
+    loopPattern: sessionId
+      ? (useLoopDetectionStore.getState().loopPattern[sessionId] ?? null)
+      : (null as LoopPattern | null),
     isAfkActive,
     showIntervention,
   }
+}
+
+function getLatestAssistantMessageId(messages: Message[]): string | null {
+  if (!messages || messages.length === 0) return null
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "assistant") return messages[i].id
+  }
+  return null
+}
+
+function getLatestUserMessageId(messages: Message[]): string | null {
+  if (!messages || messages.length === 0) return null
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "user") return messages[i].id
+  }
+  return null
 }

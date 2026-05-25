@@ -17,13 +17,12 @@ export class LoopDetector {
   private loopDetected = false
   private loopRetryCount = 0
   private detectedPattern: LoopPattern = null
-  private lastUserMessageId: string | undefined
 
   constructor(config?: Partial<LoopDetectionConfig>) {
     this.config = { ...DEFAULT_LOOP_DETECTION_CONFIG, ...config }
   }
 
-  recordToolCall(sessionId: string, input: ToolCallInput): void {
+  recordToolCall(_sessionId: string, input: ToolCallInput): void {
     const record: ToolCallRecord = {
       tool: input.tool,
       input: stringifyToolInput(input.input),
@@ -36,25 +35,22 @@ export class LoopDetector {
     }
 
     this.updateLastCleanMessage(input.messageID)
-    void sessionId
 
     this.checkToolLoop()
   }
 
-  recordReasoning(sessionId: string, text: string, messageId: string): void {
+  recordReasoning(_sessionId: string, text: string, messageId: string): void {
     this.reasoningBuffer.push(text)
     if (this.reasoningBuffer.length > this.config.bufferSize) {
       this.reasoningBuffer.shift()
     }
 
     this.updateLastCleanMessage(messageId)
-    void sessionId
 
     this.checkReasoningLoop()
   }
 
-  recordUserMessage(messageId: string): void {
-    this.lastUserMessageId = messageId
+  recordUserMessage(): void {
     this.reset()
   }
 
