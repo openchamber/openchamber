@@ -74,7 +74,7 @@ export const ChatSearchWidget: React.FC<ChatSearchWidgetProps> = ({
       const target = allMarks[activeIndex];
       if (target) {
         target.classList.add('active');
-        target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        target.scrollIntoView({ block: 'center', behavior: 'smooth' });
       } else if (attempt < 8) {
         // Message not yet rendered; wait another frame.
         requestAnimationFrame(() => activate(attempt + 1));
