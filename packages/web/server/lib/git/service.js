@@ -3018,6 +3018,65 @@ export async function getLog(directory, options = {}) {
 
   try {
     const maxCount = options.maxCount || 50;
+
+    if (options.all) {
+      const logArgs = [
+        'log',
+        `--max-count=${maxCount}`,
+        '--all',
+        '--topo-order',
+        '--date=iso',
+        '--pretty=format:%H%x1f%P%x1f%an%x1f%ae%x1f%ad%x1f%s%x1f%D%x1e',
+        '--shortstat',
+      ];
+
+      const rawLog = await git.raw(logArgs);
+      const records = rawLog
+        .split('\x1e')
+        .map((e) => e.trim())
+        .filter(Boolean);
+
+      const entries = [];
+      for (const record of records) {
+        const lines = record.split('\n').filter((l) => l.trim().length > 0);
+        const header = lines.shift() || '';
+        const [hash, parentsRaw, author_name, author_email, date, message, refsRaw] =
+          header.split('\x1f');
+        if (!hash) continue;
+
+        const parents = parentsRaw ? parentsRaw.trim().split(' ').filter(Boolean) : [];
+        const refs = refsRaw ? refsRaw.trim() : '';
+
+        let filesChanged = 0;
+        let insertions = 0;
+        let deletions = 0;
+        for (const line of lines) {
+          const filesMatch = line.match(/(\d+)\s+files?\s+changed/);
+          const insertMatch = line.match(/(\d+)\s+insertions?\(\+\)/);
+          const deleteMatch = line.match(/(\d+)\s+deletions?\(-\)/);
+          if (filesMatch) filesChanged = parseInt(filesMatch[1], 10);
+          if (insertMatch) insertions = parseInt(insertMatch[1], 10);
+          if (deleteMatch) deletions = parseInt(deleteMatch[1], 10);
+        }
+
+        entries.push({
+          hash,
+          date: date || '',
+          message: message || '',
+          refs,
+          body: '',
+          author_name: author_name || '',
+          author_email: author_email || '',
+          filesChanged,
+          insertions,
+          deletions,
+          parents,
+        });
+      }
+
+      return { all: entries, latest: entries[0] || null, total: entries.length };
+    }
+
     const filePath = options.file
       ? (await resolveGitFileContext(directoryPath, directoryGit, options.file, repoRoot)).repoPath
       : undefined;
@@ -3045,7 +3104,7 @@ export async function getLog(directory, options = {}) {
       'log',
       `--max-count=${maxCount}`,
       '--date=iso',
-      '--pretty=format:%H%x1f%an%x1f%ae%x1f%ad%x1f%s%x1e',
+      '--pretty=format:%H%x1f%P%x1f%an%x1f%ae%x1f%ad%x1f%s%x1e',
       '--shortstat'
     ];
 
@@ -3072,7 +3131,8 @@ export async function getLog(directory, options = {}) {
     records.forEach((record) => {
       const lines = record.split('\n').filter((line) => line.trim().length > 0);
       const header = lines.shift() || '';
-      const [hash] = header.split('\x1f');
+      const [hash, parentsRaw] = header.split('\x1f');
+      const parents = parentsRaw ? parentsRaw.trim().split(' ').filter(Boolean) : [];
       if (!hash) {
         return;
       }
@@ -3097,11 +3157,11 @@ export async function getLog(directory, options = {}) {
         }
       });
 
-      statsMap.set(hash, { filesChanged, insertions, deletions });
+      statsMap.set(hash, { filesChanged, insertions, deletions, parents });
     });
 
     const merged = baseLog.all.map((entry) => {
-      const stats = statsMap.get(entry.hash) || { filesChanged: 0, insertions: 0, deletions: 0 };
+      const stats = statsMap.get(entry.hash) || { filesChanged: 0, insertions: 0, deletions: 0, parents: [] };
       return {
         hash: entry.hash,
         date: entry.date,
@@ -3112,7 +3172,8 @@ export async function getLog(directory, options = {}) {
         author_email: entry.author_email,
         filesChanged: stats.filesChanged,
         insertions: stats.insertions,
-        deletions: stats.deletions
+        deletions: stats.deletions,
+        parents: stats.parents || [],
       };
     });
 

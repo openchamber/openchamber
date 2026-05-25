@@ -956,11 +956,13 @@ export function registerGitRoutes(app) {
       }
 
       const { maxCount, from, to, file } = req.query;
+      const all = req.query.all === 'true';
       const log = await getLog(directory, {
         maxCount: maxCount ? parseInt(maxCount) : undefined,
         from,
         to,
-        file
+        file,
+        all
       });
       res.json(log);
     } catch (error) {
