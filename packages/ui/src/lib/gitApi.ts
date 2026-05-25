@@ -784,6 +784,44 @@ export async function merge(
   return gitHttp.merge(directory, options);
 }
 
+export async function checkoutCommit(
+  directory: string,
+  hash: string
+): Promise<import('./api/types').CheckoutCommitResponse> {
+  const runtime = getRuntimeGit();
+  if (runtime) return runtime.checkoutCommit(directory, hash);
+  return gitHttp.checkoutCommit(directory, hash);
+}
+
+export async function cherryPick(
+  directory: string,
+  hash: string
+): Promise<import('./api/types').CherryPickResponse> {
+  const runtime = getRuntimeGit();
+  if (runtime) return runtime.cherryPick(directory, hash);
+  return gitHttp.cherryPick(directory, hash);
+}
+
+export async function revertCommit(
+  directory: string,
+  hash: string
+): Promise<import('./api/types').RevertCommitResponse> {
+  const runtime = getRuntimeGit();
+  if (runtime) return runtime.revertCommit(directory, hash);
+  return gitHttp.revertCommit(directory, hash);
+}
+
+export async function resetToCommit(
+  directory: string,
+  hash: string,
+  mode: 'soft' | 'mixed' | 'hard',
+  force?: boolean
+): Promise<import('./api/types').ResetToCommitResponse> {
+  const runtime = getRuntimeGit();
+  if (runtime) return runtime.resetToCommit(directory, hash, mode, force);
+  return gitHttp.resetToCommit(directory, hash, mode, force);
+}
+
 export async function abortMerge(directory: string): Promise<{ success: boolean }> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.abortMerge(directory);
