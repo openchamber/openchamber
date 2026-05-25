@@ -21,15 +21,23 @@ const isDev = process.env.OPENCHAMBER_ELECTRON_DEV === '1' || !app.isPackaged;
 const DEEP_LINK_PROTOCOL = 'openchamber';
 const APP_USER_MODEL_ID = 'dev.openchamber.desktop';
 const BACKGROUND_START_ARG = '--background';
-const wasOpenedAtLogin = (() => {
-  if (process.platform !== 'darwin') return false;
+
+const readLoginItemSettings = () => {
+  if (process.platform !== 'darwin') return null;
   try {
-    return app.getLoginItemSettings().wasOpenedAtLogin === true;
+    return app.getLoginItemSettings();
   } catch {
-    return false;
+    return null;
   }
-})();
-const isBackgroundStart = process.argv.includes(BACKGROUND_START_ARG) || wasOpenedAtLogin;
+};
+
+const shouldStartInBackground = (loginItemSettings = readLoginItemSettings()) => {
+  return (
+    process.argv.includes(BACKGROUND_START_ARG) ||
+    loginItemSettings?.wasOpenedAtLogin === true ||
+    loginItemSettings?.wasOpenedAsHidden === true
+  );
+};
 
 if (!app.requestSingleInstanceLock()) {
   app.exit(0);
@@ -1905,6 +1913,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       const enabled = args.enabled === true;
       app.setLoginItemSettings({
         openAtLogin: enabled,
+        openAsHidden: enabled,
         args: enabled ? [BACKGROUND_START_ARG] : [],
       });
       const settings = app.getLoginItemSettings();
@@ -2708,11 +2717,16 @@ app.on('activate', async () => {
 });
 
 app.whenReady().then(async () => {
+  const loginItemSettings = readLoginItemSettings();
+  const isBackgroundStart = shouldStartInBackground(loginItemSettings);
   log.info('[electron] app starting', {
     version: APP_VERSION,
     packaged: app.isPackaged,
     platform: process.platform,
     arch: process.arch,
+    argv: process.argv,
+    isBackgroundStart,
+    loginItemSettings,
   });
   nativeTheme.themeSource = readThemeSource();
   setupAutoUpdater();
@@ -2722,9 +2736,11 @@ app.whenReady().then(async () => {
   }
 
   if (process.platform === 'darwin' && app.isPackaged) {
+    const openAtLogin = loginItemSettings?.openAtLogin === true;
     app.setLoginItemSettings({
-      openAtLogin: app.getLoginItemSettings?.().openAtLogin === true,
-      args: [BACKGROUND_START_ARG],
+      openAtLogin,
+      openAsHidden: openAtLogin,
+      args: openAtLogin ? [BACKGROUND_START_ARG] : [],
     });
   }
 
