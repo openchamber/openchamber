@@ -19,7 +19,6 @@ interface GitGraphSegmentProps {
 export const GitGraphSegment: React.FC<GitGraphSegmentProps> = ({
   laned,
   totalLanes,
-  isExpanded: _isExpanded,
 }) => {
   const { lane, color, connectors } = laned;
   const effectiveLanes = Math.max(totalLanes, lane + 1);

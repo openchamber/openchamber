@@ -315,7 +315,6 @@ export const GitView: React.FC = () => {
   const fetchLog = useGitStore((state) => state.fetchLog);
   const fetchIdentity = useGitStore((state) => state.fetchIdentity);
   const prefetchDiffs = useGitStore((state) => state.prefetchDiffs);
-  const setLogMaxCount = useGitStore((state) => state.setLogMaxCount);
   const moveStatusPathsOptimistically = useGitStore((state) => state.moveStatusPathsOptimistically);
   const restoreStatus = useGitStore((state) => state.restoreStatus);
   const bumpIndexRevision = useGitStore((state) => state.bumpIndexRevision);
@@ -540,7 +539,7 @@ export const GitView: React.FC = () => {
   const [syncAction, setSyncAction] = React.useState<SyncAction>(null);
   const [isStashesDialogOpen, setIsStashesDialogOpen] = React.useState(false);
   const [commitAction, setCommitAction] = React.useState<CommitAction>(null);
-  const [logMaxCountLocal, setLogMaxCountLocal] = React.useState<number>(25);
+  const [logMaxCountLocal] = React.useState<number>(25);
   const [isSettingIdentity, setIsSettingIdentity] = React.useState(false);
   const { triggerFireworks } = useFireworksCelebration();
 
@@ -622,7 +621,7 @@ export const GitView: React.FC = () => {
   const [expandedCommitHashes, setExpandedCommitHashes] = React.useState<Set<string>>(new Set());
   const [commitFilesMap, setCommitFilesMap] = React.useState<Map<string, CommitFileEntry[]>>(new Map());
   const [loadingCommitHashes, setLoadingCommitHashes] = React.useState<Set<string>>(new Set());
-  const [historyBranchDivider, setHistoryBranchDivider] = React.useState<HistoryBranchDivider>(null);
+  const [, setHistoryBranchDivider] = React.useState<HistoryBranchDivider>(null);
   const [remoteUrl, setRemoteUrl] = React.useState<string | null>(null);
   const [gitmojiEmojis, setGitmojiEmojis] = React.useState<GitmojiEntry[]>([]);
   const [gitmojiSearch, setGitmojiSearch] = React.useState('');
@@ -1903,16 +1902,7 @@ export const GitView: React.FC = () => {
     setIsGitmojiPickerOpen(false);
   }, []);
 
-  const handleLogMaxCountChange = React.useCallback(
-    (count: number) => {
-      setLogMaxCountLocal(count);
-      if (currentDirectory) {
-        setLogMaxCount(currentDirectory, count);
-        fetchLog(currentDirectory, git, count);
-      }
-    },
-    [currentDirectory, setLogMaxCount, fetchLog, git]
-  );
+
 
   const isUncommittedChangesError = React.useCallback((error: unknown): boolean => {
     const message = error instanceof Error ? error.message.toLowerCase() : '';
