@@ -228,6 +228,37 @@ export interface GitMergeResult {
   conflictFiles?: string[];
 }
 
+export interface CheckoutCommitResponse {
+  success: boolean;
+}
+
+export interface CherryPickRequest {
+  hash: string;
+}
+export interface CherryPickResponse {
+  success: boolean;
+  conflict?: boolean;
+  conflictFiles?: string[];
+}
+
+export interface RevertCommitRequest {
+  hash: string;
+}
+export interface RevertCommitResponse {
+  success: boolean;
+  conflict?: boolean;
+  conflictFiles?: string[];
+}
+
+export interface ResetToCommitRequest {
+  hash: string;
+  mode: 'soft' | 'mixed' | 'hard';
+  force?: boolean;
+}
+export interface ResetToCommitResponse {
+  success: boolean;
+}
+
 export interface GitRebaseResult {
   success: boolean;
   conflict?: boolean;
@@ -283,6 +314,7 @@ export interface GitLogEntry {
   filesChanged: number;
   insertions: number;
   deletions: number;
+  parents: string[];
 }
 
 export interface GitLogResponse {
@@ -396,6 +428,7 @@ export interface GitLogOptions {
   from?: string;
   to?: string;
   file?: string;
+  all?: boolean;
 }
 
 export interface GeneratedCommitMessage {
