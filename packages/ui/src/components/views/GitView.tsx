@@ -2299,10 +2299,8 @@ export const GitView: React.FC = () => {
     if (result.operation === 'cherry-pick' || result.operation === 'revert') {
       // Cherry-pick and revert conflicts are not supported by the shared ConflictDialog
       // Show a toast with manual resolution instructions
-      toast({
-        title: `${result.operation} conflict`,
+      toast.error(`${result.operation} conflict`, {
         description: `Conflicts in: ${result.conflictFiles?.join(', ') ?? 'unknown files'}. Resolve manually and commit, or abort with git ${result.operation} --abort.`,
-        variant: 'destructive',
       });
       return;
     }

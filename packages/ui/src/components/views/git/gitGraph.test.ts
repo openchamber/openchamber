@@ -164,6 +164,6 @@ describe('assignLanes', () => {
     // Its lane has a parent ('a') but no incoming.
     const cResult = result.find((r) => r.commit.hash === 'c')!;
     const bottomStub = cResult.connectors.find((c) => c.type === 'bottom-stub');
-    expect(bottomStub).toBeDefined();
+    expect(bottomStub).toBeTruthy();
   });
 });
