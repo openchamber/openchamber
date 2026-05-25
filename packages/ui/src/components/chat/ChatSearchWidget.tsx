@@ -15,7 +15,6 @@ export const ChatSearchWidget: React.FC<ChatSearchWidgetProps> = ({
   const isOpen = useChatSearchStore((s) => s.isOpen);
   const query = useChatSearchStore((s) => s.query);
   const flags = useChatSearchStore((s) => s.flags);
-  const scope = useChatSearchStore((s) => s.scope);
   const activeIndex = useChatSearchStore((s) => s.activeIndex);
   const matches = useChatSearchStore((s) => s.matches);
   const totalMatches = useChatSearchStore((s) => s.totalMatches);
@@ -181,25 +180,6 @@ export const ChatSearchWidget: React.FC<ChatSearchWidgetProps> = ({
         aria-pressed={flags.regex}
       >
         .*
-      </button>
-
-      {/* Scope toggle
-          CR-006 / CR-007: tooltip accurately describes what IS searched.
-          Code blocks and most tool outputs (bash, JSON, diffs) are not
-          highlighted due to renderer limitations.  */}
-      <button
-        type="button"
-        title={
-          scope === 'text'
-            ? 'Scope: user + assistant text (excludes tool outputs and code blocks). Click to include tool inputs.'
-            : 'Scope: user + assistant text + tool inputs (excludes code blocks and most tool outputs). Click to search text only.'
-        }
-        aria-label={scope === 'text' ? 'Search scope: text only' : 'Search scope: all content'}
-        className={flagButtonClass(scope === 'all')}
-        onClick={() => useChatSearchStore.getState().toggleScope()}
-        aria-pressed={scope === 'all'}
-      >
-        {scope === 'text' ? 'T' : 'All'}
       </button>
 
       {/* Divider */}

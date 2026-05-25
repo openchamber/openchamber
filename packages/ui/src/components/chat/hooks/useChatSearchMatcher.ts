@@ -31,59 +31,15 @@ function stripMarkdownCode(text: string): string {
 }
 
 /**
- * Extracts searchable plain text from a tool part's input and (for 'task' tool)
- * output. Mirrors the fields that ToolPart.tsx highlights when scope is 'all'.
- */
-function extractToolText(part: Record<string, unknown>): string {
-  const state = part.state as Record<string, unknown> | undefined;
-  if (!state) return '';
-
-  const input = state.input as Record<string, unknown> | undefined;
-  const texts: string[] = [];
-
-  if (input && typeof input === 'object') {
-    if (
-      'command' in input &&
-      typeof input.command === 'string' &&
-      part.tool === 'bash'
-    ) {
-      texts.push(input.command);
-    } else if (typeof (input as Record<string, unknown>).content === 'string') {
-      texts.push((input as Record<string, unknown>).content as string);
-    } else {
-      // Fallback: join all string values from the input object
-      Object.values(input).forEach((v) => {
-        if (typeof v === 'string') texts.push(v);
-      });
-    }
-  }
-
-  // Only the 'task' tool renders its output through SimpleMarkdownRenderer,
-  // which is the only tool output we currently highlight.
-  if (state.status === 'completed' && part.tool === 'task') {
-    const output = (state as Record<string, unknown>).output;
-    if (typeof output === 'string' && output) {
-      texts.push(stripMarkdownCode(output));
-    }
-  }
-
-  return texts.join('\n');
-}
-
-/**
  * Returns the combined searchable text for a message, consistent with what
  * the rendering layer will actually mark up in the DOM:
  *
- * - scope 'text': user/assistant text and reasoning parts (code blocks stripped)
- * - scope 'all':  same + tool input text + task tool output text
+ * Searches user/assistant text and reasoning parts (code blocks stripped).
  *
  * Keeping this consistent with what the DOM highlights is critical so that
  * data-layer match count equals DOM mark count within each message.
  */
-function getSearchableText(
-  message: ChatMessageEntry,
-  scope: 'text' | 'all',
-): string {
+function getSearchableText(message: ChatMessageEntry): string {
   const texts: string[] = [];
 
   for (const part of message.parts) {
@@ -91,9 +47,6 @@ function getSearchableText(
     if (p.type === 'text' || p.type === 'reasoning') {
       const raw = getBestPartText(p);
       if (raw) texts.push(stripMarkdownCode(raw));
-    } else if (p.type === 'tool' && scope === 'all') {
-      const toolText = extractToolText(p);
-      if (toolText) texts.push(toolText);
     }
   }
 
@@ -118,7 +71,6 @@ export function useChatSearchMatcher(messages: ChatMessageEntry[]): void {
   const caseSensitive = useChatSearchStore((s) => s.flags.caseSensitive);
   const wholeWord = useChatSearchStore((s) => s.flags.wholeWord);
   const isRegex = useChatSearchStore((s) => s.flags.regex);
-  const scope = useChatSearchStore((s) => s.scope);
 
   // Keep a stable ref to the latest messages so the timer callback always
   // sees the most recent data even if it was queued before the last update.
@@ -143,7 +95,7 @@ export function useChatSearchMatcher(messages: ChatMessageEntry[]): void {
       const newMatches: MatchRecord[] = [];
 
       for (const message of messagesRef.current) {
-        const text = getSearchableText(message, scope);
+        const text = getSearchableText(message);
         if (!text) continue;
 
         regex.lastIndex = 0;
@@ -167,7 +119,6 @@ export function useChatSearchMatcher(messages: ChatMessageEntry[]): void {
     caseSensitive,
     wholeWord,
     isRegex,
-    scope,
     // Re-run when messages change (new message, streaming finalize, load older).
     // Using the array reference is intentional: it resets the debounce timer
     // on each update, so the matcher runs 350 ms after the last change.

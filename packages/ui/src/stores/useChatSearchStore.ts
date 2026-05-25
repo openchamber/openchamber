@@ -26,7 +26,6 @@ interface ChatSearchState {
   isOpen: boolean;
   query: string;
   flags: SearchFlags;
-  scope: 'text' | 'all';
   /** Ordered list of all matches from the data layer. Length = totalMatches. */
   matches: MatchRecord[];
   /** Derived from matches.length; kept as a field so selectors stay cheap. */
@@ -37,7 +36,6 @@ interface ChatSearchState {
   close: () => void;
   setQuery: (q: string) => void;
   setFlag: (flag: keyof SearchFlags, value: boolean) => void;
-  toggleScope: () => void;
   // navigate wraps around: 'next' on the last match goes to index 0, 'prev' on index 0 goes to last
   navigate: (dir: 'prev' | 'next') => void;
   setActiveIndex: (n: number) => void;
@@ -52,7 +50,6 @@ export const useChatSearchStore = create<ChatSearchState>((set, get) => ({
   isOpen: false,
   query: '',
   flags: { caseSensitive: false, wholeWord: false, regex: false },
-  scope: 'text',
   matches: [],
   totalMatches: 0,
   activeIndex: 0,
@@ -62,8 +59,6 @@ export const useChatSearchStore = create<ChatSearchState>((set, get) => ({
   setQuery: (q) => set({ query: q }),
   setFlag: (flag, value) =>
     set((state) => ({ flags: { ...state.flags, [flag]: value } })),
-  toggleScope: () =>
-    set((state) => ({ scope: state.scope === 'text' ? 'all' : 'text' })),
   navigate: (dir) => {
     const { activeIndex, totalMatches } = get();
     if (totalMatches === 0) return;
