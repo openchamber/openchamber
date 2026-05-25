@@ -4,7 +4,7 @@ import os from 'os';
 import path from 'path';
 import simpleGit from 'simple-git';
 
-import { resolveBaseRefForLog, stageFiles, unstageFiles, checkoutCommit, cherryPick } from './service.js';
+import { resolveBaseRefForLog, stageFiles, unstageFiles, checkoutCommit, cherryPick, revertCommit } from './service.js';
 
 async function createTempRepo() {
   const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'git-test-'));
@@ -146,6 +146,64 @@ describe('cherryPick', () => {
       await git.commit('Change line2 in main');
 
       const result = await cherryPick(tmpDir, featureCommit.commit);
+      expect(result.success).toBe(false);
+      expect(result.conflict).toBe(true);
+      expect(Array.isArray(result.conflictFiles)).toBe(true);
+      expect(result.conflictFiles.length).toBeGreaterThan(0);
+    } finally {
+      await cleanupTempRepo(tmpDir);
+    }
+  });
+});
+
+describe('revertCommit', () => {
+  it('reverts a commit and stages the revert changes', async () => {
+    const { tmpDir, git } = await createTempRepo();
+    try {
+      const filePath = path.join(tmpDir, 'file.txt');
+      await fs.promises.writeFile(filePath, 'line1\nline2\n', 'utf8');
+      await git.add('file.txt');
+      await git.commit('Initial commit');
+
+      // Make a change and commit
+      await fs.promises.writeFile(filePath, 'line1\nline2\nline3\n', 'utf8');
+      await git.add('file.txt');
+      const changeCommit = await git.commit('Add line3');
+
+      // Revert the commit
+      const result = await revertCommit(tmpDir, changeCommit.commit);
+      expect(result).toEqual({ success: true, conflict: false });
+
+      // The revert should be staged (file back to original content)
+      const status = await git.status();
+      expect(status.staged.length).toBeGreaterThan(0);
+      const content = await fs.promises.readFile(filePath, 'utf8');
+      expect(content).toBe('line1\nline2\n');
+    } finally {
+      await cleanupTempRepo(tmpDir);
+    }
+  });
+
+  it('returns conflict info when reverting causes a conflict', async () => {
+    const { tmpDir, git } = await createTempRepo();
+    try {
+      const filePath = path.join(tmpDir, 'file.txt');
+      await fs.promises.writeFile(filePath, 'line1\nline2\nline3\n', 'utf8');
+      await git.add('file.txt');
+      await git.commit('Initial commit');
+
+      // Commit A: change line2
+      await fs.promises.writeFile(filePath, 'line1\nchanged-a\nline3\n', 'utf8');
+      await git.add('file.txt');
+      const commitA = await git.commit('Change line2 to changed-a');
+
+      // Commit B: change line2 to something else
+      await fs.promises.writeFile(filePath, 'line1\nchanged-b\nline3\n', 'utf8');
+      await git.add('file.txt');
+      await git.commit('Change line2 to changed-b');
+
+      // Reverting commit A wants to restore 'line2', but HEAD has 'changed-b'
+      const result = await revertCommit(tmpDir, commitA.commit);
       expect(result.success).toBe(false);
       expect(result.conflict).toBe(true);
       expect(Array.isArray(result.conflictFiles)).toBe(true);

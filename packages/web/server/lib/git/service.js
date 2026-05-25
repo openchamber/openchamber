@@ -2567,6 +2567,31 @@ export async function cherryPick(directory, hash) {
   }
 }
 
+export async function revertCommit(directory, hash) {
+  const { git } = await createRepositoryGitContext(directory);
+  try {
+    await git.raw(['revert', '--no-commit', hash]);
+    return { success: true, conflict: false };
+  } catch (error) {
+    const errorMessage = String(error?.message || error || '').toLowerCase();
+    const isConflict =
+      errorMessage.includes('conflict') ||
+      errorMessage.includes('revert failed');
+
+    if (isConflict) {
+      const status = await git.status().catch(() => ({ conflicted: [] }));
+      return {
+        success: false,
+        conflict: true,
+        conflictFiles: status.conflicted || [],
+      };
+    }
+
+    console.error('Failed to revert commit:', error);
+    throw error;
+  }
+}
+
 export async function getWorktrees(directory) {
   const directoryPath = normalizeDirectoryPath(directory);
   if (!directoryPath || !fs.existsSync(directoryPath)) {
