@@ -1,0 +1,61 @@
+name: Docker Image CI
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  # This is used to create releases (if needed in future)
+  # issues: write
+  # pull-requests: write
+
+jobs:
+  build-and-push-docker-image:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # Using linux/amd64 as primary target, can add more if needed
+        platform: [linux/amd64]
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/openchamber
+          tags: |
+            type=sha
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: ${{ matrix.platform }}
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/openchamber:buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/openchamber:buildcache,mode=max
