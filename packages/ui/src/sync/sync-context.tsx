@@ -33,6 +33,7 @@ import { useConfigStore } from "@/stores/useConfigStore"
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { toast } from "@/components/ui"
 import { appendNotification } from "./notification-store"
+import { useSessionUIStore } from "./session-ui-store"
 import type { State } from "./types"
 import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
 import type { PermissionRequest } from "@/types/permission"
@@ -271,6 +272,7 @@ function pruneExternallyViewedSessions(now = Date.now()) {
 }
 const pendingQuestionToastIds = new Set<string>()
 const pendingPermissionToastIds = new Set<string>()
+const pendingBudgetWarningIds = new Set<string>()
 
 const getQuestionToastKey = (sessionID?: string, requestID?: string) => {
   if (!sessionID || !requestID) return null
@@ -1237,6 +1239,42 @@ function handleEvent(
     }
   }
 
+  // Budget warning — non-blocking toast, update budget store
+  const payloadType = (payload as Record<string, unknown>).type
+  if (payloadType === "openchamber:budget-warning") {
+    const rawProps = ((payload as Record<string, unknown>).properties ?? {}) as Record<string, unknown>
+    const sessionID = typeof rawProps.sessionID === "string" ? rawProps.sessionID : ""
+    const cumulativeCost = typeof rawProps.cumulativeCost === "number" ? rawProps.cumulativeCost : 0
+    const maxBudget = typeof rawProps.maxBudget === "number" ? rawProps.maxBudget : 0
+    const percentUsed = typeof rawProps.percentUsed === "number" ? rawProps.percentUsed : 0
+    if (!sessionID) return
+    const budgetToastKey = `budget-warning-${sessionID}`
+    const isViewed = isViewedInCurrentSession(resolvedDirectory, sessionID)
+    if (!isViewed && !pendingBudgetWarningIds.has(budgetToastKey)) {
+      pendingBudgetWarningIds.add(budgetToastKey)
+      toast.warning(`Budget warning: ${percentUsed}% of $${maxBudget.toFixed(2)} used ($${cumulativeCost.toFixed(2)})`, {
+        id: budgetToastKey,
+        action: {
+          label: "Open session",
+          onClick: () => openSessionFromToast(sessionID, resolvedDirectory),
+        },
+      })
+    }
+    useSessionUIStore.getState().markBudgetSoftCapHit(sessionID, cumulativeCost)
+    return
+  }
+
+  // Budget exceeded — update store to show intervention card. No toast needed
+  // since the UI card is more prominent.
+  if (payloadType === "openchamber:budget-exceeded") {
+    const rawProps = ((payload as Record<string, unknown>).properties ?? {}) as Record<string, unknown>
+    const sessionID = typeof rawProps.sessionID === "string" ? rawProps.sessionID : ""
+    const cumulativeCost = typeof rawProps.cumulativeCost === "number" ? rawProps.cumulativeCost : 0
+    if (!sessionID) return
+    useSessionUIStore.getState().markBudgetHardCapHit(sessionID, cumulativeCost)
+    return
+  }
+
   // Notification dispatch for session turn-complete and error events.
   // These are NOT handled by the event reducer — only the notification store.
   if (payload.type === "session.idle" || payload.type === "session.error") {
@@ -1356,6 +1394,16 @@ function handleEvent(
       const info = (payload.properties as { info: Message }).info
       if (info.role === "assistant" && (!after.part[messageID] || after.part[messageID].length === 0)) {
         enqueueSessionMaterialization(resolvedDirectory, sessionID, childStores)
+      }
+
+      // Accumulate cost from assistant messages on the client as a fallback.
+      // The server-side cost tracker also does this and enforces hard cap,
+      // but the client needs cumulative cost for immediate UI feedback.
+      if (info.role === "assistant" && typeof (info as { cost?: unknown }).cost === "number") {
+        const cost = (info as { cost: number }).cost
+        if (cost > 0) {
+          useSessionUIStore.getState().incrementSessionCost(sessionID, cost)
+        }
       }
     }
   } else {

@@ -197,6 +197,13 @@ export type SessionHistoryMeta = {
   nextCursor?: string
 }
 
+export type SessionBudgetState = {
+  maxBudgetUsd: number | null
+  cumulativeCostUsd: number
+  softCapHit: boolean
+  hardCapHit: boolean
+}
+
 export type SessionUIState = {
   currentSessionId: string | null
   newSessionDraft: NewSessionDraftState
@@ -219,6 +226,16 @@ export type SessionUIState = {
   // Non-Git mode: dismissed signature hash per session, hides bar until new turn arrives
   pendingChangesBarDismissed: Map<string, string>
   dismissPendingChangesBar: (sessionId: string, signature: string | null) => void
+
+  // Budget cap tracking - per-session spend + cap
+  sessionBudget: Map<string, SessionBudgetState>
+  getSessionBudget: (sessionId: string) => SessionBudgetState | undefined
+  setSessionBudget: (sessionId: string, maxBudgetUsd: number | null) => void
+  incrementSessionCost: (sessionId: string, costUsd: number) => void
+  markBudgetSoftCapHit: (sessionId: string, cost: number) => void
+  markBudgetHardCapHit: (sessionId: string, cost: number) => void
+  increaseBudget: (sessionId: string, additionalUsd: number) => Promise<void>
+  removeBudgetCap: (sessionId: string) => Promise<void>
 
   // Actions — UI state management
   setCurrentSession: (id: string | null, directoryHint?: string | null) => void
@@ -378,6 +395,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   lastLoadedDirectory: null,
   sessionPlanAvailable: new Map(),
   pendingChangesBarDismissed: new Map(),
+  sessionBudget: new Map(),
 
   // ---------------------------------------------------------------------------
   // setCurrentSession
@@ -1236,5 +1254,99 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
   isSessionPlanAvailable: (sessionId) => {
     return get().sessionPlanAvailable.get(sessionId) ?? false
+  },
+
+  // ---------------------------------------------------------------------------
+  // Budget cap — per-session cost tracking and enforcement
+  // ---------------------------------------------------------------------------
+  getSessionBudget: (sessionId) => {
+    return get().sessionBudget.get(sessionId)
+  },
+
+  setSessionBudget: (sessionId, maxBudgetUsd) => {
+    set((state) => {
+      const existing = state.sessionBudget.get(sessionId) ?? {
+        maxBudgetUsd: null, cumulativeCostUsd: 0, softCapHit: false, hardCapHit: false,
+      }
+      const next = new Map(state.sessionBudget)
+      next.set(sessionId, { ...existing, maxBudgetUsd })
+      return { sessionBudget: next }
+    })
+    void fetch(`/api/sessions/${sessionId}/budget`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ maxBudgetUsd }),
+    }).catch(() => {})
+  },
+
+  incrementSessionCost: (sessionId, costUsd) => {
+    if (costUsd <= 0) return
+    set((state) => {
+      const existing = state.sessionBudget.get(sessionId)
+      if (!existing || existing.hardCapHit) return state
+      const next = new Map(state.sessionBudget)
+      next.set(sessionId, { ...existing, cumulativeCostUsd: existing.cumulativeCostUsd + costUsd })
+      return { sessionBudget: next }
+    })
+  },
+
+  markBudgetSoftCapHit: (sessionId, cost) => {
+    set((state) => {
+      const existing = state.sessionBudget.get(sessionId)
+      if (!existing) return state
+      const next = new Map(state.sessionBudget)
+      next.set(sessionId, { ...existing, softCapHit: true, cumulativeCostUsd: cost })
+      return { sessionBudget: next }
+    })
+  },
+
+  markBudgetHardCapHit: (sessionId, cost) => {
+    set((state) => {
+      const existing = state.sessionBudget.get(sessionId) ?? {
+        maxBudgetUsd: null, cumulativeCostUsd: 0, softCapHit: false, hardCapHit: false,
+      }
+      const next = new Map(state.sessionBudget)
+      next.set(sessionId, { ...existing, hardCapHit: true, cumulativeCostUsd: cost })
+      return { sessionBudget: next }
+    })
+  },
+
+  increaseBudget: async (sessionId, additionalUsd) => {
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/budget/increase`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ additionalUsd }),
+      })
+      if (!res.ok) return
+      const data = await res.json()
+      const b = data.budget
+      if (b) {
+        set((state) => {
+          const next = new Map(state.sessionBudget)
+          next.set(sessionId, {
+            maxBudgetUsd: b.maxBudgetUsd,
+            cumulativeCostUsd: b.cumulativeCostUsd,
+            softCapHit: false,
+            hardCapHit: false,
+          })
+          return { sessionBudget: next }
+        })
+      }
+    } catch { /* ignore fetch error */ }
+  },
+
+  removeBudgetCap: async (sessionId) => {
+    try {
+      await fetch(`/api/sessions/${sessionId}/budget/remove-cap`, { method: 'POST' })
+    } catch { /* ignore fetch error */ }
+    set((state) => {
+      const existing = state.sessionBudget.get(sessionId) ?? {
+        maxBudgetUsd: null, cumulativeCostUsd: 0, softCapHit: false, hardCapHit: false,
+      }
+      const next = new Map(state.sessionBudget)
+      next.set(sessionId, { ...existing, maxBudgetUsd: null, softCapHit: false, hardCapHit: false })
+      return { sessionBudget: next }
+    })
   },
 }))

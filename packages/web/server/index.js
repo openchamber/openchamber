@@ -41,6 +41,8 @@ import {
 import { createFsSearchRuntime as createFsSearchRuntimeFactory } from './lib/fs/search.js';
 import { createOpenCodeLifecycleRuntime } from './lib/opencode/lifecycle.js';
 import { createOpenCodeEnvRuntime } from './lib/opencode/env-runtime.js';
+import { createCostTracker } from './lib/budget/cost-tracker.js';
+import { registerBudgetRoutes } from './lib/budget/routes.js';
 import { resolveOpenCodeEnvConfig } from './lib/opencode/env-config.js';
 import { createHmrStateRuntime } from './lib/opencode/hmr-state-runtime.js';
 import { createOpenCodeNetworkRuntime } from './lib/opencode/network-runtime.js';
@@ -401,6 +403,12 @@ const sessionRuntime = createSessionRuntime({
   broadcastEvent: broadcastGlobalUiEvent,
 });
 
+const costTracker = createCostTracker({
+  broadcastEvent: broadcastGlobalUiEvent,
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+});
+
 const getActiveSessionCount = () => {
   const snapshot = sessionRuntime.getSessionActivitySnapshot();
   return Object.values(snapshot).filter((entry) => entry.type === 'busy').length;
@@ -697,6 +705,7 @@ const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
     maybeCacheSessionInfoFromEvent(payload);
     void maybeSendPushForTrigger(payload);
     sessionRuntime.processOpenCodeSsePayload(payload);
+    costTracker.processMessageCost(payload);
   },
 });
 
@@ -1158,6 +1167,12 @@ async function main(options = {}) {
     setAutoAcceptSession,
   });
   uiAuthController = bootstrapResult.uiAuthController;
+
+  registerBudgetRoutes(app, {
+    express,
+    uiAuthController,
+    costTracker,
+  });
 
   const tunnelRuntimeContext = tunnelWiringRuntime.initialize(app, port);
   const { tunnelService, startTunnelWithNormalizedRequest } = tunnelRuntimeContext;
