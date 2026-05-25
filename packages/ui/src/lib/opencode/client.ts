@@ -682,6 +682,8 @@ class OpencodeService {
       files?: Array<FileInputLite>;
     }>;
     messageId?: string;
+    /** System-level guidance message sent alongside the prompt */
+    system?: string;
     agentMentions?: Array<{ name: string; source?: { value: string; start: number; end: number } }>;
     format?: {
       type: 'json_schema';
@@ -816,6 +818,7 @@ class OpencodeService {
             variant: params.variant,
             messageID: messageId,
             ...(params.format ? { format: params.format } : {}),
+            ...(params.system ? { system: params.system } : {}),
             parts,
           }),
         });

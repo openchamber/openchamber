@@ -64,6 +64,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { createWorktreeDraft } from '@/lib/worktreeSessionCreator';
 import { buildSessionTargetOptions } from '@/sync/session-worktree-contract';
 import { usePermissionStore } from '@/stores/permissionStore';
+import { useLoopDetectionStore } from '@/stores/loopDetectionStore';
 import { extractGitChangedFiles } from './changedFiles';
 import { useI18n } from '@/lib/i18n';
 import { fetchResponseStyleInstruction } from '@/lib/responseStyle';
@@ -658,6 +659,154 @@ const PermissionAutoAcceptButton = React.memo(function PermissionAutoAcceptButto
                 <Icon name="shield-check" className={cn(iconSizeClass)} style={{ color: 'var(--status-info)' }} />
             ) : (
                 <Icon name="shield-user" className={cn(iconSizeClass)} />
+            )}
+        </button>
+    );
+
+    if (!withTooltip) {
+        return button;
+    }
+
+    return (
+        <Tooltip>
+            <TooltipTrigger asChild>
+                {button}
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={8}>
+                {tooltipLabel}
+            </TooltipContent>
+        </Tooltip>
+    );
+});
+
+type LoopDetectionToggleProps = {
+    footerIconButtonClass: string;
+    iconSizeClass: string;
+    loopScopeSessionId: string | null;
+    loopDetectionEnabled: boolean;
+    handleLoopDetectionToggle: () => void;
+    withTooltip?: boolean;
+};
+
+const LoopDetectionToggle = React.memo(function LoopDetectionToggle(props: LoopDetectionToggleProps) {
+    const {
+        footerIconButtonClass,
+        iconSizeClass,
+        loopScopeSessionId,
+        loopDetectionEnabled,
+        handleLoopDetectionToggle,
+        withTooltip = false,
+    } = props;
+
+    const ariaLabel = loopDetectionEnabled
+        ? 'Disable loop detection'
+        : 'Enable loop detection';
+    const tooltipLabel = loopDetectionEnabled
+        ? 'Loop detection on'
+        : 'Loop detection off';
+
+    const button = (
+        <button
+            type="button"
+            onClick={handleLoopDetectionToggle}
+            className={cn(
+                footerIconButtonClass,
+                'rounded-md hover:bg-transparent',
+                !loopScopeSessionId && 'opacity-30',
+            )}
+            onMouseDown={(event) => {
+                event.preventDefault();
+            }}
+            onPointerDownCapture={(event) => {
+                if (event.pointerType === 'touch') {
+                    event.preventDefault();
+                    event.stopPropagation();
+                }
+            }}
+            aria-pressed={loopDetectionEnabled}
+            aria-label={ariaLabel}
+            title={ariaLabel}
+        >
+            {loopDetectionEnabled ? (
+                <Icon name="alert" className={cn(iconSizeClass)} style={{ color: 'var(--status-warning)' }} />
+            ) : (
+                <Icon name="alert" className={cn(iconSizeClass)} />
+            )}
+        </button>
+    );
+
+    if (!withTooltip) {
+        return button;
+    }
+
+    return (
+        <Tooltip>
+            <TooltipTrigger asChild>
+                {button}
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={8}>
+                {tooltipLabel}
+            </TooltipContent>
+        </Tooltip>
+    );
+});
+
+type AfkAutoResumeToggleProps = {
+    footerIconButtonClass: string;
+    iconSizeClass: string;
+    loopScopeSessionId: string | null;
+    afkAutoResumeEnabled: boolean;
+    loopDetectionEnabled: boolean;
+    handleAfkAutoResumeToggle: () => void;
+    withTooltip?: boolean;
+};
+
+const AfkAutoResumeToggle = React.memo(function AfkAutoResumeToggle(props: AfkAutoResumeToggleProps) {
+    const {
+        footerIconButtonClass,
+        iconSizeClass,
+        loopScopeSessionId,
+        afkAutoResumeEnabled,
+        loopDetectionEnabled,
+        handleAfkAutoResumeToggle,
+        withTooltip = false,
+    } = props;
+
+    const visible = loopDetectionEnabled && !!loopScopeSessionId;
+    if (!visible) return null;
+
+    const ariaLabel = afkAutoResumeEnabled
+        ? 'Disable AFK auto-resume'
+        : 'Enable AFK auto-resume';
+    const tooltipLabel = afkAutoResumeEnabled
+        ? 'AFK auto-resume on'
+        : 'AFK auto-resume off';
+
+    const button = (
+        <button
+            type="button"
+            onClick={handleAfkAutoResumeToggle}
+            className={cn(
+                footerIconButtonClass,
+                'rounded-md hover:bg-transparent',
+            )}
+            onMouseDown={(event) => {
+                event.preventDefault();
+            }}
+            onPointerDownCapture={(event) => {
+                if (event.pointerType === 'touch') {
+                    event.preventDefault();
+                    event.stopPropagation();
+                }
+            }}
+            aria-pressed={afkAutoResumeEnabled}
+            aria-label={ariaLabel}
+            title={ariaLabel}
+        >
+            {afkAutoResumeEnabled ? (
+                <Icon name="restart" className={cn(iconSizeClass)} style={{ color: 'var(--status-info)' }} />
+            ) : (
+                <Icon name="restart" className={cn(iconSizeClass)} />
             )}
         </button>
     );
@@ -3845,6 +3994,31 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         });
     }, [permissionAutoAcceptEnabled, permissionScopeSessionId, setSessionAutoAccept, t]);
 
+    const loopScopeSessionId = currentSessionId;
+    const loopDetectionEnabled = useLoopDetectionStore((state) => {
+        if (!loopScopeSessionId) return false;
+        return state.isLoopDetectionEnabled(loopScopeSessionId);
+    });
+    const afkAutoResumeEnabled = useLoopDetectionStore((state) => {
+        if (!loopScopeSessionId) return false;
+        return state.isAfkAutoResumeEnabled(loopScopeSessionId);
+    });
+
+    const handleLoopDetectionToggle = React.useCallback(() => {
+        if (!loopScopeSessionId) {
+            toast.error(t('chat.chatInput.toast.openSessionFirst'));
+            return;
+        }
+        const nextEnabled = !loopDetectionEnabled;
+        useLoopDetectionStore.getState().setLoopDetectionEnabled(loopScopeSessionId, nextEnabled);
+    }, [loopDetectionEnabled, loopScopeSessionId, t]);
+
+    const handleAfkAutoResumeToggle = React.useCallback(() => {
+        if (!loopScopeSessionId) return;
+        const nextEnabled = !afkAutoResumeEnabled;
+        useLoopDetectionStore.getState().setAfkAutoResumeEnabled(loopScopeSessionId, nextEnabled);
+    }, [afkAutoResumeEnabled, loopScopeSessionId]);
+
     React.useEffect(() => {
         const pendingAbortBanner = Boolean(abortPromptSessionId) && abortPromptSessionId === currentSessionId;
         if (!prevWasAbortedRef.current && pendingAbortBanner && !showAbortStatus) {
@@ -4387,6 +4561,21 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                             permissionAutoAcceptEnabled={permissionAutoAcceptEnabled}
                                             handlePermissionAutoAcceptToggle={handlePermissionAutoAcceptToggle}
                                         />
+                                        <LoopDetectionToggle
+                                            footerIconButtonClass={footerIconButtonClass}
+                                            iconSizeClass={iconSizeClass}
+                                            loopScopeSessionId={loopScopeSessionId}
+                                            loopDetectionEnabled={loopDetectionEnabled}
+                                            handleLoopDetectionToggle={handleLoopDetectionToggle}
+                                        />
+                                        <AfkAutoResumeToggle
+                                            footerIconButtonClass={footerIconButtonClass}
+                                            iconSizeClass={iconSizeClass}
+                                            loopScopeSessionId={loopScopeSessionId}
+                                            afkAutoResumeEnabled={afkAutoResumeEnabled}
+                                            loopDetectionEnabled={loopDetectionEnabled}
+                                            handleAfkAutoResumeToggle={handleAfkAutoResumeToggle}
+                                        />
                                     </div>
                                     <div className="flex items-center min-w-0 gap-x-1 justify-end">
                                         <div className="flex items-center gap-x-1 min-w-0 max-w-[60vw] flex-shrink">
@@ -4450,6 +4639,23 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                         permissionScopeSessionId={permissionScopeSessionId}
                                         permissionAutoAcceptEnabled={permissionAutoAcceptEnabled}
                                         handlePermissionAutoAcceptToggle={handlePermissionAutoAcceptToggle}
+                                        withTooltip
+                                    />
+                                    <LoopDetectionToggle
+                                        footerIconButtonClass={footerIconButtonClass}
+                                        iconSizeClass={iconSizeClass}
+                                        loopScopeSessionId={loopScopeSessionId}
+                                        loopDetectionEnabled={loopDetectionEnabled}
+                                        handleLoopDetectionToggle={handleLoopDetectionToggle}
+                                        withTooltip
+                                    />
+                                    <AfkAutoResumeToggle
+                                        footerIconButtonClass={footerIconButtonClass}
+                                        iconSizeClass={iconSizeClass}
+                                        loopScopeSessionId={loopScopeSessionId}
+                                        afkAutoResumeEnabled={afkAutoResumeEnabled}
+                                        loopDetectionEnabled={loopDetectionEnabled}
+                                        handleAfkAutoResumeToggle={handleAfkAutoResumeToggle}
                                         withTooltip
                                     />
                                 </div>
