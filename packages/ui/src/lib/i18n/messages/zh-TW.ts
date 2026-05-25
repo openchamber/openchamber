@@ -2311,4 +2311,6 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.preview.console.filter.errors': '錯誤',
   'contextPanel.preview.console.filter.warnings': '警告',
   'contextPanel.preview.console.filter.logs': '日誌',
+  'filesView.tree.actions.refreshTitle': '重新整理',
+  'sidebarFilesTree.actions.fileMenuTitle': '檔案選單',
 };
