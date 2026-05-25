@@ -64,8 +64,16 @@ export function assignLanes(commits: GitLogEntry[]): LanedCommit[] {
   for (let i = 0; i < commits.length; i++) {
     const commit = commits[i];
 
-    // Find which existing lane is waiting for this commit
-    let assignedLane = activeLanes.indexOf(commit.hash);
+    // Find all lanes waiting for this commit
+    const waitingLanes: number[] = [];
+    for (let li = 0; li < activeLanes.length; li++) {
+      if (activeLanes[li] === commit.hash) {
+        waitingLanes.push(li);
+      }
+    }
+
+    // Use the first waiting lane as the commit's lane
+    let assignedLane = waitingLanes.length > 0 ? waitingLanes[0] : -1;
     if (assignedLane === -1) {
       // No existing lane claimed this commit; take the first free lane
       const freeLane = activeLanes.indexOf(null);
@@ -76,6 +84,9 @@ export function assignLanes(commits: GitLogEntry[]): LanedCommit[] {
         activeLanes.push(null);
       }
     }
+
+    // Mark other waiting lanes as converging here (will emit merge-in connectors)
+    const convergingLanes = waitingLanes.slice(1);
 
     const color = laneColor(assignedLane);
     const hasIncoming = activeLanes[assignedLane] === commit.hash;
@@ -117,6 +128,18 @@ export function assignLanes(commits: GitLogEntry[]): LanedCommit[] {
       connectors.push({ fromLane: assignedLane, toLane: assignedLane, color, type: 'bottom-stub' });
     }
     // else: orphan with no parent and no child — just the dot, no lines
+
+    // Merge-in connectors for converging lanes
+    for (const convergingLane of convergingLanes) {
+      connectors.push({
+        fromLane: convergingLane,
+        toLane: assignedLane,
+        color: laneColor(convergingLane),
+        type: 'merge-in',
+      });
+      // Clear the converging lane
+      activeLanes[convergingLane] = null;
+    }
 
     // Branch-out segments for merge commit's extra parents
     for (const extraLane of extraParentLanes) {

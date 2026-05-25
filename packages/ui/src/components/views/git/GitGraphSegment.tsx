@@ -43,7 +43,7 @@ export const GitGraphSegment: React.FC<GitGraphSegmentProps> = ({
           case 'commit-lane':
             // Full-height vertical line
             return (
-              <line key={idx} x1={x1} y1={0} x2={x1} y2="100%" stroke={seg.color} strokeWidth={2} />
+              <line key={idx} x1={x1} y1={0} x2={x1} y2={ROW_HEADER_HEIGHT} stroke={seg.color} strokeWidth={2} />
             );
 
           case 'top-stub':
@@ -55,7 +55,7 @@ export const GitGraphSegment: React.FC<GitGraphSegmentProps> = ({
           case 'bottom-stub':
             // Line from dot center to bottom only
             return (
-              <line key={idx} x1={x1} y1={dotCy} x2={x1} y2="100%" stroke={seg.color} strokeWidth={2} />
+              <line key={idx} x1={x1} y1={dotCy} x2={x1} y2={ROW_HEADER_HEIGHT} stroke={seg.color} strokeWidth={2} />
             );
 
           case 'branch-out':
@@ -63,7 +63,7 @@ export const GitGraphSegment: React.FC<GitGraphSegmentProps> = ({
             return (
               <path
                 key={idx}
-                d={`M ${dotCx} ${dotCy} C ${dotCx} ${dotCy + ROW_HEADER_HEIGHT * 0.6}, ${x2} ${dotCy + ROW_HEADER_HEIGHT * 0.4}, ${x2} 100%`}
+                d={`M ${dotCx} ${dotCy} C ${dotCx} ${dotCy + ROW_HEADER_HEIGHT * 0.6}, ${x2} ${dotCy + ROW_HEADER_HEIGHT * 0.4}, ${x2} ${ROW_HEADER_HEIGHT}`}
                 fill="none"
                 stroke={seg.color}
                 strokeWidth={2}
