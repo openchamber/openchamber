@@ -4,7 +4,7 @@ import os from 'os';
 import path from 'path';
 import simpleGit from 'simple-git';
 
-import { resolveBaseRefForLog, stageFiles, unstageFiles, checkoutCommit } from './service.js';
+import { resolveBaseRefForLog, stageFiles, unstageFiles, checkoutCommit, cherryPick } from './service.js';
 
 async function createTempRepo() {
   const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'git-test-'));
@@ -92,6 +92,64 @@ describe('checkoutCommit', () => {
     const { tmpDir } = await createTempRepo();
     try {
       await expect(checkoutCommit(tmpDir, 'invalidhash123')).rejects.toThrow();
+    } finally {
+      await cleanupTempRepo(tmpDir);
+    }
+  });
+});
+
+describe('cherryPick', () => {
+  it('cherry-picks a commit that applies cleanly', async () => {
+    const { tmpDir, git } = await createTempRepo();
+    try {
+      const filePath = path.join(tmpDir, 'file.txt');
+      await fs.promises.writeFile(filePath, 'line1\nline2\n', 'utf8');
+      await git.add('file.txt');
+      await git.commit('Initial commit');
+
+      // Create a branch and make a change
+      await git.checkoutBranch('feature', 'HEAD');
+      await fs.promises.writeFile(filePath, 'line1\nline2\nline3\n', 'utf8');
+      await git.add('file.txt');
+      const featureCommit = await git.commit('Add line3');
+
+      // Go back to main and cherry-pick the feature commit
+      await git.checkout('main');
+      const result = await cherryPick(tmpDir, featureCommit.commit);
+      expect(result).toEqual({ success: true, conflict: false });
+
+      const content = await fs.promises.readFile(filePath, 'utf8');
+      expect(content).toBe('line1\nline2\nline3\n');
+    } finally {
+      await cleanupTempRepo(tmpDir);
+    }
+  });
+
+  it('returns conflict info when cherry-picking a conflicting commit', async () => {
+    const { tmpDir, git } = await createTempRepo();
+    try {
+      const filePath = path.join(tmpDir, 'file.txt');
+      await fs.promises.writeFile(filePath, 'line1\nline2\n', 'utf8');
+      await git.add('file.txt');
+      await git.commit('Initial commit');
+
+      // Create a branch and change line2
+      await git.checkoutBranch('feature', 'HEAD');
+      await fs.promises.writeFile(filePath, 'line1\nfeature-line2\n', 'utf8');
+      await git.add('file.txt');
+      const featureCommit = await git.commit('Change line2 in feature');
+
+      // Go back to main and change line2 differently
+      await git.checkout('main');
+      await fs.promises.writeFile(filePath, 'line1\nmain-line2\n', 'utf8');
+      await git.add('file.txt');
+      await git.commit('Change line2 in main');
+
+      const result = await cherryPick(tmpDir, featureCommit.commit);
+      expect(result.success).toBe(false);
+      expect(result.conflict).toBe(true);
+      expect(Array.isArray(result.conflictFiles)).toBe(true);
+      expect(result.conflictFiles.length).toBeGreaterThan(0);
     } finally {
       await cleanupTempRepo(tmpDir);
     }

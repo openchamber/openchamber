@@ -785,6 +785,25 @@ export function registerGitRoutes(app) {
     }
   });
 
+  app.post('/api/git/cherry-pick', async (req, res) => {
+    const { cherryPick } = await getGitLibraries();
+    try {
+      const directory = req.query.directory;
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+      const { hash } = req.body;
+      if (!hash) {
+        return res.status(400).json({ error: 'hash is required' });
+      }
+      const result = await cherryPick(directory, hash);
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to cherry-pick:', error);
+      res.status(500).json({ error: error.message || 'Failed to cherry-pick' });
+    }
+  });
+
   app.get('/api/git/worktrees', async (req, res) => {
     const { getWorktrees } = await getGitLibraries();
     try {
