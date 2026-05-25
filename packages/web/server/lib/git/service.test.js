@@ -1,6 +1,23 @@
 import { describe, expect, it } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import simpleGit from 'simple-git';
 
-import { resolveBaseRefForLog, stageFiles, unstageFiles } from './service.js';
+import { resolveBaseRefForLog, stageFiles, unstageFiles, checkoutCommit } from './service.js';
+
+async function createTempRepo() {
+  const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'git-test-'));
+  const git = simpleGit(tmpDir);
+  await git.init();
+  await git.addConfig('user.name', 'Test User', false, 'local');
+  await git.addConfig('user.email', 'test@example.com', false, 'local');
+  return { tmpDir, git };
+}
+
+async function cleanupTempRepo(tmpDir) {
+  await fs.promises.rm(tmpDir, { recursive: true, force: true });
+}
 
 describe('resolveBaseRefForLog', () => {
   it('returns the local ref unchanged when it exists, even if origin also exists', async () => {
@@ -45,5 +62,38 @@ describe('git index path validation', () => {
 
   it('rejects unstage paths outside the repository before invoking git', async () => {
     await expect(unstageFiles('/repo', ['../secret.txt'])).rejects.toThrow('Path is outside repository: ../secret.txt');
+  });
+});
+
+describe('checkoutCommit', () => {
+  it('checks out a valid commit and puts the repo in detached HEAD state', async () => {
+    const { tmpDir, git } = await createTempRepo();
+    try {
+      const filePath = path.join(tmpDir, 'file.txt');
+      await fs.promises.writeFile(filePath, 'first', 'utf8');
+      await git.add('file.txt');
+      const firstCommit = await git.commit('First commit');
+
+      await fs.promises.writeFile(filePath, 'second', 'utf8');
+      await git.add('file.txt');
+      await git.commit('Second commit');
+
+      const result = await checkoutCommit(tmpDir, firstCommit.commit);
+      expect(result).toEqual({ success: true });
+
+      const status = await git.status();
+      expect(status.detached).toBe(true);
+    } finally {
+      await cleanupTempRepo(tmpDir);
+    }
+  });
+
+  it('throws an error for an invalid/nonexistent hash', async () => {
+    const { tmpDir } = await createTempRepo();
+    try {
+      await expect(checkoutCommit(tmpDir, 'invalidhash123')).rejects.toThrow();
+    } finally {
+      await cleanupTempRepo(tmpDir);
+    }
   });
 });

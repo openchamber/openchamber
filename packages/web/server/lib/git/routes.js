@@ -766,6 +766,25 @@ export function registerGitRoutes(app) {
     }
   });
 
+  app.post('/api/git/checkout-commit', async (req, res) => {
+    const { checkoutCommit } = await getGitLibraries();
+    try {
+      const directory = req.query.directory;
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+      const { hash } = req.body;
+      if (!hash) {
+        return res.status(400).json({ error: 'hash is required' });
+      }
+      const result = await checkoutCommit(directory, hash);
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to checkout commit:', error);
+      res.status(500).json({ error: error.message || 'Failed to checkout commit' });
+    }
+  });
+
   app.get('/api/git/worktrees', async (req, res) => {
     const { getWorktrees } = await getGitLibraries();
     try {

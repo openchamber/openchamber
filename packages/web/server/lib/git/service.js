@@ -2531,6 +2531,17 @@ export async function checkoutBranch(directory, branchName) {
   }
 }
 
+export async function checkoutCommit(directory, hash) {
+  const { git } = await createRepositoryGitContext(directory);
+  try {
+    await git.checkout(hash);
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to checkout commit:', error);
+    throw error;
+  }
+}
+
 export async function getWorktrees(directory) {
   const directoryPath = normalizeDirectoryPath(directory);
   if (!directoryPath || !fs.existsSync(directoryPath)) {
