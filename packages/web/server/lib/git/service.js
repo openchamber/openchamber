@@ -2240,11 +2240,17 @@ export async function fetch(directory, options = {}) {
   const { git } = await createRepositoryGitContext(directory);
 
   try {
-    await git.fetch(
-      options.remote || 'origin',
-      options.branch,
-      options.options || {}
-    );
+    // simple-git's git.fetch(remote, branch, options) only appends the remote
+    // to the command when *both* remote and branch are truthy. When only a
+    // remote is supplied (branch is undefined), the command silently degrades
+    // to bare `git fetch` (default remote) instead of `git fetch <remote>`.
+    // Use git.raw() to build the command directly and avoid that limitation.
+    const args = ['fetch'];
+    const remote = options.remote || 'origin';
+    args.push(remote);
+    if (options.branch) args.push(options.branch);
+
+    await git.raw(args);
 
     return { success: true };
   } catch (error) {
