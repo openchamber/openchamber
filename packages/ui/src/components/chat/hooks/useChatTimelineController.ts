@@ -14,6 +14,7 @@ import {
 import type { TurnHistorySignals } from '../lib/turns/historySignals';
 import { getMemoryLimits, type SessionHistoryMeta } from '@/stores/types/sessionTypes';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 
 type ViewportAnchor = { messageId: string; offsetTop: number };
 
@@ -63,12 +64,19 @@ export interface UseChatTimelineControllerResult {
 const TURN_MODEL_CACHE_MAX = 30
 const VSCODE_TURN_MODEL_CACHE_MAX = 4
 const VSCODE_TURN_MODEL_CACHE_MAX_MESSAGES = 30
+const MOBILE_TURN_MODEL_CACHE_MAX = 4
+const MOBILE_TURN_MODEL_CACHE_MAX_MESSAGES = 30
 const turnModelCache = new Map<string, { messages: ChatMessageEntry[]; model: TurnWindowModel }>()
-const getTurnModelCacheMax = () => isVSCodeRuntime() ? VSCODE_TURN_MODEL_CACHE_MAX : TURN_MODEL_CACHE_MAX
+const getTurnModelCacheMax = () => {
+    if (isVSCodeRuntime()) return VSCODE_TURN_MODEL_CACHE_MAX
+    if (isMobileSurfaceRuntime()) return MOBILE_TURN_MODEL_CACHE_MAX
+    return TURN_MODEL_CACHE_MAX
+}
 
 const shouldCacheTurnModelMessages = (messages: ChatMessageEntry[]): boolean => {
-    if (!isVSCodeRuntime()) return true
-    return messages.length <= VSCODE_TURN_MODEL_CACHE_MAX_MESSAGES
+    if (isVSCodeRuntime()) return messages.length <= VSCODE_TURN_MODEL_CACHE_MAX_MESSAGES
+    if (isMobileSurfaceRuntime()) return messages.length <= MOBILE_TURN_MODEL_CACHE_MAX_MESSAGES
+    return true
 }
 
 const rememberTurnModel = (key: string, value: { messages: ChatMessageEntry[]; model: TurnWindowModel }) => {

@@ -1,3 +1,11 @@
+## [1.11.5] - 2026-05-25
+
+- Chat/Input: pending image attachments now show previews, sent image attachments can be cited from assistant messages, and markdown source mode highlights formatting while you type.
+- Chat: queued messages now send to the session they were queued from, even if you switch sessions before they are sent.
+- Chat/UI: chats keep following the latest response after final task summaries, activity reasoning no longer flashes before settling, and assistant timestamps stay visible on narrow layouts.
+- Settings/Skills: installed skills are discovered more accurately, skill files opened from tool messages now load correctly, and snippet names keep their canonical casing (thanks to @jkker, @isanchez404).
+- Voice: OpenAI-compatible custom speech providers can now use API keys (thanks to @yangyaofei).
+
 ## [1.11.4] - 2026-05-22
 
 - Sessions: switching between chat sessions now keeps less inactive message history in the webview, especially after opening large conversations.
@@ -384,7 +392,7 @@
 ## [1.5.9] - 2026-01-28
 
 - Agent Manager: migrated to the OpenCode SDK worktree implementation; sessions in worktrees are now completely isolated.
-- Agent Manager: worktree setup commands are now persistant per project and automatically saved/restored.
+- Agent Manager: worktree setup commands are now persistent per project and automatically saved/restored.
 
 
 ## [1.5.8] - 2026-01-26

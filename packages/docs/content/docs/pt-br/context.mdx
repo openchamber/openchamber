@@ -1,0 +1,38 @@
+---
+title: Contexto
+description: Veja quanto da memória do modelo uma sessão está usando.
+---
+
+# Contexto
+
+Todo modelo só consegue manter uma certa quantidade de uma conversa de uma vez — o seu contexto. O OpenChamber mostra o quão cheio isso está, para que você saiba quando uma sessão está chegando perto do limite e uma resposta pode começar a descartar detalhes mais antigos.
+
+## O indicador rápido
+
+Enquanto você conversa, um pequeno medidor mostra a porcentagem de contexto usada. Ele muda de cor conforme você enche:
+
+- verde — bastante espaço
+- amarelo — ficando cheio (cerca de três quartos)
+- vermelho — quase cheio
+
+Passe o mouse sobre ele (ou toque nele no celular) para ver as contagens exatas de tokens.
+
+## O painel completo de contexto
+
+Abra a aba **Context** na barra lateral direita para uma visão mais completa da sessão atual:
+
+- o modelo em uso e quando a sessão começou
+- total de tokens em relação ao limite do modelo
+- totais de mensagens e custo
+- um detalhamento dos tokens da última resposta
+- uma divisão aproximada do que está ocupando o contexto (suas mensagens, as do agente, saída de ferramentas)
+
+O detalhamento é uma estimativa, não uma contagem exata — use-o para identificar o que está enchendo a janela, não para faturamento.
+
+## O que fazer quando está cheio
+
+Comece uma sessão nova para uma nova tarefa em vez de deixar uma sessão crescer para sempre. Um contexto mais curto é mais rápido e mantém o modelo focado.
+
+## Relacionado
+
+- [Projetos](/pt-br/projects/) — as sessões são agrupadas por projeto

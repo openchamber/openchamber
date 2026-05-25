@@ -1,0 +1,32 @@
+---
+title: Preview & Dev Servers
+description: Open a running dev server inside OpenChamber.
+---
+
+# Preview & Dev Servers
+
+When you start a dev server, OpenChamber can open it right inside the app instead of a separate browser tab — so you can see your site next to the chat, capture its console, and point at elements to ask about them.
+
+## Open a preview
+
+OpenChamber watches terminal output for a local address (the `Local:` line that tools like Vite, Next.js, or Astro print). When it spots one:
+
+- in the terminal, an **Open preview** button appears
+- a [project action](/project-actions/) with auto-open turned on opens it for you
+- a local link in a chat message can open it too
+
+The site loads in the side panel. Only local addresses (on your own machine) can be previewed.
+
+## Console and inspect
+
+In the preview panel you can:
+
+- watch the page's **console** — errors, warnings, and logs, filtered however you like
+- turn on **inspect**, click any element, and send a note about it — selector, styles, position, and a screenshot — straight into chat
+
+This is the fastest way to tell the agent "this button, here" without describing it.
+
+## Related
+
+- [Project Actions](/project-actions/) — auto-open a server when you start it
+- [Desktop Browser](/desktop-browser/) — the same tools for any page, on desktop

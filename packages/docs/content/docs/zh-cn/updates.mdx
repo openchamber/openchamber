@@ -1,0 +1,31 @@
+---
+title: 更新
+description: 在桌面端、网页端和 VS Code 上保持 OpenChamber 最新。
+---
+
+# 更新
+
+你如何更新 OpenChamber 取决于你如何安装它。在任何情况下，你都可以在 **Settings → OpenChamber → About** 查看你的当前版本。
+
+## 桌面应用
+
+桌面应用会对照 GitHub 发布版本检查更新。当有可用更新时，OpenChamber 会告诉你，在你选择时下载它，并在下次重启时安装它。一切都由你掌控 — 没有你的同意不会安装任何东西。
+
+## 网页端 / CLI
+
+如果你安装的是 CLI，可以从 **About** 用检查和更新按钮更新它，或从终端更新：
+
+```bash
+openchamber update
+```
+
+OpenChamber 会检测它是如何安装的（npm、pnpm、yarn 或 bun），并为你运行正确的更新。
+
+## OpenCode 服务器
+
+OpenChamber 和 OpenCode 分别更新。当有新的 OpenCode 版本可用时，OpenChamber 会提议更新它，并在之后重启服务器。关于该服务器如何被管理，请参阅 [OpenCode Server](/zh-cn/opencode-server/)。
+
+## 相关内容
+
+- [安装](/zh-cn/install/) — 每个应用最初是如何安装的
+- [OpenCode Server](/zh-cn/opencode-server/) — 更新底层服务器

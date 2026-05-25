@@ -1,0 +1,30 @@
+---
+title: MCP Servers
+description: Add MCP servers to give agents extra tools.
+---
+
+# MCP Servers
+
+An MCP server gives your agents extra tools — things like searching a database, calling an API, or reading a service you use. Add them in **Settings → MCP**.
+
+## Add a server
+
+1. Open **Settings → MCP**.
+2. Add a server and choose its type:
+   - **local** — OpenChamber runs a command on your machine. You give it the command to run and, if needed, environment variables.
+   - **remote** — OpenChamber connects to a URL someone else hosts. You give it the URL and any headers it needs (for example an auth token).
+3. Save. The server is on by default; you can turn it off without deleting it.
+
+## Where it applies
+
+Pick the scope when you add a server:
+
+- **personal** — available in every project
+- **project** — available only in the current project, and saved alongside the project's other settings
+
+Server names use lowercase letters, numbers, hyphens, and underscores.
+
+## Related
+
+- [Providers, Models & Agents](/providers/) — connect a model first
+- [Skills](/skills/) — another way to extend what agents can do

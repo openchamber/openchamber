@@ -38,6 +38,33 @@ export const buildQueuedAutoSendPayload = (queue: QueuedMessage[]) => {
   };
 };
 
+type QueuedAutoSendPayload = NonNullable<ReturnType<typeof buildQueuedAutoSendPayload>>;
+type ResolvedQueuedSendConfig = {
+  providerID: string;
+  modelID: string;
+  agent?: string;
+  variant?: string;
+};
+
+export const sendQueuedAutoSendPayload = (
+  sessionId: string,
+  payload: QueuedAutoSendPayload,
+  resolved: ResolvedQueuedSendConfig,
+) => {
+  return useSessionUIStore.getState().sendMessage(
+    payload.primaryText,
+    resolved.providerID,
+    resolved.modelID,
+    resolved.agent,
+    payload.primaryAttachments,
+    payload.agentMentionName,
+    undefined,
+    resolved.variant,
+    'normal',
+    { sessionId },
+  );
+};
+
 const resolveSessionSendConfig = (sessionId: string) => {
   const context = useContextStore.getState();
   const config = useConfigStore.getState();
@@ -128,17 +155,12 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
       inFlightSessionsRef.current.add(sessionId);
 
       try {
-        await useSessionUIStore.getState().sendMessage(
-          payload.primaryText,
-          resolved.providerID,
-          resolved.modelID,
-          resolved.agent,
-          payload.primaryAttachments,
-          payload.agentMentionName,
-          undefined,
-          resolved.variant,
-          'normal'
-        );
+        await sendQueuedAutoSendPayload(sessionId, payload, {
+          providerID: resolved.providerID,
+          modelID: resolved.modelID,
+          agent: resolved.agent,
+          variant: resolved.variant,
+        });
 
         const removeFromQueue = useMessageQueueStore.getState().removeFromQueue;
         removeFromQueue(sessionId, payload.queuedMessageId);

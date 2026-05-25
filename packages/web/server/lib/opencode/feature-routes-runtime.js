@@ -196,6 +196,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     const {
       getSkillSources,
       discoverSkills,
+      mergeDiscoveredSkills,
       createSkill,
       updateSkill,
       deleteSkill,
@@ -236,6 +237,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       getOpenCodePort,
       getSkillSources,
       discoverSkills,
+      mergeDiscoveredSkills,
       createSkill,
       updateSkill,
       deleteSkill,

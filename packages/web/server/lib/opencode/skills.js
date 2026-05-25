@@ -21,6 +21,8 @@ import {
   findWorktreeRoot,
 } from './shared.js';
 
+const BUILT_IN_SKILL_LOCATION = '<built-in>';
+
 function ensureProjectSkillDir(workingDirectory) {
   const projectSkillDir = path.join(workingDirectory, '.opencode', 'skills');
   if (!fs.existsSync(projectSkillDir)) {
@@ -236,7 +238,39 @@ function discoverSkills(workingDirectory) {
   return Array.from(skills.values());
 }
 
+function mergeDiscoveredSkills(primarySkills = [], fallbackSkills = []) {
+  const merged = [];
+  const seenNames = new Set();
+
+  const appendSkill = (skill) => {
+    const name = typeof skill?.name === 'string' ? skill.name.trim() : '';
+    if (!name || seenNames.has(name)) {
+      return;
+    }
+    seenNames.add(name);
+    merged.push(skill);
+  };
+
+  for (const skill of primarySkills || []) {
+    appendSkill(skill);
+  }
+  for (const skill of fallbackSkills || []) {
+    appendSkill(skill);
+  }
+
+  return merged;
+}
+
 function getSkillSources(skillName, workingDirectory, discoveredSkill = null) {
+  const isReadableFile = (filePath) => {
+    if (!filePath) return false;
+    try {
+      return fs.statSync(filePath).isFile();
+    } catch {
+      return false;
+    }
+  };
+
   const projectPath = workingDirectory ? getProjectSkillPath(workingDirectory, skillName) : null;
   const projectExists = projectPath && fs.existsSync(projectPath);
   const projectDir = projectExists ? path.dirname(projectPath) : null;
@@ -259,17 +293,33 @@ function getSkillSources(skillName, workingDirectory, discoveredSkill = null) {
   const matchedDiscovered = discoveredSkill && discoveredSkill.name === skillName
     ? discoveredSkill
     : discoverSkills(workingDirectory).find((skill) => skill.name === skillName);
+  const discoveredDescription =
+    matchedDiscovered && typeof matchedDiscovered.description === 'string'
+      ? matchedDiscovered.description
+      : '';
+  const discoveredContent =
+    matchedDiscovered && typeof matchedDiscovered.content === 'string'
+      ? matchedDiscovered.content
+      : '';
+  const discoveredPath =
+    matchedDiscovered && typeof matchedDiscovered.path === 'string'
+      ? matchedDiscovered.path
+      : null;
+  const isBuiltInDiscovered = discoveredPath === BUILT_IN_SKILL_LOCATION;
   
   let mdPath = null;
   let mdScope = null;
   let mdSource = null;
   let mdDir = null;
   
-  if (matchedDiscovered?.path) {
-    mdPath = matchedDiscovered.path;
+  if (isBuiltInDiscovered) {
+    mdScope = matchedDiscovered.scope || SKILL_SCOPE.USER;
+    mdSource = matchedDiscovered.source || 'opencode';
+  } else if (discoveredPath) {
+    mdPath = discoveredPath;
     mdScope = matchedDiscovered.scope || null;
     mdSource = matchedDiscovered.source || null;
-    mdDir = path.dirname(matchedDiscovered.path);
+    mdDir = isReadableFile(discoveredPath) ? path.dirname(discoveredPath) : null;
   } else if (projectExists) {
     mdPath = projectPath;
     mdScope = SKILL_SCOPE.PROJECT;
@@ -297,10 +347,12 @@ function getSkillSources(skillName, workingDirectory, discoveredSkill = null) {
     mdDir = userAgentsDir;
   }
   
-  const mdExists = !!mdPath && fs.existsSync(mdPath);
+  const mdExists = isBuiltInDiscovered || isReadableFile(mdPath);
   if (!mdExists) {
     mdPath = null;
     mdDir = null;
+    mdScope = null;
+    mdSource = null;
   }
 
   const sources = {
@@ -310,8 +362,11 @@ function getSkillSources(skillName, workingDirectory, discoveredSkill = null) {
       dir: mdDir,
       scope: mdScope,
       source: mdSource,
-      fields: [],
-      supportingFiles: []
+      fields: isBuiltInDiscovered ? ['description', 'instructions'] : [],
+      supportingFiles: [],
+      name: matchedDiscovered?.name || skillName,
+      description: discoveredDescription,
+      instructions: isBuiltInDiscovered ? discoveredContent : ''
     },
     projectMd: {
       exists: projectExists,
@@ -542,6 +597,7 @@ export {
   getSkillScope,
   getSkillWritePath,
   discoverSkills,
+  mergeDiscoveredSkills,
   createSkill,
   updateSkill,
   deleteSkill,

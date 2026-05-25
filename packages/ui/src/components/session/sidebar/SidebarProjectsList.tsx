@@ -16,6 +16,7 @@ import type { SortableDragHandleProps } from './sortableItems';
 import { SortableGroupItem, SortableProjectItem } from './sortableItems';
 import { formatProjectLabel } from './utils';
 import { useI18n } from '@/lib/i18n';
+import type { MainTab } from '@/stores/useUIStore';
 
 type ProjectSection = {
   project: {
@@ -50,7 +51,7 @@ type Props = {
   alwaysShowActions: boolean;
   toggleProject: (id: string) => void;
   setActiveProjectIdOnly: (id: string) => void;
-  setActiveMainTab: (tab: 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files') => void;
+  setActiveMainTab: (tab: MainTab) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
   openNewSessionDraft: (options?: { directoryOverride?: string | null }) => void;
   openNewWorktreeDialog: () => void;

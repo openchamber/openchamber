@@ -1343,6 +1343,45 @@ export const Header: React.FC<HeaderProps> = ({
 
   const desktopHeaderIconButtonClass = DESKTOP_HEADER_ICON_BUTTON_CLASS;
   const mobileHeaderIconButtonClass = MOBILE_HEADER_ICON_BUTTON_CLASS;
+  const mobileActiveHeaderItem = React.useMemo(() => {
+    if (isMobileRateLimitsOpen) {
+      return 'services';
+    }
+    if (leftDrawerOpen) {
+      return 'sessions';
+    }
+    if (rightDrawerOpen) {
+      return 'git';
+    }
+    return activeMainTab;
+  }, [activeMainTab, isMobileRateLimitsOpen, leftDrawerOpen, rightDrawerOpen]);
+
+  const closeMobileHeaderPanels = React.useCallback(() => {
+    setIsMobileRateLimitsOpen(false);
+    if (leftDrawerOpen && onToggleLeftDrawer) {
+      onToggleLeftDrawer();
+    }
+    if (rightDrawerOpen && onToggleRightDrawer) {
+      onToggleRightDrawer();
+    }
+    if (!onToggleLeftDrawer && isSessionSwitcherOpen) {
+      setSessionSwitcherOpen(false);
+    }
+  }, [isSessionSwitcherOpen, leftDrawerOpen, onToggleLeftDrawer, onToggleRightDrawer, rightDrawerOpen, setSessionSwitcherOpen]);
+
+  const handleMobileLeftDrawerToggle = React.useCallback(() => {
+    if (!leftDrawerOpen) {
+      setIsMobileRateLimitsOpen(false);
+    }
+    onToggleLeftDrawer?.();
+  }, [leftDrawerOpen, onToggleLeftDrawer]);
+
+  const handleMobileRightDrawerToggle = React.useCallback(() => {
+    if (!rightDrawerOpen) {
+      setIsMobileRateLimitsOpen(false);
+    }
+    onToggleRightDrawer?.();
+  }, [onToggleRightDrawer, rightDrawerOpen]);
 
   const desktopPaddingClass = React.useMemo(() => {
     if ((isDesktopApp && isMacPlatform && !isDesktopWindowFullscreen) || isTabletStandalonePwa) {
@@ -1506,6 +1545,7 @@ export const Header: React.FC<HeaderProps> = ({
         { id: 'diff', label: t('layout.mainTab.diff'), icon: 'diff' },
         { id: 'files', label: t('layout.mainTab.files'), icon: "folder-6" },
         { id: 'terminal', label: t('layout.mainTab.terminal'), icon: "terminal-box" },
+        { id: 'context', label: t('layout.mainTab.context'), icon: "file-list-2" },
       );
 
       return base;
@@ -1520,7 +1560,7 @@ export const Header: React.FC<HeaderProps> = ({
   }, [shortcutOverrides]);
 
   useEffect(() => {
-    if (!isMobile && (activeMainTab === 'git' || activeMainTab === 'terminal' || activeMainTab === 'diff' || activeMainTab === 'files')) {
+    if (!isMobile && (activeMainTab === 'git' || activeMainTab === 'terminal' || activeMainTab === 'diff' || activeMainTab === 'files' || activeMainTab === 'context')) {
       setActiveMainTab('chat');
     }
   }, [activeMainTab, isMobile, setActiveMainTab]);
@@ -1626,13 +1666,17 @@ export const Header: React.FC<HeaderProps> = ({
         const num = parseInt(e.key, 10);
         if (num >= 1 && num <= tabs.length) {
           e.preventDefault();
+          if (isMobile) {
+            blurActiveElement();
+            closeMobileHeaderPanels();
+          }
           setActiveMainTab(tabs[num - 1].id);
         }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [tabs, setActiveMainTab]);
+  }, [blurActiveElement, closeMobileHeaderPanels, isMobile, setActiveMainTab, tabs]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1938,10 +1982,10 @@ export const Header: React.FC<HeaderProps> = ({
         {onToggleLeftDrawer ? (
           <button
             type="button"
-            onClick={onToggleLeftDrawer}
+            onClick={handleMobileLeftDrawerToggle}
             className={cn(
               mobileHeaderIconButtonClass,
-              leftDrawerOpen && 'bg-interactive-selection text-interactive-selection-foreground'
+              mobileActiveHeaderItem === 'sessions' && 'bg-interactive-selection text-interactive-selection-foreground'
             )}
             aria-label={leftDrawerOpen ? t('header.actions.closeSessionsAria') : t('header.actions.openSessionsAria')}
           >
@@ -1967,13 +2011,12 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
         )}
 
-        {isSessionSwitcherOpen && (
+        {!onToggleLeftDrawer && isSessionSwitcherOpen && (
           <span className="typography-ui-label font-semibold text-foreground">{t('header.sessions.title')}</span>
         )}
       </div>
 
-      {/* Hide tabs and right-side buttons when sessions sidebar is open */}
-      {!isSessionSwitcherOpen && (
+      {(!isSessionSwitcherOpen || Boolean(onToggleLeftDrawer)) && (
         <>
           <div className="app-region-no-drag flex min-w-0 flex-1 items-center">
             <div className="flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden scrollbar-hidden touch-pan-x overscroll-x-contain">
@@ -1995,6 +2038,7 @@ export const Header: React.FC<HeaderProps> = ({
                             onClick={() => {
                               if (isMobile) {
                                 blurActiveElement();
+                                closeMobileHeaderPanels();
                               }
                               setActiveMainTab(tab.id);
                             }}
@@ -2004,7 +2048,7 @@ export const Header: React.FC<HeaderProps> = ({
                             className={cn(
                               mobileHeaderIconButtonClass,
                               'relative rounded-lg',
-                              isActive && 'bg-interactive-selection text-interactive-selection-foreground'
+                              mobileActiveHeaderItem === tab.id && 'bg-interactive-selection text-interactive-selection-foreground'
                             )}
                           >
                             {isDiffTab ? (
@@ -2051,6 +2095,14 @@ export const Header: React.FC<HeaderProps> = ({
             <DropdownMenu
               open={isMobileRateLimitsOpen}
               onOpenChange={(open) => {
+                if (open) {
+                  if (leftDrawerOpen && onToggleLeftDrawer) {
+                    onToggleLeftDrawer();
+                  }
+                  if (rightDrawerOpen && onToggleRightDrawer) {
+                    onToggleRightDrawer();
+                  }
+                }
                 setIsMobileRateLimitsOpen(open);
                 if (open && quotaResults.length === 0) {
                   fetchAllQuotas();
@@ -2063,7 +2115,10 @@ export const Header: React.FC<HeaderProps> = ({
                     <button
                       type="button"
                       aria-label={t('header.services.viewAria')}
-                      className={mobileHeaderIconButtonClass}
+                      className={cn(
+                        mobileHeaderIconButtonClass,
+                        mobileActiveHeaderItem === 'services' && 'bg-interactive-selection text-interactive-selection-foreground'
+                      )}
                     >
                       <Icon name="stack" className="h-5 w-5" />
                     </button>
@@ -2076,10 +2131,11 @@ export const Header: React.FC<HeaderProps> = ({
               <DropdownMenuContent
                 align="end"
                 sideOffset={0}
-                className="h-dvh w-[100vw] max-h-none rounded-none border-0 p-0 overflow-hidden"
+                positionerClassName="!fixed !bottom-0 !left-0 !right-0 !top-[var(--oc-header-height,56px)] !transform-none"
+                className="h-full w-screen max-h-none rounded-none border-0 p-0 pt-1 overflow-hidden"
               >
                 <div className="flex h-full flex-col bg-[var(--surface-elevated)]">
-          <div className="sticky top-0 z-20 bg-[var(--surface-elevated)] px-2 py-px">
+                  <div className="sticky top-0 z-20 bg-[var(--surface-elevated)] px-2 py-px">
                     <div className="flex items-center justify-between gap-2 px-3 py-0">
                       <div className="h-10 min-w-0 flex-1">
                         <SortableTabsStrip
@@ -2318,11 +2374,11 @@ export const Header: React.FC<HeaderProps> = ({
                 <TooltipTrigger asChild>
                   <button
                     type="button"
-                    onClick={onToggleRightDrawer}
+                    onClick={handleMobileRightDrawerToggle}
                     className={cn(
                       mobileHeaderIconButtonClass,
                       'relative',
-                      rightDrawerOpen && 'bg-interactive-selection text-interactive-selection-foreground'
+                      mobileActiveHeaderItem === 'git' && 'bg-interactive-selection text-interactive-selection-foreground'
                     )}
                     aria-label={rightDrawerOpen ? 'Close git sidebar' : 'Open git sidebar'}
                   >

@@ -35,6 +35,7 @@ export {
   getSkillSources,
   getSkillScope,
   discoverSkills,
+  mergeDiscoveredSkills,
   createSkill,
   updateSkill,
   deleteSkill,

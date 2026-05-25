@@ -12,6 +12,10 @@ import { MarkdownRenderer } from '../../MarkdownRenderer';
 import { useStreamingTextThrottle } from '../../hooks/useStreamingTextThrottle';
 import type { StreamPhase } from '../types';
 
+const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-4 sm:!leading-6 tracking-normal';
+const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
+const TOOL_ROW_DESCRIPTION_CLASS = cn('typography-meta', TOOL_ROW_TEXT_CLASS);
+
 type PartWithText = Part & { text?: string; content?: string; time?: { start?: number; end?: number } };
 
 export type ReasoningVariant = 'thinking' | 'justification';
@@ -30,7 +34,7 @@ const cleanReasoningText = (text: string): string => {
 };
 
 const SUMMARY_MAX_CHARS = 80;
-const INLINE_THRESHOLD = 120;
+const EXPANDED_CONTENT_UNMOUNT_DELAY_MS = 350;
 const EXPANDED_CONTENT_SPRING = { type: 'spring' as const, visualDuration: 0.35, bounce: 0 };
 
 /** Strip common markdown syntax so the header preview reads as plain text. */
@@ -85,6 +89,11 @@ type ReasoningTimelineBlockProps = {
     defaultExpanded?: boolean;
 };
 
+type ExpansionState = {
+    expanded: boolean;
+    source: 'auto' | 'user';
+};
+
 export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
     text,
     variant,
@@ -97,15 +106,22 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
 }) => {
     const { t } = useI18n();
     const hasEnded = typeof time?.end === 'number';
-    const [isExpanded, setIsExpanded] = React.useState(hasEnded ? false : (defaultExpanded ?? isStreaming));
+    const canAutoExpand = isStreaming && !hasEnded;
+    const [expansion, setExpansion] = React.useState<ExpansionState>(() => {
+        if (defaultExpanded === true) {
+            return { expanded: true, source: 'user' };
+        }
+        return { expanded: canAutoExpand, source: 'auto' };
+    });
+    const isExpanded = expansion.source === 'auto'
+        ? canAutoExpand && expansion.expanded
+        : expansion.expanded;
+    const [shouldRenderExpandedContent, setShouldRenderExpandedContent] = React.useState(defaultExpanded === true || canAutoExpand);
     const contentId = React.useId();
     const scrollRef = React.useRef<HTMLElement>(null);
     const contentRef = React.useRef<HTMLDivElement>(null);
     const contentAnimationRef = React.useRef<AnimationPlaybackControls | null>(null);
     const contentMountedRef = React.useRef(false);
-    // Track previous isStreaming so the effect only collapses on true→false
-    // transitions and does NOT override defaultExpanded on initial mount.
-    const prevIsStreamingRef = React.useRef(isStreaming);
 
     const summary = React.useMemo(() => getReasoningSummary(text), [text]);
     const toggleAriaLabel = isExpanded
@@ -113,9 +129,10 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
         : t('chat.reasoningTrace.expandAria');
 
     const handleToggle = React.useCallback(() => {
-        setIsExpanded((prev) => !prev);
+        setShouldRenderExpandedContent(true);
+        setExpansion({ expanded: !isExpanded, source: 'user' });
         onContentChange?.('structural');
-    }, [onContentChange]);
+    }, [isExpanded, onContentChange]);
 
     const handleKeyDown = React.useCallback((event: React.KeyboardEvent) => {
         if (event.key === 'Enter' || event.key === ' ') {
@@ -124,15 +141,17 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
         }
     }, [handleToggle]);
 
-    React.useEffect(() => {
-        const wasStreaming = prevIsStreamingRef.current;
-        prevIsStreamingRef.current = isStreaming;
-        // Auto-collapse when live streaming ends or when an end timestamp arrives.
-        // Completed blocks initialize collapsed, so historical loads do not animate closed.
-        if (hasEnded || (wasStreaming && !isStreaming)) {
-            setIsExpanded(false);
-        }
-    }, [hasEnded, isStreaming]);
+    React.useLayoutEffect(() => {
+        setExpansion((prev) => {
+            if (prev.source === 'user') {
+                return prev;
+            }
+            if (prev.expanded === canAutoExpand) {
+                return prev;
+            }
+            return { expanded: canAutoExpand, source: 'auto' };
+        });
+    }, [canAutoExpand]);
 
     React.useEffect(() => {
         if (text.trim().length === 0) {
@@ -147,6 +166,30 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
         }
     }, [text, isStreaming, isExpanded]);
 
+    React.useEffect(() => {
+        if (isExpanded || isStreaming) {
+            setShouldRenderExpandedContent(true);
+            return;
+        }
+
+        if (!shouldRenderExpandedContent) {
+            return;
+        }
+
+        if (typeof window === 'undefined') {
+            setShouldRenderExpandedContent(false);
+            return;
+        }
+
+        const timer = window.setTimeout(() => {
+            setShouldRenderExpandedContent(false);
+        }, EXPANDED_CONTENT_UNMOUNT_DELAY_MS);
+
+        return () => {
+            window.clearTimeout(timer);
+        };
+    }, [isExpanded, isStreaming, shouldRenderExpandedContent]);
+
     React.useLayoutEffect(() => {
         const element = contentRef.current;
         if (!element) {
@@ -157,10 +200,39 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
 
         if (!contentMountedRef.current) {
             contentMountedRef.current = true;
-            element.style.height = isExpanded ? 'auto' : '0px';
-            element.style.opacity = isExpanded ? '1' : '0';
-            element.style.overflow = isExpanded ? 'visible' : 'hidden';
-            return;
+            if (!isExpanded) {
+                element.style.height = '0px';
+                element.style.opacity = '0';
+                element.style.overflow = 'hidden';
+                return;
+            }
+
+            element.style.height = '0px';
+            element.style.opacity = '0';
+            element.style.overflow = 'hidden';
+
+            const animation = animate(
+                element,
+                { height: 'auto', opacity: 1 },
+                EXPANDED_CONTENT_SPRING,
+            );
+            contentAnimationRef.current = animation;
+
+            void animation.finished.then(() => {
+                if (contentAnimationRef.current !== animation) {
+                    return;
+                }
+                contentAnimationRef.current = null;
+                element.style.overflow = 'visible';
+                element.style.height = 'auto';
+            }).catch(() => undefined);
+
+            return () => {
+                animation.stop();
+                if (contentAnimationRef.current === animation) {
+                    contentAnimationRef.current = null;
+                }
+            };
         }
 
         element.style.overflow = 'hidden';
@@ -212,34 +284,8 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
         return null;
     }
 
-    const isShort = !isStreaming && text.trim().length < INLINE_THRESHOLD;
-
-    // Short blocks: render content directly without a collapsible toggle.
-    if (isShort) {
-        return (
-            <div className="my-1" data-reasoning-block-id={blockId} data-message-text-export-root="true">
-                <div data-message-text-export-source="true">
-                    <MarkdownRenderer
-                        content={text}
-                        messageId={blockId}
-                        isAnimated={false}
-                        isStreaming={false}
-                        variant="reasoning"
-                    />
-                </div>
-                {actions ? (
-                    <div className="mt-2 mb-1 flex items-center justify-start gap-1.5" data-message-actions="true">
-                        <div className="flex items-center gap-1.5" data-message-action-group="true">
-                            {actions}
-                        </div>
-                    </div>
-                ) : null}
-            </div>
-        );
-    }
-
     return (
-        <div className="my-1" data-reasoning-block-id={blockId} data-message-text-export-root="true">
+        <div data-reasoning-block-id={blockId} data-message-text-export-root="true">
             <div
                 role="button"
                 tabIndex={0}
@@ -247,7 +293,7 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                 aria-controls={contentId}
                 aria-label={toggleAriaLabel}
                 className={cn(
-                    'group/tool flex gap-1.5 pr-2 pl-px py-2 rounded-xl cursor-pointer items-center',
+                    'group/tool flex gap-1.5 pr-2 pl-px py-1.5 rounded-xl cursor-pointer items-center',
                 )}
                 onClick={handleToggle}
                 onKeyDown={handleKeyDown}
@@ -277,20 +323,20 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                     </div>
 
                     {isStreaming ? (
-                        <span className="flex items-center gap-1 typography-meta font-medium" style={{ color: 'var(--tools-title)' }}>
+                        <span className={cn('flex items-center gap-1', TOOL_ROW_TITLE_CLASS)} style={{ color: 'var(--tools-title)' }}>
                             <span>{t(variant === 'justification' ? 'chat.reasoningTrace.justification' : 'chat.reasoningTrace.thinking')}</span>
                             <BusyDots />
                         </span>
                     ) : isExpanded ? (
                         <span
-                            className="typography-meta font-medium"
+                            className={TOOL_ROW_TITLE_CLASS}
                             style={{ color: 'var(--tools-title)' }}
                         >
                             {t(variant === 'justification' ? 'chat.reasoningTrace.justification' : 'chat.reasoningTrace.thinking')}
                         </span>
                     ) : (
                         <span
-                            className="typography-meta font-medium"
+                            className={TOOL_ROW_TITLE_CLASS}
                             style={{ color: 'var(--tools-title)' }}
                         >
                             {t(variant === 'justification' ? 'chat.reasoningTrace.justification' : 'chat.reasoningTrace.thinking')}
@@ -298,10 +344,10 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                     )}
                 </div>
 
-                <div className="flex items-center gap-1 flex-1 min-w-0 typography-meta" style={{ color: 'var(--tools-description)' }}>
+                <div className={cn('flex items-center gap-1 flex-1 min-w-0', TOOL_ROW_DESCRIPTION_CLASS)} style={{ color: 'var(--tools-description)' }}>
                     {!isStreaming && !isExpanded && summary ? (
                         <span
-                            className="min-w-0 truncate typography-meta"
+                            className={cn('min-w-0 truncate', TOOL_ROW_DESCRIPTION_CLASS)}
                             style={{ color: 'var(--tools-description)', opacity: 0.8 }}
                             title={summary}
                         >
@@ -313,52 +359,53 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                 </div>
             </div>
 
-            {/* Expanded content — keep mounted so auto-collapse can animate smoothly. */}
-            <div
-                ref={contentRef}
-                id={contentId}
-                aria-hidden={!isExpanded}
-                style={{
-                    height: isExpanded ? 'auto' : '0px',
-                    opacity: isExpanded ? 1 : 0,
-                    overflow: isExpanded ? 'visible' : 'hidden',
-                    overflowAnchor: 'none',
-                }}
-            >
-                <div className="relative ml-2 pl-3 pb-1 pt-0.5">
-                    <span
-                        aria-hidden="true"
-                        className="pointer-events-none absolute left-0 top-0 bottom-0 w-px"
-                        style={{ backgroundColor: 'var(--tools-border)' }}
-                    />
-                    <ScrollableOverlay
-                        ref={scrollRef}
-                        as="div"
-                        outerClassName="max-h-80"
-                        className="p-0"
-                        useScrollShadow
-                        scrollShadowSize={36}
-                        userIntentOnly
-                    >
-                        <div data-message-text-export-source="true">
-                            <MarkdownRenderer
-                                content={text}
-                                messageId={blockId}
-                                isAnimated={false}
-                                isStreaming={isStreaming}
-                                variant="reasoning"
-                            />
-                        </div>
-                        {actions ? (
-                            <div className="mt-2 mb-1 flex items-center justify-start gap-1.5" data-message-actions="true">
-                                <div className="flex items-center gap-1.5" data-message-action-group="true">
-                                    {actions}
-                                </div>
+            {shouldRenderExpandedContent ? (
+                <div
+                    ref={contentRef}
+                    id={contentId}
+                    aria-hidden={!isExpanded}
+                    style={{
+                        height: isExpanded ? 'auto' : '0px',
+                        opacity: isExpanded ? 1 : 0,
+                        overflow: isExpanded ? 'visible' : 'hidden',
+                        overflowAnchor: 'none',
+                    }}
+                >
+                    <div className="relative ml-2 pl-3 pb-1 pt-0.5">
+                        <span
+                            aria-hidden="true"
+                            className="pointer-events-none absolute left-0 top-0 bottom-0 w-px"
+                            style={{ backgroundColor: 'var(--tools-border)' }}
+                        />
+                        <ScrollableOverlay
+                            ref={scrollRef}
+                            as="div"
+                            outerClassName="max-h-80"
+                            className="p-0"
+                            useScrollShadow
+                            scrollShadowSize={36}
+                            userIntentOnly
+                        >
+                            <div data-message-text-export-source="true">
+                                <MarkdownRenderer
+                                    content={text}
+                                    messageId={blockId}
+                                    isAnimated={false}
+                                    isStreaming={isStreaming}
+                                    variant="reasoning"
+                                />
                             </div>
-                        ) : null}
-                    </ScrollableOverlay>
+                            {actions ? (
+                                <div className="mt-2 mb-1 flex items-center justify-start gap-1.5" data-message-actions="true">
+                                    <div className="flex items-center gap-1.5" data-message-action-group="true">
+                                        {actions}
+                                    </div>
+                                </div>
+                            ) : null}
+                        </ScrollableOverlay>
+                    </div>
                 </div>
-            </div>
+            ) : null}
         </div>
     );
 };

@@ -108,7 +108,7 @@ function convertVsCodeTheme(vscodeThemePath) {
   const semanticTokenColors = normalizedTheme.semanticTokenColors || {};
   
   // Determine variant
-  const isDark = normalizedTheme.type === 'dark' || 
+  const isDark = normalizedTheme.type === 'dark' ||
                   colors['editor.background']?.toLowerCase() < '#808080' ||
                   colors['workbench.colorTheme']?.includes('dark');
   

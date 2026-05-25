@@ -7,11 +7,23 @@ All notable changes to this project will be documented in this file.
 - Settings: added a Plugins page to view, add, edit, and remove opencode plugins. Supports `plugin` array entries (npm packages, scoped npm, versioned specs, local paths) with optional options JSON, plus auto-loaded plugin files in `~/.config/opencode/plugins/` and `<project>/.opencode/plugins/`.
 - Settings/Plugins: the Plugins page now talks to the npm registry. Sidebar rows show an update badge with the latest available version, group headers show how many updates are available, the kebab menu adds an "Update to latest" action, and the editor surfaces a banner for available updates, missing/invalid versions, missing-package, missing local file, and offline-registry states. Results are cached for one hour with a "Check for updates" button in the sidebar header for forced refresh.
 
+## [1.11.5] - 2026-05-25
+
+- Chat/Input: pending image attachments now show previews, sent image attachments can be cited from assistant messages, and markdown source mode highlights formatting while you type.
+- Chat: queued messages now send to the session they were queued from, even if you switch sessions before they are sent.
+- Chat/UI: chats keep following the latest response after final task summaries, activity reasoning no longer flashes before settling, and assistant timestamps stay visible on narrow layouts.
+- Sessions: session titles can now be renamed inline with a double-click (thanks to @robertoberto).
+- Git: changed files are split into staged and unstaged sections, and Git operations work correctly from repository subdirectories (thanks to @ShogunPanda, @kostazol).
+- Files: file search now shows the number of matches in the editor panel, and directory rows include a quick-add button (thanks to @attackonryan, @tomzx).
+- Settings/Skills: installed skills are discovered more accurately, skill files opened from tool messages now load correctly, and snippet names keep their canonical casing (thanks to @jkker, @isanchez404).
+- Mobile/PWA: long-press tooltips work on touch screens, fullscreen panels keep the right header state, deleted or long-named files behave better in file lists, and Android PWA dialogs stay visible (thanks to @kostazol, @lilyzhaun).
+- Voice: OpenAI-compatible custom speech providers can now use API keys (thanks to @yangyaofei).
+
 ## [1.11.4] - 2026-05-22
 
 - Desktop: Electron is now the desktop release target, with updated macOS menu actions for the right sidebar and terminal dock.
 - Chat: added reusable snippets with `#` autocomplete in the composer and a Snippets settings page for global and project snippets with [opencode-snippets](https://github.com/JosXa/opencode-snippets) plugin compatibility.
-- Multi-Run: runs can now be split into separate prompt/model groups, and Multi-Run prompts support command, file, agent, and snippet autocomplete (thanks to @roctom).
+- Multi-Run: runs can now be split into separate prompt/model groups, and Multi-Run prompts support command, file, agent, and snippet autocomplete (thanks to @tomzx).
 - UI: refreshed the desktop workspace shell with a full-width header, framed chat area, and smooth left/right sidebar open and close states.
 - Chat: completed reasoning blocks stay collapsed without replaying the collapse animation when you reopen a session.
 - Files: file search and mention results avoid mixing entries from similar query/cache keys (thanks to @isanchez404).
@@ -191,7 +203,7 @@ All notable changes to this project will be documented in this file.
 - Chat/Requests: restored blocking request visibility in sub-sessions, scoped auto-approve to the active session tree, and reduced noisy auto-approved notifications during multi-session work.
 - Desktop: added quick open and a LAN access toggle, plus safer quit behavior around scheduled tasks (thanks to @An-jinu).
 - Chat/Markdown: added LaTeX rendering support for clearer math and technical notation in messages (thanks to @ricautomation).
-- Settings/Skills: skills are now sorted within groups (thanks to @roctom).
+- Settings/Skills: skills are now sorted within groups (thanks to @tomzx).
 
 ## [1.9.5] - 2026-04-14
 
@@ -913,7 +925,7 @@ All notable changes to this project will be documented in this file.
 ## [1.1.4] - 2025-12-15
 
 - Flexoki themes for Shiki syntax highlighting for consistency with the app color schema.
-- Enchanced VSCode extension theming with editor themes.
+- Enhanced VSCode extension theming with editor themes.
 - Fixed mobile view model/agent selection.
 
 ## [1.1.3] - 2025-12-14

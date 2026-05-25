@@ -3,6 +3,7 @@ import type { Agent } from '@opencode-ai/sdk/v2';
 import type { QueuedMessage } from '../stores/messageQueueStore';
 
 let visibleAgents: Agent[] = [];
+const sendMessageCalls: unknown[][] = [];
 
 const getVisibleAgentsMock = mock(() => visibleAgents);
 
@@ -14,11 +15,24 @@ mock.module('@/stores/useConfigStore', () => ({
   },
 }));
 
-import { buildQueuedAutoSendPayload } from './useQueuedMessageAutoSend';
+mock.module('@/sync/session-ui-store', () => ({
+  useSessionUIStore: {
+    getState: () => ({
+      sendMessage: (...args: unknown[]) => {
+        sendMessageCalls.push(args);
+        return Promise.resolve();
+      },
+      sessionAbortFlags: new Map(),
+    }),
+  },
+}));
+
+import { buildQueuedAutoSendPayload, sendQueuedAutoSendPayload } from './useQueuedMessageAutoSend';
 
 describe('buildQueuedAutoSendPayload', () => {
   beforeEach(() => {
     visibleAgents = [];
+    sendMessageCalls.length = 0;
   });
 
   test('returns only the first queued message for auto-send', () => {
@@ -100,5 +114,37 @@ describe('buildQueuedAutoSendPayload', () => {
     expect(payload?.primaryText).toBe('');
     expect(payload?.primaryAttachments).toHaveLength(1);
     expect(payload?.primaryAttachments[0]?.filename).toBe('notes.txt');
+  });
+
+  test('auto-send targets the queued session explicitly', async () => {
+    const payload = buildQueuedAutoSendPayload([
+      {
+        id: 'queued-1',
+        content: 'queued message',
+        createdAt: 1,
+      },
+    ]);
+
+    expect(payload).not.toBeNull();
+    await sendQueuedAutoSendPayload('session-original', payload!, {
+      providerID: 'provider-1',
+      modelID: 'model-1',
+      agent: 'agent-1',
+      variant: 'variant-1',
+    });
+
+    expect(sendMessageCalls.length).toBe(1);
+    expect(sendMessageCalls[0]).toEqual([
+      'queued message',
+      'provider-1',
+      'model-1',
+      'agent-1',
+      [],
+      undefined,
+      undefined,
+      'variant-1',
+      'normal',
+      { sessionId: 'session-original' },
+    ]);
   });
 });

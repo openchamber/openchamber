@@ -264,7 +264,7 @@ const getFileNameFromPath = (path: string | null): string | null => {
 };
 
 const getTabLabel = (
-  tab: { mode: ContextPanelMode; label: string | null; targetPath: string | null },
+  tab: { mode: ContextPanelMode; label: string | null; targetPath: string | null; stagedDiff?: boolean },
   t: TranslateFn
 ): string => {
   if (tab.label) {
@@ -286,6 +286,10 @@ const getTabLabel = (
       }
     }
     return t('contextPanel.mode.preview');
+  }
+
+  if (tab.mode === 'diff') {
+    return tab.stagedDiff ? t('contextPanel.mode.stagedDiff') : t('contextPanel.mode.workingDiff');
   }
 
   return getModeLabel(tab.mode, t);
@@ -1554,7 +1558,6 @@ export const ContextPanel: React.FC = () => {
   const setContextPanelWidth = useUIStore((state) => state.setContextPanelWidth);
   const setActiveContextPanelTab = useUIStore((state) => state.setActiveContextPanelTab);
   const reorderContextPanelTabs = useUIStore((state) => state.reorderContextPanelTabs);
-  const setPendingDiffFile = useUIStore((state) => state.setPendingDiffFile);
   const setSelectedFilePath = useFilesViewTabsStore((state) => state.setSelectedPath);
   const openContextPreview = useUIStore((state) => state.openContextPreview);
   const { themeMode, lightThemeId, darkThemeId, currentTheme } = useThemeSystem();
@@ -1690,10 +1693,7 @@ export const ContextPanel: React.FC = () => {
       return;
     }
 
-    if (activeTab.mode === 'diff' && activeTab.targetPath) {
-      setPendingDiffFile(activeTab.targetPath);
-    }
-  }, [activeTab, directoryKey, setPendingDiffFile, setSelectedFilePath]);
+  }, [activeTab, directoryKey, setSelectedFilePath]);
 
   const activeChatTabID = activeTab?.mode === 'chat' ? activeTab.id : null;
 
@@ -1797,7 +1797,18 @@ export const ContextPanel: React.FC = () => {
   }), [effectiveDirectory, t, tabs]);
 
   const activeNonChatContent = activeTab?.mode === 'diff'
-    ? <DiffView hideStackedFileSidebar stackedDefaultCollapsedAll hideFileSelector pinSelectedFileHeaderToTopOnNavigate showOpenInEditorAction />
+    ? (
+      <DiffView
+        key={activeTab.id}
+        hideStackedFileSidebar
+        stackedDefaultCollapsedAll
+        hideFileSelector
+        pinSelectedFileHeaderToTopOnNavigate
+        showOpenInEditorAction
+        diffScope={activeTab.stagedDiff ? 'staged' : 'working'}
+        targetFilePath={activeTab.targetPath}
+      />
+    )
     : activeTab?.mode === 'context'
         ? <ContextPanelContent />
         : activeTab?.mode === 'plan'

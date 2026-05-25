@@ -45,6 +45,10 @@ import { resolveFallbackTaskSessionId } from './resolveFallbackTaskSessionId';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
 import { useI18n } from '@/lib/i18n';
 
+const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-4 sm:!leading-6 tracking-normal';
+const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
+const TOOL_ROW_DESCRIPTION_CLASS = cn('typography-meta', TOOL_ROW_TEXT_CLASS);
+
 type ToolStateWithMetadata = ToolStateUnion & { metadata?: Record<string, unknown>; input?: Record<string, unknown>; output?: string; error?: string; time?: { start: number; end?: number } };
 
 interface ToolPartProps {
@@ -113,11 +117,11 @@ const getMultiFileDescription = (
             {entries.map((entry) => {
                 const hasPerFileDiff = entry.added !== null || entry.removed !== null;
                 return (
-                    <span key={entry.path} className="inline-flex min-w-0 max-w-full items-center gap-1 typography-meta leading-5" style={{ color: 'var(--tools-description)' }}>
+                    <span key={entry.path} className={cn('inline-flex min-w-0 max-w-full items-center gap-1', TOOL_ROW_DESCRIPTION_CLASS)} style={{ color: 'var(--tools-description)' }}>
                         {showFileIcons ? <FileTypeIcon filePath={entry.path} className="h-3.5 w-3.5" /> : null}
                         <Text
                             variant={animate ? 'generate-effect' : 'static'}
-                            className="min-w-0 max-w-full truncate typography-meta leading-5"
+                            className={cn('min-w-0 max-w-full truncate', TOOL_ROW_DESCRIPTION_CLASS)}
                             style={{ color: 'var(--tools-description)' }}
                             title={entry.path}
                         >
@@ -1400,7 +1404,7 @@ const renderAnimatedPathWithIcon = (path: string, animate = true, grow = true, s
                 {showFileIcons ? <FileTypeIcon filePath={path} className="h-3.5 w-3.5 flex-shrink-0" /> : null}
                 <Text
                     variant={animate ? 'generate-effect' : 'static'}
-                    className={cn('min-w-0 truncate whitespace-nowrap typography-meta', grow && 'flex-1')}
+                    className={cn('min-w-0 truncate whitespace-nowrap', TOOL_ROW_DESCRIPTION_CLASS, grow && 'flex-1')}
                     style={{ color: 'var(--tools-title)' }}
                 >
                     {path}
@@ -1417,7 +1421,7 @@ const renderAnimatedPathWithIcon = (path: string, animate = true, grow = true, s
     return (
         <span className={cn('min-w-0 inline-flex items-center gap-1 overflow-hidden', grow && 'flex-1')} title={path}>
             {showFileIcons ? <FileTypeIcon filePath={path} className="h-3.5 w-3.5 flex-shrink-0" /> : null}
-            <span className={cn('min-w-0 inline-flex max-w-full items-baseline overflow-hidden typography-meta', grow && 'flex-1')}>
+            <span className={cn('min-w-0 inline-flex max-w-full items-baseline overflow-hidden', TOOL_ROW_DESCRIPTION_CLASS, grow && 'flex-1')}>
                 {hasAbsoluteRoot ? <span className="flex-shrink-0" style={{ color: 'var(--tools-description)' }}>/</span> : null}
                 <span
                     className="min-w-0 shrink truncate whitespace-nowrap"
@@ -2661,7 +2665,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
             {}
             <div
                 className={cn(
-                'group/tool flex gap-1.5 pr-2 pl-px py-2 rounded-xl cursor-pointer',
+                'group/tool flex gap-1.5 pr-2 pl-px py-1.5 rounded-xl cursor-pointer',
                 isMultiFileApplyPatch ? 'flex-wrap items-start' : 'items-center'
             )}
                 onClick={handleMainClick}
@@ -2702,7 +2706,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
                             <MinDurationShineText
                                 active={Boolean(isActive && !isError)}
                                 minDurationMs={300}
-                                className="typography-meta font-medium flex-shrink-0"
+                                className={cn(TOOL_ROW_TITLE_CLASS, 'flex-shrink-0')}
                                 style={titleStyle}
                                 title={displayName}
                             >
@@ -2716,7 +2720,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
                                 <MinDurationShineText
                                     active={Boolean(isActive && !isError)}
                                     minDurationMs={300}
-                                    className="typography-meta font-medium flex-shrink-0"
+                                    className={cn(TOOL_ROW_TITLE_CLASS, 'flex-shrink-0')}
                                     style={titleStyle}
                                     title={displayName}
                                 >
@@ -2724,7 +2728,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
                                 </MinDurationShineText>
                             </div>
                             {normalizedPartTool === 'bash' && typeof effectiveTimeStart === 'number' ? (
-                                <span className="flex-shrink-0 tabular-nums text-muted-foreground/80 typography-meta">
+                                <span className={cn('flex-shrink-0 tabular-nums text-muted-foreground/80', TOOL_ROW_DESCRIPTION_CLASS)}>
                                     <LiveDuration
                                         start={effectiveTimeStart}
                                         end={typeof effectiveTimeEnd === 'number' ? effectiveTimeEnd : undefined}
@@ -2737,11 +2741,11 @@ const ToolPart: React.FC<ToolPartProps> = ({
                 </div>
 
                 {!isMultiFileApplyPatch && (
-                    <div className="flex items-center gap-1 flex-1 min-w-0 typography-meta" style={{ color: 'var(--tools-description)' }}>
+                    <div className={cn('flex items-center gap-1 flex-1 min-w-0', TOOL_ROW_DESCRIPTION_CLASS)} style={{ color: 'var(--tools-description)' }}>
                         <div className="flex items-center gap-1 flex-1 min-w-0">
                             {justificationText && (
                                 <span
-                                    className="min-w-0 truncate typography-meta"
+                                    className={cn('min-w-0 truncate', TOOL_ROW_DESCRIPTION_CLASS)}
                                     style={{ color: 'var(--tools-description)', opacity: 0.8 }}
                                     title={justificationText}
                                 >
@@ -2754,7 +2758,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
                                 ) : (
                                     <Text
                                         variant={animateTailText ? 'generate-effect' : 'static'}
-                                        className="min-w-0 truncate typography-meta"
+                                        className={cn('min-w-0 truncate', TOOL_ROW_DESCRIPTION_CLASS)}
                                         style={{ color: 'var(--tools-description)' }}
                                         title={description}
                                     >

@@ -44,6 +44,35 @@ describe('snippets', () => {
     expect(getSnippet('same', projectDir)?.content).toBe('New');
   });
 
+  test('canonical snippet names take precedence over colliding aliases', () => {
+    writeSnippet('.opencode/snippets/review.md', 'Review by name');
+    writeSnippet('.opencode/snippet/helper.md', '---\naliases: [review, help]\n---\nReview by alias');
+
+    expect(getSnippet('review', projectDir)).toEqual(expect.objectContaining({ name: 'review', content: 'Review by name' }));
+    expect(getSnippet('help', projectDir)).toEqual(expect.objectContaining({ name: 'helper', content: 'Review by alias' }));
+    expect(expandSnippets('Use #review and #help', projectDir)).toBe('Use Review by name and Review by alias');
+  });
+
+  test('canonical snippet names override earlier same-directory aliases', () => {
+    writeSnippet('.opencode/snippet/alias-first.md', '---\naliases: [review, assist]\n---\nReview by alias');
+    writeSnippet('.opencode/snippet/review.md', 'Review by name');
+
+    const snippetDir = path.join(projectDir, '.opencode', 'snippet');
+    const originalReaddirSync = fs.readdirSync;
+    fs.readdirSync = function readdirSync(dir, ...args) {
+      if (dir === snippetDir) return ['alias-first.md', 'review.md'];
+      return originalReaddirSync.call(fs, dir, ...args);
+    };
+
+    try {
+      expect(getSnippet('review', projectDir)).toEqual(expect.objectContaining({ name: 'review', content: 'Review by name' }));
+      expect(getSnippet('assist', projectDir)).toEqual(expect.objectContaining({ name: 'alias-first', content: 'Review by alias' }));
+      expect(expandSnippets('Use #review and #assist', projectDir)).toBe('Use Review by name and Review by alias');
+    } finally {
+      fs.readdirSync = originalReaddirSync;
+    }
+  });
+
   test('creates updates and deletes snippets', () => {
     expect(createSnippet('custom-one', { content: 'Body', aliases: ['co'] }, projectDir, 'project')).toEqual(
       expect.objectContaining({ name: 'custom-one', content: 'Body', aliases: ['co'] }),

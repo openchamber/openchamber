@@ -1,0 +1,39 @@
+---
+title: Commands & Snippets
+description: Make reusable slash commands and text snippets for chat.
+---
+
+# Commands & Snippets
+
+Commands and snippets both save you from retyping the same thing. Commands are whole prompts you trigger with `/`; snippets are bits of text you drop into a message with `#`.
+
+## Commands
+
+A command is a saved prompt you run with a slash, like `/review`. Manage them at **Settings → Commands**.
+
+1. Open **Settings → Commands** and create a command.
+2. Give it a name, a description, and the prompt text it should send.
+3. Optionally pin it to a specific agent or model.
+4. Choose personal or project scope.
+
+In chat, type `/` as the **first** character of the message to bring up commands, then pick one. Your text can use placeholders:
+
+- `$ARGUMENTS` — whatever you type after the command
+- `@filename` — drops in the contents of a file
+- `` !`command` `` — drops in the output of a shell command
+
+The built-in `init` and `review` commands can be reset but not deleted.
+
+## Snippets
+
+A snippet is reusable text you reference inline with a hashtag, like `#signoff`. Manage them at **Settings → Snippets**.
+
+1. Open **Settings → Snippets** and create a snippet.
+2. Give it a name and the text it stands for. Add aliases if you want more than one trigger.
+3. Choose personal or project scope.
+
+In chat, type `#` and pick a snippet. OpenChamber swaps in the full text before sending.
+
+## Related
+
+- [Skills](/skills/) — load larger instruction sets on demand
