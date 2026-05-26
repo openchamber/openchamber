@@ -2789,7 +2789,7 @@ export async function getGitLog(
     'log',
     `--max-count=${maxCount}`,
     '--date=iso',
-    '--pretty=format:%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%ad%x1f%s',
+    '--pretty=format:%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%ad%x1f%s%x1f%D',
     '--shortstat',
   ];
 
@@ -2850,12 +2850,12 @@ export async function getGitLog(
     // Need to re-parse header fields for the final entries array
     const lines = record.split('\n').filter((l) => l.trim().length > 0);
     const lineHeader = lines.shift() || '';
-    const [, , author_name, author_email, date, message] = lineHeader.split('\x1f');
+    const [, , author_name, author_email, date, message, refs] = lineHeader.split('\x1f');
     entries.push({
       hash,
       date: date || '',
       message: message || '',
-      refs: '',
+      refs: refs?.trim() || '',
       body: '',
       author_name: author_name || '',
       author_email: author_email || '',

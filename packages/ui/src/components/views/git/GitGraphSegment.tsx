@@ -25,6 +25,7 @@ interface GitGraphSegmentProps {
 export const GitGraphSegment: React.FC<GitGraphSegmentProps> = ({
   laned,
   totalLanes,
+  isExpanded,
 }) => {
   const { lane, color, connectors } = laned;
   const effectiveLanes = Math.max(totalLanes, lane + 1);
@@ -118,7 +119,7 @@ export const GitGraphSegment: React.FC<GitGraphSegmentProps> = ({
     ctx.strokeStyle = bg || '#000';
     ctx.lineWidth = 2;
     ctx.stroke();
-  });
+  }, [laned, lane, color, connectors, totalLanes, isExpanded, w]);
 
   return (
     // This div owns the layout: height: 100% fills the self-stretch parent,

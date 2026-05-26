@@ -44,6 +44,33 @@ openchamber stop
 
 `openchamber` сам по собі запускає сервер у фоні. Додайте `--foreground`, щоб лишити його прив'язаним до вашого терміналу.
 
+## Запуск OpenChamber при вході в систему
+
+Скористайтеся `startup enable`, щоб встановити нативний користувацький сервіс. OpenChamber використовує `launchd` на macOS, `systemd --user` на Linux і Task Scheduler на Windows.
+
+```bash
+openchamber startup enable
+openchamber startup status
+openchamber startup disable
+```
+
+Щоб захистити UI, задайте пароль під час увімкнення сервісу:
+
+```bash
+OPENCHAMBER_UI_PASSWORD='secret' openchamber startup enable
+```
+
+`startup enable` зберігає знімок поточного середовища в сервісі, щоб запуск був ближчим до ручного запуску `openchamber` з тієї самої shell-сесії. Так зберігаються токени провайдерів, `PATH`, налаштування SSH agent та інші CLI-змінні для auth/config. Використайте `--no-env-snapshot`, якщо потрібне мінімальне середовище сервісу.
+
+Тунелями для такого запущеного сервісу можна керувати окремо:
+
+```bash
+openchamber tunnel start --port 3000
+openchamber tunnel stop --port 3000
+```
+
+Зупинка тунелю не перезапускає сервіс або застосунок.
+
 ## «OpenCode перезапускається»
 
 Поки сервер запускається або перезапускається, OpenChamber показує стан «OpenCode перезапускається» і призупиняє запити, доки той не буде готовий. Це нормально одразу після запуску чи перезапуску. Якщо стан так і не зникає, див. [Підключення до OpenCode](/uk/troubleshooting/opencode-connection/).

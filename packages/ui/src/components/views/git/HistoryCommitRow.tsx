@@ -120,7 +120,7 @@ function parseRefBadges(refs: string): RefBadge[] {
       return {
         label,
         isHead,
-        isRemote: r.startsWith('origin/') || r.includes('/'),
+        isRemote: !isHead && !r.startsWith('tag: ') && /^[^/]+\//.test(r),
         isTag: r.startsWith('tag: '),
       };
     });

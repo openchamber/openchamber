@@ -44,6 +44,33 @@ openchamber stop
 
 `openchamber` por sí solo inicia el servidor en segundo plano. Añade `--foreground` para mantenerlo asociado a tu terminal.
 
+## Iniciar OpenChamber al iniciar sesión
+
+Usa `startup enable` para instalar un servicio nativo de usuario. OpenChamber usa `launchd` en macOS, `systemd --user` en Linux y Task Scheduler en Windows.
+
+```bash
+openchamber startup enable
+openchamber startup status
+openchamber startup disable
+```
+
+Para proteger la UI, define la contraseña al habilitar el servicio:
+
+```bash
+OPENCHAMBER_UI_PASSWORD='secret' openchamber startup enable
+```
+
+`startup enable` guarda una captura del entorno actual en el servicio para que el arranque se parezca más a ejecutar `openchamber` desde la misma shell. Así conserva tokens de proveedores, `PATH`, configuración del agente SSH y otras variables CLI de auth/config. Usa `--no-env-snapshot` si quieres un entorno de servicio mínimo.
+
+Puedes gestionar túneles de forma independiente para ese servicio en ejecución:
+
+```bash
+openchamber tunnel start --port 3000
+openchamber tunnel stop --port 3000
+```
+
+Detener el túnel no reinicia el servicio ni la app.
+
 ## "OpenCode is restarting"
 
 Mientras el servidor se inicia o reinicia, OpenChamber muestra un estado "OpenCode is restarting" y pausa las solicitudes hasta que esté listo. Esto es normal justo después de iniciar o reiniciar. Si nunca desaparece, consulta [Conexión de OpenCode](/es/troubleshooting/opencode-connection/).

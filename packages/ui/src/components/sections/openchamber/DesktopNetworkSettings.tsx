@@ -3,7 +3,14 @@ import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
-import { getDesktopLanAddress, isDesktopLocalOriginActive, isDesktopShell, restartDesktopApp } from '@/lib/desktop';
+import {
+  getDesktopLanAddress,
+  getDesktopLaunchAtLogin,
+  isDesktopLocalOriginActive,
+  isDesktopShell,
+  restartDesktopApp,
+  setDesktopLaunchAtLogin,
+} from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 
 export const DesktopNetworkSettings: React.FC = () => {
@@ -15,6 +22,9 @@ export const DesktopNetworkSettings: React.FC = () => {
   const [draftPassword, setDraftPassword] = React.useState('');
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
+  const [launchAtLoginSupported, setLaunchAtLoginSupported] = React.useState(false);
+  const [launchAtLoginEnabled, setLaunchAtLoginEnabled] = React.useState(false);
+  const [isSavingLaunchAtLogin, setIsSavingLaunchAtLogin] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [lanAddress, setLanAddress] = React.useState<string | null>(null);
 
@@ -67,6 +77,27 @@ export const DesktopNetworkSettings: React.FC = () => {
   }, [isLocalDesktop, t]);
 
   React.useEffect(() => {
+    if (!isLocalDesktop) {
+      setLaunchAtLoginSupported(false);
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      const status = await getDesktopLaunchAtLogin();
+      if (cancelled) {
+        return;
+      }
+      setLaunchAtLoginSupported(status?.supported === true);
+      setLaunchAtLoginEnabled(status?.enabled === true);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isLocalDesktop]);
+
+  React.useEffect(() => {
     if (!isLocalDesktop || !draftValue) {
       setLanAddress(null);
       return;
@@ -100,6 +131,30 @@ export const DesktopNetworkSettings: React.FC = () => {
   const handleToggle = React.useCallback(() => {
     setDraftValue((current) => !current);
   }, []);
+
+  const handleLaunchAtLoginToggle = React.useCallback(async () => {
+    if (!launchAtLoginSupported || isSavingLaunchAtLogin) {
+      return;
+    }
+
+    const nextValue = !launchAtLoginEnabled;
+    setLaunchAtLoginEnabled(nextValue);
+    setIsSavingLaunchAtLogin(true);
+    setError(null);
+
+    try {
+      const status = await setDesktopLaunchAtLogin(nextValue);
+      if (!status?.supported) {
+        throw new Error(t('settings.openchamber.desktopNetwork.error.launchAtLoginUnsupported'));
+      }
+      setLaunchAtLoginEnabled(status.enabled);
+    } catch (cause) {
+      setLaunchAtLoginEnabled(!nextValue);
+      setError(cause instanceof Error ? cause.message : t('settings.openchamber.desktopNetwork.error.launchAtLoginSaveFailed'));
+    } finally {
+      setIsSavingLaunchAtLogin(false);
+    }
+  }, [isSavingLaunchAtLogin, launchAtLoginEnabled, launchAtLoginSupported, t]);
 
   const handleSaveAndRestart = React.useCallback(async () => {
     if (!isDirty) {
@@ -150,6 +205,34 @@ export const DesktopNetworkSettings: React.FC = () => {
       </div>
 
       <section className="space-y-2 px-2 pb-2 pt-0">
+        {launchAtLoginSupported ? (
+          <div
+            className="group flex cursor-pointer items-start gap-2 py-1.5"
+            role="button"
+            tabIndex={0}
+            onClick={handleLaunchAtLoginToggle}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                handleLaunchAtLoginToggle();
+              }
+            }}
+          >
+            <Checkbox
+              checked={launchAtLoginEnabled}
+              onChange={handleLaunchAtLoginToggle}
+              ariaLabel={t('settings.openchamber.desktopNetwork.field.launchAtLoginAria')}
+              disabled={isSavingLaunchAtLogin}
+            />
+            <div className="min-w-0 flex-1">
+              <div className="typography-ui-label text-foreground">{t('settings.openchamber.desktopNetwork.field.launchAtLogin')}</div>
+              <div className="typography-micro text-muted-foreground/70">
+                {t('settings.openchamber.desktopNetwork.field.launchAtLoginDescription')}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         <div className="space-y-1 py-1.5">
           <label className="typography-ui-label text-foreground" htmlFor="desktop-ui-password">
             {t('settings.openchamber.desktopPassword.field.password')}

@@ -44,6 +44,33 @@ openchamber stop
 
 `openchamber`만 입력하면 서버가 백그라운드에서 시작됩니다. 터미널에 연결된 상태로 유지하려면 `--foreground`를 추가하세요.
 
+## 로그인할 때 OpenChamber 시작하기
+
+`startup enable`을 사용해 네이티브 사용자 서비스를 설치하세요. OpenChamber는 macOS에서 `launchd`, Linux에서 `systemd --user`, Windows에서 Task Scheduler를 사용합니다.
+
+```bash
+openchamber startup enable
+openchamber startup status
+openchamber startup disable
+```
+
+UI를 보호하려면 서비스를 활성화할 때 비밀번호를 설정하세요:
+
+```bash
+OPENCHAMBER_UI_PASSWORD='secret' openchamber startup enable
+```
+
+`startup enable`은 현재 환경의 스냅샷을 서비스에 저장해, 같은 셸에서 `openchamber`를 직접 실행한 것에 더 가깝게 동작하게 합니다. provider 토큰, `PATH`, SSH agent 설정, 기타 CLI auth/config 환경 변수가 유지됩니다. 최소한의 서비스 환경을 원하면 `--no-env-snapshot`을 사용하세요.
+
+실행 중인 이 서비스의 터널은 별도로 관리할 수 있습니다:
+
+```bash
+openchamber tunnel start --port 3000
+openchamber tunnel stop --port 3000
+```
+
+터널을 중지해도 서비스나 앱은 재시작되지 않습니다.
+
 ## "OpenCode is restarting"
 
 서버가 시작되거나 재시작되는 동안 OpenChamber는 "OpenCode is restarting" 상태를 표시하고 준비가 끝날 때까지 요청을 일시 중지합니다. 실행 직후나 재시작 직후에는 정상적인 동작입니다. 이 상태가 계속 사라지지 않으면 [OpenCode 연결](/ko/troubleshooting/opencode-connection/)을 참고하세요.
