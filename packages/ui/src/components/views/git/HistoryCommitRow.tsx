@@ -140,11 +140,16 @@ export const HistoryCommitRow = React.memo(({
   onActionSuccess,
 }: HistoryCommitRowProps) => {
   const { t } = useI18n();
+  type PendingAction =
+    | 'checkout' | 'cherryPick' | 'revert'
+    | 'merge' | 'rebase'
+    | 'resetSoft' | 'resetMixed' | 'resetHard';
+
   const [actionLoading, setActionLoading] = React.useState<string | null>(null);
   const [showCreateBranch, setShowCreateBranch] = React.useState(false);
   const [newBranchName, setNewBranchName] = React.useState('');
   const [showResetOptions, setShowResetOptions] = React.useState(false);
-  const [pendingHardReset, setPendingHardReset] = React.useState(false);
+  const [pendingAction, setPendingAction] = React.useState<PendingAction | null>(null);
 
   const [openDiffPaths, setOpenDiffPaths] = React.useState<Set<string>>(new Set());
   const [diffCache, setDiffCache] = React.useState<Map<string, HistoryDiffCacheValue>>(new Map());
@@ -215,12 +220,7 @@ export const HistoryCommitRow = React.memo(({
 
   const handleReset = async (mode: 'soft' | 'mixed' | 'hard', force = false) => {
     if (!directory || actionLoading !== null) return;
-    if (mode === 'hard' && !force) {
-      setPendingHardReset(true);
-      return;
-    }
     setActionLoading('reset');
-    setPendingHardReset(false);
     try {
       await git.resetToCommit(directory, entry.hash, mode, force);
       setShowResetOptions(false);
@@ -229,6 +229,23 @@ export const HistoryCommitRow = React.memo(({
       toast.error(String((e as Error).message));
     } finally {
       setActionLoading(null);
+    }
+  };
+
+  // Single confirm handler dispatches to the right action based on pendingAction
+  const confirmPendingAction = async () => {
+    if (!pendingAction) return;
+    const action = pendingAction;
+    setPendingAction(null);
+    switch (action) {
+      case 'checkout':   return handleCheckout();
+      case 'cherryPick': return handleCherryPick();
+      case 'revert':     return handleRevert();
+      case 'merge':      return handleMerge();
+      case 'rebase':     return handleRebase();
+      case 'resetSoft':  return handleReset('soft');
+      case 'resetMixed': return handleReset('mixed');
+      case 'resetHard':  return handleReset('hard', true); // force=true: user already confirmed
     }
   };
 
@@ -404,77 +421,129 @@ export const HistoryCommitRow = React.memo(({
       {isExpanded && (
         <div className="px-3 pb-2 pl-8 border-t border-border/40">
           {/* Action buttons */}
-          <div className="flex flex-wrap gap-1.5 py-2 border-b border-border/30 mb-2">
-            <Button variant="outline" size="xs" disabled={actionLoading !== null} onClick={(e) => { e.stopPropagation(); void handleCheckout(); }} className="h-6">
-              {actionLoading === 'checkout' && <Icon name="loader-4" className="size-3 animate-spin mr-1" />}
-              {t('gitView.history.actions.checkout')}
-            </Button>
-
-            {showCreateBranch ? (
-              <div className="flex items-center gap-1">
-                <input autoFocus value={newBranchName} onChange={(e) => setNewBranchName(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') void handleCreateBranch(); if (e.key === 'Escape') { setShowCreateBranch(false); setNewBranchName(''); } }}
-                  placeholder={t('gitView.history.actions.createBranchPlaceholder')}
-                  className="h-6 text-xs px-2 rounded border border-border/60 bg-background min-w-0 w-32" />
-                <Button variant="outline" size="xs" className="h-6" disabled={!newBranchName.trim() || actionLoading !== null} onClick={(e) => { e.stopPropagation(); void handleCreateBranch(); }}>
-                  {t('gitView.history.actions.createBranchConfirm')}
-                </Button>
-              </div>
-            ) : (
-              <Button variant="outline" size="xs" className="h-6" onClick={(e) => { e.stopPropagation(); setShowCreateBranch(true); }}>
-                {t('gitView.history.actions.createBranch')}
+          {pendingAction ? (
+            /* Confirmation banner — replaces the button row while an action is pending */
+            <div className="flex items-center gap-2 py-2 border-b border-border/30 mb-2">
+              <span className="typography-micro text-muted-foreground flex-1 min-w-0">
+                {t(`gitView.history.actions.${pendingAction}Confirm` as never)}
+              </span>
+              <Button
+                variant="destructive" size="xs" className="h-6 shrink-0"
+                disabled={actionLoading !== null}
+                onClick={(e) => { e.stopPropagation(); void confirmPendingAction(); }}
+              >
+                {actionLoading !== null
+                  ? <Icon name="loader-4" className="size-3 animate-spin mr-1" />
+                  : null}
+                {t('gitView.history.actions.confirmButton')}
               </Button>
-            )}
-
-            <Button variant="outline" size="xs" disabled={actionLoading !== null} onClick={(e) => { e.stopPropagation(); void handleCherryPick(); }} className="h-6">
-              {actionLoading === 'cherryPick' && <Icon name="loader-4" className="size-3 animate-spin mr-1" />}
-              {t('gitView.history.actions.cherryPick')}
-            </Button>
-
-            <Button variant="outline" size="xs" disabled={actionLoading !== null} onClick={(e) => { e.stopPropagation(); void handleRevert(); }} className="h-6">
-              {actionLoading === 'revert' && <Icon name="loader-4" className="size-3 animate-spin mr-1" />}
-              {t('gitView.history.actions.revert')}
-            </Button>
-
-            <div className="relative">
-              <Button variant="outline" size="xs" disabled={actionLoading !== null} onClick={(e) => { e.stopPropagation(); setShowResetOptions((v) => !v); }} className="h-6">
-                {actionLoading === 'reset' && <Icon name="loader-4" className="size-3 animate-spin mr-1" />}
-                {t('gitView.history.actions.reset')}
+              <Button
+                variant="ghost" size="xs" className="h-6 shrink-0"
+                disabled={actionLoading !== null}
+                onClick={(e) => { e.stopPropagation(); setPendingAction(null); }}
+              >
+                {t('gitView.history.actions.cancelButton')}
               </Button>
-              {showResetOptions && (
-                <div className="absolute top-full left-0 mt-1 z-50 bg-popover border border-border/60 rounded shadow-md min-w-max">
-                  {(['soft', 'mixed', 'hard'] as const).map((mode) => (
-                    <button key={mode} type="button" disabled={actionLoading !== null} className="block w-full text-left px-3 py-1.5 typography-micro hover:bg-[var(--interactive-hover)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                      onClick={() => { setShowResetOptions(false); void handleReset(mode); }}>
-                      {t(`gitView.history.actions.reset${mode.charAt(0).toUpperCase() + mode.slice(1)}` as never)}
-                    </button>
-                  ))}
-                </div>
-              )}
             </div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-1.5 py-2 border-b border-border/30 mb-2">
+              <Button variant="outline" size="xs" className="h-6"
+                disabled={actionLoading !== null}
+                onClick={(e) => { e.stopPropagation(); setPendingAction('checkout'); }}
+              >
+                {t('gitView.history.actions.checkout')}
+              </Button>
 
-            {pendingHardReset && (
-              <div className="w-full flex items-center gap-2 mt-1 p-2 bg-[var(--status-error)]/10 rounded text-xs">
-                <span className="flex-1">{t('gitView.history.actions.resetHardConfirm')}</span>
-                <Button variant="destructive" size="xs" className="h-6" disabled={actionLoading !== null} onClick={() => void handleReset('hard', true)}>
-                  {t('gitView.history.actions.resetHardConfirmButton')}
+              {showCreateBranch ? (
+                <div className="flex items-center gap-1">
+                  <input
+                    autoFocus value={newBranchName}
+                    onChange={(e) => setNewBranchName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') void handleCreateBranch();
+                      if (e.key === 'Escape') { setShowCreateBranch(false); setNewBranchName(''); }
+                    }}
+                    placeholder={t('gitView.history.actions.createBranchPlaceholder')}
+                    className="h-6 text-xs px-2 rounded border border-border/60 bg-background min-w-0 w-32"
+                  />
+                  <Button variant="outline" size="xs" className="h-6"
+                    disabled={!newBranchName.trim() || actionLoading !== null}
+                    onClick={(e) => { e.stopPropagation(); void handleCreateBranch(); }}
+                  >
+                    {actionLoading === 'createBranch'
+                      ? <Icon name="loader-4" className="size-3 animate-spin mr-1" />
+                      : null}
+                    {t('gitView.history.actions.createBranchConfirm')}
+                  </Button>
+                </div>
+              ) : (
+                <Button variant="outline" size="xs" className="h-6"
+                  onClick={(e) => { e.stopPropagation(); setShowCreateBranch(true); }}
+                >
+                  {t('gitView.history.actions.createBranch')}
                 </Button>
-                <Button variant="ghost" size="xs" className="h-6" disabled={actionLoading !== null} onClick={() => setPendingHardReset(false)}>
-                  <Icon name="close" className="size-3" />
+              )}
+
+              <Button variant="outline" size="xs" className="h-6"
+                disabled={actionLoading !== null}
+                onClick={(e) => { e.stopPropagation(); setPendingAction('cherryPick'); }}
+              >
+                {t('gitView.history.actions.cherryPick')}
+              </Button>
+
+              <Button variant="outline" size="xs" className="h-6"
+                disabled={actionLoading !== null}
+                onClick={(e) => { e.stopPropagation(); setPendingAction('revert'); }}
+              >
+                {t('gitView.history.actions.revert')}
+              </Button>
+
+              {/* Reset: dropdown first to pick mode, then confirmation banner */}
+              <div className="relative inline-flex h-6 items-center">
+                <Button variant="outline" size="xs" className="h-6"
+                  disabled={actionLoading !== null}
+                  onClick={(e) => { e.stopPropagation(); setShowResetOptions((v) => !v); }}
+                >
+                  {actionLoading === 'reset'
+                    ? <Icon name="loader-4" className="size-3 animate-spin mr-1" />
+                    : null}
+                  {t('gitView.history.actions.reset')}
                 </Button>
+                {showResetOptions && (
+                  <div className="absolute top-full left-0 mt-1 z-50 bg-popover border border-border/60 rounded shadow-md min-w-max">
+                    {(['soft', 'mixed', 'hard'] as const).map((mode) => (
+                      <button
+                        key={mode} type="button"
+                        disabled={actionLoading !== null}
+                        className="block w-full text-left px-3 py-1.5 typography-micro hover:bg-[var(--interactive-hover)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setShowResetOptions(false);
+                          setPendingAction(`reset${mode.charAt(0).toUpperCase() + mode.slice(1)}` as PendingAction);
+                        }}
+                      >
+                        {t(`gitView.history.actions.reset${mode.charAt(0).toUpperCase() + mode.slice(1)}` as never)}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
 
-            <Button variant="outline" size="xs" disabled={actionLoading !== null} onClick={(e) => { e.stopPropagation(); void handleMerge(); }} className="h-6">
-              {actionLoading === 'merge' && <Icon name="loader-4" className="size-3 animate-spin mr-1" />}
-              {t('gitView.history.actions.merge')}
-            </Button>
+              <Button variant="outline" size="xs" className="h-6"
+                disabled={actionLoading !== null}
+                onClick={(e) => { e.stopPropagation(); setPendingAction('merge'); }}
+              >
+                {t('gitView.history.actions.merge')}
+              </Button>
 
-            <Button variant="outline" size="xs" disabled={actionLoading !== null} onClick={(e) => { e.stopPropagation(); void handleRebase(); }} className="h-6">
-              {actionLoading === 'rebase' && <Icon name="loader-4" className="size-3 animate-spin mr-1" />}
-              {t('gitView.history.actions.rebase')}
-            </Button>
-          </div>
+              <Button variant="outline" size="xs" className="h-6"
+                disabled={actionLoading !== null}
+                onClick={(e) => { e.stopPropagation(); setPendingAction('rebase'); }}
+              >
+                {t('gitView.history.actions.rebase')}
+              </Button>
+            </div>
+          )}
 
           {isLoadingFiles ? (
             <div className="flex items-center gap-2 py-2">
