@@ -14,6 +14,10 @@ const requireDirectory = (id: string, type: string, directory?: string): BridgeR
   return null;
 };
 
+const isValidCommitHash = (hash: string | undefined): hash is string => (
+  typeof hash === 'string' && /^[0-9a-fA-F]{7,40}$/.test(hash)
+);
+
 export async function handleStandardGitBridgeMessage(message: BridgeMessageInput): Promise<BridgeResponse | null> {
   const { id, type, payload } = message;
 
@@ -420,8 +424,8 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       const { directory, hash } = (payload || {}) as { directory?: string; hash?: string };
       const dirError = requireDirectory(id, type, directory);
       if (dirError) return dirError;
-      if (!hash) {
-        return { id, type, success: false, error: 'hash is required' };
+      if (!isValidCommitHash(hash)) {
+        return { id, type, success: false, error: 'Invalid commit hash' };
       }
       const result = await gitService.checkoutCommit(directory!, hash);
       return { id, type, success: true, data: result };
@@ -431,8 +435,8 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       const { directory, hash } = (payload || {}) as { directory?: string; hash?: string };
       const dirError = requireDirectory(id, type, directory);
       if (dirError) return dirError;
-      if (!hash) {
-        return { id, type, success: false, error: 'hash is required' };
+      if (!isValidCommitHash(hash)) {
+        return { id, type, success: false, error: 'Invalid commit hash' };
       }
       const result = await gitService.cherryPick(directory!, hash);
       return { id, type, success: true, data: result };
@@ -442,8 +446,8 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       const { directory, hash } = (payload || {}) as { directory?: string; hash?: string };
       const dirError = requireDirectory(id, type, directory);
       if (dirError) return dirError;
-      if (!hash) {
-        return { id, type, success: false, error: 'hash is required' };
+      if (!isValidCommitHash(hash)) {
+        return { id, type, success: false, error: 'Invalid commit hash' };
       }
       const result = await gitService.revertCommit(directory!, hash);
       return { id, type, success: true, data: result };
@@ -458,8 +462,8 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       };
       const dirError = requireDirectory(id, type, directory);
       if (dirError) return dirError;
-      if (!hash) {
-        return { id, type, success: false, error: 'hash is required' };
+      if (!isValidCommitHash(hash)) {
+        return { id, type, success: false, error: 'Invalid commit hash' };
       }
       if (!mode || !['soft', 'mixed', 'hard'].includes(mode)) {
         return { id, type, success: false, error: 'mode must be soft, mixed, or hard' };

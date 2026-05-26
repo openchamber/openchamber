@@ -279,6 +279,10 @@ async function execGit(args: string[], cwd: string): Promise<{ stdout: string; s
   });
 }
 
+function isValidCommitHash(hash: string): boolean {
+  return /^[0-9a-fA-F]{7,40}$/.test(hash);
+}
+
 function extractGitStatusPath(status: string, pathPart: string): string {
   if ((status === 'R' || status === 'C') && pathPart.includes('\t')) {
     return pathPart.split('\t').pop() || pathPart;
@@ -3292,6 +3296,9 @@ export async function continueMerge(directory: string): Promise<{ success: boole
 // ============== Commit Actions ==============
 
 export async function checkoutCommit(directory: string, hash: string): Promise<{ success: boolean }> {
+  if (!isValidCommitHash(hash)) {
+    throw new Error('Invalid commit hash');
+  }
   const result = await execGit(['checkout', hash], directory);
   if (result.exitCode !== 0) {
     throw new Error(result.stderr || 'Failed to checkout commit');
@@ -3300,6 +3307,9 @@ export async function checkoutCommit(directory: string, hash: string): Promise<{
 }
 
 export async function cherryPick(directory: string, hash: string): Promise<{ success: boolean; conflict: boolean; conflictFiles?: string[] }> {
+  if (!isValidCommitHash(hash)) {
+    throw new Error('Invalid commit hash');
+  }
   const result = await execGit(['cherry-pick', hash], directory);
 
   if (result.exitCode === 0) {
@@ -3325,6 +3335,9 @@ export async function cherryPick(directory: string, hash: string): Promise<{ suc
 }
 
 export async function revertCommit(directory: string, hash: string): Promise<{ success: boolean; conflict: boolean; conflictFiles?: string[] }> {
+  if (!isValidCommitHash(hash)) {
+    throw new Error('Invalid commit hash');
+  }
   const result = await execGit(['revert', '--no-commit', hash], directory);
 
   if (result.exitCode === 0) {
@@ -3355,6 +3368,9 @@ export async function resetToCommit(
   mode: 'soft' | 'mixed' | 'hard',
   force = false
 ): Promise<{ success: boolean }> {
+  if (!isValidCommitHash(hash)) {
+    throw new Error('Invalid commit hash');
+  }
   if (mode === 'hard' && !force) {
     const statusResult = await execGit(['status', '--porcelain'], directory);
     const isDirty = statusResult.stdout.trim().length > 0;

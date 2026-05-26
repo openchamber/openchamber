@@ -104,7 +104,6 @@ function getChangeTypeColor(changeType: string) {
 interface RefBadge {
   label: string;
   isHead: boolean;
-  isRemote: boolean;
   isTag: boolean;
 }
 
@@ -120,7 +119,6 @@ function parseRefBadges(refs: string): RefBadge[] {
       return {
         label,
         isHead,
-        isRemote: !isHead && !r.startsWith('tag: ') && /^[^/]+\//.test(r),
         isTag: r.startsWith('tag: '),
       };
     });
@@ -343,12 +341,11 @@ export const HistoryCommitRow = React.memo(({
         type="button"
         onClick={onToggle}
         className={cn(
-          'w-full flex items-start gap-3 px-3 py-2 text-left transition-colors',
-          isExpanded ? 'bg-sidebar/90' : 'hover:bg-sidebar/40'
+          'w-full flex items-start gap-3 px-3 py-2 text-left transition-colors hover:bg-[var(--interactive-hover)]/40',
         )}
       >
         {laned && totalLanes !== undefined ? (
-          <div className="shrink-0 self-stretch">
+          <div className="-my-2 shrink-0 self-stretch">
             <GitGraphSegment laned={laned} totalLanes={totalLanes} isExpanded={isExpanded} />
           </div>
         ) : (

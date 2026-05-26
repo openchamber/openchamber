@@ -1,7 +1,7 @@
 import React from 'react';
 import type { LanedCommit } from './gitGraph';
 
-export const LANE_WIDTH = 16;
+export const LANE_WIDTH = 8;
 
 interface GitGraphSegmentProps {
   laned: LanedCommit;
@@ -55,10 +55,13 @@ export const GitGraphSegment: React.FC<GitGraphSegmentProps> = ({
     const dotCy = h / 2;
     const dotCx = lane * LANE_WIDTH + LANE_WIDTH / 2;
 
+    const styles = getComputedStyle(canvas);
+    const fallbackColor = styles.getPropertyValue('--surface-muted-foreground').trim() || styles.color;
+
     const resolveColor = (value: string): string => {
       if (!value.startsWith('var(')) return value;
       const varName = value.slice(4, -1).trim();
-      return getComputedStyle(canvas).getPropertyValue(varName).trim() || '#888888';
+      return styles.getPropertyValue(varName).trim() || fallbackColor;
     };
 
     // Straight lines first so bezier curves render on top
@@ -70,10 +73,16 @@ export const GitGraphSegment: React.FC<GitGraphSegmentProps> = ({
     for (const seg of sorted) {
       const x1 = seg.fromLane * LANE_WIDTH + LANE_WIDTH / 2;
       const x2 = seg.toLane * LANE_WIDTH + LANE_WIDTH / 2;
+      const lineAlpha = seg.type === 'passing'
+        ? 0.72
+        : seg.type === 'branch-out' || seg.type === 'merge-in'
+          ? 0.95
+          : 1;
 
       ctx.beginPath();
       ctx.strokeStyle = resolveColor(seg.color);
-      ctx.lineWidth = 1.5;
+      ctx.globalAlpha = lineAlpha;
+      ctx.lineWidth = 1.25;
       ctx.lineCap = 'round';
 
       switch (seg.type) {
@@ -106,17 +115,18 @@ export const GitGraphSegment: React.FC<GitGraphSegmentProps> = ({
           continue;
       }
       ctx.stroke();
+      ctx.globalAlpha = 1;
     }
 
     // Dot — drawn last, always on top
-    const bg = getComputedStyle(canvas).getPropertyValue('--background').trim();
+    const bg = styles.getPropertyValue('--background').trim() || styles.getPropertyValue('--surface-background').trim();
     ctx.beginPath();
     ctx.arc(dotCx, dotCy, 4, 0, Math.PI * 2);
     ctx.fillStyle = resolveColor(color);
     ctx.fill();
     ctx.beginPath();
     ctx.arc(dotCx, dotCy, 5, 0, Math.PI * 2);
-    ctx.strokeStyle = bg || '#000';
+    ctx.strokeStyle = bg || fallbackColor;
     ctx.lineWidth = 2;
     ctx.stroke();
   }, [laned, lane, color, connectors, totalLanes, isExpanded, w]);
@@ -126,13 +136,13 @@ export const GitGraphSegment: React.FC<GitGraphSegmentProps> = ({
     // width is fixed to the lane count. No replaced-element intrinsic sizing.
     <div
       ref={containerRef}
-      style={{ width: w, height: '100%', position: 'relative', flexShrink: 0 }}
+      style={{ width: w, height: '100%', position: 'relative', flexShrink: 0, overflow: 'hidden' }}
     >
       {/* Canvas is absolutely inset so it matches the div exactly and never
           contributes its own intrinsic height (150px default) to flex layout. */}
       <canvas
         ref={canvasRef}
-        style={{ position: 'absolute', inset: 0 }}
+        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', display: 'block' }}
       />
     </div>
   );
