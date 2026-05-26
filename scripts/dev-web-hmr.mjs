@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
 import { existsSync, rmSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -82,6 +83,20 @@ async function stopChildTree(child) {
 
 const uiPort = process.env.OPENCHAMBER_HMR_UI_PORT || '5180';
 const backendPort = process.env.OPENCHAMBER_HMR_API_PORT || '3902';
+const hmrHost = process.env.OPENCHAMBER_HMR_HOST || '127.0.0.1';
+
+function getLanAddresses() {
+  const addresses = [];
+
+  for (const networkAddresses of Object.values(os.networkInterfaces())) {
+    for (const address of networkAddresses || []) {
+      if (address.family !== 'IPv4' || address.internal) continue;
+      addresses.push(address.address);
+    }
+  }
+
+  return addresses;
+}
 
 function clearViteCache() {
   const cacheDirs = [
@@ -97,15 +112,13 @@ function clearViteCache() {
 
 clearViteCache();
 
-const devHost = process.env.OPENCHAMBER_HOST || '127.0.0.1';
-
 const api = run('api', 'bun', ['run', '--cwd', 'packages/web', 'dev:server:watch'], {
   OPENCHAMBER_PORT: backendPort,
 });
 const vite = run(
   'vite',
   'bun',
-  ['x', 'vite', '--force', '--host', devHost, '--port', uiPort, '--strictPort'],
+  ['x', 'vite', '--force', '--host', hmrHost, '--port', uiPort, '--strictPort'],
   {
     OPENCHAMBER_PORT: backendPort,
     OPENCHAMBER_DISABLE_PWA_DEV: '1',
@@ -113,8 +126,18 @@ const vite = run(
   { cwd: webRoot },
 );
 
-console.log(`[dev:web:hmr] UI with HMR: http://${devHost}:${uiPort}`);
-console.log(`[dev:web:hmr] API: http://${devHost}:${backendPort}`);
+console.log(`[dev:web:hmr] UI with HMR: http://127.0.0.1:${uiPort}`);
+if (hmrHost === '0.0.0.0' || hmrHost === '::') {
+  const lanAddresses = getLanAddresses();
+  if (lanAddresses.length > 0) {
+    for (const address of lanAddresses) {
+      console.log(`[dev:web:hmr] LAN/mobile UI: http://${address}:${uiPort}`);
+    }
+  } else {
+    console.log('[dev:web:hmr] LAN/mobile UI: no LAN IPv4 address found');
+  }
+}
+console.log(`[dev:web:hmr] API: http://127.0.0.1:${backendPort}`);
 console.log('[dev:web:hmr] IMPORTANT: open UI URL above for HMR; backend URL has no HMR');
 
 let shuttingDown = false;
