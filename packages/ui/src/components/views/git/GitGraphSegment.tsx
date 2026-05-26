@@ -2,7 +2,8 @@ import React from 'react';
 import type { LanedCommit } from './gitGraph';
 
 export const LANE_WIDTH = 16;
-export const ROW_HEADER_HEIGHT = 40; // px — must match the commit row header height
+// Row height: py-2 (16px) + typography-ui-label line (21px) + typography-meta line (21px) = 58px
+export const ROW_HEADER_HEIGHT = 58;
 
 interface GitGraphSegmentProps {
   laned: LanedCommit;
@@ -35,9 +36,8 @@ export const GitGraphSegment: React.FC<GitGraphSegmentProps> = ({
   return (
     <svg
       width={width}
-      viewBox={`0 0 ${width} ${ROW_HEADER_HEIGHT}`}
-      preserveAspectRatio="none"
-      style={{ height: '100%', display: 'block', flexShrink: 0 }}
+      height={ROW_HEADER_HEIGHT}
+      style={{ display: 'block', flexShrink: 0 }}
       aria-hidden
     >
       {sorted.map((seg, idx) => {

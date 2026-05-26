@@ -331,7 +331,7 @@ export const HistoryCommitRow = React.memo(({
         )}
       >
         {laned && totalLanes !== undefined ? (
-          <div className="shrink-0 self-stretch">
+          <div className="shrink-0">
             <GitGraphSegment laned={laned} totalLanes={totalLanes} isExpanded={isExpanded} />
           </div>
         ) : (
