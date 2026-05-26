@@ -3,7 +3,9 @@
   "version": "1.11.6",
   "private": true,
   "description": "Electron desktop runtime for OpenChamber",
+  "homepage": "https://github.com/openchamber/openchamber",
   "author": "OpenChamber",
+  "license": "MIT",
   "type": "module",
   "main": "./dist-bundle/main.mjs",
   "dependencies": {
@@ -31,7 +33,8 @@
     "rebuild:native": "node ./scripts/rebuild-native.mjs",
     "package": "bun run build:web-assets && bun run bundle:main && bun run rebuild:native && electron-builder",
     "finalize:latest-yml": "node ./scripts/finalize-latest-yml.mjs",
-    "type-check": "node --check ./main.mjs && node --check ./preload.mjs",
+    "smoke:linux": "node ./scripts/smoke-electron-linux.mjs",
+    "type-check": "node --check ./main.mjs && node --check ./preload.mjs && node --check ./path-open-utils.mjs && node --check ./linux-app-discovery.mjs && node --check ./electron-lifecycle-utils.mjs && node --check ./scripts/smoke-linux-app-discovery.mjs && node --check ./scripts/smoke-path-open-utils.mjs && node --check ./scripts/smoke-electron-lifecycle-utils.mjs && node --check ./scripts/smoke-electron-linux.mjs",
     "lint": "node -e \"process.exit(0)\""
   },
   "build": {
@@ -54,6 +57,33 @@
     },
     "artifactName": "${productName}-${version}-${arch}.${ext}",
     "npmRebuild": false,
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Development",
+      "synopsis": "Desktop runtime for OpenChamber",
+      "description": "OpenChamber desktop runtime for interacting with local or remote OpenCode servers.",
+      "maintainer": "OpenChamber",
+      "vendor": "OpenChamber",
+      "executableName": "openchamber",
+      "desktop": {
+        "entry": {
+          "Name": "OpenChamber",
+          "Comment": "OpenChamber desktop runtime for OpenCode",
+          "StartupWMClass": "OpenChamber",
+          "StartupNotify": "true"
+        }
+      }
+    },
+    "deb": {
+      "packageName": "openchamber",
+      "packageCategory": "devel",
+      "priority": "optional",
+      "maintainer": "OpenChamber",
+      "vendor": "OpenChamber"
+    },
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "resources/icons/icon.icns",

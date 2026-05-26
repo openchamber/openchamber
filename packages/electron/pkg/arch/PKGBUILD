@@ -1,0 +1,91 @@
+# Maintainer: OpenChamber <https://github.com/openchamber/openchamber>
+
+pkgname=openchamber-electron
+pkgver=1.11.2
+pkgrel=1
+pkgdesc="OpenChamber Electron desktop runtime"
+arch=('x86_64')
+url="https://github.com/openchamber/openchamber"
+license=('MIT')
+depends=(
+  'alsa-lib'
+  'at-spi2-core'
+  'cairo'
+  'dbus'
+  'expat'
+  'gcc-libs'
+  'glib2'
+  'glibc'
+  'gtk3'
+  'hicolor-icon-theme'
+  'libnotify'
+  'libsecret'
+  'libx11'
+  'libxcb'
+  'libxcomposite'
+  'libxdamage'
+  'libxext'
+  'libxfixes'
+  'libxkbcommon'
+  'libxrandr'
+  'libxss'
+  'libxtst'
+  'nss'
+  'pango'
+  'util-linux-libs'
+  'xdg-utils'
+)
+optdepends=(
+  'libappindicator-gtk3: status indicator integration on desktops that support AppIndicator'
+)
+conflicts=('openchamber')
+options=('!strip')
+source=()
+sha256sums=()
+
+package() {
+  local electron_root="$startdir/../.."
+  local artifact_dir="$electron_root/dist/linux-unpacked"
+  local icon_dir="$electron_root/dist/.icon-set"
+
+  if [[ ! -x "$artifact_dir/openchamber" ]]; then
+    printf '%s\n' "Missing $artifact_dir/openchamber. Run bun run electron:build from the repository root first." >&2
+    return 1
+  fi
+
+  if [[ ! -d "$icon_dir" ]]; then
+    printf '%s\n' "Missing $icon_dir. Run bun run electron:build from the repository root first." >&2
+    return 1
+  fi
+
+  install -dm755 "$pkgdir/opt/OpenChamber"
+  cp -a "$artifact_dir/." "$pkgdir/opt/OpenChamber/"
+
+  install -dm755 "$pkgdir/usr/bin"
+  ln -s /opt/OpenChamber/openchamber "$pkgdir/usr/bin/openchamber"
+
+  install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/openchamber.desktop" <<'DESKTOP'
+[Desktop Entry]
+Name=OpenChamber
+Exec=/opt/OpenChamber/openchamber %U
+Terminal=false
+Type=Application
+Icon=openchamber
+StartupWMClass=OpenChamber
+Comment=OpenChamber desktop runtime for interacting with local or remote OpenCode servers.
+StartupNotify=true
+Categories=Development;
+DESKTOP
+
+  local size icon_source
+  for size in 16 32 48 64 128 256 512 1024; do
+    icon_source="$icon_dir/icon_${size}x${size}.png"
+    if [[ ! -f "$icon_source" ]]; then
+      icon_source="$icon_dir/icon_${size}.png"
+    fi
+    if [[ ! -f "$icon_source" ]]; then
+      continue
+    fi
+    install -Dm644 "$icon_source" "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/openchamber.png"
+  done
+}
