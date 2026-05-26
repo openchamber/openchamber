@@ -3,12 +3,14 @@ import type { Part } from '@opencode-ai/sdk/v2';
 
 import UserTextPart from './parts/UserTextPart';
 import ToolPart from './parts/ToolPart';
+
 import AssistantTextPart from './parts/AssistantTextPart';
 import ReasoningPart, { MergedReasoningPart } from './parts/ReasoningPart';
 import { MessageFilesDisplay } from '../FileAttachment';
 import { TurnChangedFilesDropdown } from '../TurnChangedFilesDropdown';
 import type { ToolPart as ToolPartType } from '@opencode-ai/sdk/v2';
 import type { StreamPhase, ToolPopupContent, AgentMentionInfo } from './types';
+import { computeTpsText, computeTtftText } from './metricsUtils';
 import type { TurnGroupingContext } from '../lib/turns/types';
 import { cn } from '@/lib/utils';
 import { isEmptyTextPart, extractTextContent } from './partUtils';
@@ -291,6 +293,7 @@ interface MessageBodyProps {
     messageFinish?: string;
     messageCompletedAt?: number;
     messageCreatedAt?: number;
+    outputTokens?: number;
 
     syntaxTheme: { [key: string]: React.CSSProperties };
 
@@ -853,6 +856,7 @@ const AssistantMessageBody = React.memo(({
     messageFinish,
     messageCompletedAt,
     messageCreatedAt,
+    outputTokens,
 
     syntaxTheme,
     isMobile,
@@ -1737,6 +1741,19 @@ const AssistantMessageBody = React.memo(({
         return formatTurnDuration(messageCompletedAt - userCreatedAt);
     }, [isLastAssistantInTurn, hasStopFinish, turnGroupingContext?.userMessageCreatedAt, messageCompletedAt]);
 
+    const tpsText = React.useMemo(() => {
+        if (!isLastAssistantInTurn || !hasStopFinish) return undefined;
+        if (typeof outputTokens !== 'number') return undefined;
+        return computeTpsText(visibleParts, outputTokens);
+    }, [isLastAssistantInTurn, hasStopFinish, visibleParts, outputTokens]);
+
+    const ttftText = React.useMemo(() => {
+        if (!isLastAssistantInTurn || !hasStopFinish) return undefined;
+        const userCreatedAt = turnGroupingContext?.userMessageCreatedAt;
+        if (typeof userCreatedAt !== 'number') return undefined;
+        return computeTtftText(visibleParts, userCreatedAt);
+    }, [isLastAssistantInTurn, hasStopFinish, turnGroupingContext?.userMessageCreatedAt, visibleParts]);
+
     const footerTimestamp = React.useMemo(() => {
         const timestamp = typeof messageCompletedAt === 'number' && messageCompletedAt > 0
             ? messageCompletedAt
@@ -1905,12 +1922,34 @@ const AssistantMessageBody = React.memo(({
                             {turnDurationText ? (
                                 <Tooltip>
                                     <TooltipTrigger asChild>
-                                        <span className="text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1">
+                                        <span className="text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1" aria-label={t('chat.messageBody.footer.totalTimeAria', { value: turnDurationText })}>
                                             <Icon name="hourglass" className="h-3.5 w-3.5" />
                                             <span className="message-footer__label">{turnDurationText}</span>
                                         </span>
                                     </TooltipTrigger>
-                                    <TooltipContent>{turnDurationText}</TooltipContent>
+                                    <TooltipContent sideOffset={6}>{t('chat.messageBody.footer.totalTime')}</TooltipContent>
+                                </Tooltip>
+                            ) : null}
+                            {tpsText ? (
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <span className="text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1" aria-label={t('chat.messageBody.footer.tpsAria', { value: tpsText })}>
+                                            <Icon name="pulse" className="h-3.5 w-3.5" />
+                                            <span className="message-footer__label">{tpsText}</span>
+                                        </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent sideOffset={6}>{t('chat.messageBody.footer.tps')}</TooltipContent>
+                                </Tooltip>
+                            ) : null}
+                            {ttftText ? (
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <span className="text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1" aria-label={t('chat.messageBody.footer.ttftAria', { value: ttftText })}>
+                                            <Icon name="flashlight" className="h-3.5 w-3.5" />
+                                            <span className="message-footer__label">{ttftText}</span>
+                                        </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent sideOffset={6}>{t('chat.messageBody.footer.ttft')}</TooltipContent>
                                 </Tooltip>
                             ) : null}
                             {footerTimestamp ? (
@@ -1918,13 +1957,13 @@ const AssistantMessageBody = React.memo(({
                                     <TooltipTrigger asChild>
                                         <span
                                             className={footerTimestampClassName}
-                                            aria-label={`Message time: ${footerTimestamp}`}
-                                        >
-                                            <Icon name="time" className="h-3.5 w-3.5" />
-                                            <span className="message-footer__label">{footerTimestamp}</span>
-                                        </span>
-                                    </TooltipTrigger>
-                                    <TooltipContent>{footerTimestamp}</TooltipContent>
+                                        aria-label={t('chat.messageBody.footer.completedAtAria', { value: footerTimestamp })}
+                                    >
+                                        <Icon name="time" className="h-3.5 w-3.5" />
+                                        <span className="message-footer__label">{footerTimestamp}</span>
+                                    </span>
+                                </TooltipTrigger>
+                                <TooltipContent sideOffset={6}>{t('chat.messageBody.footer.completedAt')}</TooltipContent>
                                 </Tooltip>
                             ) : null}
                             {!isMiniChatSurface && isLastAssistantInTurn && hasStopFinish ? (
