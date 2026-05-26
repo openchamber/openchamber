@@ -1,5 +1,11 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
@@ -58,6 +64,7 @@ const trimHistoryDiffCache = (cache: Map<string, HistoryDiffCacheValue>): Map<st
 
 interface HistoryCommitRowProps {
   entry: GitLogEntry;
+  mode?: 'history' | 'graph';
   laned?: LanedCommit;
   totalLanes?: number;
   isExpanded: boolean;
@@ -126,6 +133,7 @@ function parseRefBadges(refs: string): RefBadge[] {
 
 export const HistoryCommitRow = React.memo(({
   entry,
+  mode = 'history',
   laned,
   totalLanes,
   isExpanded,
@@ -138,6 +146,7 @@ export const HistoryCommitRow = React.memo(({
   onActionSuccess,
 }: HistoryCommitRowProps) => {
   const { t } = useI18n();
+  const isGraphMode = mode === 'graph';
   type PendingAction =
     | 'checkout' | 'cherryPick' | 'revert'
     | 'merge' | 'rebase'
@@ -146,7 +155,6 @@ export const HistoryCommitRow = React.memo(({
   const [actionLoading, setActionLoading] = React.useState<string | null>(null);
   const [showCreateBranch, setShowCreateBranch] = React.useState(false);
   const [newBranchName, setNewBranchName] = React.useState('');
-  const [showResetOptions, setShowResetOptions] = React.useState(false);
   const [pendingAction, setPendingAction] = React.useState<PendingAction | null>(null);
 
   const [openDiffPaths, setOpenDiffPaths] = React.useState<Set<string>>(new Set());
@@ -221,7 +229,6 @@ export const HistoryCommitRow = React.memo(({
     setActionLoading('reset');
     try {
       await git.resetToCommit(directory, entry.hash, mode, force);
-      setShowResetOptions(false);
       onActionSuccess?.();
     } catch (e: unknown) {
       toast.error(String((e as Error).message));
@@ -341,10 +348,13 @@ export const HistoryCommitRow = React.memo(({
         type="button"
         onClick={onToggle}
         className={cn(
-          'w-full flex items-start gap-3 px-3 py-2 text-left transition-colors hover:bg-[var(--interactive-hover)]/40',
+          'w-full flex items-start gap-3 px-3 py-2 text-left transition-colors',
+          isGraphMode
+            ? 'hover:bg-[var(--interactive-hover)]/40'
+            : isExpanded ? 'bg-sidebar/90' : 'hover:bg-sidebar/40'
         )}
       >
-        {laned && totalLanes !== undefined ? (
+        {isGraphMode && laned && totalLanes !== undefined ? (
           <div className="-my-2 shrink-0 self-stretch">
             <GitGraphSegment laned={laned} totalLanes={totalLanes} isExpanded={isExpanded} />
           </div>
@@ -357,7 +367,7 @@ export const HistoryCommitRow = React.memo(({
         )}
         <div className="min-w-0 flex-1">
           {/* Ref badges */}
-          {(() => {
+          {isGraphMode ? (() => {
             const badges = parseRefBadges(entry.refs);
             return badges.length > 0 ? (
               <div className="flex flex-wrap gap-1 mb-0.5">
@@ -376,7 +386,7 @@ export const HistoryCommitRow = React.memo(({
                 ))}
               </div>
             ) : null;
-          })()}
+          })() : null}
 
           <p className="typography-ui-label font-medium text-foreground line-clamp-1">
             {entry.message}
@@ -418,7 +428,7 @@ export const HistoryCommitRow = React.memo(({
       {isExpanded && (
         <div className="px-3 pb-2 pl-8 border-t border-border/40">
           {/* Action buttons */}
-          {pendingAction ? (
+          {isGraphMode && pendingAction ? (
             /* Confirmation banner — replaces the button row while an action is pending */
             <div className="flex items-center gap-2 py-2 border-b border-border/30 mb-2">
               <span className="typography-micro text-muted-foreground flex-1 min-w-0">
@@ -442,7 +452,7 @@ export const HistoryCommitRow = React.memo(({
                 {t('gitView.history.actions.cancelButton')}
               </Button>
             </div>
-          ) : (
+          ) : isGraphMode ? (
             <div className="flex flex-wrap items-center gap-1.5 py-2 border-b border-border/30 mb-2">
               <Button variant="outline" size="xs" className="h-6"
                 disabled={actionLoading !== null}
@@ -496,35 +506,36 @@ export const HistoryCommitRow = React.memo(({
               </Button>
 
               {/* Reset: dropdown first to pick mode, then confirmation banner */}
-              <div className="relative inline-flex h-6 items-center">
-                <Button variant="outline" size="xs" className="h-6"
-                  disabled={actionLoading !== null}
-                  onClick={(e) => { e.stopPropagation(); setShowResetOptions((v) => !v); }}
-                >
-                  {actionLoading === 'reset'
-                    ? <Icon name="loader-4" className="size-3 animate-spin mr-1" />
-                    : null}
-                  {t('gitView.history.actions.reset')}
-                </Button>
-                {showResetOptions && (
-                  <div className="absolute top-full left-0 mt-1 z-50 bg-popover border border-border/60 rounded shadow-md min-w-max">
-                    {(['soft', 'mixed', 'hard'] as const).map((mode) => (
-                      <button
-                        key={mode} type="button"
-                        disabled={actionLoading !== null}
-                        className="block w-full text-left px-3 py-1.5 typography-micro hover:bg-[var(--interactive-hover)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setShowResetOptions(false);
-                          setPendingAction(`reset${mode.charAt(0).toUpperCase() + mode.slice(1)}` as PendingAction);
-                        }}
-                      >
-                        {t(`gitView.history.actions.reset${mode.charAt(0).toUpperCase() + mode.slice(1)}` as never)}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="xs"
+                    className="h-6"
+                    disabled={actionLoading !== null}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {actionLoading === 'reset'
+                      ? <Icon name="loader-4" className="size-3 animate-spin mr-1" />
+                      : null}
+                    {t('gitView.history.actions.reset')}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="min-w-max">
+                  {(['soft', 'mixed', 'hard'] as const).map((mode) => (
+                    <DropdownMenuItem
+                      key={mode}
+                      disabled={actionLoading !== null}
+                      onSelect={(e) => {
+                        e.stopPropagation();
+                        setPendingAction(`reset${mode.charAt(0).toUpperCase() + mode.slice(1)}` as PendingAction);
+                      }}
+                    >
+                      {t(`gitView.history.actions.reset${mode.charAt(0).toUpperCase() + mode.slice(1)}` as never)}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
 
               <Button variant="outline" size="xs" className="h-6"
                 disabled={actionLoading !== null}
@@ -540,7 +551,7 @@ export const HistoryCommitRow = React.memo(({
                 {t('gitView.history.actions.rebase')}
               </Button>
             </div>
-          )}
+          ) : null}
 
           {isLoadingFiles ? (
             <div className="flex items-center gap-2 py-2">

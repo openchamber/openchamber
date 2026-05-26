@@ -68,6 +68,7 @@ type SyncAction = 'fetch' | 'pull' | 'push' | 'sync' | null;
 type CommitAction = 'commit' | 'commitAndPush' | null;
 type BranchOperation = 'merge' | 'rebase' | null;
 type ActionTab = 'commit' | 'branch' | 'pr';
+type GitLogDialogMode = 'history' | 'graph';
 type HistoryBranchDivider = {
   insertBeforeIndex: number;
   branchName: string;
@@ -313,6 +314,7 @@ export const GitView: React.FC = () => {
   const fetchStatus = useGitStore((state) => state.fetchStatus);
   const fetchBranches = useGitStore((state) => state.fetchBranches);
   const fetchLog = useGitStore((state) => state.fetchLog);
+  const setLogMaxCount = useGitStore((state) => state.setLogMaxCount);
   const fetchIdentity = useGitStore((state) => state.fetchIdentity);
   const prefetchDiffs = useGitStore((state) => state.prefetchDiffs);
   const moveStatusPathsOptimistically = useGitStore((state) => state.moveStatusPathsOptimistically);
@@ -539,7 +541,7 @@ export const GitView: React.FC = () => {
   const [syncAction, setSyncAction] = React.useState<SyncAction>(null);
   const [isStashesDialogOpen, setIsStashesDialogOpen] = React.useState(false);
   const [commitAction, setCommitAction] = React.useState<CommitAction>(null);
-  const [logMaxCountLocal] = React.useState<number>(25);
+  const [logMaxCountLocal, setLogMaxCountLocal] = React.useState<number>(25);
   const [isSettingIdentity, setIsSettingIdentity] = React.useState(false);
   const { triggerFireworks } = useFireworksCelebration();
 
@@ -621,11 +623,11 @@ export const GitView: React.FC = () => {
   const [expandedCommitHashes, setExpandedCommitHashes] = React.useState<Set<string>>(new Set());
   const [commitFilesMap, setCommitFilesMap] = React.useState<Map<string, CommitFileEntry[]>>(new Map());
   const [loadingCommitHashes, setLoadingCommitHashes] = React.useState<Set<string>>(new Set());
-  const [, setHistoryBranchDivider] = React.useState<HistoryBranchDivider>(null);
+  const [historyBranchDivider, setHistoryBranchDivider] = React.useState<HistoryBranchDivider>(null);
   const [remoteUrl, setRemoteUrl] = React.useState<string | null>(null);
   const [gitmojiEmojis, setGitmojiEmojis] = React.useState<GitmojiEntry[]>([]);
   const [gitmojiSearch, setGitmojiSearch] = React.useState('');
-  const [isHistoryDialogOpen, setIsHistoryDialogOpen] = React.useState(false);
+  const [gitLogDialogMode, setGitLogDialogMode] = React.useState<GitLogDialogMode | null>(null);
 
   const actionTabItems = React.useMemo(() => [
     { id: 'commit', label: t('gitView.tabs.commit'), icon: <Icon name="git-commit" className="h-3.5 w-3.5" /> },
@@ -1640,8 +1642,8 @@ export const GitView: React.FC = () => {
   }, [currentDirectory]);
 
   React.useEffect(() => {
-    if (!isHistoryDialogOpen || !currentDirectory) {
-      if (!isHistoryDialogOpen) setGraphLog(null);
+    if (gitLogDialogMode !== 'graph' || !currentDirectory) {
+      if (gitLogDialogMode !== 'graph') setGraphLog(null);
       return;
     }
     let cancelled = false;
@@ -1657,7 +1659,7 @@ export const GitView: React.FC = () => {
         if (!cancelled) setGraphLogLoading(false);
       });
     return () => { cancelled = true; };
-  }, [isHistoryDialogOpen, currentDirectory, graphLogMaxCount, git]);
+  }, [gitLogDialogMode, currentDirectory, graphLogMaxCount, git]);
 
   // Keep these sections stable in layout; individual cards render placeholders when unavailable.
 
@@ -2226,12 +2228,23 @@ export const GitView: React.FC = () => {
     [bumpIndexRevision, currentDirectory, git, status, stashDialogOperation, stashDialogBranch, refreshStatusAndBranches, refreshLog, t]
   );
 
+  const handleLogMaxCountChange = React.useCallback(
+    (count: number) => {
+      setLogMaxCountLocal(count);
+      if (currentDirectory) {
+        setLogMaxCount(currentDirectory, count);
+        fetchLog(currentDirectory, git, count);
+      }
+    },
+    [currentDirectory, fetchLog, git, setLogMaxCount]
+  );
+
   const handleGraphLogMaxCountChange = React.useCallback((count: number) => {
     setGraphLogMaxCount(count);
   }, []);
 
   const handleGraphActionSuccess = React.useCallback(() => {
-    setIsHistoryDialogOpen(false);
+    setGitLogDialogMode(null);
     if (currentDirectory) {
       fetchStatus(currentDirectory, git);
       fetchBranches(currentDirectory, git);
@@ -2345,7 +2358,8 @@ export const GitView: React.FC = () => {
         onSelectIdentity={handleApplyIdentity}
         isApplyingIdentity={isSettingIdentity}
             isWorktreeMode={!!worktreeMetadata}
-            onOpenHistory={() => setIsHistoryDialogOpen(true)}
+            onOpenHistory={() => setGitLogDialogMode('history')}
+            onOpenGraph={() => setGitLogDialogMode('graph')}
             onOpenStashes={openStashes}
             actionTabItems={actionTabItems}
             activeActionTab={actionTab}
@@ -2484,20 +2498,23 @@ export const GitView: React.FC = () => {
         </div>
       </div>
 
-      <Dialog open={isHistoryDialogOpen} onOpenChange={setIsHistoryDialogOpen}>
+      <Dialog open={gitLogDialogMode !== null} onOpenChange={(open) => { if (!open) setGitLogDialogMode(null); }}>
         <DialogContent className="max-w-5xl h-[90vh] max-h-[90vh] flex flex-col overflow-hidden">
           <DialogHeader>
-            <DialogTitle>{t('gitView.history.title')}</DialogTitle>
+            <DialogTitle>
+              {gitLogDialogMode === 'graph' ? t('gitView.graph.title') : t('gitView.history.title')}
+            </DialogTitle>
             <DialogDescription>
               {t('gitView.history.dialogDescription')}
             </DialogDescription>
           </DialogHeader>
           <div className="flex-1 min-h-0">
             <HistorySection
-              log={graphLog ?? log}
-              isLogLoading={graphLogLoading || isLogLoading}
-              logMaxCount={graphLogMaxCount}
-              onLogMaxCountChange={handleGraphLogMaxCountChange}
+              mode={gitLogDialogMode === 'graph' ? 'graph' : 'history'}
+              log={gitLogDialogMode === 'graph' ? graphLog ?? log : log}
+              isLogLoading={gitLogDialogMode === 'graph' ? graphLogLoading || isLogLoading : isLogLoading}
+              logMaxCount={gitLogDialogMode === 'graph' ? graphLogMaxCount : logMaxCountLocal}
+              onLogMaxCountChange={gitLogDialogMode === 'graph' ? handleGraphLogMaxCountChange : handleLogMaxCountChange}
               expandedCommitHashes={expandedCommitHashes}
               onToggleCommit={handleToggleCommit}
               commitFilesMap={commitFilesMap}
@@ -2506,9 +2523,9 @@ export const GitView: React.FC = () => {
               directory={currentDirectory ?? undefined}
               showHeader={false}
               contentMaxHeightClassName="h-full max-h-none"
-              branchDivider={null}
-              onConflict={handleGraphConflict}
-              onActionSuccess={handleGraphActionSuccess}
+              branchDivider={gitLogDialogMode === 'graph' ? null : historyBranchDivider}
+              onConflict={gitLogDialogMode === 'graph' ? handleGraphConflict : undefined}
+              onActionSuccess={gitLogDialogMode === 'graph' ? handleGraphActionSuccess : undefined}
             />
           </div>
         </DialogContent>

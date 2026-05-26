@@ -11,6 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Button } from '@/components/ui/button';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from "@/components/icon/Icon";
 import { HistoryCommitRow } from './HistoryCommitRow';
@@ -26,6 +27,7 @@ const LOG_SIZE_OPTIONS = [
 ];
 
 interface HistorySectionProps {
+  mode?: 'history' | 'graph';
   log: { all: GitLogEntry[] } | null;
   isLogLoading: boolean;
   logMaxCount: number;
@@ -48,6 +50,7 @@ interface HistorySectionProps {
 }
 
 export const HistorySection: React.FC<HistorySectionProps> = ({
+  mode = 'history',
   log,
   isLogLoading,
   logMaxCount,
@@ -66,11 +69,11 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
 }) => {
   const { t } = useI18n();
   const [isOpen, setIsOpen] = React.useState(true);
+  const isGraphMode = mode === 'graph';
 
-  // Compute lanes unconditionally (handle null log)
   const laned: LanedCommit[] = React.useMemo(
-    () => (log ? assignLanes(log.all) : []),
-    [log]
+    () => (isGraphMode && log ? assignLanes(log.all) : []),
+    [isGraphMode, log]
   );
 
   const maxLanes = React.useMemo(
@@ -107,46 +110,48 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
     : <Icon name="arrow-up" className="size-3.5" />;
 
   const renderCommitList = (entries: GitLogEntry[]) => (
-    <>
-      <ul className="divide-y divide-border/60">
-        {entries.map((entry) => (
-          <HistoryCommitRow
-            key={entry.hash}
-            entry={entry}
-            laned={lanedByHash.get(entry.hash)}
-            totalLanes={maxLanes}
-            isExpanded={expandedCommitHashes.has(entry.hash)}
-            onToggle={() => onToggleCommit(entry.hash)}
-            files={commitFilesMap.get(entry.hash) ?? []}
-            isLoadingFiles={loadingCommitHashes.has(entry.hash)}
-            onCopyHash={onCopyHash}
-            directory={directory}
-            onConflict={onConflict}
-            onActionSuccess={onActionSuccess}
-          />
-        ))}
-      </ul>
-      {entries.length >= logMaxCount && (
-        <div className="flex justify-center py-2 border-t border-border/40">
-          <button
-            type="button"
-            onClick={() => onLogMaxCountChange(logMaxCount + 25)}
-            disabled={isLogLoading}
-            className="typography-micro text-muted-foreground hover:text-foreground transition-colors px-3 py-1 rounded hover:bg-[var(--interactive-hover)]"
-          >
-            {isLogLoading ? (
-              <span className="flex items-center gap-1">
-                <Icon name="loader-4" className="size-3 animate-spin" />
-                {t('gitView.history.loadingMore')}
-              </span>
-            ) : (
-              t('gitView.history.loadMore')
-            )}
-          </button>
-        </div>
-      )}
-    </>
+    <ul className="divide-y divide-border/60">
+      {entries.map((entry) => (
+        <HistoryCommitRow
+          key={entry.hash}
+          entry={entry}
+          mode={mode}
+          laned={isGraphMode ? lanedByHash.get(entry.hash) : undefined}
+          totalLanes={isGraphMode ? maxLanes : undefined}
+          isExpanded={expandedCommitHashes.has(entry.hash)}
+          onToggle={() => onToggleCommit(entry.hash)}
+          files={commitFilesMap.get(entry.hash) ?? []}
+          isLoadingFiles={loadingCommitHashes.has(entry.hash)}
+          onCopyHash={onCopyHash}
+          directory={directory}
+          onConflict={onConflict}
+          onActionSuccess={onActionSuccess}
+        />
+      ))}
+    </ul>
   );
+
+  const loadMoreButton = log.all.length >= logMaxCount ? (
+    <div className="flex justify-center py-2 border-t border-border/40">
+      <Button
+        type="button"
+        variant="ghost"
+        size="xs"
+        onClick={() => onLogMaxCountChange(logMaxCount + 25)}
+        disabled={isLogLoading}
+        className="px-3 text-muted-foreground hover:text-foreground"
+      >
+        {isLogLoading ? (
+          <span className="flex items-center gap-1">
+            <Icon name="loader-4" className="size-3 animate-spin" />
+            {t('gitView.history.loadingMore')}
+          </span>
+        ) : (
+          t('gitView.history.loadMore')
+        )}
+      </Button>
+    </div>
+  ) : null;
 
   const content = (
     <ScrollableOverlay outerClassName={`min-h-0 ${contentMaxHeightClassName}`} className="h-full w-full">
@@ -157,30 +162,36 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
           </p>
         </div>
       ) : hasSplitHistory && branchDivider ? (
-        <div className="flex flex-col gap-0">
-          {topEntries.length > 0 ? (
-            <div className="rounded-xl border border-border/60 bg-background/70 overflow-hidden">
-              {renderCommitList(topEntries)}
-            </div>
-          ) : null}
+        <>
+          <div className="flex flex-col gap-0">
+            {topEntries.length > 0 ? (
+              <div className="rounded-xl border border-border/60 bg-background/70 overflow-hidden">
+                {renderCommitList(topEntries)}
+              </div>
+            ) : null}
 
-          <div className="flex items-center gap-2 px-3 py-1.5" aria-hidden>
-            <span className="h-px flex-1 bg-border/60" />
-            <span className="inline-flex max-w-[80%] items-center gap-1 typography-micro text-muted-foreground">
-              <span className="truncate" title={branchDivider.branchName}>{branchDivider.branchName}</span>
-              {dividerIcon}
-            </span>
-            <span className="h-px flex-1 bg-border/60" />
+            <div className="flex items-center gap-2 px-3 py-1.5" aria-hidden>
+              <span className="h-px flex-1 bg-border/60" />
+              <span className="inline-flex max-w-[80%] items-center gap-1 typography-micro text-muted-foreground">
+                <span className="truncate" title={branchDivider.branchName}>{branchDivider.branchName}</span>
+                {dividerIcon}
+              </span>
+              <span className="h-px flex-1 bg-border/60" />
+            </div>
+
+            {bottomEntries.length > 0 ? (
+              <div className="rounded-xl border border-border/60 bg-background/70 overflow-hidden">
+                {renderCommitList(bottomEntries)}
+              </div>
+            ) : null}
           </div>
-
-          {bottomEntries.length > 0 ? (
-            <div className="rounded-xl border border-border/60 bg-background/70 overflow-hidden">
-              {renderCommitList(bottomEntries)}
-            </div>
-          ) : null}
-        </div>
+          {loadMoreButton}
+        </>
       ) : (
-        renderCommitList(log.all)
+        <>
+          {renderCommitList(log.all)}
+          {loadMoreButton}
+        </>
       )}
     </ScrollableOverlay>
   );

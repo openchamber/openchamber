@@ -43,6 +43,7 @@ interface GitHeaderProps {
   isApplyingIdentity: boolean;
   isWorktreeMode: boolean;
   onOpenHistory?: () => void;
+  onOpenGraph?: () => void;
   onOpenStashes?: () => void;
   actionTabItems?: SortableTabsStripItem[];
   activeActionTab?: string;
@@ -246,6 +247,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
   isApplyingIdentity,
   isWorktreeMode,
   onOpenHistory,
+  onOpenGraph,
   onOpenStashes,
   actionTabItems,
   activeActionTab,
@@ -258,7 +260,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
 
   const managementButtons = (
     <div className="flex items-center gap-1 shrink-0">
-      {onOpenHistory || onOpenStashes ? (
+      {onOpenHistory || onOpenGraph || onOpenStashes ? (
         <DropdownMenu>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -267,19 +269,25 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
                   variant="ghost"
                   size="sm"
                   className="h-8 w-8 px-0"
-                  aria-label={t('gitView.history.title')}
+                  aria-label={t('gitView.header.repositoryViews')}
                 >
                   <Icon name="git-repository" className="size-4" />
                 </Button>
               </DropdownMenuTrigger>
             </TooltipTrigger>
-            <TooltipContent sideOffset={8}>{t('gitView.history.title')}</TooltipContent>
+            <TooltipContent sideOffset={8}>{t('gitView.header.repositoryViews')}</TooltipContent>
           </Tooltip>
           <DropdownMenuContent align="end">
             {onOpenHistory ? (
               <DropdownMenuItem onSelect={onOpenHistory}>
                 <Icon name="history" className="size-4" />
                 {t('gitView.history.title')}
+              </DropdownMenuItem>
+            ) : null}
+            {onOpenGraph ? (
+              <DropdownMenuItem onSelect={onOpenGraph}>
+                <Icon name="git-merge" className="size-4" />
+                {t('gitView.graph.title')}
               </DropdownMenuItem>
             ) : null}
             {onOpenStashes ? (
