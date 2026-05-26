@@ -632,10 +632,10 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
             useChatSearchStore.getState().setIsLoadingForSearch(false);
             return;
         }
-        // More pages exist. Fire and catch so errors do not leave the loading
-        // indicator stuck permanently.
+        // More pages exist. Fire and clear the loading flag on settle — whether
+        // loadMore did real work or no-op'd (e.g. meta and prefetch disagreed).
         useChatSearchStore.getState().setIsLoadingForSearch(true);
-        sync.loadMore(currentSessionId!).catch(() => {
+        sync.loadMore(currentSessionId!).finally(() => {
             useChatSearchStore.getState().setIsLoadingForSearch(false);
         });
     }, [isSearchOpen, searchQuery, searchFlags, currentSessionId, historyMeta, sync]);
