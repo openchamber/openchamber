@@ -2250,6 +2250,20 @@ export async function fetch(directory, options = {}) {
     args.push(remote);
     if (options.branch) args.push(options.branch);
 
+    // Forward extra git flags (mirrors simple-git's appendTaskOptions logic).
+    // Array form: ['--tags', '--prune'] is spread directly.
+    // Object form: string/number values become key=value flags; null/boolean
+    // values are skipped — consistent with how simple-git handled them.
+    if (Array.isArray(options.options)) {
+      args.push(...options.options);
+    } else if (options.options && typeof options.options === 'object') {
+      for (const [flag, value] of Object.entries(options.options)) {
+        if (value !== null && value !== undefined && typeof value !== 'boolean') {
+          args.push(`${flag}=${value}`);
+        }
+      }
+    }
+
     await git.raw(args);
 
     return { success: true };
