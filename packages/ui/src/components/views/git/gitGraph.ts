@@ -47,7 +47,7 @@ export function laneColor(lane: number): LaneColor {
 /**
  * Assigns visual lanes to a list of commits (newest-first order).
  *
- * Greedy lane assignment algorithm (O(n)):
+ * Greedy lane assignment algorithm (O(n × lanes) where lanes = max concurrent active branches):
  * - activeLanes[i] holds the hash expected next on lane i (or null if free)
  * - Each commit takes the lane that was waiting for it, or the next free lane
  * - Merge commits open new lanes for additional parents

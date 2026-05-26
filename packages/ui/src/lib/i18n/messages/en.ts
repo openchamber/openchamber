@@ -509,6 +509,8 @@ export const dict = {
   'gitView.history.actions.checkoutConfirm': 'Check out this commit as detached HEAD?',
   'gitView.history.actions.cherryPick': 'Cherry-pick',
   'gitView.history.actions.cherryPickConfirm': 'Cherry-pick this commit onto the current branch?',
+  'gitView.history.actions.conflictToastDescription': 'Conflicts in: {files}. Resolve manually and commit, or abort with git cherry-pick/revert --abort.',
+  'gitView.history.actions.conflictToastTitle': 'Conflict',
   'gitView.history.actions.confirmButton': 'Confirm',
   'gitView.history.actions.createBranch': 'Create branch here',
   'gitView.history.actions.createBranchConfirm': 'Create',

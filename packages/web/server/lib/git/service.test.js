@@ -377,3 +377,53 @@ describe('resetToCommit', () => {
     }
   });
 });
+
+describe('hash validation', () => {
+  it('checkoutCommit rejects non-hex hash', async () => {
+    await expect(checkoutCommit('/tmp', '--hard')).rejects.toThrow('Invalid commit hash');
+  });
+
+  it('checkoutCommit rejects ref name', async () => {
+    await expect(checkoutCommit('/tmp', 'HEAD')).rejects.toThrow('Invalid commit hash');
+  });
+
+  it('checkoutCommit accepts valid 40-char hex format', async () => {
+    await expect(checkoutCommit('/tmp', '1234567890abcdef1234567890abcdef12345678')).rejects.not.toThrow('Invalid commit hash');
+  });
+
+  it('cherryPick rejects non-hex hash', async () => {
+    await expect(cherryPick('/tmp', '--hard')).rejects.toThrow('Invalid commit hash');
+  });
+
+  it('cherryPick rejects ref name', async () => {
+    await expect(cherryPick('/tmp', 'HEAD')).rejects.toThrow('Invalid commit hash');
+  });
+
+  it('cherryPick accepts valid 40-char hex format', async () => {
+    await expect(cherryPick('/tmp', '1234567890abcdef1234567890abcdef12345678')).rejects.not.toThrow('Invalid commit hash');
+  });
+
+  it('revertCommit rejects non-hex hash', async () => {
+    await expect(revertCommit('/tmp', '--hard')).rejects.toThrow('Invalid commit hash');
+  });
+
+  it('revertCommit rejects ref name', async () => {
+    await expect(revertCommit('/tmp', 'HEAD')).rejects.toThrow('Invalid commit hash');
+  });
+
+  it('revertCommit accepts valid 40-char hex format', async () => {
+    await expect(revertCommit('/tmp', '1234567890abcdef1234567890abcdef12345678')).rejects.not.toThrow('Invalid commit hash');
+  });
+
+  it('resetToCommit rejects non-hex hash', async () => {
+    await expect(resetToCommit('/tmp', '--hard', 'soft')).rejects.toThrow('Invalid commit hash');
+  });
+
+  it('resetToCommit rejects ref name', async () => {
+    await expect(resetToCommit('/tmp', 'HEAD', 'soft')).rejects.toThrow('Invalid commit hash');
+  });
+
+  it('resetToCommit accepts valid 40-char hex format', async () => {
+    await expect(resetToCommit('/tmp', '1234567890abcdef1234567890abcdef12345678', 'soft')).rejects.not.toThrow('Invalid commit hash');
+  });
+});

@@ -1490,6 +1490,8 @@ export const dict: Record<I18nKey, string> = {
     'gitView.history.actions.cancelButton': 'Cancel',
   'gitView.history.actions.checkoutConfirm': 'Check out this commit as detached HEAD?',
   'gitView.history.actions.cherryPickConfirm': 'Cherry-pick this commit onto the current branch?',
+  'gitView.history.actions.conflictToastDescription': 'Conflicts in: {files}. Resolve manually and commit, or abort with git cherry-pick/revert --abort.',
+  'gitView.history.actions.conflictToastTitle': 'Conflict',
   'gitView.history.actions.confirmButton': 'Confirm',
   'gitView.history.actions.mergeConfirm': 'Merge this commit into the current branch?',
   'gitView.history.actions.rebaseConfirm': 'Rebase current branch onto this commit?',

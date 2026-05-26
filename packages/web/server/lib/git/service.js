@@ -596,6 +596,10 @@ const normalizeStartRef = (value) => {
   return trimmed;
 };
 
+function isValidCommitHash(hash) {
+  return typeof hash === 'string' && /^[0-9a-fA-F]{7,40}$/.test(hash);
+}
+
 const parseRemoteBranchRef = (value) => {
   const trimmed = String(value || '').trim();
   if (!trimmed) {
@@ -2532,6 +2536,9 @@ export async function checkoutBranch(directory, branchName) {
 }
 
 export async function checkoutCommit(directory, hash) {
+  if (!isValidCommitHash(hash)) {
+    throw new Error('Invalid commit hash');
+  }
   const { git } = await createRepositoryGitContext(directory);
   try {
     await git.checkout(hash);
@@ -2543,6 +2550,9 @@ export async function checkoutCommit(directory, hash) {
 }
 
 export async function cherryPick(directory, hash) {
+  if (!isValidCommitHash(hash)) {
+    throw new Error('Invalid commit hash');
+  }
   const { git } = await createRepositoryGitContext(directory);
   try {
     await git.raw(['cherry-pick', hash]);
@@ -2568,6 +2578,9 @@ export async function cherryPick(directory, hash) {
 }
 
 export async function revertCommit(directory, hash) {
+  if (!isValidCommitHash(hash)) {
+    throw new Error('Invalid commit hash');
+  }
   const { git } = await createRepositoryGitContext(directory);
   try {
     await git.raw(['revert', '--no-commit', hash]);
@@ -2593,6 +2606,9 @@ export async function revertCommit(directory, hash) {
 }
 
 export async function resetToCommit(directory, hash, mode, force = false) {
+  if (!isValidCommitHash(hash)) {
+    throw new Error('Invalid commit hash');
+  }
   const { git } = await createRepositoryGitContext(directory);
 
   if (mode === 'hard' && !force) {

@@ -2678,6 +2678,7 @@ export interface GitLogEntry {
   filesChanged: number;
   insertions: number;
   deletions: number;
+  parents: string[];
 }
 
 /**
@@ -2713,9 +2714,72 @@ async function resolveBaseRefForLog(
  */
 export async function getGitLog(
   directory: string,
-  options?: { maxCount?: number; from?: string; to?: string; file?: string }
+  options?: { maxCount?: number; from?: string; to?: string; file?: string; all?: boolean }
 ): Promise<{ all: GitLogEntry[]; latest: GitLogEntry | null; total: number }> {
   const maxCount = options?.maxCount || 50;
+
+  if (options?.all) {
+    const logArgs = [
+      'log',
+      `--max-count=${maxCount}`,
+      '--all',
+      '--topo-order',
+      '--date=iso',
+      '--pretty=format:%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%ad%x1f%s%x1f%D',
+      '--shortstat',
+    ];
+
+    const result = await execGit(logArgs, directory);
+
+    if (result.exitCode !== 0) {
+      throw new Error(result.stderr.trim() || result.stdout.trim() || 'Failed to get git log');
+    }
+
+    const records = result.stdout
+      .split('\x1e')
+      .map((e) => e.trim())
+      .filter(Boolean);
+
+    const entries: GitLogEntry[] = [];
+    for (const record of records) {
+      const lines = record.split('\n').filter((l) => l.trim().length > 0);
+      const header = lines.shift() || '';
+      const [hash, parentsRaw, author_name, author_email, date, message, refsRaw] =
+        header.split('\x1f');
+      if (!hash) continue;
+
+      const parents = parentsRaw ? parentsRaw.trim().split(' ').filter(Boolean) : [];
+      const refs = refsRaw ? refsRaw.trim() : '';
+
+      let filesChanged = 0;
+      let insertions = 0;
+      let deletions = 0;
+      for (const line of lines) {
+        const filesMatch = line.match(/(\d+)\s+files?\s+changed/);
+        const insertMatch = line.match(/(\d+)\s+insertions?\(\+\)/);
+        const deleteMatch = line.match(/(\d+)\s+deletions?\(-\)/);
+        if (filesMatch) filesChanged = parseInt(filesMatch[1], 10);
+        if (insertMatch) insertions = parseInt(insertMatch[1], 10);
+        if (deleteMatch) deletions = parseInt(deleteMatch[1], 10);
+      }
+
+      entries.push({
+        hash,
+        date: date || '',
+        message: message || '',
+        refs,
+        body: '',
+        author_name: author_name || '',
+        author_email: author_email || '',
+        filesChanged,
+        insertions,
+        deletions,
+        parents,
+      });
+    }
+
+    return { all: entries, latest: entries[0] || null, total: entries.length };
+  }
 
   // Prefer the local ref; fall back to origin/<from> only when the local ref
   // cannot be resolved (e.g. user has never checked out the base branch).
@@ -2724,10 +2788,11 @@ export async function getGitLog(
   const args = [
     'log',
     `--max-count=${maxCount}`,
-    '--format=%H|%aI|%s|%D|%b|%an|%ae',
+    '--date=iso',
+    '--pretty=format:%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%ad%x1f%s',
     '--shortstat',
   ];
-  
+
   if (resolvedFrom && options?.to) {
     args.push(`${resolvedFrom}..${options.to}`);
   } else if (resolvedFrom) {
@@ -2735,51 +2800,70 @@ export async function getGitLog(
   } else if (options?.to) {
     args.push(options.to);
   }
-  
+
   if (options?.file) {
     args.push('--', options.file);
   }
 
   const result = await execGit(args, directory);
-  
+
   if (result.exitCode !== 0) {
     throw new Error(result.stderr.trim() || result.stdout.trim() || 'Failed to get git log');
   }
 
-  const entries: GitLogEntry[] = [];
-  const lines = result.stdout.split('\n');
-  let current: Partial<GitLogEntry> | null = null;
+  const records = result.stdout
+    .split('\x1e')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
 
-  for (const line of lines) {
-    if (line.includes('|') && !line.startsWith(' ')) {
-      if (current?.hash) {
-        entries.push(current as GitLogEntry);
-      }
-      const parts = line.split('|');
-      current = {
-        hash: parts[0] || '',
-        date: parts[1] || '',
-        message: parts[2] || '',
-        refs: parts[3] || '',
-        body: parts[4] || '',
-        author_name: parts[5] || '',
-        author_email: parts[6] || '',
-        filesChanged: 0,
-        insertions: 0,
-        deletions: 0,
-      };
-    } else if (current && line.includes('file')) {
-      const statsMatch = line.match(/(\d+)\s+files?\s+changed(?:,\s+(\d+)\s+insertions?)?(?:,\s+(\d+)\s+deletions?)?/);
-      if (statsMatch) {
-        current.filesChanged = parseInt(statsMatch[1] || '0', 10);
-        current.insertions = parseInt(statsMatch[2] || '0', 10);
-        current.deletions = parseInt(statsMatch[3] || '0', 10);
-      }
+  const statsMap = new Map<string, { filesChanged: number; insertions: number; deletions: number; parents: string[] }>();
+
+  for (const record of records) {
+    const lines = record.split('\n').filter((line) => line.trim().length > 0);
+    const header = lines.shift() || '';
+    const [hash, parentsRaw] = header.split('\x1f');
+    const parents = parentsRaw ? parentsRaw.trim().split(' ').filter(Boolean) : [];
+    if (!hash) continue;
+
+    let filesChanged = 0;
+    let insertions = 0;
+    let deletions = 0;
+
+    for (const line of lines) {
+      const filesMatch = line.match(/(\d+)\s+files?\s+changed/);
+      const insertMatch = line.match(/(\d+)\s+insertions?\(\+\)/);
+      const deleteMatch = line.match(/(\d+)\s+deletions?\(-\)/);
+      if (filesMatch) filesChanged = parseInt(filesMatch[1], 10);
+      if (insertMatch) insertions = parseInt(insertMatch[1], 10);
+      if (deleteMatch) deletions = parseInt(deleteMatch[1], 10);
     }
+
+    statsMap.set(hash, { filesChanged, insertions, deletions, parents });
   }
 
-  if (current?.hash) {
-    entries.push(current as GitLogEntry);
+  const entries: GitLogEntry[] = [];
+  for (const record of records) {
+    const header = record.split('\n').filter((l) => l.trim().length > 0)[0] || '';
+    const [hash] = header.split('\x1f');
+    if (!hash) continue;
+    const stats = statsMap.get(hash) || { filesChanged: 0, insertions: 0, deletions: 0, parents: [] };
+    // Need to re-parse header fields for the final entries array
+    const lines = record.split('\n').filter((l) => l.trim().length > 0);
+    const lineHeader = lines.shift() || '';
+    const [, , author_name, author_email, date, message] = lineHeader.split('\x1f');
+    entries.push({
+      hash,
+      date: date || '',
+      message: message || '',
+      refs: '',
+      body: '',
+      author_name: author_name || '',
+      author_email: author_email || '',
+      filesChanged: stats.filesChanged,
+      insertions: stats.insertions,
+      deletions: stats.deletions,
+      parents: stats.parents,
+    });
   }
 
   return {
@@ -3203,6 +3287,87 @@ export async function continueMerge(directory: string): Promise<{ success: boole
   }
 
   throw new Error(result.stderr || 'Continue merge failed');
+}
+
+// ============== Commit Actions ==============
+
+export async function checkoutCommit(directory: string, hash: string): Promise<{ success: boolean }> {
+  const result = await execGit(['checkout', hash], directory);
+  if (result.exitCode !== 0) {
+    throw new Error(result.stderr || 'Failed to checkout commit');
+  }
+  return { success: true };
+}
+
+export async function cherryPick(directory: string, hash: string): Promise<{ success: boolean; conflict: boolean; conflictFiles?: string[] }> {
+  const result = await execGit(['cherry-pick', hash], directory);
+
+  if (result.exitCode === 0) {
+    return { success: true, conflict: false };
+  }
+
+  const output = (result.stdout + result.stderr).toLowerCase();
+  const isConflict =
+    output.includes('conflict') ||
+    output.includes('patch does not apply');
+
+  if (isConflict) {
+    const statusResult = await execGit(['status', '--porcelain'], directory);
+    const conflictFiles = statusResult.stdout
+      .split('\n')
+      .filter((line) => line.startsWith('UU') || line.startsWith('AA') || line.startsWith('DD'))
+      .map((line) => line.slice(3).trim());
+
+    return { success: false, conflict: true, conflictFiles };
+  }
+
+  throw new Error(result.stderr || 'Cherry-pick failed');
+}
+
+export async function revertCommit(directory: string, hash: string): Promise<{ success: boolean; conflict: boolean; conflictFiles?: string[] }> {
+  const result = await execGit(['revert', '--no-commit', hash], directory);
+
+  if (result.exitCode === 0) {
+    return { success: true, conflict: false };
+  }
+
+  const output = (result.stdout + result.stderr).toLowerCase();
+  const isConflict =
+    output.includes('conflict') ||
+    output.includes('revert failed');
+
+  if (isConflict) {
+    const statusResult = await execGit(['status', '--porcelain'], directory);
+    const conflictFiles = statusResult.stdout
+      .split('\n')
+      .filter((line) => line.startsWith('UU') || line.startsWith('AA') || line.startsWith('DD'))
+      .map((line) => line.slice(3).trim());
+
+    return { success: false, conflict: true, conflictFiles };
+  }
+
+  throw new Error(result.stderr || 'Revert failed');
+}
+
+export async function resetToCommit(
+  directory: string,
+  hash: string,
+  mode: 'soft' | 'mixed' | 'hard',
+  force = false
+): Promise<{ success: boolean }> {
+  if (mode === 'hard' && !force) {
+    const statusResult = await execGit(['status', '--porcelain'], directory);
+    const isDirty = statusResult.stdout.trim().length > 0;
+    if (isDirty) {
+      throw new Error('Cannot hard reset: uncommitted changes in working tree. Stash or commit first, or use force.');
+    }
+  }
+
+  const result = await execGit(['reset', `--${mode}`, hash], directory);
+  if (result.exitCode !== 0) {
+    throw new Error(result.stderr || 'Reset failed');
+  }
+  return { success: true };
 }
 
 // ============== Stash Operations ==============

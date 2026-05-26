@@ -2289,9 +2289,16 @@ export const GitView: React.FC = () => {
     if (result.operation === 'cherry-pick' || result.operation === 'revert') {
       // Cherry-pick and revert conflicts are not supported by the shared ConflictDialog
       // Show a toast with manual resolution instructions
-      toast.error(`${result.operation} conflict`, {
-        description: `Conflicts in: ${result.conflictFiles?.join(', ') ?? 'unknown files'}. Resolve manually and commit, or abort with git ${result.operation} --abort.`,
+      toast.error(t('gitView.history.actions.conflictToastTitle'), {
+        description: t('gitView.history.actions.conflictToastDescription', {
+          files: result.conflictFiles?.join(', ') ?? 'unknown files',
+        }),
       });
+      if (currentDirectory) {
+        fetchStatus(currentDirectory, git);
+        fetchBranches(currentDirectory, git);
+        fetchLog(currentDirectory, git, logMaxCountLocal);
+      }
       return;
     }
 
@@ -2301,7 +2308,7 @@ export const GitView: React.FC = () => {
     if (currentDirectory) {
       persistConflictState(currentDirectory, result.conflictFiles ?? [], result.operation);
     }
-  }, [setConflictFiles, setConflictOperation, setConflictDialogOpen, persistConflictState, currentDirectory]);
+  }, [t, setConflictFiles, setConflictOperation, setConflictDialogOpen, persistConflictState, currentDirectory, fetchStatus, fetchBranches, fetchLog, logMaxCountLocal, git]);
 
   if (!currentDirectory) {
     return (

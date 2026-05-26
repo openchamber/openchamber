@@ -416,17 +416,70 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       return { id, type, success: true, data: result };
     }
 
+    case 'api:git/checkout-commit': {
+      const { directory, hash } = (payload || {}) as { directory?: string; hash?: string };
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+      if (!hash) {
+        return { id, type, success: false, error: 'hash is required' };
+      }
+      const result = await gitService.checkoutCommit(directory!, hash);
+      return { id, type, success: true, data: result };
+    }
+
+    case 'api:git/cherry-pick': {
+      const { directory, hash } = (payload || {}) as { directory?: string; hash?: string };
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+      if (!hash) {
+        return { id, type, success: false, error: 'hash is required' };
+      }
+      const result = await gitService.cherryPick(directory!, hash);
+      return { id, type, success: true, data: result };
+    }
+
+    case 'api:git/revert-commit': {
+      const { directory, hash } = (payload || {}) as { directory?: string; hash?: string };
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+      if (!hash) {
+        return { id, type, success: false, error: 'hash is required' };
+      }
+      const result = await gitService.revertCommit(directory!, hash);
+      return { id, type, success: true, data: result };
+    }
+
+    case 'api:git/reset-to-commit': {
+      const { directory, hash, mode, force } = (payload || {}) as {
+        directory?: string;
+        hash?: string;
+        mode?: 'soft' | 'mixed' | 'hard';
+        force?: boolean;
+      };
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+      if (!hash) {
+        return { id, type, success: false, error: 'hash is required' };
+      }
+      if (!mode || !['soft', 'mixed', 'hard'].includes(mode)) {
+        return { id, type, success: false, error: 'mode must be soft, mixed, or hard' };
+      }
+      const result = await gitService.resetToCommit(directory!, hash, mode, force);
+      return { id, type, success: true, data: result };
+    }
+
     case 'api:git/log': {
-      const { directory, maxCount, from, to, file } = (payload || {}) as {
+      const { directory, maxCount, from, to, file, all } = (payload || {}) as {
         directory?: string;
         maxCount?: number;
         from?: string;
         to?: string;
         file?: string;
+        all?: boolean;
       };
       const dirError = requireDirectory(id, type, directory);
       if (dirError) return dirError;
-      const result = await gitService.getGitLog(directory!, { maxCount, from, to, file });
+      const result = await gitService.getGitLog(directory!, { maxCount, from, to, file, all });
       return { id, type, success: true, data: result };
     }
 

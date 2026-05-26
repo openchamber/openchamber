@@ -774,8 +774,8 @@ export function registerGitRoutes(app) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
       const { hash } = req.body;
-      if (!hash) {
-        return res.status(400).json({ error: 'hash is required' });
+      if (!req.body.hash || typeof req.body.hash !== 'string' || !/^[0-9a-fA-F]{7,40}$/.test(req.body.hash)) {
+        return res.status(400).json({ error: 'Invalid commit hash' });
       }
       const result = await checkoutCommit(directory, hash);
       res.json(result);
@@ -793,8 +793,8 @@ export function registerGitRoutes(app) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
       const { hash } = req.body;
-      if (!hash) {
-        return res.status(400).json({ error: 'hash is required' });
+      if (!req.body.hash || typeof req.body.hash !== 'string' || !/^[0-9a-fA-F]{7,40}$/.test(req.body.hash)) {
+        return res.status(400).json({ error: 'Invalid commit hash' });
       }
       const result = await cherryPick(directory, hash);
       res.json(result);
@@ -812,8 +812,8 @@ export function registerGitRoutes(app) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
       const { hash } = req.body;
-      if (!hash) {
-        return res.status(400).json({ error: 'hash is required' });
+      if (!req.body.hash || typeof req.body.hash !== 'string' || !/^[0-9a-fA-F]{7,40}$/.test(req.body.hash)) {
+        return res.status(400).json({ error: 'Invalid commit hash' });
       }
       const result = await revertCommit(directory, hash);
       res.json(result);
@@ -831,8 +831,8 @@ export function registerGitRoutes(app) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
       const { hash, mode, force } = req.body;
-      if (!hash) {
-        return res.status(400).json({ error: 'hash is required' });
+      if (!req.body.hash || typeof req.body.hash !== 'string' || !/^[0-9a-fA-F]{7,40}$/.test(req.body.hash)) {
+        return res.status(400).json({ error: 'Invalid commit hash' });
       }
       if (!['soft', 'mixed', 'hard'].includes(mode)) {
         return res.status(400).json({ error: 'mode must be soft, mixed, or hard' });

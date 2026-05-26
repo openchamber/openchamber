@@ -271,6 +271,7 @@ export const createVSCodeGitAPI = (): GitAPI => ({
       from: options?.from,
       to: options?.to,
       file: options?.file,
+      all: options?.all,
     });
   },
 
