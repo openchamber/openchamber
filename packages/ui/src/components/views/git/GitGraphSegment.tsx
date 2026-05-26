@@ -29,57 +29,47 @@ export const GitGraphSegment: React.FC<GitGraphSegmentProps> = ({
   return (
     <svg
       width={width}
-      height={ROW_HEADER_HEIGHT}
-      style={{ display: 'block', flexShrink: 0 }}
+      viewBox={`0 0 ${width} ${ROW_HEADER_HEIGHT}`}
+      preserveAspectRatio="none"
+      style={{ height: '100%', display: 'block', flexShrink: 0 }}
       aria-hidden
     >
       {connectors.map((seg, idx) => {
         const x1 = seg.fromLane * LANE_WIDTH + LANE_WIDTH / 2;
         const x2 = seg.toLane * LANE_WIDTH + LANE_WIDTH / 2;
+        const stroke = { stroke: seg.color, strokeWidth: 1.5, strokeLinecap: 'round' as const };
 
         switch (seg.type) {
           case 'passing':
           case 'commit-lane':
-            // Full-height vertical line
-            return (
-              <line key={idx} x1={x1} y1={0} x2={x1} y2={ROW_HEADER_HEIGHT} stroke={seg.color} strokeWidth={2} />
-            );
+            return <line key={idx} x1={x1} y1={0} x2={x1} y2={ROW_HEADER_HEIGHT} {...stroke} />;
 
           case 'top-stub':
-            // Line from top to dot center only (branch HEAD or root)
-            return (
-              <line key={idx} x1={x1} y1={0} x2={x1} y2={dotCy} stroke={seg.color} strokeWidth={2} />
-            );
+            return <line key={idx} x1={x1} y1={0} x2={x1} y2={dotCy} {...stroke} />;
 
           case 'bottom-stub':
-            // Line from dot center to bottom only
-            return (
-              <line key={idx} x1={x1} y1={dotCy} x2={x1} y2={ROW_HEADER_HEIGHT} stroke={seg.color} strokeWidth={2} />
-            );
+            return <line key={idx} x1={x1} y1={dotCy} x2={x1} y2={ROW_HEADER_HEIGHT} {...stroke} />;
 
-          case 'branch-out':
-            // Bezier from dot position to target lane at bottom
+          case 'branch-out': {
+            // S-curve: control points at midpoint Y keep the bezier inside the viewport
+            const mid = (dotCy + ROW_HEADER_HEIGHT) / 2;
             return (
-              <path
-                key={idx}
-                d={`M ${dotCx} ${dotCy} C ${dotCx} ${dotCy + ROW_HEADER_HEIGHT * 0.6}, ${x2} ${dotCy + ROW_HEADER_HEIGHT * 0.4}, ${x2} ${ROW_HEADER_HEIGHT}`}
-                fill="none"
-                stroke={seg.color}
-                strokeWidth={2}
+              <path key={idx} fill="none"
+                d={`M ${dotCx} ${dotCy} C ${dotCx} ${mid}, ${x2} ${mid}, ${x2} ${ROW_HEADER_HEIGHT}`}
+                {...stroke}
               />
             );
+          }
 
-          case 'merge-in':
-            // Bezier from top of source lane to dot position
+          case 'merge-in': {
+            const mid = dotCy / 2;
             return (
-              <path
-                key={idx}
-                d={`M ${x1} 0 C ${x1} ${dotCy * 0.6}, ${dotCx} ${dotCy * 0.4}, ${dotCx} ${dotCy}`}
-                fill="none"
-                stroke={seg.color}
-                strokeWidth={2}
+              <path key={idx} fill="none"
+                d={`M ${x1} 0 C ${x1} ${mid}, ${dotCx} ${mid}, ${dotCx} ${dotCy}`}
+                {...stroke}
               />
             );
+          }
 
           default:
             return null;
@@ -87,14 +77,7 @@ export const GitGraphSegment: React.FC<GitGraphSegmentProps> = ({
       })}
 
       {/* Commit dot — drawn last so it sits on top of lines */}
-      <circle
-        cx={dotCx}
-        cy={dotCy}
-        r={4}
-        fill={color}
-        stroke="var(--background)"
-        strokeWidth={1.5}
-      />
+      <circle cx={dotCx} cy={dotCy} r={4} fill={color} stroke="var(--background)" strokeWidth={2} />
     </svg>
   );
 };
