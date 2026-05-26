@@ -29,8 +29,8 @@ export const GitGraphSegment: React.FC<GitGraphSegmentProps> = ({
   return (
     <svg
       width={width}
-      height="100%"
-      style={{ minHeight: ROW_HEADER_HEIGHT, display: 'block', flexShrink: 0 }}
+      height={ROW_HEADER_HEIGHT}
+      style={{ display: 'block', flexShrink: 0 }}
       aria-hidden
     >
       {connectors.map((seg, idx) => {
