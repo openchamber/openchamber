@@ -40,13 +40,15 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
   const setUsageAutoRefresh = useQuotaStore((state) => state.setAutoRefresh);
   const setUsageRefreshInterval = useQuotaStore((state) => state.setRefreshInterval);
   const setUsageDisplayMode = useQuotaStore((state) => state.setDisplayMode);
+  const showPredValues = useQuotaStore((state) => state.showPredValues);
+  const setShowPredValues = useQuotaStore((state) => state.setShowPredValues);
   const loadUsageSettings = useQuotaStore((state) => state.loadSettings);
 
   React.useEffect(() => {
     void loadUsageSettings();
   }, [loadUsageSettings]);
 
-  const persistUsageSettings = React.useCallback(async (changes: { usageAutoRefresh?: boolean; usageRefreshIntervalMs?: number; usageDisplayMode?: 'usage' | 'remaining'; usageDropdownProviders?: string[] }) => {
+  const persistUsageSettings = React.useCallback(async (changes: { usageAutoRefresh?: boolean; usageRefreshIntervalMs?: number; usageDisplayMode?: 'usage' | 'remaining'; usageDropdownProviders?: string[]; usageShowPredValues?: boolean }) => {
     try {
       await updateDesktopSettings(changes);
     } catch (error) {
@@ -75,6 +77,11 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
     setUsageDisplayMode(value);
     void persistUsageSettings({ usageDisplayMode: value });
   }, [persistUsageSettings, setUsageDisplayMode]);
+
+  const handleShowPredValuesChange = React.useCallback((enabled: boolean) => {
+    setShowPredValues(enabled);
+    void persistUsageSettings({ usageShowPredValues: enabled });
+  }, [persistUsageSettings, setShowPredValues]);
 
   const bgClass = 'bg-background';
 
@@ -136,6 +143,16 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
               <SelectItem value="remaining">{t('settings.usage.sidebar.field.displayModeRemaining')}</SelectItem>
             </SelectContent>
           </Select>
+        </div>
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <span className="typography-micro text-muted-foreground">
+            {t('settings.usage.sidebar.field.showPredictions')}
+          </span>
+          <Checkbox
+            checked={showPredValues}
+            onChange={handleShowPredValuesChange}
+            ariaLabel={t('settings.usage.sidebar.field.showPredictions')}
+          />
         </div>
       </div>
 

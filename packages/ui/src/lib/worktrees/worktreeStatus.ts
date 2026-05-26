@@ -152,7 +152,7 @@ const computeProjectRoot = async (directory: string): Promise<string> => {
   return directory;
 };
 
-const resolveProjectRoot = async (directory: string): Promise<string> => {
+export const resolveProjectRoot = async (directory: string): Promise<string> => {
   const cached = resolvedRootCache.get(directory);
   if (cached && Date.now() - cached.resolvedAt < RESOLVED_ROOT_TTL_MS) {
     // Refresh recency without extending TTL.

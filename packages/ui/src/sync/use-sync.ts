@@ -35,6 +35,10 @@ const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 // session recency, not whichever component happened to call sync first.
 const seenByDirectory = new Map<string, Set<string>>()
 
+// Shared across useSync() hook instances. Chat, model controls, and sidebar can
+// all request the same session during startup; coalesce them into one HTTP load.
+const syncSessionInflightByKey = new Map<string, Promise<void>>()
+
 type SyncMeta = {
   limit: number
   cursor: string | undefined
@@ -99,7 +103,6 @@ export function useSync() {
   const childStores = useChildStoreManager()
 
   // Refs for mutable tracking (no re-renders)
-  const inflight = useRef(new Map<string, Promise<void>>())
   const optimistic = useRef(new Map<string, Map<string, OptimisticItem>>())
   const meta = useRef(new Map<string, SyncMeta>())
 
@@ -350,7 +353,7 @@ export function useSync() {
       const key = keyFor(sessionID)
 
       // Dedup inflight requests
-      const existing = inflight.current.get(key)
+      const existing = syncSessionInflightByKey.get(key)
       if (existing) return existing
 
       const current = store.getState()
@@ -386,35 +389,40 @@ export function useSync() {
         })) return
       }
 
+      const shouldFetchSession = !hasSession || force
+      const shouldLoadMessages = !cachedReady || force
       const promise = (async () => {
-        // Fetch session info if needed
-        if (!hasSession || force) {
-          try {
-            const result = await retry(() => sdk.session.get({ sessionID, directory }))
-            if (result.data) {
-              const s = store.getState()
-              const sessions = [...s.session]
-              const idx = Binary.search(sessions, sessionID, (s) => s.id)
-              if (idx.found) {
-                sessions[idx.index] = result.data
-              } else {
-                sessions.splice(idx.index, 0, result.data)
-              }
-              store.setState({ session: sessions })
-            }
-          } catch (e) {
-            console.error("[sync] failed to fetch session", sessionID, e)
-          }
-        }
-
-        // Load messages if needed
-        if (!cachedReady || force) {
-          await loadMessages(sessionID)
-        }
+        await Promise.all([
+          shouldFetchSession
+            ? (async () => {
+                try {
+                  const result = await retry(() => sdk.session.get({ sessionID, directory }))
+                  if (result.data) {
+                    const s = store.getState()
+                    const sessions = [...s.session]
+                    const idx = Binary.search(sessions, sessionID, (s) => s.id)
+                    if (idx.found) {
+                      sessions[idx.index] = result.data
+                    } else {
+                      sessions.splice(idx.index, 0, result.data)
+                    }
+                    store.setState({ session: sessions })
+                  }
+                } catch (e) {
+                  console.error("[sync] failed to fetch session", sessionID, e)
+                }
+              })()
+            : Promise.resolve(),
+          shouldLoadMessages ? loadMessages(sessionID) : Promise.resolve(),
+        ])
       })()
 
-      inflight.current.set(key, promise)
-      promise.finally(() => inflight.current.delete(key))
+      syncSessionInflightByKey.set(key, promise)
+      promise.finally(() => {
+        if (syncSessionInflightByKey.get(key) === promise) {
+          syncSessionInflightByKey.delete(key)
+        }
+      })
       return promise
     },
     [store, sdk, keyFor, touch, getMetaFor, setMetaFor, loadMessages, directory],

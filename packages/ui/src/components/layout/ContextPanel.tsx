@@ -220,6 +220,25 @@ const clampWidth = (width: number): number => {
   return Math.min(CONTEXT_PANEL_MAX_WIDTH, Math.max(CONTEXT_PANEL_MIN_WIDTH, Math.round(width)));
 };
 
+const getAvailablePanelWidth = (panel: HTMLElement | null): number | null => {
+  const parentWidth = panel?.parentElement?.clientWidth;
+  if (!parentWidth || parentWidth <= 0) {
+    return null;
+  }
+
+  return parentWidth;
+};
+
+const clampWidthToAvailableSpace = (width: number, panel: HTMLElement | null): number => {
+  const clampedWidth = clampWidth(width);
+  const availableWidth = getAvailablePanelWidth(panel);
+  if (availableWidth === null) {
+    return clampedWidth;
+  }
+
+  return Math.min(clampedWidth, Math.max(1, availableWidth));
+};
+
 const getRelativePathLabel = (filePath: string | null, directory: string): string => {
   if (!filePath) {
     return '';
@@ -1597,7 +1616,7 @@ export const ContextPanel: React.FC = () => {
       return;
     }
 
-    panel.style.setProperty('--oc-context-panel-width', `${nextWidth}px`);
+    panel.style.setProperty('--oc-context-panel-width', `${clampWidthToAvailableSpace(nextWidth, panel)}px`);
   }, []);
 
   const handleResizeStart = React.useCallback((event: React.PointerEvent) => {
@@ -1626,7 +1645,7 @@ export const ContextPanel: React.FC = () => {
     }
 
     const delta = startXRef.current - event.clientX;
-    const nextWidth = clampWidth(startWidthRef.current + delta);
+    const nextWidth = clampWidthToAvailableSpace(startWidthRef.current + delta, panelRef.current);
     if (resizingWidthRef.current === nextWidth) {
       return;
     }
@@ -1646,7 +1665,7 @@ export const ContextPanel: React.FC = () => {
       // ignore
     }
 
-    const finalWidth = resizingWidthRef.current ?? width;
+    const finalWidth = clampWidthToAvailableSpace(resizingWidthRef.current ?? width, panelRef.current);
     setIsResizing(false);
     activeResizePointerIDRef.current = null;
     resizingWidthRef.current = null;
@@ -1903,9 +1922,9 @@ export const ContextPanel: React.FC = () => {
         maxWidth: '100%',
       }
     : {
-        width: 'var(--oc-context-panel-width)',
-        minWidth: 'var(--oc-context-panel-width)',
-        maxWidth: 'var(--oc-context-panel-width)',
+        width: 'min(var(--oc-context-panel-width), 100%)',
+        minWidth: `min(${CONTEXT_PANEL_MIN_WIDTH}px, 100%)`,
+        maxWidth: '100%',
         ['--oc-context-panel-width' as string]: `${isResizing ? (resizingWidthRef.current ?? width) : width}px`,
       };
 

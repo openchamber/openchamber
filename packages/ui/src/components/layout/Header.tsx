@@ -263,6 +263,7 @@ type DesktopServicesMenuProps = {
   showDevShutdown: boolean;
   isDevShutdownInFlight: boolean;
   onDevShutdown: () => Promise<void>;
+  showPredValues: boolean;
 };
 
 const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
@@ -292,6 +293,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
   showDevShutdown,
   isDevShutdownInFlight,
   onDevShutdown,
+  showPredValues,
 }: DesktopServicesMenuProps) {
   const { t } = useI18n();
   return (
@@ -468,7 +470,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
                                 className="h-1.5"
                                 expectedMarkerPercent={expectedMarker}
                               />
-                              {paceInfo ? <PaceIndicator paceInfo={paceInfo} compact /> : null}
+                              {paceInfo && showPredValues ? <PaceIndicator paceInfo={paceInfo} compact /> : null}
                             </div>
                           );
                         })}
@@ -512,7 +514,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
                                               className="h-1.5"
                                               expectedMarkerPercent={expectedMarker}
                                             />
-                                            {paceInfo ? <PaceIndicator paceInfo={paceInfo} compact /> : null}
+                                            {paceInfo && showPredValues ? <PaceIndicator paceInfo={paceInfo} compact /> : null}
                                           </div>
                                         );
                                       })}
@@ -701,6 +703,7 @@ export const Header: React.FC<HeaderProps> = ({
   const isQuotaLoading = useQuotaStore((state) => state.isLoading);
   const quotaLastUpdated = useQuotaStore((state) => state.lastUpdated);
   const quotaDisplayMode = useQuotaStore((state) => state.displayMode);
+  const showPredValues = useQuotaStore((state) => state.showPredValues);
   const dropdownProviderIds = useQuotaStore((state) => state.dropdownProviderIds);
   const loadQuotaSettings = useQuotaStore((state) => state.loadSettings);
   const setQuotaDisplayMode = useQuotaStore((state) => state.setDisplayMode);
@@ -1820,6 +1823,7 @@ export const Header: React.FC<HeaderProps> = ({
         servicesTabItems={servicesTabItems}
         quotaLastUpdated={quotaLastUpdated}
         quotaDisplayMode={quotaDisplayMode}
+        showPredValues={showPredValues}
         quotaDisplayTabItems={quotaDisplayTabItems}
         handleDisplayModeChange={handleDisplayModeChange}
         handleUsageRefresh={handleUsageRefresh}
@@ -2288,7 +2292,7 @@ export const Header: React.FC<HeaderProps> = ({
                                         className="h-1.5"
                                         expectedMarkerPercent={expectedMarker}
                                       />
-                                      {paceInfo ? (
+                                      {paceInfo && showPredValues ? (
                                         <PaceIndicator paceInfo={paceInfo} compact />
                                       ) : null}
                                     </div>
@@ -2345,7 +2349,7 @@ export const Header: React.FC<HeaderProps> = ({
                                                       className="h-1.5"
                                                       expectedMarkerPercent={expectedMarker}
                                                     />
-                                                    {paceInfo ? (
+                                                    {paceInfo && showPredValues ? (
                                                       <PaceIndicator paceInfo={paceInfo} compact />
                                                     ) : null}
                                                   </div>

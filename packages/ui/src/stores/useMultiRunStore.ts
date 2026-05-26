@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { useSessionUIStore } from '@/sync/session-ui-store';
+import type { Session } from '@opencode-ai/sdk/v2';
+import { routeMessage, useSessionUIStore } from '@/sync/session-ui-store';
 import { devtools } from 'zustand/middleware';
 import type { CreateMultiRunParams, CreateMultiRunResult } from '@/types/multirun';
 import { opencodeClient } from '@/lib/opencode/client';
@@ -11,7 +12,9 @@ import { checkIsGitRepository } from '@/lib/gitApi';
 import { useDirectoryStore } from './useDirectoryStore';
 import { useProjectsStore } from './useProjectsStore';
 import { useSnippetsStore } from './useSnippetsStore';
+import { useGlobalSessionsStore } from './useGlobalSessionsStore';
 import { getMultiRunSessionTitle } from '@/lib/multirun/title';
+import { getSyncChildStores, registerSessionDirectory } from '@/sync/sync-refs';
 
 const toGitSafeSlug = (value: string): string => {
   return value
@@ -29,6 +32,51 @@ const toModelSlug = (providerID: string, modelID: string): string => {
 
 const generateWorktreeNameSeed = (groupSlug: string, modelSlug: string): string => {
   return `${groupSlug}/${modelSlug}`;
+};
+
+const normalizePath = (value: string): string => {
+  const replaced = value.replace(/\\/g, '/');
+  if (replaced === '/') {
+    return '/';
+  }
+  return replaced.length > 1 ? replaced.replace(/\/+$/, '') : replaced;
+};
+
+const registerCreatedSession = (session: Session, directory: string): Session => {
+  const normalizedDirectory = normalizePath(directory);
+  const sessionDirectory = (session as Session & { directory?: string | null }).directory;
+  const sessionWithDirectory = typeof sessionDirectory === 'string' && sessionDirectory.trim().length > 0
+    ? session
+    : ({ ...session, directory: normalizedDirectory } as Session);
+
+  registerSessionDirectory(session.id, normalizedDirectory);
+  useSessionUIStore.getState().markSessionAsOpenChamberCreated(session.id);
+  useGlobalSessionsStore.getState().upsertSession(sessionWithDirectory);
+
+  try {
+    const store = getSyncChildStores().ensureChild(normalizedDirectory, { bootstrap: false });
+    store.setState((state) => {
+      const existingIndex = state.session.findIndex((candidate) => candidate.id === session.id);
+      if (existingIndex >= 0 && state.session[existingIndex] === sessionWithDirectory) {
+        return state;
+      }
+
+      const nextSessions = existingIndex >= 0
+        ? state.session.map((candidate, index) => index === existingIndex ? sessionWithDirectory : candidate)
+        : [...state.session, sessionWithDirectory].sort((a, b) => a.id.localeCompare(b.id));
+
+      return {
+        session: nextSessions,
+        sessionTotal: Math.max(state.sessionTotal, nextSessions.length),
+        limit: Math.max(state.limit, nextSessions.length),
+      };
+    });
+  } catch {
+    // SyncProvider can be unavailable in tests or detached surfaces; the global
+    // session upsert above is enough for the sidebar to show the session.
+  }
+
+  return sessionWithDirectory;
 };
 
 const resolveActiveProject = (): ProjectRef | null => {
@@ -165,6 +213,7 @@ export const useMultiRunStore = create<MultiRunStore>()(
                     directory,
                     () => opencodeClient.createSession({ title: sessionTitle }),
                   );
+                  registerCreatedSession(session, directory);
 
                   createdRuns.push({
                     sessionId: session.id,
@@ -198,6 +247,7 @@ export const useMultiRunStore = create<MultiRunStore>()(
                   worktreeMetadata.path,
                   () => opencodeClient.createSession({ title: sessionTitle }),
                 );
+                registerCreatedSession(session, worktreeMetadata.path);
 
                 useSessionUIStore.getState().setWorktreeMetadata(session.id, enrichedMetadata);
 
@@ -244,17 +294,16 @@ export const useMultiRunStore = create<MultiRunStore>()(
                 createdRuns.map(async (run) => {
                   try {
                     const text = await expandText(run.prompt).catch(() => run.prompt);
-                    await opencodeClient.withDirectory(run.worktreePath, () =>
-                      opencodeClient.sendMessage({
-                        id: run.sessionId,
-                        providerID: run.providerID,
-                        modelID: run.modelID,
-                        variant: run.variant,
-                        text,
-                        agent,
-                        files: filesForMessage,
-                      }),
-                    );
+                    await routeMessage({
+                      sessionId: run.sessionId,
+                      directory: run.worktreePath,
+                      content: text,
+                      providerID: run.providerID,
+                      modelID: run.modelID,
+                      variant: run.variant,
+                      agent,
+                      files: filesForMessage,
+                    });
                   } catch (err) {
                     console.warn('[MultiRun] Failed to start run:', err);
                   }

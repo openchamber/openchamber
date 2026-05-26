@@ -1,3 +1,8 @@
+## [1.11.6] - 2026-05-25
+
+- Settings/Plugins: added a Plugins page for managing opencode plugins, with npm update checks and user/project scopes (thanks to @Quat3rnion).
+- Perf: Git repository lookups in the extension now avoid repeating the same Git read commands during refreshes.
+
 ## [1.11.5] - 2026-05-25
 
 - Chat/Input: pending image attachments now show previews, sent image attachments can be cited from assistant messages, and markdown source mode highlights formatting while you type.

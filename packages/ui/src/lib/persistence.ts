@@ -790,6 +790,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (candidate.usageDisplayMode === 'usage' || candidate.usageDisplayMode === 'remaining') {
     result.usageDisplayMode = candidate.usageDisplayMode;
   }
+  if (typeof candidate.usageShowPredValues === 'boolean') {
+    result.usageShowPredValues = candidate.usageShowPredValues;
+  }
   if (Array.isArray(candidate.usageDropdownProviders)) {
     result.usageDropdownProviders = candidate.usageDropdownProviders.filter(
       (entry): entry is string => typeof entry === 'string' && entry.length > 0

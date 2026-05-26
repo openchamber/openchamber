@@ -52,6 +52,7 @@ export type DesktopSettings = {
   // Optional absolute path to `opencode` binary.
   opencodeBinary?: string;
   desktopLanAccessEnabled?: boolean;
+  desktopUiPassword?: string;
   projects?: ProjectEntry[];
   activeProjectId?: string;
   approvedDirectories?: string[];
@@ -86,6 +87,7 @@ export type DesktopSettings = {
   usageAutoRefresh?: boolean;
   usageRefreshIntervalMs?: number;
   usageDisplayMode?: 'usage' | 'remaining';
+  usageShowPredValues?: boolean;
   usageDropdownProviders?: string[];
   usageSelectedModels?: Record<string, string[]>;  // Map of providerId -> selected model names
   usageCollapsedFamilies?: Record<string, string[]>;  // Map of providerId -> collapsed family IDs (UsagePage)
@@ -222,6 +224,45 @@ export const invokeDesktop = async <T = unknown>(command: string, args?: Record<
   const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
   if (typeof tauri?.core?.invoke !== 'function') return null;
   return tauri.core.invoke(command, args ?? {}) as Promise<T>;
+};
+
+type LaunchAtLoginStatus = {
+  supported: boolean;
+  enabled: boolean;
+};
+
+export const getDesktopLaunchAtLogin = async (): Promise<LaunchAtLoginStatus | null> => {
+  if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
+    return null;
+  }
+
+  try {
+    const result = await invokeDesktop<LaunchAtLoginStatus>('desktop_get_launch_at_login');
+    if (!result || typeof result.supported !== 'boolean' || typeof result.enabled !== 'boolean') {
+      return null;
+    }
+    return result;
+  } catch (error) {
+    console.warn('Failed to get launch at login status', error);
+    return null;
+  }
+};
+
+export const setDesktopLaunchAtLogin = async (enabled: boolean): Promise<LaunchAtLoginStatus | null> => {
+  if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
+    return null;
+  }
+
+  try {
+    const result = await invokeDesktop<LaunchAtLoginStatus>('desktop_set_launch_at_login', { enabled });
+    if (!result || typeof result.supported !== 'boolean' || typeof result.enabled !== 'boolean') {
+      return null;
+    }
+    return result;
+  } catch (error) {
+    console.warn('Failed to set launch at login status', error);
+    return null;
+  }
 };
 
 const normalizeOrigin = (raw: string): string | null => {

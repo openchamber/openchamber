@@ -58,6 +58,18 @@
             "ko": "OpenCode 서버",
             "pl": "Serwer OpenCode"
           }
+        },
+        {
+          "label": "Environment Variables",
+          "link": "/environment/",
+          "translations": {
+            "uk": "Змінні середовища",
+            "zh-CN": "环境变量",
+            "es": "Variables de entorno",
+            "pt-BR": "Variáveis de ambiente",
+            "ko": "환경 변수",
+            "pl": "Zmienne środowiskowe"
+          }
         }
       ]
     },
@@ -442,6 +454,18 @@
             "pt-BR": "Navegador desktop",
             "ko": "데스크톱 브라우저",
             "pl": "Przeglądarka na pulpicie"
+          }
+        },
+        {
+          "label": "Desktop Tunnels",
+          "link": "/desktop-tunnels/",
+          "translations": {
+            "uk": "Десктопні тунелі",
+            "zh-CN": "桌面端隧道",
+            "es": "Túneles de escritorio",
+            "pt-BR": "Túneis no desktop",
+            "ko": "데스크톱 터널",
+            "pl": "Tunele w aplikacji desktopowej"
           }
         },
         {

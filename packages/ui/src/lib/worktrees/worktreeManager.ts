@@ -1,6 +1,5 @@
 import { substituteCommandVariables } from '@/lib/openchamberConfig';
 import type { WorktreeMetadata } from '@/types/worktree';
-import { execCommand } from '@/lib/execCommands';
 import {
   deleteRemoteBranch,
   git,
@@ -9,7 +8,7 @@ import {
   clearWorktreeBootstrapState,
   markWorktreeBootstrapPending,
 } from '@/lib/worktrees/worktreeBootstrap';
-import { invalidateResolvedProjectRootCache } from '@/lib/worktrees/worktreeStatus';
+import { invalidateResolvedProjectRootCache, resolveProjectRoot } from '@/lib/worktrees/worktreeStatus';
 import type {
   CreateGitWorktreePayload,
   GitWorktreeValidationResult,
@@ -53,66 +52,6 @@ const normalizePath = (value: string): string => {
     return '/';
   }
   return replaced.length > 1 ? replaced.replace(/\/+$/, '') : replaced;
-};
-
-const toAbsolutePath = (baseDir: string, maybeRelativePath: string): string => {
-  const normalizedBase = normalizePath(baseDir);
-  const normalizedInput = normalizePath(maybeRelativePath);
-  if (!normalizedInput) return normalizedBase;
-  if (normalizedInput.startsWith('/')) return normalizedInput;
-
-  const stack = normalizedBase.split('/').filter(Boolean);
-  const parts = normalizedInput.split('/').filter(Boolean);
-  for (const part of parts) {
-    if (part === '.') continue;
-    if (part === '..') {
-      stack.pop();
-      continue;
-    }
-    stack.push(part);
-  }
-  return `/${stack.join('/')}`;
-};
-
-const derivePrimaryWorktreeRootFromGitDir = (gitDir: string): string | null => {
-  const normalized = normalizePath(gitDir);
-  if (!normalized) return null;
-  if (normalized.endsWith('/.git')) {
-    return normalized.slice(0, -'/.git'.length) || null;
-  }
-  const worktreesMarker = '/.git/worktrees/';
-  const markerIndex = normalized.indexOf(worktreesMarker);
-  if (markerIndex > 0) {
-    return normalized.slice(0, markerIndex) || null;
-  }
-  return null;
-};
-
-const resolvePrimaryWorktreeDirectory = async (directory: string): Promise<string> => {
-  const normalizedDirectory = normalizePath(directory);
-
-  const absoluteGitDirResult = await execCommand('git rev-parse --absolute-git-dir', normalizedDirectory);
-  const absoluteGitDir = normalizePath((absoluteGitDirResult.stdout || '').trim());
-  if (absoluteGitDirResult.success && absoluteGitDir) {
-    const rootFromAbsoluteGitDir = derivePrimaryWorktreeRootFromGitDir(absoluteGitDir);
-    if (rootFromAbsoluteGitDir) {
-      return rootFromAbsoluteGitDir;
-    }
-  }
-
-  const commonDirResult = await execCommand('git rev-parse --git-common-dir', normalizedDirectory);
-  const rawCommonDir = normalizePath((commonDirResult.stdout || '').trim());
-  if (!commonDirResult.success || !rawCommonDir) {
-    return normalizedDirectory;
-  }
-
-  const commonDir = toAbsolutePath(normalizedDirectory, rawCommonDir);
-  const rootFromCommonDir = derivePrimaryWorktreeRootFromGitDir(commonDir);
-  if (rootFromCommonDir) {
-    return rootFromCommonDir;
-  }
-
-  return normalizedDirectory;
 };
 
 const slugifyWorktreeName = (value: string): string => {
@@ -227,7 +166,7 @@ export async function listProjectWorktrees(project: ProjectRef): Promise<Worktre
   if (inflight) return inflight;
 
   const promise = (async (): Promise<WorktreeMetadata[]> => {
-    const metadataProjectDirectory = await resolvePrimaryWorktreeDirectory(projectDirectory).catch(() => projectDirectory);
+    const metadataProjectDirectory = await resolveProjectRoot(projectDirectory).catch(() => projectDirectory);
     const normalizedProjectDirectory = normalizePath(projectDirectory);
 
     const worktrees = await git.worktree.list(projectDirectory).catch(() => []);
@@ -289,7 +228,7 @@ export type CreateWorktreeArgs = {
 
 export async function createWorktree(project: ProjectRef, args: CreateWorktreeArgs): Promise<WorktreeMetadata> {
   const projectDirectory = normalizePath(project.path);
-  const metadataProjectDirectory = await resolvePrimaryWorktreeDirectory(projectDirectory).catch(() => projectDirectory);
+  const metadataProjectDirectory = await resolveProjectRoot(projectDirectory).catch(() => projectDirectory);
   const payload = toCreatePayload(args, projectDirectory);
 
   const created = await git.worktree.create(projectDirectory, payload);

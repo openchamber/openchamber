@@ -1569,6 +1569,9 @@ export function SyncProvider(props: {
           hasEverConnected: true,
           connectionPhase: "connected",
         })
+        if (isRecentBoot()) {
+          return
+        }
         for (const dir of childStores.children.keys()) {
           triggerDirectoryResync(dir)
         }

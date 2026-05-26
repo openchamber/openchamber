@@ -6,6 +6,7 @@ export const dict = {
   'common.unavailable': 'Unavailable',
   'common.language.english': 'English',
   'common.language.simplifiedChinese': 'Chinese (Simplified)',
+  'common.language.traditionalChinese': 'Chinese (Traditional)',
   'common.language.ukrainian': 'Ukrainian',
   'common.language.spanish': 'Spanish',
   'common.language.brazilianPortuguese': 'Brazilian Portuguese',

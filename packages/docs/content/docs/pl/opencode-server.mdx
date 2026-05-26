@@ -44,6 +44,33 @@ openchamber stop
 
 Samo `openchamber` uruchamia serwer w tle. Dodaj `--foreground`, aby pozostał dołączony do Twojego terminala.
 
+## Uruchamianie OpenChamber po zalogowaniu
+
+Użyj `startup enable`, aby zainstalować natywną usługę użytkownika. OpenChamber używa `launchd` na macOS, `systemd --user` na Linuksie i Harmonogramu zadań w Windows.
+
+```bash
+openchamber startup enable
+openchamber startup status
+openchamber startup disable
+```
+
+Aby zabezpieczyć UI, ustaw hasło podczas włączania usługi:
+
+```bash
+OPENCHAMBER_UI_PASSWORD='secret' openchamber startup enable
+```
+
+`startup enable` zapisuje migawkę bieżącego środowiska w usłudze, aby uruchomienie było bliższe ręcznemu startowi `openchamber` z tej samej powłoki. Zachowuje to tokeny dostawców, `PATH`, ustawienia agenta SSH i inne zmienne CLI auth/config. Użyj `--no-env-snapshot`, jeśli chcesz minimalne środowisko usługi.
+
+Tunelami dla tej działającej usługi możesz zarządzać niezależnie:
+
+```bash
+openchamber tunnel start --port 3000
+openchamber tunnel stop --port 3000
+```
+
+Zatrzymanie tunelu nie restartuje usługi ani aplikacji.
+
 ## „OpenCode uruchamia się ponownie”
 
 Gdy serwer startuje lub uruchamia się ponownie, OpenChamber pokazuje stan „OpenCode uruchamia się ponownie” i wstrzymuje żądania, aż będzie gotowy. To normalne tuż po uruchomieniu lub restarcie. Jeśli ten stan nigdy nie znika, zobacz [Połączenie z OpenCode](/pl/troubleshooting/opencode-connection/).

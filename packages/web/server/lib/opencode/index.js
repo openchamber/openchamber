@@ -67,6 +67,22 @@ export {
 } from './mcp.js';
 
 export {
+  listPluginEntries,
+  getPluginEntry,
+  createPluginEntry,
+  updatePluginEntry,
+  deletePluginEntry,
+  listPluginDirFiles,
+  readPluginDirFile,
+  writePluginDirFile,
+  deletePluginDirFile,
+  encodePluginId,
+  decodePluginId,
+  parsePluginRaw,
+  serializePluginEntry,
+} from './plugins.js';
+
+export {
   listSnippets,
   getSnippet,
   createSnippet,
@@ -74,3 +90,6 @@ export {
   deleteSnippet,
   expandSnippets,
 } from './snippets.js';
+
+export { getNpmInfo, lookupNpmPackage, clearCache as clearNpmCache } from './npm-registry.js';
+export { parseNpmSpec, parsePathSpec, isExactSemver } from './plugin-spec.js';

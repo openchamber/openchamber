@@ -61,7 +61,7 @@ export type { AttachedFile }
 // Send routing — shell mode, slash commands, or normal prompt
 // ---------------------------------------------------------------------------
 
-function routeMessage(params: {
+export function routeMessage(params: {
   sessionId: string
   directory?: string | null
   content: string
