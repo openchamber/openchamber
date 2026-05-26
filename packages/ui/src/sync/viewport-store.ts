@@ -34,6 +34,7 @@ export type ViewportState = {
   isSyncing: boolean
 
   updateViewportAnchor: (sessionId: string, anchor: number, scrollPosition?: SessionMemoryState['scrollPosition']) => void
+  cleanupSession: (sessionId: string) => void
 }
 
 export const useViewportStore = create<ViewportState>()((set) => ({
@@ -55,6 +56,13 @@ export const useViewportStore = create<ViewportState>()((set) => ({
         ...(scrollPosition ? { scrollPosition } : {}),
         lastAccessedAt: Date.now(),
       })
+      return { sessionMemoryState: map }
+    }),
+
+  cleanupSession: (sessionId) =>
+    set((s) => {
+      const map = new Map(s.sessionMemoryState)
+      map.delete(sessionId)
       return { sessionMemoryState: map }
     }),
 }))

@@ -7,6 +7,7 @@ import type { OpencodeClient, Session, Message, Part } from "@opencode-ai/sdk/v2
 import { Binary } from "./binary"
 import { useSessionUIStore } from "./session-ui-store"
 import { useInputStore } from "./input-store"
+import { useViewportStore } from "./viewport-store"
 import type { ChildStoreManager } from "./child-store"
 import { opencodeClient } from "@/lib/opencode/client"
 import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
@@ -262,6 +263,9 @@ export async function deleteSession(sessionId: string, _options?: Record<string,
   try {
     await sdk().session.delete({ sessionID: sessionId, directory: sessionDirectory })
     useGlobalSessionsStore.getState().removeSessions([sessionId])
+    // Clean up session-specific state from UI stores
+    useViewportStore.getState().cleanupSession(sessionId)
+    useSessionUIStore.getState().cleanupSession(sessionId)
     return true
   } catch (error) {
     console.error("[session-actions] deleteSession failed", error)
@@ -294,6 +298,9 @@ export async function deleteSessionInDirectory(sessionId: string, directory: str
   try {
     await sdk().session.delete({ sessionID: sessionId, directory })
     useGlobalSessionsStore.getState().removeSessions([sessionId])
+    // Clean up session-specific state from UI stores
+    useViewportStore.getState().cleanupSession(sessionId)
+    useSessionUIStore.getState().cleanupSession(sessionId)
     return true
   } catch (error) {
     console.error("[session-actions] deleteSessionInDirectory failed", error)
