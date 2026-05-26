@@ -1737,6 +1737,8 @@ export const dict: Record<I18nKey, string> = {
   'header.actions.newSessionWithShortcut': 'Nowa sesja ({shortcut})',
   'header.actions.openPlanAria': 'Otwórz plan',
   'header.actions.openSessionsAria': 'Otwórz sesje',
+  'header.actions.openAppMenu': 'Menu OpenChamber',
+  'header.actions.openAppMenuAria': 'Otwórz menu OpenChamber',
   'header.actions.openSessionsWithShortcut': 'Otwórz sesje ({shortcut})',
   'header.actions.planWithShortcut': 'Plan ({shortcut})',
   'header.actions.rightSidebarWithShortcut': 'Prawy panel boczny ({shortcut})',

@@ -1262,6 +1262,8 @@ export const dict = {
   'helpDialog.proTips.themeCycling': 'Theme cycling remembers your preference across sessions',
   'header.actions.rightSidebarWithShortcut': 'Right sidebar ({shortcut})',
   'header.actions.toggleRightSidebarAria': 'Toggle right sidebar',
+  'header.actions.openAppMenu': 'OpenChamber menu',
+  'header.actions.openAppMenuAria': 'Open OpenChamber menu',
   'header.actions.openSessionsWithShortcut': 'Open sessions ({shortcut})',
   'header.actions.openSessionsAria': 'Open sessions',
   'header.actions.closeSessionsAria': 'Close sessions',

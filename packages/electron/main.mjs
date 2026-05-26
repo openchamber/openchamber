@@ -2786,6 +2786,18 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     case 'desktop_get_current_window_state':
       return { maximized: Boolean(browserWindow && !browserWindow.isDestroyed() && browserWindow.isMaximized()) };
 
+    case 'desktop_show_app_menu': {
+      if (!browserWindow || browserWindow.isDestroyed()) {
+        return null;
+      }
+
+      const menu = Menu.getApplicationMenu() || buildAutoHiddenMenu();
+      const x = Number.isFinite(Number(args.x)) ? Math.max(0, Math.round(Number(args.x))) : undefined;
+      const y = Number.isFinite(Number(args.y)) ? Math.max(0, Math.round(Number(args.y))) : undefined;
+      menu.popup({ window: browserWindow, x, y });
+      return null;
+    }
+
     case 'desktop_ssh_instances_get':
       return sshManager.readInstances();
 
@@ -2935,6 +2947,23 @@ const buildAutoHiddenMenu = () => {
 
   return Menu.buildFromTemplate([
     {
+      label: 'OpenChamber',
+      submenu: [
+        { label: 'About OpenChamber', click: () => dispatchAction('about') },
+        {
+          label: 'Check for Updates',
+          click: () => dispatchCheckForUpdates(),
+        },
+        { type: 'separator' },
+        { label: 'Settings', accelerator: 'Ctrl+,', click: () => dispatchAction('settings') },
+        { label: 'Reload Webview', click: () => reloadMenuTargetWindow() },
+        { label: 'Restart', click: () => relaunchFromMenu() },
+        { label: 'Command Palette', accelerator: 'Ctrl+P', click: () => dispatchAction('command-palette') },
+        { type: 'separator' },
+        { role: 'quit' },
+      ],
+    },
+    {
       label: 'File',
       submenu: [
         { label: 'New Window', accelerator: 'Ctrl+Shift+Alt+N', click: () => void handleInvoke(null, 'desktop_new_window') },
@@ -2964,12 +2993,14 @@ const buildAutoHiddenMenu = () => {
       submenu: [
         { role: 'reload' },
         { role: 'forceReload' },
-        { role: 'toggleDevTools' },
+        ...(isDev ? [{ role: 'toggleDevTools' }] : []),
         { type: 'separator' },
-        { label: 'Git', accelerator: 'Ctrl+G', click: () => dispatchAction('open-git-tab') },
-        { label: 'Diff', accelerator: 'Ctrl+E', click: () => dispatchAction('open-diff-tab') },
-        { label: 'Files', click: () => dispatchAction('open-files-tab') },
-        { label: 'Terminal', accelerator: 'Ctrl+T', click: () => dispatchAction('open-terminal-tab') },
+        { label: 'Toggle Right Sidebar', accelerator: 'Ctrl+B', click: () => dispatchAction('toggle-right-sidebar') },
+        { label: 'Open Git Sidebar', accelerator: 'Ctrl+Shift+G', click: () => dispatchAction('open-right-sidebar-git') },
+        { label: 'Open Files Sidebar', accelerator: 'Ctrl+Shift+F', click: () => dispatchAction('open-right-sidebar-files') },
+        { type: 'separator' },
+        { label: 'Toggle Terminal Dock', accelerator: 'Ctrl+J', click: () => dispatchAction('toggle-terminal') },
+        { label: 'Toggle Terminal Expanded', accelerator: 'Ctrl+Shift+J', click: () => dispatchAction('toggle-terminal-expanded') },
         { type: 'separator' },
         { label: 'Light Theme', click: () => dispatchAction('theme-light') },
         { label: 'Dark Theme', click: () => dispatchAction('theme-dark') },
@@ -2979,6 +3010,28 @@ const buildAutoHiddenMenu = () => {
         { label: 'Toggle Memory Debug', accelerator: 'Ctrl+Shift+D', click: () => dispatchAction('toggle-memory-debug') },
         { type: 'separator' },
         { role: 'togglefullscreen' },
+      ],
+    },
+    {
+      label: 'Go',
+      submenu: [
+        { label: 'Back', accelerator: 'Ctrl+[', click: () => dispatchAction('go-back') },
+        { label: 'Forward', accelerator: 'Ctrl+]', click: () => dispatchAction('go-forward') },
+        { type: 'separator' },
+        { label: 'Previous Session', accelerator: 'Alt+Up', click: () => dispatchAction('previous-session') },
+        { label: 'Next Session', accelerator: 'Alt+Down', click: () => dispatchAction('next-session') },
+        { type: 'separator' },
+        { label: 'Previous Project', accelerator: 'Ctrl+Alt+Up', click: () => dispatchAction('previous-project') },
+        { label: 'Next Project', accelerator: 'Ctrl+Alt+Down', click: () => dispatchAction('next-project') },
+      ],
+    },
+    {
+      label: 'Window',
+      submenu: [
+        { role: 'minimize' },
+        { role: 'togglefullscreen' },
+        { type: 'separator' },
+        { role: 'close' },
       ],
     },
     {

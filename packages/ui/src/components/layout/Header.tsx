@@ -77,7 +77,7 @@ type HeaderIconActionButtonProps = {
   visible?: boolean;
   title: string;
   ariaLabel: string;
-  onClick: () => void;
+  onClick: React.MouseEventHandler<HTMLButtonElement>;
   className?: string;
   Icon: IconName;
   iconClassName?: string;
@@ -1346,6 +1346,16 @@ export const Header: React.FC<HeaderProps> = ({
     toggleSidebar();
   }, [blurActiveElement, isMobile, isSessionSwitcherOpen, setSessionSwitcherOpen, toggleSidebar]);
 
+  const handleOpenWindowsAppMenu = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    void invokeDesktop('desktop_show_app_menu', {
+      x: rect.left,
+      y: rect.bottom,
+    }).catch((error) => {
+      console.warn('[header] failed to open app menu', error);
+    });
+  }, []);
+
   const handleOpenDraftMiniChat = React.useCallback(() => {
     void invokeDesktop('desktop_open_draft_mini_chat_window', {
       directory: normalize(openDirectory || activeProject?.path || ''),
@@ -1968,6 +1978,15 @@ export const Header: React.FC<HeaderProps> = ({
       role="tablist"
       aria-label={t('header.navigation.mainAria')}
     >
+      {isWindowsElectronDesktop ? (
+        <HeaderIconActionButton
+          title={t('header.actions.openAppMenu')}
+          ariaLabel={t('header.actions.openAppMenuAria')}
+          onClick={handleOpenWindowsAppMenu}
+          className={`${desktopHeaderIconButtonClass} shrink-0`}
+          Icon={'menu-2'}
+        />
+      ) : null}
       <HeaderIconActionButton
         title={t('header.actions.openSessionsWithShortcut', { shortcut: shortcutLabel('toggle_sidebar') })}
         ariaLabel={t('header.actions.openSessionsAria')}
