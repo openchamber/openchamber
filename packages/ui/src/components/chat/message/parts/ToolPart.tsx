@@ -729,7 +729,6 @@ const ToolScrollableSection: React.FC<ToolScrollableSectionProps> = ({
                 disableHorizontal ? 'overflow-y-auto overflow-x-hidden' : 'overflow-auto',
                 className,
             )}
-           
         >
             <div className="w-full min-w-0">
                 {children}

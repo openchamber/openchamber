@@ -772,6 +772,11 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: resolved.error });
       }
 
+      const existing = await fsPromises.readFile(resolved.resolved, 'utf8').catch(() => null);
+      if (existing === content) {
+        return res.json({ success: true, path: resolved.resolved });
+      }
+
       await fsPromises.mkdir(path.dirname(resolved.resolved), { recursive: true });
       await fsPromises.writeFile(resolved.resolved, content, 'utf8');
       return res.json({ success: true, path: resolved.resolved });

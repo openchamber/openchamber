@@ -319,7 +319,7 @@ const FileRow: React.FC<FileRowProps> = ({
 
 export const SidebarFilesTree: React.FC = () => {
   const { t } = useI18n();
-  const { files, runtime } = useRuntimeAPIs();
+  const { files } = useRuntimeAPIs();
   const currentDirectory = useEffectiveDirectory() ?? '';
   const root = normalizePath(currentDirectory.trim());
   const showHidden = useDirectoryShowHidden();
@@ -335,6 +335,7 @@ export const SidebarFilesTree: React.FC = () => {
   const [searching, setSearching] = React.useState(false);
 
   const [childrenByDir, setChildrenByDir] = React.useState<Record<string, FileNode[]>>({});
+  const [loadErrorsByDir, setLoadErrorsByDir] = React.useState<Record<string, string>>({});
   const loadedDirsRef = React.useRef<Set<string>>(new Set());
   const inFlightDirsRef = React.useRef<Set<string>>(new Set());
 
@@ -419,7 +420,7 @@ export const SidebarFilesTree: React.FC = () => {
     inFlightDirsRef.current.add(normalizedDir);
 
     const respectGitignore = !showGitignored;
-    const listPromise = runtime.isDesktop
+    const listPromise = files.listDirectory
       ? files.listDirectory(normalizedDir, { respectGitignore }).then((result) => result.entries.map((entry) => ({
         name: entry.name,
         path: entry.path,
@@ -437,25 +438,34 @@ export const SidebarFilesTree: React.FC = () => {
 
         loadedDirsRef.current = new Set(loadedDirsRef.current);
         loadedDirsRef.current.add(normalizedDir);
+        setLoadErrorsByDir((prev) => {
+          if (!prev[normalizedDir]) return prev;
+          const next = { ...prev };
+          delete next[normalizedDir];
+          return next;
+        });
         setChildrenByDir((prev) => ({ ...prev, [normalizedDir]: mapped }));
       })
-      .catch(() => {
-        setChildrenByDir((prev) => ({
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : String(error ?? '');
+        console.error('Failed to load sidebar directory:', error);
+        setLoadErrorsByDir((prev) => ({
           ...prev,
-          [normalizedDir]: prev[normalizedDir] ?? [],
+          [normalizedDir]: message,
         }));
       })
       .finally(() => {
         inFlightDirsRef.current = new Set(inFlightDirsRef.current);
         inFlightDirsRef.current.delete(normalizedDir);
       });
-  }, [files, mapDirectoryEntries, runtime.isDesktop, showGitignored]);
+  }, [files, mapDirectoryEntries, showGitignored]);
 
   const refreshRoot = React.useCallback(async () => {
     if (!root) return;
 
     loadedDirsRef.current = new Set();
     inFlightDirsRef.current = new Set();
+    setLoadErrorsByDir({});
     setChildrenByDir((prev) => (Object.keys(prev).length === 0 ? prev : {}));
 
     await loadDirectory(root);
@@ -484,6 +494,7 @@ export const SidebarFilesTree: React.FC = () => {
 
     loadedDirsRef.current = new Set();
     inFlightDirsRef.current = new Set();
+    setLoadErrorsByDir({});
     setChildrenByDir((prev) => (Object.keys(prev).length === 0 ? prev : {}));
     void loadDirectory(root);
   }, [loadDirectory, root, showHidden, showGitignored]);
@@ -807,6 +818,7 @@ export const SidebarFilesTree: React.FC = () => {
   }
 
   const hasTree = Boolean(root && childrenByDir[root]);
+  const rootLoadError = root ? loadErrorsByDir[root] : null;
 
   return (
     <section className="flex h-full min-h-0 flex-col overflow-hidden bg-sidebar">
@@ -923,6 +935,14 @@ export const SidebarFilesTree: React.FC = () => {
                 </li>
               );
             })
+          ) : rootLoadError ? (
+            <li className="flex flex-col gap-2 px-2 py-1 typography-meta text-muted-foreground">
+              <span>{rootLoadError}</span>
+              <Button variant="outline" size="xs" className="w-fit gap-1.5" onClick={() => void refreshRoot()}>
+                <Icon name="refresh" className="h-3.5 w-3.5" />
+                {t('sidebarFilesTree.actions.refreshTitle')}
+              </Button>
+            </li>
           ) : hasTree && root ? (
             renderTree(root, 0)
           ) : (

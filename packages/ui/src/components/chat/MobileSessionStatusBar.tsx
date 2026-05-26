@@ -491,7 +491,6 @@ function SessionItem({
                   title={`Sub-session: ${getSessionTitle(child)}`}
                 >
                   <Icon name="loader-4" className="h-2.5 w-2.5 animate-spin"
-                    
                     style={{ color: `var(${childColor.var})` }}/>
                 </div>
               );
@@ -692,7 +691,6 @@ function SessionStatusHeader({
                     title={`Sub-session: ${child.session.title || 'Untitled'}`}
                   >
                     <Icon name="loader-4" className="h-2.5 w-2.5 animate-spin"
-                      
                       style={{ color: `var(${childColor.var})` }}/>
                   </div>
                 );

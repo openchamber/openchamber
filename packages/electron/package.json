@@ -20,7 +20,8 @@
   "desktopPrerequisites": [
     "Electron runtime dependencies installed via bun install",
     "Bun available for sidecar compilation",
-    "macOS build tools installed for notarized packaging"
+    "macOS: Xcode + build tools for notarized packaging",
+    "Windows: NSIS installed for installer creation"
   ],
   "scripts": {
     "dev": "node ./scripts/electron-dev.mjs",
@@ -29,7 +30,7 @@
     "bundle:main": "bun ./scripts/bundle-main.mjs",
     "generate:macos-icon": "node ./scripts/generate-macos-icon-assets.cjs",
     "rebuild:native": "node ./scripts/rebuild-native.mjs",
-    "package": "bun run build:web-assets && bun run bundle:main && bun run rebuild:native && electron-builder",
+    "package": "bun run build:web-assets && bun run bundle:main && bun run rebuild:native && node ./scripts/package.mjs",
     "finalize:latest-yml": "node ./scripts/finalize-latest-yml.mjs",
     "type-check": "node --check ./main.mjs && node --check ./preload.mjs",
     "lint": "node -e \"process.exit(0)\""
@@ -45,6 +46,10 @@
       {
         "from": "resources/web-dist",
         "to": "web-dist"
+      },
+      {
+        "from": "resources/icons/icon.ico",
+        "to": "icons/icon.ico"
       }
     ],
     "afterPack": "scripts/after-pack.cjs",
@@ -57,6 +62,7 @@
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "resources/icons/icon.icns",
+      "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
       "extendInfo": {
         "CFBundleIconName": "AppIcon"
       },
@@ -69,6 +75,21 @@
         "dmg",
         "zip"
       ]
+    },
+    "win": {
+      "icon": "resources/icons/icon.ico",
+      "target": [
+        "nsis"
+      ],
+      "verifyUpdateCodeSignature": false,
+      "artifactName": "${productName}-${version}-win-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "installerIcon": "resources/icons/icon.ico",
+      "uninstallerIcon": "resources/icons/icon.ico",
+      "installerHeaderIcon": "resources/icons/icon.ico"
     },
     "dmg": {
       "sign": true,

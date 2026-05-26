@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 
 import { fetchDesktopInstalledApps, isDesktopLocalOriginActive, isTauriShell, type DesktopSettings, type InstalledDesktopAppInfo } from '@/lib/desktop';
-import { OPEN_IN_APPS, DEFAULT_OPEN_IN_APP_ID, OPEN_IN_ALWAYS_AVAILABLE_APP_IDS, getOpenInAppById, type OpenInApp } from '@/lib/openInApps';
+import { OPEN_IN_APPS, DEFAULT_OPEN_IN_APP_ID, OPEN_IN_ALWAYS_AVAILABLE_APP_IDS, getOpenInAppById, getPlatformOpenInApp, type OpenInApp } from '@/lib/openInApps';
 import { updateDesktopSettings } from '@/lib/persistence';
 
 export type OpenInAppOption = OpenInApp & {
@@ -22,7 +22,7 @@ type OpenInAppsState = {
 const getAlwaysAvailableApps = (): OpenInAppOption[] => {
   return OPEN_IN_APPS
     .filter((app) => OPEN_IN_ALWAYS_AVAILABLE_APP_IDS.has(app.id))
-    .map((app) => ({ ...app }));
+    .map((app) => ({ ...getPlatformOpenInApp(app) }));
 };
 
 const getStoredAppId = (): string => {
@@ -78,7 +78,7 @@ export const useOpenInAppsStore = create<OpenInAppsState>()((set, get) => ({
       );
 
       const withIcons = filtered.map((app) => ({
-        ...app,
+        ...getPlatformOpenInApp(app),
         iconDataUrl: iconMap.get(app.appName),
       }));
 

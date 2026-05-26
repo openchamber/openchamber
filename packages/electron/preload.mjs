@@ -66,6 +66,8 @@ contextBridge.exposeInMainWorld('__OPENCHAMBER_ELECTRON__', {
   runtime: 'electron',
 });
 
+contextBridge.exposeInMainWorld('__OPENCHAMBER_PLATFORM__', process.platform);
+
 // Note: bootOutcome must stay writable from the main world's initScript so
 // re-navigations (host switch via deep link) can refresh it. contextBridge-
 // exposed globals are read-only, which blocks that update — rely solely on

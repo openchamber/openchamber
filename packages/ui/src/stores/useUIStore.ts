@@ -329,7 +329,7 @@ const upsertContextPanelTab = (
       ? {
           ...tab,
           mode: nextTab.mode,
-          targetPath: nextTab.targetPath,
+          targetPath: nextTab.targetPath || tab.targetPath,
           dedupeKey: nextTab.dedupeKey,
           label: nextTab.label,
           stagedDiff: nextTab.stagedDiff,

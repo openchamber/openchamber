@@ -17,7 +17,7 @@ export function parseSkillRepoSource(input, options = {}) {
     return { ok: false, error: { kind: 'invalidSource', message: 'Repository source is required' } };
   }
   const explicitSubpath = typeof options.subpath === 'string' && options.subpath.trim() ? options.subpath.trim() : null;
-  
+
   const urlFormat = raw.startsWith('https://') ? 'https' : raw.startsWith('git@') ? 'ssh' : 'shorthand';
   const gitHost = urlFormat === 'https' ? raw.split('/')[2] : urlFormat === 'ssh' ? raw.split('@')[1].split(':')[0] : null;
 

@@ -450,11 +450,11 @@ function parseSkillRepoSource(input: string, subpath?: string) {
     : urlFormat === 'ssh'
       ? (raw.split('@')[1].split(':')[1] ?? '').split('/').filter(Boolean)
       : null;
-    
+
   const repoName = pathSegments && pathSegments.length > 0
     ? pathSegments[pathSegments.length - 1].replace(/\.git$/i, '')
     : null;
-  
+
   const gitOwner = pathSegments && pathSegments.length > 1
     ? pathSegments.slice(0, -1).join('/')
     : (pathSegments && pathSegments.length === 1 ? pathSegments[0] : null);
