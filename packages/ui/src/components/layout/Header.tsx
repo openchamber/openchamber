@@ -81,6 +81,7 @@ type HeaderIconActionButtonProps = {
   className?: string;
   Icon: IconName;
   iconClassName?: string;
+  pressed?: boolean;
 };
 
 const HeaderIconActionButton = React.memo(function HeaderIconActionButton({
@@ -91,6 +92,7 @@ const HeaderIconActionButton = React.memo(function HeaderIconActionButton({
   className,
   Icon: iconName,
   iconClassName,
+  pressed = false,
 }: HeaderIconActionButtonProps) {
   if (!visible) {
     return null;
@@ -103,7 +105,11 @@ const HeaderIconActionButton = React.memo(function HeaderIconActionButton({
           type="button"
           onClick={onClick}
           aria-label={ariaLabel}
-          className={className ?? DESKTOP_HEADER_ICON_BUTTON_CLASS}
+          aria-pressed={pressed}
+          className={cn(
+            className ?? DESKTOP_HEADER_ICON_BUTTON_CLASS,
+            pressed && 'bg-interactive-selection text-interactive-selection-foreground'
+          )}
         >
           <Icon name={iconName} className={iconClassName ?? 'h-[18px] w-[18px]'} />
         </button>
@@ -1332,8 +1338,15 @@ export const Header: React.FC<HeaderProps> = ({
     if (!directory) {
       return;
     }
+
+    const panelState = contextPanelByDirectory[directory];
+    if (getActiveContextMode(panelState) === 'browser') {
+      closeContextPanel(directory);
+      return;
+    }
+
     openContextBrowser(directory);
-  }, [openContextBrowser, openDirectory]);
+  }, [closeContextPanel, contextPanelByDirectory, openContextBrowser, openDirectory]);
 
   const isContextPlanActive = React.useMemo(() => {
     const directory = normalize(openDirectory || '');
@@ -1342,6 +1355,15 @@ export const Header: React.FC<HeaderProps> = ({
     }
     const panelState = contextPanelByDirectory[directory];
     return getActiveContextMode(panelState) === 'plan';
+  }, [contextPanelByDirectory, openDirectory]);
+
+  const isContextBrowserActive = React.useMemo(() => {
+    const directory = normalize(openDirectory || '');
+    if (!directory) {
+      return false;
+    }
+    const panelState = contextPanelByDirectory[directory];
+    return getActiveContextMode(panelState) === 'browser';
   }, [contextPanelByDirectory, openDirectory]);
 
   const desktopHeaderIconButtonClass = DESKTOP_HEADER_ICON_BUTTON_CLASS;
@@ -1849,6 +1871,7 @@ export const Header: React.FC<HeaderProps> = ({
           title={t('contextPanel.browser.open')}
           ariaLabel={t('contextPanel.browser.open')}
           onClick={handleOpenContextBrowser}
+          pressed={isContextBrowserActive}
           Icon={'global'}
         />
       ) : null}

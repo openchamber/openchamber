@@ -1682,8 +1682,12 @@ export const ContextPanel: React.FC = () => {
     if (!directoryKey) {
       return;
     }
-    closeContextPanel(directoryKey);
-  }, [closeContextPanel, directoryKey]);
+    if (activeTab?.mode === 'browser') {
+      closeContextPanelTab(directoryKey, activeTab.id);
+    } else {
+      closeContextPanel(directoryKey);
+    }
+  }, [activeTab, closeContextPanel, closeContextPanelTab, directoryKey]);
 
   const handleToggleExpanded = React.useCallback(() => {
     if (!directoryKey) {
@@ -1910,36 +1914,43 @@ export const ContextPanel: React.FC = () => {
     </header>
   );
 
-  if (!isOpen) {
-    return null;
-  }
-
-  const panelStyle: React.CSSProperties = isExpanded
+  const panelStyle: React.CSSProperties = !isOpen
     ? {
-        ['--oc-context-panel-width' as string]: '100%',
-        width: '100%',
-        minWidth: '100%',
-        maxWidth: '100%',
+        width: 0,
+        minWidth: 0,
+        maxWidth: 0,
+        opacity: 0,
+        overflow: 'hidden',
+        visibility: 'hidden',
       }
-    : {
-        width: 'min(var(--oc-context-panel-width), 100%)',
-        minWidth: `min(${CONTEXT_PANEL_MIN_WIDTH}px, 100%)`,
-        maxWidth: '100%',
-        ['--oc-context-panel-width' as string]: `${isResizing ? (resizingWidthRef.current ?? width) : width}px`,
-      };
+    : isExpanded
+      ? {
+          ['--oc-context-panel-width' as string]: '100%',
+          width: '100%',
+          minWidth: '100%',
+          maxWidth: '100%',
+        }
+      : {
+          width: 'min(var(--oc-context-panel-width), 100%)',
+          minWidth: `min(${CONTEXT_PANEL_MIN_WIDTH}px, 100%)`,
+          maxWidth: '100%',
+          ['--oc-context-panel-width' as string]: `${isResizing ? (resizingWidthRef.current ?? width) : width}px`,
+        };
 
   return (
     <aside
       ref={panelRef}
       data-context-panel="true"
       tabIndex={-1}
+      inert={!isOpen || undefined}
       className={cn(
         'flex min-h-0 flex-col overflow-hidden bg-background',
         !isExpanded && 'border-l border-border/40',
         isExpanded
           ? 'absolute inset-0 z-20 min-w-0'
           : 'relative h-full flex-shrink-0',
-        isResizing ? 'transition-none' : 'transition-[width] duration-200 ease-in-out'
+        !isOpen && 'pointer-events-none',
+        isResizing || !isOpen ? 'transition-none' : 'transition-[width] duration-200 ease-in-out'
       )}
       onKeyDownCapture={handlePanelKeyDownCapture}
       style={panelStyle}
