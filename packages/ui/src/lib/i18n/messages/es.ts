@@ -1386,6 +1386,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.search.matchCase": "Coincidir mayúsculas/minúsculas",
   "chat.search.useRegex": "Usar expresión regular",
   "chat.search.matchWholeWord": "Coincidir palabra completa",
+  "chat.search.includeThinking": "Incluir partes de razonamiento en la búsqueda",
   "chat.search.previous": "Coincidencia anterior (Mayús+Intro)",
   "chat.search.previousAria": "Coincidencia anterior",
   "chat.search.next": "Siguiente coincidencia (Intro)",

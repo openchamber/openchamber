@@ -38,9 +38,9 @@ export function stripMarkdownForSearch(text: string): string {
     .replace(/```[\s\S]*?```/gm, ' ')
     .replace(/`([^`\n]+)`/g, '$1')
     .replace(/\*\*([^*\n]+)\*\*/g, '$1')
-    .replace(/__([^_\n]+)__/g, '$1')
+    .replace(/(^|[^\w])__([^_\n]+)__($|[^\w])/g, '$1$2$3')
     .replace(/\*([^*\n]+)\*/g, '$1')
-    .replace(/_([^_\n]+)_/g, '$1')
+    .replace(/(^|[^\w])_([^_\n]+)_($|[^\w])/g, '$1$2$3')
     .replace(/~~([^~\n]+)~~/g, '$1')
     .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1');
@@ -55,12 +55,14 @@ export function stripMarkdownForSearch(text: string): string {
  * Keeping this consistent with what the DOM highlights is critical so that
  * data-layer match count equals DOM mark count within each message.
  */
-function getSearchableText(message: ChatMessageEntry): string {
+function getSearchableText(message: ChatMessageEntry, includeThinking: boolean): string {
   const texts: string[] = [];
 
   for (const part of message.parts) {
     const p = part as unknown as Record<string, unknown>;
-    if (p.type === 'text' || p.type === 'reasoning') {
+    const isText = p.type === 'text';
+    const isReasoning = p.type === 'reasoning';
+    if (isText || (isReasoning && (includeThinking ?? false))) {
       const raw = getBestPartText(p);
       if (raw) texts.push(stripMarkdownForSearch(raw));
     }
@@ -89,6 +91,7 @@ export function useChatSearchMatcher(messages: ChatMessageEntry[]): void {
   const caseSensitive = useChatSearchStore((s) => s.flags.caseSensitive);
   const wholeWord = useChatSearchStore((s) => s.flags.wholeWord);
   const isRegex = useChatSearchStore((s) => s.flags.regex);
+  const includeThinking = useChatSearchStore((s) => s.flags.includeThinking ?? false);
 
   // Keep a stable ref to the latest messages so the timer callback always
   // sees the most recent data even if it was queued before the last update.
@@ -104,7 +107,7 @@ export function useChatSearchMatcher(messages: ChatMessageEntry[]): void {
     }
 
     const timer = setTimeout(() => {
-      const regex = buildSearchRegex(query, { caseSensitive, wholeWord, regex: isRegex });
+      const regex = buildSearchRegex(query, { caseSensitive, wholeWord, regex: isRegex, includeThinking });
       if (!regex) {
         useChatSearchStore.getState().setMatches([], null);
         return;
@@ -113,7 +116,7 @@ export function useChatSearchMatcher(messages: ChatMessageEntry[]): void {
       const newMatches: MatchRecord[] = [];
 
       for (const message of messagesRef.current) {
-        const text = getSearchableText(message);
+        const text = getSearchableText(message, includeThinking);
         if (!text) continue;
 
         regex.lastIndex = 0;
@@ -142,6 +145,7 @@ export function useChatSearchMatcher(messages: ChatMessageEntry[]): void {
     caseSensitive,
     wholeWord,
     isRegex,
+    includeThinking,
     // Re-run when messages change (new message, streaming finalize, load older).
     // Using the array reference is intentional: it resets the debounce timer
     // on each update, so the matcher runs 350 ms after the last change.

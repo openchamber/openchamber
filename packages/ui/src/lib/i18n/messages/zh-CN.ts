@@ -1386,6 +1386,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.search.matchCase': '区分大小写',
   'chat.search.useRegex': '使用正则表达式',
   'chat.search.matchWholeWord': '全字匹配',
+  'chat.search.includeThinking': '在搜索中包含思考/推理内容',
   'chat.search.previous': '上一个匹配项 (Shift+Enter)',
   'chat.search.previousAria': '上一个匹配项',
   'chat.search.next': '下一个匹配项 (Enter)',

@@ -4,6 +4,8 @@ export interface SearchFlags {
   caseSensitive: boolean;
   wholeWord: boolean;
   regex: boolean;
+  /** When true, reasoning/thinking parts are included in search and highlighting. Defaults to false. */
+  includeThinking?: boolean;
 }
 
 export interface SearchContext {
@@ -60,7 +62,7 @@ interface ChatSearchState {
 export const useChatSearchStore = create<ChatSearchState>((set, get) => ({
   isOpen: false,
   query: '',
-  flags: { caseSensitive: false, wholeWord: false, regex: false },
+  flags: { caseSensitive: false, wholeWord: false, regex: false, includeThinking: false },
   matches: [],
   totalMatches: 0,
   activeIndex: 0,

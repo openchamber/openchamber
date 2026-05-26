@@ -1422,6 +1422,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.search.matchCase': '대/소문자 구분',
   'chat.search.useRegex': '정규식 사용',
   'chat.search.matchWholeWord': '단어 단위로 일치',
+  'chat.search.includeThinking': '생각/추론 부분을 검색에 포함',
   'chat.search.previous': '이전 일치 항목(Shift+Enter)',
   'chat.search.previousAria': '이전 일치 항목',
   'chat.search.next': '다음 일치 항목(Enter)',

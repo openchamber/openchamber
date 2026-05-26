@@ -1386,6 +1386,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.search.matchCase": "Враховувати регістр",
   "chat.search.useRegex": "Використовувати регулярний вираз",
   "chat.search.matchWholeWord": "Збіг цілого слова",
+  "chat.search.includeThinking": "Включити частини міркувань у пошук",
   "chat.search.previous": "Попередній збіг (Shift+Enter)",
   "chat.search.previousAria": "Попередній збіг",
   "chat.search.next": "Наступний збіг (Enter)",

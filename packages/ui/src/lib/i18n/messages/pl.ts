@@ -450,6 +450,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.search.matchCase': 'Uwzględniaj wielkość liter',
   'chat.search.useRegex': 'Użyj wyrażenia regularnego',
   'chat.search.matchWholeWord': 'Dopasuj całe słowo',
+  'chat.search.includeThinking': 'Uwzględnij fragmenty rozumowania w wyszukiwaniu',
   'chat.search.previous': 'Poprzednie dopasowanie (Shift+Enter)',
   'chat.search.previousAria': 'Poprzednie dopasowanie',
   'chat.search.next': 'Następne dopasowanie (Enter)',

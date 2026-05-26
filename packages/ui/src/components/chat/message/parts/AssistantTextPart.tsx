@@ -67,7 +67,7 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
 
     // Skip highlighting during streaming to avoid running the rehype plugin on
     // every streaming tick. Highlights appear once the message is finalized.
-    const searchContext: SearchContext | undefined =
+    const baseSearchContext: SearchContext | undefined =
         searchIsOpen && searchQuery && !isStreaming
             ? {
                 query: searchQuery,
@@ -77,6 +77,11 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
                 messageId,
             }
             : undefined;
+
+    // For reasoning parts: only highlight when the "include thinking" toggle is on.
+    const searchContext = part.type === 'reasoning' && !(searchFlags.includeThinking ?? false)
+        ? undefined
+        : baseSearchContext;
 
     const time = partWithText.time;
     const isFinalized = Boolean(time && typeof time.end !== 'undefined');

@@ -34,6 +34,12 @@ describe('stripMarkdownForSearch', () => {
     expect(stripMarkdownForSearch('hello _world_ friend')).toBe('hello world friend');
   });
 
+  test('preserves underscores inside identifiers that are not markdown emphasis', () => {
+    const normalized = stripMarkdownForSearch('backend: _create_session_response');
+    expect(normalized).toBe('backend: _create_session_response');
+    expect(/backend: _create_session_re/i.test(normalized)).toBe(true);
+  });
+
   test('strips strikethrough ~~markers~~', () => {
     expect(stripMarkdownForSearch('~~deleted~~ text')).toBe('deleted text');
   });

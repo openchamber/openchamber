@@ -1420,6 +1420,7 @@ export const dict = {
   'chat.search.matchCase': 'Match case',
   'chat.search.useRegex': 'Use regular expression',
   'chat.search.matchWholeWord': 'Match whole word',
+  'chat.search.includeThinking': 'Include thinking / reasoning parts in search',
   'chat.search.previous': 'Previous match (Shift+Enter)',
   'chat.search.previousAria': 'Previous match',
   'chat.search.next': 'Next match (Enter)',

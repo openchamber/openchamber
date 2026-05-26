@@ -15,6 +15,7 @@ import type { TurnHistorySignals } from '../lib/turns/historySignals';
 import { getMemoryLimits, type SessionHistoryMeta } from '@/stores/types/sessionTypes';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
+import { decidePendingScrollFailure } from './pendingScrollRequest';
 
 type ViewportAnchor = { messageId: string; offsetTop: number };
 
@@ -24,6 +25,8 @@ type PendingScrollRequest = {
     id: string;
     behavior: ScrollBehavior;
     turnId: string | null;
+    visibleFailureCount: number;
+    retryFrame: number | null;
     resolve: (value: boolean) => void;
 };
 
@@ -150,6 +153,7 @@ export const useChatTimelineController = ({
     const initializedSessionRef = React.useRef<string | null>(null);
     const pendingRenderResolversRef = React.useRef<Array<() => void>>([]);
     const pendingScrollRequestRef = React.useRef<PendingScrollRequest | null>(null);
+    const retryPendingScrollRequestRef = React.useRef<() => void>(() => {});
 
     const historySignals = React.useMemo(() => {
         const defaultLimit = getMemoryLimits().HISTORICAL_MESSAGES;
@@ -233,6 +237,9 @@ export const useChatTimelineController = ({
         if (!pending) {
             return;
         }
+        if (pending.retryFrame !== null && typeof window !== 'undefined') {
+            window.cancelAnimationFrame(pending.retryFrame);
+        }
         pendingScrollRequestRef.current = null;
         pending.resolve(value);
     }, []);
@@ -264,10 +271,37 @@ export const useChatTimelineController = ({
             ? turnModelRef.current.turnIndexById.get(pending.id)
             : turnModelRef.current.messageToTurnIndex.get(pending.id);
 
-        if (typeof targetIndex === 'number' && targetIndex >= turnStartRef.current) {
-            resolvePendingScrollRequest(false);
+        const failureDecision = decidePendingScrollFailure({
+            targetIndex,
+            turnStart: turnStartRef.current,
+            visibleFailureCount: pending.visibleFailureCount,
+        });
+
+        if (failureDecision === 'wait-hidden') {
+            return;
         }
+
+        if (failureDecision === 'retry-visible') {
+            if (pending.retryFrame !== null) {
+                return;
+            }
+            if (typeof window !== 'undefined') {
+                pending.visibleFailureCount += 1;
+                pending.retryFrame = window.requestAnimationFrame(() => {
+                    if (pendingScrollRequestRef.current !== pending) {
+                        return;
+                    }
+                    pending.retryFrame = null;
+                    retryPendingScrollRequestRef.current();
+                });
+                return;
+            }
+        }
+
+        resolvePendingScrollRequest(false);
     }, [messageListRef, resolvePendingScrollRequest]);
+
+    retryPendingScrollRequestRef.current = attemptPendingScrollRequest;
 
     React.useEffect(() => {
         return () => {
@@ -440,6 +474,8 @@ export const useChatTimelineController = ({
                     id: turnId,
                     behavior: options?.behavior ?? 'auto',
                     turnId,
+                    visibleFailureCount: 0,
+                    retryFrame: null,
                     resolve,
                 };
                 attemptPendingScrollRequest();
@@ -489,6 +525,8 @@ export const useChatTimelineController = ({
                     id: messageId,
                     behavior: options?.behavior ?? 'auto',
                     turnId: turnId ?? null,
+                    visibleFailureCount: 0,
+                    retryFrame: null,
                     resolve,
                 };
                 attemptPendingScrollRequest();

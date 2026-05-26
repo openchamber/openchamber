@@ -5,7 +5,7 @@ import { useChatSearchStore } from '@/stores/useChatSearchStore';
 const panelStyle: React.CSSProperties = {
   backgroundColor: 'color-mix(in srgb, var(--surface-elevated) 85%, transparent)',
   boxShadow: '0 2px 8px color-mix(in srgb, var(--surface-background) 60%, transparent)',
-  width: 'min(400px, calc(100% - 28px))',
+  width: 'min(253px, calc(100% - 28px))',
 };
 
 const inputBaseClass = [
@@ -229,11 +229,7 @@ export const ChatSearchWidget: React.FC<ChatSearchWidgetProps> = ({
         }
       }}
     >
-      {/* ── Single row that wraps to two rows when the panel is narrowed ──
-           Row 1: [Find input (grows)]
-           Row 2 (when narrow): [Aa] [.*] [ab] [count] [↑] [↓] [×]   ── */}
-      <div className="flex w-full flex-wrap items-center gap-y-1 [font-family:inherit] text-[13px] leading-none text-[var(--surface-foreground)]">
-        {/* Find input — expands to fill all available width */}
+      <div className="flex w-full flex-col items-stretch gap-1 [font-family:inherit] text-[13px] leading-none text-[var(--surface-foreground)]">
         <input
           ref={inputRef}
           type="text"
@@ -241,13 +237,11 @@ export const ChatSearchWidget: React.FC<ChatSearchWidgetProps> = ({
           onChange={(e) => useChatSearchStore.getState().setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={t('chat.search.findPlaceholder')}
-          className={`${inputBaseClass} min-w-[160px] flex-[1_1_160px]`}
+          className={`${inputBaseClass} w-full min-w-0 flex-none`}
           aria-label={t('chat.search.findAria')}
         />
 
-        {/* Controls — kept as one non-wrapping group so they either share
-            row 1 with the input or drop cleanly together to row 2 */}
-        <div className="ml-auto flex shrink-0 items-center">
+        <div className="flex w-full shrink-0 items-center">
           {/* Toggle buttons */}
           <ToggleButton
             active={flags.caseSensitive}
@@ -269,6 +263,13 @@ export const ChatSearchWidget: React.FC<ChatSearchWidgetProps> = ({
             title={t('chat.search.matchWholeWord')}
             ariaLabel={t('chat.search.matchWholeWord')}
             icon={<span className="underline decoration-current underline-offset-2">ab</span>}
+          />
+          <ToggleButton
+            active={flags.includeThinking ?? false}
+            onClick={() => useChatSearchStore.getState().setFlag('includeThinking', !(flags.includeThinking ?? false))}
+            title={t('chat.search.includeThinking')}
+            ariaLabel={t('chat.search.includeThinking')}
+            icon="T"
           />
 
           {/* Match count — fixed width keeps layout stable between "No results" and "1/3" */}
