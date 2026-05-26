@@ -90,7 +90,10 @@ const registerExec = ({ spawn }) => {
   registerFsRoutes(app, {
     os: { homedir: () => '/home/user' },
     path,
-    fsPromises: { stat: async () => ({ isDirectory: () => true }) },
+    fsPromises: {
+      realpath: async (targetPath) => targetPath,
+      stat: async () => ({ isDirectory: () => true }),
+    },
     spawn,
     crypto: { randomUUID: (() => { let n = 0; return () => `job-${n++}`; })() },
     normalizeDirectoryPath: (p) => p,
@@ -102,11 +105,68 @@ const registerExec = ({ spawn }) => {
   return getRoute('POST', '/api/fs/exec');
 };
 
+const registerWrite = (fsPromises) => {
+  const { app, getRoute } = createRouteRegistry();
+  registerFsRoutes(app, {
+    os: { homedir: () => '/home/user' },
+    path: path.posix,
+    fsPromises: {
+      realpath: async (targetPath) => targetPath,
+      ...fsPromises,
+    },
+    spawn: vi.fn(),
+    crypto: { randomUUID: () => 'job-0' },
+    normalizeDirectoryPath: (p) => p,
+    resolveProjectDirectory: async () => ({ directory: '/repo' }),
+    buildAugmentedPath: () => '/usr/bin',
+    resolveGitBinaryForSpawn: () => 'git',
+    openchamberUserConfigRoot: '/home/user/.config',
+  });
+  return getRoute('POST', '/api/fs/write');
+};
+
 const callExec = async (handler, body) => {
   const res = createMockResponse();
   await handler({ body }, res);
   return res;
 };
+
+const callWrite = async (handler, body) => {
+  const res = createMockResponse();
+  await handler({ body }, res);
+  return res;
+};
+
+describe('fs write', () => {
+  it('does not rewrite a file when content is unchanged', async () => {
+    const fsPromises = {
+      readFile: vi.fn(async () => 'same'),
+      mkdir: vi.fn(async () => undefined),
+      writeFile: vi.fn(async () => undefined),
+    };
+    const handler = registerWrite(fsPromises);
+
+    const res = await callWrite(handler, { path: '/repo/file.txt', content: 'same' });
+
+    expect(res.body).toEqual({ success: true, path: '/repo/file.txt' });
+    expect(fsPromises.writeFile).not.toHaveBeenCalled();
+  });
+
+  it('writes a file when content changed', async () => {
+    const fsPromises = {
+      readFile: vi.fn(async () => 'old'),
+      mkdir: vi.fn(async () => undefined),
+      writeFile: vi.fn(async () => undefined),
+    };
+    const handler = registerWrite(fsPromises);
+
+    const res = await callWrite(handler, { path: '/repo/file.txt', content: 'new' });
+
+    expect(res.body).toEqual({ success: true, path: '/repo/file.txt' });
+    expect(fsPromises.mkdir).toHaveBeenCalledWith('/repo', { recursive: true });
+    expect(fsPromises.writeFile).toHaveBeenCalledWith('/repo/file.txt', 'new', 'utf8');
+  });
+});
 
 describe('fs exec git-read cache', () => {
   beforeEach(() => {

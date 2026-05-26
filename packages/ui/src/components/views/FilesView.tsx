@@ -290,6 +290,32 @@ const isFileMissingError = (error: unknown): boolean => {
 
 const MAX_VIEW_CHARS = 200_000;
 const FILE_EDITOR_AUTO_SAVE_KEY = 'openchamber:files:auto-save-enabled';
+type FileLineEnding = '\n' | '\r\n';
+
+const detectFileLineEnding = (content: string): FileLineEnding => {
+  let crlf = 0;
+  let lf = 0;
+
+  for (let index = 0; index < content.length; index += 1) {
+    if (content.charCodeAt(index) !== 10) {
+      continue;
+    }
+    if (index > 0 && content.charCodeAt(index - 1) === 13) {
+      crlf += 1;
+    } else {
+      lf += 1;
+    }
+  }
+
+  return crlf > lf ? '\r\n' : '\n';
+};
+
+const normalizeEditorLineEndings = (content: string): string => content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+const serializeEditorContent = (content: string, lineEnding: FileLineEnding): string => {
+  const normalized = normalizeEditorLineEndings(content);
+  return lineEnding === '\r\n' ? normalized.replace(/\n/g, '\r\n') : normalized;
+};
 
 const getInitialAutoSaveEnabled = (): boolean => {
   if (typeof window === 'undefined') {
@@ -763,6 +789,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
   const [draftContent, setDraftContent] = React.useState('');
   const [isSaving, setIsSaving] = React.useState(false);
+  const [loadedFileLineEnding, setLoadedFileLineEnding] = React.useState<FileLineEnding>('\n');
   const dialogInputRef = React.useRef<HTMLInputElement>(null);
   const autoSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastLoadedFileStatRef = React.useRef<FileStatSnapshot | null>(null);
@@ -1446,7 +1473,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     setIsSaving(true);
 
     try {
-      const result = await files.writeFile(selectedFile.path, draftContent);
+      const contentToWrite = serializeEditorContent(draftContent, loadedFileLineEnding);
+      const result = await files.writeFile(selectedFile.path, contentToWrite);
       if (!result?.success) {
         toast.error(t('filesView.toast.writeFileFailed'));
         return false;
@@ -1467,7 +1495,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     } finally {
       setIsSaving(false);
     }
-  }, [draftContent, files, isDirty, readFileStat, selectedFile, t]);
+  }, [draftContent, files, isDirty, loadedFileLineEnding, readFileStat, selectedFile, t]);
 
   React.useEffect(() => {
     if (!isDirty) {
@@ -1622,10 +1650,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         if (!isCurrentLoad()) {
           return;
         }
-        setFileContent(content);
-        setDraftContent(content.length > MAX_VIEW_CHARS
-          ? `${content.slice(0, MAX_VIEW_CHARS)}\n\n… truncated …`
-          : content);
+        const editorContent = normalizeEditorLineEndings(content);
+        setLoadedFileLineEnding(detectFileLineEnding(content));
+        setFileContent(editorContent);
+        setDraftContent(editorContent.length > MAX_VIEW_CHARS
+          ? `${editorContent.slice(0, MAX_VIEW_CHARS)}\n\n… truncated …`
+          : editorContent);
         setLoadedFilePath(node.path);
         void readFileStat(node.path, readOptions)
           .then((stat) => {
