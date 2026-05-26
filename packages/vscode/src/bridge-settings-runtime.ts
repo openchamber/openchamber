@@ -303,6 +303,10 @@ export const persistSettings = async (changes: Record<string, unknown>, ctx?: Br
     delete restChanges.usageAutoRefresh;
   }
 
+  if (typeof restChanges.usageShowPredValues !== 'boolean') {
+    delete restChanges.usageShowPredValues;
+  }
+
   if (typeof restChanges.usageRefreshIntervalMs === 'number' && Number.isFinite(restChanges.usageRefreshIntervalMs)) {
     restChanges.usageRefreshIntervalMs = Math.max(30000, Math.min(300000, Math.round(restChanges.usageRefreshIntervalMs)));
   } else {

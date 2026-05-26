@@ -105,6 +105,10 @@ openchamber --ui-password be-creative-here
 ```bash
 openchamber --port 8080              # Custom port
 openchamber --ui-password secret     # Password-protect UI
+openchamber startup enable           # Start at login as a native service
+OPENCHAMBER_UI_PASSWORD=secret openchamber startup enable # Save service password env
+openchamber startup status           # Show startup service status
+openchamber startup disable          # Remove startup service
 openchamber tunnel help              # Tunnel lifecycle commands
 openchamber tunnel providers         # Show provider capabilities
 openchamber tunnel profile add --provider cloudflare --mode managed-remote --name prod-main --hostname app.example.com --token <token>
@@ -119,6 +123,8 @@ OPENCODE_HOST=https://myhost:4096 OPENCODE_SKIP_START=true openchamber  # Connec
 openchamber stop                     # Stop server
 openchamber update                   # Update to latest
 ```
+
+`startup enable` snapshots your current environment into the native service so startup behaves like you launched `openchamber` from the same shell. This preserves provider tokens, PATH, SSH agent settings, and other CLI auth/config env vars. Use `--no-env-snapshot` if you want a minimal service env.
 
 Connect to an existing OpenCode server:
 ```bash

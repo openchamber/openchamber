@@ -470,14 +470,12 @@ const RevertedMessageDock: React.FC<RevertedMessageDockProps> = React.memo(({ se
 RevertedMessageDock.displayName = 'RevertedMessageDock';
 
 type ComposerAttachmentControlsProps = {
-    isMobile: boolean;
     isVSCode: boolean;
     footerIconButtonClass: string;
     iconSizeClass: string;
     fileInputRef: React.RefObject<HTMLInputElement | null>;
     handleLocalFileSelect: (event: React.ChangeEvent<HTMLInputElement>) => void | Promise<void>;
     handlePickLocalFiles: () => void;
-    handleOpenCommandMenu: () => void;
     openIssuePicker: () => void;
     openPrPicker: () => void;
     onOpenSettings?: () => void;
@@ -486,14 +484,12 @@ type ComposerAttachmentControlsProps = {
 const ComposerAttachmentControls = React.memo(function ComposerAttachmentControls(props: ComposerAttachmentControlsProps) {
     const { t } = useI18n();
     const {
-        isMobile,
         isVSCode,
         footerIconButtonClass,
         iconSizeClass,
         fileInputRef,
         handleLocalFileSelect,
         handlePickLocalFiles,
-        handleOpenCommandMenu,
         openIssuePicker,
         openPrPicker,
         onOpenSettings,
@@ -501,27 +497,6 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
 
     return (
         <div className="flex items-center gap-x-1.5">
-            {isMobile ? (
-                <button
-                    type="button"
-                    className={cn(
-                        footerIconButtonClass,
-                        'rounded-md',
-                        'hover:bg-interactive-hover/40'
-                    )}
-                    onPointerDownCapture={(event) => {
-                        if (event.pointerType === 'touch') {
-                            event.preventDefault();
-                            event.stopPropagation();
-                        }
-                    }}
-                    onClick={handleOpenCommandMenu}
-                    title={t('chat.chatInput.actions.commands')}
-                    aria-label={t('chat.chatInput.actions.commands')}
-                >
-                    <Icon name="command" className={cn(iconSizeClass)} />
-                </button>
-            ) : null}
             <input
                 ref={fileInputRef}
                 type="file"
@@ -598,8 +573,7 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
         </div>
     );
 }, (prev, next) => (
-    prev.isMobile === next.isMobile
-    && prev.isVSCode === next.isVSCode
+    prev.isVSCode === next.isVSCode
     && prev.footerIconButtonClass === next.footerIconButtonClass
     && prev.iconSizeClass === next.iconSizeClass
     && prev.onOpenSettings === next.onOpenSettings
@@ -960,7 +934,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const [mentionQuery, setMentionQuery] = React.useState('');
     const [showCommandAutocomplete, setShowCommandAutocomplete] = React.useState(false);
     const [commandQuery, setCommandQuery] = React.useState('');
-    const [autocompleteTab, setAutocompleteTab] = React.useState<'commands' | 'agents' | 'files'>('commands');
     const [showSkillAutocomplete, setShowSkillAutocomplete] = React.useState(false);
     const [skillQuery, setSkillQuery] = React.useState('');
     const [showSnippetAutocomplete, setShowSnippetAutocomplete] = React.useState(false);
@@ -2525,7 +2498,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             if (cursorPosition <= commandEnd && firstSpace === -1) {
                 const commandText = value.substring(1, commandEnd);
                 setCommandQuery(commandText);
-                setAutocompleteTab('commands');
                 setShowCommandAutocomplete(true);
                 setShowFileMention(false);
                 setShowSkillAutocomplete(false);
@@ -2578,7 +2550,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             const isWordBoundary = !charBefore || /\s/.test(charBefore);
             if (isWordBoundary && !textAfterAt.includes(' ') && !textAfterAt.includes('\n')) {
                 setMentionQuery(textAfterAt);
-                setAutocompleteTab((current) => current === 'files' ? 'files' : 'agents');
                 setShowFileMention(true);
             } else {
                 setShowFileMention(false);
@@ -2586,92 +2557,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         } else {
             setShowFileMention(false);
         }
-    }, [inputMode, setAutocompleteTab, setCommandQuery, setMentionQuery, setShowCommandAutocomplete, setShowFileMention, setShowSkillAutocomplete, setSkillQuery]);
-
-    const applyAutocompletePrefix = React.useCallback((prefix: '/' | '@') => {
-        const nextMessage = message.length === 0
-            ? prefix
-            : (message[0] === '/' || message[0] === '@')
-                ? `${prefix}${message.slice(1)}`
-                : `${prefix}${message}`;
-        setMessage(nextMessage);
-        requestAnimationFrame(() => {
-            if (textareaRef.current) {
-                const nextCursor = Math.min(nextMessage.length, textareaRef.current.value.length);
-                textareaRef.current.selectionStart = nextCursor;
-                textareaRef.current.selectionEnd = nextCursor;
-            }
-            adjustTextareaHeight();
-            updateAutocompleteState(nextMessage, nextMessage.length);
-        });
-    }, [adjustTextareaHeight, message, setMessage, updateAutocompleteState]);
-
-    const handleAutocompleteTabSelect = React.useCallback((tab: 'commands' | 'agents' | 'files') => {
-        const textarea = textareaRef.current;
-        if (isMobile && textarea) {
-            try {
-                textarea.focus({ preventScroll: true });
-            } catch {
-                textarea.focus();
-            }
-            const len = textarea.value.length;
-            try {
-                textarea.setSelectionRange(len, len);
-            } catch {
-                // ignored
-            }
-        }
-        const cursorPosition = textarea?.selectionStart ?? message.length;
-        const textBeforeCursor = message.substring(0, cursorPosition);
-        const lastAtSymbol = textBeforeCursor.lastIndexOf('@');
-        const nextMentionQuery = lastAtSymbol !== -1
-            ? textBeforeCursor.substring(lastAtSymbol + 1).replace(/[\s\n].*$/, '')
-            : '';
-
-        setAutocompleteTab(tab);
-        setCommandQuery('');
-        if (tab === 'commands') {
-            setMentionQuery('');
-            applyAutocompletePrefix('/');
-        }
-        if (tab === 'agents') {
-            setMentionQuery(nextMentionQuery);
-            applyAutocompletePrefix('@');
-        }
-        if (tab === 'files') {
-            setMentionQuery(nextMentionQuery);
-            applyAutocompletePrefix('@');
-        }
-        setShowSkillAutocomplete(false);
-        setShowCommandAutocomplete(tab === 'commands');
-        setShowFileMention(tab === 'agents' || tab === 'files');
-    }, [applyAutocompletePrefix, isMobile, message, setAutocompleteTab, setCommandQuery, setMentionQuery, setShowCommandAutocomplete, setShowFileMention, setShowSkillAutocomplete]);
-
-    const handleOpenCommandMenu = React.useCallback(() => {
-        if (!isMobile) {
-            return;
-        }
-        const textarea = textareaRef.current;
-        if (textarea) {
-            try {
-                textarea.focus({ preventScroll: true });
-            } catch {
-                textarea.focus();
-            }
-            const len = textarea.value.length;
-            try {
-                textarea.setSelectionRange(len, len);
-            } catch {
-                // ignored
-            }
-        }
-        applyAutocompletePrefix('/');
-        setCommandQuery('');
-        setAutocompleteTab('commands');
-        setShowCommandAutocomplete(true);
-        setShowFileMention(false);
-        setShowSkillAutocomplete(false);
-    }, [applyAutocompletePrefix, isMobile, setAutocompleteTab, setCommandQuery, setShowCommandAutocomplete, setShowFileMention, setShowSkillAutocomplete]);
+    }, [inputMode, setCommandQuery, setMentionQuery, setShowCommandAutocomplete, setShowFileMention, setShowSkillAutocomplete, setSkillQuery]);
 
     const insertTextAtSelection = React.useCallback((text: string) => {
         if (!text) {
@@ -4183,9 +4069,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             ref={commandRef}
                             searchQuery={commandQuery}
                             onCommandSelect={handleCommandSelect}
-                            showTabs={isMobile}
-                            activeTab={autocompleteTab}
-                            onTabSelect={handleAutocompleteTabSelect}
                             onClose={() => setShowCommandAutocomplete(false)}
                             style={isDesktopExpanded && autocompleteOverlayPosition
                                 ? {
@@ -4245,9 +4128,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             searchQuery={mentionQuery}
                             onFileSelect={handleFileSelect}
                             onAgentSelect={handleAgentSelect}
-                            showTabs={isMobile}
-                            activeTab={autocompleteTab}
-                            onTabSelect={handleAutocompleteTabSelect}
                             onClose={() => setShowFileMention(false)}
                             style={isDesktopExpanded && autocompleteOverlayPosition
                                 ? {
@@ -4368,14 +4248,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                 <div className="flex w-full items-center justify-between gap-x-1.5">
                                     <div className="flex items-center gap-x-1.5">
                                         <ComposerAttachmentControls
-                                            isMobile={isMobile}
                                             isVSCode={isVSCode}
                                             footerIconButtonClass={footerIconButtonClass}
                                             iconSizeClass={iconSizeClass}
                                             fileInputRef={fileInputRef}
                                             handleLocalFileSelect={handleLocalFileSelect}
                                             handlePickLocalFiles={handlePickLocalFiles}
-                                            handleOpenCommandMenu={handleOpenCommandMenu}
                                             openIssuePicker={openIssuePicker}
                                             openPrPicker={openPrPicker}
                                             onOpenSettings={onOpenSettings}
@@ -4426,14 +4304,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             <>
                                 <div className={cn("flex items-center flex-shrink-0", footerGapClass)}>
                                     <ComposerAttachmentControls
-                                        isMobile={isMobile}
                                         isVSCode={isVSCode}
                                         footerIconButtonClass={footerIconButtonClass}
                                         iconSizeClass={iconSizeClass}
                                         fileInputRef={fileInputRef}
                                         handleLocalFileSelect={handleLocalFileSelect}
                                         handlePickLocalFiles={handlePickLocalFiles}
-                                        handleOpenCommandMenu={handleOpenCommandMenu}
                                         openIssuePicker={openIssuePicker}
                                         openPrPicker={openPrPicker}
                                         onOpenSettings={onOpenSettings}

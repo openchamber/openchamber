@@ -20,7 +20,6 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useDeviceInfo } from '@/lib/device';
-import { useVisualViewport } from '@/hooks/useVisualViewport';
 import { cn } from '@/lib/utils';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 
@@ -60,7 +59,6 @@ export const MainLayout: React.FC = () => {
     const setMultiRunLauncherOpen = useUIStore((state) => state.setMultiRunLauncherOpen);
     const multiRunLauncherPrefillPrompt = useUIStore((state) => state.multiRunLauncherPrefillPrompt);
     const { isMobile, isTablet } = useDeviceInfo();
-    const visualViewport = useVisualViewport();
     const sidebarWidth = useUIStore((state) => state.sidebarWidth);
     const rightSidebarWidth = useUIStore((state) => state.rightSidebarWidth);
     const rightSidebarAutoClosedRef = React.useRef(false);
@@ -431,10 +429,9 @@ export const MainLayout: React.FC = () => {
                 data-page-scroll-lock="true"
                 className={cn(
                     'main-content-safe-area',
-                    isMobile ? 'flex flex-col' : 'flex h-[100dvh]',
+                    isMobile ? 'flex h-[100dvh] flex-col' : 'flex h-[100dvh]',
                     'bg-background'
                 )}
-                style={isMobile && visualViewport.height > 0 ? { height: visualViewport.height } : undefined}
             >
                 <CommandPalette />
                 <HelpDialog />

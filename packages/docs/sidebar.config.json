@@ -58,6 +58,18 @@
             "ko": "OpenCode 서버",
             "pl": "Serwer OpenCode"
           }
+        },
+        {
+          "label": "Environment Variables",
+          "link": "/environment/",
+          "translations": {
+            "uk": "Змінні середовища",
+            "zh-CN": "环境变量",
+            "es": "Variables de entorno",
+            "pt-BR": "Variáveis de ambiente",
+            "ko": "환경 변수",
+            "pl": "Zmienne środowiskowe"
+          }
         }
       ]
     },
