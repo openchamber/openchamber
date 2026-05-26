@@ -26,6 +26,12 @@ export const GitGraphSegment: React.FC<GitGraphSegmentProps> = ({
   const dotCy = ROW_HEADER_HEIGHT / 2;
   const dotCx = lane * LANE_WIDTH + LANE_WIDTH / 2;
 
+  // Render straight lines before bezier curves so curves appear on top
+  const sorted = [...connectors].sort((a, b) => {
+    const isBezier = (t: string) => t === 'branch-out' || t === 'merge-in';
+    return (isBezier(a.type) ? 1 : 0) - (isBezier(b.type) ? 1 : 0);
+  });
+
   return (
     <svg
       width={width}
@@ -34,10 +40,17 @@ export const GitGraphSegment: React.FC<GitGraphSegmentProps> = ({
       style={{ height: '100%', display: 'block', flexShrink: 0 }}
       aria-hidden
     >
-      {connectors.map((seg, idx) => {
+      {sorted.map((seg, idx) => {
         const x1 = seg.fromLane * LANE_WIDTH + LANE_WIDTH / 2;
         const x2 = seg.toLane * LANE_WIDTH + LANE_WIDTH / 2;
-        const stroke = { stroke: seg.color, strokeWidth: 1.5, strokeLinecap: 'round' as const };
+        // vectorEffect="non-scaling-stroke" keeps strokeWidth in screen pixels
+        // regardless of the non-uniform viewBox scale — prevents elliptical-pen artifacts
+        const stroke = {
+          stroke: seg.color,
+          strokeWidth: 1.5,
+          strokeLinecap: 'round' as const,
+          vectorEffect: 'non-scaling-stroke' as const,
+        };
 
         switch (seg.type) {
           case 'passing':
@@ -51,7 +64,6 @@ export const GitGraphSegment: React.FC<GitGraphSegmentProps> = ({
             return <line key={idx} x1={x1} y1={dotCy} x2={x1} y2={ROW_HEADER_HEIGHT} {...stroke} />;
 
           case 'branch-out': {
-            // S-curve: control points at midpoint Y keep the bezier inside the viewport
             const mid = (dotCy + ROW_HEADER_HEIGHT) / 2;
             return (
               <path key={idx} fill="none"
@@ -76,8 +88,13 @@ export const GitGraphSegment: React.FC<GitGraphSegmentProps> = ({
         }
       })}
 
-      {/* Commit dot — drawn last so it sits on top of lines */}
-      <circle cx={dotCx} cy={dotCy} r={4} fill={color} stroke="var(--background)" strokeWidth={2} />
+      {/* Dot drawn last — always on top; vectorEffect keeps the halo ring circular */}
+      <circle
+        cx={dotCx} cy={dotCy} r={4}
+        fill={color}
+        stroke="var(--background)" strokeWidth={2}
+        vectorEffect="non-scaling-stroke"
+      />
     </svg>
   );
 };
