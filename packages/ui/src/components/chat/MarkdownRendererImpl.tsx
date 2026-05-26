@@ -899,11 +899,15 @@ const buildMarkdownComponents = ({
   onPreviewLoopback,
   previewLabel,
   previewTitle,
+  effectiveDirectory = '',
+  onShowPopup,
 }: {
   syntaxTheme: { [key: string]: React.CSSProperties };
   onPreviewLoopback?: (url: string) => void;
   previewLabel?: string;
   previewTitle?: string;
+  effectiveDirectory?: string;
+  onShowPopup?: (content: ToolPopupContent) => void;
 }): Components => ({
   table({ children, ...props }) {
     return <TableWrapper className={props.className}>{children}</TableWrapper>;
@@ -1010,6 +1014,35 @@ const buildMarkdownComponents = ({
           </button>
         ) : null}
       </>
+    );
+  },
+  img({ src, alt }) {
+    if (!src) return null;
+    const rawSrc = src.includes('%') ? decodeURIComponent(src) : src;
+    const resolvedSrc = rawSrc.startsWith('/') || rawSrc.startsWith('http')
+      ? rawSrc
+      : `${effectiveDirectory}/${rawSrc}`;
+    const apiSrc = resolvedSrc.startsWith('http')
+      ? resolvedSrc
+      : `/api/fs/raw?path=${encodeURIComponent(resolvedSrc)}&allowOutsideWorkspace=true`;
+    const handleClick = onShowPopup ? () => {
+      onShowPopup({
+        open: true,
+        title: alt || 'Image',
+        content: '',
+        image: { url: apiSrc },
+      });
+    } : undefined;
+    return (
+      <div className="rounded-lg border border-border/40 bg-muted/10 overflow-hidden my-2">
+        <img
+          src={apiSrc}
+          alt={alt || ''}
+          className="w-full h-auto max-h-[75vh] object-contain cursor-pointer"
+          loading="lazy"
+          onClick={handleClick}
+        />
+      </div>
     );
   },
 });
@@ -1714,8 +1747,10 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
       onPreviewLoopback: effectiveDirectory ? handlePreviewLoopback : undefined,
       previewLabel,
       previewTitle,
+      effectiveDirectory,
+      onShowPopup,
     }),
-    [syntaxTheme, effectiveDirectory, handlePreviewLoopback, previewLabel, previewTitle],
+    [syntaxTheme, effectiveDirectory, handlePreviewLoopback, previewLabel, previewTitle, onShowPopup],
   );
   const componentKey = `markdown-${part?.id ? `part-${part.id}` : `message-${messageId}`}`;
   const markdownBlocks = useStableMarkdownBlocks(content, isStreaming && !disableStreamAnimation, componentKey);
@@ -1804,7 +1839,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
   });
   useExternalLinkInteractions({ containerRef, enabled: !disableLinkSafety });
   const syntaxTheme = React.useMemo(() => generateSyntaxTheme(currentTheme), [currentTheme]);
-  const markdownComponents = React.useMemo(() => buildMarkdownComponents({ syntaxTheme }), [syntaxTheme]);
+  const markdownComponents = React.useMemo(() => buildMarkdownComponents({ syntaxTheme, effectiveDirectory, onShowPopup }), [syntaxTheme, effectiveDirectory, onShowPopup]);
   const markdownBlocks = useStableMarkdownBlocks(renderedContent, false, `simple:${variant}`);
 
   const markdownClassName = variant === 'tool'
