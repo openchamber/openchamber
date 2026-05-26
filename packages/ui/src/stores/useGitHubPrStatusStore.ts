@@ -694,8 +694,58 @@ const deriveSummary = (entry: PrStatusEntry): PrVisualSummary | null => {
 const summarySignature = (s: PrVisualSummary): string =>
   `${s.number}:${s.visualState}:${s.prState}:${s.draft}:${s.title ?? ''}:${s.url ?? ''}:${s.base ?? ''}:${s.head ?? ''}:${s.canMerge ?? ''}:${s.mergeableState ?? ''}:${s.checks?.state ?? ''}:${s.checks?.total ?? ''}:${s.checks?.success ?? ''}:${s.checks?.failure ?? ''}:${s.checks?.pending ?? ''}:${s.repo?.owner ?? ''}:${s.repo?.repo ?? ''}`;
 
-let prKeyedCacheSigs = new Map<string, string>();
-let prKeyedCacheResult: Map<string, PrVisualSummary> = new Map();
+/**
+ * BoundedCache - LRU cache with max size to prevent unbounded growth
+ */
+class BoundedCache<K, V> {
+  private cache = new Map<K, V>();
+  private order: K[] = [];
+  private readonly maxSize: number;
+
+  constructor(maxSize = 50) {
+    this.maxSize = maxSize;
+  }
+
+  set(key: K, value: V): void {
+    // Evict oldest if at capacity and key doesn't exist
+    if (this.cache.size >= this.maxSize && !this.cache.has(key)) {
+      const oldest = this.order.shift();
+      if (oldest !== undefined) {
+        this.cache.delete(oldest);
+      }
+    }
+    this.cache.set(key, value);
+    // Update access order (move to end)
+    this.order = this.order.filter((k) => k !== key);
+    this.order.push(key);
+  }
+
+  get(key: K): V | undefined {
+    const value = this.cache.get(key);
+    if (value !== undefined) {
+      // Move to end (most recent)
+      this.order = this.order.filter((k) => k !== key);
+      this.order.push(key);
+    }
+    return value;
+  }
+
+  has(key: K): boolean {
+    return this.cache.has(key);
+  }
+
+  clear(): void {
+    this.cache.clear();
+    this.order = [];
+  }
+
+  get size(): number {
+    return this.cache.size;
+  }
+}
+
+let prKeyedCacheSigs = new BoundedCache<string, string>();
+let prKeyedCacheResult = new BoundedCache<string, PrVisualSummary>();
 
 export const usePrVisualSummaryByKeys = (keys: string[]) => {
   return useGitHubPrStatusStore((state) => {
