@@ -64,6 +64,26 @@ describe('buildSearchRegex', () => {
     // A bare ^ produces a zero-length match at position 0
     expect(buildSearchRegex('^', rx)).toBeNull();
   });
+
+  test('rejects quantified alternation groups (a|aa)+', () => {
+    expect(buildSearchRegex('(a|aa)+$', rx)).toBeNull();
+  });
+
+  test('rejects quantified alternation groups (foo|foobar)*', () => {
+    expect(buildSearchRegex('(foo|foobar)*$', rx)).toBeNull();
+  });
+
+  test('rejects alternation inside multiply-quantified group', () => {
+    expect(buildSearchRegex('(x|xx)+?', rx)).toBeNull();
+  });
+
+  test('still allows safe quantified groups like [a-z]+', () => {
+    expect(buildSearchRegex('[a-z]+', rx)).not.toBeNull();
+  });
+
+  test('still allows safe alternation without quantifier (a|b)', () => {
+    expect(buildSearchRegex('(a|b)', rx)).not.toBeNull();
+  });
 });
 
 describe('splitByHighlight zero-length safety', () => {

@@ -74,6 +74,7 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
                 caseSensitive: searchFlags.caseSensitive,
                 wholeWord: searchFlags.wholeWord,
                 isRegex: searchFlags.regex,
+                messageId,
             }
             : undefined;
 

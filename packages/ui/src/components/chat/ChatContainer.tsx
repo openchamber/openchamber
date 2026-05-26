@@ -4,6 +4,8 @@ import type { Message, Part, Session } from '@opencode-ai/sdk/v2';
 import { ChatInput } from './ChatInput';
 import { ChatSearchWidget } from './ChatSearchWidget';
 import { useChatSearchMatcher } from './hooks/useChatSearchMatcher';
+import { useChatSearchStore } from '@/stores/useChatSearchStore';
+import { buildSearchRegex } from '@/lib/splitByHighlight';
 import { useUIStore } from '@/stores/useUIStore';
 import { Skeleton } from '@/components/ui/skeleton';
 import ChatEmptyState from './ChatEmptyState';
@@ -606,7 +608,37 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 
     // Data-driven search matcher: keeps the store's match list up to date
     // whenever the loaded messages or search parameters change.
-    useChatSearchMatcher(timelineController.renderedMessages);
+    // Uses the full sessionMessages (not timelineController.renderedMessages) so
+    // that messages behind the "Load older messages" button are also searched.
+    useChatSearchMatcher(viewportMessages);
+
+    // When search is open with a valid query and the server has more message pages,
+    // auto-fetch them one at a time until the full history is in the store.
+    // Each fetched page changes sessionMessages.length → historyMeta recomputes
+    // → this effect re-runs → loads next page, until historyMeta.complete.
+    const isSearchOpen = useChatSearchStore((s) => s.isOpen);
+    const searchQuery = useChatSearchStore((s) => s.query);
+    const searchFlags = useChatSearchStore((s) => s.flags);
+    React.useEffect(() => {
+        const validQuery =
+            isSearchOpen &&
+            Boolean(searchQuery) &&
+            Boolean(currentSessionId) &&
+            // Do not trigger pagination for queries that produce no matches
+            // (invalid regex, empty after escaping, etc.)
+            buildSearchRegex(searchQuery, searchFlags) !== null;
+
+        if (!validQuery || !historyMeta || historyMeta.complete) {
+            useChatSearchStore.getState().setIsLoadingForSearch(false);
+            return;
+        }
+        // More pages exist. Fire and catch so errors do not leave the loading
+        // indicator stuck permanently.
+        useChatSearchStore.getState().setIsLoadingForSearch(true);
+        sync.loadMore(currentSessionId!).catch(() => {
+            useChatSearchStore.getState().setIsLoadingForSearch(false);
+        });
+    }, [isSearchOpen, searchQuery, searchFlags, currentSessionId, historyMeta, sync]);
 
     const resumeToLatestInstant = React.useCallback(() => {
         goToBottom('instant');
@@ -890,7 +922,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 	return (
 		<div className="relative flex flex-col h-full bg-background">
 			{returnToParentButton}
-			<ChatSearchWidget scrollRef={scrollRef} messageListRef={messageListRef} />
+			<ChatSearchWidget scrollRef={scrollRef} scrollToMessage={timelineController.scrollToMessage} />
 			<ChatViewport
 				key={currentSessionId}
 				currentSessionId={currentSessionId}

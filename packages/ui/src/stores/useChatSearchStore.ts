@@ -11,6 +11,8 @@ export interface SearchContext {
   caseSensitive: boolean;
   wholeWord: boolean;
   isRegex: boolean;
+  /** Message ID for annotating <mark> elements with data-search-msg. */
+  messageId: string;
 }
 
 /**
@@ -20,6 +22,7 @@ export interface SearchContext {
  */
 export interface MatchRecord {
   messageId: string;
+  occurrenceInMessage: number; // 0-based index within the message
 }
 
 interface ChatSearchState {
@@ -31,6 +34,11 @@ interface ChatSearchState {
   /** Derived from matches.length; kept as a field so selectors stay cheap. */
   totalMatches: number;
   activeIndex: number;
+  /**
+   * True while older message pages are being fetched from the server so the
+   * search can cover the full history. Set by ChatContainer's pagination loop.
+   */
+  isLoadingForSearch: boolean;
   open: () => void;
   // close preserves query/flags so reopening restores the previous search
   close: () => void;
@@ -41,9 +49,12 @@ interface ChatSearchState {
   setActiveIndex: (n: number) => void;
   /**
    * Called by useChatSearchMatcher with the freshly computed match list.
-   * Also resets activeIndex to 0 so navigation starts from the top.
+   * `preserveMessageId`: if provided and still present in the new list, keeps
+   * activeIndex pointing at the first match in that message instead of
+   * resetting to 0. Pass null when query/flags changed (always reset).
    */
-  setMatches: (matches: MatchRecord[]) => void;
+  setMatches: (matches: MatchRecord[], preserveMessageId: string | null) => void;
+  setIsLoadingForSearch: (loading: boolean) => void;
 }
 
 export const useChatSearchStore = create<ChatSearchState>((set, get) => ({
@@ -53,6 +64,7 @@ export const useChatSearchStore = create<ChatSearchState>((set, get) => ({
   matches: [],
   totalMatches: 0,
   activeIndex: 0,
+  isLoadingForSearch: false,
 
   open: () => set({ isOpen: true }),
   close: () => set({ isOpen: false }),
@@ -69,6 +81,17 @@ export const useChatSearchStore = create<ChatSearchState>((set, get) => ({
     set({ activeIndex: next });
   },
   setActiveIndex: (n) => set({ activeIndex: n }),
-  setMatches: (newMatches) =>
-    set({ matches: newMatches, totalMatches: newMatches.length, activeIndex: 0 }),
+  setMatches: (newMatches, preserveMessageId) => {
+    if (preserveMessageId !== null) {
+      const restoredIndex = newMatches.findIndex(
+        (m) => m.messageId === preserveMessageId,
+      );
+      if (restoredIndex !== -1) {
+        set({ matches: newMatches, totalMatches: newMatches.length, activeIndex: restoredIndex });
+        return;
+      }
+    }
+    set({ matches: newMatches, totalMatches: newMatches.length, activeIndex: 0 });
+  },
+  setIsLoadingForSearch: (loading) => set({ isLoadingForSearch: loading }),
 }));

@@ -9,8 +9,12 @@ const REGEX_MAX_LENGTH = 500;
  * This is a best-effort guard — not comprehensive, but catches frequent cases.
  */
 function hasReDoSRisk(source: string): boolean {
-  // Nested quantifiers: anything like (...[+*]...)[+*] or (...)[+*]{n,}
-  return /\([^()]*[+*][^()]*\)\s*[+*{]/.test(source);
+  // Nested quantifiers: (a+)+ or (.+)* etc.
+  if (/\([^()]*[+*][^()]*\)\s*[+*{?]/.test(source)) return true;
+  // Quantified alternation groups: (a|b)+, (a|aa)+, (foo|foobar)*
+  // These are classic polynomial/exponential backtracking triggers.
+  if (/\([^()]*\|[^()]*\)\s*[+*{?]/.test(source)) return true;
+  return false;
 }
 
 /**

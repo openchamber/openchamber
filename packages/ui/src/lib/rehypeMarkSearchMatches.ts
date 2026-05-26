@@ -1,10 +1,6 @@
 /**
  * rehypeMarkSearchMatches — wraps text matching a search query in
- * <mark data-search-match> elements throughout the HAST tree.
- *
- * Types for HAST nodes are defined inline to avoid depending on the `hast`
- * and `unified` npm packages at the TypeScript level. They are transitive
- * dependencies of react-markdown and will be present at runtime.
+ * <mark data-search-match data-search-msg="messageId"> elements.
  */
 
 import { buildSearchRegex } from './splitByHighlight';
@@ -15,6 +11,7 @@ export interface RehypeMarkSearchMatchesOptions {
   caseSensitive: boolean;
   wholeWord: boolean;
   isRegex: boolean;
+  messageId: string;
 }
 
 // ── Minimal inline HAST type definitions ─────────────────────────────────────
@@ -38,86 +35,56 @@ interface HastRoot {
   children: HastChild[];
 }
 
-// ── helpers ───────────────────────────────────────────────────────────────────
+// ── Block-level tag set ───────────────────────────────────────────────────────
 
-/**
- * Splits a HAST text node into text nodes and <mark> elements at match
- * boundaries. Returns the original single-item array when no matches.
- */
-function splitHastTextNode(node: HastText, regex: RegExp): HastChild[] {
-  const text = node.value;
-  const parts: HastChild[] = [];
-  let lastIndex = 0;
+const BLOCK_TAG_NAMES = new Set([
+  'div', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+  'ul', 'ol', 'li', 'blockquote', 'pre', 'table',
+  'thead', 'tbody', 'tr', 'td', 'th',
+]);
 
-  const re = new RegExp(
-    regex.source,
-    regex.flags.includes('g') ? regex.flags : regex.flags + 'g',
-  );
-  re.lastIndex = 0;
-
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(text)) !== null) {
-    // Skip zero-length matches — they produce invisible marks.
-    if (match[0].length === 0) {
-      re.lastIndex++;
-      continue;
-    }
-    if (match.index > lastIndex) {
-      parts.push({ type: 'text', value: text.slice(lastIndex, match.index) });
-    }
-    const mark: HastElement = {
-      type: 'element',
-      tagName: 'mark',
-      properties: { 'data-search-match': true },
-      children: [{ type: 'text', value: match[0] }],
-    };
-    parts.push(mark);
-    lastIndex = match.index + match[0].length;
-  }
-
-  if (parts.length === 0) return [node]; // no matches
-
-  if (lastIndex < text.length) {
-    parts.push({ type: 'text', value: text.slice(lastIndex) });
-  }
-
-  return parts;
+function isBlockElement(child: HastChild): boolean {
+  return child.type === 'element' && BLOCK_TAG_NAMES.has((child as HastElement).tagName);
 }
 
-/**
- * Recursively transforms HAST node children, splitting text nodes at match
- * boundaries and inserting <mark> elements.
- *
- * Only <pre> subtrees (fenced code blocks rendered by SyntaxHighlighter) are
- * skipped — injecting <mark> nodes into the string that SyntaxHighlighter
- * receives would corrupt its output.  Inline <code> elements ARE traversed so
- * that searches like `showPredValues` are highlighted in prose.
- */
-function transformChildren(children: HastChild[], regex: RegExp): HastChild[] {
-  return children.flatMap((child) => {
-    if (child.type === 'text') {
-      return splitHastTextNode(child as HastText, regex);
+// ── flattenInlineChildren (module-level — no messageId dependency) ────────────
+
+function flattenInlineChildren(children: HastChild[]): {
+  text: string;
+  segments: Array<{
+    node: HastChild;
+    start: number;
+    end: number;
+    text: string;
+    childIndex: number;
+  }>;
+} {
+  let text = '';
+  const segments: Array<{
+    node: HastChild; start: number; end: number; text: string; childIndex: number;
+  }> = [];
+
+  function walk(node: HastChild, childIndex: number) {
+    if (node.type === 'text') {
+      const t = node as HastText;
+      segments.push({ node, start: text.length, end: text.length + t.value.length, text: t.value, childIndex });
+      text += t.value;
+    } else if (node.type === 'element') {
+      const el = node as HastElement;
+      if (el.tagName === 'pre') return;
+      for (const child of el.children) walk(child, childIndex);
     }
-    if (child.type === 'element') {
-      const el = child as HastElement;
-      if (el.tagName === 'pre') {
-        return [el]; // skip fenced code blocks — content goes to SyntaxHighlighter
-      }
-      return [{ ...el, children: transformChildren(el.children, regex) }];
-    }
-    return [child];
-  });
+  }
+
+  for (let i = 0; i < children.length; i++) {
+    walk(children[i], i);
+  }
+
+  return { text, segments };
 }
 
 // ── plugin factory ────────────────────────────────────────────────────────────
 
-/**
- * Returns a rehype plugin function that adds <mark data-search-match> around
- * every occurrence of the query in the rendered text.
- *
- * Usage with react-markdown:
- *   rehypePlugins={[[rehypeMarkSearchMatches, { query, caseSensitive, wholeWord, isRegex }]]}
- */
 function rehypeMarkSearchMatches(options: RehypeMarkSearchMatchesOptions) {
   return (tree: HastRoot): void => {
     const flags: SearchFlags = {
@@ -128,7 +95,140 @@ function rehypeMarkSearchMatches(options: RehypeMarkSearchMatchesOptions) {
     const regex = buildSearchRegex(options.query, flags);
     if (!regex) return;
 
-    tree.children = transformChildren(tree.children, regex);
+    const { messageId } = options;
+
+    // ── helpers that close over messageId ──────────────────────────────────
+
+    function makeMarkNode(text: string): HastElement {
+      return {
+        type: 'element',
+        tagName: 'mark',
+        properties: { 'data-search-match': true, 'data-search-msg': messageId },
+        children: [{ type: 'text', value: text }],
+      };
+    }
+
+    function splitNode(node: HastText, re: RegExp): HastChild[] {
+      const text = node.value;
+      const parts: HastChild[] = [];
+      let lastIndex = 0;
+      const localRe = new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g');
+      localRe.lastIndex = 0;
+      let match: RegExpExecArray | null;
+      while ((match = localRe.exec(text)) !== null) {
+        if (match[0].length === 0) { localRe.lastIndex++; continue; }
+        if (match.index > lastIndex) parts.push({ type: 'text', value: text.slice(lastIndex, match.index) });
+        parts.push(makeMarkNode(match[0]));
+        lastIndex = match.index + match[0].length;
+      }
+      if (parts.length === 0) return [node];
+      if (lastIndex < text.length) parts.push({ type: 'text', value: text.slice(lastIndex) });
+      return parts;
+    }
+
+    function containsMark(node: HastChild): boolean {
+      if (node.type === 'element') {
+        const el = node as HastElement;
+        if (el.tagName === 'mark') return true;
+        return el.children.some(containsMark);
+      }
+      return false;
+    }
+
+    function transformChildren(children: HastChild[]): HastChild[] {
+      const result: HastChild[] = [];
+      let inlineBuffer: HastChild[] = [];
+
+      const flushBuffer = () => {
+        if (inlineBuffer.length > 0) {
+          result.push(...transformInlineSequence(inlineBuffer));
+          inlineBuffer = [];
+        }
+      };
+
+      for (const child of children) {
+        if (isBlockElement(child)) {
+          flushBuffer();
+          const el = child as HastElement;
+          if (el.tagName === 'pre') {
+            result.push(el);
+          } else {
+            result.push({ ...el, children: transformChildren(el.children) });
+          }
+        } else {
+          inlineBuffer.push(child);
+        }
+      }
+
+      flushBuffer();
+      return result;
+    }
+
+    function transformInlineSequence(children: HastChild[]): HastChild[] {
+      const normalResult = children.flatMap((child) => {
+        if (child.type === 'text') return splitNode(child as HastText, regex!);
+        if (child.type === 'element') {
+          const el = child as HastElement;
+          if (el.tagName === 'pre') return [el];
+          return [{ ...el, children: transformChildren(el.children) }];
+        }
+        return [child];
+      });
+
+      if (normalResult.some(containsMark)) return normalResult;
+
+      // Cross-boundary search
+      const { text: flatText, segments } = flattenInlineChildren(children);
+      if (flatText.length === 0) return normalResult;
+
+      const re = new RegExp(regex!.source, regex!.flags.includes('g') ? regex!.flags : regex!.flags + 'g');
+      re.lastIndex = 0;
+      const crossMatches: Array<{ start: number; end: number }> = [];
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(flatText)) !== null) {
+        if (m[0].length === 0) { re.lastIndex++; continue; }
+        crossMatches.push({ start: m.index, end: m.index + m[0].length });
+      }
+      if (crossMatches.length === 0) return normalResult;
+
+      let minChildIdx = Infinity;
+      let maxChildIdx = -Infinity;
+      for (const match of crossMatches) {
+        for (const seg of segments) {
+          if (seg.start < match.end && seg.end > match.start) {
+            if (seg.childIndex < minChildIdx) minChildIdx = seg.childIndex;
+            if (seg.childIndex > maxChildIdx) maxChildIdx = seg.childIndex;
+          }
+        }
+      }
+      if (minChildIdx === Infinity) return normalResult;
+
+      const regionChildren = children.slice(minChildIdx, maxChildIdx + 1);
+      const { text: regionText } = flattenInlineChildren(regionChildren);
+
+      const re2 = new RegExp(regex!.source, regex!.flags.includes('g') ? regex!.flags : regex!.flags + 'g');
+      re2.lastIndex = 0;
+      const regionResult: HastChild[] = [];
+      let lastIdx = 0;
+      let rm: RegExpExecArray | null;
+      while ((rm = re2.exec(regionText)) !== null) {
+        if (rm[0].length === 0) { re2.lastIndex++; continue; }
+        if (rm.index > lastIdx) regionResult.push({ type: 'text', value: regionText.slice(lastIdx, rm.index) });
+        regionResult.push(makeMarkNode(rm[0]));
+        lastIdx = rm.index + rm[0].length;
+      }
+      if (lastIdx < regionText.length) regionResult.push({ type: 'text', value: regionText.slice(lastIdx) });
+
+      return [
+        ...normalResult.slice(0, minChildIdx),
+        ...regionResult,
+        ...normalResult.slice(maxChildIdx + 1),
+      ];
+    }
+
+    // ── Transform tree ────────────────────────────────────────────────────
+
+    tree.children = transformChildren(tree.children);
   };
 }
 

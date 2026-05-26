@@ -229,9 +229,10 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
                     caseSensitive: searchFlags.caseSensitive,
                     wholeWord: searchFlags.wholeWord,
                     isRegex: searchFlags.regex,
+                    messageId,
                 }
                 : undefined,
-        [searchIsOpen, searchQuery, searchFlags.caseSensitive, searchFlags.wholeWord, searchFlags.regex],
+        [searchIsOpen, searchQuery, searchFlags.caseSensitive, searchFlags.wholeWord, searchFlags.regex, messageId],
     );
 
     // For plain text mode: split string segments in plainTextContent by match spans.
@@ -250,7 +251,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
             const parts = splitByHighlight(node, regex);
             return parts.map((part, j) =>
                 part.isMatch ? (
-                    <mark key={`hl-${i}-${j}`} data-search-match>
+                    <mark key={`hl-${i}-${j}`} data-search-match data-search-msg={messageId}>
                         {part.text}
                     </mark>
                 ) : (
@@ -258,7 +259,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
                 ),
             );
         });
-    }, [plainTextContent, searchContext]);
+    }, [plainTextContent, searchContext, messageId]);
 
     if (!textContent || textContent.trim().length === 0) {
         return null;

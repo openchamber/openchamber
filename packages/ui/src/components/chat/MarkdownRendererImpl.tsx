@@ -1032,6 +1032,7 @@ const MarkdownBlockView: React.FC<{
         caseSensitive: searchContext.caseSensitive,
         wholeWord: searchContext.wholeWord,
         isRegex: searchContext.isRegex,
+        messageId: searchContext.messageId,
       },
     ]);
   }
@@ -1046,7 +1047,8 @@ const MarkdownBlockView: React.FC<{
   prev.searchContext?.query === next.searchContext?.query &&
   prev.searchContext?.caseSensitive === next.searchContext?.caseSensitive &&
   prev.searchContext?.wholeWord === next.searchContext?.wholeWord &&
-  prev.searchContext?.isRegex === next.searchContext?.isRegex,
+  prev.searchContext?.isRegex === next.searchContext?.isRegex &&
+  prev.searchContext?.messageId === next.searchContext?.messageId,
 );
 
 MarkdownBlockView.displayName = 'MarkdownBlockView';

@@ -20,19 +20,30 @@ function getBestPartText(part: Record<string, unknown>): string {
 }
 
 /**
- * Strips fenced code blocks (```...```) from markdown text so the data-layer
- * match count mirrors what the rehype plugin highlights.
+ * Normalises raw markdown text to match what the rehype render layer presents:
  *
- * Fenced blocks are rendered by SyntaxHighlighter (inside <pre>) and are NOT
- * highlighted by the rehype plugin, so we exclude them from the count too.
+ * - Fenced code blocks     → single space   (inside <pre>, skipped by rehype)
+ * - Inline code backticks  → stripped, content kept  (`foo` → foo)
+ * - Bold markers stripped  (**text** → text, __text__ → text)
+ * - Italic markers stripped (*text* → text, _text_ → text)
+ * - Strikethrough stripped (~~text~~ → text)
+ * - Links collapsed         ([label](url) → label)
+ * - Images collapsed        (![alt](url) → alt)
  *
- * Inline code (`...`) IS now highlighted by the rehype plugin (it traverses
- * <code> elements), so we do NOT strip it here — matches inside inline code
- * must be counted.
+ * This ensures "hello world" matches "hello **world**" in the data layer,
+ * consistent with the cross-boundary highlighting the DOM produces.
  */
-function stripMarkdownCode(text: string): string {
+export function stripMarkdownForSearch(text: string): string {
   return text
-    .replace(/```[\s\S]*?```/gm, ' ');
+    .replace(/```[\s\S]*?```/gm, ' ')
+    .replace(/`([^`\n]+)`/g, '$1')
+    .replace(/\*\*([^*\n]+)\*\*/g, '$1')
+    .replace(/__([^_\n]+)__/g, '$1')
+    .replace(/\*([^*\n]+)\*/g, '$1')
+    .replace(/_([^_\n]+)_/g, '$1')
+    .replace(/~~([^~\n]+)~~/g, '$1')
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1');
 }
 
 /**
@@ -51,7 +62,7 @@ function getSearchableText(message: ChatMessageEntry): string {
     const p = part as unknown as Record<string, unknown>;
     if (p.type === 'text' || p.type === 'reasoning') {
       const raw = getBestPartText(p);
-      if (raw) texts.push(stripMarkdownCode(raw));
+      if (raw) texts.push(stripMarkdownForSearch(raw));
     }
   }
 
@@ -68,7 +79,9 @@ function getSearchableText(message: ChatMessageEntry): string {
  * `messages` means the effect re-runs (and the timer resets) whenever message
  * content changes — so counts stay accurate after streaming finalises.
  *
- * Call this once in ChatContainer and pass `timelineController.renderedMessages`.
+ * Call this once in ChatContainer and pass the full `sessionMessages` array
+ * (not `timelineController.renderedMessages`, which is windowed and excludes
+ * messages behind the "Load older messages" button).
  */
 export function useChatSearchMatcher(messages: ChatMessageEntry[]): void {
   const isOpen = useChatSearchStore((s) => s.isOpen);
@@ -86,14 +99,14 @@ export function useChatSearchMatcher(messages: ChatMessageEntry[]): void {
 
   useEffect(() => {
     if (!isOpen || !query) {
-      useChatSearchStore.getState().setMatches([]);
+      useChatSearchStore.getState().setMatches([], null);
       return;
     }
 
     const timer = setTimeout(() => {
       const regex = buildSearchRegex(query, { caseSensitive, wholeWord, regex: isRegex });
       if (!regex) {
-        useChatSearchStore.getState().setMatches([]);
+        useChatSearchStore.getState().setMatches([], null);
         return;
       }
 
@@ -104,17 +117,22 @@ export function useChatSearchMatcher(messages: ChatMessageEntry[]): void {
         if (!text) continue;
 
         regex.lastIndex = 0;
+        let occurrenceInMessage = 0;
         let m: RegExpExecArray | null;
         while ((m = regex.exec(text)) !== null) {
           if (m[0].length === 0) {
             regex.lastIndex++;
             continue;
           }
-          newMatches.push({ messageId: message.info.id });
+          newMatches.push({ messageId: message.info.id, occurrenceInMessage: occurrenceInMessage++ });
         }
       }
 
-      useChatSearchStore.getState().setMatches(newMatches);
+      // Preserve the user's position if the same message is still in results —
+      // only reset to 0 when query/flags change (handled by the null path in setMatches).
+      const { matches: prevMatches, activeIndex } = useChatSearchStore.getState();
+      const currentMessageId = prevMatches[activeIndex]?.messageId ?? null;
+      useChatSearchStore.getState().setMatches(newMatches, currentMessageId);
     }, 350);
 
     return () => clearTimeout(timer);

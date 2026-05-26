@@ -110,7 +110,12 @@ export const useKeyboardShortcuts = () => {
       if (eventMatchesShortcut(e, combo('open_chat_search'))) {
         if (useUIStore.getState().activeMainTab === 'chat') {
           e.preventDefault();
-          useChatSearchStore.getState().open();
+          const store = useChatSearchStore.getState();
+          const selectedText = window.getSelection()?.toString().trim() ?? '';
+          store.open();
+          if (selectedText) {
+            store.setQuery(selectedText);
+          }
           return;
         }
       }

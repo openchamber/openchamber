@@ -1,23 +1,67 @@
 import React from 'react';
+import { useI18n } from '@/lib/i18n';
 import { useChatSearchStore } from '@/stores/useChatSearchStore';
-import { Icon } from '@/components/icon/Icon';
-import type { MessageListHandle } from './MessageList';
+
+const panelStyle: React.CSSProperties = {
+  backgroundColor: 'color-mix(in srgb, var(--surface-elevated) 85%, transparent)',
+  boxShadow: '0 2px 8px color-mix(in srgb, var(--surface-background) 60%, transparent)',
+  width: 'min(400px, calc(100% - 28px))',
+};
+
+const inputBaseClass = [
+  'h-[26px] m-0 px-2 rounded-[6px]',
+  'border border-[var(--interactive-border)]',
+  'bg-[var(--surface-background)]',
+  'text-[12px] leading-none text-[var(--surface-foreground)]',
+  'placeholder:text-[var(--surface-muted-foreground)]',
+  'outline-none transition-colors duration-150',
+  'focus:border-[var(--primary-base)]',
+].join(' ');
+
+const toggleButtonClass = (active: boolean) => [
+  'inline-flex items-center justify-center',
+  'w-[26px] h-[26px] min-w-[26px] shrink-0 ml-px p-0',
+  'rounded border text-[13px] font-semibold leading-none',
+  'transition-colors duration-100 cursor-pointer select-none',
+  active
+    ? 'bg-[var(--interactive-hover)] border-[var(--interactive-border)] text-[var(--surface-foreground)]'
+    : 'bg-transparent border-transparent text-[var(--surface-muted-foreground)] hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]',
+].join(' ');
+
+const actionButtonClass = (disabled?: boolean) => [
+  'inline-flex items-center justify-center',
+  'w-[26px] h-[26px] min-w-[26px] shrink-0 ml-px p-0',
+  'rounded border-none bg-transparent',
+  'text-[var(--surface-muted-foreground)]',
+  'text-[15px] leading-none',
+  'transition-colors duration-100 cursor-pointer',
+  'hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]',
+  'focus-visible:outline-none focus-visible:shadow-[0_0_0_1px_var(--interactive-focus-ring)]',
+  disabled ? 'opacity-40 cursor-default pointer-events-none' : '',
+].join(' ');
 
 interface ChatSearchWidgetProps {
   scrollRef: React.RefObject<HTMLDivElement | null>;
-  messageListRef: React.RefObject<MessageListHandle | null>;
+  /**
+   * Scroll to and reveal the target message, expanding the turn window if the
+   * message is hidden behind the "Load older messages" boundary.
+   * Provided by timelineController.scrollToMessage.
+   */
+  scrollToMessage: (messageId: string, options?: { behavior?: ScrollBehavior }) => Promise<boolean>;
 }
 
 export const ChatSearchWidget: React.FC<ChatSearchWidgetProps> = ({
   scrollRef,
-  messageListRef,
+  scrollToMessage,
 }) => {
+  const { t } = useI18n();
   const isOpen = useChatSearchStore((s) => s.isOpen);
   const query = useChatSearchStore((s) => s.query);
   const flags = useChatSearchStore((s) => s.flags);
   const activeIndex = useChatSearchStore((s) => s.activeIndex);
   const matches = useChatSearchStore((s) => s.matches);
   const totalMatches = useChatSearchStore((s) => s.totalMatches);
+  const isLoadingForSearch = useChatSearchStore((s) => s.isLoadingForSearch);
 
   const inputRef = React.useRef<HTMLInputElement>(null);
 
@@ -29,16 +73,17 @@ export const ChatSearchWidget: React.FC<ChatSearchWidgetProps> = ({
   }, [isOpen]);
 
   /**
-   * Data-driven navigation (CR-001 fix):
+   * Data-driven navigation:
    *
    * 1. Look up which message contains the active match from the data layer.
-   * 2. Scroll the virtualised list to bring that message into the viewport.
-   * 3. Retry (up to 8 rAFs) until the <mark> elements for that message are
+   * 2. Call scrollToMessage (timelineController) which expands the turn window
+   *    if the message is hidden behind "Load older messages", then scrolls the
+   *    virtualised list to bring the message into view.
+   * 3. Retry (up to 16 rAFs) until the <mark> elements for that message are
    *    painted, then activate marks[activeIndex].
    *
-   * This works because the data-layer match order is the same as DOM mark
-   * order (both iterate messages/parts in document order), so the Nth data
-   * match corresponds to the Nth <mark data-search-match> in the scroll container.
+   * Extra retries (vs 8 before) cover the extra render cycles from turn-window
+   * expansion: state update → re-render → layout effect → virtualiser render.
    */
   React.useEffect(() => {
     if (!isOpen || matches.length === 0) {
@@ -58,31 +103,51 @@ export const ChatSearchWidget: React.FC<ChatSearchWidgetProps> = ({
     const container = scrollRef.current;
     if (!container) return;
 
-    // Scroll the virtualised list to ensure the target message is rendered.
-    if (messageListRef.current) {
-      messageListRef.current.scrollToMessageId(match.messageId, { behavior: 'smooth' });
-    }
+    let cancelled = false;
 
-    // Retry until the mark is painted (virtualised messages need 1-3 frames).
-    const activate = (attempt: number) => {
-      const allMarks = Array.from(
-        container.querySelectorAll<HTMLElement>('mark[data-search-match]'),
-      );
-      // Clear previous active.
-      allMarks.forEach((m) => m.classList.remove('active'));
+    const run = async () => {
+      // Expand turn window (if needed) and scroll to the target message.
+      await scrollToMessage(match.messageId, { behavior: 'smooth' });
 
-      const target = allMarks[activeIndex];
-      if (target) {
-        target.classList.add('active');
-        target.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      } else if (attempt < 8) {
-        // Message not yet rendered; wait another frame.
-        requestAnimationFrame(() => activate(attempt + 1));
-      }
+      if (cancelled) return;
+
+      // Retry until the <mark> is painted. Window expansion adds extra render
+      // cycles, so we allow up to 16 frames instead of 8.
+      const activate = (attempt: number) => {
+        if (cancelled) return;
+
+        // Clear all active marks first
+        container
+          .querySelectorAll<HTMLElement>('mark[data-search-match].active')
+          .forEach((el) => el.classList.remove('active'));
+
+        // Find marks belonging specifically to this message using data-search-msg.
+        // This is robust against earlier messages being virtualized out of the DOM —
+        // we no longer rely on a global mark index.
+        const messageMarks = Array.from(
+          container.querySelectorAll<HTMLElement>(
+            `mark[data-search-match][data-search-msg="${CSS.escape(match.messageId)}"]`,
+          ),
+        );
+
+        const target = messageMarks[match.occurrenceInMessage];
+        if (target) {
+          target.classList.add('active');
+          target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        } else if (attempt < 16) {
+          requestAnimationFrame(() => activate(attempt + 1));
+        }
+      };
+
+      requestAnimationFrame(() => activate(0));
     };
 
-    requestAnimationFrame(() => activate(0));
-  }, [activeIndex, isOpen, matches, scrollRef, messageListRef]);
+    void run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeIndex, isOpen, matches, scrollRef, scrollToMessage]);
 
   // Clean up active marks when the widget closes.
   React.useEffect(() => {
@@ -92,6 +157,7 @@ export const ChatSearchWidget: React.FC<ChatSearchWidgetProps> = ({
         .forEach((el) => el.classList.remove('active'));
     }
   }, [isOpen, scrollRef]);
+
 
   if (!isOpen) return null;
 
@@ -103,25 +169,56 @@ export const ChatSearchWidget: React.FC<ChatSearchWidgetProps> = ({
     }
   };
 
-  const flagButtonClass = (active: boolean) =>
-    [
-      'h-6 px-1.5 rounded text-xs font-mono border transition-colors cursor-pointer select-none',
-      active
-        ? 'bg-[var(--interactive-selection)] text-[var(--interactive-selectionForeground)] border-[var(--interactive-selection)]'
-        : 'bg-transparent text-[var(--surface-mutedForeground)] border-[var(--interactive-border)] hover:bg-[var(--interactive-hover)]',
-    ].join(' ');
+  const countLabel = isLoadingForSearch
+    ? t('chat.search.loading')
+    : totalMatches > 0
+      ? `${activeIndex + 1}/${totalMatches}`
+      : t('chat.search.noResults');
 
-  const countLabel =
-    totalMatches === 0
-      ? query
-        ? 'No results'
-        : ''
-      : `${activeIndex + 1} of ${totalMatches}`;
+  // ── Icon-only toggle button (matches CodeMirror search panel style) ──
+  const ToggleButton: React.FC<{
+    active: boolean;
+    onClick: () => void;
+    title: string;
+    icon: React.ReactNode;
+    ariaLabel: string;
+  }> = ({ active, onClick, title, icon, ariaLabel }) => (
+    <button
+      type="button"
+      title={title}
+      aria-label={ariaLabel}
+      aria-pressed={active}
+      onClick={onClick}
+      className={toggleButtonClass(active)}
+    >
+      {icon}
+    </button>
+  );
+
+  // ── Icon-only action button (arrows, close) ──
+  const ActionButton: React.FC<{
+    onClick: () => void;
+    title: string;
+    ariaLabel: string;
+    disabled?: boolean;
+    children: React.ReactNode;
+  }> = ({ onClick, title, ariaLabel, disabled, children }) => (
+    <button
+      type="button"
+      title={title}
+      aria-label={ariaLabel}
+      disabled={disabled}
+      onClick={onClick}
+      className={actionButtonClass(disabled)}
+    >
+      {children}
+    </button>
+  );
 
   return (
     <div
-      className="absolute top-2 right-3 z-50 flex items-center gap-1 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] px-2 py-1.5 shadow-lg"
-      style={{ minWidth: 284 }}
+      className="absolute top-[6px] right-[14px] z-50 pointer-events-auto rounded-[10px] border border-[var(--interactive-border)] p-1 text-[13px] leading-none text-[var(--surface-foreground)]"
+      style={panelStyle}
       // Capture Escape from any focused element inside the widget and stop
       // propagation so the global double-ESC abort handler is never reached.
       onKeyDown={(e) => {
@@ -132,100 +229,87 @@ export const ChatSearchWidget: React.FC<ChatSearchWidgetProps> = ({
         }
       }}
     >
-      {/* Search input */}
-      <input
-        ref={inputRef}
-        type="text"
-        value={query}
-        onChange={(e) => useChatSearchStore.getState().setQuery(e.target.value)}
-        onKeyDown={handleKeyDown}
-        placeholder="Find in chat"
-        className="h-6 flex-1 min-w-0 bg-transparent text-xs text-[var(--surface-foreground)] placeholder:text-[var(--surface-mutedForeground)] outline-none"
-        style={
-          totalMatches === 0 && query
-            ? { color: 'var(--status-error)' }
-            : undefined
-        }
-        aria-label="Search chat messages"
-      />
+      {/* ── Single row that wraps to two rows when the panel is narrowed ──
+           Row 1: [Find input (grows)]
+           Row 2 (when narrow): [Aa] [.*] [ab] [count] [↑] [↓] [×]   ── */}
+      <div className="flex w-full flex-wrap items-center gap-y-1 [font-family:inherit] text-[13px] leading-none text-[var(--surface-foreground)]">
+        {/* Find input — expands to fill all available width */}
+        <input
+          ref={inputRef}
+          type="text"
+          value={query}
+          onChange={(e) => useChatSearchStore.getState().setQuery(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder={t('chat.search.findPlaceholder')}
+          className={`${inputBaseClass} min-w-[160px] flex-[1_1_160px]`}
+          aria-label={t('chat.search.findAria')}
+        />
 
-      {/* Flag toggles */}
-      <button
-        type="button"
-        title="Match case"
-        aria-label="Match case"
-        className={flagButtonClass(flags.caseSensitive)}
-        onClick={() => useChatSearchStore.getState().setFlag('caseSensitive', !flags.caseSensitive)}
-        aria-pressed={flags.caseSensitive}
-      >
-        Aa
-      </button>
-      <button
-        type="button"
-        title="Match whole word"
-        aria-label="Match whole word"
-        className={flagButtonClass(flags.wholeWord)}
-        onClick={() => useChatSearchStore.getState().setFlag('wholeWord', !flags.wholeWord)}
-        aria-pressed={flags.wholeWord}
-        style={{ textDecoration: 'underline' }}
-      >
-        ab
-      </button>
-      <button
-        type="button"
-        title="Use regular expression"
-        aria-label="Use regular expression"
-        className={flagButtonClass(flags.regex)}
-        onClick={() => useChatSearchStore.getState().setFlag('regex', !flags.regex)}
-        aria-pressed={flags.regex}
-      >
-        .*
-      </button>
+        {/* Controls — kept as one non-wrapping group so they either share
+            row 1 with the input or drop cleanly together to row 2 */}
+        <div className="ml-auto flex shrink-0 items-center">
+          {/* Toggle buttons */}
+          <ToggleButton
+            active={flags.caseSensitive}
+            onClick={() => useChatSearchStore.getState().setFlag('caseSensitive', !flags.caseSensitive)}
+            title={t('chat.search.matchCase')}
+            ariaLabel={t('chat.search.matchCase')}
+            icon="Aa"
+          />
+          <ToggleButton
+            active={flags.regex}
+            onClick={() => useChatSearchStore.getState().setFlag('regex', !flags.regex)}
+            title={t('chat.search.useRegex')}
+            ariaLabel={t('chat.search.useRegex')}
+            icon=".*"
+          />
+          <ToggleButton
+            active={flags.wholeWord}
+            onClick={() => useChatSearchStore.getState().setFlag('wholeWord', !flags.wholeWord)}
+            title={t('chat.search.matchWholeWord')}
+            ariaLabel={t('chat.search.matchWholeWord')}
+            icon={<span className="underline decoration-current underline-offset-2">ab</span>}
+          />
 
-      {/* Divider */}
-      <span className="h-4 w-px bg-[var(--interactive-border)] mx-0.5" aria-hidden />
+          {/* Match count — fixed width keeps layout stable between "No results" and "1/3" */}
+          <span
+            className="inline-flex w-[56px] shrink-0 items-center justify-center whitespace-nowrap bg-transparent text-[11px] leading-[26px] text-[var(--surface-muted-foreground)] tabular-nums"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            {countLabel}
+          </span>
 
-      {/* Match count */}
-      <span
-        className="text-xs tabular-nums w-[76px] text-center text-[var(--surface-mutedForeground)] shrink-0"
-        aria-live="polite"
-        aria-atomic="true"
-      >
-        {countLabel}
-      </span>
+          {/* Navigation */}
+          <ActionButton
+            onClick={() => useChatSearchStore.getState().navigate('prev')}
+            title={t('chat.search.previous')}
+            ariaLabel={t('chat.search.previousAria')}
+            disabled={totalMatches === 0}
+          >
+            ↑
+          </ActionButton>
+          <ActionButton
+            onClick={() => useChatSearchStore.getState().navigate('next')}
+            title={t('chat.search.next')}
+            ariaLabel={t('chat.search.nextAria')}
+            disabled={totalMatches === 0}
+          >
+            ↓
+          </ActionButton>
 
-      {/* Prev / Next */}
-      <button
-        type="button"
-        title="Previous match (Shift+Enter)"
-        className="h-6 w-6 flex items-center justify-center rounded hover:bg-[var(--interactive-hover)] text-[var(--surface-mutedForeground)] disabled:opacity-40"
-        onClick={() => useChatSearchStore.getState().navigate('prev')}
-        disabled={totalMatches === 0}
-        aria-label="Previous match"
-      >
-        <Icon name="arrow-up-s" className="h-3.5 w-3.5" />
-      </button>
-      <button
-        type="button"
-        title="Next match (Enter)"
-        className="h-6 w-6 flex items-center justify-center rounded hover:bg-[var(--interactive-hover)] text-[var(--surface-mutedForeground)] disabled:opacity-40"
-        onClick={() => useChatSearchStore.getState().navigate('next')}
-        disabled={totalMatches === 0}
-        aria-label="Next match"
-      >
-        <Icon name="arrow-down-s" className="h-3.5 w-3.5" />
-      </button>
-
-      {/* Close */}
-      <button
-        type="button"
-        title="Close (Escape)"
-        className="h-6 w-6 flex items-center justify-center rounded hover:bg-[var(--interactive-hover)] text-[var(--surface-mutedForeground)]"
-        onClick={() => useChatSearchStore.getState().close()}
-        aria-label="Close search"
-      >
-        <Icon name="close" className="h-3.5 w-3.5" />
-      </button>
+          {/* Close */}
+          <button
+            type="button"
+            title={t('chat.search.close')}
+            aria-label={t('chat.search.closeAria')}
+            onClick={() => useChatSearchStore.getState().close()}
+            className="ml-px inline-flex h-[26px] w-[26px] min-w-[26px] shrink-0 items-center justify-center overflow-visible rounded border-none bg-transparent p-0 text-[16px] leading-none text-[var(--surface-muted-foreground)] transition-colors duration-100 hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]"
+          >
+            ×
+          </button>
+        </div>
+      </div>
     </div>
   );
 };

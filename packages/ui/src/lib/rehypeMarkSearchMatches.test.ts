@@ -45,6 +45,7 @@ function run(
     caseSensitive: opts.caseSensitive ?? false,
     wholeWord: opts.wholeWord ?? false,
     isRegex: opts.isRegex ?? false,
+    messageId: 'test-msg-id',
   });
   // call the transformer returned by the plugin
   plugin(tree);
@@ -54,16 +55,16 @@ function run(
 /** Collect all mark elements from the tree. */
 function collectMarks(tree: Root): Element[] {
   const marks: Element[] = [];
-  function walk(children: (Root | Element | Text | { type: string })[]) {
+  function walk(children: HastChild[]) {
     for (const node of children) {
       if (node.type === 'element') {
         const el = node as Element;
         if (el.tagName === 'mark') marks.push(el);
-        walk(el.children as any);
+        walk(el.children);
       }
     }
   }
-  walk(tree.children as any);
+  walk(tree.children);
   return marks;
 }
 
@@ -186,5 +187,146 @@ describe('rehypeMarkSearchMatches plugin', () => {
     expect(threw).toBe(false);
     const tree = run(makeTree('hello'), '[unclosed', { isRegex: true });
     expect(collectMarks(tree)).toHaveLength(0);
+  });
+
+  test('highlights cross-boundary matches spanning text and inline <code>', () => {
+    // Query spans across a text node and an inline <code> element.
+    const tree: Root = {
+      type: 'root',
+      children: [
+        {
+          type: 'element',
+          tagName: 'p',
+          properties: {},
+          children: [
+            { type: 'text', value: 'the store but ' },
+            {
+              type: 'element',
+              tagName: 'code',
+              properties: {},
+              children: [{ type: 'text', value: 'Header.tsx' }],
+            } as Element,
+            { type: 'text', value: ' never reads show' },
+          ],
+        } as Element,
+      ],
+    };
+    const result = run(tree, 'the store but Header.tsx');
+    const marks = collectMarks(result);
+    expect(marks).toHaveLength(1);
+    expect((marks[0].children[0] as Text).value).toBe('the store but Header.tsx');
+  });
+
+  test('highlights cross-boundary matches spanning inline <code> and trailing text', () => {
+    const tree: Root = {
+      type: 'root',
+      children: [
+        {
+          type: 'element',
+          tagName: 'p',
+          properties: {},
+          children: [
+            { type: 'text', value: 'use ' },
+            {
+              type: 'element',
+              tagName: 'code',
+              properties: {},
+              children: [{ type: 'text', value: 'foo' }],
+            } as Element,
+            { type: 'text', value: ' and bar' },
+          ],
+        } as Element,
+      ],
+    };
+    const result = run(tree, 'foo and');
+    const marks = collectMarks(result);
+    expect(marks).toHaveLength(1);
+    expect((marks[0].children[0] as Text).value).toBe('foo and');
+  });
+
+  test('preserves per-node highlighting when no cross-boundary match exists', () => {
+    const tree: Root = {
+      type: 'root',
+      children: [
+        {
+          type: 'element',
+          tagName: 'p',
+          properties: {},
+          children: [
+            { type: 'text', value: 'use ' },
+            {
+              type: 'element',
+              tagName: 'code',
+              properties: {},
+              children: [{ type: 'text', value: 'foo' }],
+            } as Element,
+            { type: 'text', value: ' here' },
+          ],
+        } as Element,
+      ],
+    };
+    const result = run(tree, 'foo');
+    const marks = collectMarks(result);
+    expect(marks).toHaveLength(1);
+    // The mark should be inside the <code> element, not flattening the whole paragraph
+    expect((marks[0].children[0] as Text).value).toBe('foo');
+  });
+});
+
+describe('cross-boundary match formatting preservation', () => {
+  test('preserves plain-text prefix node when match spans element boundary', () => {
+    // "hello <strong>world</strong> friend" — searching "world friend"
+    // The "hello " prefix is NOT part of any match and should survive as a text node.
+    const tree: Root = {
+      type: 'root',
+      children: [{
+        type: 'element', tagName: 'p', properties: {},
+        children: [
+          { type: 'text', value: 'hello ' } as Text,
+          {
+            type: 'element', tagName: 'strong', properties: {},
+            children: [{ type: 'text', value: 'world' } as Text],
+          } as Element,
+          { type: 'text', value: ' friend' } as Text,
+        ],
+      } as Element],
+    };
+    const result = run(tree, 'world friend');
+    const marks = collectMarks(result);
+    // Cross-boundary match should be found
+    expect(marks).toHaveLength(1);
+    // The "hello " prefix must still be a text node at the start of the paragraph
+    const p = (result.children[0] as Element).children;
+    // First child must be the "hello " text (not part of the mark)
+    expect(p[0].type).toBe('text');
+    expect((p[0] as Text).value).toBe('hello ');
+  });
+
+  test('preserves italic element before cross-boundary match region', () => {
+    // "<em>prefix</em> fooBar" where "fooBar" spans text " foo" + code "Bar"
+    const tree: Root = {
+      type: 'root',
+      children: [{
+        type: 'element', tagName: 'p', properties: {},
+        children: [
+          {
+            type: 'element', tagName: 'em', properties: {},
+            children: [{ type: 'text', value: 'prefix' } as Text],
+          } as Element,
+          { type: 'text', value: ' foo' } as Text,
+          {
+            type: 'element', tagName: 'code', properties: {},
+            children: [{ type: 'text', value: 'Bar' } as Text],
+          } as Element,
+        ],
+      } as Element],
+    };
+    const result = run(tree, 'fooBar', { caseSensitive: false });
+    const marks = collectMarks(result);
+    expect(marks).toHaveLength(1);
+    // <em>prefix</em> must survive as an element
+    const p = (result.children[0] as Element).children;
+    expect(p[0].type).toBe('element');
+    expect((p[0] as Element).tagName).toBe('em');
   });
 });
