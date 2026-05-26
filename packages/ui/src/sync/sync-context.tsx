@@ -1619,7 +1619,7 @@ export function SyncProvider(props: {
               providers: globalState.providers,
             },
             loadSessions: (dir) => retry(async () => {
-              const sessions = (await listGlobalSessionPages(props.sdk, {
+              const rootSessions = (await listGlobalSessionPages(props.sdk, {
                 directory: dir,
                 archived: false,
                 roots: true,
@@ -1627,6 +1627,30 @@ export function SyncProvider(props: {
               }))
                 .filter((s) => !!s?.id)
                 .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+
+              // Also load child sessions (sub-agent delegations) so they
+              // appear in the sidebar immediately instead of relying on
+              // the async global session store.
+              let allSessions: typeof rootSessions = []
+              try {
+                const allResult = await props.sdk.session.list({
+                  directory: dir,
+                  limit: 200,
+                })
+                const allError = (allResult as { error?: unknown }).error
+                if (!allError) {
+                  allSessions = ((allResult as { data?: unknown }).data ?? []) as typeof rootSessions
+                }
+              } catch {
+                // Child load is best-effort; fall back to roots only
+              }
+
+              // Merge: keep root sessions from the first query (for accurate
+              // sessionTotal), plus any child sessions from the broader query.
+              const rootIds = new Set(rootSessions.map((s: { id: string }) => s.id))
+              const childSessions = allSessions.filter((s: { id: string; parentID?: string | null }) => s?.id && !rootIds.has(s.id) && s.parentID)
+
+              const sessions = rootSessions.concat(childSessions)
               // Race guard: if the list came back empty but event pipeline
               // already populated the store, don't clobber. OpenCode can
               // answer HTTP with empty sessions while WS delivers session
@@ -1638,7 +1662,7 @@ export function SyncProvider(props: {
                 )
                 return
               }
-              store.setState({ session: sessions, sessionTotal: sessions.length, limit: Math.max(sessions.length, 50) })
+              store.setState({ session: sessions, sessionTotal: rootSessions.length, limit: Math.max(sessions.length, 50) })
               ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
             }),
           })

@@ -1,0 +1,36 @@
+{
+  "name": "opencode-drawio",
+  "version": "0.1.0",
+  "description": "Create and edit draw.io diagrams from OpenCode — add nodes, connect edges, auto-layout, and more",
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "postinstall": "bun install"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "latest",
+    "fast-xml-parser": "^5.0.9"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": "*"
+  },
+  "keywords": [
+    "opencode",
+    "plugin",
+    "drawio",
+    "diagram",
+    "draw.io",
+    "flowchart"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nerdosaurus/opencode-drawio"
+  },
+  "files": [
+    "src/"
+  ]
+}
