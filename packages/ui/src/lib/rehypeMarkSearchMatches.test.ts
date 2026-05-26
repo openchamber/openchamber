@@ -213,8 +213,10 @@ describe('rehypeMarkSearchMatches plugin', () => {
     };
     const result = run(tree, 'the store but Header.tsx');
     const marks = collectMarks(result);
-    expect(marks).toHaveLength(1);
-    expect((marks[0].children[0] as Text).value).toBe('the store but Header.tsx');
+    // Tree-preserving: one mark per overlapping text node (text node + code text).
+    expect(marks).toHaveLength(2);
+    expect((marks[0].children[0] as Text).value).toBe('the store but ');
+    expect((marks[1].children[0] as Text).value).toBe('Header.tsx');
   });
 
   test('highlights cross-boundary matches spanning inline <code> and trailing text', () => {
@@ -240,8 +242,10 @@ describe('rehypeMarkSearchMatches plugin', () => {
     };
     const result = run(tree, 'foo and');
     const marks = collectMarks(result);
-    expect(marks).toHaveLength(1);
-    expect((marks[0].children[0] as Text).value).toBe('foo and');
+    // Tree-preserving: one mark inside <code> for "foo", one text mark for " and".
+    expect(marks).toHaveLength(2);
+    expect((marks[0].children[0] as Text).value).toBe('foo');
+    expect((marks[1].children[0] as Text).value).toBe(' and');
   });
 
   test('preserves per-node highlighting when no cross-boundary match exists', () => {
@@ -293,8 +297,8 @@ describe('cross-boundary match formatting preservation', () => {
     };
     const result = run(tree, 'world friend');
     const marks = collectMarks(result);
-    // Cross-boundary match should be found
-    expect(marks).toHaveLength(1);
+    // Tree-preserving: one mark inside <strong> for "world", one for " friend".
+    expect(marks).toHaveLength(2);
     // The "hello " prefix must still be a text node at the start of the paragraph
     const p = (result.children[0] as Element).children;
     // First child must be the "hello " text (not part of the mark)
@@ -323,10 +327,52 @@ describe('cross-boundary match formatting preservation', () => {
     };
     const result = run(tree, 'fooBar', { caseSensitive: false });
     const marks = collectMarks(result);
-    expect(marks).toHaveLength(1);
+    // Tree-preserving: one mark for "foo" (in text node " foo"), one for "Bar" inside <code>.
+    expect(marks).toHaveLength(2);
     // <em>prefix</em> must survive as an element
     const p = (result.children[0] as Element).children;
     expect(p[0].type).toBe('element');
     expect((p[0] as Element).tagName).toBe('em');
+  });
+
+  // NOTE (Greptile review PR#1434 P2c): Regression test for the formatting
+  // preservation fix. The old flat-text approach stripped inline wrappers from
+  // content inside the cross-boundary region even when that content was *part of
+  // the match* (e.g. "bold" inside <strong> that matched the query). The new
+  // tree-preserving walk keeps element wrappers intact.
+  test('preserves inline element wrapper that contains matched text in cross-boundary region', () => {
+    // "<strong>bold</strong> matching tail" — query "bold matching"
+    // The match starts inside <strong>. With the old approach <strong> was flattened
+    // to plain text. The fix keeps the wrapper and places the mark inside it.
+    const tree: Root = {
+      type: 'root',
+      children: [{
+        type: 'element', tagName: 'p', properties: {},
+        children: [
+          {
+            type: 'element', tagName: 'strong', properties: {},
+            children: [{ type: 'text', value: 'bold' } as Text],
+          } as Element,
+          { type: 'text', value: ' matching tail' } as Text,
+        ],
+      } as Element],
+    };
+    const result = run(tree, 'bold matching');
+    const marks = collectMarks(result);
+    // Two marks: "bold" inside <strong>, " matching" from the trailing text node.
+    expect(marks).toHaveLength(2);
+    expect((marks[0].children[0] as Text).value).toBe('bold');
+    expect((marks[1].children[0] as Text).value).toBe(' matching');
+    // The <strong> wrapper must survive — its first (and only) child is now a <mark>.
+    const p = (result.children[0] as Element).children;
+    expect(p[0].type).toBe('element');
+    expect((p[0] as Element).tagName).toBe('strong');
+    const strong = p[0] as Element;
+    expect(strong.children[0].type).toBe('element');
+    expect((strong.children[0] as Element).tagName).toBe('mark');
+    // " tail" must remain as plain text, not wrapped in a mark.
+    const lastChild = p[p.length - 1];
+    expect(lastChild.type).toBe('text');
+    expect((lastChild as Text).value).toBe(' tail');
   });
 });

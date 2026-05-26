@@ -619,6 +619,12 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     const isSearchOpen = useChatSearchStore((s) => s.isOpen);
     const searchQuery = useChatSearchStore((s) => s.query);
     const searchFlags = useChatSearchStore((s) => s.flags);
+    // NOTE (Greptile review PR#1434 P2): Guard against concurrent loadMore calls.
+    // historyMeta recomputes whenever sessionMessages.length changes (e.g. a streaming
+    // message arrives while a page fetch is still in-flight), which re-fires the
+    // effect. Without the guard, a second loadMore call races the first and the server
+    // may return duplicate or disordered pages.
+    const loadMoreInFlightRef = React.useRef(false);
     React.useEffect(() => {
         const validQuery =
             isSearchOpen &&
@@ -632,10 +638,15 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
             useChatSearchStore.getState().setIsLoadingForSearch(false);
             return;
         }
+        // Bail out if a fetch is already in-flight; the effect will re-run once
+        // historyMeta updates after the current fetch settles.
+        if (loadMoreInFlightRef.current) return;
         // More pages exist. Fire and clear the loading flag on settle — whether
         // loadMore did real work or no-op'd (e.g. meta and prefetch disagreed).
+        loadMoreInFlightRef.current = true;
         useChatSearchStore.getState().setIsLoadingForSearch(true);
         sync.loadMore(currentSessionId!).finally(() => {
+            loadMoreInFlightRef.current = false;
             useChatSearchStore.getState().setIsLoadingForSearch(false);
         });
     }, [isSearchOpen, searchQuery, searchFlags, currentSessionId, historyMeta, sync]);

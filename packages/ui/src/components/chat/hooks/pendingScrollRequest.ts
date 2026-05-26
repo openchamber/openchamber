@@ -28,20 +28,18 @@ export const decidePendingScrollFailure = ({
     return 'resolve-failed';
 };
 
+// NOTE (Greptile review PR#1434 P2): The previous implementation had two branches
+// for the !elementScrolled case — both returned false. The virtualIndexScrollRequested
+// parameter had no effect on the return value. Collapsed to the minimal correct
+// expression. The parameter is kept in the signature so call sites remain readable
+// (it documents intent: "we requested a virtual scroll but that alone isn't enough
+// to call the attempt complete").
 export const shouldReportScrollAttemptComplete = ({
     elementScrolled,
-    virtualIndexScrollRequested,
 }: {
     elementScrolled: boolean;
+    // virtualIndexScrollRequested is kept in the type signature so call sites remain
+    // readable and self-documenting: passing it documents the *intent* (a virtual
+    // scroll was requested), even though the outcome is the same either way.
     virtualIndexScrollRequested: boolean;
-}): boolean => {
-    if (elementScrolled) {
-        return true;
-    }
-
-    if (virtualIndexScrollRequested) {
-        return false;
-    }
-
-    return false;
-};
+}): boolean => elementScrolled;

@@ -191,39 +191,69 @@ function rehypeMarkSearchMatches(options: RehypeMarkSearchMatchesOptions) {
       }
       if (crossMatches.length === 0) return normalResult;
 
-      let minChildIdx = Infinity;
-      let maxChildIdx = -Infinity;
-      for (const match of crossMatches) {
-        for (const seg of segments) {
-          if (seg.start < match.end && seg.end > match.start) {
-            if (seg.childIndex < minChildIdx) minChildIdx = seg.childIndex;
-            if (seg.childIndex > maxChildIdx) maxChildIdx = seg.childIndex;
+      // NOTE (Greptile review PR#1434 P2c): Replace flat-text region replacement
+      // with a tree-preserving mark application. The previous approach identified the
+      // span of top-level children that overlapped with cross-boundary matches
+      // (minChildIdx..maxChildIdx), flattened the entire region to plain text, then
+      // rebuilt it as flat text + mark nodes — destroying any inline formatting
+      // elements (<strong>, <em>, <code>, etc.) contained within that region.
+      //
+      // The fix walks the original HAST tree and splits only the leaf text nodes that
+      // overlap with a match, inserting <mark> wrappers in-place. Element wrappers
+      // (e.g. <strong>) are rebuilt with their children updated but otherwise intact.
+      // A cross-boundary match now produces one <mark> per overlapping text node
+      // rather than one flattened <mark> spanning the whole matched string.
+      function applyMarksPreservingTree(node: HastChild): HastChild[] {
+        if (node.type === 'text') {
+          const textNode = node as HastText;
+          const seg = segments.find((s) => s.node === node);
+          if (!seg) return [node];
+
+          const parts: HastChild[] = [];
+          let localIdx = 0;
+          let markedAny = false;
+
+          for (const match of crossMatches) {
+            const clampedStart = Math.max(0, match.start - seg.start);
+            const clampedEnd = Math.min(textNode.value.length, match.end - seg.start);
+            if (clampedStart >= clampedEnd) continue; // no overlap with this text node
+
+            markedAny = true;
+            if (clampedStart > localIdx) {
+              parts.push({ type: 'text', value: textNode.value.slice(localIdx, clampedStart) });
+            }
+            parts.push(makeMarkNode(textNode.value.slice(clampedStart, clampedEnd)));
+            localIdx = clampedEnd;
           }
+          // If nothing overlapped return the original node — no new reference needed.
+          if (!markedAny) return [node];
+          if (localIdx < textNode.value.length) {
+            parts.push({ type: 'text', value: textNode.value.slice(localIdx) });
+          }
+          return parts;
         }
+
+        if (node.type === 'element') {
+          const el = node as HastElement;
+          if (el.tagName === 'pre') return [el];
+          const newChildren: HastChild[] = [];
+          for (const child of el.children) {
+            newChildren.push(...applyMarksPreservingTree(child));
+          }
+          // Only allocate a new element reference if children actually changed.
+          const changed = newChildren.length !== el.children.length
+            || newChildren.some((c, i) => c !== el.children[i]);
+          return changed ? [{ ...el, children: newChildren }] : [el];
+        }
+
+        return [node];
       }
-      if (minChildIdx === Infinity) return normalResult;
 
-      const regionChildren = children.slice(minChildIdx, maxChildIdx + 1);
-      const { text: regionText } = flattenInlineChildren(regionChildren);
-
-      const re2 = new RegExp(regex!.source, regex!.flags.includes('g') ? regex!.flags : regex!.flags + 'g');
-      re2.lastIndex = 0;
-      const regionResult: HastChild[] = [];
-      let lastIdx = 0;
-      let rm: RegExpExecArray | null;
-      while ((rm = re2.exec(regionText)) !== null) {
-        if (rm[0].length === 0) { re2.lastIndex++; continue; }
-        if (rm.index > lastIdx) regionResult.push({ type: 'text', value: regionText.slice(lastIdx, rm.index) });
-        regionResult.push(makeMarkNode(rm[0]));
-        lastIdx = rm.index + rm[0].length;
+      const result: HastChild[] = [];
+      for (const child of children) {
+        result.push(...applyMarksPreservingTree(child));
       }
-      if (lastIdx < regionText.length) regionResult.push({ type: 'text', value: regionText.slice(lastIdx) });
-
-      return [
-        ...normalResult.slice(0, minChildIdx),
-        ...regionResult,
-        ...normalResult.slice(maxChildIdx + 1),
-      ];
+      return result;
     }
 
     // ── Transform tree ────────────────────────────────────────────────────

@@ -40,6 +40,49 @@ const actionButtonClass = (disabled?: boolean) => [
   disabled ? 'opacity-40 cursor-default pointer-events-none' : '',
 ].join(' ');
 
+// NOTE (Greptile review PR#1434 P1): These components are defined at module scope,
+// not inside the ChatSearchWidget render function. Defining them inside a render
+// function creates a new React component type identity on every re-render, which
+// forces React to unmount/remount the button DOM nodes — losing focus and causing
+// visible flicker every time the store updates (e.g. on each match count change).
+const ToggleButton: React.FC<{
+  active: boolean;
+  onClick: () => void;
+  title: string;
+  icon: React.ReactNode;
+  ariaLabel: string;
+}> = ({ active, onClick, title, icon, ariaLabel }) => (
+  <button
+    type="button"
+    title={title}
+    aria-label={ariaLabel}
+    aria-pressed={active}
+    onClick={onClick}
+    className={toggleButtonClass(active)}
+  >
+    {icon}
+  </button>
+);
+
+const ActionButton: React.FC<{
+  onClick: () => void;
+  title: string;
+  ariaLabel: string;
+  disabled?: boolean;
+  children: React.ReactNode;
+}> = ({ onClick, title, ariaLabel, disabled, children }) => (
+  <button
+    type="button"
+    title={title}
+    aria-label={ariaLabel}
+    disabled={disabled}
+    onClick={onClick}
+    className={actionButtonClass(disabled)}
+  >
+    {children}
+  </button>
+);
+
 interface ChatSearchWidgetProps {
   scrollRef: React.RefObject<HTMLDivElement | null>;
   /**
@@ -174,46 +217,6 @@ export const ChatSearchWidget: React.FC<ChatSearchWidgetProps> = ({
     : totalMatches > 0
       ? `${activeIndex + 1}/${totalMatches}`
       : t('chat.search.noResults');
-
-  // ── Icon-only toggle button (matches CodeMirror search panel style) ──
-  const ToggleButton: React.FC<{
-    active: boolean;
-    onClick: () => void;
-    title: string;
-    icon: React.ReactNode;
-    ariaLabel: string;
-  }> = ({ active, onClick, title, icon, ariaLabel }) => (
-    <button
-      type="button"
-      title={title}
-      aria-label={ariaLabel}
-      aria-pressed={active}
-      onClick={onClick}
-      className={toggleButtonClass(active)}
-    >
-      {icon}
-    </button>
-  );
-
-  // ── Icon-only action button (arrows, close) ──
-  const ActionButton: React.FC<{
-    onClick: () => void;
-    title: string;
-    ariaLabel: string;
-    disabled?: boolean;
-    children: React.ReactNode;
-  }> = ({ onClick, title, ariaLabel, disabled, children }) => (
-    <button
-      type="button"
-      title={title}
-      aria-label={ariaLabel}
-      disabled={disabled}
-      onClick={onClick}
-      className={actionButtonClass(disabled)}
-    >
-      {children}
-    </button>
-  );
 
   return (
     <div
