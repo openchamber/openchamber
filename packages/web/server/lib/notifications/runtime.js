@@ -27,7 +27,22 @@ export const createNotificationTriggerRuntime = (deps) => {
   const PUSH_PERMISSION_DEBOUNCE_MS = 500;
   const pushQuestionDebounceTimers = new Map();
   const pushPermissionDebounceTimers = new Map();
-  const notifiedPermissionRequests = new Set();
+  // Convert from Set to Map for TTL-based cleanup (prevents memory leak)
+  const NOTIFIED_PERMISSION_TTL_MS = 60 * 60 * 1000; // 1 hour TTL
+  const notifiedPermissionRequests = new Map(); // key -> addedAt
+
+  // Periodic cleanup for notifiedPermissionRequests to prevent memory leak
+  const CLEANUP_INTERVAL_MS = 10 * 60 * 1000; // Every 10 minutes
+  const cleanOldNotifiedPermissions = () => {
+    const now = Date.now();
+    for (const [key, addedAt] of notifiedPermissionRequests) {
+      if (now - addedAt > NOTIFIED_PERMISSION_TTL_MS) {
+        notifiedPermissionRequests.delete(key);
+      }
+    }
+  };
+  setInterval(cleanOldNotifiedPermissions, CLEANUP_INTERVAL_MS);
+
   const lastReadyNotificationAt = new Map();
 
   const sessionParentIdCache = new Map();
@@ -457,14 +472,20 @@ export const createNotificationTriggerRuntime = (deps) => {
       const permission = payload.properties?.permission;
       const requestKey = typeof requestId === 'string' ? `${sessionId}:${requestId}` : null;
       if (requestKey && notifiedPermissionRequests.has(requestKey)) {
-        return;
+        // Check if entry is still valid (not expired)
+        const addedAt = notifiedPermissionRequests.get(requestKey);
+        if (addedAt && Date.now() - addedAt < NOTIFIED_PERMISSION_TTL_MS) {
+          return;
+        }
+        // Entry expired, remove it
+        notifiedPermissionRequests.delete(requestKey);
       }
 
       // Client may be in Permission Auto-Accept for this session (or any
       // ancestor). Skip the whole notification path — the client responds
       // directly and the user has opted out of approval prompts.
       if (await isSessionAutoAccepting(sessionId)) {
-        if (requestKey) notifiedPermissionRequests.add(requestKey);
+        if (requestKey) notifiedPermissionRequests.set(requestKey, Date.now());
         return;
       }
 
@@ -477,7 +498,7 @@ export const createNotificationTriggerRuntime = (deps) => {
         pushPermissionDebounceTimers.delete(sessionId);
 
         if (await isSessionAutoAccepting(sessionId)) {
-          if (requestKey) notifiedPermissionRequests.add(requestKey);
+          if (requestKey) notifiedPermissionRequests.set(requestKey, Date.now());
           return;
         }
 
@@ -536,7 +557,7 @@ export const createNotificationTriggerRuntime = (deps) => {
         }
 
         if (requestKey) {
-          notifiedPermissionRequests.add(requestKey);
+          notifiedPermissionRequests.set(requestKey, Date.now());
         }
 
         void sendPushToAllUiSessions(

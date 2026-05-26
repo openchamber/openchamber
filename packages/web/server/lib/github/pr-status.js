@@ -312,6 +312,18 @@ const parseRepoFromApiUrl = (value) => {
 const _searchApiDisabledRepos = new Map();
 const SEARCH_API_RETRY_MS = 5 * 60 * 1000; // retry after 5 minutes
 
+// Periodic cleanup for disabled repos to prevent memory leak (every 30 minutes)
+const CLEANUP_DISABLED_REPOS_INTERVAL_MS = 30 * 60 * 1000;
+const cleanDisabledRepos = () => {
+  const now = Date.now();
+  for (const [key, disabledAt] of _searchApiDisabledRepos) {
+    if (now - disabledAt > SEARCH_API_RETRY_MS) {
+      _searchApiDisabledRepos.delete(key);
+    }
+  }
+};
+setInterval(cleanDisabledRepos, CLEANUP_DISABLED_REPOS_INTERVAL_MS);
+
 const searchFallbackPr = async ({ octokit, branch, repoNames }) => {
   // Build a repo key to check/store 403 status per-repo
   const repoKey = [...repoNames].sort().join(',').toLowerCase();
