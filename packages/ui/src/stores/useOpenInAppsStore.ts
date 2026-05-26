@@ -17,6 +17,7 @@ type OpenInAppsState = {
   initialize: () => void;
   loadInstalledApps: (force?: boolean) => Promise<void>;
   selectApp: (appId: string) => Promise<void>;
+  cleanup: () => void;
 };
 
 const getAlwaysAvailableApps = (): OpenInAppOption[] => {
@@ -43,6 +44,7 @@ let loading = false;
 let keepScanning = false;
 let retryAttempt = 0;
 let retryTimeout: ReturnType<typeof setTimeout> | null = null;
+let cleanupFn: (() => void) | null = null;
 
 const clearRetryTimeout = () => {
   if (retryTimeout) {
@@ -196,6 +198,14 @@ export const useOpenInAppsStore = create<OpenInAppsState>()((set, get) => ({
     window.addEventListener('openchamber:app-ready', appReadyHandler);
     window.addEventListener('openchamber:installed-apps-updated', updateHandler);
 
+    cleanupFn = () => {
+      window.removeEventListener('openchamber:settings-synced', settingsHandler);
+      window.removeEventListener('openchamber:app-ready', appReadyHandler);
+      window.removeEventListener('openchamber:installed-apps-updated', updateHandler);
+      clearRetryTimeout();
+      initialized = false;
+    };
+
     const appReady = (window as unknown as { __openchamberAppReady?: boolean }).__openchamberAppReady;
     if (appReady) {
       void loadInstalledApps();
@@ -279,5 +289,9 @@ export const useOpenInAppsStore = create<OpenInAppsState>()((set, get) => ({
     }
 
     await updateDesktopSettings({ openInAppId: appId });
+  },
+
+  cleanup: () => {
+    cleanupFn?.();
   },
 }));

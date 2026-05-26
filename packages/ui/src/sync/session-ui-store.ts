@@ -277,6 +277,9 @@ export type SessionUIState = {
   debugSessionMessages: (sessionId: string) => Promise<void>
   pollForTokenUpdates: () => void
   setSessionDirectory: (sessionId: string, directory: string | null) => void
+
+  // Cleanup — remove session-specific state from all Maps
+  cleanupSession: (sessionId: string) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -1236,5 +1239,40 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
   isSessionPlanAvailable: (sessionId) => {
     return get().sessionPlanAvailable.get(sessionId) ?? false
+  },
+
+  // ---------------------------------------------------------------------------
+  // Session cleanup — remove session-specific state from all Maps
+  // ---------------------------------------------------------------------------
+  cleanupSession: (sessionId) => {
+    set((s) => {
+      const next = { ...s }
+
+      // Clean up worktree metadata
+      next.worktreeMetadata = new Map(s.worktreeMetadata)
+      next.worktreeMetadata.delete(sessionId)
+
+      // Clean up abort flags
+      next.sessionAbortFlags = new Map(s.sessionAbortFlags)
+      next.sessionAbortFlags.delete(sessionId)
+
+      // Clean up plan available flag
+      next.sessionPlanAvailable = new Map(s.sessionPlanAvailable)
+      next.sessionPlanAvailable.delete(sessionId)
+
+      // Clean up pending changes bar dismissed
+      next.pendingChangesBarDismissed = new Map(s.pendingChangesBarDismissed)
+      next.pendingChangesBarDismissed.delete(sessionId)
+
+      // Clean up abort controller and remove from map
+      const controller = s.abortControllers.get(sessionId)
+      if (controller) {
+        controller.abort()
+      }
+      next.abortControllers = new Map(s.abortControllers)
+      next.abortControllers.delete(sessionId)
+
+      return next
+    })
   },
 }))
