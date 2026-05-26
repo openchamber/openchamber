@@ -286,6 +286,12 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const suppressNextSelectRef = React.useRef(false);
   const editCancelledRef = React.useRef(false);
   const [isTouchPressed, setIsTouchPressed] = React.useState(false);
+  const editingIdRef = React.useRef(editingId);
+  editingIdRef.current = editingId;
+  const pendingRenameRef = React.useRef<{ id: string; title: string } | null>(null);
+  const handleSaveEditRef = React.useRef(handleSaveEdit);
+  handleSaveEditRef.current = handleSaveEdit;
+  const formRef = React.useRef<HTMLFormElement>(null);
 
   const session = node.session;
   const liveSession = useSession(session.id);
@@ -447,6 +453,18 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     });
   }, [session.id, sessionDirectory]);
 
+  // Capture outside-clicks to save edits — immune to focus-race with onBlur.
+  React.useEffect(() => {
+    if (editingId !== session.id) return;
+    const handleDocMouseDown = (e: MouseEvent) => {
+      if (formRef.current && !formRef.current.contains(e.target as Node)) {
+        handleSaveEditRef.current();
+      }
+    };
+    document.addEventListener('mousedown', handleDocMouseDown);
+    return () => document.removeEventListener('mousedown', handleDocMouseDown);
+  }, [editingId, session.id]);
+
   if (editingId === session.id) {
     return (
       <div
@@ -455,8 +473,8 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       >
         <div className="flex min-w-0 flex-1 flex-col gap-0">
           <form
+            ref={formRef}
             className="flex w-full items-center gap-2"
-
             onSubmit={(event) => {
               event.preventDefault();
               handleSaveEdit();
@@ -478,13 +496,6 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                 if (event.key === ' ' || event.key === 'Enter') {
                   event.stopPropagation();
                 }
-              }}
-              onBlur={() => {
-                if (editCancelledRef.current) {
-                  editCancelledRef.current = false;
-                  return;
-                }
-                handleSaveEdit();
               }}
             />
             <button
@@ -592,6 +603,15 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     setOpenSidebarMenuKey(open ? menuInstanceKey : null);
   };
 
+  const handleMenuOpenChangeComplete = (open: boolean) => {
+    if (!open && pendingRenameRef.current) {
+      const { id, title } = pendingRenameRef.current;
+      pendingRenameRef.current = null;
+      setEditingId(id);
+      setEditTitle(title);
+    }
+  };
+
   const handleMenuTriggerClick = (event: React.MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
     event.stopPropagation();
@@ -685,11 +705,13 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   };
 
   const sessionMenuContent = (
-    <DropdownMenuContent align="end" className="min-w-[180px]" onCloseAutoFocus={(event) => { if (renamingFolderId) event.preventDefault(); }}>
+    <DropdownMenuContent align="end" className="min-w-[180px]" finalFocus={() => (renamingFolderId || editingIdRef.current) ? false : true}>
       <DropdownMenuItem
         onClick={() => {
-          setEditingId(session.id);
-          setEditTitle(sessionTitle);
+          // Defer rename until dropdown close transition completes.
+          // onOpenChangeComplete fires after animation + focus cleanup are done,
+          // avoiding focus stealing from Base UI's unmount cleanup.
+          pendingRenameRef.current = { id: session.id, title: sessionTitle };
         }}
         className="[&>svg]:mr-1"
       >
@@ -991,7 +1013,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                 </TooltipContent>
               </Tooltip>
             ) : null}
-            <DropdownMenu open={isMenuOpen} onOpenChange={handleMenuOpenChange}>
+            <DropdownMenu open={isMenuOpen} onOpenChange={handleMenuOpenChange} onOpenChangeComplete={handleMenuOpenChangeComplete}>
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
