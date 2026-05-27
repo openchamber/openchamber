@@ -16,6 +16,7 @@ import { hasPendingUserSendAnimation, consumePendingUserSendAnimation } from '@/
 import { streamPerfCount, streamPerfMeasure } from '@/stores/utils/streamDebug';
 import type { StreamPhase } from './message/types';
 import { normalizeParts } from './message/partUtils';
+import { shouldReportScrollAttemptComplete } from './hooks/pendingScrollRequest';
 
 const MESSAGE_LIST_VIRTUALIZE_THRESHOLD = 5;
 const MESSAGE_LIST_OVERSCAN = 6;
@@ -1563,12 +1564,9 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         return true;
     }, [findMessageElement, resolveScrollContainer]);
 
-    React.useEffect(() => {
-        if (!ref) {
-            return;
-        }
-
-        const handle: MessageListHandle = {
+    React.useImperativeHandle(
+        ref,
+        (): MessageListHandle => ({
             scrollToTurnId: (turnId: string, options?: { behavior?: ScrollBehavior }) => {
                 const behavior = options?.behavior ?? 'auto';
                 const index = turnIndexMap.get(turnId);
@@ -1591,7 +1589,11 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                     return false;
                 }
 
-                return scrollHistoryIndexIntoView(index, behavior);
+                const virtualIndexScrollRequested = scrollHistoryIndexIntoView(index, 'auto');
+                return shouldReportScrollAttemptComplete({
+                    elementScrolled: false,
+                    virtualIndexScrollRequested,
+                });
             },
 
             scrollToMessageId: (messageId: string, options?: { behavior?: ScrollBehavior }) => {
@@ -1601,12 +1603,23 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                     return false;
                 }
 
-                return scrollMessageElementIntoView(messageId, behavior)
-                    || (
-                        trailingStreamingEntry !== undefined && index >= historyEntries.length
-                            ? false
-                            : scrollHistoryIndexIntoView(index, behavior)
-                    );
+                const elementScrolled = scrollMessageElementIntoView(messageId, behavior);
+                if (elementScrolled) {
+                    return shouldReportScrollAttemptComplete({
+                        elementScrolled,
+                        virtualIndexScrollRequested: false,
+                    });
+                }
+
+                const targetIsTail = trailingStreamingEntry !== undefined && index >= historyEntries.length;
+                const virtualIndexScrollRequested = targetIsTail
+                    ? false
+                    : scrollHistoryIndexIntoView(index, 'auto');
+
+                return shouldReportScrollAttemptComplete({
+                    elementScrolled,
+                    virtualIndexScrollRequested,
+                });
             },
 
             captureViewportAnchor: () => {
@@ -1689,21 +1702,9 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                 if (!container) return;
                 container.scrollTop = container.scrollHeight;
             },
-        };
-
-        if (typeof ref === 'function') {
-            ref(handle);
-            return () => {
-                ref(null);
-            };
-        }
-
-        const objectRef = ref;
-        objectRef.current = handle;
-        return () => {
-            objectRef.current = null;
-        };
-    }, [findMessageElement, historyEntries.length, historyVirtualizer, messageIndexMap, resolveScrollContainer, scrollHistoryIndexIntoView, scrollMessageElementIntoView, shouldVirtualizeHistory, trailingStreamingEntry, turnIndexMap, ref]);
+        }),
+        [findMessageElement, historyEntries.length, historyVirtualizer, messageIndexMap, resolveScrollContainer, scrollHistoryIndexIntoView, scrollMessageElementIntoView, shouldVirtualizeHistory, trailingStreamingEntry, turnIndexMap],
+    );
 
     const disableFadeIn = false;
 

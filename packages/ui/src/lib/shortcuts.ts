@@ -105,6 +105,13 @@ export function keyToShortcutToken(key: string): string {
 
 const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
   {
+    id: 'open_chat_search',
+    defaultCombo: 'mod+f',
+    label: 'Find in chat',
+    description: 'Open the chat search widget',
+    customizable: true,
+  },
+  {
     id: 'open_go_to_line',
     defaultCombo: 'alt+g',
     label: 'Go to line (files editor)',

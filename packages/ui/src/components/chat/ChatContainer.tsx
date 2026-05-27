@@ -2,6 +2,10 @@ import React from 'react';
 import type { Message, Part, Session } from '@opencode-ai/sdk/v2';
 
 import { ChatInput } from './ChatInput';
+import { ChatSearchWidget } from './ChatSearchWidget';
+import { useChatSearchMatcher } from './hooks/useChatSearchMatcher';
+import { useChatSearchStore } from '@/stores/useChatSearchStore';
+import { buildSearchRegex } from '@/lib/splitByHighlight';
 import { useUIStore } from '@/stores/useUIStore';
 import { Skeleton } from '@/components/ui/skeleton';
 import ChatEmptyState from './ChatEmptyState';
@@ -602,6 +606,51 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     });
     const { loadEarlier } = timelineController;
 
+    // Data-driven search matcher: keeps the store's match list up to date
+    // whenever the loaded messages or search parameters change.
+    // Uses the full sessionMessages (not timelineController.renderedMessages) so
+    // that messages behind the "Load older messages" button are also searched.
+    useChatSearchMatcher(viewportMessages);
+
+    // When search is open with a valid query and the server has more message pages,
+    // auto-fetch them one at a time until the full history is in the store.
+    // Each fetched page changes sessionMessages.length → historyMeta recomputes
+    // → this effect re-runs → loads next page, until historyMeta.complete.
+    const isSearchOpen = useChatSearchStore((s) => s.isOpen);
+    const searchQuery = useChatSearchStore((s) => s.query);
+    const searchFlags = useChatSearchStore((s) => s.flags);
+    // NOTE (Greptile review PR#1434 P2): Guard against concurrent loadMore calls.
+    // historyMeta recomputes whenever sessionMessages.length changes (e.g. a streaming
+    // message arrives while a page fetch is still in-flight), which re-fires the
+    // effect. Without the guard, a second loadMore call races the first and the server
+    // may return duplicate or disordered pages.
+    const loadMoreInFlightRef = React.useRef(false);
+    React.useEffect(() => {
+        const validQuery =
+            isSearchOpen &&
+            Boolean(searchQuery) &&
+            Boolean(currentSessionId) &&
+            // Do not trigger pagination for queries that produce no matches
+            // (invalid regex, empty after escaping, etc.)
+            buildSearchRegex(searchQuery, searchFlags) !== null;
+
+        if (!validQuery || !historyMeta || historyMeta.complete) {
+            useChatSearchStore.getState().setIsLoadingForSearch(false);
+            return;
+        }
+        // Bail out if a fetch is already in-flight; the effect will re-run once
+        // historyMeta updates after the current fetch settles.
+        if (loadMoreInFlightRef.current) return;
+        // More pages exist. Fire and clear the loading flag on settle — whether
+        // loadMore did real work or no-op'd (e.g. meta and prefetch disagreed).
+        loadMoreInFlightRef.current = true;
+        useChatSearchStore.getState().setIsLoadingForSearch(true);
+        sync.loadMore(currentSessionId!).finally(() => {
+            loadMoreInFlightRef.current = false;
+            useChatSearchStore.getState().setIsLoadingForSearch(false);
+        });
+    }, [isSearchOpen, searchQuery, searchFlags, currentSessionId, historyMeta, sync]);
+
     const resumeToLatestInstant = React.useCallback(() => {
         goToBottom('instant');
     }, [goToBottom]);
@@ -884,6 +933,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 	return (
 		<div className="relative flex flex-col h-full bg-background">
 			{returnToParentButton}
+			<ChatSearchWidget scrollRef={scrollRef} scrollToMessage={timelineController.scrollToMessage} />
 			<ChatViewport
 				key={currentSessionId}
 				currentSessionId={currentSessionId}
