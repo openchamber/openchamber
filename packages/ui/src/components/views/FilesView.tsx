@@ -2072,7 +2072,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     const { clientX, clientY } = event;
     editorTabLongPressTimerRef.current = setTimeout(() => {
       editorTabLongPressTriggeredRef.current = true;
-      setMobileOpenFilesMenuOpen(false);
+      setMobileOpenFilesMenuOpen(true);
       setEditorTabMenu({ path, x: clientX, y: clientY });
     }, 550);
   }, [clearEditorTabLongPress, isMobile]);
@@ -3249,7 +3249,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                             event.preventDefault();
                             event.stopPropagation();
                             clearEditorTabLongPress();
-                            setMobileOpenFilesMenuOpen(false);
+                            setMobileOpenFilesMenuOpen(true);
                             setEditorTabMenu({ path: file.path, x: event.clientX, y: event.clientY });
                           }}
                           onSelect={(event) => {
