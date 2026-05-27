@@ -27,6 +27,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     getActiveTunnelController,
     setActiveTunnelController,
     tunnelAuthController,
+    getSseFanIn,
   } = dependencies;
 
   const gracefulShutdown = async (options = {}) => {
@@ -41,6 +42,11 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     sessionRuntime.dispose();
     scheduledTasksRuntime?.stop?.();
 
+    const sseFanIn = getSseFanIn?.();
+    if (sseFanIn && typeof sseFanIn.destroy === 'function') {
+      try { sseFanIn.destroy(); } catch (err) { console.warn('Error destroying SseFanIn:', err); }
+    }
+
     const healthCheckInterval = getHealthCheckInterval();
     if (healthCheckInterval) {
       clearHealthCheckInterval(healthCheckInterval);
@@ -50,7 +56,8 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     if (terminalRuntime) {
       try {
         await terminalRuntime.shutdown();
-      } catch {
+      } catch (err) {
+        console.warn('Error shutting down terminal runtime:', err?.message || err);
       } finally {
         setTerminalRuntime(null);
       }
@@ -60,7 +67,8 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     if (messageStreamRuntime) {
       try {
         await messageStreamRuntime.close();
-      } catch {
+      } catch (err) {
+        console.warn('Error closing message stream runtime:', err?.message || err);
       } finally {
         setMessageStreamRuntime(null);
       }

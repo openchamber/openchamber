@@ -6,6 +6,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { isDesktopShell } from '@/lib/desktop';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { formatDirectoryName, cn } from '@/lib/utils';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useAllLiveSessions, useAllSessionStatuses } from '@/sync/sync-context';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -32,6 +33,10 @@ import { useProjectRepoStatus } from './sidebar/hooks/useProjectRepoStatus';
 import { useProjectSessionLists } from './sidebar/hooks/useProjectSessionLists';
 import { useSessionFolderCleanup } from './sidebar/hooks/useSessionFolderCleanup';
 import { useStickyProjectHeaders } from './sidebar/hooks/useStickyProjectHeaders';
+import { useServerList, useActiveServerId, useServerActions } from '@/sync/server-context';
+import { useServerSidebarSections } from './sidebar/hooks/useServerSidebarSections';
+import { SidebarServerHeader } from './sidebar/SidebarServerHeader';
+import { Icon } from '@/components/icon/Icon';
 import { getGitHubPrStatusKey, usePrVisualSummaryByKeys, useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
 import { ProjectEditDialog } from '@/components/layout/ProjectEditDialog';
 import { UpdateDialog } from '@/components/ui/UpdateDialog';
@@ -86,6 +91,7 @@ const PROJECT_ACTIVE_SESSION_STORAGE_KEY = 'oc.sessions.activeSessionByProject';
 const SESSION_EXPANDED_STORAGE_KEY = 'oc.sessions.expandedParents.v2';
 const LEGACY_SESSION_EXPANDED_STORAGE_KEY = 'oc.sessions.expandedParents';
 const SESSION_PINNED_STORAGE_KEY = 'oc.sessions.pinned';
+const SERVER_COLLAPSE_STORAGE_KEY = 'oc.sessions.serverCollapse';
 
 type PrVisualState = 'draft' | 'open' | 'blocked' | 'merged' | 'closed';
 
@@ -174,6 +180,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const addActiveNowSessionToStore = useActiveNowStore((state) => state.addSession);
   const pruneActiveNowEntriesInStore = useActiveNowStore((state) => state.prune);
   const [collapsedProjects, setCollapsedProjects] = React.useState<Set<string>>(new Set());
+  const [collapsedServers, setCollapsedServers] = React.useState<Set<string>>(new Set());
 
   const [projectRepoStatus, setProjectRepoStatus] = React.useState<Map<string, boolean | null>>(new Map());
   const [expandedSessionGroups, setExpandedSessionGroups] = React.useState<Set<string>>(new Set());
@@ -864,6 +871,53 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   const { getOrderedGroups } = useGroupOrdering(groupOrderByProject);
   const hasInitializedArchivedCollapseRef = React.useRef(false);
+
+  const servers = useServerList();
+  const activeServerId = useActiveServerId();
+  const { connectServer, disconnectServer } = useServerActions();
+  const serverSections = useServerSidebarSections({
+    servers,
+    projectSections,
+    collapsedServers,
+  });
+
+  const serverSectionsForRender = React.useMemo(() => {
+    if (!hasSessionSearchQuery) return serverSections;
+    const filteredByProjectId = new Map(sectionsForRender.map((s) => [s.project.id, s]));
+    return serverSections.map((ss) => ({
+      ...ss,
+      projectSections: ss.projectSections
+        .filter((ps) => filteredByProjectId.has(ps.project.id))
+        .map((ps) => filteredByProjectId.get(ps.project.id)!),
+    }));
+  }, [hasSessionSearchQuery, serverSections, sectionsForRender]);
+
+  React.useEffect(() => {
+    try {
+      const raw = safeStorage.getItem(SERVER_COLLAPSE_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          setCollapsedServers(new Set(parsed.filter((item) => typeof item === 'string')));
+        }
+      }
+    } catch { /* ignored */ }
+  }, [safeStorage]);
+
+  const toggleServerCollapse = React.useCallback((serverId: string) => {
+    setCollapsedServers((prev) => {
+      const next = new Set(prev);
+      if (next.has(serverId)) {
+        next.delete(serverId);
+      } else {
+        next.add(serverId);
+      }
+      try {
+        safeStorage.setItem(SERVER_COLLAPSE_STORAGE_KEY, JSON.stringify(Array.from(next)));
+      } catch { /* ignored */ }
+      return next;
+    });
+  }, [safeStorage]);
 
   React.useEffect(() => {
     if (hasInitializedArchivedCollapseRef.current || projectSections.length === 0) {
@@ -1571,42 +1625,96 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         openScheduledTasksDialog={() => setScheduledTasksDialogOpen(true)}
         selectionModeEnabled={selectionModeEnabled}
         onToggleSelectionMode={handleToggleSelectionMode}
+        servers={servers}
+        activeServerId={activeServerId}
       />
 
-      <SidebarProjectsList
-        topContent={topContent}
-        sectionsForRender={sectionsForSidebarRender}
-        projectSections={projectSections}
-        activeProjectId={activeProjectId}
-        showOnlyMainWorkspace={showOnlyMainWorkspace}
-        hasSessionSearchQuery={hasSessionSearchQuery}
-        emptyState={emptyState}
-        searchEmptyState={searchEmptyState}
-        renderGroupSessions={renderGroupSessions}
-        homeDirectory={homeDirectory}
-        collapsedProjects={collapsedProjects}
-        hideDirectoryControls={hideDirectoryControls}
-        projectRepoStatus={projectRepoStatus}
-        isDesktopShellRuntime={isDesktopShellRuntime}
-        stuckProjectHeaders={stuckProjectHeaders}
-        mobileVariant={mobileVariant}
-        alwaysShowActions={alwaysShowSidebarActions}
-        toggleProject={toggleProject}
-        setActiveProjectIdOnly={setActiveProjectIdOnly}
-        setActiveMainTab={setActiveMainTab}
-        setSessionSwitcherOpen={setSessionSwitcherOpen}
-        openNewSessionDraft={openNewSessionDraft}
-        openNewWorktreeDialog={openNewWorktreeDialog}
-        openProjectEditDialog={setEditingProjectDialogId}
-        removeProject={removeProject}
-        projectHeaderSentinelRefs={projectHeaderSentinelRefs}
-        reorderProjects={reorderProjects}
-        getOrderedGroups={getOrderedGroups}
-        setGroupOrderByProject={setGroupOrderByProject}
-        openSidebarMenuKey={openSidebarMenuKey}
-        setOpenSidebarMenuKey={setOpenSidebarMenuKey}
-        isInlineEditing={isInlineEditing}
-      />
+      <ScrollableOverlay useScrollShadow scrollShadowSize={96} outerClassName="flex-1 min-h-0" className={cn('space-y-1 pb-1 pl-2.5 pr-2', mobileVariant ? '' : '')}>
+        {topContent}
+        {serverSectionsForRender.length === 0 ? (
+          hasSessionSearchQuery ? searchEmptyState : emptyState
+        ) : (
+          serverSectionsForRender.map((serverSection) => (
+            <div key={serverSection.serverId}>
+              <SidebarServerHeader
+                serverId={serverSection.serverId}
+                label={serverSection.label}
+                type={serverSection.type}
+                status={serverSection.status}
+                errorMessage={serverSection.errorMessage}
+                isCollapsed={serverSection.isCollapsed}
+                isActive={serverSection.serverId === activeServerId}
+                hidden={servers.length <= 1}
+                onToggleCollapse={() => toggleServerCollapse(serverSection.serverId)}
+                onConnect={
+                  serverSection.type !== 'local'
+                    ? () => { connectServer(serverSection.serverId, serverSection.label, serverSection.type, serverSection.url).catch(() => {}); }
+                    : undefined
+                }
+                onDisconnect={
+                  serverSection.type !== 'local'
+                    ? () => { disconnectServer(serverSection.serverId); }
+                    : undefined
+                }
+              />
+              {!serverSection.isCollapsed && (
+                <div className={cn(
+                  serverSection.status === 'disconnected' && 'pointer-events-none opacity-50',
+                )}>
+                  <SidebarProjectsList
+                    serverId={serverSection.serverId}
+                    hideScrollWrapper
+                    topContent={undefined}
+                    sectionsForRender={serverSection.projectSections}
+                    projectSections={serverSection.projectSections}
+                    activeProjectId={activeProjectId}
+                    showOnlyMainWorkspace={showOnlyMainWorkspace}
+                    hasSessionSearchQuery={hasSessionSearchQuery}
+                    emptyState={emptyState}
+                    searchEmptyState={searchEmptyState}
+                    renderGroupSessions={renderGroupSessions}
+                    homeDirectory={homeDirectory}
+                    collapsedProjects={collapsedProjects}
+                    hideDirectoryControls={hideDirectoryControls}
+                    projectRepoStatus={projectRepoStatus}
+                    isDesktopShellRuntime={isDesktopShellRuntime}
+                    stuckProjectHeaders={stuckProjectHeaders}
+                    mobileVariant={mobileVariant}
+                    alwaysShowActions={alwaysShowSidebarActions}
+                    toggleProject={toggleProject}
+                    setActiveProjectIdOnly={setActiveProjectIdOnly}
+                    setActiveMainTab={setActiveMainTab}
+                    setSessionSwitcherOpen={setSessionSwitcherOpen}
+                    openNewSessionDraft={openNewSessionDraft}
+                    openNewWorktreeDialog={openNewWorktreeDialog}
+                    openProjectEditDialog={setEditingProjectDialogId}
+                    removeProject={removeProject}
+                    projectHeaderSentinelRefs={projectHeaderSentinelRefs}
+                    reorderProjects={reorderProjects}
+                    getOrderedGroups={getOrderedGroups}
+                    setGroupOrderByProject={setGroupOrderByProject}
+                    openSidebarMenuKey={openSidebarMenuKey}
+                    setOpenSidebarMenuKey={setOpenSidebarMenuKey}
+                    isInlineEditing={isInlineEditing}
+                  />
+                </div>
+              )}
+            </div>
+          ))
+        )}
+        {isDesktopShellRuntime && (
+          <div className="flex items-center justify-center py-2">
+            <button
+              type="button"
+              onClick={() => { setSettingsDialogOpen(true); }}
+              className="inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-md leading-none text-muted-foreground hover:text-foreground hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+              aria-label={t('sessions.sidebar.header.actions.addProject')}
+            >
+              <Icon name="server" className="h-4.5 w-4.5" />
+            </button>
+          </div>
+        )}
+      </ScrollableOverlay>
 
       {selectionModeEnabled && selectedIds.size > 0 ? (
         <BulkActionBar

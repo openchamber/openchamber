@@ -139,7 +139,7 @@ function resolveDirectoryForBlockingRequest(
     return null
   }
 
-  for (const [directory, store] of stores.children) {
+  for (const { directory, store } of stores.getAllEntries()) {
     const state = store.getState()
     const requestMap = type === "permission" ? state.permission : state.question
     for (const requests of Object.values(requestMap) as Array<Array<{ id: string }> | undefined>) {
@@ -154,7 +154,7 @@ function resolveDirectoryForBlockingRequest(
     return sessionDirectory
   }
 
-  for (const [directory, store] of stores.children) {
+  for (const { directory, store } of stores.getAllEntries()) {
     const state = store.getState()
     if (
       state.session.some((session) => session.id === sessionId)
@@ -241,7 +241,7 @@ export async function deleteSession(sessionId: string, _options?: Record<string,
   // If the session wasn't in the resolved directory (e.g. archived session
   // whose original child store was disposed), search all child stores.
   if (!snapshot && _childStores) {
-    for (const [dir, store] of _childStores.children.entries()) {
+    for (const { directory: dir, store } of _childStores.getAllEntries()) {
       const current = store.getState()
       const sessions = [...current.session]
       const result = Binary.search(sessions, sessionId, (s) => s.id)

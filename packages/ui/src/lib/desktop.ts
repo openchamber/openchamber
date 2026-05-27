@@ -177,6 +177,9 @@ export type DesktopSettings = {
   sttSilenceThresholdDb?: number;
   sttSilenceHoldMs?: number;
   sttTranscribeOnStop?: boolean;
+
+  // Multi-server: IDs of servers to auto-register on startup
+  desktopActiveServerIds?: string[];
 };
 
 type TauriGlobal = {

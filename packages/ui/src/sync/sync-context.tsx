@@ -40,6 +40,9 @@ import type { QuestionRequest } from "@/types/question"
 import * as sessionActions from "./session-actions"
 import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./materialization"
 import { setSessionPrefetch } from "./session-prefetch-cache"
+import type { ServerTagged } from "./server-tagged"
+import { unwrapServerEvent } from "./server-tagged"
+import { useServerStore } from "./server-context"
 
 // ---------------------------------------------------------------------------
 // Context
@@ -67,7 +70,7 @@ function useSyncSystem() {
 }
 
 function getLiveStates(childStores: ChildStoreManager): State[] {
-  return Array.from(childStores.children.values(), (store) => store.getState())
+  return childStores.getAllStores().map((store) => store.getState())
 }
 
 function useLiveSyncSelector<T>(selector: (states: State[]) => T, isEqual: (left: T, right: T) => boolean = Object.is): T {
@@ -684,7 +687,7 @@ const findSessionInChildStores = (
   childStores: ChildStoreManager,
   routingIndex: EventRoutingIndex,
 ): string | null => {
-  for (const [dir, store] of childStores.children) {
+    for (const { directory: dir, store } of childStores.getAllEntries()) {
     const state = store.getState()
     if (
       state.session.some((s) => s.id === sessionID)
@@ -765,7 +768,7 @@ const resolveDirectoryFromRoutingIndex = (
     }
 
     // Scan child stores for a store that has parts for this message
-    for (const [dir, store] of childStores.children) {
+  for (const { directory: dir, store } of childStores.getAllEntries()) {
       if (Object.prototype.hasOwnProperty.call(store.getState().part, messageID)) {
         return dir
       }
@@ -776,9 +779,10 @@ const resolveDirectoryFromRoutingIndex = (
   if (
     (sessionID || messageID)
     && (!normalizedDirectory || normalizedDirectory === "global")
-    && childStores.children.size === 1
+    && childStores.getAllStores().length === 1
   ) {
-    const onlyDirectory = childStores.children.keys().next().value
+    const onlyEntry = childStores.getAllEntries()[0]
+    const onlyDirectory = onlyEntry?.directory
     if (typeof onlyDirectory === "string" && onlyDirectory.length > 0) {
       return onlyDirectory
     }
@@ -1098,10 +1102,21 @@ async function resyncDirectoryAfterReconnect(
 
 function handleEvent(
   rawDirectory: string,
-  payload: Event,
+  rawPayload: Event,
   childStores: ChildStoreManager,
   routingIndex: EventRoutingIndex,
 ) {
+  let serverId: string
+  let payload: Event
+  try {
+    const result = unwrapServerEvent(rawPayload as ServerTagged<Event>)
+    serverId = result.serverId
+    payload = result.event
+  } catch (err) {
+    console.error('[handleEvent] Failed to unwrap server-tagged event:', (err as { message?: string })?.message || err)
+    return
+  }
+
   const directory = resolveDirectoryFromRoutingIndex(routingIndex, rawDirectory, payload, childStores)
 
   // Global events
@@ -1119,17 +1134,26 @@ function handleEvent(
       useGlobalSyncStore.setState({
         projects: applyGlobalProject(current, result.project).projects,
       })
+    } else if (result.type === "server.status") {
+      const state = useServerStore.getState()
+      const existing = state.servers.find((s) => s.id === serverId)
+      state.upsertServer({
+        id: serverId,
+        label: existing?.label ?? serverId,
+        type: existing?.type ?? "local",
+        status: result.status,
+        errorMessage: "errorMessage" in result ? (result as { errorMessage?: string }).errorMessage : existing?.errorMessage,
+        url: existing?.url ?? "",
+      })
     }
     // On server.connected / global.disposed, re-bootstrap all directories
     // but only if not during recent boot
     if (payload.type === "server.connected" || payload.type === "global.disposed") {
       if (!recent) {
-        for (const dir of childStores.children.keys()) {
-          const store = childStores.getChild(dir)
-          if (store && store.getState().status !== "loading") {
-            // Mark as loading to trigger re-bootstrap
+        for (const { serverId: sId, directory: dir, store } of childStores.getAllEntries()) {
+          if (store.getState().status !== "loading") {
             store.setState({ status: "loading" as const })
-            childStores.ensureChild(dir)
+            childStores.getOrCreateChildStore(sId, dir)
           }
         }
       }
@@ -1138,7 +1162,7 @@ function handleEvent(
   }
 
   // Directory events
-  let store = childStores.getChild(directory)
+  let store = childStores.getOrCreateChildStore(serverId, directory)
   let resolvedDirectory = directory
 
   if (!store) {
@@ -1149,7 +1173,7 @@ function handleEvent(
     if (sessionID) {
       const fallbackDir = findSessionInChildStores(sessionID, childStores, routingIndex)
       if (fallbackDir) {
-        store = childStores.getChild(fallbackDir)
+        store = childStores.getOrCreateChildStore(serverId, fallbackDir)
         resolvedDirectory = fallbackDir
       }
     }
@@ -1169,7 +1193,7 @@ function handleEvent(
     return
   }
 
-  childStores.mark(resolvedDirectory)
+  childStores.mark(serverId, resolvedDirectory)
 
   if (payload.type === "permission.asked") {
     const permission = payload.properties as PermissionRequest
@@ -1414,20 +1438,22 @@ export function SyncProvider(props: {
     [childStores, props.sdk, props.directory],
   )
 
-  const triggerDirectoryResync = useCallback((directory: string) => {
-    const store = childStores.children.get(directory)
+  const triggerDirectoryResync = useCallback((directory: string, serverId?: string) => {
+    const effectiveServerId = serverId ?? "local"
+    const store = childStores.getChildByServer(effectiveServerId, directory)
     if (!store) return
     const resyncing = resyncingDirectoriesRef.current
-    if (resyncing.has(directory)) return
+    const resyncKey = `${effectiveServerId}:${directory}`
+    if (resyncing.has(resyncKey)) return
 
     lastFullResyncAtByDirectoryRef.current.set(directory, Date.now())
-    resyncing.add(directory)
+    resyncing.add(resyncKey)
     void resyncDirectoryAfterReconnect(directory, store, routingIndex)
       .catch(() => {
         // Transient failure — the watchdog, next SSE event, or reconnect will catch up.
       })
       .finally(() => {
-        resyncing.delete(directory)
+        resyncing.delete(resyncKey)
       })
   }, [childStores, routingIndex])
 
@@ -1561,7 +1587,8 @@ export function SyncProvider(props: {
             dispatchOpenCodeUpdateAvailable({ version })
           }
         }
-        handleEvent(directory, payload, childStores, routingIndex)
+        const taggedPayload: ServerTagged<Event> = { ...payload, serverId: typeof (payload as Record<string, unknown>).serverId === 'string' ? (payload as Record<string, unknown>).serverId as string : 'local' }
+        handleEvent(directory, taggedPayload as unknown as Event, childStores, routingIndex)
       },
       onReconnect: () => {
         useConfigStore.setState({
@@ -1572,8 +1599,8 @@ export function SyncProvider(props: {
         if (isRecentBoot()) {
           return
         }
-        for (const dir of childStores.children.keys()) {
-          triggerDirectoryResync(dir)
+        for (const { serverId: sId, directory: dir } of childStores.getAllEntries()) {
+          triggerDirectoryResync(dir, sId)
         }
       },
       onDisconnect: (reason) => {
@@ -1592,8 +1619,8 @@ export function SyncProvider(props: {
           hasEverConnected: true,
           connectionPhase: "connected",
         })
-        for (const dir of childStores.children.keys()) {
-          triggerDirectoryResync(dir)
+        for (const { serverId: sId, directory: dir } of childStores.getAllEntries()) {
+          triggerDirectoryResync(dir, sId)
         }
       },
     })
@@ -1614,6 +1641,7 @@ export function SyncProvider(props: {
       directory: string,
       store: StoreApi<DirectoryStore>,
       candidateSessionIds: string[],
+      serverId: string,
     ) => {
       const polling = statusPollingDirectoriesRef.current
       if (polling.has(directory)) return
@@ -1626,7 +1654,7 @@ export function SyncProvider(props: {
           needsSnapshotAfterStatusPoll(before, sessionId, statuses[sessionId])
         ))
         if (needsSnapshot) {
-          triggerDirectoryResync(directory)
+          triggerDirectoryResync(directory, serverId)
         }
       } finally {
         polling.delete(directory)
@@ -1640,7 +1668,7 @@ export function SyncProvider(props: {
         .then(() => {
           if (stopped) return
           const now = Date.now()
-          for (const [directory, store] of childStores.children.entries()) {
+          for (const { serverId: sId, directory, store } of childStores.getAllEntries()) {
             const state = store.getState()
             const candidateSessionIds = getActiveSessionCandidateIds(directory, state)
             if (candidateSessionIds.length === 0) {
@@ -1657,7 +1685,7 @@ export function SyncProvider(props: {
             const lastStatusPollAt = lastStatusPollAtByDirectoryRef.current.get(directory) ?? 0
             if (now - lastStatusPollAt >= ACTIVE_SESSION_STATUS_POLL_INTERVAL_MS) {
               lastStatusPollAtByDirectoryRef.current.set(directory, now)
-              void pollDirectoryStatuses(directory, store, candidateSessionIds).catch(() => undefined)
+              void pollDirectoryStatuses(directory, store, candidateSessionIds, sId).catch(() => undefined)
             }
 
             const lastActiveEventAt = lastActiveEventAtByDirectoryRef.current.get(directory) ?? now
@@ -1667,7 +1695,7 @@ export function SyncProvider(props: {
               && now - lastFullResyncAt >= ACTIVE_SESSION_FULL_RESYNC_COOLDOWN_MS
             ) {
               pipelineReconnectRef.current?.("active_stream_stale")
-              triggerDirectoryResync(directory)
+              triggerDirectoryResync(directory, sId)
             }
           }
         })

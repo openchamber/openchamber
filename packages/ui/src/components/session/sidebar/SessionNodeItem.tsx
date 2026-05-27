@@ -61,7 +61,7 @@ type Props = {
   handleSaveEdit: () => void;
   handleCancelEdit: () => void;
   toggleParent: (expansionKey: string) => void;
-  handleSessionSelect: (sessionId: string, sessionDirectory: string | null, isMissingDirectory: boolean, projectId?: string | null) => void;
+  handleSessionSelect: (sessionId: string, sessionDirectory: string | null, isMissingDirectory: boolean, projectId?: string | null, serverId?: string | null) => void;
   handleSessionDoubleClick: (sessionId: string, sessionTitle: string) => void;
   togglePinnedSession: (sessionId: string) => void;
   handleShareSession: (session: Session) => void;
@@ -683,7 +683,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       toggleRowSelected(session.id, sessionDirectory ?? null, collectNodeDescendantIds(node));
       return;
     }
-    handleSessionSelect(session.id, sessionDirectory, isMissingDirectory, projectId);
+    handleSessionSelect(session.id, sessionDirectory, isMissingDirectory, projectId, (session as unknown as { serverId?: string }).serverId ?? null);
   };
 
   const handleRowMouseDown = (event: React.MouseEvent<HTMLButtonElement>) => {

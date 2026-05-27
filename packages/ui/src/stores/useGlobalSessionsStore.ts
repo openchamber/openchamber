@@ -1,29 +1,28 @@
 import { create } from 'zustand';
 import type { Session } from '@opencode-ai/sdk/v2';
-import { opencodeClient } from '@/lib/opencode/client';
-import { listGlobalSessionPages } from '@/stores/globalSessions';
+
+type GlobalSessionEntry = Session & { serverId?: string };
 
 type GlobalSessionsStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 type LoadResult = {
-  activeSessions: Session[];
-  archivedSessions: Session[];
+  activeSessions: GlobalSessionEntry[];
+  archivedSessions: GlobalSessionEntry[];
 };
 
 type GlobalSessionsState = {
-  activeSessions: Session[];
-  archivedSessions: Session[];
-  sessionsByDirectory: Map<string, Session[]>;
+  activeSessions: GlobalSessionEntry[];
+  archivedSessions: GlobalSessionEntry[];
+  sessionsByDirectory: Map<string, Map<string, GlobalSessionEntry[]>>;
   hasLoaded: boolean;
   status: GlobalSessionsStatus;
   loadSessions: (fallbackActive?: Session[]) => Promise<LoadResult>;
-  applySnapshot: (activeSessions: Session[], archivedSessions: Session[], status?: GlobalSessionsStatus) => void;
-  upsertSession: (session: Session) => void;
+  applySnapshot: (activeSessions: GlobalSessionEntry[], archivedSessions: GlobalSessionEntry[], status?: GlobalSessionsStatus) => void;
+  upsertSession: (session: GlobalSessionEntry | Session) => void;
   removeSessions: (ids: Iterable<string>) => void;
   archiveSessions: (ids: Iterable<string>, archivedAt?: number) => void;
+  removeServerEntries: (serverId: string) => void;
 };
-
-const PAGE_SIZE = 500;
 
 let inflightLoad: Promise<LoadResult> | null = null;
 
@@ -52,24 +51,30 @@ export const resolveGlobalSessionDirectory = (session: Session): string | null =
     ?? normalizePath(record.project?.worktree ?? null);
 };
 
-const buildSessionsByDirectory = (sessions: Session[]): Map<string, Session[]> => {
-  const next = new Map<string, Session[]>();
+const buildSessionsByDirectory = (sessions: GlobalSessionEntry[]): Map<string, Map<string, GlobalSessionEntry[]>> => {
+  const next = new Map<string, Map<string, GlobalSessionEntry[]>>();
   for (const session of sessions) {
+    const serverId = session.serverId ?? "local";
     const directory = resolveGlobalSessionDirectory(session);
     if (!directory) {
       continue;
     }
-    const existing = next.get(directory);
+    let serverMap = next.get(serverId);
+    if (!serverMap) {
+      serverMap = new Map();
+      next.set(serverId, serverMap);
+    }
+    const existing = serverMap.get(directory);
     if (existing) {
       existing.push(session);
       continue;
     }
-    next.set(directory, [session]);
+    serverMap.set(directory, [session]);
   }
   return next;
 };
 
-const getSessionSignature = (session: Session): string => {
+const getSessionSignature = (session: GlobalSessionEntry): string => {
   return [
     session.id,
     session.title ?? '',
@@ -78,10 +83,11 @@ const getSessionSignature = (session: Session): string => {
     session.time?.archived ?? 0,
     session.share?.url ?? '',
     resolveGlobalSessionDirectory(session) ?? '',
+    session.serverId ?? '',
   ].join(':');
 };
 
-const sameSessionList = (prev: Session[], next: Session[]): boolean => {
+const sameSessionList = (prev: GlobalSessionEntry[], next: GlobalSessionEntry[]): boolean => {
   if (prev === next) {
     return true;
   }
@@ -96,7 +102,7 @@ const sameSessionList = (prev: Session[], next: Session[]): boolean => {
   return true;
 };
 
-const upsertSessionIntoList = (sessions: Session[], session: Session): Session[] => {
+const upsertSessionIntoList = (sessions: GlobalSessionEntry[], session: GlobalSessionEntry): GlobalSessionEntry[] => {
   const index = sessions.findIndex((candidate) => candidate.id === session.id);
   if (index === -1) {
     return [session, ...sessions];
@@ -109,7 +115,7 @@ const upsertSessionIntoList = (sessions: Session[], session: Session): Session[]
   return next;
 };
 
-const mergeSessionLists = (existing: Session[], incoming?: Session[]): Session[] => {
+const mergeSessionLists = (existing: GlobalSessionEntry[], incoming?: GlobalSessionEntry[]): GlobalSessionEntry[] => {
   if (!incoming || incoming.length === 0) {
     return existing;
   }
@@ -123,7 +129,7 @@ const mergeSessionLists = (existing: Session[], incoming?: Session[]): Session[]
     byId.set(session.id, session);
   });
 
-  const ordered: Session[] = [];
+  const ordered: GlobalSessionEntry[] = [];
   const seen = new Set<string>();
 
   existing.forEach((session) => {
@@ -151,8 +157,8 @@ const mergeSessionLists = (existing: Session[], incoming?: Session[]): Session[]
 
 const applySnapshot = (
   state: GlobalSessionsState,
-  activeSessions: Session[],
-  archivedSessions: Session[],
+  activeSessions: GlobalSessionEntry[],
+  archivedSessions: GlobalSessionEntry[],
   status: GlobalSessionsStatus,
 ): Partial<GlobalSessionsState> | GlobalSessionsState => {
   const nextActiveSessions = sameSessionList(state.activeSessions, activeSessions)
@@ -206,35 +212,44 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       const current = get();
 
       try {
-        const sdk = opencodeClient.getSdkClient();
         const [activeResult, archivedResult] = await Promise.allSettled([
-          listGlobalSessionPages(sdk, { archived: false, pageSize: PAGE_SIZE }),
-          listGlobalSessionPages(sdk, { archived: true, pageSize: PAGE_SIZE }),
+          fetch('/api/servers/all/sessions'),
+          fetch('/api/servers/all/sessions?archived=true'),
         ]);
 
-        const fallbackSnapshot = mergeSessionLists(current.activeSessions, fallbackActive);
-        const nextActiveSessions = activeResult.status === 'fulfilled'
-          ? activeResult.value
-          : fallbackSnapshot;
-        const nextArchivedSessions = archivedResult.status === 'fulfilled'
-          ? archivedResult.value
-          : current.archivedSessions;
+        let nextActiveSessions: GlobalSessionEntry[] = [];
+        let nextArchivedSessions: GlobalSessionEntry[] = [];
 
-        if (activeResult.status === 'rejected') {
-          console.warn('[GlobalSessions] Failed to load active sessions, preserving existing snapshot with fallback merge:', activeResult.reason);
+        if (activeResult.status === 'fulfilled' && activeResult.value.ok) {
+          const activeJson = await activeResult.value.json() as { sessions?: GlobalSessionEntry[] };
+          nextActiveSessions = activeJson.sessions ?? [];
+        } else {
+          console.warn('[GlobalSessions] Failed to load active sessions, using fallback:', activeResult.status === 'fulfilled' ? `HTTP ${activeResult.value.status}` : activeResult.reason);
+          const fallbackSnapshot = mergeSessionLists(
+            current.activeSessions,
+            fallbackActive as unknown as GlobalSessionEntry[],
+          );
+          nextActiveSessions = fallbackSnapshot;
         }
-        if (archivedResult.status === 'rejected') {
-          console.warn('[GlobalSessions] Failed to load archived sessions, preserving current snapshot:', archivedResult.reason);
+
+        if (archivedResult.status === 'fulfilled' && archivedResult.value.ok) {
+          const archivedJson = await archivedResult.value.json() as { sessions?: GlobalSessionEntry[] };
+          nextArchivedSessions = archivedJson.sessions ?? [];
+        } else {
+          console.warn('[GlobalSessions] Failed to load archived sessions, preserving current snapshot:', archivedResult.status === 'fulfilled' ? `HTTP ${archivedResult.value.status}` : archivedResult.reason);
+          nextArchivedSessions = current.archivedSessions;
         }
 
         set((state) => applySnapshot(state, nextActiveSessions, nextArchivedSessions, 'ready'));
         return { activeSessions: nextActiveSessions, archivedSessions: nextArchivedSessions };
       } catch (error) {
-        const nextActiveSessions = mergeSessionLists(current.activeSessions, fallbackActive);
-        const nextArchivedSessions = current.archivedSessions;
+        const fallbackSnapshot = mergeSessionLists(
+          current.activeSessions,
+          fallbackActive as unknown as GlobalSessionEntry[],
+        );
         console.warn('[GlobalSessions] Failed to load sessions, using fallback snapshot:', error);
-        set((state) => applySnapshot(state, nextActiveSessions, nextArchivedSessions, 'error'));
-        return { activeSessions: nextActiveSessions, archivedSessions: nextArchivedSessions };
+        set((state) => applySnapshot(state, fallbackSnapshot, current.archivedSessions, 'error'));
+        return { activeSessions: fallbackSnapshot, archivedSessions: current.archivedSessions };
       } finally {
         inflightLoad = null;
       }
@@ -302,7 +317,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     }
 
     set((state) => {
-      const movedSessions: Session[] = [];
+      const movedSessions: GlobalSessionEntry[] = [];
       const nextActiveSessions = state.activeSessions.filter((session) => {
         if (!idSet.has(session.id)) {
           return true;
@@ -327,6 +342,20 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       return {
         activeSessions: nextActiveSessions,
         archivedSessions: [...movedSessions, ...remainingArchivedSessions],
+        sessionsByDirectory: buildSessionsByDirectory(nextActiveSessions),
+      };
+    });
+  },
+
+  removeServerEntries: (serverId) => {
+    set((state) => {
+      const prevCount = state.activeSessions.length + state.archivedSessions.length;
+      const nextActiveSessions = state.activeSessions.filter((s) => s.serverId !== serverId);
+      const nextArchivedSessions = state.archivedSessions.filter((s) => s.serverId !== serverId);
+      if (nextActiveSessions.length + nextArchivedSessions.length === prevCount) return state;
+      return {
+        activeSessions: nextActiveSessions,
+        archivedSessions: nextArchivedSessions,
         sessionsByDirectory: buildSessionsByDirectory(nextActiveSessions),
       };
     });

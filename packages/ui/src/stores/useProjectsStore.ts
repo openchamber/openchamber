@@ -232,6 +232,9 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
     if (typeof candidate.sidebarCollapsed === 'boolean') {
       project.sidebarCollapsed = candidate.sidebarCollapsed;
     }
+    if (typeof candidate.serverId === 'string' && candidate.serverId.trim().length > 0) {
+      project.serverId = candidate.serverId.trim();
+    }
     result.push(project);
   }
 
@@ -314,6 +317,7 @@ const getVSCodeWorkspaceProject = (): { projects: ProjectEntry[]; activeProjectI
     label: deriveProjectLabel(normalizedPath),
     addedAt: Date.now(),
     lastOpenedAt: Date.now(),
+    serverId: 'local',
   };
 
   if (streamDebugEnabled()) {
@@ -374,6 +378,7 @@ export const useProjectsStore = create<ProjectsStore>()(
       const now = Date.now();
       const label = options?.label?.trim() || deriveProjectLabel(normalizedPath);
       const id = createProjectIdFromPath(normalizedPath);
+      const currentServerId = useDirectoryStore.getState().currentServerId || 'local';
       const entry: ProjectEntry = {
         id,
         path: normalizedPath,
@@ -381,6 +386,7 @@ export const useProjectsStore = create<ProjectsStore>()(
         color: pickAutoColor(get().projects),
         addedAt: now,
         lastOpenedAt: now,
+        serverId: currentServerId,
       };
 
       const nextProjects = [...get().projects, entry];

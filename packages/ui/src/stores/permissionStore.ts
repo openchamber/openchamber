@@ -111,7 +111,7 @@ const collectPendingFromSyncStores = (): Array<{ id: string; sessionID: string }
     try {
         const stores = getSyncChildStores();
         const pending: Array<{ id: string; sessionID: string }> = [];
-        for (const store of stores.children.values()) {
+        for (const store of stores.getAllStores()) {
             const permissionMap = store.getState().permission ?? {};
             for (const [sessionId, entries] of Object.entries(permissionMap)) {
                 for (const permission of entries ?? []) {

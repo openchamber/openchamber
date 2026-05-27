@@ -646,6 +646,16 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
       )
     );
   }
+  if (Array.isArray(candidate.desktopActiveServerIds)) {
+    result.desktopActiveServerIds = Array.from(
+      new Set(
+        candidate.desktopActiveServerIds.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
+      )
+    );
+    if (!result.desktopActiveServerIds.includes('local')) {
+      result.desktopActiveServerIds.unshift('local');
+    }
+  }
   if (typeof candidate.showReasoningTraces === 'boolean') {
     result.showReasoningTraces = candidate.showReasoningTraces;
   }

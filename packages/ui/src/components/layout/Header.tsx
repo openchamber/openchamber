@@ -67,6 +67,7 @@ import { desktopHostsGet, locationMatchesHost, redactSensitiveUrl } from '@/lib/
 import { resolveSessionDiffStats } from '@/components/session/sidebar/utils';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
+import { useServerList, useActiveServerId } from '@/sync/server-context';
 import type { Session } from '@opencode-ai/sdk/v2/client';
 import type { IconName } from "@/components/icon/icons";
 
@@ -792,10 +793,20 @@ export const Header: React.FC<HeaderProps> = ({
   const setQuotaDisplayMode = useQuotaStore((state) => state.setDisplayMode);
 
   const { isMobile } = useDeviceInfo();
+  const servers = useServerList();
+  const activeServerId = useActiveServerId();
   const githubAuthStatus = useGitHubAuthStore((state) => state.status);
   const setGitHubAuthStatus = useGitHubAuthStore((state) => state.setStatus);
 
   const headerRef = React.useRef<HTMLElement | null>(null);
+
+  const activeServerLabel = React.useMemo(() => {
+    if (servers.length <= 1) return null;
+    const active = servers.find((s) => s.id === activeServerId);
+    return active?.label ?? null;
+  }, [servers, activeServerId]);
+
+  const [isServerLabelCollapsed, setIsServerLabelCollapsed] = React.useState(false);
 
   const [isDesktopApp, setIsDesktopApp] = React.useState<boolean>(() => {
     if (typeof window === 'undefined') {
@@ -2033,6 +2044,21 @@ export const Header: React.FC<HeaderProps> = ({
             className="app-region-no-drag mr-3 flex min-w-0 flex-col items-start rounded-md px-1 py-0.5 -my-0.5 text-left transition-colors hover:bg-interactive-hover/60 focus-visible:outline-none focus-visible:bg-interactive-hover/60"
           >
             <span className="truncate typography-ui-label text-[14px] font-normal leading-tight text-foreground max-w-full">
+              {activeServerLabel && (
+                <span
+                  className="inline-flex items-center gap-0.5 mr-1.5 cursor-pointer select-none"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsServerLabelCollapsed((v) => !v);
+                  }}
+                  title={isServerLabelCollapsed ? activeServerLabel : undefined}
+                >
+                  <Icon name="server" className="h-3.5 w-3.5 text-muted-foreground/70 inline-block align-middle" />
+                  <span className="text-muted-foreground/70 text-[12px]">
+                    {isServerLabelCollapsed ? '' : `[${activeServerLabel}]`}
+                  </span>
+                </span>
+              )}
               {isNewSessionDraftOpen ? t('sessions.switcher.draftTitle') : currentSessionTitle}
             </span>
             {(activeProjectLabel || currentBranchLabel || (!isNewSessionDraftOpen && (hasNonZeroSessionChanges || worktreeBadgeKind))) ? (
