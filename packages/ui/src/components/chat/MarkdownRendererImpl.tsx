@@ -199,6 +199,7 @@ const downloadFile = (filename: string, content: string, mimeType: string) => {
   URL.revokeObjectURL(url);
 };
 
+
 // Table copy button with dropdown
 const TableCopyButton: React.FC<{ tableRef: React.RefObject<HTMLDivElement | null> }> = ({ tableRef }) => {
   const { t } = useI18n();
@@ -216,12 +217,18 @@ const TableCopyButton: React.FC<{ tableRef: React.RefObject<HTMLDivElement | nul
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const handleCopy = async (format: 'csv' | 'tsv') => {
+  const handleCopy = async (format: 'csv' | 'tsv' | 'markdown') => {
     const tableEl = tableRef.current?.querySelector('table');
     if (!tableEl) return;
     
     const data = extractTableData(tableEl);
-    const content = format === 'csv' ? tableToCSV(data) : tableToTSV(data);
+    const content =
+      format === "csv"
+        ? tableToCSV(data)
+        : format === "tsv"
+          ? tableToTSV(data)
+          : tableToMarkdown(data);
+
 
     try {
       await navigator.clipboard.write([
@@ -250,23 +257,33 @@ const TableCopyButton: React.FC<{ tableRef: React.RefObject<HTMLDivElement | nul
       <button
         onClick={() => setShowMenu(!showMenu)}
         className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
-        title={t('markdownRenderer.table.actions.copyTitle')}
+        title={t("markdownRenderer.table.actions.copyTitle")}
       >
-        {copied ? <Icon name="check" className="size-3.5" /> : <Icon name="file-copy" className="size-3.5" />}
+        {copied ? (
+          <Icon name="check" className="size-3.5" />
+        ) : (
+          <Icon name="file-copy" className="size-3.5" />
+        )}
       </button>
       {showMenu && (
         <div className="absolute top-full right-0 z-10 mt-1 min-w-[100px] overflow-hidden rounded-md border border-border bg-background shadow-none">
           <button
             className="w-full px-3 py-1.5 text-left text-sm transition-colors hover:bg-interactive-hover/40"
-            onClick={() => handleCopy('csv')}
+            onClick={() => handleCopy("csv")}
           >
             CSV
           </button>
           <button
             className="w-full px-3 py-1.5 text-left text-sm transition-colors hover:bg-interactive-hover/40"
-            onClick={() => handleCopy('tsv')}
+            onClick={() => handleCopy("tsv")}
           >
             TSV
+          </button>
+          <button
+            className="w-full px-3 py-1.5 text-left text-sm transition-colors hover:bg-interactive-hover/40"
+            onClick={() => handleCopy("markdown")}
+          >
+            Markdown
           </button>
         </div>
       )}
