@@ -92,8 +92,17 @@ const sanitizeBranchNameInput = (value: string): string => {
     .replace(/[-/]+$/, '');
 };
 
-const getRemoteBranchDisplayName = (branch: string): string => {
-  return branch.startsWith('origin/') ? branch.slice('origin/'.length) : branch;
+const getRemoteBranchDisplayName = (branch: string, remoteNames?: string[]): string => {
+  if (remoteNames) {
+    for (const name of remoteNames) {
+      if (branch.startsWith(`${name}/`)) {
+        return branch.slice(name.length + 1);
+      }
+    }
+    return branch;
+  }
+  const slashIndex = branch.indexOf('/');
+  return slashIndex > 0 ? branch.slice(slashIndex + 1) : branch;
 };
 
 export const BranchSelector: React.FC<BranchSelectorProps> = ({
@@ -142,6 +151,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
 
   const hasMultipleRemotes = remotes.length > 1;
   const canManageBranches = Boolean(onRename || onDelete || onSetUpstream);
+  const remoteNames = React.useMemo(() => remotes.map((remote) => remote.name), [remotes]);
 
   const sanitizedNewBranch = React.useMemo(
     () => sanitizeBranchNameInput(newBranchName),
@@ -332,8 +342,9 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
     if (!upstreamBranch || !onSetUpstream || !upstreamValue.trim() || isSettingUpstream) return;
     const normalized = upstreamValue.trim().replace(/^remotes\//, '');
     const slashIndex = normalized.indexOf('/');
-    const remote = slashIndex > 0 ? normalized.slice(0, slashIndex) : remotes[0]?.name || 'origin';
-    const targetBranch = slashIndex > 0 ? normalized.slice(slashIndex + 1) : normalized;
+    if (slashIndex <= 0) return;
+    const remote = normalized.slice(0, slashIndex);
+    const targetBranch = normalized.slice(slashIndex + 1);
     if (!remote || !targetBranch) return;
     setIsSettingUpstream(true);
     try {
@@ -647,7 +658,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
                   className="justify-start text-left"
                 >
                   <span className="flex min-w-0 flex-1 typography-ui-label text-foreground">
-                    <BranchNameMarquee name={getRemoteBranchDisplayName(branch)} />
+                    <BranchNameMarquee name={getRemoteBranchDisplayName(branch, remoteNames)} />
                   </span>
                 </CommandItem>
               ))}
@@ -787,7 +798,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
                     }
                   }}
                   className="min-w-0 flex-1 bg-transparent typography-ui-label outline-none placeholder:text-muted-foreground"
-                  placeholder={upstreamValue ? getRemoteBranchDisplayName(upstreamValue) : t('gitView.branch.upstreamSearchPlaceholder')}
+                  placeholder={upstreamValue ? getRemoteBranchDisplayName(upstreamValue, remoteNames) : t('gitView.branch.upstreamSearchPlaceholder')}
                   role="combobox"
                   aria-expanded="true"
                 />
@@ -795,7 +806,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
             ) : (
               <Button type="button" variant="outline" size="sm" className="h-9 w-full min-w-0 justify-start text-left normal-case" onClick={handleToggleUpstreamDropdown} disabled={upstreamOptions.length === 0 || isSettingUpstream} aria-expanded={upstreamDropdownOpen}>
                 {upstreamValue ? (
-                  <BranchNameMarquee name={getRemoteBranchDisplayName(upstreamValue)} />
+                  <BranchNameMarquee name={getRemoteBranchDisplayName(upstreamValue, remoteNames)} />
                 ) : (
                   <span className="min-w-0 truncate text-muted-foreground">{t('gitView.branch.upstreamPlaceholder')}</span>
                 )}
@@ -807,7 +818,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
                 <div className="max-h-32 overflow-y-auto">
                   {filteredUpstreamOptions.map((branch) => (
                     <Button key={branch} type="button" variant="ghost" size="sm" className="w-full min-w-0 justify-start text-left normal-case" title={branch} onClick={() => handleSelectUpstream(branch)}>
-                      <BranchNameMarquee name={getRemoteBranchDisplayName(branch)} />
+                      <BranchNameMarquee name={getRemoteBranchDisplayName(branch, remoteNames)} />
                       {branch === upstreamValue ? <Icon name="check" className="size-4 shrink-0" /> : null}
                     </Button>
                   ))}
