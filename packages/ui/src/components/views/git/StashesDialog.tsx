@@ -15,8 +15,9 @@ interface StashesDialogProps {
   onOpenChange: (open: boolean) => void;
   directory: string | null;
   hasUncommittedChanges: boolean;
+  hasStagedChanges?: boolean;
   uncommittedFileCount: number;
-  onChanged?: () => void | Promise<void>;
+  onChanged?: (change?: { affectsIndex?: boolean }) => void | Promise<void>;
 }
 
 type StashOperation = 'create' | `apply:${string}` | `pop:${string}` | `drop:${string}` | null;
@@ -26,6 +27,7 @@ export const StashesDialog: React.FC<StashesDialogProps> = ({
   onOpenChange,
   directory,
   hasUncommittedChanges,
+  hasStagedChanges = false,
   uncommittedFileCount,
   onChanged,
 }) => {
@@ -73,9 +75,9 @@ export const StashesDialog: React.FC<StashesDialogProps> = ({
     return stashes.filter((stash) => `${stash.ref} ${stash.message} ${stash.relativeTime}`.toLowerCase().includes(normalized));
   }, [query, stashes]);
 
-  const refreshAfterChange = React.useCallback(async () => {
+  const refreshAfterChange = React.useCallback(async (change?: { affectsIndex?: boolean }) => {
     await load();
-    await onChanged?.();
+    await onChanged?.(change);
   }, [load, onChanged]);
 
   const handleCreate = async () => {
@@ -89,7 +91,7 @@ export const StashesDialog: React.FC<StashesDialogProps> = ({
       } else {
         toast.info(t('gitView.stashes.toast.noChanges'));
       }
-      await refreshAfterChange();
+      await refreshAfterChange({ affectsIndex: Boolean(result.created && hasStagedChanges) });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('gitView.stashes.toast.createFailed'));
     } finally {
@@ -107,11 +109,11 @@ export const StashesDialog: React.FC<StashesDialogProps> = ({
       if (kind === 'drop') await dropGitStash(directory, { ref: stash.ref });
       const successKey = kind === 'apply' ? 'gitView.stashes.toast.applySuccess' : kind === 'pop' ? 'gitView.stashes.toast.popSuccess' : 'gitView.stashes.toast.dropSuccess';
       toast.success(t(successKey));
-      await refreshAfterChange();
+      await refreshAfterChange({ affectsIndex: kind !== 'drop' });
     } catch (error) {
       const failedKey = kind === 'apply' ? 'gitView.stashes.toast.applyFailed' : kind === 'pop' ? 'gitView.stashes.toast.popFailed' : 'gitView.stashes.toast.dropFailed';
       toast.error(error instanceof Error ? error.message : t(failedKey));
-      await refreshAfterChange();
+      await refreshAfterChange({ affectsIndex: kind !== 'drop' });
     } finally {
       setOperation(null);
     }

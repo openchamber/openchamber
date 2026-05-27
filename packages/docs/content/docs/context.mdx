@@ -1,0 +1,38 @@
+---
+title: Context
+description: See how much of the model's memory a session is using.
+---
+
+# Context
+
+Every model can only hold so much of a conversation at once — its context. OpenChamber shows how full that is, so you can tell when a session is getting close to the limit and a reply might start dropping older detail.
+
+## The quick indicator
+
+While you chat, a small gauge shows the percentage of context used. It changes color as you fill up:
+
+- green — plenty of room
+- yellow — getting full (around three-quarters)
+- red — nearly full
+
+Hover it (or tap it on mobile) to see exact token counts.
+
+## The full context panel
+
+Open the **Context** tab in the right sidebar for a fuller picture of the current session:
+
+- the model in use and when the session started
+- total tokens against the model's limit
+- message and cost totals
+- a breakdown of the last reply's tokens
+- a rough split of what's taking up context (your messages, the agent's, tool output)
+
+The breakdown is an estimate, not an exact count — use it to spot what's filling the window, not for billing.
+
+## What to do when it's full
+
+Start a fresh session for a new task instead of letting one session grow forever. A shorter context is faster and keeps the model focused.
+
+## Related
+
+- [Projects](/projects/) — sessions are grouped per project

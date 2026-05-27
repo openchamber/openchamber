@@ -221,6 +221,8 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
         const language = typeof req.headers['x-language'] === 'string' && req.headers['x-language'].trim().length > 0
           ? req.headers['x-language'].trim()
           : undefined;
+        const authHeader = typeof req.headers['authorization'] === 'string' ? req.headers['authorization'].trim() : '';
+        const apiKey = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : undefined;
 
         if (!req.body || !Buffer.isBuffer(req.body) || req.body.length === 0) {
           return res.status(400).json({ error: 'Audio data is required' });
@@ -236,6 +238,7 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
           model,
           baseURL,
           language,
+          hasApiKey: !!apiKey,
         });
 
         const transcript = await transcribeAudio({
@@ -243,6 +246,7 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
           mimeType,
           model,
           baseURL,
+          apiKey,
           language,
         });
 

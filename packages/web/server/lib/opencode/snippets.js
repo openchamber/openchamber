@@ -85,27 +85,38 @@ function loadSnippetFile(dir, filename, source) {
   };
 }
 
-function registerSnippet(registry, snippet) {
+function removeSnippetAliases(registry, snippet, canonicalNames) {
+  for (const alias of snippet.aliases) {
+    const aliasKey = alias.toLowerCase();
+    if (canonicalNames.has(aliasKey)) continue;
+    if (registry.get(aliasKey) === snippet) registry.delete(aliasKey);
+  }
+}
+
+function registerSnippet(registry, snippet, canonicalNames) {
   const key = snippet.name.toLowerCase();
   const existing = registry.get(key);
-  if (existing) {
-    for (const alias of existing.aliases) registry.delete(alias.toLowerCase());
+  if (existing?.name.toLowerCase() === key) {
+    removeSnippetAliases(registry, existing, canonicalNames);
   }
   registry.set(key, snippet);
+  canonicalNames.add(key);
   for (const alias of snippet.aliases) {
-    if (SNIPPET_NAME_PATTERN.test(alias)) registry.set(alias.toLowerCase(), snippet);
+    const aliasKey = alias.toLowerCase();
+    if (SNIPPET_NAME_PATTERN.test(alias) && !canonicalNames.has(aliasKey)) registry.set(aliasKey, snippet);
   }
 }
 
 function loadSnippetRegistry(workingDirectory) {
   const registry = new Map();
+  const canonicalNames = new Set();
   for (const { dir, source } of getLoadDirs(workingDirectory)) {
     if (!fs.existsSync(dir)) continue;
     for (const filename of fs.readdirSync(dir)) {
       if (!filename.endsWith(SNIPPET_EXTENSION)) continue;
       try {
         const snippet = loadSnippetFile(dir, filename, source);
-        if (snippet) registerSnippet(registry, snippet);
+        if (snippet) registerSnippet(registry, snippet, canonicalNames);
       } catch (error) {
         console.warn(`[Snippets] Failed to load ${path.join(dir, filename)}:`, error);
       }

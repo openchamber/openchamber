@@ -14,6 +14,7 @@ import { createTunnelAuth } from './lib/opencode/tunnel-auth.js';
 import { createManagedTunnelConfigRuntime } from './lib/tunnels/managed-config.js';
 import { createTunnelProviderRegistry } from './lib/tunnels/registry.js';
 import { createCloudflareTunnelProvider } from './lib/tunnels/providers/cloudflare.js';
+import { createNgrokTunnelProvider } from './lib/tunnels/providers/ngrok.js';
 import { createRequestSecurityRuntime } from './lib/security/request-security.js';
 import {
   TUNNEL_MODE_MANAGED_LOCAL,
@@ -198,6 +199,7 @@ const settingsNormalizationRuntime = createSettingsNormalizationRuntime({
   os,
   path,
   processLike: process,
+  realpathSync: fs.realpathSync,
   tunnelBootstrapTtlDefaultMs: TUNNEL_BOOTSTRAP_TTL_DEFAULT_MS,
   tunnelBootstrapTtlMinMs: TUNNEL_BOOTSTRAP_TTL_MIN_MS,
   tunnelBootstrapTtlMaxMs: TUNNEL_BOOTSTRAP_TTL_MAX_MS,
@@ -448,6 +450,7 @@ let activeTunnelController = null;
 let globalWatcherStartPromise = null;
 const tunnelProviderRegistry = createTunnelProviderRegistry([
   createCloudflareTunnelProvider(),
+  createNgrokTunnelProvider(),
 ]);
 tunnelProviderRegistry.seal();
 const tunnelAuthController = createTunnelAuth();
@@ -725,7 +728,7 @@ const processForwardedEventPayload = (payload, emitSyntheticEvent) => {
   emitSyntheticEvent({
     type: 'openchamber:session-status',
     properties: {
-      sessionId,
+      sessionID: sessionId,
       status,
       timestamp: Date.now(),
       metadata: {

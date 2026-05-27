@@ -42,6 +42,15 @@ const collectProxyResponseHeaders = (headers: Headers, deps: Pick<ProxyRuntimeDe
   return result;
 };
 
+const isSseProxyPath = (requestPath: string): boolean => {
+  try {
+    const parsed = new URL(requestPath, 'https://openchamber.invalid');
+    return parsed.pathname === '/event' || parsed.pathname === '/global/event';
+  } catch {
+    return requestPath === '/event' || requestPath === '/global/event';
+  }
+};
+
 type ProxyRuntimeDeps = {
   tryHandleLocalFsProxy: (method: string, requestPath: string) => Promise<ApiProxyResponsePayload | null>;
   buildUnavailableApiResponse: () => ApiProxyResponsePayload;
@@ -65,8 +74,17 @@ export async function handleProxyBridgeMessage(
         typeof requestPath === 'string' && requestPath.trim().length > 0
           ? requestPath.trim().startsWith('/')
             ? requestPath.trim()
-            : `/${requestPath.trim()}`
+          : `/${requestPath.trim()}`
           : '/';
+
+      if (isSseProxyPath(normalizedPath)) {
+        const data: ApiProxyResponsePayload = {
+          status: 400,
+          headers: { 'content-type': 'application/json' },
+          bodyText: JSON.stringify({ error: 'SSE requests must use api:sse:start' }),
+        };
+        return { id, type, success: true, data };
+      }
 
       const localFsResponse = await deps.tryHandleLocalFsProxy(normalizedMethod, normalizedPath);
       if (localFsResponse) {
@@ -85,14 +103,6 @@ export async function handleProxyBridgeMessage(
         ...deps.sanitizeForwardHeaders(headers),
         ...ctx?.manager?.getOpenCodeAuthHeaders(),
       };
-
-      if (normalizedPath === '/event' || normalizedPath === '/global/event') {
-        if (!requestHeaders.Accept) {
-          requestHeaders.Accept = 'text/event-stream';
-        }
-        requestHeaders['Cache-Control'] = requestHeaders['Cache-Control'] || 'no-cache';
-        requestHeaders.Connection = requestHeaders.Connection || 'keep-alive';
-      }
 
       try {
         const response = await fetch(targetUrl, {

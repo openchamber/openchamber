@@ -9,7 +9,7 @@ import { useI18n } from '@/lib/i18n';
 type CommitAction = 'commit' | 'commitAndPush' | null;
 
 interface CommitSectionProps {
-  selectedCount: number;
+  stagedCount: number;
   commitMessage: string;
   onCommitMessageChange: (value: string) => void;
   generatedHighlights: string[];
@@ -19,12 +19,13 @@ interface CommitSectionProps {
   onCommit: () => void;
   onCommitAndPush: () => void;
   commitAction: CommitAction;
+  hasPendingIndexMutation?: boolean;
   gitmojiEnabled: boolean;
   onOpenGitmojiPicker: () => void;
 }
 
 export const CommitSection: React.FC<CommitSectionProps> = ({
-  selectedCount,
+  stagedCount,
   commitMessage,
   onCommitMessageChange,
   generatedHighlights,
@@ -34,31 +35,31 @@ export const CommitSection: React.FC<CommitSectionProps> = ({
   onCommit,
   onCommitAndPush,
   commitAction,
+  hasPendingIndexMutation = false,
   gitmojiEnabled,
   onOpenGitmojiPicker,
 }) => {
   const { t } = useI18n();
-  const hasSelectedFiles = selectedCount > 0;
-  const canCommit = commitMessage.trim() && hasSelectedFiles && commitAction === null;
+  const hasStagedFiles = stagedCount > 0;
+  const canCommit = commitMessage.trim() && hasStagedFiles && commitAction === null && !hasPendingIndexMutation;
   const { isMobile, hasTouchInput } = useDeviceInfo();
 
   const containerClassName = 'border-0 bg-transparent rounded-none';
-  const headerClassName = 'flex w-full items-center justify-between px-0 pt-2 pb-1';
+  const headerClassName = 'flex w-full items-baseline gap-2 px-0 pt-2 pb-1';
   const contentClassName = 'flex flex-col gap-3 px-0 pt-1 pb-3';
 
   return (
     <section className={containerClassName}>
       <div className={headerClassName}>
         <h3 className="typography-ui-header font-semibold text-foreground">{t('gitView.commit.title')}</h3>
+        {!hasStagedFiles ? (
+          <span className="min-w-0 truncate typography-meta text-muted-foreground">
+            {t('gitView.commit.stageFilesHint')}
+          </span>
+        ) : null}
       </div>
 
       <div className={contentClassName}>
-        {!hasSelectedFiles ? (
-          <p className="typography-meta text-muted-foreground">
-            {t('gitView.commit.selectFilesHint')}
-          </p>
-        ) : null}
-
         <AIHighlightsBox
           highlights={generatedHighlights}
           onInsert={onInsertHighlights}
@@ -94,7 +95,8 @@ export const CommitSection: React.FC<CommitSectionProps> = ({
             disabled={
               isGeneratingMessage ||
               commitAction !== null ||
-              selectedCount === 0
+              hasPendingIndexMutation ||
+              stagedCount === 0
             }
             type="button"
             aria-label={t('gitView.commit.generateAria')}

@@ -1,0 +1,41 @@
+---
+title: 데스크톱 터널
+description: 데스크톱 앱에서 Cloudflare 또는 Ngrok 터널을 만드세요.
+---
+
+# 데스크톱 터널
+
+데스크톱 앱은 **Settings → OpenChamber → Tunnel**에서 공개 터널을 만들 수 있습니다. 이 경로에서는 OpenChamber를 CLI로 시작할 필요가 없습니다.
+
+## 공급자 설치
+
+OpenChamber는 사용자의 컴퓨터에서 공급자 CLI를 실행합니다. 먼저 사용할 공급자를 설치하세요:
+
+```bash
+brew install cloudflared
+brew install ngrok
+```
+
+Cloudflare는 `cloudflared`를 사용합니다. Ngrok은 ngrok 계정과 ngrok 대시보드의 authtoken이 필요합니다:
+
+```bash
+ngrok config add-authtoken <your-ngrok-token>
+```
+
+## 앱에서 시작
+
+1. **Settings → OpenChamber → Tunnel**을 엽니다.
+2. **Cloudflare** 또는 **Ngrok**을 선택합니다.
+3. quick tunnel을 시작합니다.
+4. 휴대폰에서 생성된 QR 코드를 스캔합니다.
+
+Ngrok은 현재 quick tunnels를 지원합니다. Cloudflare는 quick tunnels와 Cloudflare 관리형 모드를 지원합니다.
+
+## 접근 보호
+
+공급자 URL 자체가 공개되어 있어도 OpenChamber는 자체 connect token으로 접근을 보호합니다. 생성된 연결 링크에는 일회용 token이 들어 있고 TTL이 있으며, 새 링크를 만들거나 터널을 중지/재시작하면 이전의 사용되지 않은 링크는 무효화됩니다.
+
+## 관련 문서
+
+- [터널](/ko/tunnels/) — CLI 터널 사용법과 Cloudflare 관리형 모드
+- [PWA 및 모바일 접속](/ko/mobile/) — 휴대폰에서 OpenChamber에 접속하세요

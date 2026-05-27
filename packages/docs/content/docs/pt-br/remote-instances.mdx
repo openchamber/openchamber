@@ -1,0 +1,30 @@
+---
+title: Instâncias Remotas
+description: Conecte o app de desktop ao OpenChamber em outra máquina via SSH.
+---
+
+# Instâncias Remotas
+
+O app de desktop pode conectar ao OpenChamber rodando em outra máquina via SSH — um servidor de trabalho, uma máquina na nuvem, um homelab — e trazer a UI dela para a sua tela como se fosse local. Configure isso em **Settings → Remote Instances**.
+
+> As instâncias remotas são um recurso **apenas para desktop**. Na web ou no VS Code, conecte a um servidor remoto com as variáveis de ambiente em [OpenCode Server](/pt-br/opencode-server/) em vez disso.
+
+## Adicionar uma instância remota
+
+1. Abra **Settings → Remote Instances** e adicione uma.
+2. Forneça o comando SSH que você normalmente usaria para alcançar a máquina, mais um apelido.
+3. Escolha como o OpenChamber roda ali:
+   - **managed** — o OpenChamber se instala e inicia na máquina remota
+   - **external** — conecte a um que já está em execução
+4. Conecte.
+
+O OpenChamber percorre as etapas — verificando a conexão, configurando o remoto, iniciando o servidor e encaminhando a porta — e mostra em que ponto está em cada estágio. Quando chega a **ready**, a UI remota carrega localmente.
+
+## Credenciais
+
+Você decide se quer salvar as senhas SSH e de UI ou inseri-las a cada vez. Se a conexão cair, o OpenChamber informa qual etapa falhou para você corrigi-la — veja [Acesso remoto](/pt-br/troubleshooting/remote-access/).
+
+## Relacionado
+
+- [OpenCode Server](/pt-br/opencode-server/) — conecte a um servidor remoto na web ou no VS Code
+- [Acesso remoto](/pt-br/troubleshooting/remote-access/) — quando uma conexão não se completa

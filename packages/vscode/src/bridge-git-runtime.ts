@@ -14,6 +14,10 @@ const requireDirectory = (id: string, type: string, directory?: string): BridgeR
   return null;
 };
 
+const isValidCommitHash = (hash: string | undefined): hash is string => (
+  typeof hash === 'string' && /^[0-9a-fA-F]{7,40}$/.test(hash)
+);
+
 export async function handleStandardGitBridgeMessage(message: BridgeMessageInput): Promise<BridgeResponse | null> {
   const { id, type, payload } = message;
 
@@ -217,25 +221,48 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
     }
 
     case 'api:git/revert': {
-      const { directory, path: filePath } = (payload || {}) as { directory?: string; path?: string };
+      const { directory, path: filePath, scope } = (payload || {}) as { directory?: string; path?: string; scope?: 'all' | 'working' };
       if (!directory || !filePath) {
         return { id, type, success: false, error: 'Directory and path are required' };
       }
-      await gitService.revertGitFile(directory, filePath);
+      await gitService.revertGitFile(directory, filePath, { scope });
+      return { id, type, success: true, data: { success: true } };
+    }
+
+    case 'api:git/stage': {
+      const { directory, path: filePath, paths } = (payload || {}) as { directory?: string; path?: string; paths?: string[] };
+      const filePaths = (Array.isArray(paths) ? paths : [filePath])
+        .filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+      if (!directory || filePaths.length === 0) {
+        return { id, type, success: false, error: 'Directory and path are required' };
+      }
+      await gitService.stageGitFiles(directory, filePaths);
+      return { id, type, success: true, data: { success: true } };
+    }
+
+    case 'api:git/unstage': {
+      const { directory, path: filePath, paths } = (payload || {}) as { directory?: string; path?: string; paths?: string[] };
+      const filePaths = (Array.isArray(paths) ? paths : [filePath])
+        .filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+      if (!directory || filePaths.length === 0) {
+        return { id, type, success: false, error: 'Directory and path are required' };
+      }
+      await gitService.unstageGitFiles(directory, filePaths);
       return { id, type, success: true, data: { success: true } };
     }
 
     case 'api:git/commit': {
-      const { directory, message, addAll, files } = (payload || {}) as {
+      const { directory, message, addAll, files, stageFiles } = (payload || {}) as {
         directory?: string;
         message?: string;
         addAll?: boolean;
         files?: string[];
+        stageFiles?: string[];
       };
       if (!directory || !message) {
         return { id, type, success: false, error: 'Directory and message are required' };
       }
-      const result = await gitService.createGitCommit(directory, message, { addAll, files });
+      const result = await gitService.createGitCommit(directory, message, { addAll, files, stageFiles });
       return { id, type, success: true, data: result };
     }
 
@@ -393,17 +420,70 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       return { id, type, success: true, data: result };
     }
 
+    case 'api:git/checkout-commit': {
+      const { directory, hash } = (payload || {}) as { directory?: string; hash?: string };
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+      if (!isValidCommitHash(hash)) {
+        return { id, type, success: false, error: 'Invalid commit hash' };
+      }
+      const result = await gitService.checkoutCommit(directory!, hash);
+      return { id, type, success: true, data: result };
+    }
+
+    case 'api:git/cherry-pick': {
+      const { directory, hash } = (payload || {}) as { directory?: string; hash?: string };
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+      if (!isValidCommitHash(hash)) {
+        return { id, type, success: false, error: 'Invalid commit hash' };
+      }
+      const result = await gitService.cherryPick(directory!, hash);
+      return { id, type, success: true, data: result };
+    }
+
+    case 'api:git/revert-commit': {
+      const { directory, hash } = (payload || {}) as { directory?: string; hash?: string };
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+      if (!isValidCommitHash(hash)) {
+        return { id, type, success: false, error: 'Invalid commit hash' };
+      }
+      const result = await gitService.revertCommit(directory!, hash);
+      return { id, type, success: true, data: result };
+    }
+
+    case 'api:git/reset-to-commit': {
+      const { directory, hash, mode, force } = (payload || {}) as {
+        directory?: string;
+        hash?: string;
+        mode?: 'soft' | 'mixed' | 'hard';
+        force?: boolean;
+      };
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+      if (!isValidCommitHash(hash)) {
+        return { id, type, success: false, error: 'Invalid commit hash' };
+      }
+      if (!mode || !['soft', 'mixed', 'hard'].includes(mode)) {
+        return { id, type, success: false, error: 'mode must be soft, mixed, or hard' };
+      }
+      const result = await gitService.resetToCommit(directory!, hash, mode, force);
+      return { id, type, success: true, data: result };
+    }
+
     case 'api:git/log': {
-      const { directory, maxCount, from, to, file } = (payload || {}) as {
+      const { directory, maxCount, from, to, file, all } = (payload || {}) as {
         directory?: string;
         maxCount?: number;
         from?: string;
         to?: string;
         file?: string;
+        all?: boolean;
       };
       const dirError = requireDirectory(id, type, directory);
       if (dirError) return dirError;
-      const result = await gitService.getGitLog(directory!, { maxCount, from, to, file });
+      const result = await gitService.getGitLog(directory!, { maxCount, from, to, file, all });
       return { id, type, success: true, data: result };
     }
 

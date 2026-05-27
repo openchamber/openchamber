@@ -24,6 +24,7 @@ export const UsageCard: React.FC<UsageCardProps> = ({
   onToggle,
 }) => {
   const displayMode = useQuotaStore((state) => state.displayMode);
+  const showPredValues = useQuotaStore((state) => state.showPredValues);
   const displayPercent = displayMode === 'remaining' ? window.remainingPercent : window.usedPercent;
   const barLabel = displayMode === 'remaining' ? 'remaining' : 'used';
   const percentLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
@@ -82,7 +83,7 @@ export const UsageCard: React.FC<UsageCardProps> = ({
         </div>
       </div>
 
-      {paceInfo && (
+      {paceInfo && showPredValues && (
         <div className="mt-1.5">
           <PaceIndicator paceInfo={paceInfo} />
         </div>

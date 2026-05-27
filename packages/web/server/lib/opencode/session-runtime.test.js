@@ -49,7 +49,7 @@ describe('session runtime', () => {
     expect(events).toContainEqual({
       type: 'openchamber:session-status',
       properties: expect.objectContaining({
-        sessionId: 'session-1',
+        sessionID: 'session-1',
         status: 'idle',
         needsAttention: true,
       }),
@@ -57,7 +57,7 @@ describe('session runtime', () => {
     expect(events.at(-1)).toEqual({
       type: 'openchamber:session-status',
       properties: {
-        sessionId: 'session-1',
+        sessionID: 'session-1',
         status: 'idle',
         timestamp: expect.any(Number),
         metadata: {},
@@ -92,7 +92,7 @@ describe('session runtime', () => {
     expect(events).toContainEqual({
       type: 'openchamber:session-status',
       properties: expect.objectContaining({
-        sessionId: 'legacy-session-1',
+        sessionID: 'legacy-session-1',
         status: 'busy',
       }),
     });

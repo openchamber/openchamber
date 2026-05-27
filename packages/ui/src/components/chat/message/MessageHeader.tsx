@@ -39,7 +39,6 @@ const MessageHeader: React.FC<MessageHeaderProps> = ({ isUser, providerID, agent
                                     />
                                 ) : (
                                     <Icon name="brain-ai-3" className="h-4 w-4"
-                                        
                                         style={{ color: `var(${getAgentColor(agentName).var})` }}/>
                                 )}
                             </div>

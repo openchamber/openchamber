@@ -16,7 +16,7 @@ export const FileTypeIcon: React.FC<FileTypeIconProps> = ({ filePath, extension,
 
   return (
     <svg
-      className={cn('h-4 w-4 flex-shrink-0', className)}
+      className={cn('block h-4 w-4 flex-shrink-0', className)}
       aria-hidden="true"
       focusable="false"
     >

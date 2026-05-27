@@ -2,6 +2,7 @@ import os from 'os';
 import path from 'path';
 
 export const TUNNEL_PROVIDER_CLOUDFLARE = 'cloudflare';
+export const TUNNEL_PROVIDER_NGROK = 'ngrok';
 
 export const TUNNEL_MODE_QUICK = 'quick';
 export const TUNNEL_MODE_MANAGED_REMOTE = 'managed-remote';
@@ -34,6 +35,7 @@ export class TunnelServiceError extends Error {
 
 const SUPPORTED_TUNNEL_PROVIDERS = new Set([
   TUNNEL_PROVIDER_CLOUDFLARE,
+  TUNNEL_PROVIDER_NGROK,
 ]);
 
 export function normalizeTunnelProvider(value) {

@@ -1,0 +1,37 @@
+---
+title: 보안
+description: 노출하기 전에 비밀번호와 패스키로 UI를 보호하세요.
+---
+
+# 보안
+
+OpenChamber는 사용자의 컴퓨터와 코드에 대한 접근 권한을 제공하므로, 본인 외의 누군가가 접근할 수 있게 되기 전에 잠가 두세요. 이 페이지는 UI 비밀번호, 패스키, 그리고 OpenChamber를 네트워크에 노출하기 전에 알아야 할 사항을 다룹니다.
+
+## UI 비밀번호 설정하기
+
+비밀번호와 함께 OpenChamber를 시작하면 브라우저 UI가 비밀번호를 요구합니다.
+
+```bash
+openchamber --ui-password be-creative-here
+```
+
+명령줄에 넣는 대신 `OPENCHAMBER_UI_PASSWORD` 환경 변수로 설정할 수도 있습니다. 로그인하면 OpenChamber가 한동안 기기를 기억하므로 매번 묻지 않습니다.
+
+다른 사람이 인스턴스에 접근할 수 있다면, 특히 [터널](/ko/tunnels/)이나 공용 인터넷을 통해 접근할 수 있다면 항상 비밀번호를 설정하세요.
+
+## 패스키
+
+비밀번호가 설정되면 더 빠른 로그인을 위해 패스키(Face ID, Touch ID, 보안 키)를 추가할 수 있습니다. **Settings → OpenChamber → Passkeys**에서 추가하세요.
+
+패스키는 현재 비밀번호에 연결됩니다. 비밀번호를 변경하거나 제거하면 저장된 패스키가 삭제되며, 다시 추가해야 합니다.
+
+## 노출하기 전에
+
+- 기본적으로 OpenChamber는 사용자 자신의 컴퓨터(`127.0.0.1`)에서만 수신 대기합니다. 더 넓게 수신 대기하려면 의도적인 변경이 필요하며, 먼저 비밀번호를 설정해야 합니다.
+- 인터넷에 포트를 여는 것보다 [터널](/ko/tunnels/)이나 사설 네트워크(예: VPN)를 선호하세요.
+- OpenChamber를 자체 HTTPS 서버 뒤에 둔다면 [Reverse Proxy](/ko/reverse-proxy/)를 참고하세요.
+
+## 관련 항목
+
+- [Tunnels](/ko/tunnels/) — 원격으로 인스턴스에 접근하는 권장 방법
+- [Reverse Proxy](/ko/reverse-proxy/) — 자체 서버 뒤에서 OpenChamber 실행

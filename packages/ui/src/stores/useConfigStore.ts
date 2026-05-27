@@ -550,11 +550,13 @@ interface ConfigStore {
     openaiVoice: string;
     openaiApiKey: string;
     openaiCompatibleUrl: string;
+    openaiCompatibleApiKey: string;
     openaiCompatibleVoice: string;
     openaiCompatibleTtsModel: string;
     // STT (speech-to-text) settings
     sttProvider: 'browser' | 'server' | 'wasm';
     sttServerUrl: string;
+    sttApiKey: string;
     sttModel: string;
     wasmSttModel: string;
     sttLanguage: string;
@@ -576,10 +578,12 @@ interface ConfigStore {
     setOpenaiVoice: (voice: string) => void;
     setOpenaiApiKey: (apiKey: string) => void;
     setOpenaiCompatibleUrl: (url: string) => void;
+    setOpenaiCompatibleApiKey: (apiKey: string) => void;
     setOpenaiCompatibleVoice: (voice: string) => void;
     setOpenaiCompatibleTtsModel: (model: string) => void;
     setSttProvider: (provider: 'browser' | 'server' | 'wasm') => void;
     setSttServerUrl: (url: string) => void;
+    setSttApiKey: (apiKey: string) => void;
     setSttModel: (model: string) => void;
     setWasmSttModel: (model: string) => void;
     setSttLanguage: (lang: string) => void;
@@ -748,6 +752,14 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                     return '';
                 })(),
+                // OpenAI-compatible custom server API key
+                openaiCompatibleApiKey: (() => {
+                    if (typeof window !== 'undefined') {
+                        const saved = localStorage.getItem('openaiCompatibleApiKey');
+                        if (saved) return saved;
+                    }
+                    return '';
+                })(),
                 // OpenAI-compatible custom server voice
                 openaiCompatibleVoice: (() => {
                     if (typeof window !== 'undefined') {
@@ -782,6 +794,13 @@ export const useConfigStore = create<ConfigStore>()(
                         if (saved) return saved;
                     }
                     return 'http://localhost:8001/v1';
+                })(),
+                sttApiKey: (() => {
+                    if (typeof window !== 'undefined') {
+                        const saved = localStorage.getItem('sttApiKey');
+                        if (saved) return saved;
+                    }
+                    return '';
                 })(),
                 sttModel: (() => {
                     if (typeof window !== 'undefined') {
@@ -1720,6 +1739,20 @@ export const useConfigStore = create<ConfigStore>()(
                             });
                         };
 
+                        // Prefer the selected agent's configured model when switching agents.
+                        const agent = agents.find((candidate) => candidate.name === agentName);
+                        const agentModelSelection = agent?.model;
+                        if (agentModelSelection?.providerID && agentModelSelection?.modelID) {
+                            const { providerID, modelID } = agentModelSelection;
+                            const agentProvider = providers.find((provider) => provider.id === providerID);
+                            const agentModel = agentProvider?.models.find((model) => model.id === modelID);
+
+                            if (agentModel) {
+                                applyResolvedModelSelection(providerID, modelID, undefined);
+                                return;
+                            }
+                        }
+
                         if (currentSessionId) {
                             const existingAgentModel = useSelectionStore.getState().getAgentModelForSession(currentSessionId, agentName);
                             if (existingAgentModel && hasProviderModel(providers, existingAgentModel.providerId, existingAgentModel.modelId)) {
@@ -1740,11 +1773,7 @@ export const useConfigStore = create<ConfigStore>()(
                             }
                         }
 
-                        if (hasProviderModel(providers, currentProviderId, currentModelId)) {
-                            return;
-                        }
-
-                        // If settings has a default model, use it instead of agent's preferred
+                        // If the agent has no preferred model, use settings default.
                         if (settingsDefaultModel) {
                             const parsed = parseModelString(settingsDefaultModel);
                             if (parsed) {
@@ -1765,18 +1794,7 @@ export const useConfigStore = create<ConfigStore>()(
                             }
                         }
 
-                        // Fall back to agent's preferred model
-                        const agent = agents.find((candidate) => candidate.name === agentName);
-                        const agentModelSelection = agent?.model;
-                        if (agentModelSelection?.providerID && agentModelSelection?.modelID) {
-                            const { providerID, modelID } = agentModelSelection;
-                            const agentProvider = providers.find((provider) => provider.id === providerID);
-                            const agentModel = agentProvider?.models.find((model) => model.id === modelID);
-
-                            if (agentModel) {
-                                applyResolvedModelSelection(providerID, modelID, undefined);
-                            }
-                        }
+                        // Otherwise keep the current valid model selection unchanged.
                     }
                 },
 
@@ -1886,6 +1904,13 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                 },
 
+                setOpenaiCompatibleApiKey: (apiKey: string) => {
+                    set({ openaiCompatibleApiKey: apiKey });
+                    if (typeof window !== 'undefined') {
+                        localStorage.setItem('openaiCompatibleApiKey', apiKey);
+                    }
+                },
+
                 setOpenaiCompatibleVoice: (voice: string) => {
                     set({ openaiCompatibleVoice: voice });
                     if (typeof window !== 'undefined') {
@@ -1914,6 +1939,13 @@ export const useConfigStore = create<ConfigStore>()(
                         localStorage.setItem('sttServerUrl', url);
                     }
                     updateDesktopSettings({ sttServerUrl: url }).catch(() => {});
+                },
+
+                setSttApiKey: (apiKey: string) => {
+                    set({ sttApiKey: apiKey });
+                    if (typeof window !== 'undefined') {
+                        localStorage.setItem('sttApiKey', apiKey);
+                    }
                 },
 
                 setSttModel: (model: string) => {

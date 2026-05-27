@@ -23,7 +23,7 @@ type GlobalSessionsState = {
   archiveSessions: (ids: Iterable<string>, archivedAt?: number) => void;
 };
 
-const PAGE_SIZE = 200;
+const PAGE_SIZE = 500;
 
 let inflightLoad: Promise<LoadResult> | null = null;
 

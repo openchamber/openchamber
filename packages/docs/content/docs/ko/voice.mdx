@@ -1,0 +1,36 @@
+---
+title: 음성 모드
+description: OpenChamber에 말하고 응답을 소리내어 들으세요.
+---
+
+# 음성 모드
+
+음성 모드를 사용하면 메시지를 받아쓰게 하고 응답을 소리내어 들을 수 있습니다. **Settings → OpenChamber → Voice**에서 켭니다.
+
+## 응답을 소리내어 읽기(text-to-speech)
+
+응답을 읽는 방식을 선택합니다.
+
+- **browser** — 브라우저의 내장 음성, 설정 불필요
+- **OpenAI** — OpenAI의 음성. API 키를 붙여넣고 음성을 선택합니다
+- **OpenAI-compatible** — OpenAI 형식을 지원하는 모든 서비스. URL과, 필요하다면 API 키를 입력합니다
+- **macOS say** — 내장 `say` 명령. 이를 지원하는 Mac에서 사용 가능
+
+켜면 메시지에 재생 버튼이 생겨 소리내어 들을 수 있습니다.
+
+## 메시지 받아쓰기(speech-to-text)
+
+음성을 텍스트로 변환하는 방식을 선택합니다.
+
+- **browser** — 브라우저의 내장 인식, 설정 불필요
+- **server** — OpenAI 호환 변환 서비스. URL과, 필요하다면 API 키를 입력합니다
+- **on-device** — 브라우저에서 실행되며 처음 사용할 때 다운로드되는 음성 모델
+
+## 휴대폰 관련 참고 사항
+
+휴대폰에서 응답을 소리내어 읽을 때는 OpenAI 또는 OpenAI-compatible 옵션이 가장 안정적입니다. 모바일 브라우저는 내장 음성을 제한합니다.
+
+## 관련 항목
+
+- [Notifications](/ko/notifications/) — 듣는 대신 알림을 받으세요
+- [Providers, Models & Agents](/ko/providers/) — OpenAI 키가 이미 저장되어 있을 수 있는 곳

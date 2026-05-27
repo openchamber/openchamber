@@ -126,10 +126,38 @@ export async function getGitFileDiff(
   return gitHttp.getGitFileDiff(directory, options);
 }
 
-export async function revertGitFile(directory: string, filePath: string): Promise<void> {
+export async function revertGitFile(
+  directory: string,
+  filePath: string,
+  options?: { scope?: 'all' | 'working' }
+): Promise<void> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtime.revertGitFile(directory, filePath);
-  return gitHttp.revertGitFile(directory, filePath);
+  if (runtime) return runtime.revertGitFile(directory, filePath, options);
+  return gitHttp.revertGitFile(directory, filePath, options);
+}
+
+export async function stageGitFile(directory: string, filePath: string): Promise<void> {
+  const runtime = getRuntimeGit();
+  if (runtime?.stageGitFile) return runtime.stageGitFile(directory, filePath);
+  return gitHttp.stageGitFile(directory, filePath);
+}
+
+export async function stageGitFiles(directory: string, filePaths: string[]): Promise<void> {
+  const runtime = getRuntimeGit();
+  if (runtime?.stageGitFiles) return runtime.stageGitFiles(directory, filePaths);
+  return gitHttp.stageGitFiles(directory, filePaths);
+}
+
+export async function unstageGitFile(directory: string, filePath: string): Promise<void> {
+  const runtime = getRuntimeGit();
+  if (runtime?.unstageGitFile) return runtime.unstageGitFile(directory, filePath);
+  return gitHttp.unstageGitFile(directory, filePath);
+}
+
+export async function unstageGitFiles(directory: string, filePaths: string[]): Promise<void> {
+  const runtime = getRuntimeGit();
+  if (runtime?.unstageGitFiles) return runtime.unstageGitFiles(directory, filePaths);
+  return gitHttp.unstageGitFiles(directory, filePaths);
 }
 
 export async function isLinkedWorktree(directory: string): Promise<boolean> {
@@ -754,6 +782,44 @@ export async function merge(
   const runtime = getRuntimeGit();
   if (runtime) return runtime.merge(directory, options);
   return gitHttp.merge(directory, options);
+}
+
+export async function checkoutCommit(
+  directory: string,
+  hash: string
+): Promise<import('./api/types').CheckoutCommitResponse> {
+  const runtime = getRuntimeGit();
+  if (runtime) return runtime.checkoutCommit(directory, hash);
+  return gitHttp.checkoutCommit(directory, hash);
+}
+
+export async function cherryPick(
+  directory: string,
+  hash: string
+): Promise<import('./api/types').CherryPickResponse> {
+  const runtime = getRuntimeGit();
+  if (runtime) return runtime.cherryPick(directory, hash);
+  return gitHttp.cherryPick(directory, hash);
+}
+
+export async function revertCommit(
+  directory: string,
+  hash: string
+): Promise<import('./api/types').RevertCommitResponse> {
+  const runtime = getRuntimeGit();
+  if (runtime) return runtime.revertCommit(directory, hash);
+  return gitHttp.revertCommit(directory, hash);
+}
+
+export async function resetToCommit(
+  directory: string,
+  hash: string,
+  mode: 'soft' | 'mixed' | 'hard',
+  force?: boolean
+): Promise<import('./api/types').ResetToCommitResponse> {
+  const runtime = getRuntimeGit();
+  if (runtime) return runtime.resetToCommit(directory, hash, mode, force);
+  return gitHttp.resetToCommit(directory, hash, mode, force);
 }
 
 export async function abortMerge(directory: string): Promise<{ success: boolean }> {

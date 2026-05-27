@@ -250,6 +250,14 @@ const IdentityRow: React.FC<IdentityRowProps> = ({
   const iconColor = COLOR_MAP[profile.color || ''];
   const authType = profile.authType || 'ssh';
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.currentTarget !== e.target) return;
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+
+    e.preventDefault();
+    onEdit();
+  };
+
   return (
     <div
       className={cn(
@@ -259,7 +267,7 @@ const IdentityRow: React.FC<IdentityRowProps> = ({
       onClick={onEdit}
       role="button"
       tabIndex={0}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onEdit(); }}
+      onKeyDown={handleKeyDown}
     >
       <div className="flex items-center gap-3 min-w-0">
         <Icon name={iconName} className="w-4 h-4 shrink-0" style={{ color: iconColor }} />

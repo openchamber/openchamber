@@ -1,0 +1,49 @@
+---
+title: Dostawcy, modele i agenci
+description: Połącz dostawców AI, wybierz modele i skonfiguruj agentów.
+---
+
+# Dostawcy, modele i agenci
+
+Zanim OpenChamber cokolwiek zrobi, potrzebuje co najmniej jednego połączonego dostawcy AI. Ta strona opisuje łączenie dostawcy, wybór modelu i dostosowywanie agentów.
+
+## Połącz dostawcę
+
+1. Otwórz **Settings → Providers**.
+2. Otwórz menu **Add provider** i wybierz dostawcę, który nie jest jeszcze połączony.
+3. Zaloguj się na jeden z dwóch sposobów, zależnie od dostawcy:
+   - **Klucz API** — wklej swój klucz i zapisz.
+   - **Logowanie (device flow)** — OpenChamber pokazuje link i krótki kod. Otwórz link, wpisz kod i zatwierdź. OpenChamber sam dokończy łączenie.
+
+Gdy dostawca pokazuje się jako połączony, jego modele stają się dostępne w czacie.
+
+Aby się rozłączyć, otwórz dostawcę i wybierz usunięcie jego logowania.
+
+## Wybierz model
+
+Model wybierasz tam, gdzie pracujesz:
+
+- w czacie użyj selektora modelu w pasku wiadomości, aby ustawić dostawcę i model dla tej sesji
+- dla agenta ustaw model domyślny (poniżej)
+
+## Skonfiguruj agentów
+
+Agent to nazwana konfiguracja — model, osobowość i to, co wolno mu robić.
+
+1. Otwórz **Settings → Agents**.
+2. Wybierz agenta lub utwórz nowego.
+3. Edytuj dowolne z poniższych:
+   - **description** — do czego służy agent
+   - **model** — jego domyślny model
+   - **temperature** — jak kreatywne są jego odpowiedzi
+   - **prompt** — stałe instrukcje, których zawsze przestrzega
+   - **tool rules** — których narzędzi może używać
+
+## Gdzie są przechowywane Twoje logowania
+
+Logowania dostawców są przechowywane przez OpenCode, a nie OpenChamber, więc są współdzielone z OpenCode CLI. Jeśli ustawisz tego samego dostawcę w więcej niż jednym miejscu, wygrywa ustawienie najbardziej szczegółowe: ustawienie dla projektu nadpisuje Twoje osobiste.
+
+## Powiązane
+
+- [Serwery MCP](/pl/mcp/) — dodaj agentom dodatkowe narzędzia
+- [Zużycie i limity](/pl/usage/) — śledź, ile już wykorzystałeś

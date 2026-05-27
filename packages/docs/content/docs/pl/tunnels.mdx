@@ -7,7 +7,22 @@ description: Bezpiecznie udostępnij OpenChamber do dostępu zdalnego i mobilneg
 
 Tunel to publiczny link do Twojego OpenChamber, dzięki któremu możesz dotrzeć do niego z telefonu lub z innej sieci. Użyj `openchamber tunnel`, aby utworzyć go dla działającej instancji.
 
-## Szybki start (tryb szybki Cloudflare)
+## Wymagania wstępne
+
+OpenChamber uruchamia CLI dostawcy tunelu na Twoim komputerze. Najpierw zainstaluj dostawcę, którego chcesz użyć:
+
+```bash
+brew install cloudflared
+brew install ngrok
+```
+
+Szybkie tunele Cloudflare działają przez `cloudflared`. Ngrok wymaga konta ngrok i authtokena z panelu ngrok:
+
+```bash
+ngrok config add-authtoken <your-ngrok-token>
+```
+
+## Szybki start
 
 1. Uruchom OpenChamber:
 
@@ -15,10 +30,16 @@ Tunel to publiczny link do Twojego OpenChamber, dzięki któremu możesz dotrze�
 openchamber
 ```
 
-2. Uruchom tunel:
+2. Uruchom tunel Cloudflare:
 
 ```bash
 openchamber tunnel start --provider cloudflare --mode quick
+```
+
+Albo uruchom tunel Ngrok:
+
+```bash
+openchamber tunnel start --provider ngrok --mode quick
 ```
 
 3. Sprawdź status:
@@ -30,6 +51,11 @@ openchamber tunnel status
 Gdy tunel działa, `status` pokazuje publiczny adres URL. Otwórz go lub zeskanuj kod QR, aby dotrzeć do OpenChamber z dowolnego miejsca.
 
 Domyślnie OpenChamber wypisuje kod QR w interaktywnych sesjach TTY. Użyj `--qr`, aby wymusić wyświetlenie kodu QR, lub `--no-qr`, aby je wyłączyć.
+
+## Dostawcy
+
+- `cloudflare`: tryby quick, managed remote i managed local
+- `ngrok`: tryb quick
 
 ## Tryby zarządzane
 
@@ -68,7 +94,9 @@ openchamber tunnel start --profile prod-main
 ```bash
 openchamber tunnel providers
 openchamber tunnel ready --provider cloudflare
+openchamber tunnel ready --provider ngrok
 openchamber tunnel doctor --provider cloudflare
+openchamber tunnel doctor --provider ngrok
 openchamber tunnel stop --port 3000
 ```
 
@@ -80,4 +108,7 @@ openchamber tunnel stop --port 3000
 
 ## Powiązane
 
+- [Bezpieczeństwo](/pl/security/) — zabezpiecz interfejs przed udostępnieniem
+- [Tunele w aplikacji desktopowej](/pl/desktop-tunnels/) — konfiguracja tunelu w aplikacji desktopowej bez startu z CLI
+- [PWA i dostęp z telefonu](/pl/mobile/) — korzystaj z OpenChamber z telefonu
 - [Rozwiązywanie problemów](/pl/troubleshooting/) — jeśli link tunelu nie działa

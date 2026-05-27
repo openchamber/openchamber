@@ -13,7 +13,12 @@ import type { IconName } from "@/components/icon/icons";
 import { BranchSelector } from './BranchSelector';
 import { WorktreeBranchDisplay } from './WorktreeBranchDisplay';
 import { SyncActions } from './SyncActions';
-import type { GitStatus, GitIdentityProfile, GitRemote } from '@/lib/api/types';
+import type {
+  GitStatus,
+  GitIdentityProfile,
+  GitRemote,
+  GitRemoteComparison,
+} from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 
 type SyncAction = 'fetch' | 'pull' | 'push' | 'sync' | null;
@@ -38,6 +43,8 @@ interface GitHeaderProps {
   isApplyingIdentity: boolean;
   isWorktreeMode: boolean;
   onOpenHistory?: () => void;
+  onOpenGraph?: () => void;
+  onOpenStashes?: () => void;
   actionTabItems?: SortableTabsStripItem[];
   activeActionTab?: string;
   onSelectActionTab?: (tabID: string) => void;
@@ -177,6 +184,49 @@ export const IdentityDropdown: React.FC<IdentityDropdownProps> = ({
   );
 };
 
+interface UpstreamStatusPillProps {
+  comparison: GitRemoteComparison;
+  trackingBranch: string | null;
+  tooltipDelayMs?: number;
+}
+
+const UpstreamStatusPill: React.FC<UpstreamStatusPillProps> = ({
+  comparison,
+  trackingBranch,
+  tooltipDelayMs = 1000,
+}) => {
+  const { t } = useI18n();
+  const target = `${comparison.remote}/${comparison.branch}`;
+  const isSynced = comparison.ahead === 0 && comparison.behind === 0;
+  const tooltipText = trackingBranch
+    ? t('gitView.header.upstreamTooltipTracking', { target, tracking: trackingBranch })
+    : t('gitView.header.upstreamTooltip', { target });
+
+  return (
+    <Tooltip delayDuration={tooltipDelayMs}>
+      <TooltipTrigger asChild>
+        <div className="inline-flex h-8 max-w-full items-center gap-1.5 rounded-md border border-[var(--interactive-border)] bg-[var(--surface-elevated)] px-2 typography-micro text-muted-foreground">
+          <Icon name="git-branch" className="size-3.5 shrink-0" />
+          <span className="min-w-0 truncate text-foreground/80">{target}</span>
+          {isSynced ? (
+            <span className="tabular-nums text-muted-foreground">{t('gitView.header.upstreamSynced')}</span>
+          ) : (
+            <span className="inline-flex items-center gap-1 tabular-nums">
+              {comparison.ahead > 0 ? (
+                <span className="text-[var(--status-info)]">↑{comparison.ahead}</span>
+              ) : null}
+              {comparison.behind > 0 ? (
+                <span className="text-[var(--status-warning)]">↓{comparison.behind}</span>
+              ) : null}
+            </span>
+          )}
+        </div>
+      </TooltipTrigger>
+      <TooltipContent sideOffset={8}>{tooltipText}</TooltipContent>
+    </Tooltip>
+  );
+};
+
 export const GitHeader: React.FC<GitHeaderProps> = ({
   status,
   localBranches,
@@ -197,6 +247,8 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
   isApplyingIdentity,
   isWorktreeMode,
   onOpenHistory,
+  onOpenGraph,
+  onOpenStashes,
   actionTabItems,
   activeActionTab,
   onSelectActionTab,
@@ -208,20 +260,44 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
 
   const managementButtons = (
     <div className="flex items-center gap-1 shrink-0">
-      {onOpenHistory ? (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 w-8 px-0"
-              onClick={onOpenHistory}
-            >
-              <Icon name="history" className="size-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent sideOffset={8}>{t('gitView.history.title')}</TooltipContent>
-        </Tooltip>
+      {onOpenHistory || onOpenGraph || onOpenStashes ? (
+        <DropdownMenu>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 px-0"
+                  aria-label={t('gitView.header.repositoryViews')}
+                >
+                  <Icon name="git-repository" className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent sideOffset={8}>{t('gitView.header.repositoryViews')}</TooltipContent>
+          </Tooltip>
+          <DropdownMenuContent align="end">
+            {onOpenHistory ? (
+              <DropdownMenuItem onSelect={onOpenHistory}>
+                <Icon name="history" className="size-4" />
+                {t('gitView.history.title')}
+              </DropdownMenuItem>
+            ) : null}
+            {onOpenGraph ? (
+              <DropdownMenuItem onSelect={onOpenGraph}>
+                <Icon name="git-merge" className="size-4" />
+                {t('gitView.graph.title')}
+              </DropdownMenuItem>
+            ) : null}
+            {onOpenStashes ? (
+              <DropdownMenuItem onSelect={onOpenStashes}>
+                <Icon name="archive-stack" className="size-4" />
+                {t('gitView.stashes.title')}
+              </DropdownMenuItem>
+            ) : null}
+          </DropdownMenuContent>
+        </DropdownMenu>
       ) : null}
     </div>
   );
@@ -244,13 +320,20 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
     />
   );
 
+  const upstreamStatusPill = status.upstreamComparison ? (
+    <UpstreamStatusPill
+      comparison={status.upstreamComparison}
+      trackingBranch={status.tracking}
+      tooltipDelayMs={1000}
+    />
+  ) : null;
+
   const identityControl = (
     <IdentityDropdown
       activeProfile={activeIdentityProfile}
       identities={availableIdentities}
       onSelect={onSelectIdentity}
       isApplying={isApplyingIdentity}
-
       iconOnly={true}
     />
   );
@@ -273,7 +356,6 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
               onCheckout={onCheckoutBranch}
               onCreate={onCreateBranch}
               remotes={remotes}
-
             />
           )}
         </div>
@@ -297,6 +379,9 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
               className="h-full"
             />
           </div>
+          {upstreamStatusPill ? (
+            <div className="min-w-0 shrink">{upstreamStatusPill}</div>
+          ) : null}
           <div className="shrink-0">{syncButtons}</div>
         </div>
       ) : null}

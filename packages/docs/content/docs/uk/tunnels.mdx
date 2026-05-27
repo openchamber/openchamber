@@ -7,7 +7,22 @@ description: Безпечно відкрийте OpenChamber для віддал
 
 Тунель — це публічне посилання на ваш OpenChamber, щоб дістатися до нього з телефона чи з іншої мережі. Скористайтеся `openchamber tunnel`, щоб створити його для запущеного інстансу.
 
-## Швидкий старт (швидкий режим Cloudflare)
+## Передумови
+
+OpenChamber запускає CLI провайдера тунелю на вашій машині. Спочатку встановіть провайдера, який хочете використовувати:
+
+```bash
+brew install cloudflared
+brew install ngrok
+```
+
+Швидкі тунелі Cloudflare працюють через `cloudflared`. Для Ngrok потрібен акаунт ngrok і authtoken з dashboard ngrok:
+
+```bash
+ngrok config add-authtoken <your-ngrok-token>
+```
+
+## Швидкий старт
 
 1. Запустіть OpenChamber:
 
@@ -15,10 +30,16 @@ description: Безпечно відкрийте OpenChamber для віддал
 openchamber
 ```
 
-2. Запустіть тунель:
+2. Запустіть тунель Cloudflare:
 
 ```bash
 openchamber tunnel start --provider cloudflare --mode quick
+```
+
+Або запустіть тунель Ngrok:
+
+```bash
+openchamber tunnel start --provider ngrok --mode quick
 ```
 
 3. Перевірте статус:
@@ -30,6 +51,11 @@ openchamber tunnel status
 Коли тунель піднято, `status` показує публічний URL. Відкрийте його або відскануйте QR-код, щоб дістатися до OpenChamber звідусіль.
 
 Типово OpenChamber виводить QR-код в інтерактивних TTY-сесіях. Використовуйте `--qr`, щоб примусово вивести QR, або `--no-qr`, щоб вимкнути його.
+
+## Провайдери
+
+- `cloudflare`: quick, managed remote і managed local режими
+- `ngrok`: quick режим
 
 ## Керовані режими
 
@@ -68,7 +94,9 @@ openchamber tunnel start --profile prod-main
 ```bash
 openchamber tunnel providers
 openchamber tunnel ready --provider cloudflare
+openchamber tunnel ready --provider ngrok
 openchamber tunnel doctor --provider cloudflare
+openchamber tunnel doctor --provider ngrok
 openchamber tunnel stop --port 3000
 ```
 
@@ -80,4 +108,7 @@ openchamber tunnel stop --port 3000
 
 ## Пов'язане
 
+- [Безпека](/uk/security/) — захистіть інтерфейс перед відкриттям доступу
+- [Десктопні тунелі](/uk/desktop-tunnels/) — налаштування тунелю в десктопному застосунку без CLI-старту
+- [PWA та мобільний доступ](/uk/mobile/) — відкривайте OpenChamber з телефона
 - [Усунення несправностей](/uk/troubleshooting/) — якщо посилання тунелю не працює

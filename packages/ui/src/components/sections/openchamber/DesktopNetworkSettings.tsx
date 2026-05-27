@@ -2,7 +2,15 @@ import * as React from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { getDesktopLanAddress, isDesktopLocalOriginActive, isDesktopShell, restartDesktopApp } from '@/lib/desktop';
+import { Input } from '@/components/ui/input';
+import {
+  getDesktopLanAddress,
+  getDesktopLaunchAtLogin,
+  isDesktopLocalOriginActive,
+  isDesktopShell,
+  restartDesktopApp,
+  setDesktopLaunchAtLogin,
+} from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 
 export const DesktopNetworkSettings: React.FC = () => {
@@ -10,8 +18,13 @@ export const DesktopNetworkSettings: React.FC = () => {
   const isLocalDesktop = isDesktopShell() && isDesktopLocalOriginActive();
   const [savedValue, setSavedValue] = React.useState(false);
   const [draftValue, setDraftValue] = React.useState(false);
+  const [savedPassword, setSavedPassword] = React.useState('');
+  const [draftPassword, setDraftPassword] = React.useState('');
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
+  const [launchAtLoginSupported, setLaunchAtLoginSupported] = React.useState(false);
+  const [launchAtLoginEnabled, setLaunchAtLoginEnabled] = React.useState(false);
+  const [isSavingLaunchAtLogin, setIsSavingLaunchAtLogin] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [lanAddress, setLanAddress] = React.useState<string | null>(null);
 
@@ -32,14 +45,20 @@ export const DesktopNetworkSettings: React.FC = () => {
           throw new Error(t('settings.openchamber.desktopNetwork.error.loadFailed'));
         }
 
-        const data = (await response.json().catch(() => null)) as null | { desktopLanAccessEnabled?: unknown };
+        const data = (await response.json().catch(() => null)) as null | {
+          desktopLanAccessEnabled?: unknown;
+          desktopUiPassword?: unknown;
+        };
         if (cancelled) {
           return;
         }
 
         const enabled = data?.desktopLanAccessEnabled === true;
+        const password = typeof data?.desktopUiPassword === 'string' ? data.desktopUiPassword : '';
         setSavedValue(enabled);
         setDraftValue(enabled);
+        setSavedPassword(password);
+        setDraftPassword(password);
         setError(null);
       } catch (cause) {
         if (!cancelled) {
@@ -56,6 +75,27 @@ export const DesktopNetworkSettings: React.FC = () => {
       cancelled = true;
     };
   }, [isLocalDesktop, t]);
+
+  React.useEffect(() => {
+    if (!isLocalDesktop) {
+      setLaunchAtLoginSupported(false);
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      const status = await getDesktopLaunchAtLogin();
+      if (cancelled) {
+        return;
+      }
+      setLaunchAtLoginSupported(status?.supported === true);
+      setLaunchAtLoginEnabled(status?.enabled === true);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isLocalDesktop]);
 
   React.useEffect(() => {
     if (!isLocalDesktop || !draftValue) {
@@ -77,7 +117,7 @@ export const DesktopNetworkSettings: React.FC = () => {
     };
   }, [draftValue, isLocalDesktop]);
 
-  const isDirty = draftValue !== savedValue;
+  const isDirty = draftValue !== savedValue || draftPassword !== savedPassword;
   const currentPort = React.useMemo(() => {
     if (typeof window === 'undefined') {
       return null;
@@ -91,6 +131,30 @@ export const DesktopNetworkSettings: React.FC = () => {
   const handleToggle = React.useCallback(() => {
     setDraftValue((current) => !current);
   }, []);
+
+  const handleLaunchAtLoginToggle = React.useCallback(async () => {
+    if (!launchAtLoginSupported || isSavingLaunchAtLogin) {
+      return;
+    }
+
+    const nextValue = !launchAtLoginEnabled;
+    setLaunchAtLoginEnabled(nextValue);
+    setIsSavingLaunchAtLogin(true);
+    setError(null);
+
+    try {
+      const status = await setDesktopLaunchAtLogin(nextValue);
+      if (!status?.supported) {
+        throw new Error(t('settings.openchamber.desktopNetwork.error.launchAtLoginUnsupported'));
+      }
+      setLaunchAtLoginEnabled(status.enabled);
+    } catch (cause) {
+      setLaunchAtLoginEnabled(!nextValue);
+      setError(cause instanceof Error ? cause.message : t('settings.openchamber.desktopNetwork.error.launchAtLoginSaveFailed'));
+    } finally {
+      setIsSavingLaunchAtLogin(false);
+    }
+  }, [isSavingLaunchAtLogin, launchAtLoginEnabled, launchAtLoginSupported, t]);
 
   const handleSaveAndRestart = React.useCallback(async () => {
     if (!isDirty) {
@@ -107,7 +171,10 @@ export const DesktopNetworkSettings: React.FC = () => {
           'Content-Type': 'application/json',
           Accept: 'application/json',
         },
-        body: JSON.stringify({ desktopLanAccessEnabled: draftValue }),
+        body: JSON.stringify({
+          desktopLanAccessEnabled: draftValue,
+          desktopUiPassword: draftPassword,
+        }),
       });
 
       if (!response.ok) {
@@ -115,6 +182,7 @@ export const DesktopNetworkSettings: React.FC = () => {
       }
 
       setSavedValue(draftValue);
+      setSavedPassword(draftPassword);
 
       const restarted = await restartDesktopApp();
       if (!restarted) {
@@ -124,7 +192,7 @@ export const DesktopNetworkSettings: React.FC = () => {
       setError(cause instanceof Error ? cause.message : t('settings.openchamber.desktopNetwork.error.saveFailed'));
       setIsSaving(false);
     }
-  }, [draftValue, isDirty, t]);
+  }, [draftPassword, draftValue, isDirty, t]);
 
   if (!isLocalDesktop) {
     return null;
@@ -137,6 +205,52 @@ export const DesktopNetworkSettings: React.FC = () => {
       </div>
 
       <section className="space-y-2 px-2 pb-2 pt-0">
+        {launchAtLoginSupported ? (
+          <div
+            className="group flex cursor-pointer items-start gap-2 py-1.5"
+            role="button"
+            tabIndex={0}
+            onClick={handleLaunchAtLoginToggle}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                handleLaunchAtLoginToggle();
+              }
+            }}
+          >
+            <Checkbox
+              checked={launchAtLoginEnabled}
+              onChange={handleLaunchAtLoginToggle}
+              ariaLabel={t('settings.openchamber.desktopNetwork.field.launchAtLoginAria')}
+              disabled={isSavingLaunchAtLogin}
+            />
+            <div className="min-w-0 flex-1">
+              <div className="typography-ui-label text-foreground">{t('settings.openchamber.desktopNetwork.field.launchAtLogin')}</div>
+              <div className="typography-micro text-muted-foreground/70">
+                {t('settings.openchamber.desktopNetwork.field.launchAtLoginDescription')}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        <div className="space-y-1 py-1.5">
+          <label className="typography-ui-label text-foreground" htmlFor="desktop-ui-password">
+            {t('settings.openchamber.desktopPassword.field.password')}
+          </label>
+          <Input
+            id="desktop-ui-password"
+            type="password"
+            className="h-7 max-w-sm"
+            value={draftPassword}
+            onChange={(event) => setDraftPassword(event.target.value)}
+            placeholder={t('settings.openchamber.desktopPassword.field.passwordPlaceholder')}
+            disabled={isLoading || isSaving}
+          />
+          <div className="typography-micro text-muted-foreground/70">
+            {t('settings.openchamber.desktopPassword.field.passwordDescription')}
+          </div>
+        </div>
+
         <div
           className="group flex cursor-pointer items-start gap-2 py-1.5"
           role="button"
