@@ -1,0 +1,39 @@
+---
+title: Polecenia i fragmenty
+description: Twórz wielokrotnego użytku polecenia z ukośnikiem i fragmenty tekstu do czatu.
+---
+
+# Polecenia i fragmenty
+
+Polecenia i fragmenty oszczędzają Ci ponownego wpisywania tego samego. Polecenia to całe prompty uruchamiane przez `/`; fragmenty to kawałki tekstu wstawiane do wiadomości przez `#`.
+
+## Polecenia
+
+Polecenie to zapisany prompt uruchamiany ukośnikiem, jak `/review`. Zarządzaj nimi w **Settings → Commands**.
+
+1. Otwórz **Settings → Commands** i utwórz polecenie.
+2. Nadaj mu nazwę, opis i tekst promptu, który ma wysłać.
+3. Opcjonalnie przypnij je do konkretnego agenta lub modelu.
+4. Wybierz zakres osobisty lub projektowy.
+
+W czacie wpisz `/` jako **pierwszy** znak wiadomości, aby otworzyć polecenia, a następnie wybierz jedno. Twój tekst może używać symboli zastępczych:
+
+- `$ARGUMENTS` — to, co wpiszesz po poleceniu
+- `@filename` — wstawia zawartość pliku
+- `` !`command` `` — wstawia wynik polecenia powłoki
+
+Wbudowane polecenia `init` i `review` można zresetować, ale nie usunąć.
+
+## Fragmenty
+
+Fragment to wielokrotnego użytku tekst, do którego odwołujesz się w treści hasztagiem, jak `#signoff`. Zarządzaj nimi w **Settings → Snippets**.
+
+1. Otwórz **Settings → Snippets** i utwórz fragment.
+2. Nadaj mu nazwę i tekst, który reprezentuje. Dodaj aliasy, jeśli chcesz mieć więcej niż jeden wyzwalacz.
+3. Wybierz zakres osobisty lub projektowy.
+
+W czacie wpisz `#` i wybierz fragment. OpenChamber podstawi pełny tekst przed wysłaniem.
+
+## Powiązane
+
+- [Skille](/pl/skills/) — wczytuj większe zestawy instrukcji na żądanie

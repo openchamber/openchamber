@@ -1,5 +1,11 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
@@ -8,6 +14,10 @@ import { useI18n } from '@/lib/i18n';
 import { getCommitFileDiff, type CommitFileDiffResponse } from '@/lib/gitApi';
 import { PierreDiffViewer } from '@/components/views/PierreDiffViewer';
 import { getLanguageFromExtension } from '@/lib/toolHelpers';
+import type { LanedCommit } from './gitGraph';
+import { GitGraphSegment } from './GitGraphSegment';
+import * as git from '@/lib/gitApi';
+import { toast } from '@/components/ui/toast';
 
 const HISTORY_DIFF_REQUEST_TIMEOUT_MS = 15000;
 const HISTORY_DIFF_LARGE_CHANGED_LINES = 500;
@@ -54,12 +64,17 @@ const trimHistoryDiffCache = (cache: Map<string, HistoryDiffCacheValue>): Map<st
 
 interface HistoryCommitRowProps {
   entry: GitLogEntry;
+  mode?: 'history' | 'graph';
+  laned?: LanedCommit;
+  totalLanes?: number;
   isExpanded: boolean;
   onToggle: () => void;
   files: CommitFileEntry[];
   isLoadingFiles: boolean;
   onCopyHash: (hash: string) => void;
   directory: string | undefined;
+  onConflict?: (result: { conflict: boolean; conflictFiles?: string[]; operation: 'cherry-pick' | 'revert' | 'merge' | 'rebase' }) => void;
+  onActionSuccess?: () => void;
 }
 
 function formatCommitDate(date: string) {
@@ -93,20 +108,185 @@ function getChangeTypeColor(changeType: string) {
   }
 }
 
+interface RefBadge {
+  label: string;
+  isHead: boolean;
+  isTag: boolean;
+}
+
+function parseRefBadges(refs: string): RefBadge[] {
+  if (!refs) return [];
+  return refs
+    .split(',')
+    .map((r) => r.trim())
+    .filter(Boolean)
+    .map((r) => {
+      const isHead = r.startsWith('HEAD ->');
+      const label = isHead ? r.replace('HEAD -> ', '') : r.replace('tag: ', '');
+      return {
+        label,
+        isHead,
+        isTag: r.startsWith('tag: '),
+      };
+    });
+}
+
 export const HistoryCommitRow = React.memo(({
   entry,
+  mode = 'history',
+  laned,
+  totalLanes,
   isExpanded,
   onToggle,
   files,
   isLoadingFiles,
   onCopyHash,
   directory,
+  onConflict,
+  onActionSuccess,
 }: HistoryCommitRowProps) => {
   const { t } = useI18n();
+  const isGraphMode = mode === 'graph';
+  type PendingAction =
+    | 'checkout' | 'cherryPick' | 'revert'
+    | 'merge' | 'rebase'
+    | 'resetSoft' | 'resetMixed' | 'resetHard';
+
+  const [actionLoading, setActionLoading] = React.useState<string | null>(null);
+  const [showCreateBranch, setShowCreateBranch] = React.useState(false);
+  const [newBranchName, setNewBranchName] = React.useState('');
+  const [pendingAction, setPendingAction] = React.useState<PendingAction | null>(null);
 
   const [openDiffPaths, setOpenDiffPaths] = React.useState<Set<string>>(new Set());
   const [diffCache, setDiffCache] = React.useState<Map<string, HistoryDiffCacheValue>>(new Map());
   const [forceRenderLargePaths, setForceRenderLargePaths] = React.useState<Set<string>>(new Set());
+
+  const handleCheckout = async () => {
+    if (!directory) return;
+    setActionLoading('checkout');
+    try {
+      await git.checkoutCommit(directory, entry.hash);
+      toast.success(t('gitView.history.actions.detachedHead'));
+      onActionSuccess?.();
+    } catch (e: unknown) {
+      toast.error(String((e as Error).message));
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleCreateBranch = async () => {
+    if (!directory || !newBranchName.trim()) return;
+    setActionLoading('createBranch');
+    try {
+      await git.createBranch(directory, newBranchName.trim(), entry.hash);
+      setShowCreateBranch(false);
+      setNewBranchName('');
+      onActionSuccess?.();
+    } catch (e: unknown) {
+      toast.error(String((e as Error).message));
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleCherryPick = async () => {
+    if (!directory) return;
+    setActionLoading('cherryPick');
+    try {
+      const result = await git.cherryPick(directory, entry.hash);
+      if (result.conflict) {
+        onConflict?.({ conflict: true, conflictFiles: result.conflictFiles, operation: 'cherry-pick' });
+      } else {
+        onActionSuccess?.();
+      }
+    } catch (e: unknown) {
+      toast.error(String((e as Error).message));
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleRevert = async () => {
+    if (!directory) return;
+    setActionLoading('revert');
+    try {
+      const result = await git.revertCommit(directory, entry.hash);
+      if (result.conflict) {
+        onConflict?.({ conflict: true, conflictFiles: result.conflictFiles, operation: 'revert' });
+      } else {
+        onActionSuccess?.();
+      }
+    } catch (e: unknown) {
+      toast.error(String((e as Error).message));
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleReset = async (mode: 'soft' | 'mixed' | 'hard', force = false) => {
+    if (!directory || actionLoading !== null) return;
+    setActionLoading('reset');
+    try {
+      await git.resetToCommit(directory, entry.hash, mode, force);
+      onActionSuccess?.();
+    } catch (e: unknown) {
+      toast.error(String((e as Error).message));
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  // Single confirm handler dispatches to the right action based on pendingAction
+  const confirmPendingAction = async () => {
+    if (!pendingAction) return;
+    const action = pendingAction;
+    setPendingAction(null);
+    switch (action) {
+      case 'checkout':   return handleCheckout();
+      case 'cherryPick': return handleCherryPick();
+      case 'revert':     return handleRevert();
+      case 'merge':      return handleMerge();
+      case 'rebase':     return handleRebase();
+      case 'resetSoft':  return handleReset('soft');
+      case 'resetMixed': return handleReset('mixed');
+      case 'resetHard':  return handleReset('hard', true); // force=true: user already confirmed
+    }
+  };
+
+  const handleMerge = async () => {
+    if (!directory) return;
+    setActionLoading('merge');
+    try {
+      const result = await git.merge(directory, { branch: entry.hash });
+      if (result.conflict) {
+        onConflict?.({ conflict: true, conflictFiles: result.conflictFiles, operation: 'merge' });
+      } else {
+        onActionSuccess?.();
+      }
+    } catch (e: unknown) {
+      toast.error(String((e as Error).message));
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleRebase = async () => {
+    if (!directory) return;
+    setActionLoading('rebase');
+    try {
+      const result = await git.rebase(directory, { onto: entry.hash });
+      if (result.conflict) {
+        onConflict?.({ conflict: true, conflictFiles: result.conflictFiles, operation: 'rebase' });
+      } else {
+        onActionSuccess?.();
+      }
+    } catch (e: unknown) {
+      toast.error(String((e as Error).message));
+    } finally {
+      setActionLoading(null);
+    }
+  };
 
   const loadFileDiff = React.useCallback(async (file: CommitFileEntry) => {
     const key = file.path;
@@ -169,15 +349,45 @@ export const HistoryCommitRow = React.memo(({
         onClick={onToggle}
         className={cn(
           'w-full flex items-start gap-3 px-3 py-2 text-left transition-colors',
-          isExpanded ? 'bg-sidebar/90' : 'hover:bg-sidebar/40'
+          isGraphMode
+            ? 'hover:bg-[var(--interactive-hover)]/40'
+            : isExpanded ? 'bg-sidebar/90' : 'hover:bg-sidebar/40'
         )}
       >
-        <div
-          className="h-2 w-2 translate-y-2 rounded-full shrink-0"
-          style={{ backgroundColor: 'var(--status-success)' }}
-          aria-hidden
-        />
+        {isGraphMode && laned && totalLanes !== undefined ? (
+          <div className="-my-2 shrink-0 self-stretch">
+            <GitGraphSegment laned={laned} totalLanes={totalLanes} isExpanded={isExpanded} />
+          </div>
+        ) : (
+          <div
+            className="h-2 w-2 translate-y-2 rounded-full shrink-0"
+            style={{ backgroundColor: 'var(--status-success)' }}
+            aria-hidden
+          />
+        )}
         <div className="min-w-0 flex-1">
+          {/* Ref badges */}
+          {isGraphMode ? (() => {
+            const badges = parseRefBadges(entry.refs);
+            return badges.length > 0 ? (
+              <div className="flex flex-wrap gap-1 mb-0.5">
+                {badges.map((badge) => (
+                  <span key={badge.label}
+                    className={cn(
+                      'inline-flex items-center px-1.5 py-0 typography-micro rounded font-medium',
+                      badge.isHead
+                        ? 'bg-[var(--chart-1)] text-[var(--primary-foreground)]'
+                        : badge.isTag
+                        ? 'bg-[var(--chart-5)] text-[var(--primary-foreground)]'
+                        : 'bg-[var(--interactive-hover)] text-[var(--foreground)]'
+                    )}>
+                    {badge.label}
+                  </span>
+                ))}
+              </div>
+            ) : null;
+          })() : null}
+
           <p className="typography-ui-label font-medium text-foreground line-clamp-1">
             {entry.message}
           </p>
@@ -217,6 +427,132 @@ export const HistoryCommitRow = React.memo(({
 
       {isExpanded && (
         <div className="px-3 pb-2 pl-8 border-t border-border/40">
+          {/* Action buttons */}
+          {isGraphMode && pendingAction ? (
+            /* Confirmation banner — replaces the button row while an action is pending */
+            <div className="flex items-center gap-2 py-2 border-b border-border/30 mb-2">
+              <span className="typography-micro text-muted-foreground flex-1 min-w-0">
+                {t(`gitView.history.actions.${pendingAction}Confirm` as never)}
+              </span>
+              <Button
+                variant="destructive" size="xs" className="h-6 shrink-0"
+                disabled={actionLoading !== null}
+                onClick={(e) => { e.stopPropagation(); void confirmPendingAction(); }}
+              >
+                {actionLoading !== null
+                  ? <Icon name="loader-4" className="size-3 animate-spin mr-1" />
+                  : null}
+                {t('gitView.history.actions.confirmButton')}
+              </Button>
+              <Button
+                variant="ghost" size="xs" className="h-6 shrink-0"
+                disabled={actionLoading !== null}
+                onClick={(e) => { e.stopPropagation(); setPendingAction(null); }}
+              >
+                {t('gitView.history.actions.cancelButton')}
+              </Button>
+            </div>
+          ) : isGraphMode ? (
+            <div className="flex flex-wrap items-center gap-1.5 py-2 border-b border-border/30 mb-2">
+              <Button variant="outline" size="xs" className="h-6"
+                disabled={actionLoading !== null}
+                onClick={(e) => { e.stopPropagation(); setPendingAction('checkout'); }}
+              >
+                {t('gitView.history.actions.checkout')}
+              </Button>
+
+              {showCreateBranch ? (
+                <div className="flex items-center gap-1">
+                  <input
+                    autoFocus value={newBranchName}
+                    onChange={(e) => setNewBranchName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') void handleCreateBranch();
+                      if (e.key === 'Escape') { setShowCreateBranch(false); setNewBranchName(''); }
+                    }}
+                    placeholder={t('gitView.history.actions.createBranchPlaceholder')}
+                    className="h-6 text-xs px-2 rounded border border-border/60 bg-background min-w-0 w-32"
+                  />
+                  <Button variant="outline" size="xs" className="h-6"
+                    disabled={!newBranchName.trim() || actionLoading !== null}
+                    onClick={(e) => { e.stopPropagation(); void handleCreateBranch(); }}
+                  >
+                    {actionLoading === 'createBranch'
+                      ? <Icon name="loader-4" className="size-3 animate-spin mr-1" />
+                      : null}
+                    {t('gitView.history.actions.createBranchConfirm')}
+                  </Button>
+                </div>
+              ) : (
+                <Button variant="outline" size="xs" className="h-6"
+                  onClick={(e) => { e.stopPropagation(); setShowCreateBranch(true); }}
+                >
+                  {t('gitView.history.actions.createBranch')}
+                </Button>
+              )}
+
+              <Button variant="outline" size="xs" className="h-6"
+                disabled={actionLoading !== null}
+                onClick={(e) => { e.stopPropagation(); setPendingAction('cherryPick'); }}
+              >
+                {t('gitView.history.actions.cherryPick')}
+              </Button>
+
+              <Button variant="outline" size="xs" className="h-6"
+                disabled={actionLoading !== null}
+                onClick={(e) => { e.stopPropagation(); setPendingAction('revert'); }}
+              >
+                {t('gitView.history.actions.revert')}
+              </Button>
+
+              {/* Reset: dropdown first to pick mode, then confirmation banner */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="xs"
+                    className="h-6"
+                    disabled={actionLoading !== null}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {actionLoading === 'reset'
+                      ? <Icon name="loader-4" className="size-3 animate-spin mr-1" />
+                      : null}
+                    {t('gitView.history.actions.reset')}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="min-w-max">
+                  {(['soft', 'mixed', 'hard'] as const).map((mode) => (
+                    <DropdownMenuItem
+                      key={mode}
+                      disabled={actionLoading !== null}
+                      onSelect={(e) => {
+                        e.stopPropagation();
+                        setPendingAction(`reset${mode.charAt(0).toUpperCase() + mode.slice(1)}` as PendingAction);
+                      }}
+                    >
+                      {t(`gitView.history.actions.reset${mode.charAt(0).toUpperCase() + mode.slice(1)}` as never)}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              <Button variant="outline" size="xs" className="h-6"
+                disabled={actionLoading !== null}
+                onClick={(e) => { e.stopPropagation(); setPendingAction('merge'); }}
+              >
+                {t('gitView.history.actions.merge')}
+              </Button>
+
+              <Button variant="outline" size="xs" className="h-6"
+                disabled={actionLoading !== null}
+                onClick={(e) => { e.stopPropagation(); setPendingAction('rebase'); }}
+              >
+                {t('gitView.history.actions.rebase')}
+              </Button>
+            </div>
+          ) : null}
+
           {isLoadingFiles ? (
             <div className="flex items-center gap-2 py-2">
               <Icon name="loader-4" className="size-4 animate-spin text-muted-foreground" />

@@ -1,6 +1,7 @@
 export { GitHeader } from './GitHeader';
 export { GitEmptyState } from './GitEmptyState';
-export { ChangesSection } from './ChangesSection';
+export { ChangesPanel } from './ChangesPanel';
+export type { ChangesGroupConfig } from './ChangesPanel';
 export { ChangeRow } from './ChangeRow';
 export { CommitSection } from './CommitSection';
 export { CommitInput } from './CommitInput';

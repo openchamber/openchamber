@@ -1,0 +1,37 @@
+---
+title: Segurança
+description: Proteja a UI com uma senha e passkeys antes de expô-la.
+---
+
+# Segurança
+
+O OpenChamber dá acesso à sua máquina e ao seu código, então proteja-o antes que qualquer pessoa além de você possa alcançá-lo. Esta página cobre a senha de UI, as passkeys e o que saber antes de expor o OpenChamber a uma rede.
+
+## Definir uma senha de UI
+
+Inicie o OpenChamber com uma senha e a UI do navegador a solicita:
+
+```bash
+openchamber --ui-password be-creative-here
+```
+
+Você também pode defini-la com a variável de ambiente `OPENCHAMBER_UI_PASSWORD` em vez de colocá-la na linha de comando. Após o login, o OpenChamber lembra o dispositivo por um tempo para que você não seja solicitado toda vez.
+
+Sempre defina uma senha se a instância puder ser alcançada por outra pessoa — especialmente por um [túnel](/pt-br/tunnels/) ou pela internet pública.
+
+## Passkeys
+
+Uma vez definida uma senha, você pode adicionar passkeys (Face ID, Touch ID, uma chave de segurança) para um login mais rápido. Adicione-as em **Settings → OpenChamber → Passkeys**.
+
+As passkeys estão vinculadas à senha atual. Se você alterar ou remover a senha, as passkeys salvas são apagadas e você precisará adicioná-las novamente.
+
+## Antes de expô-lo
+
+- Por padrão, o OpenChamber só escuta na sua própria máquina (`127.0.0.1`). É preciso uma mudança deliberada para escutar mais amplamente, e você deve definir uma senha primeiro.
+- Prefira um [túnel](/pt-br/tunnels/) ou uma rede privada (como uma VPN) a abrir uma porta para a internet.
+- Se você colocar o OpenChamber atrás do seu próprio servidor HTTPS, veja [Reverse Proxy](/pt-br/reverse-proxy/).
+
+## Relacionado
+
+- [Túneis](/pt-br/tunnels/) — a forma recomendada de alcançar uma instância remotamente
+- [Reverse Proxy](/pt-br/reverse-proxy/) — execute o OpenChamber atrás do seu próprio servidor

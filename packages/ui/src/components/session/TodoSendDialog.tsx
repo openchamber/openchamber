@@ -196,30 +196,41 @@ export function TodoSendDialog(props: TodoSendDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => { if (!submitting) onOpenChange(nextOpen); }}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-2xl overflow-visible">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
 
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <ModelSelector
-            providerId={execution.providerID}
-            modelId={execution.modelID}
-            onChange={(providerID, modelID) => {
-              setExecution((prev) => ({ ...prev, providerID, modelID, variant: '' }));
-            }}
-          />
-          <ThinkingPill
-            value={execution.variant}
-            options={variantOptions}
-            disabled={!hasVariantOptions}
-            onChange={(variant) => setExecution((prev) => ({ ...prev, variant }))}
-          />
-          <AgentSelector
-            agentName={execution.agent}
-            filter={agentFilter}
-            onChange={(agent) => setExecution((prev) => ({ ...prev, agent }))}
-          />
+        <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+          <div className="flex min-w-0 flex-col gap-1.5">
+            <span className="typography-meta font-medium text-muted-foreground">{t('chat.modelControls.model')}</span>
+            <ModelSelector
+              providerId={execution.providerID}
+              modelId={execution.modelID}
+              className="w-full justify-between"
+              dropdownPortalToBody
+              onChange={(providerID, modelID) => {
+                setExecution((prev) => ({ ...prev, providerID, modelID, variant: '' }));
+              }}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <span className="typography-meta font-medium text-muted-foreground">{t('sessions.scheduledTasks.editor.thinkingLevel.label')}</span>
+            <ThinkingPill
+              value={execution.variant}
+              options={variantOptions}
+              disabled={!hasVariantOptions}
+              onChange={(variant) => setExecution((prev) => ({ ...prev, variant }))}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <span className="typography-meta font-medium text-muted-foreground">{t('sessions.scheduledTasks.editor.agent.label')}</span>
+            <AgentSelector
+              agentName={execution.agent}
+              filter={agentFilter}
+              onChange={(agent) => setExecution((prev) => ({ ...prev, agent }))}
+            />
+          </div>
         </div>
 
         <div className="flex items-center justify-end gap-2">

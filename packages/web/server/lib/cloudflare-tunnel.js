@@ -637,14 +637,12 @@ export async function startCloudflareTunnel({ originUrl, port }) {
 
 export function printTunnelWarning() {
   console.log(`
-⚠️  Cloudflare Quick Tunnel Limitations:
+⚠️  Quick Tunnel Limitations:
 
-   • Maximum 200 concurrent requests
-   • Server-Sent Events (SSE) are NOT supported
+   • Provider limits may apply
    • URLs are temporary and will expire when the tunnel stops
    • Password protection is required for tunnel access
 
-   For production use, set up a managed remote Cloudflare Tunnel:
-   https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/
+   For production use, set up a persistent provider tunnel or static domain.
 `);
 }

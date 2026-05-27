@@ -1,0 +1,38 @@
+---
+title: 远程访问
+description: 修复隧道、远程实例，以及从另一台设备访问 OpenChamber 的问题。
+---
+
+# 远程访问
+
+当你无法从手机或另一台机器访问 OpenChamber 时，修复方法取决于你的连接方式。
+
+## 先检查基础项
+
+- 先在同一台电脑上打开 `http://localhost:3000` — 如果这都失败，那就不是远程问题；参阅 [OpenCode 连接](/zh-cn/troubleshooting/opencode-connection/)
+- 用 `openchamber status` 确认服务器正在运行
+
+## 隧道链接无法使用
+
+- 运行 `openchamber tunnel status --all`
+- 从同一个实例和端口重启隧道
+- 如果之前的连接链接已被使用过，重新生成它
+
+完整设置请参阅 [隧道](/zh-cn/tunnels/)。
+
+## 远程实例无法连接（桌面端）
+
+当某个 [远程实例](/zh-cn/remote-instances/) 停滞时，OpenChamber 会指出失败的步骤：
+
+- **auth** — 你的 SSH 或 UI 密码被拒绝；重新输入它
+- **install / start** — OpenChamber 无法在远程机器上设置或启动服务器；检查该机器的要求
+- **forwarding** — 连接已建立但端口没有到达你；尝试一个不同的本地端口
+
+## 在你自己的服务器后面
+
+如果你把 OpenChamber 放在反向代理后面，而它加载异常或无法连接，请参阅 [反向代理](/zh-cn/reverse-proxy/)。
+
+## 相关内容
+
+- [隧道](/zh-cn/tunnels/) · [远程实例](/zh-cn/remote-instances/) · [反向代理](/zh-cn/reverse-proxy/)
+- [安全](/zh-cn/security/) — 在公开 UI 之前保护它

@@ -12,6 +12,11 @@ const execFileAsync = promisify(execFile);
 const gpgconfCandidates = ['gpgconf', '/opt/homebrew/bin/gpgconf', '/usr/local/bin/gpgconf'];
 let resolvedGitBinary = null;
 const worktreeBootstrapState = new Map();
+const remoteExistenceCache = new Map();
+const SIMPLE_GIT_SAFE_BINARY_PATTERN = /^([a-z]:)?([a-z0-9/.\\_~-]+)$/i;
+const SIMPLE_GIT_UNSAFE_BINARY_WARNING = 'Invalid value supplied for custom binary, restricted characters must be removed';
+const REMOTE_EXISTENCE_CACHE_TTL_MS = 30_000;
+const gitIndexMutationQueues = new Map();
 
 const WORKTREE_BOOTSTRAP_PENDING = 'pending';
 const WORKTREE_BOOTSTRAP_READY = 'ready';
@@ -85,6 +90,30 @@ const normalizeGitExecutableCandidate = (candidate) => {
   return trimmed;
 };
 
+const isSafeSimpleGitBinary = (candidate) => (
+  typeof candidate === 'string' && SIMPLE_GIT_SAFE_BINARY_PATTERN.test(candidate)
+);
+
+const createSimpleGit = (options) => {
+  if (!options?.unsafe?.allowUnsafeCustomBinary) {
+    return simpleGit(options);
+  }
+
+  const originalWarn = console.warn;
+  console.warn = (...args) => {
+    if (String(args[0] || '').includes(SIMPLE_GIT_UNSAFE_BINARY_WARNING)) {
+      return;
+    }
+    originalWarn(...args);
+  };
+
+  try {
+    return simpleGit(options);
+  } finally {
+    console.warn = originalWarn;
+  }
+};
+
 const listPathExecutableCandidates = (binaryName) => {
   const currentPath = process.env.PATH || '';
   const seen = new Set();
@@ -132,22 +161,34 @@ const resolveGitBinary = () => {
     .map((value) => (typeof value === 'string' ? value.trim() : ''))
     .filter(Boolean);
   for (const candidate of explicit) {
-    if (isExecutableFile(candidate)) {
-      resolvedGitBinary = candidate;
+    const normalized = normalizeGitExecutableCandidate(candidate);
+    if (isExecutableFile(normalized)) {
+      resolvedGitBinary = normalized;
       return resolvedGitBinary;
     }
   }
 
-  const discovered = [
+  const pathDiscovered = [
     ...listPathExecutableCandidates('git.exe'),
     ...listPathExecutableCandidates('git'),
+  ]
+    .map(normalizeGitExecutableCandidate)
+    .filter(Boolean)
+    .filter((candidate) => isExecutableFile(candidate));
+  if (pathDiscovered.length > 0) {
+    resolvedGitBinary = 'git';
+    return resolvedGitBinary;
+  }
+
+  const discovered = [
     ...listWindowsGitInstallCandidates(),
   ]
     .map(normalizeGitExecutableCandidate)
     .filter(Boolean)
     .filter((candidate) => isExecutableFile(candidate));
 
-  const preferredExe = discovered.find((candidate) => candidate.toLowerCase().endsWith('.exe'));
+  const preferredExe = discovered.find((candidate) => isSafeSimpleGitBinary(candidate) && candidate.toLowerCase().endsWith('.exe'))
+    || discovered.find((candidate) => candidate.toLowerCase().endsWith('.exe'));
   resolvedGitBinary = preferredExe || discovered[0] || 'git.exe';
   return resolvedGitBinary;
 };
@@ -275,9 +316,9 @@ const createGit = async (directory) => {
   const hasCustomBinary = typeof binary === 'string' && binary.trim() && binary !== 'git' && binary !== 'git.exe';
   const unsafe = hasCustomBinary ? { allowUnsafeCustomBinary: true } : undefined;
   if (!directory) {
-    return simpleGit({ env, spawnOptions, binary, unsafe });
+    return createSimpleGit({ env, spawnOptions, binary, unsafe });
   }
-  return simpleGit({
+  return createSimpleGit({
     baseDir: normalizeDirectoryPath(directory),
     env,
     spawnOptions,
@@ -305,6 +346,60 @@ const normalizeDirectoryPath = (value) => {
   }
 
   return trimmed;
+};
+
+const getGitIndexMutationQueueKey = (directory) => {
+  const normalized = normalizeDirectoryPath(directory);
+  if (!normalized) {
+    return '';
+  }
+  return path.resolve(normalized);
+};
+
+const withGitIndexMutationQueue = async (directory, task) => {
+  let key = getGitIndexMutationQueueKey(directory);
+  try {
+    const directoryPath = normalizeDirectoryPath(directory);
+    if (directoryPath) {
+      const git = await createGit(directoryPath);
+      key = await resolveGitRepositoryRoot(directoryPath, git);
+    }
+  } catch {
+    // Fall back to the normalized directory key when the repo root is unavailable.
+  }
+  if (!key) {
+    return task();
+  }
+
+  const previous = gitIndexMutationQueues.get(key) || Promise.resolve();
+  const current = previous.catch(() => {}).then(task);
+  const tail = current.catch(() => {});
+  gitIndexMutationQueues.set(key, tail);
+
+  try {
+    return await current;
+  } finally {
+    if (gitIndexMutationQueues.get(key) === tail) {
+      gitIndexMutationQueues.delete(key);
+    }
+  }
+};
+
+const normalizeFilePathList = (paths) => Array.from(new Set(
+  (Array.isArray(paths) ? paths : [paths])
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+));
+
+const validateRepositoryFilePaths = (directoryPath, filePaths) => {
+  const repoRoot = path.resolve(directoryPath);
+
+  for (const filePath of filePaths) {
+    const absoluteTarget = path.resolve(repoRoot, filePath);
+    if (!absoluteTarget.startsWith(repoRoot + path.sep) && absoluteTarget !== repoRoot) {
+      throw new Error(`Path is outside repository: ${filePath}`);
+    }
+  }
 };
 
 const toGitPath = (value) => value.replace(/\\/g, '/');
@@ -541,6 +636,10 @@ const normalizeStartRef = (value) => {
   return trimmed;
 };
 
+function isValidCommitHash(hash) {
+  return typeof hash === 'string' && /^[0-9a-fA-F]{7,40}$/.test(hash);
+}
+
 const parseRemoteBranchRef = (value) => {
   const trimmed = String(value || '').trim();
   if (!trimmed) {
@@ -620,6 +719,96 @@ const parseGitErrorText = (error) => {
     .filter(Boolean)
     .join('\n')
     .trim();
+};
+
+const parseAheadBehindCounts = (value) => {
+  const [aheadRaw, behindRaw] = String(value || '').trim().split(/\s+/);
+  const ahead = parseInt(aheadRaw, 10);
+  const behind = parseInt(behindRaw, 10);
+  if (!Number.isFinite(ahead) || !Number.isFinite(behind)) {
+    return null;
+  }
+  return { ahead, behind };
+};
+
+const getRemoteExistenceCacheKey = (directory, remoteName) => {
+  const normalizedDirectory = normalizeDirectoryPath(directory) || '';
+  return `${path.resolve(normalizedDirectory)}\0${remoteName}`;
+};
+
+const hasRemote = async (git, directory, remoteName) => {
+  const remote = String(remoteName || '').trim();
+  if (!remote) {
+    return false;
+  }
+
+  const key = getRemoteExistenceCacheKey(directory, remote);
+  const cached = remoteExistenceCache.get(key);
+  if (cached && Date.now() - cached.checkedAt < REMOTE_EXISTENCE_CACHE_TTL_MS) {
+    return cached.exists;
+  }
+
+  const exists = await git
+    .raw(['remote', 'get-url', remote])
+    .then((value) => String(value || '').trim().length > 0)
+    .catch(() => false);
+
+  remoteExistenceCache.set(key, { exists, checkedAt: Date.now() });
+  return exists;
+};
+
+const buildRawGitOptions = (raw) => {
+  if (Array.isArray(raw)) {
+    return raw.map((value) => String(value || '').trim()).filter(Boolean);
+  }
+
+  if (!raw || typeof raw !== 'object') {
+    return [];
+  }
+
+  return Object.entries(raw).flatMap(([key, value]) => {
+    const option = String(key || '').trim();
+    if (!option || value === false) {
+      return [];
+    }
+    if (value === true || value == null) {
+      return [option];
+    }
+    return [option, String(value)];
+  });
+};
+
+const getRemoteBranchComparison = async (git, remoteName, branchName) => {
+  const remote = String(remoteName || '').trim();
+  const branch = String(branchName || '').trim();
+  if (!remote || !branch) {
+    return null;
+  }
+
+  const remoteRef = `refs/remotes/${remote}/${branch}`;
+  const exists = await git
+    .raw(['rev-parse', '--verify', remoteRef])
+    .then((value) => String(value || '').trim())
+    .catch(() => '');
+  if (!exists) {
+    return null;
+  }
+
+  const countsRaw = await git
+    .raw(['rev-list', '--left-right', '--count', `HEAD...${remoteRef}`])
+    .then((value) => String(value || '').trim())
+    .catch(() => '');
+  const counts = parseAheadBehindCounts(countsRaw);
+  if (!counts) {
+    return null;
+  }
+
+  return {
+    remote,
+    branch,
+    ahead: counts.ahead,
+    behind: counts.behind,
+  };
 };
 
 const isNotGitRepositoryError = (error) => {
@@ -1287,7 +1476,7 @@ export async function getStatus(directory, options = {}) {
   const lightMode = options.mode === 'light';
 
   try {
-    const { repoRoot, git } = await createRepositoryGitContext(directory);
+    const { directoryPath, repoRoot, git } = await createRepositoryGitContext(directory);
 
     // Use -uall to show all untracked files individually, not just directories
     const status = await git.status(['-uall']);
@@ -1440,6 +1629,7 @@ export async function getStatus(directory, options = {}) {
     let tracking = status.tracking || null;
     let ahead = status.ahead;
     let behind = status.behind;
+    let upstreamComparison;
 
     // When no upstream is configured (common for new worktree branches), Git doesn't report ahead/behind.
     // We still want to show the number of unpublished commits to the user.
@@ -1457,6 +1647,15 @@ export async function getStatus(directory, options = {}) {
           behind = 0;
         }
       }
+    }
+
+    if (
+      !lightMode
+      && status.current
+      && (!tracking || !tracking.startsWith('upstream/'))
+      && await hasRemote(git, directoryPath, 'upstream')
+    ) {
+      upstreamComparison = await getRemoteBranchComparison(git, 'upstream', status.current);
     }
 
     // Check for in-progress operations
@@ -1519,6 +1718,7 @@ export async function getStatus(directory, options = {}) {
       tracking,
       ahead,
       behind,
+      upstreamComparison,
       files: status.files.map((f) => ({
         path: f.path,
         index: f.index,
@@ -1811,14 +2011,30 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
 
   let modified = '';
   try {
-    const stat = await fsp.stat(absolutePath);
-    if (stat.isFile()) {
+    if (staged) {
       if (isImage) {
-        // For images, read as binary and convert to data URL
-        const buffer = await fsp.readFile(absolutePath);
-        modified = `data:${mimeType};base64,${buffer.toString('base64')}`;
+        const { stdout } = await execFileAsync(getGitBinary(), ['show', `:${repoPath}`], {
+          cwd: repoRoot,
+          encoding: 'buffer',
+          windowsHide: true,
+          maxBuffer: 50 * 1024 * 1024,
+        });
+        if (stdout && stdout.length > 0) {
+          modified = `data:${mimeType};base64,${stdout.toString('base64')}`;
+        }
       } else {
-        modified = await fsp.readFile(absolutePath, 'utf8');
+        modified = await git.show([`:${repoPath}`]);
+      }
+    } else {
+      const stat = await fsp.stat(absolutePath);
+      if (stat.isFile()) {
+        if (isImage) {
+          // For images, read as binary and convert to data URL
+          const buffer = await fsp.readFile(absolutePath);
+          modified = `data:${mimeType};base64,${buffer.toString('base64')}`;
+        } else {
+          modified = await fsp.readFile(absolutePath, 'utf8');
+        }
       }
     }
   } catch (error) {
@@ -1838,52 +2054,57 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
   };
 }
 
-export async function revertFile(directory, filePath) {
-  const directoryPath = normalizeDirectoryPath(directory);
-  const directoryGit = await createGit(directoryPath);
-  const repoRoot = await resolveGitRepositoryRoot(directoryPath, directoryGit);
-  const { absolutePath, repoPath } = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
-  const git = await createGit(repoRoot);
+export async function revertFile(directory, filePath, options = {}) {
+  return withGitIndexMutationQueue(directory, async () => {
+    const scope = options?.scope === 'working' ? 'working' : 'all';
+    const directoryPath = normalizeDirectoryPath(directory);
+    const directoryGit = await createGit(directoryPath);
+    const repoRoot = await resolveGitRepositoryRoot(directoryPath, directoryGit);
+    const { absolutePath, repoPath } = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
+    const git = await createGit(repoRoot);
 
-  const isTracked = await git
-    .raw(['ls-files', '--error-unmatch', '--', repoPath])
-    .then(() => true)
-    .catch(() => false);
+    const isTracked = await git
+      .raw(['ls-files', '--error-unmatch', '--', repoPath])
+      .then(() => true)
+      .catch(() => false);
 
-  if (!isTracked) {
-    try {
-      await git.raw(['clean', '-f', '-d', '--', repoPath]);
-      return;
-    } catch (cleanError) {
+    if (!isTracked) {
       try {
-        await fsp.rm(absolutePath, { recursive: true, force: true });
+        await git.raw(['clean', '-f', '-d', '--', repoPath]);
         return;
-      } catch (fsError) {
-        if (fsError && typeof fsError === 'object' && fsError.code === 'ENOENT') {
+      } catch (cleanError) {
+        try {
+          await fsp.rm(absolutePath, { recursive: true, force: true });
           return;
+        } catch (fsError) {
+          if (fsError && typeof fsError === 'object' && fsError.code === 'ENOENT') {
+            return;
+          }
+          console.error('Failed to remove untracked file during revert:', fsError);
+          throw fsError;
         }
-        console.error('Failed to remove untracked file during revert:', fsError);
-        throw fsError;
       }
     }
-  }
 
-  try {
-    await git.raw(['restore', '--staged', '--', repoPath]);
-  } catch (error) {
-    await git.raw(['reset', 'HEAD', '--', repoPath]).catch(() => {});
-  }
-
-  try {
-    await git.raw(['restore', '--', repoPath]);
-  } catch (error) {
-    try {
-      await git.raw(['checkout', '--', repoPath]);
-    } catch (fallbackError) {
-      console.error('Failed to revert git file:', fallbackError);
-      throw fallbackError;
+    if (scope === 'all') {
+      try {
+        await git.raw(['restore', '--staged', '--', repoPath]);
+      } catch (error) {
+        await git.raw(['reset', 'HEAD', '--', repoPath]).catch(() => {});
+      }
     }
-  }
+
+    try {
+      await git.raw(['restore', '--', repoPath]);
+    } catch (error) {
+      try {
+        await git.raw(['checkout', '--', repoPath]);
+      } catch (fallbackError) {
+        console.error('Failed to revert git file:', fallbackError);
+        throw fallbackError;
+      }
+    }
+  });
 }
 
 export async function collectDiffs(directory, files = []) {
@@ -1908,9 +2129,20 @@ export async function pull(directory, options = {}) {
     : options.options || {};
 
   try {
+    const remote = String(options.remote || '').trim();
+    const requestedBranch = String(options.branch || '').trim();
+    let branch = requestedBranch;
+
+    if (remote && !branch) {
+      // simple-git only includes the remote when both remote and branch are provided.
+      // Resolve the current branch so selecting a remote in the UI really runs `git pull <remote> <branch>`.
+      const status = await git.status();
+      branch = String(status.current || '').trim();
+    }
+
     const result = await git.pull(
-      options.remote || 'origin',
-      options.branch,
+      remote || 'origin',
+      branch || undefined,
       pullOptions
     );
 
@@ -1981,7 +2213,12 @@ export async function stashPush(directory, options = {}) {
 export async function stashApply(directory, options = {}) {
   const { git } = await createRepositoryGitContext(directory);
   const ref = typeof options.ref === 'string' && options.ref.trim() ? options.ref.trim() : 'stash@{0}';
-  await git.raw(['stash', 'apply', ref]);
+  // Prefer --index so the staged/unstaged split captured in the stash is restored
+  // faithfully. Fall back to a plain apply when the index can't be reinstated
+  // cleanly (e.g. conflicts), which is the prior behavior.
+  await git.raw(['stash', 'apply', '--index', ref]).catch(async () => {
+    await git.raw(['stash', 'apply', ref]);
+  });
   return { success: true, ref };
 }
 
@@ -2159,11 +2396,20 @@ export async function fetch(directory, options = {}) {
   const { git } = await createRepositoryGitContext(directory);
 
   try {
-    await git.fetch(
-      options.remote || 'origin',
-      options.branch,
-      options.options || {}
-    );
+    const remote = String(options.remote || '').trim();
+    const branch = String(options.branch || '').trim();
+    const fetchOptions = options.options || {};
+
+    if (remote && !branch) {
+      // simple-git drops the remote when branch is omitted, so use raw to preserve `git fetch <remote>`.
+      await git.raw(['fetch', ...buildRawGitOptions(fetchOptions), remote]);
+    } else {
+      await git.fetch(
+        remote || 'origin',
+        branch || undefined,
+        fetchOptions
+      );
+    }
 
     return { success: true };
   } catch (error) {
@@ -2172,77 +2418,197 @@ export async function fetch(directory, options = {}) {
   }
 }
 
-export async function commit(directory, message, options = {}) {
-  const { directoryPath, directoryGit, repoRoot, git } = await createRepositoryGitContext(directory);
+export async function stageFile(directory, filePath) {
+  await stageFiles(directory, [filePath]);
+}
 
-  try {
-    const requestedFiles = Array.isArray(options.files)
-      ? options.files
-        .map((value) => String(value || '').trim())
-        .filter(Boolean)
-      : [];
-    let filesToCommit = [];
+export async function stageFiles(directory, paths) {
+  if (!directory) {
+    throw new Error('directory and path are required for stageFile');
+  }
 
-    if (options.addAll) {
-      await git.add('.');
-    } else if (requestedFiles.length > 0) {
-      filesToCommit = Array.from(new Set(await Promise.all(requestedFiles.map(async (filePath) => {
-        const fileContext = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
-        return fileContext.repoPath;
-      }))));
+  const filePaths = normalizeFilePathList(paths);
+  if (filePaths.length === 0) {
+    throw new Error('directory and path are required for stageFile');
+  }
+  validateRepositoryFilePaths(normalizeDirectoryPath(directory), filePaths);
 
-      const status = await git.status();
-      const fileStatusByPath = new Map(status.files.map((file) => [file.path, file]));
-      filesToCommit = filesToCommit.filter((filePath) => fileStatusByPath.has(filePath));
-
-      if (filesToCommit.length === 0) {
-        throw new Error('No selected files are available to commit. Refresh git status and try again.');
-      }
-
-      const filesNeedingAdd = filesToCommit.filter((filePath) => {
-        const fileStatus = fileStatusByPath.get(filePath);
-        if (!fileStatus) {
-          return false;
-        }
-
-        const alreadyFullyStaged = fileStatus.index !== ' ' && fileStatus.working_dir === ' ';
-        return !alreadyFullyStaged;
-      });
-
-      if (filesNeedingAdd.length > 0) {
-        await git.add(filesNeedingAdd);
-      }
-    }
-
-    const commitArgs =
-      !options.addAll && filesToCommit.length > 0
-        ? filesToCommit
-        : undefined;
-
-    let result;
-    try {
-      result = await git.commit(message, commitArgs);
-    } catch (error) {
+  await withGitIndexMutationQueue(directory, async () => {
+    const { directoryPath, directoryGit, repoRoot, git } = await createRepositoryGitContext(directory);
+    const repoPaths = Array.from(new Set(await Promise.all(filePaths.map(async (filePath) => {
+      const fileContext = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
+      return fileContext.repoPath;
+    }))));
+    validateRepositoryFilePaths(repoRoot, repoPaths);
+    await git.raw(['add', '--', ...repoPaths]).catch(async (error) => {
       const gitErrorText = parseGitErrorText(error);
       const isPathspecError = gitErrorText.includes('pathspec') && gitErrorText.includes('did not match any files');
-      if (!isPathspecError || !commitArgs || commitArgs.length === 0) {
+      if (!isPathspecError) {
         throw error;
       }
 
-      // Fallback for deleted/stale selections: commit currently staged changes.
-      result = await git.commit(message);
-    }
+      // During rapid stage/unstage toggling the optimistic UI can request staging a
+      // path that a prior queued mutation already staged (most visibly a deletion,
+      // whose file is gone from the working tree). `git add` aborts the whole batch
+      // on a single unmatched pathspec, so retry per-path and skip the ones already
+      // in their target state rather than failing the entire "stage all".
+      for (const repoPath of repoPaths) {
+        await git.raw(['add', '--', repoPath]).catch((perPathError) => {
+          const perPathText = parseGitErrorText(perPathError);
+          const perPathIsPathspecError =
+            perPathText.includes('pathspec') && perPathText.includes('did not match any files');
+          if (!perPathIsPathspecError) {
+            throw perPathError;
+          }
+        });
+      }
+    });
+  });
+}
 
-    return {
-      success: true,
-      commit: result.commit,
-      branch: result.branch,
-      summary: result.summary
-    };
-  } catch (error) {
-    console.error('Failed to commit:', error);
-    throw error;
+export async function unstageFile(directory, filePath) {
+  await unstageFiles(directory, [filePath]);
+}
+
+export async function unstageFiles(directory, paths) {
+  if (!directory) {
+    throw new Error('directory and path are required for unstageFile');
   }
+
+  const filePaths = normalizeFilePathList(paths);
+  if (filePaths.length === 0) {
+    throw new Error('directory and path are required for unstageFile');
+  }
+  validateRepositoryFilePaths(normalizeDirectoryPath(directory), filePaths);
+
+  await withGitIndexMutationQueue(directory, async () => {
+    const { directoryPath, directoryGit, repoRoot, git } = await createRepositoryGitContext(directory);
+    const repoPaths = Array.from(new Set(await Promise.all(filePaths.map(async (filePath) => {
+      const fileContext = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
+      return fileContext.repoPath;
+    }))));
+    validateRepositoryFilePaths(repoRoot, repoPaths);
+    await git.raw(['restore', '--staged', '--', ...repoPaths]).catch(async () => {
+      await git.raw(['reset', 'HEAD', '--', ...repoPaths]);
+    });
+  });
+}
+
+export async function commit(directory, message, options = {}) {
+  return withGitIndexMutationQueue(directory, async () => {
+    const { directoryPath, directoryGit, repoRoot, git } = await createRepositoryGitContext(directory);
+    let temporarilyUnstagedFiles = [];
+
+    try {
+      const requestedFiles = Array.isArray(options.files)
+        ? options.files
+          .map((value) => String(value || '').trim())
+          .filter(Boolean)
+        : [];
+      const requestedStageFiles = Array.isArray(options.stageFiles)
+        ? options.stageFiles
+          .map((value) => String(value || '').trim())
+          .filter(Boolean)
+        : null;
+      let filesToCommit = [];
+      let commitFromIndexOnly = false;
+
+      if (options.addAll) {
+        await git.add('.');
+      } else if (requestedFiles.length > 0) {
+        filesToCommit = Array.from(new Set(await Promise.all(requestedFiles.map(async (filePath) => {
+          const fileContext = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
+          return fileContext.repoPath;
+        }))));
+
+        const stageFilesToCommit = requestedStageFiles
+          ? Array.from(new Set(await Promise.all(requestedStageFiles.map(async (filePath) => {
+            const fileContext = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
+            return fileContext.repoPath;
+          }))))
+          : null;
+
+        const status = await git.status();
+        const fileStatusByPath = new Map(status.files.map((file) => [file.path, file]));
+      filesToCommit = filesToCommit.filter((filePath) => fileStatusByPath.has(filePath));
+
+        if (filesToCommit.length === 0) {
+          throw new Error('No selected files are available to commit. Refresh git status and try again.');
+        }
+
+        if (requestedStageFiles) {
+          commitFromIndexOnly = true;
+          const selectedFileSet = new Set(filesToCommit);
+          temporarilyUnstagedFiles = status.files
+            .filter((file) => {
+              const indexStatus = (file.index || '').trim();
+              return indexStatus && indexStatus !== '?' && !selectedFileSet.has(file.path);
+            })
+            .map((file) => file.path);
+
+          if (temporarilyUnstagedFiles.length > 0) {
+            await git.raw(['restore', '--staged', '--', ...temporarilyUnstagedFiles]);
+          }
+        }
+
+        const filesNeedingAdd = requestedStageFiles
+          ? (stageFilesToCommit || []).filter((filePath) => fileStatusByPath.has(filePath))
+          : filesToCommit.filter((filePath) => {
+            const fileStatus = fileStatusByPath.get(filePath);
+            if (!fileStatus) {
+              return false;
+            }
+
+            const alreadyFullyStaged = fileStatus.index !== ' ' && fileStatus.working_dir === ' ';
+            return !alreadyFullyStaged;
+          });
+
+        if (filesNeedingAdd.length > 0) {
+          await git.raw(['add', '--', ...filesNeedingAdd]);
+        }
+      }
+
+      const commitArgs =
+        !commitFromIndexOnly && !options.addAll && filesToCommit.length > 0
+          ? filesToCommit
+          : undefined;
+
+      let result;
+      try {
+        result = await git.commit(message, commitArgs);
+      } catch (error) {
+        const gitErrorText = parseGitErrorText(error);
+        const isPathspecError = gitErrorText.includes('pathspec') && gitErrorText.includes('did not match any files');
+        if (!isPathspecError || !commitArgs || commitArgs.length === 0) {
+          throw error;
+        }
+
+        // Fallback for deleted/stale selections: commit currently staged changes.
+        result = await git.commit(message);
+      }
+
+      if (temporarilyUnstagedFiles.length > 0) {
+        await git.raw(['add', '--', ...temporarilyUnstagedFiles]).catch((restoreError) => {
+          console.error('Failed to restore temporarily unstaged files:', restoreError);
+        });
+      }
+
+      return {
+        success: true,
+        commit: result.commit,
+        branch: result.branch,
+        summary: result.summary
+      };
+    } catch (error) {
+      if (temporarilyUnstagedFiles.length > 0) {
+        await git.raw(['add', '--', ...temporarilyUnstagedFiles]).catch((restoreError) => {
+          console.error('Failed to restore temporarily unstaged files after commit failure:', restoreError);
+        });
+      }
+      console.error('Failed to commit:', error);
+      throw error;
+    }
+  });
 }
 
 export async function getBranches(directory) {
@@ -2326,6 +2692,99 @@ export async function checkoutBranch(directory, branchName) {
     return { success: true, branch: branchName };
   } catch (error) {
     console.error('Failed to checkout branch:', error);
+    throw error;
+  }
+}
+
+export async function checkoutCommit(directory, hash) {
+  if (!isValidCommitHash(hash)) {
+    throw new Error('Invalid commit hash');
+  }
+  const { git } = await createRepositoryGitContext(directory);
+  try {
+    await git.checkout(hash);
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to checkout commit:', error);
+    throw error;
+  }
+}
+
+export async function cherryPick(directory, hash) {
+  if (!isValidCommitHash(hash)) {
+    throw new Error('Invalid commit hash');
+  }
+  const { git } = await createRepositoryGitContext(directory);
+  try {
+    await git.raw(['cherry-pick', hash]);
+    return { success: true, conflict: false };
+  } catch (error) {
+    const errorMessage = String(error?.message || error || '').toLowerCase();
+    const isConflict =
+      errorMessage.includes('conflict') ||
+      errorMessage.includes('patch does not apply');
+
+    if (isConflict) {
+      const status = await git.status().catch(() => ({ conflicted: [] }));
+      return {
+        success: false,
+        conflict: true,
+        conflictFiles: status.conflicted || [],
+      };
+    }
+
+    console.error('Failed to cherry-pick:', error);
+    throw error;
+  }
+}
+
+export async function revertCommit(directory, hash) {
+  if (!isValidCommitHash(hash)) {
+    throw new Error('Invalid commit hash');
+  }
+  const { git } = await createRepositoryGitContext(directory);
+  try {
+    await git.raw(['revert', '--no-commit', hash]);
+    return { success: true, conflict: false };
+  } catch (error) {
+    const errorMessage = String(error?.message || error || '').toLowerCase();
+    const isConflict =
+      errorMessage.includes('conflict') ||
+      errorMessage.includes('revert failed');
+
+    if (isConflict) {
+      const status = await git.status().catch(() => ({ conflicted: [] }));
+      return {
+        success: false,
+        conflict: true,
+        conflictFiles: status.conflicted || [],
+      };
+    }
+
+    console.error('Failed to revert commit:', error);
+    throw error;
+  }
+}
+
+export async function resetToCommit(directory, hash, mode, force = false) {
+  if (!isValidCommitHash(hash)) {
+    throw new Error('Invalid commit hash');
+  }
+  const { git } = await createRepositoryGitContext(directory);
+
+  if (mode === 'hard' && !force) {
+    const status = await git.status();
+    const isDirty = !status.isClean();
+    if (isDirty) {
+      throw new Error('Cannot hard reset: uncommitted changes in working tree. Stash or commit first, or use force.');
+    }
+  }
+
+  try {
+    await git.raw(['reset', `--${mode}`, hash]);
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to reset to commit:', error);
     throw error;
   }
 }
@@ -2817,6 +3276,65 @@ export async function getLog(directory, options = {}) {
 
   try {
     const maxCount = options.maxCount || 50;
+
+    if (options.all) {
+      const logArgs = [
+        'log',
+        `--max-count=${maxCount}`,
+        '--all',
+        '--topo-order',
+        '--date=iso',
+        '--pretty=format:%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%ad%x1f%s%x1f%D',
+        '--shortstat',
+      ];
+
+      const rawLog = await git.raw(logArgs);
+      const records = rawLog
+        .split('\x1e')
+        .map((e) => e.trim())
+        .filter(Boolean);
+
+      const entries = [];
+      for (const record of records) {
+        const lines = record.split('\n').filter((l) => l.trim().length > 0);
+        const header = lines.shift() || '';
+        const [hash, parentsRaw, author_name, author_email, date, message, refsRaw] =
+          header.split('\x1f');
+        if (!hash) continue;
+
+        const parents = parentsRaw ? parentsRaw.trim().split(' ').filter(Boolean) : [];
+        const refs = refsRaw ? refsRaw.trim() : '';
+
+        let filesChanged = 0;
+        let insertions = 0;
+        let deletions = 0;
+        for (const line of lines) {
+          const filesMatch = line.match(/(\d+)\s+files?\s+changed/);
+          const insertMatch = line.match(/(\d+)\s+insertions?\(\+\)/);
+          const deleteMatch = line.match(/(\d+)\s+deletions?\(-\)/);
+          if (filesMatch) filesChanged = parseInt(filesMatch[1], 10);
+          if (insertMatch) insertions = parseInt(insertMatch[1], 10);
+          if (deleteMatch) deletions = parseInt(deleteMatch[1], 10);
+        }
+
+        entries.push({
+          hash,
+          date: date || '',
+          message: message || '',
+          refs,
+          body: '',
+          author_name: author_name || '',
+          author_email: author_email || '',
+          filesChanged,
+          insertions,
+          deletions,
+          parents,
+        });
+      }
+
+      return { all: entries, latest: entries[0] || null, total: entries.length };
+    }
+
     const filePath = options.file
       ? (await resolveGitFileContext(directoryPath, directoryGit, options.file, repoRoot)).repoPath
       : undefined;
@@ -2844,7 +3362,7 @@ export async function getLog(directory, options = {}) {
       'log',
       `--max-count=${maxCount}`,
       '--date=iso',
-      '--pretty=format:%H%x1f%an%x1f%ae%x1f%ad%x1f%s%x1e',
+      '--pretty=format:%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%ad%x1f%s',
       '--shortstat'
     ];
 
@@ -2871,7 +3389,8 @@ export async function getLog(directory, options = {}) {
     records.forEach((record) => {
       const lines = record.split('\n').filter((line) => line.trim().length > 0);
       const header = lines.shift() || '';
-      const [hash] = header.split('\x1f');
+      const [hash, parentsRaw] = header.split('\x1f');
+      const parents = parentsRaw ? parentsRaw.trim().split(' ').filter(Boolean) : [];
       if (!hash) {
         return;
       }
@@ -2896,11 +3415,11 @@ export async function getLog(directory, options = {}) {
         }
       });
 
-      statsMap.set(hash, { filesChanged, insertions, deletions });
+      statsMap.set(hash, { filesChanged, insertions, deletions, parents });
     });
 
     const merged = baseLog.all.map((entry) => {
-      const stats = statsMap.get(entry.hash) || { filesChanged: 0, insertions: 0, deletions: 0 };
+      const stats = statsMap.get(entry.hash) || { filesChanged: 0, insertions: 0, deletions: 0, parents: [] };
       return {
         hash: entry.hash,
         date: entry.date,
@@ -2911,7 +3430,8 @@ export async function getLog(directory, options = {}) {
         author_email: entry.author_email,
         filesChanged: stats.filesChanged,
         insertions: stats.insertions,
-        deletions: stats.deletions
+        deletions: stats.deletions,
+        parents: stats.parents || [],
       };
     });
 

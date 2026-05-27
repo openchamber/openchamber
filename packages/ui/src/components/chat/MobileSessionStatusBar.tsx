@@ -1,7 +1,13 @@
 import React from 'react';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
-import { useSessions, useAllSessionStatuses } from '@/sync/sync-context';
+import {
+  useSessions,
+  useAllSessionStatuses,
+  useLiveSessionStatusCounts,
+  useSession,
+  useDirectorySync,
+} from '@/sync/sync-context';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -64,6 +70,62 @@ const normalize = (value: string): string => {
   const replaced = value.replace(/\\/g, '/');
   return replaced === '/' ? '/' : replaced.replace(/\/+$/, '');
 };
+
+const getDisplaySessionTitle = (session: Session): string => {
+  const title = session.title;
+  if (title && title.trim()) return title;
+  return 'New session';
+};
+
+const countUnreadSessions = (unseenCounts: Record<string, number>): number => {
+  let count = 0;
+  for (const value of Object.values(unseenCounts)) {
+    if (value > 0) count += 1;
+  }
+  return count;
+};
+
+function useCurrentContextUsage(): SessionContextUsage | null {
+  const getContextUsage = useSessionUIStore((state) => state.getContextUsage);
+  const getCurrentModel = useConfigStore((state) => state.getCurrentModel);
+
+  const currentModel = getCurrentModel();
+  const limit = currentModel && typeof currentModel.limit === 'object' && currentModel.limit !== null
+    ? (currentModel.limit as Record<string, unknown>)
+    : null;
+  const contextLimit = (limit && typeof limit.context === 'number' ? limit.context : 0);
+  const outputLimit = (limit && typeof limit.output === 'number' ? limit.output : 0);
+  return getContextUsage(contextLimit, outputLimit);
+}
+
+function useCurrentProjectDisplay() {
+  const { currentTheme } = useThemeSystem();
+  const projects = useProjectsStore((state) => state.projects);
+  const activeProjectId = useProjectsStore((state) => state.activeProjectId);
+  const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
+  const activeProject = React.useMemo(
+    () => projects.find((project) => project.id === activeProjectId) ?? null,
+    [activeProjectId, projects],
+  );
+
+  const currentProjectIconImageUrl = activeProject
+    ? getProjectIconImageUrl(activeProject, {
+      themeVariant: currentTheme.metadata.variant,
+      iconColor: currentTheme.colors.surface.foreground,
+    })
+    : null;
+
+  return {
+    projects,
+    activeProjectId,
+    homeDirectory,
+    currentProjectLabel: activeProject?.label || formatDirectoryName(activeProject?.path || '', homeDirectory),
+    currentProjectIcon: activeProject?.icon,
+    currentProjectIconImageUrl,
+    currentProjectIconBackground: activeProject?.iconBackground ?? null,
+    currentProjectColor: activeProject?.color,
+  };
+}
 
 function useSessionGrouping(
   sessions: Session[],
@@ -177,9 +239,7 @@ function useSessionHelpers(
   }, [agents]);
 
   const getSessionTitle = React.useCallback((session: Session): string => {
-    const title = session.title;
-    if (title && title.trim()) return title;
-    return 'New session';
+    return getDisplaySessionTitle(session);
   }, []);
 
   const isRunning = React.useCallback((sessionId: string): boolean => {
@@ -431,7 +491,6 @@ function SessionItem({
                   title={`Sub-session: ${getSessionTitle(child)}`}
                 >
                   <Icon name="loader-4" className="h-2.5 w-2.5 animate-spin"
-                    
                     style={{ color: `var(${childColor.var})` }}/>
                 </div>
               );
@@ -632,7 +691,6 @@ function SessionStatusHeader({
                     title={`Sub-session: ${child.session.title || 'Untitled'}`}
                   >
                     <Icon name="loader-4" className="h-2.5 w-2.5 animate-spin"
-                      
                       style={{ color: `var(${childColor.var})` }}/>
                   </div>
                 );
@@ -1611,35 +1669,112 @@ function ExpandedView({
   );
 }
 
-export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
-  onSessionSwitch,
+const MobileSessionStatusBarCollapsed: React.FC<{ onExpand: () => void }> = ({
+  onExpand,
 }) => {
   const { t } = useI18n();
-  const { currentTheme } = useThemeSystem();
+  const sessionCount = useDirectorySync(React.useCallback((state) => state.session.length, []));
+  const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const currentSession = useSession(currentSessionId, currentDirectory || undefined);
+  const statusCounts = useLiveSessionStatusCounts();
+  const unseenCounts = useNotificationStore((state) => state.index.session.unseenCount);
+  const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
+  const updateSessionTitle = useSessionUIStore((state) => state.updateSessionTitle);
+  const contextUsage = useCurrentContextUsage();
+  const {
+    currentProjectLabel,
+    currentProjectIcon,
+    currentProjectIconImageUrl,
+    currentProjectIconBackground,
+    currentProjectColor,
+  } = useCurrentProjectDisplay();
+
+  const totalUnread = React.useMemo(() => countUnreadSessions(unseenCounts), [unseenCounts]);
+  const currentSessionTitle = currentSession
+    ? getDisplaySessionTitle(currentSession)
+    : t('chat.mobileStatus.swipeHint');
+
+  const [editingSessionId, setEditingSessionId] = React.useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = React.useState('');
+
+  if (sessionCount === 0) {
+    return null;
+  }
+
+  const handleSessionDoubleClick = (sessionId: string, sessionTitle: string) => {
+    setEditingSessionId(sessionId);
+    setEditingTitle(sessionTitle);
+  };
+
+  const handleEditCancel = () => {
+    setEditingSessionId(null);
+    setEditingTitle('');
+  };
+
+  const handleEditSave = () => {
+    if (!editingSessionId) return;
+    const trimmed = editingTitle.trim();
+    const originalTitle = currentSession && currentSession.id === editingSessionId
+      ? getDisplaySessionTitle(currentSession)
+      : '';
+    if (trimmed && trimmed !== originalTitle) {
+      void updateSessionTitle(editingSessionId, trimmed);
+    }
+    setEditingSessionId(null);
+    setEditingTitle('');
+  };
+
+  return (
+    <CollapsedView
+      runningCount={statusCounts.running}
+      unreadCount={totalUnread}
+      currentSessionId={currentSessionId}
+      currentSessionTitle={currentSessionTitle}
+      currentProjectLabel={currentProjectLabel}
+      currentProjectIcon={currentProjectIcon}
+      currentProjectIconImageUrl={currentProjectIconImageUrl}
+      currentProjectIconBackground={currentProjectIconBackground}
+      currentProjectColor={currentProjectColor}
+      onToggle={onExpand}
+      onNewSession={() => openNewSessionDraft()}
+      contextUsage={contextUsage}
+      editingSessionId={editingSessionId}
+      editingTitle={editingTitle}
+      onTitleDoubleClick={handleSessionDoubleClick}
+      onEditingTitleChange={setEditingTitle}
+      onEditSave={handleEditSave}
+      onEditCancel={handleEditCancel}
+    />
+  );
+};
+
+const MobileSessionStatusBarExpanded: React.FC<MobileSessionStatusBarProps & { onCollapse: () => void }> = ({
+  onSessionSwitch,
+  onCollapse,
+}) => {
+  const { t } = useI18n();
   const sessions = useSessions();
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const sessionStatus = useAllSessionStatuses();
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
   const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
-  const getContextUsage = useSessionUIStore((state) => state.getContextUsage);
   const updateSessionTitle = useSessionUIStore((state) => state.updateSessionTitle);
   const agents = useConfigStore((state) => state.agents);
-  const getCurrentModel = useConfigStore((state) => state.getCurrentModel);
-  const isMobile = useUIStore((state) => state.isMobile);
-  const showMobileSessionStatusBar = useUIStore((state) => state.showMobileSessionStatusBar);
-  const isMobileSessionStatusBarCollapsed = useUIStore((state) => state.isMobileSessionStatusBarCollapsed);
-  const setIsMobileSessionStatusBarCollapsed = useUIStore((state) => state.setIsMobileSessionStatusBarCollapsed);
-
-  // Project store
-  const projects = useProjectsStore((state) => state.projects);
-  const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   const setActiveProject = useProjectsStore((state) => state.setActiveProject);
   const setActiveProjectIdOnly = useProjectsStore((state) => state.setActiveProjectIdOnly);
   const removeProject = useProjectsStore((state) => state.removeProject);
-  const getActiveProject = useProjectsStore((state) => state.getActiveProject);
-
-  // Directory store
-  const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
+  const contextUsage = useCurrentContextUsage();
+  const {
+    projects,
+    activeProjectId,
+    homeDirectory,
+    currentProjectLabel,
+    currentProjectIcon,
+    currentProjectIconImageUrl,
+    currentProjectIconBackground,
+    currentProjectColor,
+  } = useCurrentProjectDisplay();
 
   const { sessions: sortedSessions, totalRunning, totalUnread, totalCount } = useSessionGrouping(sessions, sessionStatus);
   const { getSessionAgentName, getSessionTitle, needsAttention } = useSessionHelpers(agents, sessionStatus);
@@ -1654,32 +1789,11 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
   const currentSessionWithStatus = sortedSessions.find((s) => s.id === currentSessionId);
   const currentSessionChildIndicators = currentSessionWithStatus?._childIndicators ?? [];
 
-  const activeProject = getActiveProject();
-  const currentProjectLabel = activeProject?.label || formatDirectoryName(activeProject?.path || '', homeDirectory);
-  const currentProjectIcon = activeProject?.icon;
-  const currentProjectIconImageUrl = activeProject
-    ? getProjectIconImageUrl(activeProject, {
-      themeVariant: currentTheme.metadata.variant,
-      iconColor: currentTheme.colors.surface.foreground,
-    })
-    : null;
-  const currentProjectIconBackground = activeProject?.iconBackground ?? null;
-  const currentProjectColor = activeProject?.color;
-
-  // Calculate token usage for current session
-  const currentModel = getCurrentModel();
-  const limit = currentModel && typeof currentModel.limit === 'object' && currentModel.limit !== null
-    ? (currentModel.limit as Record<string, unknown>)
-    : null;
-  const contextLimit = (limit && typeof limit.context === 'number' ? limit.context : 0);
-  const outputLimit = (limit && typeof limit.output === 'number' ? limit.output : 0);
-  const contextUsage = getContextUsage(contextLimit, outputLimit);
-
   const [isExpanded, setIsExpanded] = React.useState(false);
   const [editingSessionId, setEditingSessionId] = React.useState<string | null>(null);
   const [editingTitle, setEditingTitle] = React.useState('');
 
-  if (!isMobile || !showMobileSessionStatusBar || totalCount === 0) {
+  if (totalCount === 0) {
     return null;
   }
 
@@ -1750,32 +1864,6 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
     sessionEvents.requestDirectoryDialog();
   };
 
-  if (isMobileSessionStatusBarCollapsed) {
-    return (
-      <CollapsedView
-        runningCount={totalRunning}
-        unreadCount={totalUnread}
-        currentSessionId={currentSessionId}
-        currentSessionTitle={currentSessionTitle}
-        currentProjectLabel={currentProjectLabel}
-        currentProjectIcon={currentProjectIcon}
-        currentProjectIconImageUrl={currentProjectIconImageUrl}
-        currentProjectIconBackground={currentProjectIconBackground}
-        currentProjectColor={currentProjectColor}
-        onToggle={() => setIsMobileSessionStatusBarCollapsed(false)}
-        onNewSession={handleCreateSession}
-        contextUsage={contextUsage}
-        childIndicators={currentSessionChildIndicators}
-        editingSessionId={editingSessionId}
-        editingTitle={editingTitle}
-        onTitleDoubleClick={handleSessionDoubleClick}
-        onEditingTitleChange={handleEditingTitleChange}
-        onEditSave={handleEditSave}
-        onEditCancel={handleEditCancel}
-      />
-    );
-  }
-
   return (
     <ExpandedView
       sessions={sortedSessions}
@@ -1790,7 +1878,7 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
       currentProjectColor={currentProjectColor}
       isExpanded={isExpanded}
       onToggleCollapse={() => {
-        setIsMobileSessionStatusBarCollapsed(true);
+        onCollapse();
         setIsExpanded(false);
       }}
       onNewSession={handleCreateSession}
@@ -1813,6 +1901,34 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
       onEditingTitleChange={handleEditingTitleChange}
       onEditSave={handleEditSave}
       onEditCancel={handleEditCancel}
+    />
+  );
+};
+
+export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
+  onSessionSwitch,
+}) => {
+  const isMobile = useUIStore((state) => state.isMobile);
+  const showMobileSessionStatusBar = useUIStore((state) => state.showMobileSessionStatusBar);
+  const isMobileSessionStatusBarCollapsed = useUIStore((state) => state.isMobileSessionStatusBarCollapsed);
+  const setIsMobileSessionStatusBarCollapsed = useUIStore((state) => state.setIsMobileSessionStatusBarCollapsed);
+
+  if (!isMobile || !showMobileSessionStatusBar) {
+    return null;
+  }
+
+  if (isMobileSessionStatusBarCollapsed) {
+    return (
+      <MobileSessionStatusBarCollapsed
+        onExpand={() => setIsMobileSessionStatusBarCollapsed(false)}
+      />
+    );
+  }
+
+  return (
+    <MobileSessionStatusBarExpanded
+      onSessionSwitch={onSessionSwitch}
+      onCollapse={() => setIsMobileSessionStatusBarCollapsed(true)}
     />
   );
 };

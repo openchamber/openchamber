@@ -24,6 +24,10 @@ import JustificationBlock from './JustificationBlock';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
 import { getExternalFaviconUrl } from '@/lib/url';
 
+const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-4 sm:!leading-6 tracking-normal';
+const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
+const TOOL_ROW_DESCRIPTION_CLASS = cn('typography-meta', TOOL_ROW_TEXT_CLASS);
+
 interface ProgressiveGroupProps {
     parts: TurnActivityPart[];
     isExpanded: boolean;
@@ -128,6 +132,14 @@ const getToolFilePath = (activity: TurnActivityPart): string | null => {
         (metadata?.path as string);
 
     return typeof filePath === 'string' && filePath.trim().length > 0 ? filePath : null;
+};
+
+const getToolSkillDirectory = (activity: TurnActivityPart): string | null => {
+    const part = activity.part as ToolPartType;
+    const state = part.state as { metadata?: Record<string, unknown> } | undefined;
+    const dir = state?.metadata?.dir;
+
+    return typeof dir === 'string' && dir.trim().length > 0 ? dir : null;
 };
 
 const toTodoStatusKey = (value: unknown): 'pending' | 'in_progress' | 'completed' | 'cancelled' | null => {
@@ -274,7 +286,7 @@ const renderReadFilePath = (displayPath: string, animate = true) => {
         return (
             <Text
                 variant={animate ? 'generate-effect' : 'static'}
-                className="min-w-0 flex-1 truncate whitespace-nowrap typography-meta leading-5"
+                className={cn('min-w-0 flex-1 truncate whitespace-nowrap', TOOL_ROW_DESCRIPTION_CLASS)}
                 style={{ color: 'var(--tools-title)' }}
                 title={displayPath}
             >
@@ -289,7 +301,7 @@ const renderReadFilePath = (displayPath: string, animate = true) => {
     const displayDir = hasAbsoluteRoot ? dir.slice(1) : dir;
 
     return (
-        <span className="min-w-0 inline-flex max-w-full flex-1 items-baseline overflow-hidden typography-meta leading-5" title={displayPath}>
+        <span className={cn('min-w-0 inline-flex max-w-full flex-1 items-baseline overflow-hidden', TOOL_ROW_DESCRIPTION_CLASS)} title={displayPath}>
             {hasAbsoluteRoot ? <span className="flex-shrink-0" style={{ color: 'var(--tools-description)' }}>/</span> : null}
             <span
                 className="min-w-0 shrink truncate whitespace-nowrap"
@@ -327,6 +339,15 @@ const resolveAbsolutePath = (currentDirectory: string, filePath: string): string
         return normalizedPath;
     }
     return normalizedDirectory.endsWith('/') ? `${normalizedDirectory}${normalizedPath}` : `${normalizedDirectory}/${normalizedPath}`;
+};
+
+const resolveSkillFilePath = (skillPathOrDir: string): string => {
+    const normalizedPath = trimTrailingSlashes(normalizePathValue(skillPathOrDir));
+    if (!normalizedPath) {
+        return '';
+    }
+
+    return normalizedPath.toLowerCase().endsWith('/skill.md') ? normalizedPath : `${normalizedPath}/SKILL.md`;
 };
 
 const getContextDirectoryForPath = (currentDirectory: string, absolutePath: string): string => {
@@ -639,6 +660,24 @@ const StaticToolRowInner: React.FC<{
         return descs;
     }, [activities]);
 
+    const skillEntries = React.useMemo(() => {
+        if (toolName.toLowerCase() !== 'skill') return [] as Array<{ name: string; path: string }>;
+
+        const entries: Array<{ name: string; path: string }> = [];
+        for (const activity of activities) {
+            const name = getToolShortDescription(activity);
+            if (!name) continue;
+
+            const skill = skillByName.get(name);
+            const rawPath = skill?.path || getToolSkillDirectory(activity);
+            const path = rawPath ? resolveSkillFilePath(rawPath) : '';
+            if (!path || entries.some((entry) => entry.name === name && entry.path === path)) continue;
+            entries.push({ name, path });
+        }
+
+        return entries;
+    }, [activities, skillByName, toolName]);
+
     const readFileEntries = React.useMemo(() => {
         if (!isReadGroup) return [] as Array<{ path: string; displayPath: string; offset?: number }>;
 
@@ -675,14 +714,13 @@ const StaticToolRowInner: React.FC<{
         uiStore.openContextFile(contextDirectory, absolutePath);
     }, [currentDirectory, runtime]);
 
-    const handleSkillClick = React.useCallback((skillName: string) => {
-        const skill = skillByName.get(skillName);
-        if (!skill?.path) {
+    const handleSkillClick = React.useCallback((skillPath: string) => {
+        if (!skillPath) {
             return;
         }
         const uiStore = useUIStore.getState();
-        uiStore.openContextFile(currentDirectory || getContextDirectoryForPath('', skill.path), skill.path);
-    }, [currentDirectory, skillByName]);
+        uiStore.openContextFile(currentDirectory || getContextDirectoryForPath('', skillPath), skillPath);
+    }, [currentDirectory]);
 
     const normalizedToolName = toolName.toLowerCase();
     const isSearchGroup = normalizedToolName === 'grep'
@@ -705,7 +743,7 @@ const StaticToolRowInner: React.FC<{
             <MinDurationShineText
                 active={hasRunningActivity}
                 minDurationMs={1000}
-                className="typography-meta leading-5 font-medium inline-flex h-5 items-center flex-shrink-0 opacity-85"
+                className={cn(TOOL_ROW_TITLE_CLASS, 'inline-flex items-center flex-shrink-0 opacity-85')}
                 style={{ color: 'var(--tools-title)' }}
                 title={displayName}
             >
@@ -721,7 +759,7 @@ const StaticToolRowInner: React.FC<{
                             event.stopPropagation();
                             handleReadFileClick(entry.path, entry.offset);
                         }}
-                        className="inline-flex items-center justify-start gap-1 min-w-0 flex-1 text-left typography-meta leading-5 hover:opacity-90"
+                        className={cn('inline-flex !min-h-0 items-center justify-start gap-1 min-w-0 flex-1 text-left hover:opacity-90', TOOL_ROW_DESCRIPTION_CLASS)}
                         style={{ color: 'var(--tools-description)' }}
                         title={entry.offset ? `${entry.displayPath}:${entry.offset}` : entry.displayPath}
                     >
@@ -735,7 +773,7 @@ const StaticToolRowInner: React.FC<{
                     <span key={`${desc}-${index}`} className="inline-flex min-w-0 flex-1">
                         <Text
                             variant={animateTailText ? 'generate-effect' : 'static'}
-                            className="min-w-0 flex-1 truncate whitespace-nowrap typography-meta leading-5"
+                            className={cn('min-w-0 flex-1 truncate whitespace-nowrap', TOOL_ROW_DESCRIPTION_CLASS)}
                             style={{ color: 'var(--tools-description)' }}
                             title={desc}
                         >
@@ -753,7 +791,7 @@ const StaticToolRowInner: React.FC<{
                         rel="noopener noreferrer"
                         className={cn(
                             'min-w-0 flex-1 inline-flex items-center gap-1.5 underline decoration-[color:var(--status-info)] underline-offset-2 hover:opacity-90',
-                            'truncate whitespace-nowrap typography-meta'
+                            'truncate whitespace-nowrap', TOOL_ROW_DESCRIPTION_CLASS
                         )}
                         style={{ color: 'var(--status-info)' }}
                         title={url}
@@ -763,28 +801,28 @@ const StaticToolRowInner: React.FC<{
                     </a>
                 ))
                 : null}
-            {isSkillGroup && descriptions.length > 0
-                ? descriptions.map((skillName, index) => (
+            {isSkillGroup && skillEntries.length > 0
+                ? skillEntries.map((entry, index) => (
                     <button
-                        key={`${skillName}-${index}`}
+                        key={`${entry.name}-${entry.path}-${index}`}
                         type="button"
                         onClick={(event) => {
                             event.preventDefault();
                             event.stopPropagation();
-                            handleSkillClick(skillName);
+                            handleSkillClick(entry.path);
                         }}
-                        className="min-w-0 flex-1 truncate whitespace-nowrap typography-meta leading-5 text-left hover:opacity-90"
+                        className={cn('!min-h-0 min-w-0 flex-1 truncate whitespace-nowrap text-left hover:opacity-90', TOOL_ROW_DESCRIPTION_CLASS)}
                         style={{ color: 'var(--tools-description)' }}
-                        title={skillName}
+                        title={entry.path}
                     >
-                        {skillName}
+                        {entry.name}
                     </button>
                 ))
                 : null}
             {!isReadGroup && !isSearchGroup && !isFetchGroup && !isSkillGroup && descriptions.length > 0 ? (
                 <Text
                     variant={animateTailText ? 'generate-effect' : 'static'}
-                    className="min-w-0 flex-1 truncate whitespace-nowrap typography-meta leading-5"
+                    className={cn('min-w-0 flex-1 truncate whitespace-nowrap', TOOL_ROW_DESCRIPTION_CLASS)}
                     style={{ color: 'var(--tools-description)' }}
                 >
                     {descriptions.join(' ')}
@@ -1016,7 +1054,7 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                             <button
                                 type="button"
                                 onClick={onToggle}
-                                className="typography-meta leading-5 px-2 py-1 text-muted-foreground/45 hover:text-muted-foreground/65 text-left"
+                                className="typography-meta leading-4 px-2 py-1 text-muted-foreground/45 hover:text-muted-foreground/65 text-left"
                             >
                                 +{previewHiddenCount} more...
                             </button>

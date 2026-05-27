@@ -1,0 +1,39 @@
+---
+title: Comandos e Snippets
+description: Crie comandos de barra e trechos de texto reutilizáveis para o chat.
+---
+
+# Comandos e Snippets
+
+Comandos e snippets ambos evitam que você redigite a mesma coisa. Comandos são prompts inteiros que você dispara com `/`; snippets são pedaços de texto que você insere em uma mensagem com `#`.
+
+## Comandos
+
+Um comando é um prompt salvo que você executa com uma barra, como `/review`. Gerencie-os em **Settings → Commands**.
+
+1. Abra **Settings → Commands** e crie um comando.
+2. Dê a ele um nome, uma descrição e o texto do prompt que ele deve enviar.
+3. Opcionalmente, fixe-o em um agente ou modelo específico.
+4. Escolha o escopo personal ou project.
+
+No chat, digite `/` como o **primeiro** caractere da mensagem para abrir os comandos e escolha um. Seu texto pode usar marcadores:
+
+- `$ARGUMENTS` — o que você digitar depois do comando
+- `@filename` — insere o conteúdo de um arquivo
+- `` !`command` `` — insere a saída de um comando de shell
+
+Os comandos integrados `init` e `review` podem ser redefinidos, mas não excluídos.
+
+## Snippets
+
+Um snippet é um texto reutilizável que você referencia inline com uma cerquilha, como `#signoff`. Gerencie-os em **Settings → Snippets**.
+
+1. Abra **Settings → Snippets** e crie um snippet.
+2. Dê a ele um nome e o texto que ele representa. Adicione aliases se quiser mais de um gatilho.
+3. Escolha o escopo personal ou project.
+
+No chat, digite `#` e escolha um snippet. O OpenChamber substitui pelo texto completo antes de enviar.
+
+## Relacionado
+
+- [Skills](/pt-br/skills/) — carregue conjuntos maiores de instruções sob demanda

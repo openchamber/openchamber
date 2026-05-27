@@ -231,7 +231,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
             )}
             <div
                 className={cn(
-                    "break-words font-sans typography-markdown",
+                    "break-words font-sans typography-markdown-body",
                     isExpanded && "pb-3",
                     normalizedRenderingMode === 'plain' && 'whitespace-pre-wrap',
                     !isExpanded && "line-clamp-2",
@@ -241,8 +241,9 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
                 onClick={handleClick}
             >
                 {normalizedRenderingMode === 'markdown' ? (
-                    <SimpleMarkdownRenderer 
-                        content={processedMarkdownContent} 
+                    <SimpleMarkdownRenderer
+                        content={processedMarkdownContent}
+                        className="[&_.markdown-content>*:first-child]:mt-0 [&_.markdown-content>*:last-child]:mb-0"
                         disableLinkSafety 
                     />
                 ) : (

@@ -7,7 +7,22 @@ description: 安全地将 OpenChamber 开放给远程和移动访问。
 
 隧道是指向你的 OpenChamber 的一个公开链接，让你可以从手机或另一个网络访问它。使用 `openchamber tunnel` 为正在运行的实例创建一个隧道。
 
-## 快速开始（Cloudflare 快速模式）
+## 前置要求
+
+OpenChamber 会在你的机器上启动隧道提供商的 CLI。请先安装你想使用的提供商：
+
+```bash
+brew install cloudflared
+brew install ngrok
+```
+
+Cloudflare 快速隧道可以通过 `cloudflared` 运行。Ngrok 需要 ngrok 账号，以及从 ngrok dashboard 获取的 authtoken：
+
+```bash
+ngrok config add-authtoken <your-ngrok-token>
+```
+
+## 快速开始
 
 1. 启动 OpenChamber：
 
@@ -15,10 +30,16 @@ description: 安全地将 OpenChamber 开放给远程和移动访问。
 openchamber
 ```
 
-2. 启动隧道：
+2. 启动 Cloudflare 隧道：
 
 ```bash
 openchamber tunnel start --provider cloudflare --mode quick
+```
+
+或启动 Ngrok 隧道：
+
+```bash
+openchamber tunnel start --provider ngrok --mode quick
 ```
 
 3. 查看状态：
@@ -30,6 +51,11 @@ openchamber tunnel status
 隧道建立后，`status` 会显示一个公开 URL。打开它，或扫描二维码，即可从任何地方访问 OpenChamber。
 
 默认情况下，OpenChamber 会在交互式 TTY 会话中输出二维码。使用 `--qr` 强制输出二维码，或使用 `--no-qr` 将其禁用。
+
+## 提供商
+
+- `cloudflare`：quick、managed remote 和 managed local 模式
+- `ngrok`：quick 模式
 
 ## 托管模式
 
@@ -68,7 +94,9 @@ openchamber tunnel start --profile prod-main
 ```bash
 openchamber tunnel providers
 openchamber tunnel ready --provider cloudflare
+openchamber tunnel ready --provider ngrok
 openchamber tunnel doctor --provider cloudflare
+openchamber tunnel doctor --provider ngrok
 openchamber tunnel stop --port 3000
 ```
 
@@ -80,4 +108,7 @@ openchamber tunnel stop --port 3000
 
 ## 相关内容
 
+- [安全](/zh-cn/security/) — 在开放访问前保护 UI
+- [桌面端隧道](/zh-cn/desktop-tunnels/) — 无需从 CLI 启动即可在桌面应用中设置隧道
+- [PWA 与移动访问](/zh-cn/mobile/) — 从手机访问 OpenChamber
 - [问题排查](/zh-cn/troubleshooting/) — 如果隧道链接无法使用

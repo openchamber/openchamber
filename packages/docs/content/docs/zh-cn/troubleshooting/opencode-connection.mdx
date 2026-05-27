@@ -1,0 +1,34 @@
+---
+title: OpenCode 连接
+description: 修复 OpenChamber 无法连接到它的 OpenCode 服务器的问题。
+---
+
+# OpenCode 连接
+
+如果 OpenChamber 加载了但始终无法越过 “OpenCode is restarting”，或者聊天没有响应，那就是它所通信的服务器无法访问。请逐项排查。
+
+## 卡在 “OpenCode is restarting”
+
+- 启动后稍等片刻 — 服务器启动期间出现此状态是正常的
+- 用 `openchamber status` 检查服务器是否存活
+- 用 `openchamber restart` 重启它
+- 用 `openchamber logs` 查看启动详情
+
+## 你正在连接自己的服务器
+
+如果你设置了 OpenChamber 使用现有的服务器，请对照 [OpenCode Server](/zh-cn/opencode-server/) 仔细检查配置：
+
+- `OPENCODE_HOST` 必须包含端口，且不带路径 — 例如 `http://localhost:4096`
+- 设置 `OPENCODE_SKIP_START=true`，这样 OpenChamber 就不会同时启动自己的服务器
+- 如果地址无效，OpenChamber 会忽略它并改为启动自己的服务器 — 请在日志中查找 `[config]` 警告
+
+## 仍然失败
+
+- 确认 Node.js 是 `20` 或更新版本
+- 重新安装最新的 CLI
+- 在测试任何隧道或远程链接之前，先直接打开 `http://localhost:3000`
+
+## 相关内容
+
+- [OpenCode Server](/zh-cn/opencode-server/) — OpenChamber 如何查找和管理服务器
+- [问题排查](/zh-cn/troubleshooting/) — 其他常见问题

@@ -1,0 +1,32 @@
+---
+title: Multi-run
+description: Uruchom ten sam prompt na kilku modelach lub w kilku sesjach naraz.
+---
+
+# Multi-run
+
+Multi-run uruchamia kilka sesji z jednego formularza — przydatne do wypróbowania tego samego zadania na różnych modelach i porównania wyników. Otwórz go z przycisku u góry paska bocznego sesji.
+
+## Rozpocznij multi-run
+
+1. Otwórz launcher multi-run.
+2. Wybierz projekt i nazwij grupę uruchomień.
+3. Napisz prompt i wybierz modele, na których ma się uruchomić (do pięciu na grupę).
+4. Wybierz, czy **isolate runs**.
+5. Uruchom.
+
+Każdy model dostaje własną sesję i wszystkie startują z Twoim promptem.
+
+## Izolowane uruchomienia
+
+Włącz **isolate runs**, aby każde uruchomienie miało własny [worktree](/pl/worktrees/) i gałąź, dzięki czemu nigdy nie dotykają tych samych plików. Wymaga to repozytorium git — dla folderów, które nim nie są, jest automatycznie wyłączone. Wybierz gałąź, od której startują uruchomienia.
+
+Gdy izolacja jest wyłączona, każde uruchomienie jest zwykłą sesją w folderze projektu.
+
+## Porównywanie wyników
+
+Każde uruchomienie to zwykła sesja, którą możesz otworzyć, przeczytać i zachować lub odrzucić. Jeśli uruchomiłeś sesje, aby porównać podejścia, przejrzyj je obok siebie i przenieś najlepsze dalej.
+
+## Powiązane
+
+- [Sesje worktree](/pl/worktrees/) — jak izolacja działa pod spodem

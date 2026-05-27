@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, powerMonitor, session, shell, webContents } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, powerMonitor, screen, session, shell, webContents } from 'electron';
 import contextMenu from 'electron-context-menu';
 import log from 'electron-log/main.js';
 import dgram from 'node:dgram';
@@ -19,18 +19,41 @@ const __dirname = path.dirname(__filename);
 const isDev = process.env.OPENCHAMBER_ELECTRON_DEV === '1' || !app.isPackaged;
 
 const DEEP_LINK_PROTOCOL = 'openchamber';
-const APP_USER_MODEL_ID = 'dev.openchamber.desktop';
+const PACKAGED_APP_USER_MODEL_ID = 'dev.openchamber.desktop';
+const DEV_APP_USER_MODEL_ID = 'dev.openchamber.desktop.dev';
+const APP_USER_MODEL_ID = app.isPackaged ? PACKAGED_APP_USER_MODEL_ID : DEV_APP_USER_MODEL_ID;
+const BACKGROUND_START_ARG = '--background';
+
+const readLoginItemSettings = () => {
+  if (process.platform !== 'darwin') return null;
+  try {
+    return app.getLoginItemSettings();
+  } catch {
+    return null;
+  }
+};
+
+const shouldStartInBackground = (loginItemSettings = readLoginItemSettings()) => {
+  return (
+    process.argv.includes(BACKGROUND_START_ARG) ||
+    loginItemSettings?.wasOpenedAtLogin === true ||
+    loginItemSettings?.wasOpenedAsHidden === true
+  );
+};
+
+// Set the product name early so electron-log derives its log directory as
+// ~/Library/Logs/OpenChamber/ (not ~/Library/Logs/@openchamber/electron/).
+app.setName('OpenChamber');
+if (isDev) {
+  app.setPath('userData', path.join(app.getPath('appData'), 'OpenChamber Dev'));
+}
+app.setAppUserModelId(APP_USER_MODEL_ID);
+app.commandLine.appendSwitch('proxy-bypass-list', '<-loopback>');
 
 if (!app.requestSingleInstanceLock()) {
   app.exit(0);
   process.exit(0);
 }
-
-// Set the product name early so electron-log derives its log directory as
-// ~/Library/Logs/OpenChamber/ (not ~/Library/Logs/@openchamber/electron/).
-app.setName('OpenChamber');
-app.setAppUserModelId(APP_USER_MODEL_ID);
-app.commandLine.appendSwitch('proxy-bypass-list', '<-loopback>');
 
 try {
   process.chdir(os.homedir());
@@ -429,12 +452,42 @@ const readWindowState = () => {
   return stateValue && typeof stateValue === 'object' ? stateValue : null;
 };
 
+const clampWindowBoundsToVisibleWorkArea = (bounds) => {
+  const width = Math.max(MIN_RESTORE_WINDOW_WIDTH, Math.round(Number(bounds?.width) || 0));
+  const height = Math.max(MIN_RESTORE_WINDOW_HEIGHT, Math.round(Number(bounds?.height) || 0));
+  const x = Math.round(Number(bounds?.x));
+  const y = Math.round(Number(bounds?.y));
+
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return { width, height };
+  }
+
+  try {
+    const display = screen.getDisplayMatching({ x, y, width, height }) || screen.getPrimaryDisplay();
+    const workArea = display.workArea;
+    const clampedWidth = Math.min(width, Math.max(MIN_WINDOW_WIDTH, workArea.width));
+    const clampedHeight = Math.min(height, Math.max(MIN_WINDOW_HEIGHT, workArea.height));
+    const maxX = workArea.x + workArea.width - clampedWidth;
+    const maxY = workArea.y + workArea.height - clampedHeight;
+
+    return {
+      x: clampedWidth >= workArea.width ? workArea.x : Math.min(Math.max(x, workArea.x), maxX),
+      y: clampedHeight >= workArea.height ? workArea.y : Math.min(Math.max(y, workArea.y), maxY),
+      width: clampedWidth,
+      height: clampedHeight,
+    };
+  } catch {
+    return { x, y, width, height };
+  }
+};
+
 const writeWindowState = async (browserWindow) => {
   if (!browserWindow || browserWindow.isDestroyed()) return;
   if (!state.mainWindow || browserWindow.id !== state.mainWindow.id) return;
 
   const bounds = browserWindow.getBounds();
   await mutateSettingsRoot((root) => {
+    if (!browserWindow || browserWindow.isDestroyed()) return root;
     root.desktopWindowState = {
       x: bounds.x,
       y: bounds.y,
@@ -700,12 +753,54 @@ const probeShellEnv = (shell, mode) => {
   return Object.keys(env).length > 0 ? env : null;
 };
 
+const queryWindowsRegistryValue = (key, name) => {
+  const result = spawnSync('reg.exe', ['query', key, '/v', name], {
+    encoding: 'utf8',
+    windowsHide: true,
+  });
+  if (result.error || result.status !== 0) return '';
+  const line = String(result.stdout || '')
+    .split(/\r?\n/)
+    .map((entry) => entry.trim())
+    .find((entry) => entry.toLowerCase().startsWith(name.toLowerCase()));
+  if (!line) return '';
+  const match = line.match(/^\S+\s+REG_\S+\s+(.+)$/);
+  return match?.[1]?.trim() || '';
+};
+
+const expandWindowsEnvRefs = (value) => String(value || '').replace(/%([^%]+)%/g, (_match, key) => process.env[key] || '');
+
+const loadWindowsEnv = () => {
+  const machinePath = queryWindowsRegistryValue('HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment', 'Path');
+  const userPath = queryWindowsRegistryValue('HKCU\\Environment', 'Path');
+  const homeDir = os.homedir();
+  const localAppData = process.env.LOCALAPPDATA || path.join(homeDir, 'AppData', 'Local');
+  const appData = process.env.APPDATA || path.join(homeDir, 'AppData', 'Roaming');
+  const commonPaths = [
+    path.join(homeDir, '.opencode', 'bin'),
+    path.join(homeDir, '.bun', 'bin'),
+    path.join(homeDir, '.local', 'bin'),
+    path.join(localAppData, 'Programs', 'Microsoft VS Code', 'bin'),
+    path.join(localAppData, 'Programs', 'Cursor', 'resources', 'app', 'bin'),
+    path.join(appData, 'npm'),
+  ];
+  return {
+    PATH: [machinePath, userPath, process.env.PATH, ...commonPaths]
+      .map(expandWindowsEnvRefs)
+      .filter(Boolean)
+      .join(path.delimiter),
+  };
+};
+
 // Finder-launched apps on macOS inherit a minimal PATH (no /opt/homebrew, mise, asdf, etc.).
 // Probe the user's login shell once so the sidecar sees the same PATH / tool env as `$SHELL -il`.
 const loadShellEnv = () => {
   if (shellEnvProbed) return cachedShellEnv;
   shellEnvProbed = true;
-  if (process.platform === 'win32') return null;
+  if (process.platform === 'win32') {
+    cachedShellEnv = loadWindowsEnv();
+    return cachedShellEnv;
+  }
   const shell = process.env.SHELL || '/bin/sh';
   if (isNushell(shell)) return null;
   cachedShellEnv = probeShellEnv(shell, '-il') || probeShellEnv(shell, '-l');
@@ -724,7 +819,8 @@ const inheritUserShellEnv = () => {
 
   const homeDir = os.homedir();
   const currentPath = process.env.PATH || '';
-  const currentPathLooksUserConfigured = pathLooksUserConfigured(currentPath, homeDir, ':');
+  const delimiter = process.platform === 'win32' ? ';' : ':';
+  const currentPathLooksUserConfigured = pathLooksUserConfigured(currentPath, homeDir, delimiter);
 
   for (const [key, value] of Object.entries(shellEnv)) {
     if (key === 'PATH') continue;
@@ -734,8 +830,8 @@ const inheritUserShellEnv = () => {
   }
 
   const shellPath = typeof shellEnv.PATH === 'string' ? shellEnv.PATH : '';
-  if (!currentPathLooksUserConfigured && shellPath) {
-    process.env.PATH = mergePathValues(shellPath, currentPath, ':');
+  if ((process.platform === 'win32' || !currentPathLooksUserConfigured) && shellPath) {
+    process.env.PATH = mergePathValues(shellPath, currentPath, delimiter);
   }
 };
 
@@ -749,6 +845,7 @@ const spawnLocalServer = async () => {
   // warning and persists the flag via /api/config/settings.
   const lanAccessEnabled = settings.desktopLanAccessEnabled === true;
   const bindHost = lanAccessEnabled ? '0.0.0.0' : '127.0.0.1';
+  const desktopUiPassword = typeof settings.desktopUiPassword === 'string' ? settings.desktopUiPassword.trim() : '';
 
   // Probe before starting the server — main() in the server module sets up a
   // lot of global state before binding, and calling it twice after a listen
@@ -773,6 +870,11 @@ const spawnLocalServer = async () => {
   process.env.OPENCHAMBER_DIST_DIR = resolveWebDistDir();
   process.env.OPENCHAMBER_RUNTIME = 'desktop';
   process.env.OPENCHAMBER_DESKTOP_NOTIFY = 'true';
+  if (desktopUiPassword) {
+    process.env.OPENCHAMBER_UI_PASSWORD = desktopUiPassword;
+  } else {
+    delete process.env.OPENCHAMBER_UI_PASSWORD;
+  }
   process.env.OPENCHAMBER_SKIP_API_COMPRESSION = process.env.OPENCHAMBER_SKIP_API_COMPRESSION || 'true';
   process.env.NO_PROXY = process.env.NO_PROXY || 'localhost,127.0.0.1';
   process.env.no_proxy = process.env.no_proxy || 'localhost,127.0.0.1';
@@ -782,6 +884,7 @@ const spawnLocalServer = async () => {
   const handle = await startWebUiServer({
     port: chosenPort,
     host: bindHost,
+    uiPassword: desktopUiPassword || null,
     attachSignals: false,
     exitOnShutdown: false,
     onDesktopNotification: (payload) => maybeShowNativeNotification(payload),
@@ -996,6 +1099,15 @@ const emitToAllWindows = (event, detail) => {
   }
 };
 
+const setTaskbarProgress = (value) => {
+  if (process.platform !== 'win32') return;
+  for (const browserWindow of BrowserWindow.getAllWindows()) {
+    if (!browserWindow.isDestroyed()) {
+      browserWindow.setProgressBar(value);
+    }
+  }
+};
+
 const pendingDeepLinks = [];
 
 const parseDeepLink = (raw) => {
@@ -1151,24 +1263,53 @@ const readThemeSource = () => {
   return 'system';
 };
 
+const getWindowIconPath = () => {
+  if (process.platform !== 'win32' && process.platform !== 'linux') {
+    return undefined;
+  }
+  const iconPath = isDev
+    ? path.join(__dirname, 'resources', 'icons', 'icon.ico')
+    : path.join(process.resourcesPath, 'icons', 'icon.ico');
+  return fs.existsSync(iconPath) ? iconPath : undefined;
+};
+
+const canUseTitleBarOverlay = (browserWindow) => (
+  process.platform === 'win32' &&
+  Boolean(browserWindow?.__ocTitleBarOverlayEnabled) &&
+  typeof browserWindow.setTitleBarOverlay === 'function' &&
+  !browserWindow.isDestroyed()
+);
+
 const createBrowserWindow = ({ label, restoreGeometry, url }) => {
   const saved = restoreGeometry ? readWindowState() : null;
   const useSaved = saved && typeof saved.width === 'number' && typeof saved.height === 'number';
+  const restoredBounds = useSaved ? clampWindowBoundsToVisibleWorkArea(saved) : null;
   const desktopLocalOrigin = state.localOrigin || '';
   const desktopHome = os.homedir() || '';
   const desktopMacosMajor = String(macosMajorVersion());
+  const usesCustomTitleBar = process.platform === 'darwin' || process.platform === 'win32';
+  const titleBarOverlayEnabled = false;
+  const autoHidesNativeMenuBar = process.platform !== 'darwin';
+  const windowIconPath = getWindowIconPath();
   const options = {
     title: 'OpenChamber',
-    width: useSaved ? Math.max(saved.width, MIN_RESTORE_WINDOW_WIDTH) : 1280,
-    height: useSaved ? Math.max(saved.height, MIN_RESTORE_WINDOW_HEIGHT) : 800,
+    ...(Number.isFinite(restoredBounds?.x) && Number.isFinite(restoredBounds?.y)
+      ? { x: restoredBounds.x, y: restoredBounds.y }
+      : {}),
+    width: restoredBounds?.width ?? 1280,
+    height: restoredBounds?.height ?? 800,
     minWidth: MIN_WINDOW_WIDTH,
     minHeight: MIN_WINDOW_HEIGHT,
+    icon: windowIconPath,
     show: false,
     backgroundColor: '#151313',
+    frame: process.platform === 'win32' ? false : undefined,
+    autoHideMenuBar: autoHidesNativeMenuBar,
     // Tauri used an overlay title bar with explicit traffic-light placement.
     // Electron's hiddenInset adds its own extra inset, which leaves the controls
     // visibly lower than the app header. Use a plain hidden title bar instead.
-    titleBarStyle: process.platform === 'darwin' ? 'hidden' : 'default',
+    titleBarStyle: usesCustomTitleBar ? 'hidden' : 'default',
+    titleBarOverlay: titleBarOverlayEnabled,
     trafficLightPosition: process.platform === 'darwin' ? { x: 16, y: 17 } : undefined,
     webPreferences: {
       additionalArguments: [
@@ -1178,7 +1319,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url }) => {
         `--openchamber-boot-outcome=${JSON.stringify(state.bootOutcome || null)}`,
       ],
       preload: isDev ? path.join(__dirname, 'preload.mjs') : path.join(app.getAppPath(), 'preload.mjs'),
-      backgroundThrottling: true,
+      backgroundThrottling: false,
       contextIsolation: true,
       nodeIntegration: false,
       webviewTag: true,
@@ -1192,10 +1333,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url }) => {
 
   const browserWindow = new BrowserWindow(options);
   browserWindow.__ocLabel = label || nextWindowLabel();
-
-  if (useSaved && Number.isFinite(saved.x) && Number.isFinite(saved.y)) {
-    browserWindow.setPosition(saved.x, saved.y);
-  }
+  browserWindow.__ocTitleBarOverlayEnabled = titleBarOverlayEnabled;
 
   if (useSaved && saved.maximized) {
     browserWindow.maximize();
@@ -1233,6 +1371,14 @@ const createBrowserWindow = ({ label, restoreGeometry, url }) => {
 
   browserWindow.on('resize', () => {
     emitToWindow(browserWindow, 'openchamber:window-resized');
+    debounceWindowStatePersist(browserWindow, false);
+  });
+  browserWindow.on('maximize', () => {
+    emitToWindow(browserWindow, 'openchamber:window-maximized-changed', { maximized: true });
+    debounceWindowStatePersist(browserWindow, false);
+  });
+  browserWindow.on('unmaximize', () => {
+    emitToWindow(browserWindow, 'openchamber:window-maximized-changed', { maximized: false });
     debounceWindowStatePersist(browserWindow, false);
   });
   browserWindow.on('move', () => {
@@ -1371,6 +1517,21 @@ const activateMainWindow = async (url, localOrigin, bootOutcome) => {
   return state.mainWindow;
 };
 
+const openMainWindow = async () => {
+  if (!state.localOrigin) {
+    const { initialUrl, localOrigin, bootOutcome } = await resolveInitialUrl();
+    return activateMainWindow(initialUrl, localOrigin, bootOutcome);
+  }
+
+  const config = readDesktopHostsConfig();
+  const localUiUrl = state.sidecarUrl || state.localOrigin;
+  const host = config.defaultHostId && config.defaultHostId !== LOCAL_HOST_ID
+    ? config.hosts.find((entry) => entry.id === config.defaultHostId)
+    : null;
+  const targetUrl = host?.url && !state.unreachableHosts.has(host.url) ? host.url : localUiUrl;
+  return activateMainWindow(targetUrl, state.localOrigin, state.bootOutcome);
+};
+
 const createAdditionalWindow = async (url) => {
   if (!state.localOrigin) {
     return null;
@@ -1418,6 +1579,7 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
     height: MINI_CHAT_WINDOW_HEIGHT,
     minWidth: MINI_CHAT_MIN_WINDOW_WIDTH,
     minHeight: MINI_CHAT_MIN_WINDOW_HEIGHT,
+    icon: getWindowIconPath(),
     show: false,
     backgroundColor: '#151313',
     titleBarStyle: process.platform === 'darwin' ? 'hidden' : 'default',
@@ -1429,7 +1591,7 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
         `--openchamber-macos-major=${desktopMacosMajor}`,
       ],
       preload: isDev ? path.join(__dirname, 'preload.mjs') : path.join(app.getAppPath(), 'preload.mjs'),
-      backgroundThrottling: true,
+      backgroundThrottling: false,
       contextIsolation: true,
       nodeIntegration: false,
       webviewTag: true,
@@ -1517,12 +1679,16 @@ const setMiniChatPinned = (browserWindow, pinned) => {
 };
 
 const resolveInitialUrl = async () => {
-  const localUrl = isDev && await waitForHealth('http://127.0.0.1:3901', 5_000, 100)
-    ? 'http://127.0.0.1:3901'
+  const hmrApiPort = process.env.OPENCHAMBER_HMR_API_PORT || '3901';
+  const hmrUiPort = process.env.OPENCHAMBER_HMR_UI_PORT || '5173';
+  const hmrApiUrl = `http://127.0.0.1:${hmrApiPort}`;
+  const hmrUiUrl = `http://127.0.0.1:${hmrUiPort}`;
+  const localUrl = isDev && await waitForHealth(hmrApiUrl, 5_000, 100)
+    ? hmrApiUrl
     : await spawnLocalServer();
 
-  const localUiUrl = isDev && await waitForHealth('http://127.0.0.1:5173', 8_000, 100)
-    ? 'http://127.0.0.1:5173'
+  const localUiUrl = isDev && await waitForHealth(hmrUiUrl, 8_000, 100)
+    ? hmrUiUrl
     : localUrl;
 
   state.sidecarUrl = localUrl;
@@ -1598,6 +1764,9 @@ const setupAutoUpdater = () => {
   });
 
   autoUpdater.on('download-progress', (progress) => {
+    const total = Number(progress.total || 0);
+    const transferred = Number(progress.transferred || 0);
+    setTaskbarProgress(total > 0 ? Math.max(0, Math.min(1, transferred / total)) : 0.01);
     emitToAllWindows('openchamber:update-progress', mapUpdaterProgressEvent({
       event: 'Progress',
       data: {
@@ -1610,12 +1779,14 @@ const setupAutoUpdater = () => {
 
   autoUpdater.on('update-downloaded', (info) => {
     log.info(`[electron] update-downloaded version=${info?.version || 'unknown'}`);
+    setTaskbarProgress(-1);
     if (state.pendingUpdate) {
       state.pendingUpdate.downloaded = true;
     }
   });
 
   autoUpdater.on('error', (err) => {
+    setTaskbarProgress(-1);
     log.error('[electron] autoUpdater error', err);
   });
 };
@@ -1784,6 +1955,138 @@ const CLI_BY_APP_ID = {
   zed: 'zed',
 };
 
+const WINDOWS_CLI_BY_APP_ID = {
+  vscode: 'code.cmd',
+  cursor: 'cursor.cmd',
+  vscodium: 'codium.cmd',
+  windsurf: 'windsurf.cmd',
+  zed: 'zed.cmd',
+};
+
+const WINDOWS_APP_EXECUTABLES = {
+  terminal: ['wt.exe', 'WindowsTerminal.exe'],
+  vscode: ['code.cmd', 'code.exe'],
+  cursor: ['cursor.cmd', 'cursor.exe'],
+  vscodium: ['codium.cmd', 'codium.exe'],
+  windsurf: ['windsurf.cmd', 'windsurf.exe'],
+  zed: ['zed.exe'],
+  'visual-studio': ['devenv.exe'],
+  'sublime-text': ['subl.exe', 'sublime_text.exe'],
+};
+
+const WINDOWS_APP_ID_BY_NAME = new Map([
+  ['finder', 'finder'],
+  ['file explorer', 'finder'],
+  ['terminal', 'terminal'],
+  ['windows terminal', 'terminal'],
+  ['visual studio code', 'vscode'],
+  ['cursor', 'cursor'],
+  ['vscodium', 'vscodium'],
+  ['windsurf', 'windsurf'],
+  ['zed', 'zed'],
+  ['visual studio', 'visual-studio'],
+  ['sublime text', 'sublime-text'],
+]);
+
+const getWindowsAppIdForName = (appName) => WINDOWS_APP_ID_BY_NAME.get(String(appName || '').trim().toLowerCase()) || '';
+
+const runWhere = (program) => {
+  const result = spawnSync('where.exe', [program], { encoding: 'utf8', windowsHide: true });
+  if (result.error || result.status !== 0) return null;
+  const first = String(result.stdout || '').split(/\r?\n/).map((line) => line.trim()).find(Boolean);
+  return first || null;
+};
+
+const findWindowsExecutable = (appId) => {
+  for (const program of WINDOWS_APP_EXECUTABLES[appId] || []) {
+    const resolved = runWhere(program);
+    if (resolved) return resolved;
+  }
+  return null;
+};
+
+const findWindowsAppNameExecutable = (appName) => {
+  const program = `${String(appName || '').trim()}.exe`.replace(/\s+/g, '');
+  return program === '.exe' ? null : runWhere(program);
+};
+
+const isWindowsAppInstalled = ({ appId, appName }) => {
+  if (appId === 'finder') return true;
+  if (appId === 'terminal') return Boolean(findWindowsExecutable('terminal'));
+  if (findWindowsExecutable(appId)) return true;
+  return Boolean(findWindowsAppNameExecutable(appName));
+};
+
+const buildWindowsInstalledApps = (apps) => {
+  const seen = new Set();
+  return (Array.isArray(apps) ? apps : [])
+    .map((appName) => String(appName || '').trim())
+    .filter((appName) => appName && !seen.has(appName) && seen.add(appName))
+    .filter((appName) => isWindowsAppInstalled({ appId: getWindowsAppIdForName(appName), appName }))
+    .map((name) => ({ name, iconDataUrl: null }));
+};
+
+const buildWindowsOpenProjectSpecs = ({ projectPath, appId, appName }) => {
+  if (appId === 'finder') {
+    return [{ program: 'explorer.exe', args: [projectPath] }];
+  }
+  if (appId === 'terminal') {
+    const specs = [];
+    const terminal = findWindowsExecutable('terminal');
+    if (terminal) {
+      specs.push({ program: terminal, args: ['-d', projectPath] });
+    }
+    const shell = runWhere('pwsh.exe') || runWhere('powershell.exe');
+    if (shell) {
+      specs.push({ program: shell, args: ['-NoExit', '-Command', `Set-Location -LiteralPath ${JSON.stringify(projectPath)}`] });
+    }
+    return specs;
+  }
+  const specs = [];
+  const cli = WINDOWS_CLI_BY_APP_ID[appId];
+  if (cli) {
+    const resolvedCli = runWhere(cli);
+    if (resolvedCli) {
+      specs.push({ program: resolvedCli, args: [projectPath] });
+    }
+  }
+  const exe = findWindowsExecutable(appId);
+  if (exe) {
+    specs.push({ program: exe, args: [projectPath] });
+  }
+  const namedExe = findWindowsAppNameExecutable(appName);
+  if (namedExe && !specs.some((spec) => spec.program === namedExe)) {
+    specs.push({ program: namedExe, args: [projectPath] });
+  }
+  return specs;
+};
+
+const buildWindowsOpenFileSpecs = ({ filePath, appId, appName }) => {
+  if (appId === 'finder') {
+    return [{ program: 'explorer.exe', args: ['/select,', filePath] }];
+  }
+  if (appId === 'terminal') {
+    return buildWindowsOpenProjectSpecs({ projectPath: path.dirname(filePath), appId, appName });
+  }
+  const specs = [];
+  const cli = WINDOWS_CLI_BY_APP_ID[appId];
+  if (cli) {
+    const resolvedCli = runWhere(cli);
+    if (resolvedCli) {
+      specs.push({ program: resolvedCli, args: [filePath] });
+    }
+  }
+  const exe = findWindowsExecutable(appId);
+  if (exe) {
+    specs.push({ program: exe, args: [filePath] });
+  }
+  const namedExe = findWindowsAppNameExecutable(appName);
+  if (namedExe && !specs.some((spec) => spec.program === namedExe)) {
+    specs.push({ program: namedExe, args: [filePath] });
+  }
+  return specs;
+};
+
 const buildOpenProjectSpecs = ({ projectPath, appId, appName }) => {
   if (appId === 'finder') {
     return [{ program: 'open', args: [projectPath] }];
@@ -1829,10 +2132,66 @@ const buildOpenFileSpecs = ({ filePath, appId, appName }) => {
   return specs;
 };
 
+const quoteWindowsCommandArg = (value) => `"${String(value).replace(/"/g, '""')}"`;
+
+const resolveWindowsLaunchProgram = (program) => {
+  if (path.isAbsolute(program)) {
+    return fs.existsSync(program) ? program : null;
+  }
+  return runWhere(program);
+};
+
+const launchWindowsCommandScript = (spec, program) => {
+  const commandLine = ['call', quoteWindowsCommandArg(program), ...spec.args.map(quoteWindowsCommandArg)].join(' ');
+  const child = spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', commandLine], {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: false,
+    windowsVerbatimArguments: true,
+  });
+  child.unref();
+};
+
+const launchWindowsSpec = (spec) => {
+  const program = resolveWindowsLaunchProgram(spec.program);
+  if (!program) {
+    throw new Error('program not found');
+  }
+
+  if (/\.(cmd|bat)$/i.test(program)) {
+    launchWindowsCommandScript(spec, program);
+    return;
+  }
+
+  const child = spawn(program, spec.args, {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: false,
+  });
+  child.unref();
+};
+
 const runSpecChain = (specs, appName) => {
+  if (!Array.isArray(specs) || specs.length === 0) {
+    throw new Error(`Failed to open in ${appName}: no launch candidates`);
+  }
+
+  if (process.platform === 'win32') {
+    const failures = [];
+    for (const spec of specs) {
+      try {
+        launchWindowsSpec(spec);
+        return;
+      } catch (error) {
+        failures.push(`${spec.program}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    throw new Error(`Failed to open in ${appName}: ${failures.join('; ')}`);
+  }
+
   const failures = [];
   for (const spec of specs) {
-    const result = spawnSync(spec.program, spec.args, { stdio: 'ignore' });
+    const result = spawnSync(spec.program, spec.args, { stdio: 'ignore', windowsHide: true });
     if (result.error) {
       failures.push(`${spec.program}: ${result.error.message}`);
       continue;
@@ -1861,6 +2220,24 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
 
     case 'desktop_get_app_version':
       return APP_VERSION;
+
+    case 'desktop_get_launch_at_login': {
+      if (process.platform !== 'darwin') return { supported: false, enabled: false };
+      const settings = app.getLoginItemSettings();
+      return { supported: true, enabled: settings.openAtLogin === true };
+    }
+
+    case 'desktop_set_launch_at_login': {
+      if (process.platform !== 'darwin') return { supported: false, enabled: false };
+      const enabled = args.enabled === true;
+      app.setLoginItemSettings({
+        openAtLogin: enabled,
+        openAsHidden: enabled,
+        args: enabled ? [BACKGROUND_START_ARG] : [],
+      });
+      const settings = app.getLoginItemSettings();
+      return { supported: true, enabled: settings.openAtLogin === true };
+    }
 
     case 'desktop_browser_capture_page': {
       const wcId = Number.isFinite(args.webContentsId) ? Math.trunc(args.webContentsId) : null;
@@ -2037,34 +2414,45 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     }
 
     case 'desktop_open_in_app': {
-      if (process.platform !== 'darwin') {
-        throw new Error('desktop_open_in_app is only supported on macOS');
-      }
       const projectPath = typeof args.projectPath === 'string' ? args.projectPath.trim() : '';
       const appId = typeof args.appId === 'string' ? args.appId.trim().toLowerCase() : '';
       const appName = typeof args.appName === 'string' ? args.appName.trim() : '';
       if (!projectPath || !appId || !appName) {
         throw new Error('Project path, app id, and app name are required');
       }
+      if (process.platform === 'win32') {
+        runSpecChain(buildWindowsOpenProjectSpecs({ projectPath, appId, appName }), appName);
+        return null;
+      }
+      if (process.platform !== 'darwin') {
+        throw new Error('desktop_open_in_app is only supported on macOS and Windows');
+      }
       runSpecChain(buildOpenProjectSpecs({ projectPath, appId, appName }), appName);
       return null;
     }
 
     case 'desktop_open_file_in_app': {
-      if (process.platform !== 'darwin') {
-        throw new Error('desktop_open_file_in_app is only supported on macOS');
-      }
       const filePath = typeof args.filePath === 'string' ? args.filePath.trim() : '';
       const appId = typeof args.appId === 'string' ? args.appId.trim().toLowerCase() : '';
       const appName = typeof args.appName === 'string' ? args.appName.trim() : '';
       if (!filePath || !appId || !appName) {
         throw new Error('File path, app id, and app name are required');
       }
+      if (process.platform === 'win32') {
+        runSpecChain(buildWindowsOpenFileSpecs({ filePath, appId, appName }), appName);
+        return null;
+      }
+      if (process.platform !== 'darwin') {
+        throw new Error('desktop_open_file_in_app is only supported on macOS and Windows');
+      }
       runSpecChain(buildOpenFileSpecs({ filePath, appId, appName }), appName);
       return null;
     }
 
     case 'desktop_filter_installed_apps': {
+      if (process.platform === 'win32') {
+        return buildWindowsInstalledApps(args.apps).map((app) => app.name);
+      }
       if (process.platform !== 'darwin') {
         throw new Error('desktop_filter_installed_apps is only supported on macOS');
       }
@@ -2076,6 +2464,9 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     }
 
     case 'desktop_fetch_app_icons': {
+      if (process.platform === 'win32') {
+        return [];
+      }
       if (process.platform !== 'darwin') {
         throw new Error('desktop_fetch_app_icons is only supported on macOS');
       }
@@ -2091,9 +2482,6 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     }
 
     case 'desktop_get_installed_apps': {
-      if (process.platform !== 'darwin') {
-        throw new Error('desktop_get_installed_apps is only supported on macOS');
-      }
       const cachePath = buildInstalledAppsCachePath();
       const now = Math.floor(Date.now() / 1000);
       let cache = null;
@@ -2105,11 +2493,16 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       const hasCache = Boolean(cache);
       const isCacheStale = !cache || (now - Number(cache.updatedAt || 0)) > INSTALLED_APPS_CACHE_TTL_SECS;
       const refresh = async () => {
-        const apps = await buildInstalledApps(Array.isArray(args.apps) ? args.apps : []);
+        const apps = process.platform === 'win32'
+          ? buildWindowsInstalledApps(args.apps)
+          : await buildInstalledApps(Array.isArray(args.apps) ? args.apps : []);
         await fsp.mkdir(path.dirname(cachePath), { recursive: true });
         await fsp.writeFile(cachePath, JSON.stringify({ updatedAt: now, apps }, null, 2));
         emitToAllWindows('openchamber:installed-apps-updated', apps);
       };
+      if (process.platform !== 'darwin' && process.platform !== 'win32') {
+        throw new Error('desktop_get_installed_apps is only supported on macOS and Windows');
+      }
       if (!hasCache || isCacheStale || args.force === true) {
         void refresh();
       }
@@ -2157,6 +2550,14 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         nativeTheme.themeSource = 'dark';
       } else {
         nativeTheme.themeSource = 'system';
+      }
+      if (canUseTitleBarOverlay(browserWindow)) {
+        const useDark = nativeTheme.shouldUseDarkColors;
+        browserWindow.setTitleBarOverlay({
+          color: useDark ? '#151313' : '#f5f5f4',
+          symbolColor: useDark ? '#fafaf9' : '#1c1917',
+          height: 48,
+        });
       }
       return null;
     }
@@ -2213,40 +2614,45 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       if (!state.pendingUpdate) {
         throw new Error('No pending update');
       }
+      setTaskbarProgress(0.01);
       emitToAllWindows('openchamber:update-progress', mapUpdaterProgressEvent({
         event: 'Started',
         data: {
           contentLength: null,
         },
       }));
-      if (!state.pendingUpdate.electronUpdate) {
-        throw new Error('Electron updater metadata is not available for this build');
+      try {
+        if (!state.pendingUpdate.electronUpdate) {
+          throw new Error('Electron updater metadata is not available for this build');
+        }
+        if (!state.pendingUpdate.downloaded) {
+          await new Promise((resolve, reject) => {
+            let settled = false;
+            const cleanup = () => {
+              autoUpdater.off('update-downloaded', onDownloaded);
+              autoUpdater.off('error', onError);
+            };
+            const finish = (callback, value) => {
+              if (settled) return;
+              settled = true;
+              cleanup();
+              callback(value);
+            };
+            const onDownloaded = () => finish(resolve, null);
+            const onError = (error) => finish(reject, error);
+            autoUpdater.on('update-downloaded', onDownloaded);
+            autoUpdater.on('error', onError);
+            Promise.resolve(autoUpdater.downloadUpdate()).catch((error) => finish(reject, error));
+          });
+        }
+        emitToAllWindows('openchamber:update-progress', mapUpdaterProgressEvent({
+          event: 'Finished',
+          data: {},
+        }));
+        return null;
+      } finally {
+        setTaskbarProgress(-1);
       }
-      if (!state.pendingUpdate.downloaded) {
-        await new Promise((resolve, reject) => {
-          let settled = false;
-          const cleanup = () => {
-            autoUpdater.off('update-downloaded', onDownloaded);
-            autoUpdater.off('error', onError);
-          };
-          const finish = (callback, value) => {
-            if (settled) return;
-            settled = true;
-            cleanup();
-            callback(value);
-          };
-          const onDownloaded = () => finish(resolve, null);
-          const onError = (error) => finish(reject, error);
-          autoUpdater.on('update-downloaded', onDownloaded);
-          autoUpdater.on('error', onError);
-          Promise.resolve(autoUpdater.downloadUpdate()).catch((error) => finish(reject, error));
-        });
-      }
-      emitToAllWindows('openchamber:update-progress', mapUpdaterProgressEvent({
-        event: 'Finished',
-        data: {},
-      }));
-      return null;
 
     case 'desktop_restart': {
       const applyUpdate = Boolean(state.pendingUpdate?.downloaded && app.isPackaged);
@@ -2363,6 +2769,38 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         browserWindow.close();
       }
       return null;
+
+    case 'desktop_minimize_current_window':
+      if (browserWindow && !browserWindow.isDestroyed()) {
+        browserWindow.minimize();
+      }
+      return null;
+
+    case 'desktop_toggle_current_window_maximized':
+      if (browserWindow && !browserWindow.isDestroyed()) {
+        if (browserWindow.isMaximized()) {
+          browserWindow.unmaximize();
+        } else {
+          browserWindow.maximize();
+        }
+        return { maximized: browserWindow.isMaximized() };
+      }
+      return { maximized: false };
+
+    case 'desktop_get_current_window_state':
+      return { maximized: Boolean(browserWindow && !browserWindow.isDestroyed() && browserWindow.isMaximized()) };
+
+    case 'desktop_show_app_menu': {
+      if (!browserWindow || browserWindow.isDestroyed()) {
+        return null;
+      }
+
+      const menu = Menu.getApplicationMenu() || buildAutoHiddenMenu();
+      const x = Number.isFinite(Number(args.x)) ? Math.max(0, Math.round(Number(args.x))) : undefined;
+      const y = Number.isFinite(Number(args.y)) ? Math.max(0, Math.round(Number(args.y))) : undefined;
+      menu.popup({ window: browserWindow, x, y });
+      return null;
+    }
 
     case 'desktop_ssh_instances_get':
       return sshManager.readInstances();
@@ -2504,6 +2942,119 @@ const buildMacMenu = () => {
   ]);
 };
 
+const buildAutoHiddenMenu = () => {
+  const dispatchAction = (action) => dispatchMenuAction(action);
+  const handleCopyAction = () => {
+    BrowserWindow.getFocusedWindow()?.webContents.copy();
+    dispatchAction('copy');
+  };
+
+  return Menu.buildFromTemplate([
+    {
+      label: 'OpenChamber',
+      submenu: [
+        { label: 'About OpenChamber', click: () => dispatchAction('about') },
+        {
+          label: 'Check for Updates',
+          click: () => dispatchCheckForUpdates(),
+        },
+        { type: 'separator' },
+        { label: 'Settings', accelerator: 'Ctrl+,', click: () => dispatchAction('settings') },
+        { label: 'Reload Webview', click: () => reloadMenuTargetWindow() },
+        { label: 'Restart', click: () => relaunchFromMenu() },
+        { label: 'Command Palette', accelerator: 'Ctrl+P', click: () => dispatchAction('command-palette') },
+        { type: 'separator' },
+        { role: 'quit' },
+      ],
+    },
+    {
+      label: 'File',
+      submenu: [
+        { label: 'New Window', accelerator: 'Ctrl+Shift+Alt+N', click: () => void handleInvoke(null, 'desktop_new_window') },
+        { type: 'separator' },
+        { label: 'New Session', accelerator: 'Ctrl+N', click: () => dispatchAction('new-session') },
+        { label: 'New Worktree', accelerator: 'Ctrl+Shift+N', click: () => dispatchAction('new-worktree-session') },
+        { type: 'separator' },
+        { label: 'Add Workspace', click: () => dispatchAction('change-workspace') },
+        { type: 'separator' },
+        { role: 'quit' },
+      ],
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { label: 'Copy', accelerator: 'Ctrl+C', click: () => handleCopyAction() },
+        { role: 'paste' },
+        { role: 'selectAll' },
+      ],
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        ...(isDev ? [{ role: 'toggleDevTools' }] : []),
+        { type: 'separator' },
+        { label: 'Toggle Right Sidebar', accelerator: 'Ctrl+B', click: () => dispatchAction('toggle-right-sidebar') },
+        { label: 'Open Git Sidebar', accelerator: 'Ctrl+Shift+G', click: () => dispatchAction('open-right-sidebar-git') },
+        { label: 'Open Files Sidebar', accelerator: 'Ctrl+Shift+F', click: () => dispatchAction('open-right-sidebar-files') },
+        { type: 'separator' },
+        { label: 'Toggle Terminal Dock', accelerator: 'Ctrl+J', click: () => dispatchAction('toggle-terminal') },
+        { label: 'Toggle Terminal Expanded', accelerator: 'Ctrl+Shift+J', click: () => dispatchAction('toggle-terminal-expanded') },
+        { type: 'separator' },
+        { label: 'Light Theme', click: () => dispatchAction('theme-light') },
+        { label: 'Dark Theme', click: () => dispatchAction('theme-dark') },
+        { label: 'System Theme', click: () => dispatchAction('theme-system') },
+        { type: 'separator' },
+        { label: 'Toggle Session Sidebar', accelerator: 'Ctrl+L', click: () => dispatchAction('toggle-sidebar') },
+        { label: 'Toggle Memory Debug', accelerator: 'Ctrl+Shift+D', click: () => dispatchAction('toggle-memory-debug') },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
+    {
+      label: 'Go',
+      submenu: [
+        { label: 'Back', accelerator: 'Ctrl+[', click: () => dispatchAction('go-back') },
+        { label: 'Forward', accelerator: 'Ctrl+]', click: () => dispatchAction('go-forward') },
+        { type: 'separator' },
+        { label: 'Previous Session', accelerator: 'Alt+Up', click: () => dispatchAction('previous-session') },
+        { label: 'Next Session', accelerator: 'Alt+Down', click: () => dispatchAction('next-session') },
+        { type: 'separator' },
+        { label: 'Previous Project', accelerator: 'Ctrl+Alt+Up', click: () => dispatchAction('previous-project') },
+        { label: 'Next Project', accelerator: 'Ctrl+Alt+Down', click: () => dispatchAction('next-project') },
+      ],
+    },
+    {
+      label: 'Window',
+      submenu: [
+        { role: 'minimize' },
+        { role: 'togglefullscreen' },
+        { type: 'separator' },
+        { role: 'close' },
+      ],
+    },
+    {
+      label: 'Help',
+      submenu: [
+        { label: 'Keyboard Shortcuts', accelerator: 'Ctrl+.', click: () => dispatchAction('help-dialog') },
+        { label: 'Show Diagnostics', accelerator: 'Ctrl+Shift+L', click: () => dispatchAction('download-logs') },
+        { type: 'separator' },
+        { label: 'Clear Cache', click: () => void handleInvoke(null, 'desktop_clear_cache') },
+        { type: 'separator' },
+        { label: 'Report a Bug', click: () => shell.openExternal(GITHUB_BUG_REPORT_URL) },
+        { label: 'Request a Feature', click: () => shell.openExternal(GITHUB_FEATURE_REQUEST_URL) },
+        { type: 'separator' },
+        { label: 'Join Discord', click: () => shell.openExternal(DISCORD_INVITE_URL) },
+      ],
+    },
+  ]);
+};
+
 contextMenu({
   showInspectElement: isDev,
   showSaveImageAs: true,
@@ -2554,6 +3105,10 @@ const COMMANDS_SAFE_FOR_REMOTE = new Set([
   'desktop_set_window_theme',
   'desktop_is_window_fullscreen',
   'desktop_start_window_drag',
+  'desktop_minimize_current_window',
+  'desktop_toggle_current_window_maximized',
+  'desktop_close_current_window',
+  'desktop_get_current_window_state',
   'desktop_get_app_version',
   'desktop_get_lan_address',
   'desktop_capture_page_rect',
@@ -2629,12 +3184,19 @@ app.on('second-instance', (_event, argv) => {
     ? argv.filter((arg) => typeof arg === 'string' && arg.startsWith(`${DEEP_LINK_PROTOCOL}://`))
     : [];
   if (urls.length > 0) handleDeepLinks(urls);
-  focusForegroundWindow();
+  if (BrowserWindow.getAllWindows().length > 0) {
+    focusForegroundWindow();
+  } else {
+    void openMainWindow();
+  }
 });
 
 app.on('open-url', (event, url) => {
   event.preventDefault();
   handleDeepLinks([url]);
+  if (BrowserWindow.getAllWindows().length === 0) {
+    void openMainWindow();
+  }
 });
 
 app.on('activate', async () => {
@@ -2648,29 +3210,46 @@ app.on('activate', async () => {
     return;
   }
 
-  if (state.localOrigin) {
-    const config = readDesktopHostsConfig();
-    const localUiUrl = state.sidecarUrl || state.localOrigin;
-    const host = config.defaultHostId && config.defaultHostId !== LOCAL_HOST_ID
-      ? config.hosts.find((entry) => entry.id === config.defaultHostId)
-      : null;
-    const targetUrl = host?.url && !state.unreachableHosts.has(host.url) ? host.url : localUiUrl;
-    await createAdditionalWindow(targetUrl);
-  }
+  await openMainWindow();
 });
 
 app.whenReady().then(async () => {
+  const loginItemSettings = readLoginItemSettings();
+  const isBackgroundStart = shouldStartInBackground(loginItemSettings);
   log.info('[electron] app starting', {
     version: APP_VERSION,
     packaged: app.isPackaged,
     platform: process.platform,
     arch: process.arch,
+    argv: process.argv,
+    isBackgroundStart,
+    loginItemSettings,
   });
   nativeTheme.themeSource = readThemeSource();
   setupAutoUpdater();
 
   if (process.platform === 'darwin') {
     Menu.setApplicationMenu(buildMacMenu());
+  } else {
+    Menu.setApplicationMenu(buildAutoHiddenMenu());
+  }
+
+  if (process.platform === 'darwin' && app.isPackaged) {
+    const openAtLogin = loginItemSettings?.openAtLogin === true;
+    app.setLoginItemSettings({
+      openAtLogin,
+      openAsHidden: openAtLogin,
+      args: openAtLogin ? [BACKGROUND_START_ARG] : [],
+    });
+  }
+
+  if (isBackgroundStart) {
+    const { localOrigin, bootOutcome } = await resolveInitialUrl();
+    state.localOrigin = localOrigin;
+    state.bootOutcome = bootOutcome ?? null;
+    state.initScript = buildInitScript(localOrigin, state.bootOutcome);
+    log.info('[electron] started in background without window');
+    return;
   }
 
   state.mainWindow = createBrowserWindow({

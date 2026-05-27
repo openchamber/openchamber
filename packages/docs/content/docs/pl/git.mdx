@@ -1,0 +1,41 @@
+---
+title: Przepływy Git i GitHub
+description: Dodawaj do indeksu, commituj i zarządzaj gałęziami bez wychodzenia z OpenChamber.
+---
+
+# Przepływy Git i GitHub
+
+OpenChamber ma wbudowany widok git, dzięki czemu możesz przeglądać zmiany, commitować i zarządzać gałęziami bez przełączania się na terminal. Otwórz go z zakładki **Git** w prawym pasku bocznym.
+
+## Przeglądaj i commituj
+
+Widok git dzieli Twoje zmiany na **staged** i **unstaged**:
+
+- kliknij **+** przy pliku, aby dodać go do indeksu, lub **−**, aby go usunąć z indeksu
+- dodaj lub usuń z indeksu wszystko w grupie naraz
+- kliknij plik, aby zobaczyć jego diff
+
+Następnie napisz komunikat commita i commituj. Możesz zlecić OpenChamber **wygenerowanie komunikatu commita** na podstawie Twoich zmian z indeksu — używa modelu bieżącej sesji, więc potrzebujesz otwartej sesji.
+
+## Gałęzie i historia
+
+Widok git obejmuje też resztę codziennej pracy z git:
+
+- twórz, przełączaj, zmieniaj nazwy i usuwaj gałęzie
+- push, pull i fetch
+- przeglądaj historię i diffy poszczególnych commitów
+- odkładaj (stash) i przywracaj zmiany
+
+## Pull requesty
+
+Połącz GitHub (zobacz [Issues i PR na GitHub](/pl/github/)), a zakładka **PR** pozwoli Ci otworzyć pull request, zaktualizować go, oznaczyć jako gotowy lub scalić — oraz wygenerować jego tytuł i opis w ten sam sposób co komunikaty commitów.
+
+## Rozwiązywanie konfliktów
+
+Jeśli scalanie, rebase lub integracja napotka konflikt, OpenChamber pokazuje, co utknęło, i pozwala Ci to rozwiązać — w tym przekazać to agentowi.
+
+## Powiązane
+
+- [Issues i PR na GitHub](/pl/github/) — połącz GitHub i rozpocznij pracę od issue
+- [Sesje worktree](/pl/worktrees/) — izoluj gałąź w jej własnym folderze
+- [Tożsamości Git](/pl/git-identities/) — commituj jako właściwa osoba w każdym repozytorium

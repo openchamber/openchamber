@@ -1,0 +1,30 @@
+---
+title: Remote Instances
+description: Connect the desktop app to OpenChamber on another machine over SSH.
+---
+
+# Remote Instances
+
+The desktop app can connect to OpenChamber running on another machine over SSH — a work server, a cloud box, a homelab — and bring its UI to your screen as if it were local. Set this up at **Settings → Remote Instances**.
+
+> Remote instances are a **desktop-only** feature. On the web or in VS Code, connect to a remote server with the environment variables in [OpenCode Server](/opencode-server/) instead.
+
+## Add a remote instance
+
+1. Open **Settings → Remote Instances** and add one.
+2. Give it the SSH command you'd normally use to reach the machine, plus a nickname.
+3. Choose how OpenChamber runs there:
+   - **managed** — OpenChamber installs and starts itself on the remote machine
+   - **external** — connect to one that's already running
+4. Connect.
+
+OpenChamber walks through the steps — checking the connection, setting up the remote, starting the server, and forwarding the port — and shows where it is at each stage. When it reaches **ready**, the remote UI loads locally.
+
+## Credentials
+
+You decide whether to save the SSH and UI passwords or enter them each time. If the connection drops, OpenChamber reports which step failed so you can fix it — see [Remote access](/troubleshooting/remote-access/).
+
+## Related
+
+- [OpenCode Server](/opencode-server/) — connect to a remote server on web or VS Code
+- [Remote access](/troubleshooting/remote-access/) — when a connection won't complete

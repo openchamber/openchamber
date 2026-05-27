@@ -13,6 +13,20 @@ import {
 function withContentCache(files: FilesAPI): FilesAPI {
   const cache = new Map<string, { content: string; path: string; size?: number; mtimeMs?: number }>();
 
+  const removeCacheEntry = (path: string) => {
+    cache.delete(path);
+    removeContentBytes(path);
+  };
+
+  const removeCacheEntriesByPrefix = (path: string) => {
+    const prefix = path.endsWith('/') ? path : `${path}/`;
+    for (const key of cache.keys()) {
+      if (key === path || key.startsWith(prefix)) {
+        removeCacheEntry(key);
+      }
+    }
+  };
+
   /** Whether cached metadata still matches the file on disk. */
   const statMatches = (
     cached: { size?: number; mtimeMs?: number },
@@ -86,10 +100,12 @@ function withContentCache(files: FilesAPI): FilesAPI {
         if (hit) {
           // Validate cached entry is still fresh
           if (files.statFile) {
-            const latest = await files.statFile(path).catch(() => null);
-            if (latest && !statMatches(hit, latest)) {
-              cache.delete(path);
-              removeContentBytes(path);
+            const latest = await files.statFile(path).catch(() => {
+              removeCacheEntry(path);
+              return null;
+            });
+            if (!latest || !statMatches(hit, latest)) {
+              removeCacheEntry(path);
               return readFreshFile(path);
             }
           }
@@ -104,26 +120,22 @@ function withContentCache(files: FilesAPI): FilesAPI {
   // Invalidate cache on writes, deletes, renames
   const cachedWriteFile: FilesAPI['writeFile'] = files.writeFile
     ? async (path, content) => {
-        cache.delete(path);
-        removeContentBytes(path);
+        removeCacheEntry(path);
         return files.writeFile!(path, content);
       }
     : undefined;
 
   const cachedDelete: FilesAPI['delete'] = files.delete
     ? async (path) => {
-        cache.delete(path);
-        removeContentBytes(path);
+        removeCacheEntriesByPrefix(path);
         return files.delete!(path);
       }
     : undefined;
 
   const cachedRename: FilesAPI['rename'] = files.rename
     ? async (oldPath, newPath) => {
-        cache.delete(oldPath);
-        removeContentBytes(oldPath);
-        cache.delete(newPath);
-        removeContentBytes(newPath);
+        removeCacheEntriesByPrefix(oldPath);
+        removeCacheEntriesByPrefix(newPath);
         return files.rename!(oldPath, newPath);
       }
     : undefined;

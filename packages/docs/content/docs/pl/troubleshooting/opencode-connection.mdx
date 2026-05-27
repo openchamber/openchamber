@@ -1,0 +1,34 @@
+---
+title: Połączenie z OpenCode
+description: Napraw brak połączenia OpenChamber z serwerem OpenCode.
+---
+
+# Połączenie z OpenCode
+
+Jeśli OpenChamber się ładuje, ale nigdy nie przechodzi poza „OpenCode uruchamia się ponownie”, albo czat nie odpowiada, serwer, z którym się komunikuje, jest nieosiągalny. Przejdź przez te kroki.
+
+## Utknął na „OpenCode uruchamia się ponownie”
+
+- daj mu chwilę tuż po uruchomieniu — ten stan jest normalny, gdy serwer startuje
+- sprawdź, czy serwer żyje, za pomocą `openchamber status`
+- zrestartuj go za pomocą `openchamber restart`
+- zobacz szczegóły startu za pomocą `openchamber logs`
+
+## Łączysz się z własnym serwerem
+
+Jeśli ustawiłeś OpenChamber tak, aby używał istniejącego serwera, sprawdź ponownie konfigurację z [OpenCode Server](/pl/opencode-server/):
+
+- `OPENCODE_HOST` musi zawierać port, bez ścieżki — na przykład `http://localhost:4096`
+- ustaw `OPENCODE_SKIP_START=true`, aby OpenChamber nie uruchamiał też własnego
+- jeśli adres jest nieprawidłowy, OpenChamber go ignoruje i uruchamia własny serwer — poszukaj ostrzeżenia `[config]` w logach
+
+## Nadal nie działa
+
+- potwierdź, że Node.js jest w wersji `20` lub nowszej
+- przeinstaluj najnowsze CLI
+- otwórz `http://localhost:3000` bezpośrednio, zanim przetestujesz jakikolwiek tunel lub zdalny link
+
+## Powiązane
+
+- [OpenCode Server](/pl/opencode-server/) — jak OpenChamber znajduje serwer i nim zarządza
+- [Rozwiązywanie problemów](/pl/troubleshooting/) — inne częste problemy

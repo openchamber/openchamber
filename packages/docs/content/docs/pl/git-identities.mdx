@@ -1,0 +1,30 @@
+---
+title: Tożsamości Git
+description: Commituj z właściwym imieniem i adresem e-mail dla każdego repozytorium.
+---
+
+# Tożsamości Git
+
+Tożsamość git to imię i adres e-mail, którymi podpisywane są Twoje commity. Jeśli pracujesz z repozytoriami osobistymi i służbowymi, możesz zapisać tożsamości i zastosować właściwą dla każdego repozytorium, zamiast polegać na jednym globalnym ustawieniu. Zarządzaj nimi w **Settings → Git**.
+
+## Dodaj tożsamość
+
+1. Otwórz **Settings → Git** i wybierz **New**.
+2. Wprowadź **name** i **email**, którymi chcesz commitować.
+3. Wybierz, jak uwierzytelnia się ze zdalnym repozytorium:
+   - **SSH** — wskaż klucz SSH
+   - **token** — użyj zapisanego poświadczenia dla hosta
+4. Opcjonalnie nadaj jej kolor i ikonę, by łatwo było ją rozpoznać.
+
+Globalna tożsamość Twojego systemu również jest pokazana, tylko do odczytu.
+
+## Zastosuj tożsamość do repozytorium
+
+Zastosowanie tożsamości zapisuje ją do **lokalnej** konfiguracji git tego repozytorium — wpływa tylko na to repozytorium, a nie na Twoje ustawienie globalne. Tożsamości SSH ustawiają też polecenie SSH, aby używać Twojego klucza; tożsamości tokenowe konfigurują przechowywanie poświadczeń dla hosta.
+
+Możesz zaimportować tożsamości, które OpenChamber wykryje w Twoich istniejących poświadczeniach git, i zapisać je jako tożsamości tokenowe.
+
+## Powiązane
+
+- [Przepływy Git i GitHub](/pl/git/) — commituj, używając ustawionej tożsamości
+- [Issues i PR na GitHub](/pl/github/) — połącz konto GitHub na potrzeby PR-ów
