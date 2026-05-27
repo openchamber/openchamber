@@ -113,4 +113,13 @@ describe('normalizeCustomOpenAIBaseURL', () => {
     const result = normalizeCustomOpenAIBaseURL('https://my-server.com/v1/?key=123');
     expect(result.value).toBe('https://my-server.com/v1');
   });
+
+  it('denies remote URLs on desktop when env var is explicitly false', () => {
+    process.env.OPENCHAMBER_RUNTIME = 'desktop';
+    process.env.OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS = 'false';
+
+    const result = normalizeCustomOpenAIBaseURL('https://my-tts-server.example.com/v1');
+    expect(result.error).toMatch(/Remote custom server URLs are disabled/);
+    expect(result.value).toBeUndefined();
+  });
 });

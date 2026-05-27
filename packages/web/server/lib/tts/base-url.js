@@ -48,7 +48,9 @@ export const normalizeCustomOpenAIBaseURL = (value) => {
   }
 
   const isDesktop = (process.env.OPENCHAMBER_RUNTIME || '').trim().toLowerCase() === 'desktop';
-  const allowRemote = isEnvFlagEnabled(process.env.OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS) || isDesktop;
+  const envFlagRaw = process.env.OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS;
+  const hasExplicitFlag = typeof envFlagRaw === 'string' && envFlagRaw.trim().length > 0;
+  const allowRemote = hasExplicitFlag ? isEnvFlagEnabled(envFlagRaw) : isDesktop;
   if (!allowRemote && !isAllowedLocalHost(parsed.hostname)) {
     return {
       error: 'Remote custom server URLs are disabled. Set OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS=true to allow this host.',
