@@ -85,13 +85,24 @@ export function routeMessage(params: {
   additionalParts?: Array<{ text: string; synthetic?: boolean; files?: Array<{ type: "file"; mime: string; url: string; filename: string }> }>
 }): Promise<void> {
   const requestDirectory = params.directory ?? undefined
+
+  const resolveServerId = (): string | undefined => {
+    const globalStore = useGlobalSessionsStore.getState()
+    const session = [...globalStore.activeSessions, ...globalStore.archivedSessions]
+      .find((s) => s.id === params.sessionId)
+    const raw = (session as Record<string, unknown> | undefined)?.serverId
+    return typeof raw === 'string' && raw.length > 0 && raw !== 'local' ? raw : undefined
+  }
+
   if (params.inputMode === "shell") {
+    const serverId = resolveServerId()
     return opencodeClient.shellSession({
       sessionId: params.sessionId,
       directory: requestDirectory,
       agent: params.agent ?? "",
       model: { providerID: params.providerID, modelID: params.modelID },
       command: params.content,
+      serverId,
     }).then(() => undefined)
   }
 
@@ -114,6 +125,7 @@ export function routeMessage(params: {
       || useSkillsStore.getState().skills.some((s) => s.name === cmdName)
 
     if (isCommand) {
+      const serverId = resolveServerId()
       return optimisticSend({
         sessionId: params.sessionId,
         content: params.content,
@@ -133,12 +145,14 @@ export function routeMessage(params: {
           files: params.files,
           messageId: messageID,
           directory: requestDirectory,
+          serverId,
         }).then(() => {}),
       })
     }
   }
 
   // Normal prompt — optimistic insert so message appears instantly
+  const serverId = resolveServerId()
   return optimisticSend({
     sessionId: params.sessionId,
     content: params.content,
@@ -159,6 +173,7 @@ export function routeMessage(params: {
       additionalParts: params.additionalParts,
       messageId: messageID,
       directory: requestDirectory,
+      serverId,
     }).then(() => {}),
   })
 }
@@ -1134,14 +1149,15 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // ---------------------------------------------------------------------------
   // createSession
   // ---------------------------------------------------------------------------
-  createSession: async (title, directoryOverride, parentID, metadata) => {
+  createSession: async (title, directoryOverride, parentID, _metadata) => {
     const draft = get().newSessionDraft
     const targetFolderId = draft.targetFolderId
     get().closeNewSessionDraft()
 
     try {
+      void (_metadata as unknown);
       const dir = directoryOverride ?? opencodeClient.getDirectory()
-      const session = await createSessionAction(title, dir, parentID ?? null, metadata)
+      const session = await createSessionAction(title, dir, parentID ?? null)
       if (!session) return null
 
       if (targetFolderId) {

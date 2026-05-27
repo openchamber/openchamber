@@ -25,6 +25,7 @@ import {
   shouldRetry,
   getRetryDelayMs,
 } from "./provider-tracker";
+import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap";
 
 // Use relative path by default (works with both dev and nginx proxy server)
 // Can be overridden with VITE_OPENCODE_URL for absolute URLs in special deployments
@@ -79,8 +80,8 @@ function unwrapSdkOptional<T>(result: SdkResult<T>, operation: string): T | unde
 }
 
 const ABSOLUTE_URL_PATTERN = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//;
-const ID_RANDOM_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-const ID_RANDOM_LENGTH = 14;
+export const ID_RANDOM_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+export const ID_RANDOM_LENGTH = 14;
 
 let lastIdTimestamp = 0;
 let idCounter = 0;
@@ -102,7 +103,7 @@ const randomBase62 = (length: number): string => {
   return result;
 };
 
-const ascendingId = (prefix: "msg"): string => {
+export const ascendingId = (prefix: string): string => {
   const timestamp = Date.now();
   if (timestamp !== lastIdTimestamp) {
     lastIdTimestamp = timestamp;
@@ -268,9 +269,46 @@ class OpencodeService {
     return this.client;
   }
 
+  /**
+   * Evict all cached SDK clients scoped to a given server.
+   * Call this when a remote server is disconnected or its URL changes.
+   */
+  clearServerClientCache(serverId: string) {
+    const prefix = `server:${serverId}`
+    for (const key of this.scopedClients.keys()) {
+      if (key.startsWith(prefix)) {
+        this.scopedClients.delete(key)
+      }
+    }
+  }
+
   /** Get a scoped SDK client for a specific directory */
-  getScopedSdkClient(directory: string): OpencodeClient {
+  getScopedSdkClient(directory: string, serverId?: string): OpencodeClient {
+    if (serverId && serverId !== 'local') {
+      return this.getServerClient(serverId, directory)
+    }
     return this.getScopedApiClient(directory);
+  }
+
+  /**
+   * Get an SDK client scoped to a specific server. For the local server,
+   * returns the default client. For remote servers, creates a client
+   * pointed at the local server's proxy route (/api/servers/<id>/proxy)
+   * so all session CRUD requests are forwarded to the correct backend.
+   */
+  getServerClient(serverId: string, directory?: string): OpencodeClient {
+    if (!serverId || serverId === 'local') {
+      return directory ? this.getScopedApiClient(directory) : this.client
+    }
+    const key = `server:${serverId}${directory ? `:${directory}` : ''}`
+    const existing = this.scopedClients.get(key)
+    if (existing) return existing
+    const baseUrl = ensureAbsoluteBaseUrl(`/api/servers/${serverId}/proxy`)
+    const scoped = directory
+      ? createOpencodeClient({ baseUrl, directory, fetch: runtimeFetch })
+      : createOpencodeClient({ baseUrl, fetch: runtimeFetch })
+    this.scopedClients.set(key, scoped)
+    return scoped
   }
 
   /**
@@ -488,16 +526,24 @@ class OpencodeService {
   }
 
   // Session Management
-  async listSessions(): Promise<Session[]> {
-    const response = await this.client.session.list(
-      this.currentDirectory ? { directory: this.currentDirectory } : undefined
+  async listSessions(options?: { directory?: string | null; serverId?: string }): Promise<Session[]> {
+    const serverId = options?.serverId
+    const client = serverId && serverId !== 'local'
+      ? this.getServerClient(serverId, this.normalizeCandidatePath(options?.directory) ?? undefined)
+      : this.client
+    const directory = this.normalizeCandidatePath(options?.directory) ?? this.currentDirectory
+    const response = await client.session.list(
+      directory ? { directory } : undefined
     );
     return Array.isArray(response.data) ? response.data : [];
   }
 
-  async createSession(params?: { parentID?: string; title?: string; metadata?: Record<string, unknown> }, directory?: string | null): Promise<Session> {
+  async createSession(params?: { parentID?: string; title?: string; metadata?: Record<string, unknown> }, directory?: string | null, serverId?: string): Promise<Session> {
     const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
-    const response = await this.client.session.create({
+    const client = serverId && serverId !== 'local'
+      ? this.getServerClient(serverId, requestDirectory || undefined)
+      : this.client
+    const response = await client.session.create({
       ...(requestDirectory ? { directory: requestDirectory } : {}),
       parentID: params?.parentID,
       title: params?.title,
@@ -506,18 +552,24 @@ class OpencodeService {
     return unwrapSdkData(response, 'session.create');
   }
 
-  async getSession(id: string, directory?: string | null): Promise<Session> {
+  async getSession(id: string, serverId?: string, directory?: string | null): Promise<Session> {
     const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
-    const response = await this.client.session.get({
+    const client = serverId && serverId !== 'local'
+      ? this.getServerClient(serverId, requestDirectory || undefined)
+      : this.client
+    const response = await client.session.get({
       sessionID: id,
       ...(requestDirectory ? { directory: requestDirectory } : {})
     });
     return unwrapSdkData(response, 'session.get');
   }
 
-  async deleteSession(id: string, directory?: string | null): Promise<boolean> {
+  async deleteSession(id: string, directory?: string | null, serverId?: string): Promise<boolean> {
     const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
-    const response = await this.client.session.delete({
+    const client = serverId && serverId !== 'local'
+      ? this.getServerClient(serverId, requestDirectory || undefined)
+      : this.client
+    const response = await client.session.delete({
       sessionID: id,
       ...(requestDirectory ? { directory: requestDirectory } : {}),
     });
@@ -528,14 +580,18 @@ class OpencodeService {
     id: string,
     patch: { title?: string; metadata?: Record<string, unknown>; time?: { archived?: number | null } },
     directory?: string | null,
+    serverId?: string,
   ): Promise<Session> {
     const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
+    const client = serverId && serverId !== 'local'
+      ? this.getServerClient(serverId, requestDirectory || undefined)
+      : this.client
     const sdkPatch = {
       ...(patch.title !== undefined ? { title: patch.title } : {}),
       ...(patch.metadata !== undefined ? { metadata: patch.metadata } : {}),
       ...(patch.time?.archived !== undefined && patch.time.archived !== null ? { time: { archived: patch.time.archived } } : {}),
     };
-    const response = await this.client.session.update({
+    const response = await client.session.update({
       sessionID: id,
       ...(requestDirectory ? { directory: requestDirectory } : {}),
       ...sdkPatch,
@@ -543,8 +599,11 @@ class OpencodeService {
     return unwrapSdkData(response, 'session.update');
   }
 
-  async getSessionMessages(id: string, limit?: number): Promise<{ info: Message; parts: Part[] }[]> {
-    const response = await this.client.session.messages({
+  async getSessionMessages(id: string, limit?: number, serverId?: string): Promise<{ info: Message; parts: Part[] }[]> {
+    const client = serverId && serverId !== 'local'
+      ? this.getServerClient(serverId, this.currentDirectory || undefined)
+      : this.client
+    const response = await client.session.messages({
       sessionID: id,
       ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
       ...(typeof limit === 'number' ? { limit } : {}),
@@ -552,9 +611,12 @@ class OpencodeService {
     return unwrapSdkData(response, 'session.messages');
   }
 
-  async getSessionTodos(sessionId: string): Promise<Array<{ id: string; content: string; status: string; priority: string }>> {
+  async getSessionTodos(sessionId: string, serverId?: string): Promise<Array<{ id: string; content: string; status: string; priority: string }>> {
     try {
-      const response = await this.client.session.todo({
+      const client = serverId && serverId !== 'local'
+        ? this.getServerClient(serverId, this.currentDirectory || undefined)
+        : this.client
+      const response = await client.session.todo({
         sessionID: sessionId,
         ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
       });
@@ -740,6 +802,8 @@ class OpencodeService {
       schema: Record<string, unknown>;
       retryCount?: number;
     };
+    /** Route through the proxy for a remote server */
+    serverId?: string;
     directory?: string | null;
   }): Promise<string> {
     // Reuse one client-side message ID across retries. The server accepts this
@@ -811,6 +875,18 @@ class OpencodeService {
 
     const requestDirectory = this.normalizeCandidatePath(params.directory ?? null) ?? this.currentDirectory;
 
+    if (requestDirectory) {
+      await waitForWorktreeBootstrap(requestDirectory);
+    }
+
+    // Use async prompt endpoint so the client doesn't block waiting
+    // for model work (SSE will deliver output/status).
+    // This avoids 504s from proxy timeouts on long-running turns.
+    const remoteSdk = params.serverId && params.serverId !== 'local'
+      ? this.getServerClient(params.serverId, requestDirectory ?? undefined)
+      : null
+    const effectiveClient = remoteSdk ?? this.client
+
     if (params.format) {
       console.info('[git-generation][browser] send structured message', {
         sessionId: params.id,
@@ -830,7 +906,7 @@ class OpencodeService {
 
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        const result = await this.client.session.promptAsync({
+        const result = await effectiveClient.session.promptAsync({
           sessionID: params.id,
           ...(requestDirectory ? { directory: requestDirectory } : {}),
           model: {
@@ -905,6 +981,8 @@ class OpencodeService {
     variant?: string;
     files?: Array<FileInputLite>;
     messageId?: string;
+    /** Route through the proxy for a remote server */
+    serverId?: string;
     directory?: string | null;
   }): Promise<string> {
     const tempMessageId = params.messageId ?? ascendingId("msg");
@@ -917,8 +995,12 @@ class OpencodeService {
     }
 
     const requestDirectory = this.normalizeCandidatePath(params.directory ?? null) ?? this.currentDirectory;
+    const remoteSdk = params.serverId && params.serverId !== 'local'
+      ? this.getServerClient(params.serverId, requestDirectory ?? undefined)
+      : null
+    const effectiveClient = remoteSdk ?? this.client
 
-    const response = await this.client.session.command({
+    const response = await effectiveClient.session.command({
       sessionID: params.id,
       ...(requestDirectory ? { directory: requestDirectory } : {}),
       command: params.command,
@@ -934,8 +1016,12 @@ class OpencodeService {
     return tempMessageId;
   }
 
-  async abortSession(id: string): Promise<boolean> {
-    const response = await this.client.session.abort(
+  async abortSession(id: string, serverId?: string, directory?: string | null): Promise<boolean> {
+    const remoteSdk = serverId && serverId !== 'local'
+      ? this.getServerClient(serverId, directory ?? this.currentDirectory ?? undefined)
+      : null
+    const effectiveClient = remoteSdk ?? this.client
+    const response = await effectiveClient.session.abort(
       {
         sessionID: id,
         ...(this.currentDirectory ? { directory: this.currentDirectory } : {})
@@ -952,9 +1038,14 @@ class OpencodeService {
     model: { providerID: string; modelID: string };
     messageId?: string;
     directory?: string | null;
+    serverId?: string;
   }): Promise<{ info: Message; parts: Part[] }> {
     const requestDirectory = this.normalizeCandidatePath(params.directory ?? null) ?? this.currentDirectory;
-    const response = await this.client.session.shell({
+    const remoteSdk = params.serverId && params.serverId !== 'local'
+      ? this.getServerClient(params.serverId, requestDirectory ?? undefined)
+      : null
+    const effectiveClient = remoteSdk ?? this.client
+    const response = await effectiveClient.session.shell({
       sessionID: params.sessionId,
       ...(requestDirectory ? { directory: requestDirectory } : {}),
       messageID: params.messageId,
@@ -965,9 +1056,13 @@ class OpencodeService {
     return unwrapSdkData(response, 'session.shell') as { info: Message; parts: Part[] };
   }
 
-  async revertSession(sessionId: string, messageId: string, partId?: string, directory?: string | null): Promise<Session> {
+  async revertSession(sessionId: string, messageId: string, partId?: string, directory?: string | null, serverId?: string): Promise<Session> {
     const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
-    const response = await this.client.session.revert({
+    const remoteSdk = serverId && serverId !== 'local'
+      ? this.getServerClient(serverId, requestDirectory ?? undefined)
+      : null
+    const effectiveClient = remoteSdk ?? this.client
+    const response = await effectiveClient.session.revert({
       sessionID: sessionId,
       ...(requestDirectory ? { directory: requestDirectory } : {}),
       messageID: messageId,
@@ -976,9 +1071,13 @@ class OpencodeService {
     return unwrapSdkData(response, 'session.revert');
   }
 
-  async summarizeSession(sessionId: string, providerId: string, modelId: string, directory?: string | null): Promise<boolean> {
+  async summarizeSession(sessionId: string, providerId: string, modelId: string, directory?: string | null, serverId?: string): Promise<boolean> {
     const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
-    const response = await this.client.session.summarize({
+    const remoteSdk = serverId && serverId !== 'local'
+      ? this.getServerClient(serverId, requestDirectory ?? undefined)
+      : null
+    const effectiveClient = remoteSdk ?? this.client
+    const response = await effectiveClient.session.summarize({
       sessionID: sessionId,
       ...(requestDirectory ? { directory: requestDirectory } : {}),
       providerID: providerId,
@@ -987,17 +1086,26 @@ class OpencodeService {
     return unwrapSdkOptional(response, 'session.summarize') === true;
   }
 
-  async unrevertSession(sessionId: string): Promise<Session> {
-    const response = await this.client.session.unrevert({
+  async unrevertSession(sessionId: string, serverId?: string, directory?: string | null): Promise<Session> {
+    const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
+    const remoteSdk = serverId && serverId !== 'local'
+      ? this.getServerClient(serverId, requestDirectory ?? undefined)
+      : null
+    const effectiveClient = remoteSdk ?? this.client
+    const response = await effectiveClient.session.unrevert({
       sessionID: sessionId,
-      ...(this.currentDirectory ? { directory: this.currentDirectory } : {})
+      ...(requestDirectory ? { directory: requestDirectory } : {}),
     });
     return unwrapSdkData(response, 'session.unrevert');
   }
 
-  async forkSession(sessionId: string, messageId?: string, directory?: string | null): Promise<Session> {
+  async forkSession(sessionId: string, messageId?: string, directory?: string | null, serverId?: string): Promise<Session> {
     const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
-    const response = await this.client.session.fork({
+    const remoteSdk = serverId && serverId !== 'local'
+      ? this.getServerClient(serverId, requestDirectory ?? undefined)
+      : null
+    const effectiveClient = remoteSdk ?? this.client
+    const response = await effectiveClient.session.fork({
       sessionID: sessionId,
       ...(requestDirectory ? { directory: requestDirectory } : {}),
       messageID: messageId,
@@ -1020,11 +1128,15 @@ class OpencodeService {
    * not be conflated with that — return `null` so the caller can preserve state.
    */
   async getSessionStatusForDirectory(
-    directory: string | null | undefined
+    directory: string | null | undefined,
+    serverId?: string,
   ): Promise<Record<string, { type: "idle" | "busy" | "retry"; attempt?: number; message?: string; next?: number }> | null> {
     try {
       const trimmedDirectory = typeof directory === "string" ? directory.trim() : "";
-      const result = await this.client.session.status(trimmedDirectory ? { directory: trimmedDirectory } : undefined);
+      const client = serverId && serverId !== 'local'
+        ? this.getServerClient(serverId, trimmedDirectory || undefined)
+        : this.client
+      const result = await client.session.status(trimmedDirectory ? { directory: trimmedDirectory } : undefined);
       if (result.error || !result.data || typeof result.data !== "object") {
         return null;
       }
@@ -1093,10 +1205,13 @@ class OpencodeService {
   async replyToPermission(
     requestId: string,
     reply: 'once' | 'always' | 'reject',
-    options?: { message?: string; directory?: string | null }
+    options?: { message?: string; directory?: string | null; serverId?: string }
   ): Promise<boolean> {
     const requestDirectory = this.normalizeCandidatePath(options?.directory ?? null) ?? this.currentDirectory;
-    const response = await this.client.permission.reply({
+    const client = options?.serverId && options.serverId !== 'local'
+      ? this.getServerClient(options.serverId, requestDirectory || undefined)
+      : this.client
+    const response = await client.permission.reply({
       requestID: requestId,
       ...(requestDirectory ? { directory: requestDirectory } : {}),
       reply,
@@ -1111,12 +1226,16 @@ class OpencodeService {
    * can preserve existing state instead of conflating "fetch failed" with
    * "server returned no pending permissions".
    */
-  async listPendingPermissions(options?: { directories?: Array<string | null | undefined> }): Promise<PermissionRequest[]> {
+  async listPendingPermissions(options?: { directories?: Array<string | null | undefined>; serverId?: string }): Promise<PermissionRequest[]> {
     const fetches: Array<Promise<PermissionRequest[]>> = [];
+    const serverId = options?.serverId
 
     const fetchForDirectory = async (directory?: string | null): Promise<PermissionRequest[]> => {
       const trimmed = typeof directory === 'string' ? directory.trim() : '';
-      const result = await this.client.permission.list(trimmed ? { directory: trimmed } : undefined);
+      const client = serverId && serverId !== 'local'
+        ? this.getServerClient(serverId, trimmed || undefined)
+        : this.client
+      const result = await client.permission.list(trimmed ? { directory: trimmed } : undefined);
       if (result.error) {
         throw new Error(`permission.list failed: ${formatSdkError(result.error)}`);
       }
@@ -1157,7 +1276,7 @@ class OpencodeService {
   }
 
   // Questions ("ask" tool)
-  async replyToQuestion(requestId: string, answers: string[] | string[][], directory?: string | null): Promise<boolean> {
+  async replyToQuestion(requestId: string, answers: string[] | string[][], directory?: string | null, serverId?: string): Promise<boolean> {
     const normalizedAnswers: string[][] = (() => {
       if (!Array.isArray(answers) || answers.length === 0) {
         return [];
@@ -1169,7 +1288,10 @@ class OpencodeService {
     })();
 
     const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
-    const response = await this.client.question.reply({
+    const client = serverId && serverId !== 'local'
+      ? this.getServerClient(serverId, requestDirectory || undefined)
+      : this.client
+    const response = await client.question.reply({
       requestID: requestId,
       ...(requestDirectory ? { directory: requestDirectory } : {}),
       answers: normalizedAnswers,
@@ -1190,12 +1312,16 @@ class OpencodeService {
    * rationale — resync paths preserve state on throw via outer try/catch
    * instead of conflating failure with an empty server response.
    */
-  async listPendingQuestions(options?: { directories?: Array<string | null | undefined> }): Promise<QuestionRequest[]> {
+  async listPendingQuestions(options?: { directories?: Array<string | null | undefined>; serverId?: string }): Promise<QuestionRequest[]> {
     const fetches: Array<Promise<QuestionRequest[]>> = [];
+    const serverId = options?.serverId
 
     const fetchForDirectory = async (directory?: string | null): Promise<QuestionRequest[]> => {
       const trimmed = typeof directory === 'string' ? directory.trim() : '';
-      const result = await this.client.question.list(trimmed ? { directory: trimmed } : undefined);
+      const client = serverId && serverId !== 'local'
+        ? this.getServerClient(serverId, trimmed || undefined)
+        : this.client
+      const result = await client.question.list(trimmed ? { directory: trimmed } : undefined);
       if (result.error) {
         throw new Error(`question.list failed: ${formatSdkError(result.error)}`);
       }
@@ -1611,9 +1737,9 @@ class OpencodeService {
     return await response.json();
   }
 
-  async listLocalDirectory(directoryPath: string | null | undefined, options?: { respectGitignore?: boolean }): Promise<FilesystemEntry[]> {
+  async listLocalDirectory(directoryPath: string | null | undefined, options?: { respectGitignore?: boolean; serverId?: string }): Promise<FilesystemEntry[]> {
     const normalizedDirectoryPath = typeof directoryPath === 'string' ? normalizeFsPath(directoryPath.trim()) : '';
-    const cacheKey = `${normalizedDirectoryPath}|${options?.respectGitignore ? '1' : '0'}`;
+    const cacheKey = `${normalizedDirectoryPath}|${options?.respectGitignore ? '1' : '0'}|${options?.serverId ?? ''}`;
     const now = Date.now();
     const cached = this.listDirectoryCache.get(cacheKey);
     if (cached && cached.expiresAt > now) {

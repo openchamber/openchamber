@@ -3,6 +3,8 @@ import type { Session } from '@opencode-ai/sdk/v2';
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import type { MainTab } from '@/stores/useUIStore';
 
 type DeleteSessionConfirmSetter = React.Dispatch<React.SetStateAction<{
@@ -57,6 +59,30 @@ export const useSessionActions = (args: Args) => {
   const [copiedSessionId, setCopiedSessionId] = React.useState<string | null>(null);
   const copyTimeout = React.useRef<number | null>(null);
 
+  const sessionDirCacheRef = React.useRef<Map<string, string | null> | null>(null)
+  const sessionDirCacheKeyRef = React.useRef('')
+
+  function resolveSessionDirectory(sessionId: string, serverId?: string | null): string | null {
+    const sessionsByDirectory = useGlobalSessionsStore.getState().sessionsByDirectory;
+    const effectiveServerId = serverId || 'local';
+    const cacheKey = `${effectiveServerId}::${useGlobalSessionsStore.getState().activeSessions.map(s => s.id).join(',')}`
+    if (!sessionDirCacheRef.current || sessionDirCacheKeyRef.current !== cacheKey) {
+      sessionDirCacheRef.current = new Map()
+      const serverMap = sessionsByDirectory.get(effectiveServerId)
+      if (serverMap) {
+        for (const [dir, sessions] of serverMap) {
+          for (const session of sessions) {
+            if (!sessionDirCacheRef.current.has(session.id)) {
+              sessionDirCacheRef.current.set(session.id, dir)
+            }
+          }
+        }
+      }
+      sessionDirCacheKeyRef.current = cacheKey
+    }
+    return sessionDirCacheRef.current.get(sessionId) ?? null
+  }
+
   React.useEffect(() => {
     return () => {
       if (copyTimeout.current) {
@@ -66,7 +92,11 @@ export const useSessionActions = (args: Args) => {
   }, []);
 
   const handleSessionSelect = React.useCallback(
-    (sessionId: string, sessionDirectory?: string | null, projectId?: string | null) => {
+    (sessionId: string, sessionDirectory?: string | null, disabled?: boolean, projectId?: string | null, serverId?: string | null) => {
+      if (disabled) {
+        return;
+      }
+
       const resetSessionSearch = () => {
         if (!args.isSessionSearchOpen && args.sessionSearchQuery.length === 0) {
           return;
@@ -80,7 +110,21 @@ export const useSessionActions = (args: Args) => {
       }
 
       if (sessionDirectory && sessionDirectory !== args.currentDirectory) {
-        args.setDirectory(sessionDirectory, { showOverlay: false });
+    const effectiveServerId = serverId ?? 'local';
+        const currentServerId = useDirectoryStore.getState().currentServerId;
+        if (effectiveServerId !== currentServerId) {
+          useDirectoryStore.getState().setDirectory(sessionDirectory, { showOverlay: false, serverId: effectiveServerId });
+        } else {
+          args.setDirectory(sessionDirectory, { showOverlay: false });
+        }
+      } else if (serverId) {
+        const currentServerId = useDirectoryStore.getState().currentServerId;
+        if (serverId !== currentServerId) {
+          const resolvedDir = resolveSessionDirectory(sessionId, serverId) ?? args.currentDirectory;
+          if (resolvedDir) {
+            useDirectoryStore.getState().setDirectory(resolvedDir, { showOverlay: false, serverId });
+          }
+        }
       }
 
       if (args.mobileVariant) {

@@ -9,23 +9,33 @@ import type { Config, OpencodeClient } from "@opencode-ai/sdk/v2/client"
 import type { ChildStoreManager } from "./child-store"
 import { getSessionMaterializationStatus } from "./materialization"
 import type { State } from "./types"
+import { useDirectoryStore as useDirStore } from "@/stores/useDirectoryStore"
 
 let _childStores: ChildStoreManager | null = null
 let _directory: string = ""
 let _registerSessionDirectory: ((sessionID: string, directory: string) => void) | null = null
 const configListeners = new Set<(directory: string, config: Config) => void>()
+let _cleanRoutingIndex: (() => void) | null = null
 
 export function setSyncRefs(
   _sdk: OpencodeClient,
   childStores: ChildStoreManager,
   directory: string,
   registerSessionDirectory?: (sessionID: string, directory: string) => void,
+  cleanRoutingIndex?: () => void,
 ) {
   _childStores = childStores
   _directory = directory
   if (registerSessionDirectory) {
     _registerSessionDirectory = registerSessionDirectory
   }
+  if (cleanRoutingIndex) {
+    _cleanRoutingIndex = cleanRoutingIndex
+  }
+}
+
+export function cleanRoutingIndex() {
+  _cleanRoutingIndex?.()
 }
 
 /** Pre-register a session→directory mapping in the routing index.
@@ -46,7 +56,11 @@ export function getDirectoryState(directory?: string): State | undefined {
   if (!stores) return undefined
   const dir = directory || _directory
   if (!dir) return undefined
-  return stores.getState(dir)
+  const serverId = useDirStore.getState().currentServerId
+  return (
+    stores.getStateByServer(serverId, dir) ??
+    (stores.findChildByDirectory?.(dir)?.getState())
+  )
 }
 
 /** Read resolved OpenCode config from a directory child store, if bootstrapped. */
@@ -80,7 +94,7 @@ export function getAllSyncSessions() {
   if (!stores) return []
 
   const deduped = new Map<string, State["session"][number]>()
-  for (const store of stores.children.values()) {
+  for (const store of stores.getAllStores()) {
     for (const session of store.getState().session) {
       if (!session?.id) continue
       deduped.set(session.id, session)

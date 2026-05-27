@@ -169,3 +169,17 @@ contextBridge.exposeInMainWorld('__OPENCHAMBER_DESKTOP__', {
   openExternal: (url) => ipcRenderer.invoke('openchamber:invoke', 'desktop_open_external_url', { url }),
   listen: async (event, handler) => addListener(event, handler),
 });
+
+// Multi-server API — register/unregister remote servers in the in-process
+// server manager so the sidebar can show sessions from multiple hosts.
+contextBridge.exposeInMainWorld('__OPENCHAMBER_MULTI_SERVER__', {
+  listServers: () => ipcRenderer.invoke('openchamber:invoke', 'desktop_server_list', {}),
+  registerServer: (config) => ipcRenderer.invoke('openchamber:invoke', 'desktop_server_register', config || {}),
+  unregisterServer: (serverId) => ipcRenderer.invoke('openchamber:invoke', 'desktop_server_unregister', { serverId }),
+  onServerStatusChange: (cb) => {
+    const handler = (eventPayload) => {
+      try { cb(eventPayload?.payload ?? eventPayload ?? {}); } catch (err) { console.error('[preload] server status handler error:', err) }
+    };
+    return addListener('openchamber:server-status', handler);
+  },
+});

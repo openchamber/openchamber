@@ -54,6 +54,7 @@ type Props = {
   groupDirectory?: string | null;
   projectId?: string | null;
   archivedBucket?: boolean;
+  directoryStatus?: Map<string, 'unknown' | 'exists' | 'missing'>;
   currentSessionId: string | null;
   pinnedSessionIds: Set<string>;
   expandedParents: Set<string>;
@@ -67,7 +68,7 @@ type Props = {
   handleSaveEdit: (titleOverride?: string) => void;
   handleCancelEdit: () => void;
   toggleParent: (expansionKey: string) => void;
-  handleSessionSelect: (sessionId: string, sessionDirectory: string | null, projectId?: string | null) => void;
+  handleSessionSelect: (sessionId: string, sessionDirectory: string | null, isMissingDirectory: boolean, projectId?: string | null, serverId?: string | null) => void;
   handleSessionDoubleClick: (sessionId: string, sessionTitle: string) => void;
   togglePinnedSession: (sessionId: string) => void;
   handleShareSession: (session: Session) => void;
@@ -210,6 +211,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     groupDirectory,
     projectId,
     archivedBucket = false,
+    directoryStatus,
     currentSessionId,
     pinnedSessionIds,
     expandedParents,
@@ -353,6 +355,8 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   );
   const sessionStatus = useGlobalSessionStatus(session.id);
   const sessionPermissions = useSessionPermissions(session.id, sessionDirectory ?? undefined);
+  const directoryState = sessionDirectory ? directoryStatus?.get(sessionDirectory) : null;
+  const isMissingDirectory = directoryState === 'missing';
   const isActive = currentSessionId === session.id;
   const sessionTitle = resolvedSession.title || t('sessions.sidebar.session.untitled');
   const hasChildren = node.children.length > 0;
@@ -744,7 +748,9 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       toggleRowSelected(session.id, sessionDirectory ?? null, collectNodeDescendantIds(node));
       return;
     }
-    handleSessionSelect(session.id, sessionDirectory, projectId);
+    const rawServerId = (session as Record<string, unknown>).serverId
+    const resolvedServerId = typeof rawServerId === 'string' && rawServerId.length > 0 ? rawServerId : undefined
+    handleSessionSelect(session.id, sessionDirectory, isMissingDirectory, projectId, resolvedServerId);
   };
 
   const handleRowMouseDown = (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -981,6 +987,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                   // stays put.
                   '-ml-3',
                   depth > 0 ? 'pl-[32px]' : 'pl-[18px]',
+                  isMissingDirectory ? 'opacity-75' : '',
                   // Active (currently open) session gets a subtle primary tint;
                   // multi-select highlight takes precedence when both apply.
                   isActive && !isRowSelected && 'bg-primary/10',
@@ -997,17 +1004,18 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                 <TooltipTrigger asChild>
                   <button
                     type="button"
- 	                    onPointerDown={handleRowPointerDown}
- 	                    onPointerUp={handleRowPointerEnd}
- 	                    onPointerCancel={handleRowPointerEnd}
- 	                    onMouseDown={handleRowMouseDown}
- 	                    onClick={(event) => handleRowSelect(event)}
+  	                    onPointerDown={handleRowPointerDown}
+  	                    onPointerUp={handleRowPointerEnd}
+  	                    onPointerCancel={handleRowPointerEnd}
+  	                    onMouseDown={handleRowMouseDown}
+  	                    onClick={(event) => handleRowSelect(event)}
+                    disabled={isMissingDirectory}
                     onDoubleClick={(e) => {
                       e.stopPropagation();
                       handleSessionDoubleClick(session.id, sessionTitle);
                     }}
                     className={cn(
-	                      'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none transition-[padding]',
+	                      'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed transition-[padding]',
 	                      isTouchPressed && 'bg-interactive-hover/70',
                       alwaysShowActions
                         ? (isVSCode ? revealPaddingClass : alwaysActionPaddingClass)
@@ -1066,12 +1074,13 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
 	                onPointerCancel={handleRowPointerEnd}
 	                onMouseDown={handleRowMouseDown}
 	                onClick={(event) => handleRowSelect(event)}
+                disabled={isMissingDirectory}
                 onDoubleClick={(e) => {
                   e.stopPropagation();
                   handleSessionDoubleClick(session.id, sessionTitle);
                 }}
                 className={cn(
-	                  'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none transition-[padding]',
+	                  'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed transition-[padding]',
 	                  isTouchPressed && 'bg-interactive-hover/70',
                   alwaysShowActions
                     ? (isVSCode ? revealPaddingClass : alwaysActionPaddingClass)
@@ -1356,6 +1365,11 @@ const areSessionNodeItemPropsEqual = (prev: Props, next: Props): boolean => {
   if (prev.notifyOnSubtasks !== next.notifyOnSubtasks) return false;
   if (prev.nodeStructureKey !== next.nodeStructureKey) return false;
   if (getNodeSessionDirectory(prev.node) !== getNodeSessionDirectory(next.node)) return false;
+  {
+    const prevDir = getNodeSessionDirectory(prev.node);
+    const nextDir = getNodeSessionDirectory(next.node);
+    if ((prevDir ? prev.directoryStatus?.get(prevDir) : null) !== (nextDir ? next.directoryStatus?.get(nextDir) : null)) return false;
+  }
   if (!isSecondaryMetaEqual(prev.secondaryMeta, next.secondaryMeta)) return false;
 
   if (prev.liveSessionById !== next.liveSessionById

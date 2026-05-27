@@ -42,7 +42,7 @@ describe('useGlobalSessionsStore', () => {
 
     const session = useGlobalSessionsStore.getState().activeSessions[0];
     expect(resolveGlobalSessionDirectory(session)).toBe('/repo/app');
-    expect(useGlobalSessionsStore.getState().sessionsByDirectory.get('/repo/app')?.[0]?.id).toBe('ses_1');
+    expect(useGlobalSessionsStore.getState().sessionsByDirectory.get('local')?.get('/repo/app')?.[0]?.id).toBe('ses_1');
   });
 
   test('preserves raw directory metadata when a live update only has project worktree', () => {
@@ -65,8 +65,8 @@ describe('useGlobalSessionsStore', () => {
     }));
 
     expect(resolveGlobalSessionDirectory(useGlobalSessionsStore.getState().activeSessions[0])).toBe('/repo/app-worktree');
-    expect(useGlobalSessionsStore.getState().sessionsByDirectory.get('/repo/app')).toBe(undefined);
-    expect(useGlobalSessionsStore.getState().sessionsByDirectory.get('/repo/app-worktree')?.[0]?.id).toBe('ses_1');
+    expect(useGlobalSessionsStore.getState().sessionsByDirectory.get('local')?.get('/repo/app')).toBe(undefined);
+    expect(useGlobalSessionsStore.getState().sessionsByDirectory.get('local')?.get('/repo/app-worktree')?.[0]?.id).toBe('ses_1');
   });
 
   test('preserves directory metadata when moving a session to archived', () => {

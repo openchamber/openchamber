@@ -9,6 +9,7 @@ import net from 'net';
 import { fileURLToPath } from 'url';
 import os from 'os';
 import crypto from 'crypto';
+import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import { createUiAuth } from './lib/ui-auth/ui-auth.js';
 import { createTunnelAuth } from './lib/opencode/tunnel-auth.js';
 import { createManagedTunnelConfigRuntime } from './lib/tunnels/managed-config.js';
@@ -70,6 +71,9 @@ import { createOpenCodeResolutionRuntime } from './lib/opencode/opencode-resolut
 import { createBootstrapRuntime } from './lib/opencode/bootstrap-runtime.js';
 import { createSessionRuntime } from './lib/opencode/session-runtime.js';
 import { createOpenCodeWatcherRuntime } from './lib/opencode/watcher.js';
+import { MultiServerManager } from './lib/opencode/multi-server-manager.js';
+import { SseFanIn } from './lib/opencode/sse-fan-in.js';
+import { registerAggregateRoutes } from './lib/opencode/aggregate-routes.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { createServerStartupRuntime } from './lib/opencode/server-startup-runtime.js';
 import { createTunnelWiringRuntime } from './lib/opencode/tunnel-wiring-runtime.js';
@@ -683,6 +687,43 @@ const globalMessageStreamHub = createGlobalMessageStreamHub({
   upstreamStallTimeoutMs: getUpstreamStallTimeoutMs,
 });
 
+// Multi-server infrastructure
+const serverManager = new MultiServerManager({ defaultServerId: 'local' });
+const sseFanIn = new SseFanIn(serverManager);
+
+globalMessageStreamHub.subscribeStatus((status) => {
+  if (status.type === 'connect') {
+    serverManager.updateStatus('local', 'connected');
+    sseFanIn.dispatchSynthetic('local', 'server.status', { status: 'connected' });
+  } else if (status.type === 'disconnect') {
+    serverManager.updateStatus('local', 'disconnected');
+    sseFanIn.dispatchSynthetic('local', 'server.status', { status: 'disconnected' });
+  } else if (status.type === 'error' || status.type === 'initial-error') {
+    const msg = status.error?.error?.message ?? status.error?.message ?? String(status.error);
+    serverManager.updateStatus('local', 'error', msg);
+    sseFanIn.dispatchSynthetic('local', 'server.status', { status: 'error', errorMessage: msg });
+  }
+});
+
+// Register downstream listener: process tagged events from SseFanIn
+sseFanIn.onEvent((batch) => {
+  for (const tagged of batch) {
+    if (tagged.type !== 'server.status') {
+      maybeCacheSessionInfoFromEvent(tagged);
+      void maybeSendPushForTrigger(tagged);
+      sessionRuntime.processOpenCodeSsePayload(tagged);
+    }
+    if (tagged.serverId !== 'local') {
+      const directory = typeof tagged.directory === 'string' && tagged.directory.length > 0
+        ? tagged.directory
+        : typeof tagged.properties?.directory === 'string' && tagged.properties.directory.length > 0
+          ? tagged.properties.directory
+          : undefined
+      globalMessageStreamHub.feedEvent({ payload: tagged, directory })
+    }
+  }
+});
+
 const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   waitForOpenCodePort: (...args) => waitForOpenCodePort(...args),
   buildOpenCodeUrl,
@@ -690,9 +731,9 @@ const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   parseSseDataPayload: (...args) => parseSseDataPayload(...args),
   globalEventHub: globalMessageStreamHub,
   onPayload: (payload) => {
-    maybeCacheSessionInfoFromEvent(payload);
-    void maybeSendPushForTrigger(payload);
-    sessionRuntime.processOpenCodeSsePayload(payload);
+    if (payload && typeof payload === 'object' && typeof payload.serverId === 'string' && payload.serverId !== 'local') return;
+    // Feed local server events into the fan-in for serverId tagging + coalesce
+    sseFanIn.feedLocal('local', payload);
   },
 });
 
@@ -974,6 +1015,25 @@ const ensureGlobalWatcherStarted = async () => {
 const bootstrapOpenCodeAtStartup = async (...args) => {
   await openCodeLifecycleRuntime.bootstrapOpenCodeAtStartup(...args);
   scheduleOpenCodeApiDetection();
+
+  // Register local server with the multi-server manager
+  if (!serverManager.getServer('local')) {
+    const localBaseUrl = openCodeBaseUrl || `http://127.0.0.1:${openCodePort}`;
+    const localClient = createOpencodeClient({
+      baseUrl: localBaseUrl,
+      headers: getOpenCodeAuthHeaders(),
+    });
+    serverManager.registerServer({
+      id: 'local',
+      label: 'Local',
+      type: 'local',
+      url: localBaseUrl,
+      client: localClient,
+    });
+  }
+
+  sseFanIn.startAll();
+
   if (openCodeLifecycleState.openCodeProcess && !openCodeLifecycleState.isExternalOpenCode) {
     startHealthMonitoring();
   }
@@ -1030,6 +1090,8 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   },
   tunnelAuthController,
   scheduledTasksRuntime,
+  getServerManager: () => serverManager,
+  getSseFanIn: () => sseFanIn,
 });
 
 const gracefulShutdown = (...args) => gracefulShutdownRuntime.gracefulShutdown(...args);
@@ -1241,6 +1303,9 @@ async function main(options = {}) {
     writeSseEvent,
   });
 
+  // Multi-server aggregate routes (with auth-gated mutation endpoints)
+  registerAggregateRoutes(app, serverManager, sseFanIn, getOpenCodeAuthHeaders, uiAuthController.requireAuth);
+
   const previewProxyRuntime = createPreviewProxyRuntime({
     crypto,
     URL,
@@ -1327,6 +1392,8 @@ async function main(options = {}) {
     }),
     isReady: () => isOpenCodeReady,
     restartOpenCode: () => restartOpenCode(),
+    getServerManager: () => serverManager,
+    getSseFanIn: () => sseFanIn,
     getOpenCodeProcessInfo: () => ({
       managed: Boolean((openCodeProcess || openCodePort) && !ENV_SKIP_OPENCODE_START && !isExternalOpenCode),
       pid: typeof openCodeProcess?.pid === 'number' ? openCodeProcess.pid : null,
@@ -1356,4 +1423,6 @@ export {
   restartOpenCode,
   main as startWebUiServer,
   parseServeCliOptions as parseArgs,
+  serverManager,
+  sseFanIn,
 };

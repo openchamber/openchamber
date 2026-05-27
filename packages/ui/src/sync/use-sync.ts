@@ -183,7 +183,7 @@ export function useSync() {
   const evict = useCallback(
     (dir: string, sessionIDs: string[]) => {
       if (sessionIDs.length === 0) return
-      const dirStore = childStores.getChild(dir)
+      const dirStore = childStores.findChildByDirectory(dir)
       if (!dirStore) return
 
       const current = dirStore.getState()
