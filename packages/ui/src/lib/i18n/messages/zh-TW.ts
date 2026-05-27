@@ -2156,6 +2156,7 @@ export const dict: Record<I18nKey, string> = {
   'openInApp.actions.copyPath': '複製路徑',
   'openInApp.actions.refreshApps': '重新整理應用程式',
   'openInApp.toast.pathCopied': '路徑已複製到剪貼簿',
+  'openInApp.toast.remoteOpenFailed': '無法在編輯器中開啟遠端路徑',
   'projectActions.actions.addActionAria': '新增操作',
   'projectActions.actions.addAction': '新增操作',
   'projectActions.actions.addNewAction': '新增新操作',
