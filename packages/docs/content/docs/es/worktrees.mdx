@@ -1,0 +1,36 @@
+---
+title: Sesiones de worktree
+description: Da a una sesión su propia rama y carpeta para que el trabajo quede aislado.
+---
+
+# Sesiones de worktree
+
+Una sesión de worktree se ejecuta en su propia copia del repositorio, en su propia rama (un worktree de git). Eso evita que las sesiones paralelas se pisen los archivos: una puede refactorizar mientras otra corrige un error, sin estar cambiando de un lado a otro.
+
+## Crea una
+
+1. Abre el diálogo de nuevo worktree desde el botón en la parte superior de la barra lateral de sesiones.
+2. Elige un punto de partida:
+   - **nueva rama** — nombra la rama y elige desde qué rama partir
+   - **rama existente** — haz checkout de una rama que ya tengas
+3. Confirma la carpeta del worktree (OpenChamber sugiere una a partir del nombre de la rama).
+4. Créala.
+
+OpenChamber crea la rama, configura la carpeta e inicia una sesión en ella. También puedes arrancar una directamente desde una [tarea](/es/notes-todos-plans/) o desde una [issue o PR de GitHub](/es/github/).
+
+## Trae el trabajo de vuelta
+
+Cuando el trabajo esté listo, usa **Integrate** en la vista de Git para traer los commits del worktree a otra rama (como `main`). Si un cambio entra en conflicto, puedes entregarle el conflicto al agente para que lo resuelva.
+
+## Limpieza
+
+Eliminar o archivar la sesión puede quitar el worktree. Tú eliges si también eliminar la rama: local, y remota si la hay. No se elimina nada sin que lo pidas.
+
+## Si algo no encaja
+
+Un worktree puede requerir atención si su carpeta desapareció, su rama está en un estado desacoplado, o una fusión o rebase quedó a medias. OpenChamber lo señala para que lo arregles; consulta [Worktrees y Git](/es/troubleshooting/worktrees-git/).
+
+## Relacionado
+
+- [Multi-run](/es/multi-run/) — lanza muchas sesiones de worktree a la vez
+- [Flujos de trabajo de Git y GitHub](/es/git/) — haz commit e integra desde dentro de OpenChamber

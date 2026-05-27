@@ -19,23 +19,16 @@ type AgentInfo = {
   description?: string;
   mode?: string | null;
 };
-const EMPTY_FILES: FileInfo[] = [];
-const EMPTY_AGENTS: AgentInfo[] = [];
 
 export interface FileMentionHandle {
   handleKeyDown: (key: string) => void;
 }
-
-type AutocompleteTab = 'commands' | 'agents' | 'files';
 
 interface FileMentionAutocompleteProps {
   searchQuery: string;
   onFileSelect: (file: FileInfo) => void;
   onAgentSelect?: (agentName: string) => void;
   onClose: () => void;
-  showTabs?: boolean;
-  activeTab?: AutocompleteTab;
-  onTabSelect?: (tab: AutocompleteTab) => void;
   style?: React.CSSProperties;
 }
 
@@ -44,9 +37,6 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
   onFileSelect,
   onAgentSelect,
   onClose,
-  showTabs,
-  activeTab = 'files',
-  onTabSelect,
   style,
 }, ref) => {
   const { t } = useI18n();
@@ -87,9 +77,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
   const labelRefs = React.useRef<(HTMLSpanElement | null)[]>([]);
   const measureRefs = React.useRef<(HTMLSpanElement | null)[]>([]);
   const containerRef = React.useRef<HTMLDivElement | null>(null);
-  const ignoreTabClickRef = React.useRef(false);
   const normalizedSearchQuery = (searchQuery ?? '').trim();
-  const scopeResultsToActiveTab = showTabs === true;
   const recentFiles = React.useMemo(() => {
     if (!projectRoot || !projectTabs) {
       return [] as FileInfo[];
@@ -128,14 +116,12 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
     return mapped;
   }, [normalizedSearchQuery, projectRoot, projectTabs]);
   const visibleAgents = React.useMemo(
-    () => !scopeResultsToActiveTab || activeTab === 'agents'
-      ? (normalizedSearchQuery.length > 0 ? agents : agents.slice(0, 2))
-      : EMPTY_AGENTS,
-    [activeTab, agents, normalizedSearchQuery.length, scopeResultsToActiveTab],
+    () => normalizedSearchQuery.length > 0 ? agents : agents.slice(0, 2),
+    [agents, normalizedSearchQuery.length],
   );
-  const visibleDirectories = !scopeResultsToActiveTab || activeTab === 'files' ? directories : EMPTY_FILES;
-  const visibleRecentFiles = !scopeResultsToActiveTab || activeTab === 'files' ? recentFiles : EMPTY_FILES;
-  const visibleFiles = !scopeResultsToActiveTab || activeTab === 'files' ? files : EMPTY_FILES;
+  const visibleDirectories = directories;
+  const visibleRecentFiles = recentFiles;
+  const visibleFiles = files;
 
   React.useEffect(() => {
     const handlePointerDown = (event: MouseEvent | TouchEvent) => {
@@ -452,56 +438,14 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
     }
   };
 
-  const tabs = React.useMemo(() => ([
-    { id: 'commands' as const, label: t('chat.autocomplete.tabs.commands') },
-    { id: 'agents' as const, label: t('chat.autocomplete.tabs.agents') },
-    { id: 'files' as const, label: t('chat.autocomplete.tabs.files') },
-  ]), [t]);
-
   return (
       <div
         ref={containerRef}
         className="absolute z-[100] min-w-0 w-full max-w-[640px] max-h-64 bg-background border-2 border-border/60 rounded-xl shadow-none bottom-full mb-2 left-0 flex flex-col"
         style={style}
       >
-        {showTabs ? (
-          <div className="px-2 pt-2 pb-1 border-b border-border/60">
-            <div className="flex items-center gap-1 rounded-lg bg-[var(--surface-elevated)] p-1">
-              {tabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  className={cn(
-                    'flex-1 px-2.5 py-1 rounded-md typography-meta font-semibold transition-none',
-                    activeTab === tab.id
-                      ? 'bg-interactive-selection text-interactive-selection-foreground shadow-none'
-                      : 'text-muted-foreground hover:bg-interactive-hover/50'
-                  )}
-                  onPointerDown={(event) => {
-                    if (event.pointerType !== 'touch') {
-                      return;
-                    }
-                    event.preventDefault();
-                    event.stopPropagation();
-                    ignoreTabClickRef.current = true;
-                    onTabSelect?.(tab.id);
-                  }}
-                  onClick={() => {
-                    if (ignoreTabClickRef.current) {
-                      ignoreTabClickRef.current = false;
-                      return;
-                    }
-                    onTabSelect?.(tab.id);
-                  }}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : null}
         <ScrollableOverlay outerClassName="flex-1 min-h-0" className="px-0">
-        {(!scopeResultsToActiveTab || activeTab === 'files') && loading ? (
+        {loading ? (
           <div className="flex items-center justify-center py-4">
             <Icon name="refresh" className="h-4 w-4 animate-spin text-muted-foreground" />
           </div>

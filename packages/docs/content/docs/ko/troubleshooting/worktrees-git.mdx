@@ -1,0 +1,35 @@
+---
+title: Worktree 및 Git
+description: 일반적인 worktree 및 git 문제를 해결하세요.
+---
+
+# Worktree 및 Git
+
+[worktree 세션](/ko/worktrees/)과 [git 보기](/ko/git/)에서 발생하는 문제와 해결 방법입니다.
+
+## worktree에 주의가 필요함
+
+OpenChamber는 무언가 잘못되면 worktree를 표시합니다.
+
+- **folder missing** — worktree의 폴더가 OpenChamber 외부에서 삭제되거나 이동됨. 세션을 제거하고 새 worktree를 만드세요
+- **detached or unborn branch** — worktree가 정상적인 브랜치에 있지 않음. 정상 브랜치로 체크아웃하세요
+- **merge, rebase, or cherry-pick in progress** — 작업이 절반만 끝남. git 보기에서 완료하거나 중단하세요
+
+## worktree를 만들 수 없음
+
+- **branch already exists** — 다른 브랜치 이름을 선택하거나 existing-branch 옵션을 사용하세요
+- **name already in use** — 다른 worktree 이름을 선택하세요
+
+## 커밋 또는 PR 생성 실패
+
+커밋 메시지나 PR 설명 생성은 활성 세션에서 실행되므로, 작동하는 모델이 선택된 세션이 열려 있어야 합니다. 세션을 열거나 선택한 뒤 다시 시도하세요.
+
+## SSH 또는 Windows 경로 문제
+
+- 저장소가 사용하는 SSH 키가 [git 신원](/ko/git-identities/)에 설정된 것과 같은지 확인하세요
+- Windows에서 git은 Unix 스타일 경로(예: `/c/Users/...`)를 사용합니다. OpenChamber가 이를 처리하지만, 사용자 지정 SSH 키 경로도 같은 형식을 따라야 합니다
+
+## 관련 항목
+
+- [Worktree Sessions](/ko/worktrees/) — worktree가 생성되고 제거되는 방법
+- [Git Identities](/ko/git-identities/) — 저장소마다 올바른 키와 신원을 설정하세요

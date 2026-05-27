@@ -1,0 +1,38 @@
+---
+title: Dostęp zdalny
+description: Napraw tunele, zdalne instancje i dostęp do OpenChamber z innego urządzenia.
+---
+
+# Dostęp zdalny
+
+Gdy nie możesz dotrzeć do OpenChamber z telefonu lub innej maszyny, rozwiązanie zależy od tego, jak się łączysz.
+
+## Najpierw sprawdź podstawy
+
+- najpierw otwórz `http://localhost:3000` na tym samym komputerze — jeśli to zawiedzie, to nie jest problem zdalny; zobacz [Połączenie z OpenCode](/pl/troubleshooting/opencode-connection/)
+- potwierdź, że serwer działa, za pomocą `openchamber status`
+
+## Link tunelu nie działa
+
+- uruchom `openchamber tunnel status --all`
+- zrestartuj tunel z tej samej instancji i portu
+- wygeneruj ponownie link połączenia, jeśli poprzedni był już użyty
+
+Zobacz [Tunele](/pl/tunnels/), aby poznać pełną konfigurację.
+
+## Zdalna instancja nie chce się połączyć (komputer)
+
+Gdy [zdalna instancja](/pl/remote-instances/) się zatnie, OpenChamber wskazuje krok, który zawiódł:
+
+- **auth** — Twoje hasło SSH lub UI zostało odrzucone; wpisz je ponownie
+- **install / start** — OpenChamber nie mógł skonfigurować lub uruchomić serwera na zdalnej maszynie; sprawdź wymagania tej maszyny
+- **forwarding** — połączenie działa, ale port do Ciebie nie dociera; spróbuj innego portu lokalnego
+
+## Za własnym serwerem
+
+Jeśli umieściłeś OpenChamber za reverse proxy i ładuje się dziwnie lub nie chce się połączyć, zobacz [Reverse Proxy](/pl/reverse-proxy/).
+
+## Powiązane
+
+- [Tunele](/pl/tunnels/) · [Zdalne instancje](/pl/remote-instances/) · [Reverse Proxy](/pl/reverse-proxy/)
+- [Bezpieczeństwo](/pl/security/) — zabezpiecz UI przed udostępnieniem

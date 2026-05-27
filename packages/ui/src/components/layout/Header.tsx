@@ -1,5 +1,4 @@
 import React, { useEffect } from 'react';
-import { createPortal } from 'react-dom';
 import {
   Tooltip,
   TooltipContent,
@@ -36,7 +35,6 @@ import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { useDeviceInfo, useTabletStandalonePwaRuntime } from '@/lib/device';
 import { cn, hasModifier } from '@/lib/utils';
 import { McpDropdownContent } from '@/components/mcp/McpDropdown';
-import { McpIcon } from '@/components/icons/McpIcon';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { formatQuotaValueLabel, formatQuotaResetLabel, formatWindowLabel, QUOTA_PROVIDERS, calculatePace, calculateExpectedUsagePercent } from '@/lib/quota';
 import { UsageProgressBar } from '@/components/sections/usage/UsageProgressBar';
@@ -79,10 +77,11 @@ type HeaderIconActionButtonProps = {
   visible?: boolean;
   title: string;
   ariaLabel: string;
-  onClick: () => void;
+  onClick: React.MouseEventHandler<HTMLButtonElement>;
   className?: string;
   Icon: IconName;
   iconClassName?: string;
+  pressed?: boolean;
 };
 
 const HeaderIconActionButton = React.memo(function HeaderIconActionButton({
@@ -93,6 +92,7 @@ const HeaderIconActionButton = React.memo(function HeaderIconActionButton({
   className,
   Icon: iconName,
   iconClassName,
+  pressed = false,
 }: HeaderIconActionButtonProps) {
   if (!visible) {
     return null;
@@ -105,7 +105,11 @@ const HeaderIconActionButton = React.memo(function HeaderIconActionButton({
           type="button"
           onClick={onClick}
           aria-label={ariaLabel}
-          className={className ?? DESKTOP_HEADER_ICON_BUTTON_CLASS}
+          aria-pressed={pressed}
+          className={cn(
+            className ?? DESKTOP_HEADER_ICON_BUTTON_CLASS,
+            pressed && 'bg-interactive-selection text-interactive-selection-foreground'
+          )}
         >
           <Icon name={iconName} className={iconClassName ?? 'h-[18px] w-[18px]'} />
         </button>
@@ -114,6 +118,83 @@ const HeaderIconActionButton = React.memo(function HeaderIconActionButton({
         <p>{title}</p>
       </TooltipContent>
     </Tooltip>
+  );
+});
+
+type WindowsWindowControlsProps = {
+  visible: boolean;
+};
+
+const WindowsWindowControls = React.memo(function WindowsWindowControls({ visible }: WindowsWindowControlsProps) {
+  const { t } = useI18n();
+  const [isMaximized, setIsMaximized] = React.useState(false);
+
+  useEffect(() => {
+    if (!visible) {
+      return;
+    }
+
+    let disposed = false;
+    void invokeDesktop<{ maximized?: boolean }>('desktop_get_current_window_state')
+      .then((state) => {
+        if (!disposed) {
+          setIsMaximized(Boolean(state?.maximized));
+        }
+      })
+      .catch(() => {});
+
+    const handleMaximizedChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ maximized?: boolean }>).detail;
+      setIsMaximized(Boolean(detail?.maximized));
+    };
+
+    window.addEventListener('openchamber:window-maximized-changed', handleMaximizedChange);
+    return () => {
+      disposed = true;
+      window.removeEventListener('openchamber:window-maximized-changed', handleMaximizedChange);
+    };
+  }, [visible]);
+
+  if (!visible) {
+    return null;
+  }
+
+  const buttonClassName = 'app-region-no-drag inline-flex h-12 w-11 items-center justify-center text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
+
+  return (
+    <div className="app-region-no-drag -mr-3 ml-2 flex h-12 shrink-0 items-center" aria-label={t('header.windowControls.groupAria')}>
+      <button
+        type="button"
+        className={buttonClassName}
+        onClick={() => { void invokeDesktop('desktop_minimize_current_window'); }}
+        title={t('header.windowControls.minimize')}
+        aria-label={t('header.windowControls.minimize')}
+      >
+        <Icon name="subtract" className="h-4 w-4" />
+      </button>
+      <button
+        type="button"
+        className={buttonClassName}
+        onClick={() => {
+          void invokeDesktop<{ maximized?: boolean }>('desktop_toggle_current_window_maximized')
+            .then((state) => setIsMaximized(Boolean(state?.maximized)))
+            .catch(() => {});
+        }}
+        title={isMaximized ? t('header.windowControls.restore') : t('header.windowControls.maximize')}
+        aria-label={isMaximized ? t('header.windowControls.restore') : t('header.windowControls.maximize')}
+      >
+        <Icon name={isMaximized ? 'fullscreen-exit' : 'checkbox-blank'} className="h-3.5 w-3.5" />
+      </button>
+      <button
+        type="button"
+        className={cn(buttonClassName, 'hover:bg-status-error hover:text-status-error-foreground')}
+        onClick={() => { void invokeDesktop('desktop_close_current_window'); }}
+        title={t('header.windowControls.close')}
+        aria-label={t('header.windowControls.close')}
+      >
+        <Icon name="close" className="h-4 w-4" />
+      </button>
+    </div>
   );
 });
 
@@ -265,6 +346,7 @@ type DesktopServicesMenuProps = {
   showDevShutdown: boolean;
   isDevShutdownInFlight: boolean;
   onDevShutdown: () => Promise<void>;
+  showPredValues: boolean;
 };
 
 const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
@@ -294,6 +376,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
   showDevShutdown,
   isDevShutdownInFlight,
   onDevShutdown,
+  showPredValues,
 }: DesktopServicesMenuProps) {
   const { t } = useI18n();
   return (
@@ -470,7 +553,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
                                 className="h-1.5"
                                 expectedMarkerPercent={expectedMarker}
                               />
-                              {paceInfo ? <PaceIndicator paceInfo={paceInfo} compact /> : null}
+                              {paceInfo && showPredValues ? <PaceIndicator paceInfo={paceInfo} compact /> : null}
                             </div>
                           );
                         })}
@@ -514,7 +597,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
                                               className="h-1.5"
                                               expectedMarkerPercent={expectedMarker}
                                             />
-                                            {paceInfo ? <PaceIndicator paceInfo={paceInfo} compact /> : null}
+                                            {paceInfo && showPredValues ? <PaceIndicator paceInfo={paceInfo} compact /> : null}
                                           </div>
                                         );
                                       })}
@@ -646,7 +729,6 @@ interface HeaderProps {
   onToggleRightDrawer?: () => void;
   leftDrawerOpen?: boolean;
   rightDrawerOpen?: boolean;
-  desktopRightSidebarActionsHost?: HTMLElement | null;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -654,13 +736,10 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleRightDrawer,
   leftDrawerOpen,
   rightDrawerOpen,
-  desktopRightSidebarActionsHost = null,
 }) => {
   const { t } = useI18n();
   const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
   const toggleSidebar = useUIStore((state) => state.toggleSidebar);
-  const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
-  const isRightSidebarOpen = useUIStore((state) => state.isRightSidebarOpen);
   const toggleBottomTerminal = useUIStore((state) => state.toggleBottomTerminal);
   const toggleRightSidebar = useUIStore((state) => state.toggleRightSidebar);
   const openContextOverview = useUIStore((state) => state.openContextOverview);
@@ -677,7 +756,6 @@ export const Header: React.FC<HeaderProps> = ({
   const [isDevShutdownInFlight, setIsDevShutdownInFlight] = React.useState(false);
 
   const getContextUsage = useSessionUIStore((state) => state.getContextUsage);
-  const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
   const isNewSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const currentSessionMessagesResolved = useSessionMessagesResolved(currentSessionId ?? '');
@@ -708,6 +786,7 @@ export const Header: React.FC<HeaderProps> = ({
   const isQuotaLoading = useQuotaStore((state) => state.isLoading);
   const quotaLastUpdated = useQuotaStore((state) => state.lastUpdated);
   const quotaDisplayMode = useQuotaStore((state) => state.displayMode);
+  const showPredValues = useQuotaStore((state) => state.showPredValues);
   const dropdownProviderIds = useQuotaStore((state) => state.dropdownProviderIds);
   const loadQuotaSettings = useQuotaStore((state) => state.loadSettings);
   const setQuotaDisplayMode = useQuotaStore((state) => state.setDisplayMode);
@@ -733,6 +812,13 @@ export const Header: React.FC<HeaderProps> = ({
       return false;
     }
     return /Macintosh|Mac OS X/.test(navigator.userAgent || '');
+  }, []);
+
+  const isWindowsElectronDesktop = React.useMemo(() => {
+    if (typeof window === 'undefined') {
+      return false;
+    }
+    return Boolean(window.__OPENCHAMBER_ELECTRON__) && window.__OPENCHAMBER_PLATFORM__ === 'win32';
   }, []);
 
   const macosMajorVersion = React.useMemo(() => {
@@ -815,15 +901,6 @@ export const Header: React.FC<HeaderProps> = ({
   }, [desktopServicesTab, isDesktopApp]);
 
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
-  const isLeftSidebarOpen = React.useMemo(() => {
-    if (!isMobile) {
-      return isSidebarOpen;
-    }
-    if (typeof onToggleLeftDrawer === 'function') {
-      return Boolean(leftDrawerOpen);
-    }
-    return isSessionSwitcherOpen;
-  }, [isMobile, isSessionSwitcherOpen, isSidebarOpen, leftDrawerOpen, onToggleLeftDrawer]);
   const showDesktopHeaderContextUsage = !isVSCode && activeMainTab === 'chat' && !!stableDesktopContextUsage && stableDesktopContextUsage.totalTokens > 0;
   const desktopHeaderDisplayPercentage = stableDesktopContextUsage && stableDesktopContextUsage.contextLimit > 0
     ? Math.min(999, (stableDesktopContextUsage.totalTokens / stableDesktopContextUsage.contextLimit) * 100)
@@ -1275,11 +1352,15 @@ export const Header: React.FC<HeaderProps> = ({
     toggleSidebar();
   }, [blurActiveElement, isMobile, isSessionSwitcherOpen, setSessionSwitcherOpen, toggleSidebar]);
 
-  const handleHeaderNewSession = React.useCallback(() => {
-    setActiveMainTab('chat');
-    setSessionSwitcherOpen(false);
-    openNewSessionDraft();
-  }, [openNewSessionDraft, setActiveMainTab, setSessionSwitcherOpen]);
+  const handleOpenWindowsAppMenu = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    void invokeDesktop('desktop_show_app_menu', {
+      x: rect.left,
+      y: rect.bottom,
+    }).catch((error) => {
+      console.warn('[header] failed to open app menu', error);
+    });
+  }, []);
 
   const handleOpenDraftMiniChat = React.useCallback(() => {
     void invokeDesktop('desktop_open_draft_mini_chat_window', {
@@ -1351,8 +1432,15 @@ export const Header: React.FC<HeaderProps> = ({
     if (!directory) {
       return;
     }
+
+    const panelState = contextPanelByDirectory[directory];
+    if (getActiveContextMode(panelState) === 'browser') {
+      closeContextPanel(directory);
+      return;
+    }
+
     openContextBrowser(directory);
-  }, [openContextBrowser, openDirectory]);
+  }, [closeContextPanel, contextPanelByDirectory, openContextBrowser, openDirectory]);
 
   const isContextPlanActive = React.useMemo(() => {
     const directory = normalize(openDirectory || '');
@@ -1363,15 +1451,63 @@ export const Header: React.FC<HeaderProps> = ({
     return getActiveContextMode(panelState) === 'plan';
   }, [contextPanelByDirectory, openDirectory]);
 
+  const isContextBrowserActive = React.useMemo(() => {
+    const directory = normalize(openDirectory || '');
+    if (!directory) {
+      return false;
+    }
+    const panelState = contextPanelByDirectory[directory];
+    return getActiveContextMode(panelState) === 'browser';
+  }, [contextPanelByDirectory, openDirectory]);
+
   const desktopHeaderIconButtonClass = DESKTOP_HEADER_ICON_BUTTON_CLASS;
   const mobileHeaderIconButtonClass = MOBILE_HEADER_ICON_BUTTON_CLASS;
+  const mobileActiveHeaderItem = React.useMemo(() => {
+    if (isMobileRateLimitsOpen) {
+      return 'services';
+    }
+    if (leftDrawerOpen) {
+      return 'sessions';
+    }
+    if (rightDrawerOpen) {
+      return 'git';
+    }
+    return activeMainTab;
+  }, [activeMainTab, isMobileRateLimitsOpen, leftDrawerOpen, rightDrawerOpen]);
+
+  const closeMobileHeaderPanels = React.useCallback(() => {
+    setIsMobileRateLimitsOpen(false);
+    if (leftDrawerOpen && onToggleLeftDrawer) {
+      onToggleLeftDrawer();
+    }
+    if (rightDrawerOpen && onToggleRightDrawer) {
+      onToggleRightDrawer();
+    }
+    if (!onToggleLeftDrawer && isSessionSwitcherOpen) {
+      setSessionSwitcherOpen(false);
+    }
+  }, [isSessionSwitcherOpen, leftDrawerOpen, onToggleLeftDrawer, onToggleRightDrawer, rightDrawerOpen, setSessionSwitcherOpen]);
+
+  const handleMobileLeftDrawerToggle = React.useCallback(() => {
+    if (!leftDrawerOpen) {
+      setIsMobileRateLimitsOpen(false);
+    }
+    onToggleLeftDrawer?.();
+  }, [leftDrawerOpen, onToggleLeftDrawer]);
+
+  const handleMobileRightDrawerToggle = React.useCallback(() => {
+    if (!rightDrawerOpen) {
+      setIsMobileRateLimitsOpen(false);
+    }
+    onToggleRightDrawer?.();
+  }, [onToggleRightDrawer, rightDrawerOpen]);
 
   const desktopPaddingClass = React.useMemo(() => {
-    if (!isSidebarOpen && ((isDesktopApp && isMacPlatform && !isDesktopWindowFullscreen) || isTabletStandalonePwa)) {
+    if ((isDesktopApp && isMacPlatform && !isDesktopWindowFullscreen) || isTabletStandalonePwa) {
       return 'pl-[5.5rem]';
     }
     return 'pl-3';
-  }, [isDesktopApp, isDesktopWindowFullscreen, isMacPlatform, isSidebarOpen, isTabletStandalonePwa]);
+  }, [isDesktopApp, isDesktopWindowFullscreen, isMacPlatform, isTabletStandalonePwa]);
 
   useEffect(() => {
     if (!isDesktopApp || !isMacPlatform) {
@@ -1434,19 +1570,19 @@ export const Header: React.FC<HeaderProps> = ({
   }, [isDesktopApp, isMacPlatform, macosMajorVersion]);
 
   const webWindowControlsOverlayStyle = React.useMemo<React.CSSProperties | undefined>(() => {
-    if (isDesktopApp || isVSCode) {
+    if ((isDesktopApp && !isWindowsElectronDesktop) || isVSCode) {
       return undefined;
     }
 
     return {
-      paddingLeft: isTabletStandalonePwa && !isSidebarOpen
+      paddingLeft: isTabletStandalonePwa
         ? 'max(calc(0.75rem + var(--oc-wco-left-inset, 0px)), 5.5rem)'
         : 'calc(0.75rem + var(--oc-wco-left-inset, 0px))',
       paddingRight: 'calc(0.75rem + var(--oc-wco-right-inset, 0px))',
       minHeight: 'max(3rem, var(--oc-wco-titlebar-height, 0px))',
       height: 'max(3rem, var(--oc-wco-titlebar-height, 0px))',
     };
-  }, [isDesktopApp, isSidebarOpen, isTabletStandalonePwa, isVSCode]);
+  }, [isDesktopApp, isTabletStandalonePwa, isVSCode, isWindowsElectronDesktop]);
 
   const updateHeaderHeight = React.useCallback(() => {
     if (typeof document === 'undefined') {
@@ -1528,6 +1664,7 @@ export const Header: React.FC<HeaderProps> = ({
         { id: 'diff', label: t('layout.mainTab.diff'), icon: 'diff' },
         { id: 'files', label: t('layout.mainTab.files'), icon: "folder-6" },
         { id: 'terminal', label: t('layout.mainTab.terminal'), icon: "terminal-box" },
+        { id: 'context', label: t('layout.mainTab.context'), icon: "file-list-2" },
       );
 
       return base;
@@ -1542,7 +1679,7 @@ export const Header: React.FC<HeaderProps> = ({
   }, [shortcutOverrides]);
 
   useEffect(() => {
-    if (!isMobile && (activeMainTab === 'git' || activeMainTab === 'terminal' || activeMainTab === 'diff' || activeMainTab === 'files')) {
+    if (!isMobile && (activeMainTab === 'git' || activeMainTab === 'terminal' || activeMainTab === 'diff' || activeMainTab === 'files' || activeMainTab === 'context')) {
       setActiveMainTab('chat');
     }
   }, [activeMainTab, isMobile, setActiveMainTab]);
@@ -1554,7 +1691,7 @@ export const Header: React.FC<HeaderProps> = ({
     }
     base.push(
       { value: 'usage', label: t('layout.services.usage'), icon: "timer" },
-      { value: 'mcp', label: 'MCP', icon: McpIcon as unknown as IconName }
+      { value: 'mcp', label: 'MCP', icon: "plug-2" }
     );
     return base;
   }, [isDesktopApp, t]);
@@ -1648,13 +1785,17 @@ export const Header: React.FC<HeaderProps> = ({
         const num = parseInt(e.key, 10);
         if (num >= 1 && num <= tabs.length) {
           e.preventDefault();
+          if (isMobile) {
+            blurActiveElement();
+            closeMobileHeaderPanels();
+          }
           setActiveMainTab(tabs[num - 1].id);
         }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [tabs, setActiveMainTab]);
+  }, [blurActiveElement, closeMobileHeaderPanels, isMobile, setActiveMainTab, tabs]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1798,6 +1939,7 @@ export const Header: React.FC<HeaderProps> = ({
         servicesTabItems={servicesTabItems}
         quotaLastUpdated={quotaLastUpdated}
         quotaDisplayMode={quotaDisplayMode}
+        showPredValues={showPredValues}
         quotaDisplayTabItems={quotaDisplayTabItems}
         handleDisplayModeChange={handleDisplayModeChange}
         handleUsageRefresh={handleUsageRefresh}
@@ -1823,6 +1965,7 @@ export const Header: React.FC<HeaderProps> = ({
           title={t('contextPanel.browser.open')}
           ariaLabel={t('contextPanel.browser.open')}
           onClick={handleOpenContextBrowser}
+          pressed={isContextBrowserActive}
           Icon={'global'}
         />
       ) : null}
@@ -1844,7 +1987,6 @@ export const Header: React.FC<HeaderProps> = ({
     </>
   );
 
-  const desktopSidebarActionsInline = !isRightSidebarOpen || !desktopRightSidebarActionsHost;
   const showMiniChatHeaderAction = hasElectronDesktopIPC && (isNewSessionDraftOpen || Boolean(currentSessionId));
 
   const renderDesktop = () => (
@@ -1859,8 +2001,16 @@ export const Header: React.FC<HeaderProps> = ({
       role="tablist"
       aria-label={t('header.navigation.mainAria')}
     >
+      {isWindowsElectronDesktop ? (
+        <HeaderIconActionButton
+          title={t('header.actions.openAppMenu')}
+          ariaLabel={t('header.actions.openAppMenuAria')}
+          onClick={handleOpenWindowsAppMenu}
+          className={`${desktopHeaderIconButtonClass} shrink-0`}
+          Icon={'menu-2'}
+        />
+      ) : null}
       <HeaderIconActionButton
-        visible={!isSidebarOpen}
         title={t('header.actions.openSessionsWithShortcut', { shortcut: shortcutLabel('toggle_sidebar') })}
         ariaLabel={t('header.actions.openSessionsAria')}
         onClick={handleOpenSessionSwitcher}
@@ -1868,24 +2018,7 @@ export const Header: React.FC<HeaderProps> = ({
         Icon={'layout-left'}
       />
 
-      <div className={cn('flex min-w-0 flex-1 items-center', !isSidebarOpen && 'pl-3')}>
-        {!isLeftSidebarOpen ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                aria-label={t('header.actions.newSessionAria')}
-                onClick={handleHeaderNewSession}
-                className={cn(desktopHeaderIconButtonClass, 'mr-6 shrink-0')}
-              >
-                <Icon name="chat-new" className="h-[18px] w-[18px]" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>{t('header.actions.newSessionWithShortcut', { shortcut: shortcutLabel('new_chat') })}</p>
-            </TooltipContent>
-          </Tooltip>
-        ) : null}
+      <div className="flex min-w-0 flex-1 items-center pl-3">
         {projectActionsContext && (
           <ProjectActionsButton
             projectRef={projectActionsContext.projectRef}
@@ -1953,7 +2086,7 @@ export const Header: React.FC<HeaderProps> = ({
               showPercentIcon
               onClick={handleOpenContextPanel}
               pressed={isContextPanelActive}
-              className={desktopSidebarActionsInline && !showMiniChatHeaderAction ? 'mr-3.5' : ''}
+              className={!showMiniChatHeaderAction ? 'mr-3.5' : ''}
               valueClassName="typography-ui-label font-medium leading-none text-foreground"
               percentIconClassName="h-5 w-5"
             />
@@ -1963,13 +2096,11 @@ export const Header: React.FC<HeaderProps> = ({
             title={isNewSessionDraftOpen ? t('header.actions.newMiniChat') : t('header.actions.openSessionMiniChat')}
             ariaLabel={isNewSessionDraftOpen ? t('header.actions.newMiniChatAria') : t('header.actions.openSessionMiniChatAria')}
             onClick={handleOpenCurrentMiniChat}
-            className={cn(desktopHeaderIconButtonClass, desktopSidebarActionsInline && showDesktopHeaderContextUsage ? 'mr-3.5' : 'mr-1')}
+            className={cn(desktopHeaderIconButtonClass, showDesktopHeaderContextUsage ? 'mr-3.5' : 'mr-1')}
             Icon={'picture-in-picture-2'}
           />
-          {desktopSidebarActionsInline ? desktopSidebarActions : null}
-          {!desktopSidebarActionsInline && desktopRightSidebarActionsHost
-            ? createPortal(desktopSidebarActions, desktopRightSidebarActionsHost)
-            : null}
+          {desktopSidebarActions}
+          <WindowsWindowControls visible={isWindowsElectronDesktop} />
         </div>
       </div>
     </div>
@@ -1982,10 +2113,10 @@ export const Header: React.FC<HeaderProps> = ({
         {onToggleLeftDrawer ? (
           <button
             type="button"
-            onClick={onToggleLeftDrawer}
+            onClick={handleMobileLeftDrawerToggle}
             className={cn(
               mobileHeaderIconButtonClass,
-              leftDrawerOpen && 'bg-interactive-selection text-interactive-selection-foreground'
+              mobileActiveHeaderItem === 'sessions' && 'bg-interactive-selection text-interactive-selection-foreground'
             )}
             aria-label={leftDrawerOpen ? t('header.actions.closeSessionsAria') : t('header.actions.openSessionsAria')}
           >
@@ -2011,13 +2142,12 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
         )}
 
-        {isSessionSwitcherOpen && (
+        {!onToggleLeftDrawer && isSessionSwitcherOpen && (
           <span className="typography-ui-label font-semibold text-foreground">{t('header.sessions.title')}</span>
         )}
       </div>
 
-      {/* Hide tabs and right-side buttons when sessions sidebar is open */}
-      {!isSessionSwitcherOpen && (
+      {(!isSessionSwitcherOpen || Boolean(onToggleLeftDrawer)) && (
         <>
           <div className="app-region-no-drag flex min-w-0 flex-1 items-center">
             <div className="flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden scrollbar-hidden touch-pan-x overscroll-x-contain">
@@ -2039,6 +2169,7 @@ export const Header: React.FC<HeaderProps> = ({
                             onClick={() => {
                               if (isMobile) {
                                 blurActiveElement();
+                                closeMobileHeaderPanels();
                               }
                               setActiveMainTab(tab.id);
                             }}
@@ -2048,7 +2179,7 @@ export const Header: React.FC<HeaderProps> = ({
                             className={cn(
                               mobileHeaderIconButtonClass,
                               'relative rounded-lg',
-                              isActive && 'bg-interactive-selection text-interactive-selection-foreground'
+                              mobileActiveHeaderItem === tab.id && 'bg-interactive-selection text-interactive-selection-foreground'
                             )}
                           >
                             {isDiffTab ? (
@@ -2095,6 +2226,14 @@ export const Header: React.FC<HeaderProps> = ({
             <DropdownMenu
               open={isMobileRateLimitsOpen}
               onOpenChange={(open) => {
+                if (open) {
+                  if (leftDrawerOpen && onToggleLeftDrawer) {
+                    onToggleLeftDrawer();
+                  }
+                  if (rightDrawerOpen && onToggleRightDrawer) {
+                    onToggleRightDrawer();
+                  }
+                }
                 setIsMobileRateLimitsOpen(open);
                 if (open && quotaResults.length === 0) {
                   fetchAllQuotas();
@@ -2107,7 +2246,10 @@ export const Header: React.FC<HeaderProps> = ({
                     <button
                       type="button"
                       aria-label={t('header.services.viewAria')}
-                      className={mobileHeaderIconButtonClass}
+                      className={cn(
+                        mobileHeaderIconButtonClass,
+                        mobileActiveHeaderItem === 'services' && 'bg-interactive-selection text-interactive-selection-foreground'
+                      )}
                     >
                       <Icon name="stack" className="h-5 w-5" />
                     </button>
@@ -2120,10 +2262,11 @@ export const Header: React.FC<HeaderProps> = ({
               <DropdownMenuContent
                 align="end"
                 sideOffset={0}
-                className="h-dvh w-[100vw] max-h-none rounded-none border-0 p-0 overflow-hidden"
+                positionerClassName="!fixed !bottom-0 !left-0 !right-0 !top-[var(--oc-header-height,56px)] !transform-none"
+                className="h-full w-screen max-h-none rounded-none border-0 p-0 pt-1 overflow-hidden"
               >
                 <div className="flex h-full flex-col bg-[var(--surface-elevated)]">
-          <div className="sticky top-0 z-20 bg-[var(--surface-elevated)] px-2 py-px">
+                  <div className="sticky top-0 z-20 bg-[var(--surface-elevated)] px-2 py-px">
                     <div className="flex items-center justify-between gap-2 px-3 py-0">
                       <div className="h-10 min-w-0 flex-1">
                         <SortableTabsStrip
@@ -2276,7 +2419,7 @@ export const Header: React.FC<HeaderProps> = ({
                                         className="h-1.5"
                                         expectedMarkerPercent={expectedMarker}
                                       />
-                                      {paceInfo ? (
+                                      {paceInfo && showPredValues ? (
                                         <PaceIndicator paceInfo={paceInfo} compact />
                                       ) : null}
                                     </div>
@@ -2333,7 +2476,7 @@ export const Header: React.FC<HeaderProps> = ({
                                                       className="h-1.5"
                                                       expectedMarkerPercent={expectedMarker}
                                                     />
-                                                    {paceInfo ? (
+                                                    {paceInfo && showPredValues ? (
                                                       <PaceIndicator paceInfo={paceInfo} compact />
                                                     ) : null}
                                                   </div>
@@ -2362,11 +2505,11 @@ export const Header: React.FC<HeaderProps> = ({
                 <TooltipTrigger asChild>
                   <button
                     type="button"
-                    onClick={onToggleRightDrawer}
+                    onClick={handleMobileRightDrawerToggle}
                     className={cn(
                       mobileHeaderIconButtonClass,
                       'relative',
-                      rightDrawerOpen && 'bg-interactive-selection text-interactive-selection-foreground'
+                      mobileActiveHeaderItem === 'git' && 'bg-interactive-selection text-interactive-selection-foreground'
                     )}
                     aria-label={rightDrawerOpen ? 'Close git sidebar' : 'Open git sidebar'}
                   >
@@ -2386,8 +2529,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   const headerClassName = cn(
     'header-safe-area relative z-10',
-    isMobile && 'border-b border-border/50',
-    'bg-background'
+    isMobile ? 'border-b border-border/50 bg-background' : 'bg-sidebar'
   );
 
   return (

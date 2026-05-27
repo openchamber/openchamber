@@ -2,6 +2,7 @@ import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import type { SessionGroup, SessionNode } from '../types';
 import { normalizePath } from '../utils';
+import type { MainTab } from '@/stores/useUIStore';
 
 type ProjectSection = {
   project: { id: string; normalizedPath: string };
@@ -18,7 +19,7 @@ type Args = {
   newSessionDraftOpen: boolean;
   mobileVariant: boolean;
   openNewSessionDraft: (options?: { directoryOverride?: string | null }) => void;
-  setActiveMainTab: (tab: 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files') => void;
+  setActiveMainTab: (tab: MainTab) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
   sessions: Session[];
   worktreeMetadata: Map<string, { path?: string | null }>;

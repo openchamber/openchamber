@@ -1,0 +1,33 @@
+---
+title: Instalação
+description: Instale o OpenChamber para desktop, web ou VS Code.
+---
+
+# Instalação
+
+Há três formas de rodar o OpenChamber:
+
+- app de desktop para macOS
+- app web hospedado pela CLI, que você pode instalar como um app de celular (um PWA)
+- extensão para VS Code
+
+## Pré-requisito
+
+Instale o [OpenCode](https://opencode.ai) primeiro — o OpenChamber roda em cima dele.
+
+## Web + PWA
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/openchamber/openchamber/main/scripts/install.sh | bash
+openchamber --ui-password be-creative-here
+```
+
+Abra a URL que a CLI imprime (geralmente `http://localhost:3000`). Você deve ver a lista de sessões do OpenChamber. Para deixá-lo à mão, use a opção "Instalar" do seu navegador na barra de endereço para adicioná-lo como um app.
+
+## Desktop
+
+Baixe a build de desktop mais recente na página de releases do GitHub ou na página de download do OpenChamber. Abra-a e entre no seu fluxo de trabalho habitual do OpenCode.
+
+## VS Code
+
+Instale pela VS Code Marketplace e entre no seu fluxo de trabalho habitual do OpenCode. A visualização do OpenChamber então abre na barra lateral.

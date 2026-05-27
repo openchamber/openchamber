@@ -760,6 +760,12 @@ html:not(.dark) .chat-scroll {
   }
 }
 
+@container commit-actions (max-width: 22rem) {
+  .commit-actions__label--push {
+    display: none;
+  }
+}
+
 @container commit-actions (max-width: 19rem) {
   .commit-actions__label {
     display: none;
@@ -801,8 +807,8 @@ html:not(.dark) .chat-scroll {
   }
 }
 
-/* Assistant message footer: collapse text labels to icons when narrow. */
-@container message-footer (max-width: 24rem) {
+/* Assistant message footer: collapse text labels only on very narrow layouts. */
+@container message-footer (max-width: 16rem) {
   .message-footer__label {
     display: none;
   }
@@ -1436,6 +1442,23 @@ input[aria-label="Terminal input"] {
   100% { transform: translateX(-100%); }
 }
 
+@keyframes open-file-name-marquee-scroll {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.open-file-name-marquee-track {
+  display: inline-flex;
+  min-width: max-content;
+  animation: open-file-name-marquee-scroll var(--open-file-name-marquee-duration, 14s) linear infinite;
+  will-change: transform;
+}
+
+.open-file-name-marquee-item {
+  flex-shrink: 0;
+  padding-right: 2rem;
+}
+
 .marquee-text {
   display: inline-block;
   white-space: nowrap;
@@ -1453,9 +1476,28 @@ input[aria-label="Terminal input"] {
 
 @media (prefers-reduced-motion: reduce) {
   .marquee-text--auto,
+  .open-file-name-marquee-track,
   .group:hover .marquee-text--active,
   .marquee-text--active:hover {
     animation: none;
+  }
+
+  .open-file-name-marquee-track {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    will-change: auto;
+  }
+
+  .open-file-name-marquee-track .open-file-name-marquee-item {
+    display: inline;
+    padding-right: 0;
+  }
+
+  .open-file-name-marquee-track .open-file-name-marquee-item[aria-hidden="true"] {
+    display: none;
   }
 
   .animate-busy-pulse {

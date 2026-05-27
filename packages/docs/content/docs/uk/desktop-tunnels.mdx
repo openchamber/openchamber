@@ -1,0 +1,41 @@
+---
+title: Десктопні тунелі
+description: Створюйте Cloudflare або Ngrok тунелі з десктопного застосунку.
+---
+
+# Десктопні тунелі
+
+Десктопний застосунок може створити публічний тунель через **Settings → OpenChamber → Tunnel**. Для цього не потрібно запускати OpenChamber через CLI.
+
+## Встановіть провайдера
+
+OpenChamber запускає CLI провайдера на вашій машині. Спочатку встановіть провайдера, який хочете використовувати:
+
+```bash
+brew install cloudflared
+brew install ngrok
+```
+
+Cloudflare використовує `cloudflared`. Для Ngrok потрібен акаунт ngrok і authtoken з dashboard ngrok:
+
+```bash
+ngrok config add-authtoken <your-ngrok-token>
+```
+
+## Запуск із застосунку
+
+1. Відкрийте **Settings → OpenChamber → Tunnel**.
+2. Виберіть **Cloudflare** або **Ngrok**.
+3. Запустіть quick tunnel.
+4. Відскануйте згенерований QR-код з телефона.
+
+Ngrok зараз підтримує quick tunnels. Cloudflare підтримує quick tunnels і керовані режими Cloudflare.
+
+## Захист доступу
+
+Навіть якщо URL провайдера публічний, OpenChamber все одно захищає доступ власним connect token. Згенероване посилання містить одноразовий token, має TTL, а старі невикористані посилання відкликаються, коли ви генеруєте нове або зупиняєте/перезапускаєте тунель.
+
+## Пов'язане
+
+- [Тунелі](/uk/tunnels/) — використання тунелів через CLI і керовані режими Cloudflare
+- [PWA та мобільний доступ](/uk/mobile/) — відкривайте OpenChamber з телефона

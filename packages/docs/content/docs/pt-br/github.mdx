@@ -1,0 +1,34 @@
+---
+title: Issues e PRs do GitHub
+description: Conecte o GitHub e inicie sessões a partir de issues e pull requests.
+---
+
+# Issues e PRs do GitHub
+
+Conecte sua conta do GitHub e o OpenChamber pode trazer issues e pull requests, iniciar uma sessão direto a partir de uma delas e abrir ou atualizar PRs para você.
+
+## Conectar o GitHub
+
+1. Abra **Settings → Git**.
+2. Em GitHub, escolha **Connect**. O OpenChamber mostra um link e um código curto.
+3. Abra o link, insira o código e aprove.
+
+Quando estiver conectado, sua conta aparece na seção do GitHub. Você pode conectar mais de uma conta e alternar entre elas, ou desconectar a qualquer momento.
+
+## Começar o trabalho a partir de uma issue ou PR
+
+Quando você cria uma [sessão de worktree](/pt-br/worktrees/) com o GitHub conectado, pode escolher **Start from GitHub issue/PR**:
+
+- escolha uma **issue** e o OpenChamber nomeia o branch a partir dela e abre a sessão com a issue e seus comentários como a primeira mensagem
+- escolha um **pull request** e ele faz checkout do branch do PR; você pode incluir o diff do PR para que o agente tenha a mudança completa
+
+Isso o coloca direto em uma sessão com o contexto já carregado.
+
+## Abrir e gerenciar pull requests
+
+Pela aba **PR** na [visão de git](/pt-br/git/), você pode criar um pull request, atualizá-lo, marcar um rascunho como pronto ou fazer merge. O OpenChamber pode gerar o título e a descrição do PR a partir das suas mudanças.
+
+## Relacionado
+
+- [Fluxos de Git e GitHub](/pt-br/git/) — faça commit e gerencie branches
+- [Sessões de Worktree](/pt-br/worktrees/) — onde as sessões de issue e PR começam

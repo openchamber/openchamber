@@ -343,7 +343,7 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
       normalizedError.includes('network') ||
       normalizedError.includes('connection') ||
       normalizedError.includes('check connection');
-    
+
     if (isNetworkError) {
       console.error('[useBrowserVoice] Network error — staying in error state:', errorMsg);
       setError(errorMsg);
@@ -355,7 +355,7 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
       }
       return;
     }
-    
+
     console.error('[useBrowserVoice] Recognition error:', errorMsg);
     setError(errorMsg);
     setStatus('error');
@@ -374,7 +374,7 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
     if (nextRetry <= MAX_RECOVERY_RETRIES) {
       const delay = Math.min(1000 * Math.pow(2, nextRetry - 1), 8000);
       console.log(`[useBrowserVoice] Scheduling recovery retry ${nextRetry}/${MAX_RECOVERY_RETRIES} in ${delay}ms`);
-      
+
       if (recoveryTimerRef.current !== null) {
         clearTimeout(recoveryTimerRef.current);
       }

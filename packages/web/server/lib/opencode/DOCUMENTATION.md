@@ -18,6 +18,7 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/network-runtime.js`: OpenCode URL construction, health-probe readiness checks, and API prefix runtime.
 - `packages/web/server/lib/opencode/project-directory-runtime.js`: request-scoped and settings-backed project directory resolution/validation runtime.
 - `packages/web/server/lib/opencode/config-entity-routes.js`: route registration for agent/command/MCP config orchestration and reload semantics.
+- `packages/web/server/lib/opencode/snippets.js`: opencode-snippets-compatible snippet file CRUD, discovery, and hashtag expansion.
 - `packages/web/server/lib/opencode/cli-options.js`: CLI/environment option parsing for server startup arguments.
 - `packages/web/server/lib/opencode/core-routes.js`: server status/system routes, auth/access guard routes, and settings utility route registration.
 - `packages/web/server/lib/opencode/shutdown-runtime.js`: graceful shutdown orchestration runtime for watcher/session/terminal/process/server teardown.
@@ -211,6 +212,7 @@ This module provides OpenCode server integration utilities for the web server ru
   - Agents: `/api/config/agents/:name` and `/api/config/agents/:name/config`
   - Commands: `/api/config/commands/:name`
   - MCP servers: `/api/config/mcp` and `/api/config/mcp/:name`
+  - Snippets: `/api/config/snippets`, `/api/config/snippets/:name`, and `/api/config/snippets/expand`
 
 ## Public exports (auth-state-runtime.js)
 - `createOpenCodeAuthStateRuntime(dependencies)`: creates runtime for managed OpenCode auth password state and request headers.
@@ -236,6 +238,7 @@ This module provides OpenCode server integration utilities for the web server ru
    - `DELETE /api/passkeys/:id`
    - `POST /api/auth/reset`
    - `GET /connect`
+   - `POST /api/system/probe-url`
    - `app.use('/api', ...)` auth/tunnel guard
 - `registerSettingsUtilityRoutes(app, dependencies)`: registers small settings utility endpoints:
   - `GET /api/config/themes`

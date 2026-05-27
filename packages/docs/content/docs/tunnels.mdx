@@ -5,9 +5,24 @@ description: Expose OpenChamber safely for remote and mobile access.
 
 # Tunnels
 
-Use `openchamber tunnel` to expose a running OpenChamber instance.
+A tunnel is a public link to your OpenChamber, so you can reach it from your phone or another network. Use `openchamber tunnel` to create one for a running instance.
 
-## Quick start (Cloudflare quick mode)
+## Prerequisites
+
+OpenChamber starts the tunnel provider CLI on your machine. Install the provider you want to use first:
+
+```bash
+brew install cloudflared
+brew install ngrok
+```
+
+Cloudflare quick tunnels can run with `cloudflared`. Ngrok requires an ngrok account and an authtoken from the ngrok dashboard:
+
+```bash
+ngrok config add-authtoken <your-ngrok-token>
+```
+
+## Quick start
 
 1. Start OpenChamber:
 
@@ -15,10 +30,16 @@ Use `openchamber tunnel` to expose a running OpenChamber instance.
 openchamber
 ```
 
-2. Start a tunnel:
+2. Start a Cloudflare tunnel:
 
 ```bash
 openchamber tunnel start --provider cloudflare --mode quick
+```
+
+Or start an Ngrok tunnel:
+
+```bash
+openchamber tunnel start --provider ngrok --mode quick
 ```
 
 3. Check status:
@@ -27,7 +48,14 @@ openchamber tunnel start --provider cloudflare --mode quick
 openchamber tunnel status
 ```
 
+When the tunnel is up, `status` shows a public URL. Open it, or scan the QR code, to reach OpenChamber from anywhere.
+
 By default, OpenChamber prints a QR code in interactive TTY sessions. Use `--qr` to force QR output, or `--no-qr` to disable it.
+
+## Providers
+
+- `cloudflare`: quick, managed remote, and managed local modes
+- `ngrok`: quick mode
 
 ## Managed modes
 
@@ -66,7 +94,9 @@ openchamber tunnel start --profile prod-main
 ```bash
 openchamber tunnel providers
 openchamber tunnel ready --provider cloudflare
+openchamber tunnel ready --provider ngrok
 openchamber tunnel doctor --provider cloudflare
+openchamber tunnel doctor --provider ngrok
 openchamber tunnel stop --port 3000
 ```
 
@@ -75,3 +105,10 @@ openchamber tunnel stop --port 3000
 - one active tunnel per OpenChamber instance (port)
 - starting a new mode/provider on same instance replaces previous tunnel
 - generating a new connect link revokes previous unused one
+
+## Related
+
+- [Security](/security/) — protect the UI before exposing it
+- [Desktop Tunnels](/desktop-tunnels/) — desktop app tunnel setup without CLI startup
+- [PWA & Mobile](/mobile/) — reach OpenChamber from your phone
+- [Troubleshooting](/troubleshooting/) — if the tunnel link doesn't work

@@ -12,6 +12,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
+import type { IconName } from "@/components/icon/icons";
 import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -147,7 +148,7 @@ const STATUS_META: Record<
   ScheduledTaskStatus,
   {
     tone: StatusTone;
-    Icon: string;
+    Icon: IconName;
     spin?: boolean;
   }
 > = {

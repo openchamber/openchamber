@@ -107,7 +107,8 @@ export function sendBridgeMessageWithOptions<T = unknown>(
 export type ProxiedApiResponse = {
   status: number;
   headers: Record<string, string>;
-  bodyBase64: string;
+  bodyBase64?: string;
+  bodyText?: string;
 };
 
 export async function proxyApiRequest(options: {

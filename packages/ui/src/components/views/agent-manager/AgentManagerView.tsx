@@ -98,7 +98,8 @@ export const AgentManagerView: React.FC<AgentManagerViewProps> = ({ className })
   }, [selectGroup]);
 
   const handleCreateGroup = React.useCallback(async (params: CreateMultiRunParams) => {
-    toast.info(`Creating agent group "${params.name}" with ${params.models.length} model(s)...`);
+    const totalModels = params.groups.reduce((sum, g) => sum + g.models.length, 0);
+    toast.info(`Creating agent group "${params.name}" with ${totalModels} run(s)...`);
 
     const result = await createMultiRun(params);
 

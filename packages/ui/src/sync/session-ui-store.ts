@@ -61,8 +61,9 @@ export type { AttachedFile }
 // Send routing — shell mode, slash commands, or normal prompt
 // ---------------------------------------------------------------------------
 
-function routeMessage(params: {
+export function routeMessage(params: {
   sessionId: string
+  directory?: string | null
   content: string
   providerID: string
   modelID: string
@@ -73,74 +74,86 @@ function routeMessage(params: {
   files?: Array<{ type: "file"; mime: string; url: string; filename: string }>
   additionalParts?: Array<{ text: string; synthetic?: boolean; files?: Array<{ type: "file"; mime: string; url: string; filename: string }> }>
 }): Promise<void> {
-  if (params.inputMode === "shell") {
-    const sdk = opencodeClient.getSdkClient()
-    const dir = opencodeClient.getDirectory() || undefined
-    return sdk.session.shell({
-      sessionID: params.sessionId,
-      directory: dir,
-      agent: params.agent,
-      model: { providerID: params.providerID, modelID: params.modelID },
-      command: params.content,
-    }).then(() => {})
-  }
-
-  // Slash commands — fire and forget, SSE delivers messages and status
-  if (params.content.startsWith("/")) {
-    const [head, ...tail] = params.content.split(" ")
-    const cmdName = head.slice(1)
-
-    const dirState = getDirectoryState()
-    const syncCommands = dirState?.command ?? []
-    const storeCommands = useCommandsStore.getState().commands
-
-    const isCommand = syncCommands.find((c) => c.name === cmdName)
-      || storeCommands.find((c) => c.name === cmdName)
-
-    if (isCommand) {
-      return optimisticSend({
-        sessionId: params.sessionId,
-        content: params.content,
-        providerID: params.providerID,
-        modelID: params.modelID,
+  const run = (): Promise<void> => {
+    if (params.inputMode === "shell") {
+      const sdk = opencodeClient.getSdkClient()
+      const dir = opencodeClient.getDirectory() || undefined
+      return sdk.session.shell({
+        sessionID: params.sessionId,
+        directory: dir,
         agent: params.agent,
-        files: params.files,
-        send: (messageID) => opencodeClient.sendCommand({
-          id: params.sessionId,
+        model: { providerID: params.providerID, modelID: params.modelID },
+        command: params.content,
+      }).then(() => {})
+    }
+
+    // Slash commands — fire and forget, SSE delivers messages and status
+    if (params.content.startsWith("/")) {
+      const [head, ...tail] = params.content.split(" ")
+      const cmdName = head.slice(1)
+
+      const dirState = getDirectoryState(params.directory ?? undefined)
+      const syncCommands = dirState?.command ?? []
+      const storeCommands = useCommandsStore.getState().commands
+
+      const isCommand = syncCommands.find((c) => c.name === cmdName)
+        || storeCommands.find((c) => c.name === cmdName)
+
+      if (isCommand) {
+        return optimisticSend({
+          sessionId: params.sessionId,
+          content: params.content,
           providerID: params.providerID,
           modelID: params.modelID,
-          command: cmdName,
-          arguments: tail.join(" "),
           agent: params.agent,
-          variant: params.variant,
           files: params.files,
-          messageId: messageID,
-        }).then(() => {}),
-      })
+          send: (messageID) => opencodeClient.sendCommand({
+            id: params.sessionId,
+            providerID: params.providerID,
+            modelID: params.modelID,
+            command: cmdName,
+            arguments: tail.join(" "),
+            agent: params.agent,
+            variant: params.variant,
+            files: params.files,
+            messageId: messageID,
+          }).then(() => {}),
+        })
+      }
     }
-  }
 
-  // Normal prompt — optimistic insert so message appears instantly
-  return optimisticSend({
-    sessionId: params.sessionId,
-    content: params.content,
-    providerID: params.providerID,
-    modelID: params.modelID,
-    agent: params.agent,
-    files: params.files,
-    send: (messageID) => opencodeClient.sendMessage({
-      id: params.sessionId,
+    // Normal prompt — optimistic insert so message appears instantly
+    return optimisticSend({
+      sessionId: params.sessionId,
+      content: params.content,
       providerID: params.providerID,
       modelID: params.modelID,
-      text: params.content,
       agent: params.agent,
-      agentMentions: params.agentMentionName ? [{ name: params.agentMentionName }] : undefined,
-      variant: params.variant,
       files: params.files,
-      additionalParts: params.additionalParts,
-      messageId: messageID,
-    }).then(() => {}),
-  })
+      send: (messageID) => opencodeClient.sendMessage({
+        id: params.sessionId,
+        providerID: params.providerID,
+        modelID: params.modelID,
+        text: params.content,
+        agent: params.agent,
+        agentMentions: params.agentMentionName ? [{ name: params.agentMentionName }] : undefined,
+        variant: params.variant,
+        files: params.files,
+        additionalParts: params.additionalParts,
+        messageId: messageID,
+      }).then(() => {}),
+    })
+  }
+
+  if (params.directory !== undefined) {
+    return opencodeClient.withDirectory(params.directory, run)
+  }
+
+  return run()
+}
+
+type SendMessageOptions = {
+  sessionId?: string
 }
 
 function notifyMessageSent(sessionId: string): void {
@@ -239,6 +252,7 @@ export type SessionUIState = {
     additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }>,
     variant?: string,
     inputMode?: "normal" | "shell",
+    options?: SendMessageOptions,
   ) => Promise<void>
 
   createSession: (title?: string, directoryOverride?: string | null, parentID?: string | null) => Promise<Session | null>
@@ -703,9 +717,10 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }>,
     variant?: string,
     inputMode?: "normal" | "shell",
+    options?: SendMessageOptions,
   ) => {
     // Clear non-Git changed-files bar on new user message for current session
-    const sid = get().currentSessionId;
+    const sid = options?.sessionId ?? get().currentSessionId;
     if (sid) {
       const map = new Map(get().pendingChangesBarDismissed);
       map.delete(sid);
@@ -716,7 +731,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const trimmedAgent = typeof agent === "string" && agent.trim().length > 0 ? agent.trim() : undefined
 
     // ---- New session from draft ----
-    if (draft?.open) {
+    if (!options?.sessionId && draft?.open) {
       const draftTargetFolderId = draft.targetFolderId
       let draftDirectoryOverride = draft.bootstrapPendingDirectory ?? draft.directoryOverride ?? null
       const draftProjectId = draft.selectedProjectId ?? null
@@ -788,6 +803,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
       await routeMessage({
         sessionId: created.id,
+        directory: createdDirectory,
         content,
         providerID,
         modelID,
@@ -811,24 +827,24 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     }
 
     // ---- Existing session ----
-    const currentSessionId = get().currentSessionId
-    const sessionAgentSelection = currentSessionId
-      ? useSelectionStore.getState().getSessionAgentSelection(currentSessionId)
+    const targetSessionId = options?.sessionId ?? get().currentSessionId
+    const sessionAgentSelection = targetSessionId
+      ? useSelectionStore.getState().getSessionAgentSelection(targetSessionId)
       : null
     const configAgentName = useConfigStore.getState().currentAgentName
     const effectiveAgent = trimmedAgent || sessionAgentSelection || configAgentName || undefined
 
-    if (currentSessionId && effectiveAgent) {
-      useSelectionStore.getState().saveSessionAgentSelection(currentSessionId, effectiveAgent)
-      useSelectionStore.getState().saveAgentModelVariantForSession(currentSessionId, effectiveAgent, providerID, modelID, variant)
+    if (targetSessionId && effectiveAgent) {
+      useSelectionStore.getState().saveSessionAgentSelection(targetSessionId, effectiveAgent)
+      useSelectionStore.getState().saveAgentModelVariantForSession(targetSessionId, effectiveAgent, providerID, modelID, variant)
     }
 
-    if (currentSessionId) {
+    if (targetSessionId) {
       const viewportState = useViewportStore.getState()
-      const memState = viewportState.sessionMemoryState.get(currentSessionId)
+      const memState = viewportState.sessionMemoryState.get(targetSessionId)
       if (!memState || !memState.lastUserMessageAt) {
         const newMemState = new Map(viewportState.sessionMemoryState)
-        newMemState.set(currentSessionId, {
+        newMemState.set(targetSessionId, {
           viewportAnchor: 0,
           isStreaming: false,
           lastAccessedAt: Date.now(),
@@ -840,19 +856,19 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       }
     }
 
-    const currentSessionDirectory = currentSessionId
-      ? normalizePath(get().getDirectoryForSession(currentSessionId))
+    const currentSessionDirectory = targetSessionId
+      ? normalizePath(get().getDirectoryForSession(targetSessionId))
       : null
     if (currentSessionDirectory) {
       await waitForWorktreeBootstrap(currentSessionDirectory)
     }
 
-    if (currentSessionId) {
-      notifyMessageSent(currentSessionId)
+    if (targetSessionId) {
+      notifyMessageSent(targetSessionId)
     }
 
-    if (currentSessionId) {
-      markPendingUserSendAnimation(currentSessionId)
+    if (targetSessionId) {
+      markPendingUserSendAnimation(targetSessionId)
     }
 
     const files = attachments?.map((a) => ({
@@ -863,7 +879,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     }))
 
     await routeMessage({
-      sessionId: currentSessionId || "",
+      sessionId: targetSessionId || "",
+      directory: currentSessionDirectory,
       content,
       providerID,
       modelID,
@@ -1208,6 +1225,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // ---------------------------------------------------------------------------
   markSessionPlanAvailable: (sessionId) => {
     set((state) => {
+      if (state.sessionPlanAvailable.get(sessionId) === true) {
+        return state
+      }
       const next = new Map(state.sessionPlanAvailable)
       next.set(sessionId, true)
       return { sessionPlanAvailable: next }

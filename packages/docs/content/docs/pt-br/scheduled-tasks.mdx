@@ -1,0 +1,33 @@
+---
+title: Tarefas Agendadas
+description: Execute um prompt automaticamente em uma agenda.
+---
+
+# Tarefas Agendadas
+
+Uma tarefa agendada executa um prompt para você em uma agenda — por exemplo, um "resumir as mudanças de ontem" diário ou uma limpeza semanal. Quando ela é executada, o OpenChamber inicia uma nova sessão e envia o prompt sozinho. Abra o agendador pelo botão no topo da barra lateral de sessões.
+
+## Criar uma tarefa
+
+1. Abra a caixa de diálogo de tarefas agendadas pela barra lateral de sessões.
+2. Adicione uma tarefa e dê a ela um nome.
+3. Escolha quando ela é executada:
+   - **diária** — em um ou mais horários a cada dia
+   - **semanal** — em dias da semana e horários escolhidos
+   - **uma vez** — uma única data e hora
+4. Defina o que ela faz: o prompt a enviar, e o provedor, modelo e agente a usar. O prompt pode ser um comando de barra, como `/review`.
+5. Salve e certifique-se de que a tarefa está ativada.
+
+Você pode executar qualquer tarefa imediatamente com **run now** para verificar se ela faz o que você espera.
+
+## Como é o sucesso
+
+Após uma execução, a tarefa mostra quando rodou pela última vez, se teve êxito e um link para a sessão que ela criou. Se uma execução falha, o erro também é mostrado ali.
+
+## Tenha em mente
+
+As tarefas só disparam enquanto o servidor do OpenChamber estiver em execução. Se você o fechar, as execuções agendadas ficam pausadas até ele voltar a funcionar.
+
+## Relacionado
+
+- [Comandos e Snippets](/pt-br/commands-snippets/) — reutilize um comando de barra como o prompt

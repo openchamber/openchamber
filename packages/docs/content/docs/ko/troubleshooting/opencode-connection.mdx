@@ -1,0 +1,34 @@
+---
+title: OpenCode 연결
+description: OpenChamber가 OpenCode 서버에 연결되지 않는 문제를 해결하세요.
+---
+
+# OpenCode 연결
+
+OpenChamber가 로드되지만 "OpenCode is restarting"에서 넘어가지 못하거나 채팅이 응답하지 않는다면, 통신하는 서버에 접근할 수 없는 상태입니다. 다음을 차례로 확인하세요.
+
+## "OpenCode is restarting"에서 멈춰 있음
+
+- 실행 직후에는 잠시 기다리세요. 서버가 시작되는 동안에는 정상적인 상태입니다
+- `openchamber status`로 서버가 살아 있는지 확인합니다
+- `openchamber restart`로 재시작합니다
+- `openchamber logs`로 시작 세부 정보를 봅니다
+
+## 직접 운영하는 서버에 연결 중
+
+OpenChamber가 기존 서버를 사용하도록 설정했다면 [OpenCode Server](/ko/opencode-server/)의 설정을 다시 확인하세요.
+
+- `OPENCODE_HOST`에는 포트가 포함되어야 하며 경로가 없어야 합니다(예: `http://localhost:4096`)
+- OpenChamber가 자체 서버를 함께 시작하지 않도록 `OPENCODE_SKIP_START=true`를 설정합니다
+- 주소가 올바르지 않으면 OpenChamber가 이를 무시하고 자체 서버를 시작합니다. 로그에서 `[config]` 경고를 찾아보세요
+
+## 여전히 실패함
+
+- Node.js 버전이 `20` 이상인지 확인합니다
+- 최신 CLI를 다시 설치합니다
+- 터널이나 원격 링크를 테스트하기 전에 `http://localhost:3000`을 직접 엽니다
+
+## 관련 항목
+
+- [OpenCode Server](/ko/opencode-server/) — OpenChamber가 서버를 찾고 관리하는 방법
+- [문제 해결](/ko/troubleshooting/) — 다른 일반적인 문제

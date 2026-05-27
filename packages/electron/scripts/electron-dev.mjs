@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -7,13 +8,39 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '../../..');
 const electronDir = path.join(repoRoot, 'packages/electron');
+const preferredHmrUiPort = Number(process.env.OPENCHAMBER_HMR_UI_PORT || '5173');
+const preferredHmrApiPort = Number(process.env.OPENCHAMBER_HMR_API_PORT || '3901');
+
+const quoteWindowsCommandArg = (value) => `"${String(value).replace(/"/g, '""')}"`;
+
+function resolveWindowsCommand(command) {
+  if (process.platform !== 'win32' || path.isAbsolute(command)) {
+    return command;
+  }
+
+  const result = spawnSync('where.exe', [command], { encoding: 'utf8', windowsHide: true });
+  if (result.error || result.status !== 0) {
+    return command;
+  }
+
+  const candidates = String(result.stdout || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  return candidates.find((entry) => /\.(exe|cmd|bat)$/i.test(entry)) || candidates[0] || command;
+}
 
 function spawnProcess(command, args, options = {}) {
-  return spawn(command, args, {
+  const resolvedCommand = resolveWindowsCommand(command);
+  const isWindowsCommandScript = process.platform === 'win32' && /\.(cmd|bat)$/i.test(resolvedCommand);
+  const spawnCommand = isWindowsCommandScript ? (process.env.ComSpec || 'cmd.exe') : resolvedCommand;
+  const spawnArgs = isWindowsCommandScript
+    ? ['/d', '/s', '/c', ['call', quoteWindowsCommandArg(resolvedCommand), ...args.map(quoteWindowsCommandArg)].join(' ')]
+    : args;
+
+  return spawn(spawnCommand, spawnArgs, {
     cwd: repoRoot,
     env: { ...process.env, OPENCHAMBER_ELECTRON_DEV: '1' },
     stdio: 'inherit',
     detached: process.platform !== 'win32',
+    windowsVerbatimArguments: isWindowsCommandScript,
     ...options,
   });
 }
@@ -37,6 +64,55 @@ function waitForExit(child, timeoutMs) {
 
     child.once('exit', onExit);
   });
+}
+
+function isPortAvailable(port) {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once('error', () => resolve(false));
+    server.once('listening', () => {
+      server.close(() => resolve(true));
+    });
+    server.listen(port, '127.0.0.1');
+  });
+}
+
+async function findAvailablePort(preferredPort) {
+  const start = Number.isFinite(preferredPort) && preferredPort > 0 ? preferredPort : 0;
+  if (start === 0) {
+    return new Promise((resolve, reject) => {
+      const server = net.createServer();
+      server.once('error', reject);
+      server.once('listening', () => {
+        const address = server.address();
+        const port = typeof address === 'object' && address ? address.port : 0;
+        server.close(() => resolve(port));
+      });
+      server.listen(0, '127.0.0.1');
+    });
+  }
+
+  for (let port = start; port < start + 50; port += 1) {
+    if (await isPortAvailable(port)) {
+      if (port !== start) {
+        console.warn(`[electron:dev] port ${start} is unavailable, using ${port} instead.`);
+      }
+      return port;
+    }
+  }
+
+  throw new Error(`No available port found near ${start}`);
+}
+
+function killWindowsProcessTree(pid) {
+  if (!pid) return;
+  try {
+    spawnSync('taskkill.exe', ['/PID', String(pid), '/T', '/F'], {
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+  } catch {
+  }
 }
 
 function signalChild(child, signal) {
@@ -66,6 +142,11 @@ async function stopChildTree(child) {
   signalChild(child, 'SIGINT');
   await waitForExit(child, 2500);
 
+  if (process.platform === 'win32' && child.exitCode === null && child.signalCode === null) {
+    killWindowsProcessTree(child.pid);
+    await waitForExit(child, 1000);
+  }
+
   if (child.exitCode === null && child.signalCode === null) {
     signalChild(child, 'SIGTERM');
     await waitForExit(child, 2500);
@@ -78,16 +159,28 @@ async function stopChildTree(child) {
 }
 
 async function main() {
+  const hmrApiPort = String(await findAvailablePort(preferredHmrApiPort));
+  const hmrUiPort = String(await findAvailablePort(preferredHmrUiPort));
+
   const devServer = spawnProcess('node', ['./scripts/dev-web-hmr.mjs'], {
     env: {
       ...process.env,
       OPENCHAMBER_ELECTRON_DEV: '1',
-      OPENCHAMBER_HMR_UI_PORT: '5173',
-      OPENCHAMBER_HMR_API_PORT: '3901',
+      OPENCHAMBER_HMR_UI_PORT: hmrUiPort,
+      OPENCHAMBER_HMR_API_PORT: hmrApiPort,
       OPENCHAMBER_DISABLE_PWA_DEV: '1',
     },
   });
-  const electron = spawnProcess('npx', ['electron', './main.mjs'], { cwd: electronDir });
+  const electron = spawnProcess('npx', ['electron', './main.mjs'], {
+    cwd: electronDir,
+    env: {
+      ...process.env,
+      OPENCHAMBER_ELECTRON_DEV: '1',
+      OPENCHAMBER_HMR_UI_PORT: hmrUiPort,
+      OPENCHAMBER_HMR_API_PORT: hmrApiPort,
+      OPENCHAMBER_DISABLE_PWA_DEV: '1',
+    },
+  });
 
   let cleaning = false;
   const teardown = async (code) => {

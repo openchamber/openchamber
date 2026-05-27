@@ -1,0 +1,37 @@
+---
+title: Bezpieczeństwo
+description: Zabezpiecz UI hasłem i kluczami dostępu, zanim je udostępnisz.
+---
+
+# Bezpieczeństwo
+
+OpenChamber daje dostęp do Twojej maszyny i Twojego kodu, więc zabezpiecz go, zanim ktokolwiek poza Tobą będzie mógł do niego dotrzeć. Ta strona omawia hasło UI, klucze dostępu (passkeys) oraz to, co warto wiedzieć przed udostępnieniem OpenChamber w sieci.
+
+## Ustaw hasło UI
+
+Uruchom OpenChamber z hasłem, a interfejs webowy poprosi o nie:
+
+```bash
+openchamber --ui-password be-creative-here
+```
+
+Możesz też ustawić je za pomocą zmiennej środowiskowej `OPENCHAMBER_UI_PASSWORD`, zamiast podawać je w wierszu poleceń. Po zalogowaniu OpenChamber zapamiętuje urządzenie na pewien czas, więc nie pyta za każdym razem.
+
+Zawsze ustawiaj hasło, jeśli instancja jest dostępna dla kogokolwiek innego — zwłaszcza przez [tunel](/pl/tunnels/) lub publiczny internet.
+
+## Klucze dostępu (passkeys)
+
+Po ustawieniu hasła możesz dodać klucze dostępu (Face ID, Touch ID, klucz bezpieczeństwa) dla szybszego logowania. Dodaj je w **Settings → OpenChamber → Passkeys**.
+
+Klucze dostępu są powiązane z bieżącym hasłem. Jeśli zmienisz lub usuniesz hasło, zapisane klucze dostępu zostaną wyczyszczone i będziesz je dodawać ponownie.
+
+## Zanim ją udostępnisz
+
+- Domyślnie OpenChamber nasłuchuje tylko na Twojej własnej maszynie (`127.0.0.1`). Nasłuchiwanie szerzej wymaga celowej zmiany i najpierw powinieneś ustawić hasło.
+- Preferuj [tunel](/pl/tunnels/) lub sieć prywatną (jak VPN) zamiast otwierania portu do internetu.
+- Jeśli umieszczasz OpenChamber za własnym serwerem HTTPS, zobacz [Reverse Proxy](/pl/reverse-proxy/).
+
+## Powiązane
+
+- [Tunele](/pl/tunnels/) — zalecany sposób na zdalne dotarcie do instancji
+- [Reverse Proxy](/pl/reverse-proxy/) — uruchom OpenChamber za własnym serwerem

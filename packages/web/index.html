@@ -2,7 +2,7 @@
 <html lang="en" class="h-full">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
 
     <!-- Favicon -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
@@ -57,46 +57,29 @@
         return fallback;
       };
 
-      const normalizeMobileKeyboardMode = (value, fallback = 'native') => {
+      const normalizeMobileKeyboardMode = (value, fallback = 'resize-content') => {
         if (value === 'native' || value === 'resize-content') {
           return value;
         }
         return fallback;
       };
 
-      const supportsMobileKeyboardResizeContent = () => {
-        const userAgent = navigator.userAgent || '';
-        const platform = navigator.platform || '';
-        const maxTouchPoints = navigator.maxTouchPoints || 0;
-        const isIOS = /iPhone|iPad|iPod/i.test(userAgent)
-          || ((/Macintosh|MacIntel/i.test(userAgent) || /MacIntel/i.test(platform)) && maxTouchPoints > 1);
-
-        return !isIOS;
-      };
-
-      const getSupportedMobileKeyboardMode = (mode) => {
-        if (mode === 'resize-content' && !supportsMobileKeyboardResizeContent()) {
-          return 'native';
-        }
-        return mode;
-      };
-
       const getViewportContentForMobileKeyboardMode = (value) => {
-        const mode = getSupportedMobileKeyboardMode(normalizeMobileKeyboardMode(value, 'native'));
+        const mode = normalizeMobileKeyboardMode(value, 'resize-content');
         return mode === 'resize-content'
           ? `${viewportBaseContent}, interactive-widget=resizes-content`
           : viewportBaseContent;
       };
 
       const applyStoredMobileKeyboardMode = () => {
-        let mode = 'native';
+        let mode = 'resize-content';
         try {
-          mode = getSupportedMobileKeyboardMode(normalizeMobileKeyboardMode(localStorage.getItem(mobileKeyboardModeStorageKey), 'native'));
-          if (mode === 'native') {
+          mode = normalizeMobileKeyboardMode(localStorage.getItem(mobileKeyboardModeStorageKey), 'resize-content');
+          if (mode === 'resize-content') {
             localStorage.removeItem(mobileKeyboardModeStorageKey);
           }
         } catch {
-          mode = 'native';
+          mode = 'resize-content';
         }
 
         document.documentElement.setAttribute('data-oc-mobile-keyboard-mode', mode);

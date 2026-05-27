@@ -291,16 +291,60 @@ export function registerGitRoutes(app) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const { path } = req.body || {};
+      const { path, scope } = req.body || {};
       if (!path || typeof path !== 'string') {
         return res.status(400).json({ error: 'path parameter is required' });
       }
 
-      await revertFile(directory, path);
+      await revertFile(directory, path, { scope });
       res.json({ success: true });
     } catch (error) {
       console.error('Failed to revert git file:', error);
       res.status(500).json({ error: error.message || 'Failed to revert git file' });
+    }
+  });
+
+  app.post('/api/git/stage', async (req, res) => {
+    const { stageFiles } = await getGitLibraries();
+    try {
+      const directory = req.query.directory;
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+
+      const { path, paths } = req.body || {};
+      const filePaths = Array.isArray(paths) ? paths : [path];
+      if (!filePaths.some((value) => typeof value === 'string' && value.trim())) {
+        return res.status(400).json({ error: 'path parameter is required' });
+      }
+
+      await stageFiles(directory, filePaths);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Failed to stage git file:', error);
+      res.status(500).json({ error: error.message || 'Failed to stage git file' });
+    }
+  });
+
+  app.post('/api/git/unstage', async (req, res) => {
+    const { unstageFiles } = await getGitLibraries();
+    try {
+      const directory = req.query.directory;
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+
+      const { path, paths } = req.body || {};
+      const filePaths = Array.isArray(paths) ? paths : [path];
+      if (!filePaths.some((value) => typeof value === 'string' && value.trim())) {
+        return res.status(400).json({ error: 'path parameter is required' });
+      }
+
+      await unstageFiles(directory, filePaths);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Failed to unstage git file:', error);
+      res.status(500).json({ error: error.message || 'Failed to unstage git file' });
     }
   });
 
@@ -581,7 +625,7 @@ export function registerGitRoutes(app) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const { message, addAll, files } = req.body;
+      const { message, addAll, files, stageFiles } = req.body;
       if (!message) {
         return res.status(400).json({ error: 'message is required' });
       }
@@ -589,6 +633,7 @@ export function registerGitRoutes(app) {
       const result = await commit(directory, message, {
         addAll,
         files,
+        stageFiles,
       });
       res.json(result);
     } catch (error) {
@@ -718,6 +763,85 @@ export function registerGitRoutes(app) {
     } catch (error) {
       console.error('Failed to checkout branch:', error);
       res.status(500).json({ error: error.message || 'Failed to checkout branch' });
+    }
+  });
+
+  app.post('/api/git/checkout-commit', async (req, res) => {
+    const { checkoutCommit } = await getGitLibraries();
+    try {
+      const directory = req.query.directory;
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+      const { hash } = req.body;
+      if (!req.body.hash || typeof req.body.hash !== 'string' || !/^[0-9a-fA-F]{7,40}$/.test(req.body.hash)) {
+        return res.status(400).json({ error: 'Invalid commit hash' });
+      }
+      const result = await checkoutCommit(directory, hash);
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to checkout commit:', error);
+      res.status(500).json({ error: error.message || 'Failed to checkout commit' });
+    }
+  });
+
+  app.post('/api/git/cherry-pick', async (req, res) => {
+    const { cherryPick } = await getGitLibraries();
+    try {
+      const directory = req.query.directory;
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+      const { hash } = req.body;
+      if (!req.body.hash || typeof req.body.hash !== 'string' || !/^[0-9a-fA-F]{7,40}$/.test(req.body.hash)) {
+        return res.status(400).json({ error: 'Invalid commit hash' });
+      }
+      const result = await cherryPick(directory, hash);
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to cherry-pick:', error);
+      res.status(500).json({ error: error.message || 'Failed to cherry-pick' });
+    }
+  });
+
+  app.post('/api/git/revert-commit', async (req, res) => {
+    const { revertCommit } = await getGitLibraries();
+    try {
+      const directory = req.query.directory;
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+      const { hash } = req.body;
+      if (!req.body.hash || typeof req.body.hash !== 'string' || !/^[0-9a-fA-F]{7,40}$/.test(req.body.hash)) {
+        return res.status(400).json({ error: 'Invalid commit hash' });
+      }
+      const result = await revertCommit(directory, hash);
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to revert commit:', error);
+      res.status(500).json({ error: error.message || 'Failed to revert commit' });
+    }
+  });
+
+  app.post('/api/git/reset-to-commit', async (req, res) => {
+    const { resetToCommit } = await getGitLibraries();
+    try {
+      const directory = req.query.directory;
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+      const { hash, mode, force } = req.body;
+      if (!req.body.hash || typeof req.body.hash !== 'string' || !/^[0-9a-fA-F]{7,40}$/.test(req.body.hash)) {
+        return res.status(400).json({ error: 'Invalid commit hash' });
+      }
+      if (!['soft', 'mixed', 'hard'].includes(mode)) {
+        return res.status(400).json({ error: 'mode must be soft, mixed, or hard' });
+      }
+      const result = await resetToCommit(directory, hash, mode, force === true);
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to reset to commit:', error);
+      res.status(500).json({ error: error.message || 'Failed to reset' });
     }
   });
 
@@ -911,11 +1035,13 @@ export function registerGitRoutes(app) {
       }
 
       const { maxCount, from, to, file } = req.query;
+      const all = req.query.all === 'true';
       const log = await getLog(directory, {
         maxCount: maxCount ? parseInt(maxCount) : undefined,
         from,
         to,
-        file
+        file,
+        all
       });
       res.json(log);
     } catch (error) {

@@ -21,8 +21,15 @@ const compositeKey = (directory: string, sessionID: string) =>
 const cache = new Map<string, Meta>()
 const inflight = new Map<string, Promise<Meta | undefined>>()
 const rev = new Map<string, number>()
+const listeners = new Map<string, Set<() => void>>()
 
 const version = (id: string) => rev.get(id) ?? 0
+
+const notify = (id: string) => {
+  const callbacks = listeners.get(id)
+  if (!callbacks) return
+  callbacks.forEach((callback) => callback())
+}
 
 /** Check if a prefetch/sync can be skipped (recently fetched). */
 export function shouldSkipSessionPrefetch(input: {
@@ -44,6 +51,21 @@ export function shouldSkipSessionPrefetch(input: {
 
 export function getSessionPrefetch(directory: string, sessionID: string): Meta | undefined {
   return cache.get(compositeKey(directory, sessionID))
+}
+
+export function subscribeSessionPrefetch(directory: string, sessionID: string, callback: () => void) {
+  if (!sessionID) return () => undefined
+  const id = compositeKey(directory, sessionID)
+  let callbacks = listeners.get(id)
+  if (!callbacks) {
+    callbacks = new Set()
+    listeners.set(id, callbacks)
+  }
+  callbacks.add(callback)
+  return () => {
+    callbacks?.delete(callback)
+    if (callbacks?.size === 0) listeners.delete(id)
+  }
 }
 
 export function getSessionPrefetchPromise(directory: string, sessionID: string) {
@@ -82,12 +104,14 @@ export function setSessionPrefetch(input: {
   complete: boolean
   at?: number
 }) {
-  cache.set(compositeKey(input.directory, input.sessionID), {
+  const id = compositeKey(input.directory, input.sessionID)
+  cache.set(id, {
     limit: input.limit,
     cursor: input.cursor,
     complete: input.complete,
     at: input.at ?? Date.now(),
   })
+  notify(id)
 }
 
 /** Invalidate cache for specific sessions (e.g. after eviction). */
@@ -98,6 +122,7 @@ export function clearSessionPrefetch(directory: string, sessionIDs: Iterable<str
     rev.set(id, version(id) + 1)
     cache.delete(id)
     inflight.delete(id)
+    notify(id)
   }
 }
 
@@ -110,5 +135,6 @@ export function clearSessionPrefetchDirectory(directory: string) {
     rev.set(id, version(id) + 1)
     cache.delete(id)
     inflight.delete(id)
+    notify(id)
   }
 }

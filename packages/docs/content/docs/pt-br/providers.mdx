@@ -1,0 +1,49 @@
+---
+title: Provedores, Modelos e Agentes
+description: Conecte provedores de IA, escolha modelos e configure agentes.
+---
+
+# Provedores, Modelos e Agentes
+
+Antes de o OpenChamber poder fazer qualquer coisa, ele precisa de pelo menos um provedor de IA conectado. Esta página cobre conectar um provedor, escolher um modelo e personalizar agentes.
+
+## Conectar um provedor
+
+1. Abra **Settings → Providers**.
+2. Abra o menu **Add provider** e escolha um provedor que ainda não esteja conectado.
+3. Faça login de uma de duas maneiras, dependendo do provedor:
+   - **Chave de API** — cole sua chave e salve.
+   - **Login (device flow)** — o OpenChamber mostra um link e um código curto. Abra o link, insira o código e aprove. O OpenChamber conclui a conexão sozinho.
+
+Quando um provedor aparece como conectado, seus modelos ficam disponíveis no chat.
+
+Para desconectar, abra o provedor e escolha remover o login dele.
+
+## Escolher um modelo
+
+Você escolhe o modelo onde está trabalhando:
+
+- no chat, use o seletor de modelo na barra de mensagens para definir o provedor e o modelo daquela sessão
+- por agente, defina um modelo padrão (abaixo)
+
+## Configurar agentes
+
+Um agente é uma configuração nomeada — um modelo, uma personalidade e o que ele tem permissão de fazer.
+
+1. Abra **Settings → Agents**.
+2. Escolha um agente ou crie um novo.
+3. Edite qualquer um destes:
+   - **description** — para que serve o agente
+   - **model** — seu modelo padrão
+   - **temperature** — quão criativas são suas respostas
+   - **prompt** — instruções permanentes que ele sempre segue
+   - **tool rules** — quais ferramentas ele pode usar
+
+## Onde ficam seus logins
+
+Os logins de provedores são armazenados pelo OpenCode, não pelo OpenChamber, então são compartilhados com a CLI do OpenCode. Se você definir o mesmo provedor em mais de um lugar, a configuração mais específica vence: uma configuração por projeto sobrescreve a sua pessoal.
+
+## Relacionado
+
+- [Servidores MCP](/pt-br/mcp/) — adicione ferramentas extras para os agentes
+- [Uso e Cotas](/pt-br/usage/) — acompanhe quanto você já usou

@@ -63,21 +63,34 @@ export function createUpstreamSseReader({
   let stopped = false;
   let activeController = null;
   let lastEventId = typeof initialLastEventId === 'string' ? initialLastEventId : '';
+  let stopListenerAttached = false;
 
-  const stop = () => {
+  function detachStopListener() {
+    if (!stopListenerAttached) return;
+    signal?.removeEventListener('abort', stop);
+    stopListenerAttached = false;
+  }
+
+  function attachStopListener() {
+    if (!signal || signal.aborted || stopListenerAttached) return;
+    signal.addEventListener('abort', stop, { once: true });
+    stopListenerAttached = true;
+  }
+
+  function stop() {
     stopped = true;
+    detachStopListener();
     if (activeController && !activeController.signal.aborted) {
       activeController.abort();
     }
-  };
-
-  signal?.addEventListener('abort', stop, { once: true });
+  }
 
   const start = () => {
     if (running) {
       return running;
     }
 
+    attachStopListener();
     stopped = false;
     running = (async () => {
       while (!stopped && !signal?.aborted) {
@@ -210,6 +223,7 @@ export function createUpstreamSseReader({
         }
       }
     })().finally(() => {
+      detachStopListener();
       running = null;
     });
 

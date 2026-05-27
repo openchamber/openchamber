@@ -40,6 +40,10 @@
     padding-inline: calc(clamp(0.75rem, 2.5vw, 1rem) * var(--padding-scale, 1));
   }
 
+  .wide-chat-layout .chat-input-column {
+    width: min(100%, 64rem);
+  }
+
   .chat-message-column {
     width: min(100%, 48rem);
     margin-inline: auto;

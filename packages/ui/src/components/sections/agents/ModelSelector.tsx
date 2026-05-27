@@ -23,6 +23,8 @@ interface ModelSelectorProps {
     className?: string;
     allowedProviderIds?: string[];
     placeholder?: string;
+    tooltipsEnabled?: boolean;
+    dropdownPortalToBody?: boolean;
 }
 
 export const ModelSelector: React.FC<ModelSelectorProps> = ({
@@ -32,6 +34,8 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     className,
     allowedProviderIds,
     placeholder,
+    tooltipsEnabled = true,
+    dropdownPortalToBody = false,
 }) => {
     const { t } = useI18n();
     const { isReady, isUnavailable } = useOpenCodeReadiness();
@@ -103,7 +107,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             includeNotSelected
             onSelectNone={handleSelectNone}
             onEscape={closePicker}
-            tooltipsEnabled={isActuallyMobile ? isMobilePanelOpen : isDropdownOpen}
+            tooltipsEnabled={tooltipsEnabled && (isActuallyMobile ? isMobilePanelOpen : isDropdownOpen)}
             isFavorite={(entry) => isFavoriteModel(entry.providerID, entry.modelID)}
             onToggleFavorite={(entry) => toggleFavoriteModel(entry.providerID, entry.modelID)}
         />
@@ -152,7 +156,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
         <DropdownMenu open={isReady && isDropdownOpen} onOpenChange={isReady ? setIsDropdownOpen : undefined}>
             <DropdownMenuTrigger asChild>
                 <div className={cn(
-                    'border-input data-[placeholder]:text-muted-foreground flex items-center justify-between gap-2 rounded-lg border bg-transparent px-2 py-2 typography-ui-label whitespace-nowrap shadow-none outline-none hover:bg-interactive-hover data-[popup-open]:bg-interactive-active h-6 w-fit',
+                    'border-input data-[placeholder]:text-muted-foreground flex min-w-0 items-center justify-between gap-2 rounded-lg border bg-transparent px-2 py-2 typography-ui-label whitespace-nowrap shadow-none outline-none hover:bg-interactive-hover data-[popup-open]:bg-interactive-active h-6 w-fit',
                     !isReady && 'opacity-60 cursor-not-allowed',
                     className,
                 )}>
@@ -165,14 +169,14 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                         </>
                     ) : (
                         <>
-                            {providerId ? <ProviderLogo providerId={providerId} className="h-3.5 w-3.5 flex-shrink-0" /> : <Icon name="pencil-ai" className="h-3.5 w-3.5 text-muted-foreground" />}
-                            <span className="typography-ui-label font-normal whitespace-nowrap text-foreground">{triggerLabel}</span>
+                            {providerId ? <ProviderLogo providerId={providerId} className="h-3.5 w-3.5 flex-shrink-0" /> : <Icon name="pencil-ai" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />}
+                            <span className="typography-ui-label min-w-0 truncate font-normal text-foreground">{triggerLabel}</span>
                         </>
                     )}
                     <Icon name="arrow-down-s" className="h-4 w-4 flex-shrink-0 text-muted-foreground/50" />
                 </div>
             </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-[min(380px,calc(100vw-2rem))] p-0 flex flex-col" align="start">
+            <DropdownMenuContent className="w-[min(380px,calc(100vw-2rem))] p-0 flex flex-col" align="start" portalToBody={dropdownPortalToBody}>
                 {picker}
             </DropdownMenuContent>
         </DropdownMenu>

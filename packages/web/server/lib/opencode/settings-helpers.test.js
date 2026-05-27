@@ -52,6 +52,17 @@ describe('settings helpers', () => {
     });
   });
 
+  it('accepts desktopUiPassword as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ desktopUiPassword: ' secret ' })).toEqual({
+      desktopUiPassword: 'secret',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ desktopUiPassword: '' })).toEqual({
+      desktopUiPassword: '',
+    });
+  });
+
   it('accepts mobileKeyboardMode as a persisted shared setting', () => {
     const helpers = createTestHelpers();
 

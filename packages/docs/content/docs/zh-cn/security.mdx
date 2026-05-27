@@ -1,0 +1,37 @@
+---
+title: 安全
+description: 在公开 UI 之前，用密码和 passkey 保护它。
+---
+
+# 安全
+
+OpenChamber 让外界可以访问你的机器和代码，所以在除你之外的任何人能够访问它之前，请把它锁好。本页介绍 UI 密码、passkey，以及在将 OpenChamber 暴露到网络之前需要了解的内容。
+
+## 设置 UI 密码
+
+带密码启动 OpenChamber，浏览器 UI 就会要求输入它：
+
+```bash
+openchamber --ui-password be-creative-here
+```
+
+你也可以用 `OPENCHAMBER_UI_PASSWORD` 环境变量来设置它，而不是把它放在命令行上。登录后，OpenChamber 会记住该设备一段时间，这样你就不必每次都输入。
+
+如果实例可以被其他任何人访问，请务必设置密码 — 尤其是通过 [隧道](/zh-cn/tunnels/) 或公共互联网时。
+
+## Passkey
+
+设置密码后，你可以添加 passkey（Face ID、Touch ID、安全密钥）以便更快登录。在 **Settings → OpenChamber → Passkeys** 中添加它们。
+
+passkey 与当前密码绑定。如果你更改或移除密码，已保存的 passkey 会被清除，你需要重新添加它们。
+
+## 在暴露它之前
+
+- 默认情况下 OpenChamber 只监听你自己的机器（`127.0.0.1`）。需要一次刻意的更改才能更广泛地监听，并且你应该先设置密码。
+- 相比向互联网开放一个端口，更推荐使用 [隧道](/zh-cn/tunnels/) 或专用网络（比如 VPN）。
+- 如果你把 OpenChamber 放在你自己的 HTTPS 服务器后面，请参阅 [反向代理](/zh-cn/reverse-proxy/)。
+
+## 相关内容
+
+- [隧道](/zh-cn/tunnels/) — 远程访问实例的推荐方式
+- [反向代理](/zh-cn/reverse-proxy/) — 在你自己的服务器后面运行 OpenChamber

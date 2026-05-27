@@ -1,0 +1,41 @@
+---
+title: Git & GitHub Workflows
+description: Stage, commit, and manage branches without leaving OpenChamber.
+---
+
+# Git & GitHub Workflows
+
+OpenChamber has a built-in git view so you can review changes, commit, and manage branches without switching to a terminal. Open it from the **Git** tab in the right sidebar.
+
+## Review and commit
+
+The git view splits your changes into **staged** and **unstaged**:
+
+- click a file's **+** to stage it, or **−** to unstage it
+- stage or unstage everything in a group at once
+- click a file to see its diff
+
+Then write a commit message and commit. You can have OpenChamber **generate a commit message** from your staged changes — it uses the current session's model, so you need a session open.
+
+## Branches and history
+
+The git view also covers the everyday rest of git:
+
+- create, switch, rename, and delete branches
+- push, pull, and fetch
+- browse history and per-commit diffs
+- stash and restore changes
+
+## Pull requests
+
+Connect GitHub (see [GitHub Issues & PRs](/github/)) and the **PR** tab lets you open a pull request, update it, mark it ready, or merge it — and generate its title and description the same way as commit messages.
+
+## Bringing in conflicts
+
+If a merge, rebase, or integrate hits a conflict, OpenChamber shows what's stuck and lets you resolve it — including handing it to the agent.
+
+## Related
+
+- [GitHub Issues & PRs](/github/) — connect GitHub and start work from issues
+- [Worktree Sessions](/worktrees/) — isolate a branch in its own folder
+- [Git Identities](/git-identities/) — commit as the right person per repo

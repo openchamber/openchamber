@@ -5,6 +5,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useAgentsStore } from '@/stores/useAgentsStore';
 import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
+import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useSkillsCatalogStore } from '@/stores/useSkillsCatalogStore';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -16,6 +17,8 @@ import { CommandsSidebar } from '@/components/sections/commands/CommandsSidebar'
 import { CommandsPage } from '@/components/sections/commands/CommandsPage';
 import { McpSidebar } from '@/components/sections/mcp/McpSidebar';
 import { McpPage } from '@/components/sections/mcp/McpPage';
+import { PluginsSidebar, PluginsPage } from '@/components/sections/plugins';
+import { usePluginsStore } from '@/stores/usePluginsStore';
 import { SkillsSidebar } from '@/components/sections/skills/SkillsSidebar';
 import { SkillsPage } from '@/components/sections/skills/SkillsPage';
 import { ProjectsSidebar } from '@/components/sections/projects/ProjectsSidebar';
@@ -28,6 +31,8 @@ import { UsageSidebar } from '@/components/sections/usage/UsageSidebar';
 import { UsagePage } from '@/components/sections/usage/UsagePage';
 import { MagicPromptsSidebar } from '@/components/sections/magic-prompts/MagicPromptsSidebar';
 import { MagicPromptsPage } from '@/components/sections/magic-prompts/MagicPromptsPage';
+import { SnippetsSidebar } from '@/components/sections/snippets/SnippetsSidebar';
+import { SnippetsPage } from '@/components/sections/snippets/SnippetsPage';
 import { GitPage } from '@/components/sections/git-identities/GitPage';
 import type { OpenChamberSection } from '@/components/sections/openchamber/types';
 import { OpenChamberPage } from '@/components/sections/openchamber/OpenChamberPage';
@@ -50,12 +55,17 @@ import {
 const SETTINGS_NAV_MIN_WIDTH = 176;
 const SETTINGS_NAV_MAX_WIDTH = 280;
 const SETTINGS_NAV_RESIZE_STEP = 8;
+const SETTINGS_DETAIL_HISTORY_KEY = '__openchamberSettingsDetail';
 
 function clampSettingsNavWidth(width: number): number {
   return Math.min(SETTINGS_NAV_MAX_WIDTH, Math.max(SETTINGS_NAV_MIN_WIDTH, width));
 }
 
 type MobileStage = 'nav' | 'page-sidebar' | 'page-content';
+type SettingsDetailHistoryEntry = {
+  page: SettingsPageSlug;
+  stage: 'page-content';
+};
 
 interface SettingsViewProps {
   onClose?: () => void;
@@ -73,12 +83,14 @@ const pageOrder: SettingsPageSlug[] = [
   'shortcuts',
   'git',
   'magic-prompts',
+  'snippets',
   'projects',
   'remote-instances',
   'agents',
   'behavior',
   'commands',
   'mcp',
+  'plugins',
   'providers',
   'usage',
   'skills.installed',
@@ -86,6 +98,8 @@ const pageOrder: SettingsPageSlug[] = [
   'voice',
   'tunnel',
 ];
+
+const SNIPPETS_SETTINGS_ICON = { icon: 'chat-thread' } as const;
 
 function buildRuntimeContext(isDesktop: boolean): SettingsRuntimeContext {
   const isVSCode = isVSCodeRuntime();
@@ -98,6 +112,37 @@ function isPageAvailable(page: SettingsPageMeta, ctx: SettingsRuntimeContext): b
     return true;
   }
   return page.isAvailable(ctx);
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function getSettingsDetailHistoryEntry(state: unknown): SettingsDetailHistoryEntry | null {
+  if (!isObjectRecord(state)) {
+    return null;
+  }
+
+  const detail = state[SETTINGS_DETAIL_HISTORY_KEY];
+  if (!isObjectRecord(detail)) {
+    return null;
+  }
+
+  const page = detail.page;
+  const stage = detail.stage;
+  if (typeof page !== 'string' || stage !== 'page-content') {
+    return null;
+  }
+
+  const resolvedPage = resolveSettingsSlug(page);
+  return { page: resolvedPage, stage };
+}
+
+function getCurrentHistoryState(): Record<string, unknown> {
+  if (typeof window === 'undefined' || !isObjectRecord(window.history.state)) {
+    return {};
+  }
+  return window.history.state;
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
@@ -113,6 +158,8 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
       return 'chat-ai-3';
     case 'magic-prompts':
       return 'ai-generate-2';
+    case 'snippets':
+      return SNIPPETS_SETTINGS_ICON.icon;
     case 'notifications':
       return 'notification-3';
     case 'shortcuts':
@@ -130,6 +177,8 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
       return 'slash-commands-2';
     case 'mcp':
       return 'plug-2';
+    case 'plugins':
+      return 'code-box';
 
     case 'skills.installed':
       return 'book-open';
@@ -353,9 +402,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       void useMcpConfigStore.getState().loadMcpConfigs();
       return;
     }
+    if (settingsSlug === 'plugins') {
+      void usePluginsStore.getState().loadPlugins();
+      return;
+    }
     if (settingsSlug === 'skills.installed' || settingsSlug === 'skills.catalog') {
       void useSkillsStore.getState().loadSkills();
       void useSkillsCatalogStore.getState().loadCatalog();
+    }
+    if (settingsSlug === 'snippets') {
+      void useSnippetsStore.getState().loadSnippets();
     }
   }, [activeProjectId, isSettingsDialogOpen, isWindowed, runtimeCtx.isVSCode, settingsSlug]);
 
@@ -407,6 +463,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return t('settings.page.commands.title');
       case 'mcp':
         return t('settings.page.mcp.title');
+      case 'plugins':
+        return t('settings.page.plugins.title');
       case 'skills.installed':
         return t('settings.page.skills.title');
       case 'skills.catalog':
@@ -423,6 +481,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return t('settings.page.sessions.title');
       case 'magic-prompts':
         return t('settings.page.magicPrompts.title');
+      case 'snippets':
+        return t('settings.page.snippets.title');
       case 'notifications':
         return t('settings.page.notifications.title');
       case 'voice':
@@ -458,6 +518,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <CommandsSidebar onItemSelect={opts.onItemSelect} />;
       case 'mcp':
         return <McpSidebar onItemSelect={opts.onItemSelect} />;
+      case 'plugins':
+        return <PluginsSidebar onItemSelect={opts.onItemSelect} />;
       case 'skills.installed':
         return <SkillsSidebar onItemSelect={opts.onItemSelect} />;
       case 'providers':
@@ -466,6 +528,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <UsageSidebar onItemSelect={opts.onItemSelect} />;
       case 'magic-prompts':
         return <MagicPromptsSidebar onItemSelect={opts.onItemSelect} />;
+      case 'snippets':
+        return <SnippetsSidebar onItemSelect={opts.onItemSelect} />;
       default:
         return null;
     }
@@ -492,6 +556,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <CommandsPage />;
       case 'mcp':
         return <McpPage />;
+      case 'plugins':
+        return <PluginsPage />;
       case 'skills.installed':
         return <SkillsPage view="installed" />;
       case 'skills.catalog':
@@ -502,6 +568,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <UsagePage />;
       case 'magic-prompts':
         return <MagicPromptsPage />;
+      case 'snippets':
+        return <SnippetsPage />;
       case 'git':
         return <GitPage />;
       case 'appearance':
@@ -542,11 +610,84 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   }, [isMobile, mobileStage, settingsSlug]);
 
   const showBackButton = isMobile && mobileStage !== 'nav';
+  const backButtonTargetsPageSidebar = isMobile && mobileStage === 'page-content' && settingsSlug === 'skills.installed';
+  const showOpenPageSidebarButton = mobileStage === 'page-content'
+    && activePageMeta?.kind === 'split'
+    && !backButtonTargetsPageSidebar;
+  const mobileBackButtonLabel = backButtonTargetsPageSidebar
+    ? t('settings.view.actions.back')
+    : showBackButton
+      ? t('settings.view.actions.backToSettings')
+      : t('settings.view.actions.closeSettings');
   const shortcutKey = getModifierLabel();
 
+  const pushMobileSplitDetailHistory = React.useCallback((slug: SettingsPageSlug) => {
+    if (typeof window === 'undefined' || runtimeCtx.isVSCode) {
+      return;
+    }
+
+    const currentDetail = getSettingsDetailHistoryEntry(window.history.state);
+    if (currentDetail?.page === slug && currentDetail.stage === 'page-content') {
+      return;
+    }
+
+    window.history.pushState(
+      {
+        ...getCurrentHistoryState(),
+        [SETTINGS_DETAIL_HISTORY_KEY]: { page: slug, stage: 'page-content' },
+      },
+      '',
+      window.location.href,
+    );
+  }, [runtimeCtx.isVSCode]);
+
+  const handleMobilePageSidebarItemSelect = React.useCallback(() => {
+    setMobileStage('page-content');
+    if (settingsSlug === 'skills.installed') {
+      pushMobileSplitDetailHistory(settingsSlug);
+    }
+  }, [pushMobileSplitDetailHistory, settingsSlug]);
+
   const handleBack = React.useCallback(() => {
+    if (backButtonTargetsPageSidebar) {
+      const currentDetail = typeof window !== 'undefined'
+        ? getSettingsDetailHistoryEntry(window.history.state)
+        : null;
+      if (currentDetail?.page === settingsSlug && !runtimeCtx.isVSCode) {
+        window.history.back();
+        return;
+      }
+      setMobileStage('page-sidebar');
+      return;
+    }
+
     setMobileStage('nav');
-  }, []);
+  }, [backButtonTargetsPageSidebar, runtimeCtx.isVSCode, settingsSlug]);
+
+  React.useEffect(() => {
+    if (!isMobile || runtimeCtx.isVSCode) {
+      return;
+    }
+
+    const handlePopState = (event: PopStateEvent) => {
+      if (settingsSlug !== 'skills.installed') {
+        return;
+      }
+
+      const detail = getSettingsDetailHistoryEntry(event.state);
+      if (detail?.page === 'skills.installed') {
+        setMobileStage('page-content');
+        return;
+      }
+
+      setMobileStage((stage) => stage === 'page-content' ? 'page-sidebar' : stage);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [isMobile, runtimeCtx.isVSCode, settingsSlug]);
 
   const handleOpenPageSidebar = React.useCallback(() => {
     setMobileStage('page-sidebar');
@@ -653,7 +794,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       return (
         <div className={cn('flex-1 min-h-0 overflow-hidden', runtimeCtx.isVSCode ? 'bg-background' : 'bg-sidebar')}>
           <ErrorBoundary>
-            {renderPageSidebar(settingsSlug, { onItemSelect: () => setMobileStage('page-content') })}
+            {renderPageSidebar(settingsSlug, { onItemSelect: handleMobilePageSidebarItemSelect })}
           </ErrorBoundary>
         </div>
       );
@@ -707,7 +848,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
           <button
             type="button"
             onClick={showBackButton ? handleBack : onClose}
-            aria-label={showBackButton ? t('settings.view.actions.backToSettings') : t('settings.view.actions.closeSettings')}
+            aria-label={mobileBackButtonLabel}
             className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           >
             <Icon name="arrow-left-s" className="h-5 w-5" />
@@ -719,7 +860,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
               : (activePageMeta ? getPageTitle(activePageMeta.slug) : t('settings.view.home.title'))}
           </div>
 
-          {mobileStage === 'page-content' && activePageMeta?.kind === 'split' && (
+          {showOpenPageSidebarButton && (
             <button
               type="button"
               onClick={handleOpenPageSidebar}

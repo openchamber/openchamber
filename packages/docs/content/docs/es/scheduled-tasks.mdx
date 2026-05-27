@@ -1,0 +1,33 @@
+---
+title: Tareas programadas
+description: Ejecuta un prompt automáticamente según una programación.
+---
+
+# Tareas programadas
+
+Una tarea programada ejecuta un prompt por ti según una programación; por ejemplo, un "resume los cambios de ayer" diario o una limpieza semanal. Cuando se ejecuta, OpenChamber inicia una sesión nueva y envía el prompt por su cuenta. Abre el programador desde el botón en la parte superior de la barra lateral de sesiones.
+
+## Crea una tarea
+
+1. Abre el diálogo de tareas programadas desde la barra lateral de sesiones.
+2. Añade una tarea y dale un nombre.
+3. Elige cuándo se ejecuta:
+   - **diaria** — a una o varias horas cada día
+   - **semanal** — en los días de la semana y horas elegidos
+   - **una vez** — una sola fecha y hora
+4. Define qué hace: el prompt a enviar, y el proveedor, modelo y agente a usar. El prompt puede ser un comando de barra, como `/review`.
+5. Guarda y asegúrate de que la tarea esté habilitada.
+
+Puedes ejecutar cualquier tarea de inmediato con **run now** para comprobar que hace lo que esperas.
+
+## Cómo se ve el éxito
+
+Después de una ejecución, la tarea muestra cuándo se ejecutó por última vez, si tuvo éxito y un enlace a la sesión que creó. Si una ejecución falla, el error también se muestra ahí.
+
+## Ten en cuenta
+
+Las tareas solo se disparan mientras el servidor de OpenChamber está en funcionamiento. Si lo cierras, las ejecuciones programadas se pausan hasta que vuelva a estar activo.
+
+## Relacionado
+
+- [Comandos y fragmentos](/es/commands-snippets/) — reutiliza un comando de barra como prompt

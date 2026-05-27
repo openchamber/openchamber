@@ -115,6 +115,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.desktopLanAccessEnabled === 'boolean') {
       result.desktopLanAccessEnabled = candidate.desktopLanAccessEnabled;
     }
+    if (typeof candidate.desktopUiPassword === 'string') {
+      result.desktopUiPassword = candidate.desktopUiPassword.trim();
+    }
     if (Array.isArray(candidate.projects)) {
       const projects = sanitizeProjects(candidate.projects);
       if (projects) {
@@ -221,6 +224,9 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (candidate.usageDisplayMode === 'usage' || candidate.usageDisplayMode === 'remaining') {
       result.usageDisplayMode = candidate.usageDisplayMode;
+    }
+    if (typeof candidate.usageShowPredValues === 'boolean') {
+      result.usageShowPredValues = candidate.usageShowPredValues;
     }
     if (Array.isArray(candidate.usageDropdownProviders)) {
       result.usageDropdownProviders = normalizeStringArray(candidate.usageDropdownProviders);

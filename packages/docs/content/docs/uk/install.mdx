@@ -1,0 +1,33 @@
+---
+title: Встановлення
+description: Встановіть OpenChamber для десктопа, вебу або VS Code.
+---
+
+# Встановлення
+
+Є три способи запустити OpenChamber:
+
+- десктоп-застосунок для macOS
+- вебзастосунок на базі CLI, який можна встановити як застосунок на телефоні (PWA)
+- розширення для VS Code
+
+## Передумова
+
+Спершу встановіть [OpenCode](https://opencode.ai) — OpenChamber працює поверх нього.
+
+## Веб + PWA
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/openchamber/openchamber/main/scripts/install.sh | bash
+openchamber --ui-password be-creative-here
+```
+
+Відкрийте URL, який вивів CLI (зазвичай `http://localhost:3000`). Ви маєте побачити список сесій OpenChamber. Щоб він був під рукою, скористайтеся опцією «Install» в адресному рядку браузера й додайте його як застосунок.
+
+## Десктоп
+
+Завантажте найновішу десктопну збірку зі сторінки релізів на GitHub або зі сторінки завантаження OpenChamber. Відкрийте її та увійдіть у свій звичний робочий процес OpenCode.
+
+## VS Code
+
+Встановіть із VS Code Marketplace і увійдіть у свій звичний робочий процес OpenCode. Після цього вікно OpenChamber відкриється на бічній панелі.

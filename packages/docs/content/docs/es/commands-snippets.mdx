@@ -1,0 +1,39 @@
+---
+title: Comandos y fragmentos
+description: Crea comandos de barra y fragmentos de texto reutilizables para el chat.
+---
+
+# Comandos y fragmentos
+
+Los comandos y los fragmentos te ahorran reescribir lo mismo una y otra vez. Los comandos son prompts completos que activas con `/`; los fragmentos son trozos de texto que insertas en un mensaje con `#`.
+
+## Comandos
+
+Un comando es un prompt guardado que ejecutas con una barra, como `/review`. Gestiónalos en **Settings → Commands**.
+
+1. Abre **Settings → Commands** y crea un comando.
+2. Dale un nombre, una descripción y el texto del prompt que debe enviar.
+3. Opcionalmente, fíjalo a un agente o modelo concreto.
+4. Elige el ámbito personal o de proyecto.
+
+En el chat, escribe `/` como **primer** carácter del mensaje para abrir los comandos y elige uno. Tu texto puede usar marcadores de posición:
+
+- `$ARGUMENTS` — lo que escribas después del comando
+- `@filename` — inserta el contenido de un archivo
+- `` !`command` `` — inserta la salida de un comando de shell
+
+Los comandos integrados `init` y `review` se pueden restablecer, pero no eliminar.
+
+## Fragmentos
+
+Un fragmento es texto reutilizable que referencias en línea con una almohadilla, como `#signoff`. Gestiónalos en **Settings → Snippets**.
+
+1. Abre **Settings → Snippets** y crea un fragmento.
+2. Dale un nombre y el texto que representa. Añade alias si quieres más de un disparador.
+3. Elige el ámbito personal o de proyecto.
+
+En el chat, escribe `#` y elige un fragmento. OpenChamber inserta el texto completo antes de enviar.
+
+## Relacionado
+
+- [Skills](/es/skills/) — carga conjuntos de instrucciones más grandes cuando los necesitas

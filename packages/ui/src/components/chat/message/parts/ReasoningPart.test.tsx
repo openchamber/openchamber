@@ -39,7 +39,8 @@ describe('ReasoningTimelineBlock', () => {
     // Summary preview (beginning of text) is visible in the header
     expect(markup).toContain('First thought');
 
-    // Expanded body (MarkdownRenderer) is NOT rendered while collapsed
+    // Historical collapsed blocks do not mount the expanded body, avoiding a
+    // first-frame flash when Activity reveals previously hidden rows.
     expect(markup).not.toContain('data-message-text-export-source');
   });
 

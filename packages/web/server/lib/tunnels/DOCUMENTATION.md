@@ -10,6 +10,7 @@ This module contains tunnel provider orchestration for OpenChamber, including pr
 - `packages/web/server/lib/tunnels/routes.js`: tunnel API route registration and request orchestration runtime.
 - `packages/web/server/lib/tunnels/types.js`: tunnel constants, normalization, and shared type helpers.
 - `packages/web/server/lib/tunnels/providers/cloudflare.js`: Cloudflare tunnel provider implementation.
+- `packages/web/server/lib/tunnels/providers/ngrok.js`: Ngrok quick tunnel provider implementation.
 
 ## Public exports (routes.js)
 - `createTunnelRoutesRuntime(dependencies)`: creates tunnel routes runtime and helpers.

@@ -1,0 +1,49 @@
+---
+title: Providers, Models & Agents
+description: Connect AI providers, pick models, and set up agents.
+---
+
+# Providers, Models & Agents
+
+Before OpenChamber can do anything, it needs at least one AI provider connected. This page covers connecting a provider, choosing a model, and tailoring agents.
+
+## Connect a provider
+
+1. Open **Settings → Providers**.
+2. Open the **Add provider** menu and pick a provider that isn't connected yet.
+3. Sign in one of two ways, depending on the provider:
+   - **API key** — paste your key and save.
+   - **Sign-in (device flow)** — OpenChamber shows a link and a short code. Open the link, enter the code, and approve. OpenChamber finishes connecting on its own.
+
+When a provider shows as connected, its models become available in chat.
+
+To disconnect, open the provider and choose to remove its sign-in.
+
+## Pick a model
+
+You pick the model where you're working:
+
+- in chat, use the model picker in the message bar to set the provider and model for that session
+- per agent, set a default model (below)
+
+## Set up agents
+
+An agent is a named setup — a model, a personality, and what it's allowed to do.
+
+1. Open **Settings → Agents**.
+2. Pick an agent, or create a new one.
+3. Edit any of:
+   - **description** — what the agent is for
+   - **model** — its default model
+   - **temperature** — how creative its answers are
+   - **prompt** — standing instructions it always follows
+   - **tool rules** — which tools it may use
+
+## Where your sign-ins live
+
+Provider sign-ins are stored by OpenCode, not OpenChamber, so they're shared with the OpenCode CLI. If you set the same provider in more than one place, the most specific setting wins: a per-project setting overrides your personal one.
+
+## Related
+
+- [MCP Servers](/mcp/) — add extra tools for agents
+- [Usage & Quotas](/usage/) — track how much you've used
