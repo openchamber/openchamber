@@ -2128,6 +2128,7 @@ export const dict = {
   'openInApp.actions.copyPath': 'Copy Path',
   'openInApp.actions.refreshApps': 'Refresh Apps',
   'openInApp.toast.pathCopied': 'Path copied to clipboard',
+  'openInApp.toast.remoteOpenFailed': 'Failed to open remote path in app',
   'projectActions.actions.addActionAria': 'Add action',
   'projectActions.actions.addAction': 'Add action',
   'projectActions.actions.addNewAction': 'Add new action',

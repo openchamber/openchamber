@@ -2833,6 +2833,181 @@ const buildOpenFileSpecs = ({ filePath, appId, appName }) => {
   return specs;
 };
 
+const REMOTE_URI_SCHEME_BY_APP_ID = {
+  vscode: 'vscode',
+  cursor: 'cursor',
+  vscodium: 'vscodium',
+  windsurf: 'windsurf',
+};
+
+const buildOpenRemoteProjectSpecs = ({ projectPath, appId, appName, sshInfo }) => {
+  const specs = [];
+  const cli = CLI_BY_APP_ID[appId];
+  if (cli) {
+    const hostPart = sshInfo.user ? `${sshInfo.user}@${sshInfo.host}` : sshInfo.host;
+    const hostPort = sshInfo.port && sshInfo.port !== 22 ? `${hostPart}:${sshInfo.port}` : hostPart;
+    const remoteTarget = `ssh-remote+${hostPort}`;
+    specs.push({ program: cli, args: ['--remote', remoteTarget, '--new-window', projectPath] });
+    const scheme = REMOTE_URI_SCHEME_BY_APP_ID[appId] || 'vscode';
+    const encodedPath = projectPath.split('/').map(encodeURIComponent).join('/');
+    const deepLinkUri = `${scheme}://vscode-remote/${remoteTarget}${encodedPath}`;
+    specs.push({ program: 'open', args: [deepLinkUri] });
+  }
+  return specs;
+};
+
+const buildOpenRemoteFileSpecs = ({ filePath, appId, appName, sshInfo }) => {
+  const specs = [];
+  const cli = CLI_BY_APP_ID[appId];
+  if (cli) {
+    const hostPart = sshInfo.user ? `${sshInfo.user}@${sshInfo.host}` : sshInfo.host;
+    const hostPort = sshInfo.port && sshInfo.port !== 22 ? `${hostPart}:${sshInfo.port}` : hostPart;
+    const remoteTarget = `ssh-remote+${hostPort}`;
+    specs.push({ program: cli, args: ['--remote', remoteTarget, '--goto', filePath] });
+    const scheme = REMOTE_URI_SCHEME_BY_APP_ID[appId] || 'vscode';
+    const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
+    const deepLinkUri = `${scheme}://vscode-remote/${remoteTarget}${encodedPath}`;
+    specs.push({ program: 'open', args: [deepLinkUri] });
+  }
+  return specs;
+};
+
+const buildWindowsOpenRemoteProjectSpecs = ({ projectPath, appId, appName, sshInfo }) => {
+  const specs = [];
+  const hostPart = sshInfo.user ? `${sshInfo.user}@${sshInfo.host}` : sshInfo.host;
+  const hostPort = sshInfo.port && sshInfo.port !== 22 ? `${hostPart}:${sshInfo.port}` : hostPart;
+  const remoteTarget = `ssh-remote+${hostPort}`;
+  const cli = WINDOWS_CLI_BY_APP_ID[appId];
+  if (cli) {
+    const resolvedCli = runWhere(cli);
+    if (resolvedCli) {
+      specs.push({ program: resolvedCli, args: ['--remote', remoteTarget, '--new-window', projectPath] });
+    }
+  }
+  const exe = findWindowsExecutable(appId);
+  if (exe) {
+    specs.push({ program: exe, args: ['--remote', remoteTarget, '--new-window', projectPath] });
+  }
+  // Intentional: no findWindowsAppNameExecutable fallback here.
+  // The fallback searches by user-friendly app name and would not
+  // include the --remote arg, so it can't open the remote target.
+  return specs;
+};
+const buildWindowsOpenRemoteFileSpecs = ({ filePath, appId, appName, sshInfo }) => {
+  const specs = [];
+  const hostPart = sshInfo.user ? `${sshInfo.user}@${sshInfo.host}` : sshInfo.host;
+  const hostPort = sshInfo.port && sshInfo.port !== 22 ? `${hostPart}:${sshInfo.port}` : hostPart;
+  const remoteTarget = `ssh-remote+${hostPort}`;
+  const cli = WINDOWS_CLI_BY_APP_ID[appId];
+  if (cli) {
+    const resolvedCli = runWhere(cli);
+    if (resolvedCli) {
+      specs.push({ program: resolvedCli, args: ['--remote', remoteTarget, '--goto', filePath] });
+    }
+  }
+  const exe = findWindowsExecutable(appId);
+  if (exe) {
+    specs.push({ program: exe, args: ['--remote', remoteTarget, '--goto', filePath] });
+  }
+  // Intentional: no findWindowsAppNameExecutable fallback here
+  // (same rationale as buildWindowsOpenRemoteProjectSpecs).
+  return specs;
+};
+
+const getSshInfoByOrigin = (requestOrigin) => {
+  // readInstances() returns raw JSON; sshParsed may be absent for
+  // instances that have never been connected. We fall back to the
+  // active session's parsed data, and skip entries with no parsed info.
+  const instances = sshManager.readInstances().instances;
+  const hostsConfig = readDesktopHostsConfig();
+  const hosts = hostsConfig.hosts || [];
+
+  for (const instance of instances) {
+    const hostEntry = hosts.find((h) => h.id === instance.id);
+    if (!hostEntry) continue;
+
+    let hostOrigin = '';
+    try { hostOrigin = new URL(hostEntry.url).origin; } catch {}
+
+    if (hostOrigin !== requestOrigin) continue;
+
+    const status = sshManager.statuses.get(instance.id);
+    if (status?.phase !== 'ready') continue;
+
+    const session = sshManager.sessions.get(instance.id);
+    const parsed = instance.sshParsed || session?.parsed;
+    if (!parsed || !parsed.destination) continue;
+
+    let port = 22;
+    let user = '';
+    for (let i = 0; i < parsed.args.length; i++) {
+      const arg = parsed.args[i];
+      if (arg === '-p' && i + 1 < parsed.args.length) {
+        port = parseInt(parsed.args[i + 1], 10) || 22;
+        i++;
+        continue;
+      }
+      if (arg.startsWith('-p') && arg.length > 2) {
+        port = parseInt(arg.slice(2), 10) || 22;
+        continue;
+      }
+      if (arg === '-P' && i + 1 < parsed.args.length) {
+        port = parseInt(parsed.args[i + 1], 10) || 22;
+        i++;
+        continue;
+      }
+      if (arg.startsWith('-P') && arg.length > 2) {
+        port = parseInt(arg.slice(2), 10) || 22;
+        continue;
+      }
+      if (arg === '-l' && i + 1 < parsed.args.length) {
+        user = parsed.args[i + 1];
+        i++;
+        continue;
+      }
+      if (arg.startsWith('-l') && arg.length > 2) {
+        user = arg.slice(2);
+        continue;
+      }
+      if (arg === '-o' && i + 1 < parsed.args.length) {
+        const opt = parsed.args[i + 1];
+        i++;
+        const eqIdx = opt.indexOf('=');
+        if (eqIdx >= 0) {
+          const key = opt.slice(0, eqIdx);
+          const value = opt.slice(eqIdx + 1);
+          if (key === 'Port' || key === 'port') {
+            port = parseInt(value, 10) || 22;
+          } else if (key === 'User' || key === 'user') {
+            user = value;
+          }
+        }
+        continue;
+      }
+      if (arg.startsWith('-o') && arg.length > 2) {
+        const opt = arg.slice(2);
+        const eqIdx = opt.indexOf('=');
+        if (eqIdx >= 0) {
+          const key = opt.slice(0, eqIdx);
+          const value = opt.slice(eqIdx + 1);
+          if (key === 'Port' || key === 'port') {
+            port = parseInt(value, 10) || 22;
+          } else if (key === 'User' || key === 'user') {
+            user = value;
+          }
+        }
+        continue;
+      }
+    }
+
+    const result = { host: parsed.destination, port, instanceId: instance.id };
+    if (user) result.user = user;
+    return result;
+  }
+
+  return null;
+};
+
 const quoteWindowsCommandArg = (value) => `"${String(value).replace(/"/g, '""')}"`;
 
 const resolveWindowsLaunchProgram = (program) => {
@@ -2917,7 +3092,7 @@ const runSpecChain = (specs, appName) => {
   throw new Error(`Failed to open in ${appName}: ${failures.join('; ')}`);
 };
 
-const handleInvoke = async (browserWindow, command, args = {}) => {
+const handleInvoke = async (browserWindow, command, args = {}, senderOrigin = '') => {
   switch (command) {
     case 'desktop_start_window_drag':
       return null;
@@ -3164,6 +3339,71 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         throw new Error('desktop_open_file_in_app is only supported on macOS and Windows');
       }
       runSpecChain(buildOpenFileSpecs({ filePath, appId, appName }), appName);
+      return null;
+    }
+
+    case 'desktop_get_active_ssh_info': {
+      const requestOrigin = typeof args.origin === 'string' ? args.origin.trim() : '';
+      if (senderOrigin && requestOrigin !== senderOrigin) {
+        throw new Error('Origin mismatch');
+      }
+      const resolvedOrigin = senderOrigin || requestOrigin;
+      if (!resolvedOrigin) return null;
+      const sshInfo = getSshInfoByOrigin(resolvedOrigin);
+      return sshInfo || null;
+    }
+
+    case 'desktop_open_remote_in_app': {
+      const projectPath = typeof args.projectPath === 'string' ? args.projectPath.trim() : '';
+      const appId = typeof args.appId === 'string' ? args.appId.trim().toLowerCase() : '';
+      const appName = typeof args.appName === 'string' ? args.appName.trim() : '';
+      const requestOrigin = typeof args.origin === 'string' ? args.origin.trim() : '';
+      if (senderOrigin && requestOrigin !== senderOrigin) {
+        throw new Error('Origin mismatch');
+      }
+      const resolvedOrigin = senderOrigin || requestOrigin;
+      if (!projectPath || !appId || !appName || !resolvedOrigin) {
+        throw new Error('Project path, app id, app name, and origin are required');
+      }
+      const sshInfo = getSshInfoByOrigin(resolvedOrigin);
+      if (!sshInfo) {
+        throw new Error('SSH connection info not available');
+      }
+      if (process.platform === 'win32') {
+        runSpecChain(buildWindowsOpenRemoteProjectSpecs({ projectPath, appId, appName, sshInfo }), appName);
+        return null;
+      }
+      if (process.platform !== 'darwin') {
+        throw new Error('desktop_open_remote_in_app is only supported on macOS and Windows');
+      }
+      runSpecChain(buildOpenRemoteProjectSpecs({ projectPath, appId, appName, sshInfo }), appName);
+      return null;
+    }
+
+    case 'desktop_open_remote_file_in_app': {
+      const filePath = typeof args.filePath === 'string' ? args.filePath.trim() : '';
+      const appId = typeof args.appId === 'string' ? args.appId.trim().toLowerCase() : '';
+      const appName = typeof args.appName === 'string' ? args.appName.trim() : '';
+      const requestOrigin = typeof args.origin === 'string' ? args.origin.trim() : '';
+      if (senderOrigin && requestOrigin !== senderOrigin) {
+        throw new Error('Origin mismatch');
+      }
+      const resolvedOrigin = senderOrigin || requestOrigin;
+      if (!filePath || !appId || !appName || !resolvedOrigin) {
+        throw new Error('File path, app id, app name, and origin are required');
+      }
+      const sshInfo = getSshInfoByOrigin(resolvedOrigin);
+      if (!sshInfo) {
+        throw new Error('SSH connection info not available');
+      }
+      if (process.platform === 'win32') {
+        runSpecChain(buildWindowsOpenRemoteFileSpecs({ filePath, appId, appName, sshInfo }), appName);
+        return null;
+      }
+      if (process.platform !== 'darwin') {
+        throw new Error('desktop_open_remote_file_in_app is only supported on macOS and Windows');
+      }
+      runSpecChain(buildOpenRemoteFileSpecs({ filePath, appId, appName, sshInfo }), appName);
       return null;
     }
 
@@ -3852,19 +4092,59 @@ app.on('web-contents-created', (_event, contents) => {
 // shell.openPath, installed-app scans, app relaunch, and file dialogs
 // are gated to local senders — even the user's own remote UI shouldn't
 // need them, and a compromised remote can't use them either.
-const isLocalSender = (webContents) => {
+// SSH-tunnel pages (loopback origin that does NOT match the local origin)
+// are restricted to a separate whitelist: SSH context queries, remote
+// open commands, and app scans. File reads, dialogs, and local path
+// open are NOT granted to SSH tunnels — only to the true local origin.
+const isActualLocalOrigin = (webContents) => {
   try {
     const raw = typeof webContents?.getURL === 'function' ? webContents.getURL() : '';
     if (!raw) return false;
     const url = new URL(raw);
     if (url.protocol === `${UI_PROTOCOL}:` && url.hostname === 'app') return true;
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+    const hostname = url.hostname;
+    const isLoopback = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
     if (state.localOrigin) {
       try {
         const allowed = new URL(state.localOrigin);
         if (allowed.origin === url.origin) return true;
-      } catch {
+      } catch {}
+      if (state.sidecarUrl) {
+        try {
+          const allowed = new URL(state.sidecarUrl);
+          if (allowed.origin === url.origin) return true;
+        } catch {}
       }
+      return false;
+    }
+    // No explicit local origin configured — fall back to loopback check
+    return isLoopback;
+  } catch {
+    return false;
+  }
+};
+
+const isSshTunnelOrigin = (webContents) => {
+  try {
+    const raw = typeof webContents?.getURL === 'function' ? webContents.getURL() : '';
+    if (!raw) return false;
+    const url = new URL(raw);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+    const hostname = url.hostname;
+    if (hostname !== 'localhost' && hostname !== '127.0.0.1' && hostname !== '::1') return false;
+    // A tunnel origin is only meaningful when a local origin is known
+    // and the loopback origin does NOT match it. If localOrigin is not
+    // configured, no origin can be classified as a tunnel.
+    if (!state.localOrigin) return false;
+    try {
+      const allowed = new URL(state.localOrigin);
+      if (allowed.origin === url.origin) return false;
+    } catch {}
+    // Only treat as a tunnel origin if this port maps to a ready SSH instance
+    const port = parseInt(url.port, 10) || (url.protocol === 'https:' ? 443 : 80);
+    for (const status of sshManager.statuses.values()) {
+      if (status.phase === 'ready' && status.localPort === port) return true;
     }
     if (state.sidecarUrl) {
       try {
@@ -3879,6 +4159,15 @@ const isLocalSender = (webContents) => {
   }
 };
 
+const isLocalSender = (webContents) => {
+  return isActualLocalOrigin(webContents) || isSshTunnelOrigin(webContents);
+};
+
+// desktop_open_remote_in_app, desktop_open_remote_file_in_app, and
+// desktop_get_active_ssh_info are in SSH_TUNNEL_COMMANDS so they can
+// be called from SSH-tunneled pages on 127.0.0.1. They are NOT in
+// COMMANDS_SAFE_FOR_REMOTE because non-loopback remote pages must
+// never invoke them.
 const COMMANDS_SAFE_FOR_REMOTE = new Set([
   'desktop_hosts_get',
   'desktop_host_probe',
@@ -3897,18 +4186,48 @@ const COMMANDS_SAFE_FOR_REMOTE = new Set([
   'desktop_capture_page_rect',
 ]);
 
+const SSH_TUNNEL_COMMANDS = new Set([
+  'desktop_get_active_ssh_info',
+  'desktop_open_remote_in_app',
+  'desktop_open_remote_file_in_app',
+  'desktop_filter_installed_apps',
+  'desktop_get_installed_apps',
+  'desktop_fetch_app_icons',
+]);
+
 ipcMain.handle('openchamber:invoke', async (event, command, args) => {
-  if (!isLocalSender(event.sender) && !COMMANDS_SAFE_FOR_REMOTE.has(command)) {
+  const tunnelOrigin = isSshTunnelOrigin(event.sender);
+  const localOrigin = isActualLocalOrigin(event.sender);
+  const isSafeForRemote = COMMANDS_SAFE_FOR_REMOTE.has(command);
+  const isSafeForTunnel = SSH_TUNNEL_COMMANDS.has(command);
+
+  if (!localOrigin && !tunnelOrigin && !isSafeForRemote) {
     log.warn(`[ipc] rejected ${command} from non-local origin: ${event.sender?.getURL?.() || '(unknown)'}`);
     throw new Error('IPC not available for this origin');
   }
+
+  if (tunnelOrigin && !localOrigin && !isSafeForTunnel && !isSafeForRemote) {
+    log.warn(`[ipc] rejected ${command} from SSH tunnel origin: ${event.sender?.getURL?.() || '(unknown)'}`);
+    throw new Error('IPC not available for this origin');
+  }
+
+  let senderOrigin = '';
+  if (isSafeForTunnel) {
+    try {
+      const url = new URL(event.sender.getURL());
+      senderOrigin = url.origin;
+    } catch {}
+  }
+
   const browserWindow = BrowserWindow.fromWebContents(event.sender);
-  return handleInvoke(browserWindow, command, args);
+  return handleInvoke(browserWindow, command, args, senderOrigin);
 });
 
 ipcMain.handle('openchamber:dialog:open', async (event, options) => {
-  // Native file dialogs expose absolute local paths; never grant to remote.
-  if (!isLocalSender(event.sender)) {
+  // Native file dialogs expose absolute local paths; never grant to
+  // remote OR SSH tunnel origins. Only the true local origin may
+  // open file dialogs.
+  if (!isActualLocalOrigin(event.sender)) {
     log.warn(`[ipc] rejected dialog:open from non-local origin: ${event.sender?.getURL?.() || '(unknown)'}`);
     throw new Error('IPC not available for this origin');
   }

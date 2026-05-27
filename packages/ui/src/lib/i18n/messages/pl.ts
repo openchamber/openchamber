@@ -2080,6 +2080,7 @@ export const dict: Record<I18nKey, string> = {
   'openInApp.actions.openInAria': 'Otwórz w {app}',
   'openInApp.actions.refreshApps': 'Odśwież aplikacje',
   'openInApp.toast.pathCopied': 'Ścieżka skopiowana do schowka',
+  'openInApp.toast.remoteOpenFailed': 'Nie udało się otworzyć ścieżki zdalnej w aplikacji',
   'planView.actions.copyPlanContents': 'Kopiuj treść planu',
   'planView.actions.implement': 'Wdróż',
   'planView.actions.implementPlanAria': 'Wdróż plan',

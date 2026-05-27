@@ -2,32 +2,33 @@ export type OpenInApp = {
   id: string;
   label: string;
   appName: string;
+  supportsRemote: boolean;
 };
 
 export const OPEN_IN_APPS: OpenInApp[] = [
-  { id: 'finder', label: 'Finder', appName: 'Finder' },
-  { id: 'terminal', label: 'Terminal', appName: 'Terminal' },
-  { id: 'iterm2', label: 'iTerm2', appName: 'iTerm' },
-  { id: 'ghostty', label: 'Ghostty', appName: 'Ghostty' },
-  { id: 'vscode', label: 'VS Code', appName: 'Visual Studio Code' },
-  { id: 'intellij', label: 'IntelliJ', appName: 'IntelliJ IDEA' },
-  { id: 'visual-studio', label: 'Visual Studio', appName: 'Visual Studio' },
-  { id: 'cursor', label: 'Cursor', appName: 'Cursor' },
-  { id: 'android-studio', label: 'Android Studio', appName: 'Android Studio' },
-  { id: 'pycharm', label: 'PyCharm', appName: 'PyCharm' },
-  { id: 'xcode', label: 'Xcode', appName: 'Xcode' },
-  { id: 'sublime-text', label: 'Sublime', appName: 'Sublime Text' },
-  { id: 'webstorm', label: 'WebStorm', appName: 'WebStorm' },
-  { id: 'rider', label: 'Rider', appName: 'Rider' },
-  { id: 'zed', label: 'Zed', appName: 'Zed' },
-  { id: 'phpstorm', label: 'PhpStorm', appName: 'PhpStorm' },
-  { id: 'eclipse', label: 'Eclipse', appName: 'Eclipse' },
-  { id: 'windsurf', label: 'Windsurf', appName: 'Windsurf' },
-  { id: 'vscodium', label: 'VSCodium', appName: 'VSCodium' },
-  { id: 'rustrover', label: 'RustRover', appName: 'RustRover' },
-  { id: 'kiro', label: 'Kiro', appName: 'Kiro' },
-  { id: 'antigravity', label: 'Antigravity', appName: 'Antigravity' },
-  { id: 'trae', label: 'Trae', appName: 'Trae' },
+  { id: 'finder', label: 'Finder', appName: 'Finder', supportsRemote: false },
+  { id: 'terminal', label: 'Terminal', appName: 'Terminal', supportsRemote: false },
+  { id: 'iterm2', label: 'iTerm2', appName: 'iTerm', supportsRemote: false },
+  { id: 'ghostty', label: 'Ghostty', appName: 'Ghostty', supportsRemote: false },
+  { id: 'vscode', label: 'VS Code', appName: 'Visual Studio Code', supportsRemote: true },
+  { id: 'intellij', label: 'IntelliJ', appName: 'IntelliJ IDEA', supportsRemote: false },
+  { id: 'visual-studio', label: 'Visual Studio', appName: 'Visual Studio', supportsRemote: false },
+  { id: 'cursor', label: 'Cursor', appName: 'Cursor', supportsRemote: true },
+  { id: 'android-studio', label: 'Android Studio', appName: 'Android Studio', supportsRemote: false },
+  { id: 'pycharm', label: 'PyCharm', appName: 'PyCharm', supportsRemote: false },
+  { id: 'xcode', label: 'Xcode', appName: 'Xcode', supportsRemote: false },
+  { id: 'sublime-text', label: 'Sublime', appName: 'Sublime Text', supportsRemote: false },
+  { id: 'webstorm', label: 'WebStorm', appName: 'WebStorm', supportsRemote: false },
+  { id: 'rider', label: 'Rider', appName: 'Rider', supportsRemote: false },
+  { id: 'zed', label: 'Zed', appName: 'Zed', supportsRemote: false },
+  { id: 'phpstorm', label: 'PhpStorm', appName: 'PhpStorm', supportsRemote: false },
+  { id: 'eclipse', label: 'Eclipse', appName: 'Eclipse', supportsRemote: false },
+  { id: 'windsurf', label: 'Windsurf', appName: 'Windsurf', supportsRemote: true },
+  { id: 'vscodium', label: 'VSCodium', appName: 'VSCodium', supportsRemote: true },
+  { id: 'rustrover', label: 'RustRover', appName: 'RustRover', supportsRemote: false },
+  { id: 'kiro', label: 'Kiro', appName: 'Kiro', supportsRemote: false },
+  { id: 'antigravity', label: 'Antigravity', appName: 'Antigravity', supportsRemote: false },
+  { id: 'trae', label: 'Trae', appName: 'Trae', supportsRemote: false },
 ];
 
 export const DEFAULT_OPEN_IN_APP_ID = 'finder';

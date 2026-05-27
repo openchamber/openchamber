@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-import { fetchDesktopInstalledApps, isDesktopLocalOriginActive, isDesktopShell, type DesktopSettings, type InstalledDesktopAppInfo } from '@/lib/desktop';
+import { fetchDesktopInstalledApps, isOpenInAppAvailable, type DesktopSettings, type InstalledDesktopAppInfo } from '@/lib/desktop';
 import { OPEN_IN_APPS, DEFAULT_OPEN_IN_APP_ID, OPEN_IN_ALWAYS_AVAILABLE_APP_IDS, getOpenInAppById, getPlatformOpenInApp, type OpenInApp } from '@/lib/openInApps';
 import { updateDesktopSettings } from '@/lib/persistence';
 
@@ -86,7 +86,7 @@ export const useOpenInAppsStore = create<OpenInAppsState>()((set, get) => ({
     };
 
     const loadInstalledApps = async (force?: boolean) => {
-      if (!isDesktopShell() || !isDesktopLocalOriginActive()) {
+      if (!isOpenInAppAvailable()) {
         return;
       }
 
@@ -181,6 +181,7 @@ export const useOpenInAppsStore = create<OpenInAppsState>()((set, get) => ({
     };
 
     const updateHandler = (event: Event) => {
+      if (!isOpenInAppAvailable()) return;
       const detail = (event as CustomEvent<InstalledDesktopAppInfo[]>).detail;
       if (!Array.isArray(detail)) {
         return;
@@ -213,7 +214,7 @@ export const useOpenInAppsStore = create<OpenInAppsState>()((set, get) => ({
       get().initialize();
     }
 
-    if (!isDesktopShell() || !isDesktopLocalOriginActive()) {
+    if (!isOpenInAppAvailable()) {
       return;
     }
 
@@ -250,7 +251,7 @@ export const useOpenInAppsStore = create<OpenInAppsState>()((set, get) => ({
         (app) => allowed.has(app.appName) || OPEN_IN_ALWAYS_AVAILABLE_APP_IDS.has(app.id)
       );
       const withIcons = filtered.map((app) => ({
-        ...app,
+        ...getPlatformOpenInApp(app),
         iconDataUrl: iconMap.get(app.appName),
       }));
 
