@@ -160,6 +160,8 @@ export const VoiceSettings: React.FC = () => {
     const openaiCompatibleTtsModel = useConfigStore((state) => state.openaiCompatibleTtsModel);
     const setOpenaiCompatibleTtsModel = useConfigStore((state) => state.setOpenaiCompatibleTtsModel);
     const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
+    const ttsInputMode = useConfigStore((state) => state.ttsInputMode);
+    const setTtsInputMode = useConfigStore((state) => state.setTtsInputMode);
     // STT settings
     const sttProvider = useConfigStore((state) => state.sttProvider);
     const setSttProvider = useConfigStore((state) => state.setSttProvider);
@@ -1050,6 +1052,36 @@ export const VoiceSettings: React.FC = () => {
                     >
                         <Checkbox checked={showMessageTTSButtons} onChange={setShowMessageTTSButtons} ariaLabel={t('settings.voice.page.field.messageReadAloudButtonAria')} />
                         <span className="typography-ui-label text-foreground">{t('settings.voice.page.field.messageReadAloudButton')}</span>
+                    </div>
+
+                    <div className="pb-1.5 pt-0.5">
+                        <div className="flex min-w-0 flex-col gap-1.5">
+                            <div className="flex items-center gap-1.5">
+                                <span className="typography-ui-label text-foreground">
+                                    {t('settings.voice.page.field.ttsInputMode')}
+                                </span>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-1">
+                                <Button
+                                    variant="chip"
+                                    size="xs"
+                                    aria-pressed={ttsInputMode === 'sanitized'}
+                                    onClick={() => setTtsInputMode('sanitized')}
+                                    className="!font-normal"
+                                >
+                                    {t('settings.voice.page.field.ttsInputModeSanitized')}
+                                </Button>
+                                <Button
+                                    variant="chip"
+                                    size="xs"
+                                    aria-pressed={ttsInputMode === 'raw'}
+                                    onClick={() => setTtsInputMode('raw')}
+                                    className="!font-normal"
+                                >
+                                    {t('settings.voice.page.field.ttsInputModeRaw')}
+                                </Button>
+                            </div>
+                        </div>
                     </div>
 
                 </section>

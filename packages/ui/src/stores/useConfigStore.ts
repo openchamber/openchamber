@@ -564,6 +564,7 @@ interface ConfigStore {
     sttSilenceHoldMs: number;
     sttTranscribeOnStop: boolean;
     showMessageTTSButtons: boolean;
+    ttsInputMode: 'sanitized' | 'raw';
     voiceModeEnabled: boolean;
     // Summarization settings
     summarizeMessageTTS: boolean;
@@ -591,6 +592,7 @@ interface ConfigStore {
     setSttSilenceHoldMs: (ms: number) => void;
     setSttTranscribeOnStop: (enabled: boolean) => void;
     setShowMessageTTSButtons: (show: boolean) => void;
+    setTtsInputMode: (mode: 'sanitized' | 'raw') => void;
     setVoiceModeEnabled: (enabled: boolean) => void;
     setSummarizeMessageTTS: (enabled: boolean) => void;
     setSummarizeVoiceConversation: (enabled: boolean) => void;
@@ -857,6 +859,13 @@ export const useConfigStore = create<ConfigStore>()(
                         if (saved === 'true') return true;
                     }
                     return false;
+                })(),
+                ttsInputMode: (() => {
+                    if (typeof window !== 'undefined') {
+                        const saved = localStorage.getItem('ttsInputMode');
+                        if (saved === 'raw') return 'raw' as const;
+                    }
+                    return 'sanitized' as const;
                 })(),
                 // Voice mode enabled - load from localStorage or default to false
                 voiceModeEnabled: (() => {
@@ -2000,6 +2009,13 @@ export const useConfigStore = create<ConfigStore>()(
                     set({ showMessageTTSButtons: show });
                     if (typeof window !== 'undefined') {
                         localStorage.setItem('showMessageTTSButtons', String(show));
+                    }
+                },
+
+                setTtsInputMode: (mode: 'sanitized' | 'raw') => {
+                    set({ ttsInputMode: mode });
+                    if (typeof window !== 'undefined') {
+                        localStorage.setItem('ttsInputMode', mode);
                     }
                 },
 
