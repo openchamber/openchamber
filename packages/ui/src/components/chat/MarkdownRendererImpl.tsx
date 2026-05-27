@@ -222,12 +222,14 @@ const TableCopyButton: React.FC<{ tableRef: React.RefObject<HTMLDivElement | nul
     if (!tableEl) return;
     
     const data = extractTableData(tableEl);
-    const content =
-      format === "csv"
-        ? tableToCSV(data)
-        : format === "tsv"
-          ? tableToTSV(data)
-          : tableToMarkdown(data);
+    let content: string;
+    if (format === 'csv') {
+      content = tableToCSV(data);
+    } else if (format === 'tsv') {
+      content = tableToTSV(data);
+    } else {
+      content = tableToMarkdown(data);
+    }
 
 
     try {
