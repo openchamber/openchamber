@@ -192,6 +192,13 @@ async function shutdown(exitCode = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
   await Promise.all([stopChildTree(api), stopChildTree(vite)]);
+  // Clean up orphaned OpenCode processes that weren't killed by
+  // the Express server's shutdown (e.g. when nodemon is killed first).
+  try {
+    spawnSync('pkill', ['-f', 'opencode serve'], { stdio: 'ignore' });
+  } catch {
+    // best-effort
+  }
   process.exit(exitCode);
 }
 
