@@ -198,6 +198,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
   }, [resolvedPath, sessionDirectory, homeDirectory]);
   const [content, setContent] = React.useState<string>('');
   const { isPlaying: isTTSPlaying, play: playTTS, stop: stopTTS } = useMessageTTS();
+  const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
   const [saveError, setSaveError] = React.useState<string | null>(null);
   const planFileLabel = React.useMemo(() => {
     return displayPath ? displayPath.split('/').pop() || t('planView.file.defaultName') : t('planView.file.defaultName');
@@ -690,6 +691,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
               currentMode={mdViewMode}
               onToggle={() => saveMdViewMode(mdViewMode === 'preview' ? 'edit' : 'preview')}
             />
+            {mdViewMode === 'preview' && showMessageTTSButtons && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -716,6 +718,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
                 {isTTSPlaying ? t('planView.tts.stopSpeaking') : t('planView.tts.readAloud')}
               </TooltipContent>
             </Tooltip>
+            )}
             <Button
               variant="ghost"
               size="sm"

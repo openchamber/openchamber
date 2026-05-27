@@ -783,6 +783,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
   const [fileContent, setFileContent] = React.useState<string>('');
   const { isPlaying: isTTSPlaying, play: playTTS, stop: stopTTS } = useMessageTTS();
+  const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
   const [fileLoading, setFileLoading] = React.useState(false);
   const [fileError, setFileError] = React.useState<string | null>(null);
   const [desktopImageSrc, setDesktopImageSrc] = React.useState<string>('');
@@ -2859,7 +2860,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           />
         )}
 
-        {isMarkdown && getMdViewMode() === 'preview' && (
+        {isMarkdown && getMdViewMode() === 'preview' && showMessageTTSButtons && (
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
