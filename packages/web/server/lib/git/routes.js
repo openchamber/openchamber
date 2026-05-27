@@ -724,6 +724,32 @@ export function registerGitRoutes(app) {
       res.status(500).json({ error: error.message || 'Failed to rename branch' });
     }
   });
+  app.put('/api/git/branches/upstream', async (req, res) => {
+    const { setBranchUpstream } = await getGitLibraries();
+    try {
+      const directory = req.query.directory;
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+
+      const { branch, remote, upstreamBranch } = req.body;
+      if (!branch) {
+        return res.status(400).json({ error: 'branch is required' });
+      }
+      if (!remote) {
+        return res.status(400).json({ error: 'remote is required' });
+      }
+      if (!upstreamBranch) {
+        return res.status(400).json({ error: 'upstreamBranch is required' });
+      }
+
+      const result = await setBranchUpstream(directory, branch, remote, upstreamBranch);
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to set branch upstream:', error);
+      res.status(500).json({ error: error.message || 'Failed to set branch upstream' });
+    }
+  });
   app.delete('/api/git/remote-branches', async (req, res) => {
     const { deleteRemoteBranch } = await getGitLibraries();
     try {

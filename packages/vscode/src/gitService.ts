@@ -803,6 +803,34 @@ export async function deleteRemoteBranch(directory: string, branch: string, remo
   return { success: result.exitCode === 0 };
 }
 
+export async function setBranchUpstream(directory: string, branch: string, remote: string, upstreamBranch: string): Promise<{ success: boolean; branch: string; upstream: string }> {
+  const context = await resolveWorktreeProjectContext(directory);
+  const normalizedBranch = cleanBranchName(String(branch || '').trim());
+  const normalizedRemote = String(remote || '').trim();
+  const normalizedUpstreamBranch = cleanBranchName(String(upstreamBranch || '').trim());
+
+  if (!normalizedBranch) {
+    throw new Error('branch is required');
+  }
+  if (!normalizedRemote) {
+    throw new Error('remote is required');
+  }
+  if (!normalizedUpstreamBranch) {
+    throw new Error('upstreamBranch is required');
+  }
+
+  await applyUpstreamConfiguration({
+    primaryWorktree: context.primaryWorktree,
+    worktreeDirectory: context.primaryWorktree,
+    localBranch: normalizedBranch,
+    setUpstream: true,
+    upstreamRemote: normalizedRemote,
+    upstreamBranch: normalizedUpstreamBranch,
+  });
+
+  return { success: true, branch: normalizedBranch, upstream: `${normalizedRemote}/${normalizedUpstreamBranch}` };
+}
+
 // ============== Worktree Operations ==============
 
 export interface GitWorktreeInfo {

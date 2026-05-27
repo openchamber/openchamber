@@ -92,6 +92,20 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       return { id, type, success: true, data: result };
     }
 
+    case 'api:git/branches/upstream': {
+      const { directory, branch, remote, upstreamBranch } = (payload || {}) as {
+        directory?: string;
+        branch?: string;
+        remote?: string;
+        upstreamBranch?: string;
+      };
+      if (!directory || !branch || !remote || !upstreamBranch) {
+        return { id, type, success: false, error: 'Directory, branch, remote, and upstream branch are required' };
+      }
+      const result = await gitService.setBranchUpstream(directory, branch, remote, upstreamBranch);
+      return { id, type, success: true, data: result };
+    }
+
     case 'api:git/checkout': {
       const { directory, branch } = (payload || {}) as { directory?: string; branch?: string };
       if (!directory || !branch) {

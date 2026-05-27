@@ -3409,6 +3409,38 @@ export async function renameBranch(directory, oldName, newName) {
   }
 }
 
+export async function setBranchUpstream(directory, branch, remote, upstreamBranch) {
+  const { repoRoot } = await createRepositoryGitContext(directory);
+  const normalizedBranch = cleanBranchName(String(branch || '').trim());
+  const normalizedRemote = String(remote || '').trim();
+  const normalizedUpstreamBranch = cleanBranchName(String(upstreamBranch || '').trim());
+
+  if (!normalizedBranch) {
+    throw new Error('branch is required');
+  }
+  if (!normalizedRemote) {
+    throw new Error('remote is required');
+  }
+  if (!normalizedUpstreamBranch) {
+    throw new Error('upstreamBranch is required');
+  }
+
+  try {
+    await applyUpstreamConfiguration({
+      primaryWorktree: repoRoot,
+      worktreeDirectory: repoRoot,
+      localBranch: normalizedBranch,
+      setUpstream: true,
+      upstreamRemote: normalizedRemote,
+      upstreamBranch: normalizedUpstreamBranch,
+    });
+    return { success: true, branch: normalizedBranch, upstream: `${normalizedRemote}/${normalizedUpstreamBranch}` };
+  } catch (error) {
+    console.error('Failed to set branch upstream:', error);
+    throw error;
+  }
+}
+
 export async function getRemotes(directory) {
   const { git } = await createRepositoryGitContext(directory);
 

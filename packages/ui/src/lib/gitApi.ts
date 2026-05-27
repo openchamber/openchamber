@@ -184,6 +184,12 @@ export async function deleteRemoteBranch(directory: string, payload: import('./a
   return gitHttp.deleteRemoteBranch(directory, payload);
 }
 
+export async function setBranchUpstream(directory: string, payload: import('./api/types').GitSetBranchUpstreamPayload): Promise<{ success: boolean; branch: string; upstream: string }> {
+  const runtime = getRuntimeGit();
+  if (runtime) return runtime.setBranchUpstream(directory, payload);
+  return gitHttp.setBranchUpstream(directory, payload);
+}
+
 export async function generateCommitMessage(
   directory: string,
   files: string[],

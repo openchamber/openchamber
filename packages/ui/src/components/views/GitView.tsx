@@ -1352,6 +1352,46 @@ export const GitView: React.FC = () => {
     }
   };
 
+  const handleDeleteBranch = async (branch: string) => {
+    if (!currentDirectory) return;
+
+    const blockingReasons = getMutationBlockingReasons(worktreeAttachment);
+    if (blockingReasons.length > 0) {
+      toast.error(t('gitView.toast.cannotDeleteBranch', { reason: formatBlockingReason(blockingReasons[0]) }));
+      return;
+    }
+
+    try {
+      await git.deleteGitBranch(currentDirectory, { branch });
+      toast.success(t('gitView.toast.deletedBranch', { branch }));
+      await refreshStatusAndBranches();
+      await refreshLog();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t('gitView.toast.deleteBranchFailed', { branch });
+      toast.error(message);
+    }
+  };
+
+  const handleSetBranchUpstream = async (branch: string, remote: string, upstreamBranch: string) => {
+    if (!currentDirectory) return;
+
+    const blockingReasons = getMutationBlockingReasons(worktreeAttachment);
+    if (blockingReasons.length > 0) {
+      toast.error(t('gitView.toast.cannotSetUpstream', { reason: formatBlockingReason(blockingReasons[0]) }));
+      return;
+    }
+
+    try {
+      const result = await git.setBranchUpstream(currentDirectory, { branch, remote, upstreamBranch });
+      toast.success(t('gitView.toast.upstreamSet', { branch, remote: result.upstream }));
+      await refreshStatusAndBranches();
+      await refreshLog();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t('gitView.toast.setUpstreamFailed', { branch });
+      toast.error(message);
+    }
+  };
+
   const handleCheckoutBranch = async (branch: string) => {
     if (!currentDirectory) return;
 
@@ -2317,6 +2357,8 @@ export const GitView: React.FC = () => {
         onCheckoutBranch={handleCheckoutBranch}
         onCreateBranch={handleCreateBranch}
         onRenameBranch={handleRenameBranch}
+        onDeleteBranch={handleDeleteBranch}
+        onSetBranchUpstream={handleSetBranchUpstream}
         activeIdentityProfile={activeIdentityProfile}
         availableIdentities={availableIdentities}
         onSelectIdentity={handleApplyIdentity}
