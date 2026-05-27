@@ -1488,6 +1488,14 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       return true;
     }
 
+    // Guard against persisting a stale empty read caused by a concurrent
+    // writer truncating the file (O_TRUNC race). If the draft is empty and
+    // the original content was not, something went wrong — don't save.
+    if (draftContent === '' && fileContent !== '') {
+      console.warn(`[saveDraft] refusing to save empty draft for "${selectedFile.path}" (${fileContent.length} bytes were expected)`);
+      return false;
+    }
+
     setIsSaving(true);
 
     try {
@@ -1513,7 +1521,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     } finally {
       setIsSaving(false);
     }
-  }, [draftContent, files, isDirty, loadedFileLineEnding, readFileStat, selectedFile, t]);
+  }, [draftContent, fileContent, files, isDirty, loadedFileLineEnding, readFileStat, selectedFile, t]);
 
   React.useEffect(() => {
     if (!isDirty) {

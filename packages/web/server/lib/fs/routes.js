@@ -668,7 +668,18 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: 'Specified path is not a file' });
       }
 
-      const content = await fsPromises.readFile(canonicalPath, 'utf8');
+      let content = await fsPromises.readFile(canonicalPath, 'utf8');
+      // Retry empty reads — concurrent writer may have truncated the file
+      // between our stat and read (O_TRUNC window). If the file existed with
+      // content at stat time but we read nothing, the writer hasn't finished
+      // writing yet.
+      if (content.length === 0 && stats.size > 0) {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          await new Promise((r) => setTimeout(r, 50 * (attempt + 1)));
+          content = await fsPromises.readFile(canonicalPath, 'utf8');
+          if (content.length > 0) break;
+        }
+      }
       return res.type('text/plain').send(content);
     } catch (error) {
       const err = error;
@@ -785,7 +796,19 @@ export const registerFsRoutes = (app, dependencies) => {
       }
 
       await fsPromises.mkdir(path.dirname(resolved.resolved), { recursive: true });
-      await fsPromises.writeFile(resolved.resolved, content, 'utf8');
+
+      // Atomic write: write to temp then rename to avoid concurrent readers
+      // seeing an empty file during the O_TRUNC window of direct writeFile.
+      const tmp = `${resolved.resolved}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      let tmpExists = false;
+      try {
+        await fsPromises.writeFile(tmp, content, 'utf8');
+        tmpExists = true;
+        await fsPromises.rename(tmp, resolved.resolved);
+      } catch (error) {
+        if (tmpExists) await fsPromises.unlink(tmp).catch(() => {});
+        throw error;
+      }
       return res.json({ success: true, path: resolved.resolved });
     } catch (error) {
       const err = error;
