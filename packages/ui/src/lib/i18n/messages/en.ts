@@ -984,6 +984,7 @@ export const dict = {
   'filesView.editor.back': 'Back',
   'filesView.editor.openFilesAria': 'Open files',
   'filesView.editor.closeFileAria': 'Close {name}',
+  'filesView.editor.tabMenu.openAria': 'Open tab actions',
   'filesView.editor.tabMenu.close': 'Close',
   'filesView.editor.tabMenu.closeAll': 'Close all',
   'filesView.editor.tabMenu.closeAllRight': 'Close all to the right',

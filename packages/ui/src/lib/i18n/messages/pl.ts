@@ -1331,6 +1331,7 @@ export const dict: Record<I18nKey, string> = {
   'filesView.dialog.rootFallback': 'główny',
   'filesView.editor.back': 'Wstecz',
   'filesView.editor.closeFileAria': 'Zamknij {name}',
+  'filesView.editor.tabMenu.openAria': 'Otwórz akcje karty',
   'filesView.editor.tabMenu.close': 'Zamknij',
   'filesView.editor.tabMenu.closeAll': 'Zamknij wszystko',
   'filesView.editor.tabMenu.closeAllRight': 'Zamknij wszystko po prawej',

@@ -3191,7 +3191,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
               <div className="relative min-w-0 max-w-full">
                 <DropdownMenu open={editorTabMenu?.path === selectedFile.path} onOpenChange={(open) => setEditorTabMenu(open ? (editorTabMenu ?? { path: selectedFile.path, x: 0, y: 0 }) : null)}>
                   <DropdownMenuTrigger asChild>
-                    <button type="button" tabIndex={-1} aria-hidden="true" style={{ left: editorTabMenu?.x ?? 0, top: editorTabMenu?.y ?? 0 }} className="pointer-events-none fixed size-px opacity-0" />
+                    <button type="button" tabIndex={-1} aria-label={t('filesView.editor.tabMenu.openAria')} style={{ left: editorTabMenu?.x ?? 0, top: editorTabMenu?.y ?? 0 }} className="pointer-events-none fixed size-px opacity-0" />
                   </DropdownMenuTrigger>
                   {renderEditorTabContextMenu(selectedFile)}
                 </DropdownMenu>
@@ -3306,7 +3306,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                           )}
                         >
                           <DropdownMenuTrigger asChild>
-                            <button type="button" tabIndex={-1} aria-hidden="true" style={{ left: editorTabMenu?.x ?? 0, top: editorTabMenu?.y ?? 0 }} className="pointer-events-none fixed size-px opacity-0" />
+                            <button type="button" tabIndex={-1} aria-label={t('filesView.editor.tabMenu.openAria')} style={{ left: editorTabMenu?.x ?? 0, top: editorTabMenu?.y ?? 0 }} className="pointer-events-none fixed size-px opacity-0" />
                           </DropdownMenuTrigger>
                           <FileTypeIcon filePath={file.path} extension={file.extension} className="size-3.5 flex-shrink-0" />
                           <button
