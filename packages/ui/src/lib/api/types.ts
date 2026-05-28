@@ -421,6 +421,12 @@ export interface GitDeleteRemoteBranchPayload {
   remote?: string;
 }
 
+export interface GitSetBranchUpstreamPayload {
+  branch: string;
+  remote: string;
+  upstreamBranch: string;
+}
+
 export interface GitRemoveRemotePayload {
   remote: string;
 }
@@ -472,6 +478,7 @@ export interface GitAPI {
   getGitBranches(directory: string): Promise<GitBranch>;
   deleteGitBranch(directory: string, payload: GitDeleteBranchPayload): Promise<{ success: boolean }>;
   deleteRemoteBranch(directory: string, payload: GitDeleteRemoteBranchPayload): Promise<{ success: boolean }>;
+  setBranchUpstream(directory: string, payload: GitSetBranchUpstreamPayload): Promise<{ success: boolean; branch: string; upstream: string }>;
   removeRemote(directory: string, payload: GitRemoveRemotePayload): Promise<{ success: boolean }>;
   generateCommitMessage(directory: string, files: string[], options?: { zenModel?: string; providerId?: string; modelId?: string }): Promise<{ message: GeneratedCommitMessage }>;
   generatePullRequestDescription(

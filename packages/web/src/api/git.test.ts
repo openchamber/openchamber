@@ -14,6 +14,7 @@ vi.mock('@openchamber/ui/lib/gitApiHttp', () => ({
   getGitBranches: vi.fn(),
   deleteGitBranch: vi.fn(),
   deleteRemoteBranch: vi.fn(),
+  setBranchUpstream: vi.fn(),
   removeRemote: vi.fn(),
   generateCommitMessage: vi.fn(),
   generatePullRequestDescription: vi.fn(),

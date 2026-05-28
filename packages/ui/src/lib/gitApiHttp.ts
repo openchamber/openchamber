@@ -9,6 +9,7 @@ import type {
   GitBranch,
   GitDeleteBranchPayload,
   GitDeleteRemoteBranchPayload,
+  GitSetBranchUpstreamPayload,
   GitRemoveRemotePayload,
   GeneratedCommitMessage,
   GitWorktreeInfo,
@@ -326,6 +327,31 @@ export async function deleteRemoteBranch(directory: string, payload: GitDeleteRe
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || 'Failed to delete remote branch');
+  }
+
+  return response.json();
+}
+
+export async function setBranchUpstream(directory: string, payload: GitSetBranchUpstreamPayload): Promise<{ success: boolean; branch: string; upstream: string }> {
+  if (!payload?.branch) {
+    throw new Error('branch is required to set branch upstream');
+  }
+  if (!payload?.remote) {
+    throw new Error('remote is required to set branch upstream');
+  }
+  if (!payload?.upstreamBranch) {
+    throw new Error('upstreamBranch is required to set branch upstream');
+  }
+
+  const response = await fetch(buildUrl(`${API_BASE}/branches/upstream`, directory), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error || 'Failed to set branch upstream');
   }
 
   return response.json();

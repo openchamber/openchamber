@@ -27,7 +27,7 @@ interface GitHeaderProps {
   status: GitStatus | null;
   localBranches: string[];
   remoteBranches: string[];
-  branchInfo: Record<string, { ahead?: number; behind?: number }> | undefined;
+  branchInfo: Record<string, { tracking?: string; ahead?: number; behind?: number }> | undefined;
   syncAction: SyncAction;
   remotes: GitRemote[];
   onFetch: (remote: GitRemote) => void;
@@ -37,6 +37,8 @@ interface GitHeaderProps {
   onCheckoutBranch: (branch: string) => void;
   onCreateBranch: (name: string, remote?: GitRemote) => Promise<void>;
   onRenameBranch?: (oldName: string, newName: string) => Promise<void>;
+  onDeleteBranch?: (branch: string) => Promise<void>;
+  onSetBranchUpstream?: (branch: string, remote: string, upstreamBranch: string) => Promise<void>;
   activeIdentityProfile: GitIdentityProfile | null;
   availableIdentities: GitIdentityProfile[];
   onSelectIdentity: (profile: GitIdentityProfile) => void;
@@ -241,6 +243,8 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
   onCheckoutBranch,
   onCreateBranch,
   onRenameBranch,
+  onDeleteBranch,
+  onSetBranchUpstream,
   activeIdentityProfile,
   availableIdentities,
   onSelectIdentity,
@@ -355,6 +359,9 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
               branchInfo={branchInfo}
               onCheckout={onCheckoutBranch}
               onCreate={onCreateBranch}
+              onRename={onRenameBranch}
+              onDelete={onDeleteBranch}
+              onSetUpstream={onSetBranchUpstream}
               remotes={remotes}
             />
           )}
