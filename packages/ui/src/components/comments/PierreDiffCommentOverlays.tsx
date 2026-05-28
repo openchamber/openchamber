@@ -5,6 +5,7 @@ import type { InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
 import { InlineCommentCard } from './InlineCommentCard';
 import { InlineCommentInput } from './InlineCommentInput';
 import { toPierreAnnotationId } from './PierreDiffCommentUtils';
+import { findRevertHunkActionForSelection, type RevertHunkAction } from '@/lib/gitDiffHunks';
 
 interface PierreDiffCommentOverlaysProps {
   diffRootRef: React.RefObject<HTMLDivElement | null>;
@@ -17,6 +18,8 @@ interface PierreDiffCommentOverlaysProps {
   onCancel: () => void;
   onEdit: (draft: InlineCommentDraft) => void;
   onDelete: (draft: InlineCommentDraft) => void;
+  hunkActions?: RevertHunkAction[];
+  onRevertHunk?: (action: RevertHunkAction) => Promise<void> | void;
 }
 
 function parseCssWidth(value: string): number | null {
@@ -53,6 +56,8 @@ export function PierreDiffCommentOverlays(props: PierreDiffCommentOverlaysProps)
     onCancel,
     onEdit,
     onDelete,
+    hunkActions = [],
+    onRevertHunk,
   } = props;
 
   const [retryTick, setRetryTick] = React.useState(0);
@@ -166,6 +171,11 @@ export function PierreDiffCommentOverlays(props: PierreDiffCommentOverlaysProps)
 
   void retryTick;
 
+  const selectedHunkAction = React.useMemo(
+    () => findRevertHunkActionForSelection(hunkActions, selection),
+    [hunkActions, selection]
+  );
+
   return (
     <>
       {drafts.map((draft) => {
@@ -220,6 +230,8 @@ export function PierreDiffCommentOverlays(props: PierreDiffCommentOverlaysProps)
             onSave={onSave}
             onCancel={onCancel}
             maxWidth={targetMaxWidth}
+            canRevertHunk={Boolean(selectedHunkAction && onRevertHunk)}
+            onRevertHunk={selectedHunkAction && onRevertHunk ? () => onRevertHunk(selectedHunkAction) : undefined}
           />,
           target,
           selectionAnnotationId

@@ -12,6 +12,7 @@ import {
   resetToCommit,
   resolveBaseRefForLog,
   revertCommit,
+  revertHunk,
   stageFiles,
   unstageFiles,
 } from './service.js';
@@ -116,6 +117,51 @@ describe('git index path validation', () => {
     await expect(unstageFiles('/repo', ['../secret.txt'])).rejects.toThrow(
       'Path is outside repository: ../secret.txt'
     );
+  });
+});
+
+describe('revertHunk', () => {
+  it('reverse-applies a single working-tree hunk', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    runGit(repo, ['init']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    fs.writeFileSync(path.join(repo, 'file.txt'), 'one\ntwo\nthree\n', 'utf8');
+    runGit(repo, ['add', 'file.txt']);
+    runGit(repo, ['commit', '-m', 'initial']);
+
+    fs.writeFileSync(path.join(repo, 'file.txt'), 'one\nTWO\nthree\n', 'utf8');
+    await revertHunk(repo, {
+      path: 'file.txt',
+      patch: 'diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -2 +2 @@\n-two\n+TWO\n',
+    });
+
+    expect(fs.readFileSync(path.join(repo, 'file.txt'), 'utf8')).toBe('one\ntwo\nthree\n');
+  });
+
+  it('reverse-applies a single staged hunk to the index', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    runGit(repo, ['init']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    fs.writeFileSync(path.join(repo, 'file.txt'), 'one\ntwo\nthree\n', 'utf8');
+    runGit(repo, ['add', 'file.txt']);
+    runGit(repo, ['commit', '-m', 'initial']);
+
+    fs.writeFileSync(path.join(repo, 'file.txt'), 'one\nTWO\nthree\n', 'utf8');
+    runGit(repo, ['add', 'file.txt']);
+    await revertHunk(repo, {
+      path: 'file.txt',
+      staged: true,
+      patch: 'diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -2 +2 @@\n-two\n+TWO\n',
+    });
+
+    expect(runGit(repo, ['show', ':file.txt'])).toBe('one\ntwo\nthree\n');
+    expect(fs.readFileSync(path.join(repo, 'file.txt'), 'utf8')).toBe('one\nTWO\nthree\n');
   });
 });
 

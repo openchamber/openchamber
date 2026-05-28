@@ -1256,6 +1256,8 @@ export const dict = {
   'inlineComment.actions.cancel': 'Cancel',
   'inlineComment.actions.save': 'Save',
   'inlineComment.actions.comment': 'Comment',
+  'inlineComment.actions.revertHunk': 'Revert Hunk',
+  'inlineComment.actions.revertingHunk': 'Reverting...',
   'inlineComment.actions.showLess': 'Show less',
   'inlineComment.actions.showMore': 'Show more',
   'inlineComment.actions.editComment': 'Edit comment',

@@ -2020,6 +2020,8 @@ export const dict: Record<I18nKey, string> = {
   'inlineComment.actions.comment': 'Comment',
   'inlineComment.actions.deleteComment': 'Delete comment',
   'inlineComment.actions.editComment': 'Edit comment',
+  'inlineComment.actions.revertHunk': 'Revert Hunk',
+  'inlineComment.actions.revertingHunk': 'Reverting...',
   'inlineComment.actions.save': 'Zapisz',
   'inlineComment.actions.showLess': 'Show less',
   'inlineComment.actions.showMore': 'Show more',

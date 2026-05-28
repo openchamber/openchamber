@@ -15,6 +15,8 @@ export interface InlineCommentInputProps {
   isEditing?: boolean;
   className?: string;
   maxWidth?: number;
+  canRevertHunk?: boolean;
+  onRevertHunk?: () => Promise<void> | void;
 }
 
 export function InlineCommentInput({
@@ -26,12 +28,15 @@ export function InlineCommentInput({
   isEditing = false,
   className,
   maxWidth,
+  canRevertHunk = false,
+  onRevertHunk,
 }: InlineCommentInputProps) {
   const { t } = useI18n();
   const themeContext = useOptionalThemeSystem();
   const currentTheme = themeContext?.currentTheme;
   const { isMobile } = useDeviceInfo();
   const [text, setText] = React.useState(initialText);
+  const [isRevertingHunk, setIsRevertingHunk] = React.useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   
   // Stable range snapshot to prevent race with selection clearing
@@ -113,6 +118,18 @@ export function InlineCommentInput({
     }
   };
 
+  const handleRevertHunkClick = async (e: React.MouseEvent | React.TouchEvent | React.PointerEvent) => {
+    e.stopPropagation();
+    if (!onRevertHunk || isRevertingHunk) return;
+
+    setIsRevertingHunk(true);
+    try {
+      await onRevertHunk();
+    } finally {
+      setIsRevertingHunk(false);
+    }
+  };
+
   return (
     <div
       className={cn(
@@ -152,31 +169,48 @@ export function InlineCommentInput({
           className="min-h-[80px] px-3 py-2.5 text-sm resize-y"
         />
         
-        <div className="flex items-center justify-end gap-2 mt-3">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onCancel}
-            onPointerDown={(e) => e.stopPropagation()}
-            onTouchStart={(e) => e.stopPropagation()}
-            className="h-8 text-muted-foreground hover:text-foreground"
-          >
-            {t('inlineComment.actions.cancel')}
-          </Button>
-          <Button
-            size="sm"
-            onClick={handleSaveClick}
-            onPointerDown={(e) => e.stopPropagation()}
-            onTouchStart={(e) => e.stopPropagation()}
-            disabled={!text.trim()}
-            className="h-8 min-w-[80px]"
-            style={{
-              backgroundColor: currentTheme?.colors?.status?.success,
-              color: currentTheme?.colors?.status?.successForeground,
-            }}
-          >
-            {isEditing ? t('inlineComment.actions.save') : t('inlineComment.actions.comment')}
-          </Button>
+        <div className="flex items-center justify-between gap-2 mt-3">
+          <div>
+            {canRevertHunk && onRevertHunk ? (
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={handleRevertHunkClick}
+                onPointerDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
+                disabled={isRevertingHunk}
+                className="h-8"
+              >
+                {isRevertingHunk ? t('inlineComment.actions.revertingHunk') : t('inlineComment.actions.revertHunk')}
+              </Button>
+            ) : null}
+          </div>
+          <div className="flex items-center justify-end gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onCancel}
+              onPointerDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+              className="h-8 text-muted-foreground hover:text-foreground"
+            >
+              {t('inlineComment.actions.cancel')}
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleSaveClick}
+              onPointerDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+              disabled={!text.trim()}
+              className="h-8 min-w-[80px]"
+              style={{
+                backgroundColor: currentTheme?.colors?.status?.success,
+                color: currentTheme?.colors?.status?.successForeground,
+              }}
+            >
+              {isEditing ? t('inlineComment.actions.save') : t('inlineComment.actions.comment')}
+            </Button>
+          </div>
         </div>
       </div>
     </div>
