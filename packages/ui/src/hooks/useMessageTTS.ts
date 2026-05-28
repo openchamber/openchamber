@@ -35,6 +35,7 @@ export function useMessageTTS(): UseMessageTTSReturn {
     const openaiCompatibleUrl = useConfigStore((state) => state.openaiCompatibleUrl);
     const openaiCompatibleTtsModel = useConfigStore((state) => state.openaiCompatibleTtsModel);
     const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
+    const ttsInputMode = useConfigStore((state) => state.ttsInputMode);
 
     const isServerProvider = voiceProvider === 'openai' || voiceProvider === 'openai-compatible';
     const shouldCheckOpenAIAvailability = showMessageTTSButtons && isServerProvider;
@@ -64,7 +65,7 @@ export function useMessageTTS(): UseMessageTTSReturn {
         setIsPlaying(true);
         
         try {
-            const textToSpeak = sanitizeForTTS(text);
+            const textToSpeak = (ttsInputMode === 'raw' && isServerProvider) ? text : sanitizeForTTS(text);
             
             if (isServerProvider && isServerTTSAvailable) {
                 const voice = voiceProvider === 'openai-compatible' ? openaiCompatibleVoice : openaiVoice;
@@ -123,6 +124,7 @@ export function useMessageTTS(): UseMessageTTSReturn {
         openaiCompatibleTtsModel,
         isServerTTSAvailable,
         isSayTTSAvailable,
+        ttsInputMode,
         speakServerTTS,
         speakSayTTS,
         stop,
