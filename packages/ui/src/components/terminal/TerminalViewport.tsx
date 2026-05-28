@@ -69,6 +69,10 @@ type RendererWithScrollbar = {
   renderScrollbar?: (...args: unknown[]) => void;
 };
 
+type TerminalWithRenderer = {
+  renderer?: RendererWithScrollbar;
+};
+
 interface TerminalViewportProps {
   sessionKey: string;
   chunks: TerminalChunk[];
@@ -1076,13 +1080,15 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
           terminal.loadAddon(fitAddon);
           terminal.open(container);
           if (enableTouchScroll) {
-            const renderer = (terminal as unknown as { renderer?: RendererWithScrollbar }).renderer;
+            const renderer = (terminal as unknown as TerminalWithRenderer).renderer;
             if (renderer && typeof renderer.renderScrollbar === 'function') {
               const originalRenderScrollbar = renderer.renderScrollbar.bind(renderer);
               renderer.renderScrollbar = () => {};
               restorePatchedScrollbar = () => {
                 renderer.renderScrollbar = originalRenderScrollbar;
               };
+            } else if (process.env.NODE_ENV === 'development') {
+              console.warn('[TerminalViewport] Ghostty renderer scrollbar hook is unavailable; touch scrollbar suppression may need an update.');
             }
           }
           bumpTerminalReady();
