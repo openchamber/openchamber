@@ -950,7 +950,6 @@ export const dict: Record<I18nKey, string> = {
   "filesView.editor.back": "Voltar",
   "filesView.editor.openFilesAria": "Abrir arquivos",
   "filesView.editor.closeFileAria": "Fechar {name}",
-  "filesView.editor.tabMenu.openAria": "Abrir ações da aba",
   "filesView.editor.tabMenu.close": "Fechar",
   "filesView.editor.tabMenu.closeAll": "Fechar tudo",
   "filesView.editor.tabMenu.closeAllRight": "Fechar tudo à direita",

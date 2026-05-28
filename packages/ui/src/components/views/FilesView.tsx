@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
@@ -838,6 +839,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const [contextMenuPath, setContextMenuPath] = React.useState<string | null>(null);
   const [editorTabMenu, setEditorTabMenu] = React.useState<EditorTabMenuState | null>(null);
   const [mobileOpenFilesMenuOpen, setMobileOpenFilesMenuOpen] = React.useState(false);
+  const [mobileOpenFilesMenuInteracted, setMobileOpenFilesMenuInteracted] = React.useState(false);
   const [copiedContent, setCopiedContent] = React.useState(false);
   const [copiedPath, setCopiedPath] = React.useState(false);
   const [isGoToLineOpen, setIsGoToLineOpen] = React.useState(false);
@@ -2058,7 +2060,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     }
   }, []);
 
-  const startEditorTabPointerLongPress = React.useCallback((event: React.PointerEvent, path: string) => {
+  const startEditorTabPointerLongPress = React.useCallback((event: React.PointerEvent, path: string, keepOpenFilesMenuOpen = false) => {
     if (event.pointerType === 'mouse') {
       return;
     }
@@ -2072,7 +2074,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     const { clientX, clientY } = event;
     editorTabLongPressTimerRef.current = setTimeout(() => {
       editorTabLongPressTriggeredRef.current = true;
-      setMobileOpenFilesMenuOpen(true);
+      setMobileOpenFilesMenuOpen(keepOpenFilesMenuOpen);
       setEditorTabMenu({ path, x: clientX, y: clientY });
     }, 550);
   }, [clearEditorTabLongPress, isMobile]);
@@ -2765,10 +2767,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     );
   }, [currentTheme.metadata.variant, pierreTheme, wrapLines]);
 
-  const renderEditorTabContextMenu = (file: FileNode) => {
-    const tabIndex = openFiles.findIndex((item) => item.path === file.path);
-    const leftPaths = tabIndex > 0 ? openFiles.slice(0, tabIndex).map((item) => item.path) : [];
-    const rightPaths = tabIndex >= 0 ? openFiles.slice(tabIndex + 1).map((item) => item.path) : [];
+  const renderEditorTabContextMenu = (file: FileNode, tabFiles = openFiles) => {
+    const tabIndex = tabFiles.findIndex((item) => item.path === file.path);
+    const leftPaths = tabIndex > 0 ? tabFiles.slice(0, tabIndex).map((item) => item.path) : [];
+    const rightPaths = tabIndex >= 0 ? tabFiles.slice(tabIndex + 1).map((item) => item.path) : [];
     const relativePath = getDisplayPath(root, file.path) || file.path;
 
     return (
@@ -2777,7 +2779,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           <Icon name="close" className="mr-2 size-4" />
           {t('filesView.editor.tabMenu.close')}
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => handleCloseFiles(openFiles.map((item) => item.path))}>
+        <DropdownMenuItem onClick={() => handleCloseFiles(tabFiles.map((item) => item.path))}>
           <Icon name="close-circle" className="mr-2 size-4" />
           {t('filesView.editor.tabMenu.closeAll')}
         </DropdownMenuItem>
@@ -3144,6 +3146,23 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   };
 
   const editorTabContextFile = editorTabMenu ? (openFiles.find((file) => file.path === editorTabMenu.path) ?? null) : null;
+  const editorTabMenuPositionKey = editorTabMenu ? `${editorTabMenu.path}:${editorTabMenu.x}:${editorTabMenu.y}` : 'closed';
+  const mobileOpenFiles = selectedFile ? openFiles.filter((file) => file.path !== selectedFile.path) : openFiles;
+  const mobileEditorTabOrder = selectedFile ? [selectedFile, ...mobileOpenFiles] : openFiles;
+  const hasMobileOpenFiles = mobileOpenFiles.length > 0;
+  const renderEditorTabMenuTrigger = () => {
+    const trigger = (
+      <DropdownMenuTrigger asChild>
+        <button type="button" tabIndex={-1} aria-hidden="true" style={{ left: editorTabMenu?.x ?? 0, top: editorTabMenu?.y ?? 0, width: 0, height: 0, minWidth: 0, minHeight: 0, padding: 0, border: 0 }} className="pointer-events-none fixed opacity-0" />
+      </DropdownMenuTrigger>
+    );
+
+    if (typeof document === 'undefined') {
+      return trigger;
+    }
+
+    return createPortal(trigger, document.body);
+  };
 
   const fileViewer = (
     <div
@@ -3192,18 +3211,19 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
           {isMobile ? (
             selectedFile ? (
-              <div className="relative min-w-0 max-w-full">
-                <DropdownMenu open={Boolean(editorTabContextFile)} onOpenChange={(open) => setEditorTabMenu(open ? editorTabMenu : null)}>
-                  <DropdownMenuTrigger asChild>
-                    <button type="button" tabIndex={-1} aria-label={t('filesView.editor.tabMenu.openAria')} style={{ left: editorTabMenu?.x ?? 0, top: editorTabMenu?.y ?? 0 }} className="pointer-events-none fixed size-px opacity-0" />
-                  </DropdownMenuTrigger>
-                  {editorTabContextFile ? renderEditorTabContextMenu(editorTabContextFile) : null}
+              <div className="relative flex min-w-0 flex-1 items-center">
+                <DropdownMenu key={editorTabMenuPositionKey} open={Boolean(editorTabContextFile)} onOpenChange={(open) => setEditorTabMenu(open ? editorTabMenu : null)}>
+                  {renderEditorTabMenuTrigger()}
+                  {editorTabContextFile ? renderEditorTabContextMenu(editorTabContextFile, mobileEditorTabOrder) : null}
                 </DropdownMenu>
-                <DropdownMenu open={mobileOpenFilesMenuOpen} onOpenChange={setMobileOpenFilesMenuOpen}>
+                <DropdownMenu open={mobileOpenFilesMenuOpen && hasMobileOpenFiles} onOpenChange={(open) => {
+                  setMobileOpenFilesMenuOpen(open && hasMobileOpenFiles);
+                  setMobileOpenFilesMenuInteracted(false);
+                }}>
                   <DropdownMenuTrigger asChild>
                     <button
                       type="button"
-                      className="inline-flex min-w-0 max-w-full items-center gap-1 text-left typography-ui-label font-medium"
+                      className="inline-flex min-w-0 flex-1 items-center gap-1 text-left typography-ui-label font-medium"
                       aria-label={t('filesView.editor.openFilesAria')}
                       onPointerDown={(event) => startEditorTabPointerLongPress(event, selectedFile.path)}
                       onPointerUp={clearEditorTabLongPress}
@@ -3226,18 +3246,19 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                       <Icon name="arrow-down-s" className="size-4 flex-shrink-0 text-muted-foreground" />
                     </button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-[min(24rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)]">
-                    {openFiles.map((file) => {
-                      const isActive = selectedFile?.path === file.path;
+                  <DropdownMenuContent align="start" className="w-[min(24rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)]" onKeyDown={() => setMobileOpenFilesMenuInteracted(true)}>
+                    {mobileOpenFiles.map((file) => {
+                      const isContextTarget = editorTabMenu?.path === file.path;
                       return (
                         <DropdownMenuItem
                           key={file.path}
+                          onPointerMove={() => setMobileOpenFilesMenuInteracted(true)}
                           onPointerDown={(event) => {
                             const target = event.target as HTMLElement;
                             if (target.closest('[data-close-open-file]')) {
                               return;
                             }
-                            startEditorTabPointerLongPress(event, file.path);
+                            startEditorTabPointerLongPress(event, file.path, true);
                           }}
                           onPointerUp={clearEditorTabLongPress}
                           onPointerCancel={clearEditorTabLongPress}
@@ -3261,13 +3282,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                               event.preventDefault();
                               return;
                             }
-                            if (!isActive) {
-                              void handleSelectFile(file);
-                            }
+                            void handleSelectFile(file);
                           }}
                           className={cn(
                             'flex min-w-0 items-center justify-between gap-2 overflow-hidden',
-                            isActive && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]'
+                            !mobileOpenFilesMenuInteracted && !isContextTarget && 'data-[highlighted]:!bg-transparent',
+                            isContextTarget && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]'
                           )}
                         >
                           <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
@@ -3296,6 +3316,22 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                     })}
                   </DropdownMenuContent>
                 </DropdownMenu>
+                <button
+                  type="button"
+                  onPointerDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    handleCloseFile(selectedFile.path);
+                  }}
+                  className="mr-1 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-[var(--surface-muted-foreground)] hover:text-[var(--surface-foreground)]"
+                  aria-label={t('filesView.editor.closeFileAria', { name: selectedFile.name })}
+                >
+                  <Icon name="close" className="size-3.5" />
+                </button>
               </div>
             ) : (
               <div className="typography-ui-label font-medium truncate">{t('filesView.editor.selectFile')}</div>
@@ -3317,7 +3353,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                   {openFiles.map((file) => {
                     const isActive = selectedFile?.path === file.path;
                     return (
-                      <DropdownMenu key={file.path} open={editorTabMenu?.path === file.path} onOpenChange={(open) => setEditorTabMenu(open ? (editorTabMenu ?? { path: file.path, x: 0, y: 0 }) : null)}>
+                      <DropdownMenu key={`${file.path}:${editorTabMenu?.path === file.path ? editorTabMenuPositionKey : 'closed'}`} open={editorTabMenu?.path === file.path} onOpenChange={(open) => setEditorTabMenu(open ? (editorTabMenu ?? { path: file.path, x: 0, y: 0 }) : null)}>
                         <div
                           title={getDisplayPath(root, file.path)}
                           onContextMenu={(event) => {
@@ -3332,9 +3368,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                               : 'bg-transparent border-[var(--interactive-border)] text-[var(--surface-muted-foreground)] hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]'
                           )}
                         >
-                          <DropdownMenuTrigger asChild>
-                            <button type="button" tabIndex={-1} aria-label={t('filesView.editor.tabMenu.openAria')} style={{ left: editorTabMenu?.x ?? 0, top: editorTabMenu?.y ?? 0 }} className="pointer-events-none fixed size-px opacity-0" />
-                          </DropdownMenuTrigger>
+                          {renderEditorTabMenuTrigger()}
                           <FileTypeIcon filePath={file.path} extension={file.extension} className="size-3.5 flex-shrink-0" />
                           <button
                             type="button"

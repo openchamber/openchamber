@@ -948,7 +948,6 @@ export const dict: Record<I18nKey, string> = {
   'filesView.editor.back': '返回',
   'filesView.editor.openFilesAria': '開啟檔案清單',
   'filesView.editor.closeFileAria': '關閉 {name}',
-  'filesView.editor.tabMenu.openAria': '開啟分頁操作',
   'filesView.editor.tabMenu.close': '關閉',
   'filesView.editor.tabMenu.closeAll': '全部關閉',
   'filesView.editor.tabMenu.closeAllRight': '關閉右側全部',

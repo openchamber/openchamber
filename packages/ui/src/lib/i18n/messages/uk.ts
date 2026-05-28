@@ -950,7 +950,6 @@ export const dict: Record<I18nKey, string> = {
   "filesView.editor.back": "Назад",
   "filesView.editor.openFilesAria": "Відкрити файли",
   "filesView.editor.closeFileAria": "Закрити {name}",
-  "filesView.editor.tabMenu.openAria": "Відкрити дії вкладки",
   "filesView.editor.tabMenu.close": "Закрити",
   "filesView.editor.tabMenu.closeAll": "Закрити все",
   "filesView.editor.tabMenu.closeAllRight": "Закрити все праворуч",
