@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
@@ -51,7 +52,7 @@ import { useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
-import { Icon } from "@/components/icon/Icon";
+import { Icon } from '@/components/icon/Icon';
 import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import { openDesktopFileInApp, openDesktopPath } from '@/lib/desktop';
@@ -76,6 +77,12 @@ type FileStatSnapshot = {
 type SelectedLineRange = {
   start: number;
   end: number;
+};
+
+type EditorTabMenuState = {
+  path: string;
+  x: number;
+  y: number;
 };
 
 const getParentDirectoryPath = (path: string): string => {
@@ -800,8 +807,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const [confirmDiscardOpen, setConfirmDiscardOpen] = React.useState(false);
   const pendingSelectFileRef = React.useRef<FileNode | null>(null);
   const pendingTabRef = React.useRef<import('@/stores/useUIStore').MainTab | null>(null);
-  const pendingClosePathRef = React.useRef<string | null>(null);
+  const pendingClosePathsRef = React.useRef<string[] | null>(null);
   const skipDirtyOnceRef = React.useRef(false);
+  const editorTabLongPressTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const editorTabLongPressTriggeredRef = React.useRef(false);
   const copiedContentTimeoutRef = React.useRef<number | null>(null);
   const copiedPathTimeoutRef = React.useRef<number | null>(null);
   const editorViewRef = React.useRef<EditorView | null>(null);
@@ -816,6 +825,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         window.cancelAnimationFrame(pendingNavigationRafRef.current);
         pendingNavigationRafRef.current = null;
       }
+      if (editorTabLongPressTimerRef.current !== null) {
+        clearTimeout(editorTabLongPressTimerRef.current);
+        editorTabLongPressTimerRef.current = null;
+      }
     };
   }, []);
 
@@ -824,6 +837,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const [dialogInputValue, setDialogInputValue] = React.useState('');
   const [isDialogSubmitting, setIsDialogSubmitting] = React.useState(false);
   const [contextMenuPath, setContextMenuPath] = React.useState<string | null>(null);
+  const [editorTabMenu, setEditorTabMenu] = React.useState<EditorTabMenuState | null>(null);
+  const [mobileOpenFilesMenuOpen, setMobileOpenFilesMenuOpen] = React.useState(false);
+  const [mobileOpenFilesMenuInteracted, setMobileOpenFilesMenuInteracted] = React.useState(false);
   const [copiedContent, setCopiedContent] = React.useState(false);
   const [copiedPath, setCopiedPath] = React.useState(false);
   const [isGoToLineOpen, setIsGoToLineOpen] = React.useState(false);
@@ -1861,11 +1877,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const discardAndContinue = React.useCallback(() => {
     const nextFile = pendingSelectFileRef.current;
     const nextTab = pendingTabRef.current;
-    const closePath = pendingClosePathRef.current;
+    const closePaths = pendingClosePathsRef.current;
 
     pendingSelectFileRef.current = null;
     pendingTabRef.current = null;
-    pendingClosePathRef.current = null;
+    pendingClosePathsRef.current = null;
 
     // Allow one guarded navigation (tab/file) without re-opening dialog.
     skipDirtyOnceRef.current = true;
@@ -1875,11 +1891,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     // Discard draft by reverting back to last loaded content
     setDraftContent(displayedContent);
 
-    if (closePath) {
+    if (closePaths) {
       if (root) {
-        removeOpenPath(root, closePath);
+        closePaths.forEach((closePath) => removeOpenPath(root, closePath));
       }
-      if (selectedFile?.path === closePath) {
+      if (selectedFile?.path && closePaths.includes(selectedFile.path)) {
         if (nextFile) {
           void handleSelectFile(nextFile);
         } else {
@@ -1912,7 +1928,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const saveAndContinue = React.useCallback(async () => {
     const nextFile = pendingSelectFileRef.current;
     const nextTab = pendingTabRef.current;
-    const closePath = pendingClosePathRef.current;
+    const closePaths = pendingClosePathsRef.current;
 
     const saved = await saveDraft();
     if (!saved) {
@@ -1922,18 +1938,18 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
     pendingSelectFileRef.current = null;
     pendingTabRef.current = null;
-    pendingClosePathRef.current = null;
+    pendingClosePathsRef.current = null;
 
     // We'll proceed after saving; suppress guard reopening.
     skipDirtyOnceRef.current = true;
 
     setConfirmDiscardOpen(false);
 
-    if (closePath) {
+    if (closePaths) {
       if (root) {
-        removeOpenPath(root, closePath);
+        closePaths.forEach((closePath) => removeOpenPath(root, closePath));
       }
-      if (selectedFile?.path === closePath) {
+      if (selectedFile?.path && closePaths.includes(selectedFile.path)) {
         if (nextFile) {
           await handleSelectFile(nextFile);
         } else {
@@ -1970,7 +1986,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     if (isActive && isDirty) {
       setConfirmDiscardOpen(true);
       pendingSelectFileRef.current = nextFile;
-      pendingClosePathRef.current = path;
+      pendingClosePathsRef.current = [path];
       return;
     }
 
@@ -1998,6 +2014,81 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       setShowMobilePageContent(false);
     }
   }, [getNextOpenFile, handleSelectFile, isDirty, isMobile, openFiles, removeOpenPath, root, selectedFile?.path, setSelectedPath]);
+
+  const handleCloseFiles = React.useCallback((paths: string[]) => {
+    if (!root || paths.length === 0) {
+      return;
+    }
+
+    const uniquePaths = Array.from(new Set(paths));
+    const selectedPath = selectedFile?.path ?? null;
+    const isClosingSelected = selectedPath ? uniquePaths.includes(selectedPath) : false;
+    const nextFile = isClosingSelected ? (openFiles.find((file) => !uniquePaths.includes(file.path)) ?? null) : null;
+
+    if (isClosingSelected && isDirty) {
+      setConfirmDiscardOpen(true);
+      pendingSelectFileRef.current = nextFile;
+      pendingClosePathsRef.current = uniquePaths;
+      return;
+    }
+
+    uniquePaths.forEach((path) => removeOpenPath(root, path));
+
+    if (!isClosingSelected) {
+      return;
+    }
+
+    if (nextFile) {
+      void handleSelectFile(nextFile);
+      return;
+    }
+
+    setSelectedPath(root, null);
+    setFileContent('');
+    setFileError(null);
+    setDesktopImageSrc('');
+    setLoadedFilePath(null);
+    if (isMobile) {
+      setShowMobilePageContent(false);
+    }
+  }, [handleSelectFile, isDirty, isMobile, openFiles, removeOpenPath, root, selectedFile?.path, setSelectedPath]);
+
+  const clearEditorTabLongPress = React.useCallback(() => {
+    if (editorTabLongPressTimerRef.current !== null) {
+      clearTimeout(editorTabLongPressTimerRef.current);
+      editorTabLongPressTimerRef.current = null;
+    }
+  }, []);
+
+  const startEditorTabPointerLongPress = React.useCallback((event: React.PointerEvent, path: string, keepOpenFilesMenuOpen = false) => {
+    if (event.pointerType === 'mouse') {
+      return;
+    }
+
+    if (!isMobile) {
+      return;
+    }
+
+    clearEditorTabLongPress();
+    editorTabLongPressTriggeredRef.current = false;
+    const { clientX, clientY } = event;
+    editorTabLongPressTimerRef.current = setTimeout(() => {
+      editorTabLongPressTriggeredRef.current = true;
+      setMobileOpenFilesMenuOpen(keepOpenFilesMenuOpen);
+      setEditorTabMenu({ path, x: clientX, y: clientY });
+    }, 550);
+  }, [clearEditorTabLongPress, isMobile]);
+
+  const handleEditorTabClickAfterLongPress = React.useCallback((event: React.SyntheticEvent) => {
+    if (!editorTabLongPressTriggeredRef.current) {
+      return false;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    editorTabLongPressTriggeredRef.current = false;
+    return true;
+  }, []);
 
   const getFileStatus = React.useCallback((path: string): FileStatus | null => {
     // Check open status
@@ -2676,6 +2767,68 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     );
   }, [currentTheme.metadata.variant, pierreTheme, wrapLines]);
 
+  const renderEditorTabContextMenu = (file: FileNode, tabFiles = openFiles) => {
+    const tabIndex = tabFiles.findIndex((item) => item.path === file.path);
+    const leftPaths = tabIndex > 0 ? tabFiles.slice(0, tabIndex).map((item) => item.path) : [];
+    const rightPaths = tabIndex >= 0 ? tabFiles.slice(tabIndex + 1).map((item) => item.path) : [];
+    const relativePath = getDisplayPath(root, file.path) || file.path;
+
+    return (
+      <DropdownMenuContent align="start" className="w-56" onCloseAutoFocus={() => setEditorTabMenu(null)}>
+        <DropdownMenuItem onClick={() => handleCloseFile(file.path)}>
+          <Icon name="close" className="mr-2 size-4" />
+          {t('filesView.editor.tabMenu.close')}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => handleCloseFiles(tabFiles.map((item) => item.path))}>
+          <Icon name="close-circle" className="mr-2 size-4" />
+          {t('filesView.editor.tabMenu.closeAll')}
+        </DropdownMenuItem>
+        <DropdownMenuItem disabled={rightPaths.length === 0} onClick={() => handleCloseFiles(rightPaths)}>
+          <Icon name="arrow-right" className="mr-2 size-4" />
+          {t('filesView.editor.tabMenu.closeAllRight')}
+        </DropdownMenuItem>
+        <DropdownMenuItem disabled={leftPaths.length === 0} onClick={() => handleCloseFiles(leftPaths)}>
+          <Icon name="arrow-left" className="mr-2 size-4" />
+          {t('filesView.editor.tabMenu.closeAllLeft')}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => {
+          void copyTextToClipboard(file.path).then((result) => {
+            if (result.ok) {
+              toast.success(t('sidebarFilesTree.toast.pathCopied'));
+              return;
+            }
+            toast.error(t('sidebarFilesTree.toast.copyFailed'));
+          });
+        }}>
+          <Icon name="file-copy" className="mr-2 size-4" />
+          {t('sidebarFilesTree.menu.copyPath')}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => {
+          void copyTextToClipboard(relativePath).then((result) => {
+            if (result.ok) {
+              toast.success(t('filesView.toast.relativePathCopied'));
+              return;
+            }
+            toast.error(t('sidebarFilesTree.toast.copyFailed'));
+          });
+        }}>
+          <Icon name="file-copy-2" className="mr-2 size-4" />
+          {t('filesView.tree.menu.copyRelativePath')}
+        </DropdownMenuItem>
+        {files.downloadFile && (
+          <DropdownMenuItem onClick={() => {
+            const fn = files.downloadFile;
+            if (fn) void fn(file.path);
+          }}>
+            <Icon name="download" className="mr-2 size-4" />
+            {t('filesView.editor.saveFile')}
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    );
+  };
+
   const renderFloatingFileControls = ({ exitFullscreenOnly = false }: { exitFullscreenOnly?: boolean } = {}) => {
     if (!selectedFile) {
       return null;
@@ -2992,6 +3145,25 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     );
   };
 
+  const editorTabContextFile = editorTabMenu ? (openFiles.find((file) => file.path === editorTabMenu.path) ?? null) : null;
+  const editorTabMenuPositionKey = editorTabMenu ? `${editorTabMenu.path}:${editorTabMenu.x}:${editorTabMenu.y}` : 'closed';
+  const mobileOpenFiles = selectedFile ? openFiles.filter((file) => file.path !== selectedFile.path) : openFiles;
+  const mobileEditorTabOrder = selectedFile ? [selectedFile, ...mobileOpenFiles] : openFiles;
+  const hasMobileOpenFiles = mobileOpenFiles.length > 0;
+  const renderEditorTabMenuTrigger = () => {
+    const trigger = (
+      <DropdownMenuTrigger asChild>
+        <button type="button" tabIndex={-1} aria-hidden="true" style={{ left: editorTabMenu?.x ?? 0, top: editorTabMenu?.y ?? 0, width: 0, height: 0, minWidth: 0, minHeight: 0, padding: 0, border: 0 }} className="pointer-events-none fixed opacity-0" />
+      </DropdownMenuTrigger>
+    );
+
+    if (typeof document === 'undefined') {
+      return trigger;
+    }
+
+    return createPortal(trigger, document.body);
+  };
+
   const fileViewer = (
     <div
       className="relative flex h-full min-h-0 min-w-0 w-full flex-col overflow-hidden"
@@ -3039,65 +3211,128 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
           {isMobile ? (
             selectedFile ? (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    type="button"
-                    className="inline-flex min-w-0 max-w-full items-center gap-1 text-left typography-ui-label font-medium"
-                    aria-label={t('filesView.editor.openFilesAria')}
-                  >
-                    <FileTypeIcon filePath={selectedFile.path} extension={selectedFile.extension} className="size-3.5 flex-shrink-0" />
-                    <ScrollingFileName name={selectedFile.name} />
-                    <Icon name="arrow-down-s" className="size-4 flex-shrink-0 text-muted-foreground" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-[min(24rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)]">
-                  {openFiles.map((file) => {
-                    const isActive = selectedFile?.path === file.path;
-                    return (
-                      <DropdownMenuItem
-                        key={file.path}
-                        onSelect={(event) => {
-                          const target = event.target as HTMLElement;
-                          if (target.closest('[data-close-open-file]')) {
-                            event.preventDefault();
-                            return;
-                          }
-                          if (!isActive) {
-                            void handleSelectFile(file);
-                          }
-                        }}
-                        className={cn(
-                          'flex min-w-0 items-center justify-between gap-2 overflow-hidden',
-                          isActive && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]'
-                        )}
-                      >
-                        <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-                          <FileTypeIcon filePath={file.path} extension={file.extension} className="size-3.5 flex-shrink-0" />
-                          <ScrollingFileName name={file.name} />
-                        </span>
-                        <button
-                          type="button"
-                          data-close-open-file
+              <div className="relative flex min-w-0 flex-1 items-center">
+                <DropdownMenu key={editorTabMenuPositionKey} open={Boolean(editorTabContextFile)} onOpenChange={(open) => setEditorTabMenu(open ? editorTabMenu : null)}>
+                  {renderEditorTabMenuTrigger()}
+                  {editorTabContextFile ? renderEditorTabContextMenu(editorTabContextFile, mobileEditorTabOrder) : null}
+                </DropdownMenu>
+                <DropdownMenu open={mobileOpenFilesMenuOpen && hasMobileOpenFiles} onOpenChange={(open) => {
+                  setMobileOpenFilesMenuOpen(open && hasMobileOpenFiles);
+                  setMobileOpenFilesMenuInteracted(false);
+                }}>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      className="inline-flex min-w-0 flex-1 items-center gap-1 text-left typography-ui-label font-medium"
+                      aria-label={t('filesView.editor.openFilesAria')}
+                      onPointerDown={(event) => startEditorTabPointerLongPress(event, selectedFile.path)}
+                      onPointerUp={clearEditorTabLongPress}
+                      onPointerCancel={clearEditorTabLongPress}
+                      onContextMenu={(event) => {
+                        if (!isMobile) {
+                          return;
+                        }
+                        event.preventDefault();
+                        event.stopPropagation();
+                        clearEditorTabLongPress();
+                        setEditorTabMenu({ path: selectedFile.path, x: event.clientX, y: event.clientY });
+                      }}
+                      onClick={(event) => {
+                        handleEditorTabClickAfterLongPress(event);
+                      }}
+                    >
+                      <FileTypeIcon filePath={selectedFile.path} extension={selectedFile.extension} className="size-3.5 flex-shrink-0" />
+                      <ScrollingFileName name={selectedFile.name} />
+                      <Icon name="arrow-down-s" className="size-4 flex-shrink-0 text-muted-foreground" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-[min(24rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)]" onKeyDown={() => setMobileOpenFilesMenuInteracted(true)}>
+                    {mobileOpenFiles.map((file) => {
+                      const isContextTarget = editorTabMenu?.path === file.path;
+                      return (
+                        <DropdownMenuItem
+                          key={file.path}
+                          onPointerMove={() => setMobileOpenFilesMenuInteracted(true)}
                           onPointerDown={(event) => {
+                            const target = event.target as HTMLElement;
+                            if (target.closest('[data-close-open-file]')) {
+                              return;
+                            }
+                            startEditorTabPointerLongPress(event, file.path, true);
+                          }}
+                          onPointerUp={clearEditorTabLongPress}
+                          onPointerCancel={clearEditorTabLongPress}
+                          onContextMenu={(event) => {
+                            const target = event.target as HTMLElement;
+                            if (target.closest('[data-close-open-file]')) {
+                              return;
+                            }
                             event.preventDefault();
                             event.stopPropagation();
+                            clearEditorTabLongPress();
+                            setMobileOpenFilesMenuOpen(true);
+                            setEditorTabMenu({ path: file.path, x: event.clientX, y: event.clientY });
                           }}
-                          onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            handleCloseFile(file.path);
+                          onSelect={(event) => {
+                            if (handleEditorTabClickAfterLongPress(event)) {
+                              return;
+                            }
+                            const target = event.target as HTMLElement;
+                            if (target.closest('[data-close-open-file]')) {
+                              event.preventDefault();
+                              return;
+                            }
+                            void handleSelectFile(file);
                           }}
-                          className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-[var(--surface-muted-foreground)] hover:text-[var(--surface-foreground)]"
-                          aria-label={t('filesView.editor.closeFileAria', { name: file.name })}
+                          className={cn(
+                            'flex min-w-0 items-center justify-between gap-2 overflow-hidden',
+                            !mobileOpenFilesMenuInteracted && !isContextTarget && 'data-[highlighted]:!bg-transparent',
+                            isContextTarget && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]'
+                          )}
                         >
-                          <Icon name="close" className="size-3.5" />
-                        </button>
-                      </DropdownMenuItem>
-                    );
-                  })}
-                </DropdownMenuContent>
-              </DropdownMenu>
+                          <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+                            <FileTypeIcon filePath={file.path} extension={file.extension} className="size-3.5 flex-shrink-0" />
+                            <ScrollingFileName name={file.name} />
+                          </span>
+                          <button
+                            type="button"
+                            data-close-open-file
+                            onPointerDown={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                            }}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              handleCloseFile(file.path);
+                            }}
+                            className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-[var(--surface-muted-foreground)] hover:text-[var(--surface-foreground)]"
+                            aria-label={t('filesView.editor.closeFileAria', { name: file.name })}
+                          >
+                            <Icon name="close" className="size-3.5" />
+                          </button>
+                        </DropdownMenuItem>
+                      );
+                    })}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <button
+                  type="button"
+                  onPointerDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    handleCloseFile(selectedFile.path);
+                  }}
+                  className="mr-1 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-[var(--surface-muted-foreground)] hover:text-[var(--surface-foreground)]"
+                  aria-label={t('filesView.editor.closeFileAria', { name: selectedFile.name })}
+                >
+                  <Icon name="close" className="size-3.5" />
+                </button>
+              </div>
             ) : (
               <div className="typography-ui-label font-medium truncate">{t('filesView.editor.selectFile')}</div>
             )
@@ -3118,43 +3353,51 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                   {openFiles.map((file) => {
                     const isActive = selectedFile?.path === file.path;
                     return (
-                      <div
-                        key={file.path}
-                        title={getDisplayPath(root, file.path)}
-                        className={cn(
-                          'group inline-flex items-center gap-1 rounded-md border px-2 py-1 typography-ui-label transition-colors whitespace-nowrap',
-                          isActive
-                            ? 'bg-[var(--interactive-selection)] border-[var(--primary-muted)] text-[var(--interactive-selection-foreground)]'
-                            : 'bg-transparent border-[var(--interactive-border)] text-[var(--surface-muted-foreground)] hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]'
-                        )}
-                      >
-                        <FileTypeIcon filePath={file.path} extension={file.extension} className="size-3.5 flex-shrink-0" />
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (!isActive) {
-                              void handleSelectFile(file);
-                            }
-                          }}
-                          className="max-w-[12rem] truncate text-left"
-                        >
-                          {file.name}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(event) => {
+                      <DropdownMenu key={`${file.path}:${editorTabMenu?.path === file.path ? editorTabMenuPositionKey : 'closed'}`} open={editorTabMenu?.path === file.path} onOpenChange={(open) => setEditorTabMenu(open ? (editorTabMenu ?? { path: file.path, x: 0, y: 0 }) : null)}>
+                        <div
+                          title={getDisplayPath(root, file.path)}
+                          onContextMenu={(event) => {
+                            event.preventDefault();
                             event.stopPropagation();
-                            handleCloseFile(file.path);
+                            setEditorTabMenu({ path: file.path, x: event.clientX, y: event.clientY });
                           }}
                           className={cn(
-                            'rounded-sm p-0.5 text-[var(--surface-muted-foreground)] hover:text-[var(--surface-foreground)]',
-                            !isActive && !alwaysShowActions && 'opacity-0 group-hover:opacity-100'
+                            'group relative inline-flex items-center gap-1 rounded-md border px-2 py-1 typography-ui-label transition-colors whitespace-nowrap',
+                            isActive
+                              ? 'bg-[var(--interactive-selection)] border-[var(--primary-muted)] text-[var(--interactive-selection-foreground)]'
+                              : 'bg-transparent border-[var(--interactive-border)] text-[var(--surface-muted-foreground)] hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]'
                           )}
-                          aria-label={t('filesView.editor.closeFileAria', { name: file.name })}
                         >
-                          <Icon name="close" className="size-3.5" />
-                        </button>
-                      </div>
+                          {renderEditorTabMenuTrigger()}
+                          <FileTypeIcon filePath={file.path} extension={file.extension} className="size-3.5 flex-shrink-0" />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!isActive) {
+                                void handleSelectFile(file);
+                              }
+                            }}
+                            className="max-w-[12rem] truncate text-left"
+                          >
+                            {file.name}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleCloseFile(file.path);
+                            }}
+                            className={cn(
+                              'rounded-sm p-0.5 text-[var(--surface-muted-foreground)] hover:text-[var(--surface-foreground)]',
+                              !isActive && !alwaysShowActions && 'opacity-0 group-hover:opacity-100'
+                            )}
+                            aria-label={t('filesView.editor.closeFileAria', { name: file.name })}
+                          >
+                            <Icon name="close" className="size-3.5" />
+                          </button>
+                        </div>
+                        {renderEditorTabContextMenu(file)}
+                      </DropdownMenu>
                     );
                   })}
                 </div>
