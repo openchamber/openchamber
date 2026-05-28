@@ -36,6 +36,10 @@ import type {
   GitRemote,
   GitRebaseResult,
   GitMergeResult,
+  CheckoutCommitResponse,
+  CherryPickResponse,
+  RevertCommitResponse,
+  ResetToCommitResponse,
 } from '@openchamber/ui/lib/api/types';
 
 export const createVSCodeGitAPI = (): GitAPI => ({
@@ -277,6 +281,7 @@ export const createVSCodeGitAPI = (): GitAPI => ({
       from: options?.from,
       to: options?.to,
       file: options?.file,
+      all: options?.all,
     });
   },
 
@@ -363,6 +368,22 @@ export const createVSCodeGitAPI = (): GitAPI => ({
 
   continueMerge: async (directory: string): Promise<{ success: boolean; conflict: boolean; conflictFiles?: string[] }> => {
     return sendBridgeMessage<{ success: boolean; conflict: boolean; conflictFiles?: string[] }>('api:git/merge/continue', { directory });
+  },
+
+  checkoutCommit: async (directory: string, hash: string): Promise<CheckoutCommitResponse> => {
+    return sendBridgeMessage<CheckoutCommitResponse>('api:git/checkout-commit', { directory, hash });
+  },
+
+  cherryPick: async (directory: string, hash: string): Promise<CherryPickResponse> => {
+    return sendBridgeMessage<CherryPickResponse>('api:git/cherry-pick', { directory, hash });
+  },
+
+  revertCommit: async (directory: string, hash: string): Promise<RevertCommitResponse> => {
+    return sendBridgeMessage<RevertCommitResponse>('api:git/revert-commit', { directory, hash });
+  },
+
+  resetToCommit: async (directory: string, hash: string, mode: 'soft' | 'mixed' | 'hard', force?: boolean): Promise<ResetToCommitResponse> => {
+    return sendBridgeMessage<ResetToCommitResponse>('api:git/reset-to-commit', { directory, hash, mode, force });
   },
 
   stash: async (

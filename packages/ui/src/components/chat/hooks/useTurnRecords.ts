@@ -22,9 +22,14 @@ export const useTurnRecords = (
     const staticTurnsRef = React.useRef<TurnRecord[]>([]);
     const streamingTurnRef = React.useRef<TurnRecord | undefined>(undefined);
     const previousSessionKeyRef = React.useRef<string | undefined>(options.sessionKey);
+    const previousShowTextJustificationActivityRef = React.useRef(options.showTextJustificationActivity);
 
-    if (previousSessionKeyRef.current !== options.sessionKey) {
+    if (
+        previousSessionKeyRef.current !== options.sessionKey
+        || previousShowTextJustificationActivityRef.current !== options.showTextJustificationActivity
+    ) {
         previousSessionKeyRef.current = options.sessionKey;
+        previousShowTextJustificationActivityRef.current = options.showTextJustificationActivity;
         previousProjectionRef.current = null;
         staticTurnsRef.current = [];
         streamingTurnRef.current = undefined;

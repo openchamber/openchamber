@@ -792,6 +792,85 @@ export function registerGitRoutes(app) {
     }
   });
 
+  app.post('/api/git/checkout-commit', async (req, res) => {
+    const { checkoutCommit } = await getGitLibraries();
+    try {
+      const directory = req.query.directory;
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+      const { hash } = req.body;
+      if (!req.body.hash || typeof req.body.hash !== 'string' || !/^[0-9a-fA-F]{7,40}$/.test(req.body.hash)) {
+        return res.status(400).json({ error: 'Invalid commit hash' });
+      }
+      const result = await checkoutCommit(directory, hash);
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to checkout commit:', error);
+      res.status(500).json({ error: error.message || 'Failed to checkout commit' });
+    }
+  });
+
+  app.post('/api/git/cherry-pick', async (req, res) => {
+    const { cherryPick } = await getGitLibraries();
+    try {
+      const directory = req.query.directory;
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+      const { hash } = req.body;
+      if (!req.body.hash || typeof req.body.hash !== 'string' || !/^[0-9a-fA-F]{7,40}$/.test(req.body.hash)) {
+        return res.status(400).json({ error: 'Invalid commit hash' });
+      }
+      const result = await cherryPick(directory, hash);
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to cherry-pick:', error);
+      res.status(500).json({ error: error.message || 'Failed to cherry-pick' });
+    }
+  });
+
+  app.post('/api/git/revert-commit', async (req, res) => {
+    const { revertCommit } = await getGitLibraries();
+    try {
+      const directory = req.query.directory;
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+      const { hash } = req.body;
+      if (!req.body.hash || typeof req.body.hash !== 'string' || !/^[0-9a-fA-F]{7,40}$/.test(req.body.hash)) {
+        return res.status(400).json({ error: 'Invalid commit hash' });
+      }
+      const result = await revertCommit(directory, hash);
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to revert commit:', error);
+      res.status(500).json({ error: error.message || 'Failed to revert commit' });
+    }
+  });
+
+  app.post('/api/git/reset-to-commit', async (req, res) => {
+    const { resetToCommit } = await getGitLibraries();
+    try {
+      const directory = req.query.directory;
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+      const { hash, mode, force } = req.body;
+      if (!req.body.hash || typeof req.body.hash !== 'string' || !/^[0-9a-fA-F]{7,40}$/.test(req.body.hash)) {
+        return res.status(400).json({ error: 'Invalid commit hash' });
+      }
+      if (!['soft', 'mixed', 'hard'].includes(mode)) {
+        return res.status(400).json({ error: 'mode must be soft, mixed, or hard' });
+      }
+      const result = await resetToCommit(directory, hash, mode, force === true);
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to reset to commit:', error);
+      res.status(500).json({ error: error.message || 'Failed to reset' });
+    }
+  });
+
   app.get('/api/git/worktrees', async (req, res) => {
     const { getWorktrees } = await getGitLibraries();
     try {
@@ -982,11 +1061,13 @@ export function registerGitRoutes(app) {
       }
 
       const { maxCount, from, to, file } = req.query;
+      const all = req.query.all === 'true';
       const log = await getLog(directory, {
         maxCount: maxCount ? parseInt(maxCount) : undefined,
         from,
         to,
-        file
+        file,
+        all
       });
       res.json(log);
     } catch (error) {

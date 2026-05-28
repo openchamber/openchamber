@@ -34,8 +34,8 @@ const cleanReasoningText = (text: string): string => {
 };
 
 const SUMMARY_MAX_CHARS = 80;
-const EXPANDED_CONTENT_UNMOUNT_DELAY_MS = 350;
-const EXPANDED_CONTENT_SPRING = { type: 'spring' as const, visualDuration: 0.35, bounce: 0 };
+const EXPANDED_CONTENT_UNMOUNT_DELAY_MS = 200;
+const EXPANDED_CONTENT_TRANSITION = { duration: 0.2, ease: 'easeOut' as const };
 
 /** Strip common markdown syntax so the header preview reads as plain text. */
 const stripMarkdown = (text: string): string =>
@@ -202,19 +202,17 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
             contentMountedRef.current = true;
             if (!isExpanded) {
                 element.style.height = '0px';
-                element.style.opacity = '0';
                 element.style.overflow = 'hidden';
                 return;
             }
 
             element.style.height = '0px';
-            element.style.opacity = '0';
             element.style.overflow = 'hidden';
 
             const animation = animate(
                 element,
-                { height: 'auto', opacity: 1 },
-                EXPANDED_CONTENT_SPRING,
+                { height: 'auto' },
+                EXPANDED_CONTENT_TRANSITION,
             );
             contentAnimationRef.current = animation;
 
@@ -239,16 +237,14 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
 
         if (isExpanded) {
             element.style.height = '0px';
-            element.style.opacity = '0';
         } else {
             element.style.height = `${element.scrollHeight}px`;
-            element.style.opacity = '1';
         }
 
         const animation = animate(
             element,
-            { height: isExpanded ? 'auto' : '0px', opacity: isExpanded ? 1 : 0 },
-            EXPANDED_CONTENT_SPRING,
+            { height: isExpanded ? 'auto' : '0px' },
+            EXPANDED_CONTENT_TRANSITION,
         );
         contentAnimationRef.current = animation;
 
@@ -366,12 +362,18 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                     aria-hidden={!isExpanded}
                     style={{
                         height: isExpanded ? 'auto' : '0px',
-                        opacity: isExpanded ? 1 : 0,
                         overflow: isExpanded ? 'visible' : 'hidden',
                         overflowAnchor: 'none',
                     }}
                 >
-                    <div className="relative ml-2 pl-3 pb-1 pt-0.5">
+                    <div
+                        className="relative ml-2 pl-3 pb-1 pt-0.5"
+                        style={{
+                            opacity: isExpanded ? 1 : 0,
+                            transform: isExpanded ? 'translateY(0)' : 'translateY(-4px)',
+                            transition: 'opacity 180ms ease-out, transform 180ms ease-out',
+                        }}
+                    >
                         <span
                             aria-hidden="true"
                             className="pointer-events-none absolute left-0 top-0 bottom-0 w-px"

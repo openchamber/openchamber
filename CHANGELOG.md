@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.11.7] - 2026-05-27
+
+- Git: commit history now includes a branch graph and commit-row actions in the history modal (thanks to @ermanhavuc).
+- Desktop: added a launch-at-startup setting, and collapsed browser windows now keep their webview state.
+- UI/Localization: added Traditional Chinese interface translations (thanks to @Jia35).
+- Chat/Input: selecting an agent now switches to that agent's configured model, and malformed tool diffs no longer break chat rendering (thanks to @Adrian-Eckardt).
+- Sessions: inline session renaming no longer exits immediately after focus changes (thanks to @youfch).
+- Notes/Todos: completed todos stay at the end of the list, and the send-to-session dialog has a cleaner model picker (thanks to @kostazol, @rghamilton3).
+- Usage: added a setting to hide prediction rows on usage cards (thanks to @ermanhavuc).
+- VSCode: restored live streaming in the extension.
+
 ## [1.11.6] - 2026-05-25
 
 - Settings/Plugins: added a Plugins page for managing opencode plugins, with npm update checks and user/project scopes (thanks to @Quat3rnion).

@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { animate, type AnimationPlaybackControls } from 'motion';
+import type { AnimationPlaybackControls } from 'motion';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { PatchDiff } from '@pierre/diffs/react';
 import { cn } from '@/lib/utils';
@@ -197,8 +197,7 @@ const LiveDuration: React.FC<{ start: number; end?: number; active: boolean }> =
     return <>{formatDuration(start, end, now)}</>;
 };
 
-const EXPANDED_CONTENT_TRANSITION_MS = 350;
-const EXPANDED_CONTENT_SPRING = { type: 'spring' as const, visualDuration: 0.35, bounce: 0 };
+const EXPANDED_CONTENT_TRANSITION_MS = 0;
 
 const useAnimatedExpandedContent = (isExpanded: boolean) => {
     const [shouldRender, setShouldRender] = React.useState(isExpanded);
@@ -729,7 +728,6 @@ const ToolScrollableSection: React.FC<ToolScrollableSectionProps> = ({
                 disableHorizontal ? 'overflow-y-auto overflow-x-hidden' : 'overflow-auto',
                 className,
             )}
-           
         >
             <div className="w-full min-w-0">
                 {children}
@@ -1872,55 +1870,15 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
             return;
         }
 
+        expandedContentMountedRef.current = true;
         expandedContentAnimationRef.current?.stop();
+        expandedContentAnimationRef.current = null;
+        element.style.height = isExpanded ? 'auto' : '0px';
+        element.style.overflow = isExpanded ? 'visible' : 'hidden';
 
-        if (!expandedContentMountedRef.current) {
-            expandedContentMountedRef.current = true;
-            element.style.height = isExpanded ? 'auto' : '0px';
-            element.style.opacity = isExpanded ? '1' : '0';
-            element.style.overflow = isExpanded ? 'visible' : 'hidden';
-            return;
+        if (shouldNotifyStructuralChange) {
+            onContentChangeRef.current?.('structural');
         }
-
-        element.style.overflow = 'hidden';
-
-        if (isExpanded) {
-            element.style.height = '0px';
-            element.style.opacity = '0';
-        } else {
-            element.style.height = `${element.scrollHeight}px`;
-            element.style.opacity = '1';
-        }
-
-        const animation = animate(
-            element,
-            { height: isExpanded ? 'auto' : '0px', opacity: isExpanded ? 1 : 0 },
-            EXPANDED_CONTENT_SPRING,
-        );
-        expandedContentAnimationRef.current = animation;
-
-        void animation.finished.then(() => {
-            if (expandedContentAnimationRef.current !== animation) {
-                return;
-            }
-            expandedContentAnimationRef.current = null;
-            if (isExpanded) {
-                element.style.overflow = 'visible';
-                element.style.height = 'auto';
-            } else {
-                element.style.overflow = 'hidden';
-            }
-            if (shouldNotifyStructuralChange) {
-                onContentChangeRef.current?.('structural');
-            }
-        }).catch(() => undefined);
-
-        return () => {
-            animation.stop();
-            if (expandedContentAnimationRef.current === animation) {
-                expandedContentAnimationRef.current = null;
-            }
-        };
     }, [isExpanded, isTaskTool, shouldNotifyStructuralChange]);
 
     React.useEffect(() => {
@@ -2726,13 +2684,18 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                     aria-hidden={!isExpanded}
                     style={{
                         height: isExpanded ? 'auto' : '0px',
-                        opacity: isExpanded ? 1 : 0,
                         overflow: isExpanded ? 'visible' : 'hidden',
                         overflowAnchor: 'none',
                     }}
                 >
                     {shouldRenderExpandedContent ? (
-                        <div className="relative ml-2 pl-3">
+                        <div
+                            className="relative ml-2 pl-3"
+                            style={{
+                                opacity: isExpanded ? 1 : 0,
+                                transform: isExpanded ? 'translateY(0)' : 'translateY(-4px)',
+                            }}
+                        >
                             <span
                                 aria-hidden="true"
                                 className="pointer-events-none absolute left-0 top-px bottom-0 w-px"

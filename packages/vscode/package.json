@@ -2,7 +2,7 @@
   "name": "openchamber",
   "displayName": "OpenChamber",
   "description": "AI coding assistant powered by OpenCode",
-  "version": "1.11.6",
+  "version": "1.11.7",
   "publisher": "fedaykindev",
   "private": true,
   "repository": {
@@ -228,7 +228,7 @@
     "watch:extension": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch --sourcemap --main-fields=module,main",
     "watch:webview": "vite build --watch",
     "type-check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.webview.json",
-    "lint": "bunx eslint --ext .ts,.tsx src webview",
+    "lint": "bun x eslint --ext .ts,.tsx src webview",
     "package": "vsce package --no-dependencies"
   },
   "devDependencies": {

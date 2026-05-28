@@ -51,6 +51,30 @@ export const createOpenCodeEnvRuntime = (deps) => {
     }
   };
 
+  const resolveWindowsExecutablePath = (candidate) => {
+    if (process.platform !== 'win32' || typeof candidate !== 'string' || candidate.trim().length === 0) {
+      return candidate;
+    }
+
+    const trimmed = candidate.trim();
+    const ext = path.extname(trimmed).toLowerCase();
+    if (ext) {
+      return isExecutable(trimmed) ? trimmed : null;
+    }
+
+    const pathExt = process.env.PATHEXT || process.env.PathExt || '.COM;.EXE;.BAT;.CMD';
+    for (const rawExt of pathExt.split(';')) {
+      const normalizedExt = rawExt.trim();
+      if (!normalizedExt) continue;
+      const withExt = `${trimmed}${normalizedExt.startsWith('.') ? normalizedExt : `.${normalizedExt}`}`;
+      if (isExecutable(withExt)) {
+        return withExt;
+      }
+    }
+
+    return isExecutable(trimmed) ? trimmed : null;
+  };
+
   const searchPathFor = (binaryName) => {
     const trimmed = typeof binaryName === 'string' ? binaryName.trim() : '';
     if (!trimmed) {
@@ -59,7 +83,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
 
     const current = process.env.PATH || '';
     const parts = current.split(path.delimiter).filter(Boolean);
-    const candidateNames = [trimmed];
+    const candidateNames = [];
 
     if (process.platform === 'win32' && !path.extname(trimmed)) {
       const pathExt = process.env.PATHEXT || process.env.PathExt || '.COM;.EXE;.BAT;.CMD';
@@ -72,6 +96,8 @@ export const createOpenCodeEnvRuntime = (deps) => {
         }
       }
     }
+
+    candidateNames.push(trimmed);
 
     for (const dir of parts) {
       for (const candidateName of candidateNames) {
@@ -649,6 +675,9 @@ export const createOpenCodeEnvRuntime = (deps) => {
     if (!trimmed) {
       return null;
     }
+    if (process.platform === 'win32') {
+      return resolveWindowsExecutablePath(trimmed);
+    }
     return isExecutable(trimmed) ? trimmed : null;
   };
 
@@ -669,10 +698,20 @@ export const createOpenCodeEnvRuntime = (deps) => {
       return null;
     }
 
+    const packageShim = path.join(nodeModulesDir, 'opencode-ai', 'bin', 'opencode.exe');
+    if (isExecutable(packageShim)) {
+      return packageShim;
+    }
+
     for (const packageName of getWindowsNativeOpencodePackageNames()) {
-      const candidate = path.join(nodeModulesDir, packageName, 'bin', 'opencode.exe');
-      if (isExecutable(candidate)) {
-        return candidate;
+      const candidates = [
+        path.join(nodeModulesDir, packageName, 'bin', 'opencode.exe'),
+        path.join(nodeModulesDir, 'opencode-ai', 'node_modules', packageName, 'bin', 'opencode.exe'),
+      ];
+      for (const candidate of candidates) {
+        if (isExecutable(candidate)) {
+          return candidate;
+        }
       }
     }
 
@@ -816,6 +855,15 @@ export const createOpenCodeEnvRuntime = (deps) => {
 
       const directBinary = normalizeExecutableCandidate(candidate);
       if (directBinary) {
+        const directExt = path.extname(directBinary).toLowerCase();
+        if (WINDOWS_BATCH_EXTENSIONS.has(directExt)) {
+          return {
+            binary: process.env.ComSpec || 'cmd.exe',
+            args: ['/d', '/s', '/c', 'call', directBinary],
+            wrapperType: 'cmd-wrapper',
+          };
+        }
+
         return {
           binary: directBinary,
           args: [],

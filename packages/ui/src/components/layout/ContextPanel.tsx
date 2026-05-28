@@ -23,7 +23,7 @@ import { Icon } from "@/components/icon/Icon";
 import { OpenChamberLogo } from "@/components/ui/OpenChamberLogo";
 import { invokeDesktopCommand } from '@/lib/desktopNative';
 
-const CONTEXT_PANEL_MIN_WIDTH = 360;
+const CONTEXT_PANEL_MIN_WIDTH = 380;
 const CONTEXT_PANEL_MAX_WIDTH = 1400;
 const CONTEXT_PANEL_DEFAULT_WIDTH = 600;
 const CONTEXT_TAB_LABEL_MAX_CHARS = 24;
@@ -1588,6 +1588,7 @@ export const ContextPanel: React.FC = () => {
   const width = clampWidth(panelState?.width ?? CONTEXT_PANEL_DEFAULT_WIDTH);
 
   const [isResizing, setIsResizing] = React.useState(false);
+  const [suppressWidthTransition, setSuppressWidthTransition] = React.useState(false);
   const startXRef = React.useRef(0);
   const startWidthRef = React.useRef(width);
   const resizingWidthRef = React.useRef<number | null>(null);
@@ -1595,6 +1596,41 @@ export const ContextPanel: React.FC = () => {
   const panelRef = React.useRef<HTMLElement | null>(null);
   const chatFrameRefs = React.useRef<Map<string, HTMLIFrameElement>>(new Map());
   const wasOpenRef = React.useRef(false);
+  const previousIsOpenRef = React.useRef(isOpen);
+  const suppressWidthTransitionFrameRef = React.useRef<number | null>(null);
+
+  const suppressWidthTransitionForFrame = React.useCallback(() => {
+    setSuppressWidthTransition(true);
+    if (suppressWidthTransitionFrameRef.current !== null) {
+      window.cancelAnimationFrame(suppressWidthTransitionFrameRef.current);
+    }
+    suppressWidthTransitionFrameRef.current = window.requestAnimationFrame(() => {
+      suppressWidthTransitionFrameRef.current = null;
+      setSuppressWidthTransition(false);
+    });
+  }, []);
+
+  React.useEffect(() => () => {
+    if (suppressWidthTransitionFrameRef.current !== null) {
+      window.cancelAnimationFrame(suppressWidthTransitionFrameRef.current);
+    }
+  }, []);
+
+  React.useLayoutEffect(() => {
+    const wasOpen = previousIsOpenRef.current;
+    previousIsOpenRef.current = isOpen;
+
+    if (!isOpen) {
+      setSuppressWidthTransition(false);
+      return;
+    }
+
+    if (wasOpen) {
+      return;
+    }
+
+    suppressWidthTransitionForFrame();
+  }, [isOpen, suppressWidthTransitionForFrame]);
 
   React.useEffect(() => {
     if (!isOpen || wasOpenRef.current) {
@@ -1666,11 +1702,13 @@ export const ContextPanel: React.FC = () => {
     }
 
     const finalWidth = clampWidthToAvailableSpace(resizingWidthRef.current ?? width, panelRef.current);
+    suppressWidthTransitionForFrame();
+    applyLiveWidth(finalWidth);
+    resizingWidthRef.current = finalWidth;
+    setContextPanelWidth(directoryKey, finalWidth);
     setIsResizing(false);
     activeResizePointerIDRef.current = null;
-    resizingWidthRef.current = null;
-    setContextPanelWidth(directoryKey, finalWidth);
-  }, [directoryKey, setContextPanelWidth, width]);
+  }, [applyLiveWidth, directoryKey, setContextPanelWidth, suppressWidthTransitionForFrame, width]);
 
   React.useEffect(() => {
     if (!isResizing) {
@@ -1910,36 +1948,44 @@ export const ContextPanel: React.FC = () => {
     </header>
   );
 
-  if (!isOpen) {
-    return null;
-  }
-
-  const panelStyle: React.CSSProperties = isExpanded
+  const panelStyle: React.CSSProperties = !isOpen
     ? {
-        ['--oc-context-panel-width' as string]: '100%',
-        width: '100%',
-        minWidth: '100%',
-        maxWidth: '100%',
-      }
-    : {
-        width: 'min(var(--oc-context-panel-width), 100%)',
-        minWidth: `min(${CONTEXT_PANEL_MIN_WIDTH}px, 100%)`,
-        maxWidth: '100%',
         ['--oc-context-panel-width' as string]: `${isResizing ? (resizingWidthRef.current ?? width) : width}px`,
-      };
+        width: 0,
+        minWidth: 0,
+        maxWidth: 0,
+        opacity: 0,
+        overflow: 'hidden',
+        visibility: 'hidden',
+      }
+    : isExpanded
+      ? {
+          ['--oc-context-panel-width' as string]: '100%',
+          width: '100%',
+          minWidth: '100%',
+          maxWidth: '100%',
+        }
+      : {
+          width: 'min(var(--oc-context-panel-width), 100%)',
+          minWidth: `min(${CONTEXT_PANEL_MIN_WIDTH}px, 100%)`,
+          maxWidth: '100%',
+          ['--oc-context-panel-width' as string]: `${isResizing ? (resizingWidthRef.current ?? width) : width}px`,
+        };
 
   return (
     <aside
       ref={panelRef}
       data-context-panel="true"
       tabIndex={-1}
+      inert={!isOpen || undefined}
       className={cn(
         'flex min-h-0 flex-col overflow-hidden bg-background',
         !isExpanded && 'border-l border-border/40',
         isExpanded
           ? 'absolute inset-0 z-20 min-w-0'
           : 'relative h-full flex-shrink-0',
-        isResizing ? 'transition-none' : 'transition-[width] duration-200 ease-in-out'
+        !isOpen && 'pointer-events-none',
+        isResizing || !isOpen || suppressWidthTransition ? 'transition-none' : 'transition-[width] duration-200 ease-in-out'
       )}
       onKeyDownCapture={handlePanelKeyDownCapture}
       style={panelStyle}

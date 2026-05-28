@@ -31,6 +31,10 @@ import type {
   GitIdentitySummary,
   DiscoveredGitCredential,
   MergeConflictDetails,
+  CheckoutCommitResponse,
+  CherryPickResponse,
+  RevertCommitResponse,
+  ResetToCommitResponse,
 } from './api/types';
 
 declare global {
@@ -737,6 +741,7 @@ export async function getGitLog(
       from: options.from,
       to: options.to,
       file: options.file,
+      all: options.all ? 'true' : undefined,
     })
   );
   if (!response.ok) {
@@ -952,6 +957,72 @@ export async function merge(
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || 'Failed to merge');
+  }
+  return response.json();
+}
+
+export async function checkoutCommit(
+  directory: string,
+  hash: string
+): Promise<CheckoutCommitResponse> {
+  const response = await fetch(buildUrl(`${API_BASE}/checkout-commit`, directory), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ hash }),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error || 'Failed to checkout commit');
+  }
+  return response.json();
+}
+
+export async function cherryPick(
+  directory: string,
+  hash: string
+): Promise<CherryPickResponse> {
+  const response = await fetch(buildUrl(`${API_BASE}/cherry-pick`, directory), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ hash }),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error || 'Failed to cherry-pick');
+  }
+  return response.json();
+}
+
+export async function revertCommit(
+  directory: string,
+  hash: string
+): Promise<RevertCommitResponse> {
+  const response = await fetch(buildUrl(`${API_BASE}/revert-commit`, directory), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ hash }),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error || 'Failed to revert commit');
+  }
+  return response.json();
+}
+
+export async function resetToCommit(
+  directory: string,
+  hash: string,
+  mode: 'soft' | 'mixed' | 'hard',
+  force?: boolean
+): Promise<ResetToCommitResponse> {
+  const response = await fetch(buildUrl(`${API_BASE}/reset-to-commit`, directory), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ hash, mode, force }),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error || 'Failed to reset');
   }
   return response.json();
 }

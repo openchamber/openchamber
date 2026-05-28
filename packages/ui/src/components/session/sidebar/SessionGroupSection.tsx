@@ -777,7 +777,6 @@ export function SessionGroupSection(props: Props): React.ReactNode {
                       <TooltipTrigger asChild>
                         <span className="inline-flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center">
                           <Icon name="git-branch" className="h-3.5 w-3.5 text-muted-foreground"
-                            
                             style={branchIconColor ? { color: branchIconColor } : undefined}/>
                         </span>
                       </TooltipTrigger>
@@ -810,7 +809,6 @@ export function SessionGroupSection(props: Props): React.ReactNode {
                     </Tooltip>
                   ) : (
                     <Icon name="git-branch" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground"
-                      
                       style={branchIconColor ? { color: branchIconColor } : undefined}/>
                   )
                 ) : null}

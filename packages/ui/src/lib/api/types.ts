@@ -118,11 +118,19 @@ export interface GitRebaseInProgress {
   onto: string;
 }
 
+export interface GitRemoteComparison {
+  remote: string;
+  branch: string;
+  ahead: number;
+  behind: number;
+}
+
 export interface GitStatus {
   current: string;
   tracking: string | null;
   ahead: number;
   behind: number;
+  upstreamComparison?: GitRemoteComparison | null;
   files: GitStatusFile[];
   isClean: boolean;
   diffStats?: Record<string, { insertions: number; deletions: number }>;
@@ -228,6 +236,37 @@ export interface GitMergeResult {
   conflictFiles?: string[];
 }
 
+export interface CheckoutCommitResponse {
+  success: boolean;
+}
+
+export interface CherryPickRequest {
+  hash: string;
+}
+export interface CherryPickResponse {
+  success: boolean;
+  conflict?: boolean;
+  conflictFiles?: string[];
+}
+
+export interface RevertCommitRequest {
+  hash: string;
+}
+export interface RevertCommitResponse {
+  success: boolean;
+  conflict?: boolean;
+  conflictFiles?: string[];
+}
+
+export interface ResetToCommitRequest {
+  hash: string;
+  mode: 'soft' | 'mixed' | 'hard';
+  force?: boolean;
+}
+export interface ResetToCommitResponse {
+  success: boolean;
+}
+
 export interface GitRebaseResult {
   success: boolean;
   conflict?: boolean;
@@ -283,6 +322,7 @@ export interface GitLogEntry {
   filesChanged: number;
   insertions: number;
   deletions: number;
+  parents: string[];
 }
 
 export interface GitLogResponse {
@@ -402,6 +442,7 @@ export interface GitLogOptions {
   from?: string;
   to?: string;
   file?: string;
+  all?: boolean;
 }
 
 export interface GeneratedCommitMessage {
@@ -483,6 +524,10 @@ export interface GitAPI {
   merge(directory: string, options: { branch: string }): Promise<GitMergeResult>;
   abortMerge(directory: string): Promise<{ success: boolean }>;
   continueMerge(directory: string): Promise<{ success: boolean; conflict: boolean; conflictFiles?: string[] }>;
+  checkoutCommit(directory: string, hash: string): Promise<CheckoutCommitResponse>;
+  cherryPick(directory: string, hash: string): Promise<CherryPickResponse>;
+  revertCommit(directory: string, hash: string): Promise<RevertCommitResponse>;
+  resetToCommit(directory: string, hash: string, mode: 'soft' | 'mixed' | 'hard', force?: boolean): Promise<ResetToCommitResponse>;
   stash(directory: string, options?: { message?: string; includeUntracked?: boolean }): Promise<{ success: boolean }>;
   stashPop(directory: string): Promise<{ success: boolean }>;
   getConflictDetails(directory: string): Promise<MergeConflictDetails>;

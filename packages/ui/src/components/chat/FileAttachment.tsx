@@ -316,7 +316,7 @@ FileChip.displayName = 'FileChip';
 const VSCodeFileChip = memo(({ file, onRemove }: FileChipProps) => {
   const { t } = useI18n();
   const { displayName, extension } = useFileDetails(file);
-  
+
   // Detect selection-style attachments: ends with ":N" or ":N-M"
   const isSelectionAttachment = /:\d+(?:-\d+)?$/.test(displayName);
 
@@ -359,7 +359,7 @@ interface AttachedFilesListProps {
   onShowPopup?: (content: ToolPopupContent) => void;
 }
 
-export const AttachedVSCodeFileChips = memo(({ onShowPopup }: AttachedFilesListProps) => {  
+export const AttachedVSCodeFileChips = memo(({ onShowPopup }: AttachedFilesListProps) => {
   const attachedFiles = useInputStore((state) => state.attachedFiles);
   const removeAttachedFile = useInputStore((state) => state.removeAttachedFile);
 

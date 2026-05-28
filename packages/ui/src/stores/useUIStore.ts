@@ -329,7 +329,7 @@ const upsertContextPanelTab = (
       ? {
           ...tab,
           mode: nextTab.mode,
-          targetPath: nextTab.targetPath,
+          targetPath: nextTab.targetPath || tab.targetPath,
           dedupeKey: nextTab.dedupeKey,
           label: nextTab.label,
           stagedDiff: nextTab.stagedDiff,
@@ -866,7 +866,7 @@ export const useUIStore = create<UIStore>()(
         userMessageRenderingMode: 'markdown',
         stickyUserHeader: true,
         showSplitAssistantMessageActions: false,
-        showMobileSessionStatusBar: true,
+        showMobileSessionStatusBar: false,
         isMobileSessionStatusBarCollapsed: false,
         isExpandedInput: false,
         reportUsage: true,

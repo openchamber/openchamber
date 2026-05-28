@@ -1,3 +1,9 @@
+## [1.11.7] - 2026-05-27
+
+- Chat/Input: selecting an agent now switches to that agent's configured model, and malformed tool diffs no longer break chat rendering (thanks to @Adrian-Eckardt).
+- Usage: added a setting to hide prediction rows on usage cards (thanks to @ermanhavuc).
+- Reliability/Streaming: restored live streaming in the extension.
+
 ## [1.11.6] - 2026-05-25
 
 - Settings/Plugins: added a Plugins page for managing opencode plugins, with npm update checks and user/project scopes (thanks to @Quat3rnion).
