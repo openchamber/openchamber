@@ -202,7 +202,7 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
   },
   {
     id: 'rename_session',
-    defaultCombo: 'ctrl+r',
+    defaultCombo: 'mod+r',
     label: 'Rename session',
     description: 'Rename the current session',
     customizable: true,

@@ -14,9 +14,9 @@ describe('rename_session shortcut', () => {
     expect(action!.label).toBe('Rename session');
   });
 
-  test('has ctrl+r as default combo', () => {
+  test('has mod+r as default combo', () => {
     const action = getShortcutAction('rename_session');
-    expect(action!.defaultCombo).toBe('ctrl+r');
+    expect(action!.defaultCombo).toBe('mod+r');
   });
 
   test('is customizable', () => {
@@ -29,7 +29,7 @@ describe('rename_session shortcut', () => {
 
   test('returns default combo when no override is set', () => {
     const combo = getEffectiveShortcutCombo('rename_session');
-    expect(combo).toBe('ctrl+r');
+    expect(combo).toBe('mod+r');
   });
 
   test('returns override combo when one is set', () => {
