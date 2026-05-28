@@ -163,11 +163,13 @@ export interface GitFileDiffResponse {
   modified: string;
   path: string;
   isBinary?: boolean;
+  hunkPatch?: string;
 }
 
 export interface GetGitFileDiffOptions {
   path: string;
   staged?: boolean;
+  includeHunkPatch?: boolean;
 }
 
 export interface GitBranchDetails {

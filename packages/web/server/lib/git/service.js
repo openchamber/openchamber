@@ -1996,7 +1996,7 @@ const isBinaryDiff = async (directoryPath, filePath, staged) => {
   return false;
 };
 
-export async function getFileDiff(directory, { path: filePath, staged = false } = {}) {
+export async function getFileDiff(directory, { path: filePath, staged = false, includeHunkPatch = false } = {}) {
   if (!directory || !filePath) {
     throw new Error('directory and path are required for getFileDiff');
   }
@@ -2015,6 +2015,7 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
         modified: '',
         path: filePath,
         isBinary: true,
+        hunkPatch: undefined,
       };
     }
   }
@@ -2080,11 +2081,16 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
     }
   }
 
+  const hunkPatch = includeHunkPatch
+    ? await getDiff(directory, { path: filePath, staged, contextLines: 0 })
+    : undefined;
+
   return {
     original: typeof original === 'string' ? original.replace(/\r\n/g, '\n') : original,
     modified: typeof modified === 'string' ? modified.replace(/\r\n/g, '\n') : modified,
     path: filePath,
     isBinary: false,
+    hunkPatch,
   };
 }
 

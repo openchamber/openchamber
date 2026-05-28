@@ -265,10 +265,12 @@ export function registerGitRoutes(app) {
       }
 
       const staged = req.query.staged === 'true';
+      const includeHunkPatch = req.query.hunkPatch === 'true';
 
       const result = await getFileDiff(directory, {
         path: pathParam,
         staged,
+        includeHunkPatch,
       });
 
       res.json({
@@ -276,6 +278,7 @@ export function registerGitRoutes(app) {
         modified: result.modified,
         path: result.path,
         isBinary: Boolean(result.isBinary),
+        hunkPatch: result.hunkPatch,
       });
     } catch (error) {
       console.error('Failed to get git file diff:', error);

@@ -2111,8 +2111,9 @@ export async function getGitRangeFiles(
 export async function getGitFileDiff(
   directory: string, 
   filePath: string, 
-  staged = false
-): Promise<{ original: string; modified: string; path: string }> {
+  staged = false,
+  includeHunkPatch = false
+): Promise<{ original: string; modified: string; path: string; hunkPatch?: string }> {
   const repo = await getRepository(directory);
   
   if (repo) {
@@ -2142,14 +2143,18 @@ export async function getGitFileDiff(
         modified = Buffer.from(modifiedBytes).toString('utf8');
       }
       
-      return { original, modified, path: filePath };
+      const hunkPatch = includeHunkPatch
+        ? (await getGitDiff(directory, filePath, staged, 0)).diff
+        : undefined;
+
+      return { original, modified, path: filePath, hunkPatch };
     } catch (error) {
       console.error('[GitService] Failed to get file diff:', error);
     }
   }
 
   // Fallback: return empty content
-  return { original: '', modified: '', path: filePath };
+  return { original: '', modified: '', path: filePath, hunkPatch: includeHunkPatch ? '' : undefined };
 }
 
 /**
@@ -2200,6 +2205,49 @@ const normalizePatchFilePath = (value: string): string => {
   return trimmed;
 };
 
+const toGitPath = (value: string): string => value.replace(/\\/g, '/');
+
+const isInsideOrSameDirectory = (root: string, target: string): boolean => {
+  const relative = path.relative(root, target);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+};
+
+const resolveGitRepositoryRoot = async (directory: string): Promise<string> => {
+  const result = await execGit(['rev-parse', '--show-toplevel'], directory);
+  if (result.exitCode !== 0) {
+    throw new Error(result.stderr || 'Failed to resolve git repository root');
+  }
+
+  const root = result.stdout.trim();
+  return path.isAbsolute(root) ? path.resolve(root) : path.resolve(directory, root);
+};
+
+const resolveGitFileContext = async (directory: string, filePath: string): Promise<{ repoRoot: string; repoPath: string }> => {
+  const directoryPath = path.resolve(normalizeDirectoryPath(directory));
+  const repoRoot = await resolveGitRepositoryRoot(directoryPath);
+  const candidates = Array.from(new Set([
+    path.resolve(repoRoot, filePath),
+    path.resolve(directoryPath, filePath),
+  ]));
+
+  for (const absolutePath of candidates) {
+    if (!isInsideOrSameDirectory(repoRoot, absolutePath)) {
+      continue;
+    }
+
+    const repoPath = toGitPath(path.relative(repoRoot, absolutePath));
+    const existsInWorktree = await fs.promises.stat(absolutePath).then((stat) => stat.isFile()).catch(() => false);
+    const existsInIndex = await execGit(['cat-file', '-e', `:${repoPath}`], repoRoot).then((result) => result.exitCode === 0);
+    const existsInHead = await execGit(['cat-file', '-e', `HEAD:${repoPath}`], repoRoot).then((result) => result.exitCode === 0);
+
+    if (existsInWorktree || existsInIndex || existsInHead) {
+      return { repoRoot, repoPath };
+    }
+  }
+
+  throw new Error('Invalid file path');
+};
+
 const validateSingleFilePatchPath = (patch: string, filePath: string): void => {
   const paths = new Set<string>();
   for (const line of patch.replace(/\r\n/g, '\n').split('\n')) {
@@ -2232,7 +2280,8 @@ export async function revertGitHunk(
     throw new Error('patch is required');
   }
 
-  validateSingleFilePatchPath(patch, filePath);
+  const { repoRoot, repoPath } = await resolveGitFileContext(directory, filePath);
+  validateSingleFilePatchPath(patch, repoPath);
 
   const args = ['apply'];
   if (payload.staged === true) {
@@ -2240,7 +2289,7 @@ export async function revertGitHunk(
   }
   args.push('--reverse', '--whitespace=nowarn', '--unidiff-zero', '--recount');
 
-  const result = await execGitWithInput(args, directory, patch);
+  const result = await execGitWithInput(args, repoRoot, patch);
   if (result.exitCode !== 0) {
     throw new Error(result.stderr || result.stdout || 'Failed to revert git hunk');
   }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { revertGitHunk, stageGitFile, stageGitFiles, unstageGitFile, unstageGitFiles } from './gitApiHttp';
+import { getGitFileDiff, revertGitHunk, stageGitFile, stageGitFiles, unstageGitFile, unstageGitFiles } from './gitApiHttp';
 
 type FetchCall = {
   input: RequestInfo | URL;
@@ -128,6 +128,21 @@ describe('gitApiHttp index mutations', () => {
         staged: true,
         patch: 'diff --git a/src/file.ts b/src/file.ts\n',
       });
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('requests file diff hunk patches when needed', async () => {
+    installWindowMock();
+    const calls = installFetchMock();
+    try {
+      await getGitFileDiff('/repo', { path: 'src/file.ts', staged: true, includeHunkPatch: true });
+
+      expect(calls).toHaveLength(1);
+      expect(String(calls[0].input)).toBe(
+        'http://localhost:3000/api/git/file-diff?directory=%2Frepo&path=src%2Ffile.ts&staged=true&hunkPatch=true'
+      );
     } finally {
       restoreMocks();
     }

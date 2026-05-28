@@ -115,6 +115,7 @@ The following functions are internal helpers used by exported functions:
 - The shared Git panel exposes explicit staging actions. Unstaged rows use `stageFile`, staged rows use `unstageFile`, and commits operate on the current staged index.
 - `stageFiles` remains supported for callers that need to stage a selected unstaged subset as part of commit. In that mode the server temporarily unstages unrelated index entries, stages `stageFiles`, commits from the index, then restores temporarily unstaged entries.
 - Hunk revert receives a caller-selected single-file patch from `/api/git/revert-hunk`. The service validates that the patch file headers match the requested repository path before applying it. UI callers should generate these patches from zero-context diffs so the selected hunk can be reverted independently from adjacent hunks.
+
 ### Worktree Create/Remove Response
 - `head`: HEAD commit SHA.
 - `name`: Worktree name.

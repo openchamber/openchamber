@@ -186,7 +186,7 @@ export async function getGitDiff(directory: string, options: GetGitDiffOptions):
 }
 
 export async function getGitFileDiff(directory: string, options: GetGitFileDiffOptions): Promise<GitFileDiffResponse> {
-  const { path, staged } = options;
+  const { path, staged, includeHunkPatch } = options;
   if (!path) {
     throw new Error('path is required to fetch git file diff');
   }
@@ -195,6 +195,7 @@ export async function getGitFileDiff(directory: string, options: GetGitFileDiffO
     buildUrl(`${API_BASE}/file-diff`, directory, {
       path,
       staged: staged ? 'true' : undefined,
+      hunkPatch: includeHunkPatch ? 'true' : undefined,
     })
   );
 

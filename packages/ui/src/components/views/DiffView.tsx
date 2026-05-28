@@ -52,7 +52,7 @@ type FileEntry = GitStatus['files'][number] & {
     isNew: boolean;
 };
 
-type DiffData = { original: string; modified: string; isBinary?: boolean };
+type DiffData = { original: string; modified: string; isBinary?: boolean; hunkPatch?: string };
 type DiffScope = 'all' | 'staged' | 'working';
 
 const BinaryDiffPlaceholder = React.memo(() => {
@@ -690,7 +690,6 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     const [stagedDiffData, setStagedDiffData] = React.useState<DiffData | null>(null);
     const [hunkActions, setHunkActions] = React.useState<RevertHunkAction[]>([]);
     const lastDiffRequestRef = React.useRef<string | null>(null);
-    const lastHunkRequestRef = React.useRef<string | null>(null);
     const sectionRef = React.useRef<HTMLDivElement | null>(null);
 
     const descriptor = React.useMemo(() => describeChange(file), [file]);
@@ -699,8 +698,22 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     const diffData = React.useMemo<DiffData | null>(() => {
         if (staged) return stagedDiffData;
         if (!cachedDiff) return null;
-        return { original: cachedDiff.original, modified: cachedDiff.modified, isBinary: cachedDiff.isBinary };
+        return {
+            original: cachedDiff.original,
+            modified: cachedDiff.modified,
+            isBinary: cachedDiff.isBinary,
+            hunkPatch: cachedDiff.hunkPatch,
+        };
     }, [cachedDiff, staged, stagedDiffData]);
+
+    React.useEffect(() => {
+        if (!diffData || diffData.isBinary || !diffData.hunkPatch) {
+            setHunkActions([]);
+            return;
+        }
+
+        setHunkActions(buildRevertHunkActions(file.path, diffData.hunkPatch));
+    }, [diffData, file.path]);
 
     const setSectionRef = React.useCallback((node: HTMLDivElement | null) => {
         sectionRef.current = node;
@@ -760,40 +773,7 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         setHunkActions([]);
         setDiffLoadError(null);
         lastDiffRequestRef.current = null;
-        lastHunkRequestRef.current = null;
     }, [staged, stagedRevision]);
-
-    React.useEffect(() => {
-        if (!isExpanded || !hasBeenVisible || !diffData || diffData.isBinary) {
-            setHunkActions([]);
-            lastHunkRequestRef.current = null;
-            return;
-        }
-
-        const requestKey = `${directory}::${file.path}::${staged ? `staged:${stagedRevision}` : 'unstaged'}::hunks`;
-        if (lastHunkRequestRef.current === requestKey) {
-            return;
-        }
-        lastHunkRequestRef.current = requestKey;
-
-        let cancelled = false;
-        void git.getGitDiff(directory, { path: file.path, staged, contextLines: 0 })
-            .then((response) => {
-                if (cancelled) return;
-                setHunkActions(buildRevertHunkActions(file.path, response.diff));
-            })
-            .catch(() => {
-                if (cancelled) return;
-                setHunkActions([]);
-            });
-
-        return () => {
-            cancelled = true;
-            if (lastHunkRequestRef.current === requestKey) {
-                lastHunkRequestRef.current = null;
-            }
-        };
-    }, [diffData, directory, file.path, git, hasBeenVisible, isExpanded, staged, stagedRevision]);
 
     const handleRevertHunk = React.useCallback(async (action: RevertHunkAction) => {
         try {
@@ -804,7 +784,6 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
             });
             clearDiffCache(directory);
             setHunkActions([]);
-            lastHunkRequestRef.current = null;
             if (staged) {
                 setStagedDiffData(null);
                 bumpIndexRevision(directory);
@@ -817,7 +796,7 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
 
     React.useEffect(() => {
         if (!isExpanded || !hasBeenVisible) return;
-        if (!directory || diffData) {
+        if (!directory || (diffData && (diffData.isBinary || diffData.hunkPatch))) {
             lastDiffRequestRef.current = null;
             setIsLoading(false);
             return;
@@ -832,7 +811,7 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         setIsLoading(true);
 
         let cancelled = false;
-        const fetchPromise = git.getGitFileDiff(directory, { path: file.path, staged });
+        const fetchPromise = git.getGitFileDiff(directory, { path: file.path, staged, includeHunkPatch: true });
         const timeoutMs = DIFF_REQUEST_TIMEOUT_MS;
         const timeoutPromise = new Promise<never>((_, reject) => {
             setTimeout(() => reject(new Error(`Timed out after ${timeoutMs}ms`)), timeoutMs);
@@ -846,6 +825,7 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                     original: response.original ?? '',
                     modified: response.modified ?? '',
                     isBinary: response.isBinary,
+                    hunkPatch: response.hunkPatch,
                 };
                 if (staged) {
                     setStagedDiffData(nextDiff);
@@ -1084,7 +1064,6 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const [diffLoadError, setDiffLoadError] = React.useState<string | null>(null);
     const [selectedHunkActions, setSelectedHunkActions] = React.useState<RevertHunkAction[]>([]);
     const lastDiffRequestRef = React.useRef<string | null>(null);
-    const lastSelectedHunkRequestRef = React.useRef<string | null>(null);
 
     const pendingDiffFile = useUIStore((state) => state.pendingDiffFile);
     const pendingDiffStaged = useUIStore((state) => state.pendingDiffStaged);
@@ -1583,40 +1562,22 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const selectedDiffData = React.useMemo<DiffData | null>(() => {
         if (activeDiffStaged) return selectedStagedDiffData;
         if (!selectedCachedDiff) return null;
-        return { original: selectedCachedDiff.original, modified: selectedCachedDiff.modified, isBinary: selectedCachedDiff.isBinary };
+        return {
+            original: selectedCachedDiff.original,
+            modified: selectedCachedDiff.modified,
+            isBinary: selectedCachedDiff.isBinary,
+            hunkPatch: selectedCachedDiff.hunkPatch,
+        };
     }, [activeDiffStaged, selectedCachedDiff, selectedStagedDiffData]);
 
     React.useEffect(() => {
-        if (isStackedView || !effectiveDirectory || !selectedFile || !selectedDiffData || selectedDiffData.isBinary) {
+        if (isStackedView || !selectedFile || !selectedDiffData || selectedDiffData.isBinary || !selectedDiffData.hunkPatch) {
             setSelectedHunkActions([]);
-            lastSelectedHunkRequestRef.current = null;
             return;
         }
 
-        const requestKey = `${effectiveDirectory}::${selectedFile}::${activeDiffStaged ? `staged:${indexRevision}` : 'unstaged'}::hunks`;
-        if (lastSelectedHunkRequestRef.current === requestKey) {
-            return;
-        }
-        lastSelectedHunkRequestRef.current = requestKey;
-
-        let cancelled = false;
-        void git.getGitDiff(effectiveDirectory, { path: selectedFile, staged: activeDiffStaged, contextLines: 0 })
-            .then((response) => {
-                if (cancelled) return;
-                setSelectedHunkActions(buildRevertHunkActions(selectedFile, response.diff));
-            })
-            .catch(() => {
-                if (cancelled) return;
-                setSelectedHunkActions([]);
-            });
-
-        return () => {
-            cancelled = true;
-            if (lastSelectedHunkRequestRef.current === requestKey) {
-                lastSelectedHunkRequestRef.current = null;
-            }
-        };
-    }, [activeDiffStaged, effectiveDirectory, git, indexRevision, isStackedView, selectedDiffData, selectedFile]);
+        setSelectedHunkActions(buildRevertHunkActions(selectedFile, selectedDiffData.hunkPatch));
+    }, [isStackedView, selectedDiffData, selectedFile]);
 
     const handleSelectedRevertHunk = React.useCallback(async (action: RevertHunkAction) => {
         if (!effectiveDirectory || !selectedFile) return;
@@ -1629,7 +1590,6 @@ export const DiffView: React.FC<DiffViewProps> = ({
             });
             clearDiffCache(effectiveDirectory);
             setSelectedHunkActions([]);
-            lastSelectedHunkRequestRef.current = null;
             if (activeDiffStaged) {
                 setSelectedStagedDiffData(null);
                 bumpIndexRevision(effectiveDirectory);
@@ -1728,7 +1688,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
             return;
         }
 
-        if (activeDiffStaged ? selectedStagedDiffData : selectedCachedDiff) {
+        if (selectedDiffData && (selectedDiffData.isBinary || selectedDiffData.hunkPatch)) {
             lastDiffRequestRef.current = null;
             return;
         }
@@ -1740,7 +1700,11 @@ export const DiffView: React.FC<DiffViewProps> = ({
         lastDiffRequestRef.current = requestKey;
 
         let cancelled = false;
-        const fetchPromise = git.getGitFileDiff(effectiveDirectory, { path: selectedFile, staged: activeDiffStaged });
+        const fetchPromise = git.getGitFileDiff(effectiveDirectory, {
+            path: selectedFile,
+            staged: activeDiffStaged,
+            includeHunkPatch: true,
+        });
         const timeoutMs = DIFF_REQUEST_TIMEOUT_MS;
         const timeoutPromise = new Promise<never>((_, reject) => {
             setTimeout(() => reject(new Error(`Timed out after ${timeoutMs}ms`)), timeoutMs);
@@ -1754,6 +1718,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                     original: response.original ?? '',
                     modified: response.modified ?? '',
                     isBinary: response.isBinary,
+                    hunkPatch: response.hunkPatch,
                 };
                 if (activeDiffStaged) {
                     setSelectedStagedDiffData(nextDiff);
@@ -1774,7 +1739,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 lastDiffRequestRef.current = null;
             }
         };
-    }, [activeDiffStaged, effectiveDirectory, indexRevision, isStackedView, selectedFile, selectedCachedDiff, selectedStagedDiffData, git, setDiff, diffRetryNonce]);
+    }, [activeDiffStaged, effectiveDirectory, indexRevision, isStackedView, selectedDiffData, selectedFile, git, setDiff, diffRetryNonce]);
 
     // Render only the selected diff viewer to prevent memory bloat with many files
     const renderSelectedDiffViewer = () => {

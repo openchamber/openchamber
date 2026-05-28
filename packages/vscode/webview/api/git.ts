@@ -65,6 +65,7 @@ export const createVSCodeGitAPI = (): GitAPI => ({
       directory,
       path: options.path,
       staged: options.staged,
+      includeHunkPatch: options.includeHunkPatch,
     });
   },
 
