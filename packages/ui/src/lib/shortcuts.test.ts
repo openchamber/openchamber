@@ -39,11 +39,11 @@ describe('rename_session shortcut', () => {
     expect(combo).toBe('f2');
   });
 
-  test('returns empty string for unassigned override', () => {
+  test('returns override as-is when set to a non-standard value', () => {
     const combo = getEffectiveShortcutCombo('rename_session', {
       rename_session: 'none',
     });
-    // 'none' is normalized to the unassigned sentinel
-    expect(combo === '' || combo === 'none').toBe(true);
+    // 'none' is treated as a valid single-key combo (not the unassigned sentinel)
+    expect(combo).toBe('none');
   });
 });

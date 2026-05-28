@@ -659,8 +659,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     if (session) {
       setEditingId(session.id);
       setEditTitle(session.title);
+      setPendingSessionRenameId(null);
     }
-    setPendingSessionRenameId(null);
   }, [pendingSessionRenameId, sessions, setPendingSessionRenameId]);
 
   const toggleParent = React.useCallback((expansionKey: string) => {

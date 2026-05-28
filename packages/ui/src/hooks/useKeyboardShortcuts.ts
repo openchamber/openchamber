@@ -161,8 +161,8 @@ export const useKeyboardShortcuts = () => {
       }
 
       if (eventMatchesShortcut(e, combo('rename_session'))) {
-        e.preventDefault();
         if (currentSessionId) {
+          e.preventDefault();
           setPendingSessionRenameId(currentSessionId);
         }
         return;
