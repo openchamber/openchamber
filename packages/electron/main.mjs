@@ -335,7 +335,28 @@ const settingsFilePath = () => {
 const sshManager = new ElectronSshManager({
   settingsFilePath: settingsFilePath(),
   appVersion: APP_VERSION,
-  emit: (event, detail) => emitToAllWindows(event, detail),
+  emit: (event, detail) => {
+    emitToAllWindows(event, detail);
+    if (event === 'openchamber:ssh-instance-status' && detail && typeof detail === 'object') {
+      emitToAllWindows('openchamber:server-status', {
+        serverId: detail.id,
+        phase: detail.phase,
+        localUrl: detail.localUrl || null,
+        status: detail.phase === 'ready' ? 'connected' : (detail.phase === 'error' ? 'error' : (detail.phase === 'idle' ? 'disconnected' : 'connecting')),
+        detail: detail.detail || null,
+      });
+      const sm = state.serverHandle?.getServerManager?.();
+      if (sm) {
+        if (detail.phase === 'ready') {
+          sm.updateStatus(detail.id, 'connected');
+        } else if (detail.phase === 'idle') {
+          sm.updateStatus(detail.id, 'disconnected');
+        } else if (detail.phase === 'error') {
+          sm.updateStatus(detail.id, 'error', detail.detail || 'SSH error');
+        }
+      }
+    }
+  },
 });
 
 const readJsonFile = (filePath) => {
@@ -902,6 +923,75 @@ const spawnLocalServer = async () => {
   });
 
   return url;
+};
+
+const registerPersistedActiveServers = async () => {
+  try {
+    const settings = readSettingsRoot();
+    const ids = Array.isArray(settings.desktopActiveServerIds) ? settings.desktopActiveServerIds : [];
+    if (ids.length === 0) return;
+
+    const sm = state.serverHandle?.getServerManager?.();
+    const sf = state.serverHandle?.getSseFanIn?.();
+    if (!sm || !sf) return;
+
+    const instances = sshManager.readInstances().instances;
+    const hostsConfig = readDesktopHostsConfig();
+    const orphanedIds = [];
+
+    for (const id of ids) {
+      const instance = instances.find((inst) => inst?.id === id);
+      if (instance) {
+        try {
+          const statuses = await sshManager.statusesWithDefaults(id);
+          const status = statuses.find((s) => s.id === id);
+          if (status?.phase === 'ready' && status?.localUrl) {
+            const label = instance.nickname?.trim() || instance.sshParsed?.destination || id;
+            const existing = sm.getServer(id);
+            if (!existing || existing.status === 'disconnected') {
+              try {
+                const { createOpencodeClient } = await import('@opencode-ai/sdk/v2');
+                const client = createOpencodeClient({ baseUrl: status.localUrl });
+                sm.registerServer({ id, label, type: 'ssh', url: status.localUrl, client });
+              } catch {
+                sm.registerServer({ id, label, type: 'ssh', url: status.localUrl });
+              }
+              sf.subscribeServer(id);
+            }
+          }
+        } catch {
+        }
+        continue;
+      }
+
+      const host = hostsConfig.hosts.find((h) => h.id === id);
+      if (host?.url) {
+        const existing = sm.getServer(id);
+        if (!existing || existing.status === 'disconnected') {
+          const url = normalizeHostUrl(host.url) || host.url;
+          try {
+            const { createOpencodeClient } = await import('@opencode-ai/sdk/v2');
+            const client = createOpencodeClient({ baseUrl: url });
+            sm.registerServer({ id, label: host.label, type: 'remote-url', url, client });
+          } catch {
+            sm.registerServer({ id, label: host.label, type: 'remote-url', url });
+          }
+          sf.subscribeServer(id);
+        }
+        continue;
+      }
+
+      orphanedIds.push(id);
+    }
+
+    if (orphanedIds.length > 0) {
+      await mutateSettingsRoot((root) => {
+        const currentIds = Array.isArray(root.desktopActiveServerIds) ? root.desktopActiveServerIds : [];
+        root.desktopActiveServerIds = currentIds.filter((i) => !orphanedIds.includes(i));
+      });
+    }
+  } catch {
+  }
 };
 
 const killSidecar = () => {
@@ -2836,6 +2926,85 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       sshManager.clearLogsForInstance(String(args.id || '').trim());
       return null;
 
+    case 'desktop_server_list': {
+      const sm = state.serverHandle?.getServerManager?.();
+      const servers = sm ? sm.listServers() : [];
+      const sshStatuses = await sshManager.statusesWithDefaults();
+      const sshStatusById = {};
+      for (const s of sshStatuses) {
+        sshStatusById[s.id] = { phase: s.phase, localUrl: s.localUrl, localPort: s.localPort };
+      }
+      return servers.map((s) => ({ ...s, sshStatus: sshStatusById[s.id] || null }));
+    }
+
+    case 'desktop_server_register': {
+      const id = String(args.id || '').trim();
+      const label = String(args.label || '').trim();
+      const type = String(args.type || 'remote-url').trim();
+      const url = String(args.url || '').trim();
+
+      if (!id || id === LOCAL_HOST_ID) throw new Error('Invalid server id');
+      if (!url) throw new Error('URL is required');
+
+      const sm = state.serverHandle?.getServerManager?.();
+      const sf = state.serverHandle?.getSseFanIn?.();
+      if (!sm || !sf) throw new Error('Server is not ready');
+
+      const existing = sm.getServer(id);
+      if (existing?.client) {
+        sm.updateStatus(id, 'connecting');
+        sf.subscribeServer(id);
+        return sm.listServers().find((s) => s.id === id);
+      }
+      if (existing) sm.removeServer(id);
+
+      try {
+        const { createOpencodeClient } = await import('@opencode-ai/sdk/v2');
+        const client = createOpencodeClient({ baseUrl: url });
+
+        sm.registerServer({ id, label, type, url, client });
+        sf.subscribeServer(id);
+      } catch (err) {
+        log.error(`Failed to import SDK for server ${id}:`, err?.message || err);
+        sm.registerServer({ id, label, type, url });
+        sm.updateStatus(id, 'error', err?.message || 'SDK import failed');
+      }
+
+      await mutateSettingsRoot((root) => {
+        const ids = Array.isArray(root.desktopActiveServerIds) ? root.desktopActiveServerIds : [];
+        if (!ids.includes(id)) {
+          root.desktopActiveServerIds = [...ids, id];
+        }
+      });
+
+      return sm.listServers().find((s) => s.id === id);
+    }
+
+    case 'desktop_server_unregister': {
+      const id = String(args.serverId || '').trim();
+      if (!id || id === LOCAL_HOST_ID) throw new Error('Invalid server id');
+
+      const sm = state.serverHandle?.getServerManager?.();
+      const sf = state.serverHandle?.getSseFanIn?.();
+      if (!sm || !sf) throw new Error('Server is not ready');
+
+      try {
+        sm.removeServer(id);
+      } catch {}
+      try {
+        sf.unsubscribeServer(id);
+      } catch {}
+
+      await mutateSettingsRoot((root) => {
+        const ids = Array.isArray(root.desktopActiveServerIds) ? root.desktopActiveServerIds : [];
+        root.desktopActiveServerIds = ids.filter((i) => i !== id);
+      });
+
+      try { await sshManager.disconnect(id); } catch {}
+
+      return { ok: true };
+    }
+
     default:
       throw new Error(`Unknown desktop command: ${command}`);
   }
@@ -3112,6 +3281,9 @@ const COMMANDS_SAFE_FOR_REMOTE = new Set([
   'desktop_get_app_version',
   'desktop_get_lan_address',
   'desktop_capture_page_rect',
+  'desktop_server_list',
+  'desktop_server_register',
+  'desktop_server_unregister',
 ]);
 
 ipcMain.handle('openchamber:invoke', async (event, command, args) => {
@@ -3269,6 +3441,9 @@ app.whenReady().then(async () => {
   powerMonitor.on('resume', () => {
     emitToAllWindows('openchamber:system-resume', { timestamp: Date.now() });
   });
+
+  // Re-register any servers that were active when the app last quit
+  void registerPersistedActiveServers();
 }).catch((error) => {
   log.error('[electron] startup failed:', error);
   app.exit(1);

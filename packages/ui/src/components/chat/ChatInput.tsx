@@ -11,6 +11,7 @@ import { useInputStore } from '@/sync/input-store';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import * as sessionActions from '@/sync/session-actions';
 import { useDirectorySync, useUserMessageHistory } from '@/sync/sync-context';
+import { useServerList, useActiveServerId } from '@/sync/server-context';
 import { useInlineCommentDraftStore, type InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { appendInlineComments } from '@/lib/messages/inlineComments';
@@ -1020,6 +1021,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const setAgent = useConfigStore((state) => state.setAgent);
     const getVisibleAgents = useConfigStore((state) => state.getVisibleAgents);
     const agents = getVisibleAgents();
+    const servers = useServerList();
+    const activeServerId = useActiveServerId();
+    const activeServerLabel = servers.find(s => s.id === activeServerId)?.label;
     const isMobile = useUIStore((state) => state.isMobile);
     const setImagePreviewOpen = useUIStore((state) => state.setImagePreviewOpen);
     const inputBarOffset = useUIStore((state) => state.inputBarOffset);
@@ -4189,6 +4193,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     )}
                     <div className={cn("overflow-hidden", isDesktopExpanded && 'flex flex-1 min-h-0 flex-col')}>
                         <div className="flex items-center gap-1 px-3 pt-1 flex-wrap relative z-10">
+                            {servers.length > 1 && activeServerLabel && (
+                                <div className="flex items-center gap-1 px-2 py-0.5 text-[11px] text-muted-foreground/70 bg-muted/40 rounded-full self-start ml-1">
+                                    <Icon name="server" className="size-3" />
+                                    <span className="truncate max-w-[120px]">{activeServerLabel}</span>
+                                </div>
+                            )}
                             <AttachedVSCodeFileChips onShowPopup={handleShowAttachmentPreview} />
                             <ActiveEditorFileSuggestion />
                         </div>

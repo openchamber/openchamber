@@ -19,6 +19,7 @@ import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import { isTauriShell, isDesktopShell } from '@/lib/desktop';
+import { updateDesktopSettings } from '@/lib/persistence';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
 import {
@@ -428,6 +429,15 @@ export function DesktopHostSwitcherDialog({
     const origin = host.id === LOCAL_HOST_ID ? getLocalOrigin() : (normalizeHostUrl(host.url) || '');
     if (!origin) return;
 
+    const persistServerId = async (serverId: string) => {
+      try {
+        const resp = await fetch('/api/config/settings').then((r) => r.json()).catch(() => null);
+        const existing = resp?.desktopActiveServerIds ?? ['local'];
+        const newIds = [...new Set([...existing, serverId])];
+        void updateDesktopSettings({ desktopActiveServerIds: newIds });
+      } catch { /* best-effort persistence */ }
+    };
+
     const isSshHost = Boolean(sshHostIds[host.id]);
 
     if (host.id !== LOCAL_HOST_ID && isSshHost && isTauriShell()) {
@@ -447,7 +457,14 @@ export function DesktopHostSwitcherDialog({
       if (existingStatus?.phase === 'ready' && existingUrl) {
         const target = toNavigationUrl(existingUrl);
         onHostSwitched?.();
-        window.location.assign(target);
+        const multiServer = window.__OPENCHAMBER_MULTI_SERVER__;
+        if (multiServer) {
+          await multiServer.registerServer({ id: host.id, label: host.label, type: 'ssh', url: target });
+          void persistServerId(host.id);
+          toast.success(t('desktopHostSwitcher.toast.sshConnected', { host: redactSensitiveUrl(host.label) }));
+        } else {
+          window.location.assign(target);
+        }
         return;
       }
 
@@ -487,6 +504,13 @@ export function DesktopHostSwitcherDialog({
         const targetOrigin = normalizeHostUrl(readyStatus.localUrl || '') || origin;
         const target = toNavigationUrl(targetOrigin);
         onHostSwitched?.();
+        const multiServer = window.__OPENCHAMBER_MULTI_SERVER__;
+        if (multiServer) {
+          await multiServer.registerServer({ id: host.id, label: host.label, type: 'ssh', url: target });
+          void persistServerId(host.id);
+          toast.success(t('desktopHostSwitcher.toast.sshConnected', { host: redactSensitiveUrl(host.label) }));
+          return;
+        }
         window.location.assign(target);
         return;
       } catch (err) {
@@ -531,6 +555,21 @@ export function DesktopHostSwitcherDialog({
 
     const target = toNavigationUrl(origin);
     onHostSwitched?.();
+
+    const multiServer = window.__OPENCHAMBER_MULTI_SERVER__;
+    if (multiServer && host.id !== LOCAL_HOST_ID) {
+      try {
+        await multiServer.registerServer({ id: host.id, label: host.label, type: 'remote-url', url: target });
+        void persistServerId(host.id);
+        setSwitchingHostId(null);
+        return;
+      } catch (err) {
+        setSwitchingHostId(null);
+        toast.error(t('desktopHostSwitcher.error.failedToSave'), {
+          description: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
 
     try {
       window.location.assign(target);
@@ -629,6 +668,9 @@ export function DesktopHostSwitcherDialog({
     }));
     const localTarget = toNavigationUrl(getLocalOrigin());
     onHostSwitched?.();
+    if (window.__OPENCHAMBER_MULTI_SERVER__) {
+      return;
+    }
     window.location.assign(localTarget);
   }, [onHostSwitched]);
 
@@ -959,6 +1001,34 @@ export function DesktopHostSwitcherDialog({
                             : t('desktopHostSwitcher.actions.openInNewWindow')}
                         </TooltipContent>
                       </Tooltip>
+
+                      {!isLocal && isSsh && statusKind === 'ok' && window.__OPENCHAMBER_MULTI_SERVER__ && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              className="h-8 w-8 rounded-md inline-flex items-center justify-center text-muted-foreground/60 hover:text-destructive hover:bg-interactive-hover transition-colors"
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                try {
+                                  await window.__OPENCHAMBER_MULTI_SERVER__?.unregisterServer(host.id);
+                                  toast.success(t('desktopHostSwitcher.toast.sshDisconnected', { host: redactSensitiveUrl(host.label) }));
+                                } catch (err) {
+                                  toast.error(t('desktopHostSwitcher.error.failedToSave'), {
+                                    description: err instanceof Error ? err.message : String(err),
+                                  });
+                                }
+                              }}
+                              aria-label={t('desktopHostSwitcher.actions.removeServerAria')}
+                            >
+                              <Icon name="close" className="h-4 w-4" />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent sideOffset={6}>
+                            {t('desktopHostSwitcher.actions.removeServer')}
+                          </TooltipContent>
+                        </Tooltip>
+                      )}
                     </div>
                   </div>
                 );

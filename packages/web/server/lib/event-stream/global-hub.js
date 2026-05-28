@@ -93,6 +93,14 @@ export function createGlobalMessageStreamHub({
           }
         }
 
+        if (
+          normalized.payload
+          && typeof normalized.payload === 'object'
+          && !normalized.payload.serverId
+        ) {
+          normalized.payload = { ...normalized.payload, serverId: 'local' }
+        }
+
         for (const subscriber of Array.from(eventSubscribers)) {
           notifySubscriber('event', subscriber, normalized);
         }
@@ -125,6 +133,16 @@ export function createGlobalMessageStreamHub({
     buildUrlFailed = false;
   };
 
+  const feedEvent = ({ payload }) => {
+    if (payload && typeof payload === 'object' && !payload.serverId) {
+      payload = { ...payload, serverId: 'local' };
+    }
+    const normalized = normalizeEvent({ envelope: {}, payload });
+    for (const subscriber of Array.from(eventSubscribers)) {
+      notifySubscriber('event', subscriber, normalized);
+    }
+  };
+
   return {
     start,
     stop,
@@ -154,5 +172,6 @@ export function createGlobalMessageStreamHub({
       const index = replay.findIndex((entry) => entry.eventId === eventId);
       return index === -1 ? [] : replay.slice(index + 1);
     },
+    feedEvent,
   };
 }

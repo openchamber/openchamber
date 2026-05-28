@@ -10,6 +10,7 @@ import { getSafeStorage } from './utils/safeStorage';
 interface DirectoryStore {
 
   currentDirectory: string;
+  currentServerId: string;
   directoryHistory: string[];
   historyIndex: number;
   homeDirectory: string;
@@ -17,7 +18,7 @@ interface DirectoryStore {
   isHomeReady: boolean;
   isSwitchingDirectory: boolean;
 
-  setDirectory: (path: string, options?: { showOverlay?: boolean }) => void;
+  setDirectory: (path: string, options?: { showOverlay?: boolean; serverId?: string }) => void;
   goBack: () => void;
   goForward: () => void;
   goToParent: () => void;
@@ -30,6 +31,12 @@ const safeStorage = getSafeStorage();
 const persistedLastDirectory = safeStorage.getItem('lastDirectory');
 const initialHasPersistedDirectory =
   typeof persistedLastDirectory === 'string' && persistedLastDirectory.length > 0;
+
+const persistedLastServerId = safeStorage.getItem('lastServerId');
+const initialServerId =
+  typeof persistedLastServerId === 'string' && persistedLastServerId.length > 0
+    ? persistedLastServerId
+    : 'local';
 
 
 const invalidateFileSearchCache = (scope?: string | null) => {
@@ -252,6 +259,7 @@ export const useDirectoryStore = create<DirectoryStore>()(
     (set, get) => ({
 
       currentDirectory: initialCurrentDirectory,
+      currentServerId: initialServerId,
       directoryHistory: [initialCurrentDirectory],
       historyIndex: 0,
       homeDirectory: initialHomeDirectory,
@@ -259,7 +267,7 @@ export const useDirectoryStore = create<DirectoryStore>()(
       isHomeReady: initialIsHomeReady,
       isSwitchingDirectory: false,
 
-      setDirectory: (path: string, options?: { showOverlay?: boolean }) => {
+      setDirectory: (path: string, options?: { showOverlay?: boolean; serverId?: string }) => {
         void options;
         const homeDir = cachedHomeDirectory || get().homeDirectory || safeStorage.getItem('homeDirectory');
         const resolvedPath = resolveDirectoryPath(path, homeDir);
@@ -270,14 +278,20 @@ export const useDirectoryStore = create<DirectoryStore>()(
         opencodeClient.setDirectory(resolvedPath);
         invalidateFileSearchCache();
 
+        const serverId = options?.serverId || get().currentServerId;
+
         set((state) => {
           const newHistory = [...state.directoryHistory.slice(0, state.historyIndex + 1), resolvedPath];
 
           safeStorage.setItem('lastDirectory', resolvedPath);
+          if (serverId) {
+            safeStorage.setItem('lastServerId', serverId);
+          }
           void updateDesktopSettings({ lastDirectory: resolvedPath });
 
           return {
             currentDirectory: resolvedPath,
+            currentServerId: serverId,
             directoryHistory: newHistory,
             historyIndex: newHistory.length - 1,
             hasPersistedDirectory: true,

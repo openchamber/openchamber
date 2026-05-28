@@ -12,6 +12,7 @@ import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import { Icon } from "@/components/icon/Icon";
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useI18n } from '@/lib/i18n';
+import type { ServerInfo } from '@/sync/server-context';
 
 type Props = {
   hideDirectoryControls: boolean;
@@ -34,6 +35,8 @@ type Props = {
   openScheduledTasksDialog: () => void;
   selectionModeEnabled: boolean;
   onToggleSelectionMode: () => void;
+  servers?: ServerInfo[];
+  activeServerId?: string;
 };
 
 export function SidebarHeader(props: Props): React.ReactNode {
@@ -59,6 +62,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
     openScheduledTasksDialog,
     selectionModeEnabled,
     onToggleSelectionMode,
+    servers,
   } = props;
 
   const displayMode = useSessionDisplayStore((state) => state.displayMode);
@@ -233,7 +237,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
                 <span>{searchMatchCount === 1
                   ? t('sessions.sidebar.header.search.matchCountSingle', { count: searchMatchCount })
                   : t('sessions.sidebar.header.search.matchCountPlural', { count: searchMatchCount })}</span>
-              ) : <span />}
+              ) : <span>{servers && servers.length > 1 ? `Searching ${servers.length} servers` : ''}</span>}
               <span>{t('sessions.sidebar.header.search.escapeHint')}</span>
             </div>
             <div className="relative">

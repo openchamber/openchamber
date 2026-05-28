@@ -64,6 +64,8 @@ type Props = {
   openSidebarMenuKey: string | null;
   setOpenSidebarMenuKey: (key: string | null) => void;
   isInlineEditing: boolean;
+  serverId?: string;
+  hideScrollWrapper?: boolean;
 };
 
 export function SidebarProjectsList(props: Props): React.ReactNode {
@@ -76,17 +78,9 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
   );
 
-  if (props.projectSections.length === 0) {
-    return <ScrollableOverlay useScrollShadow scrollShadowSize={96} outerClassName="flex-1 min-h-0" className={cn('space-y-1 pb-1 pl-2.5 pr-2', props.mobileVariant ? '' : '')}>{props.topContent}{props.emptyState}</ScrollableOverlay>;
-  }
-
-  if (props.sectionsForRender.length === 0) {
-    return <ScrollableOverlay useScrollShadow scrollShadowSize={96} outerClassName="flex-1 min-h-0" className={cn('space-y-1 pb-1 pl-2.5 pr-2', props.mobileVariant ? '' : '')}>{props.searchEmptyState}</ScrollableOverlay>;
-  }
-
-  return (
-    <ScrollableOverlay useScrollShadow scrollShadowSize={96} outerClassName="flex-1 min-h-0" className={cn('space-y-1 pb-1 pl-2.5 pr-2', props.mobileVariant ? '' : '')}>
-      {props.topContent}
+  const inner = (
+    <>
+      {!props.hideScrollWrapper && props.topContent}
       {props.showOnlyMainWorkspace ? (
         <div className="space-y-[0.6rem] py-1">
           {(() => {
@@ -239,6 +233,29 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
           </DndContext>
         </>
       )}
+    </>
+  );
+
+  if (props.hideScrollWrapper) {
+    if (props.projectSections.length === 0)
+      return inner;
+    if (props.sectionsForRender.length === 0)
+      return <>{props.searchEmptyState}</>;
+    return inner;
+  }
+
+  if (props.projectSections.length === 0) {
+    return <ScrollableOverlay useScrollShadow scrollShadowSize={96} outerClassName="flex-1 min-h-0" className={cn('space-y-1 pb-1 pl-2.5 pr-2', props.mobileVariant ? '' : '')}>{props.topContent}{props.emptyState}</ScrollableOverlay>;
+  }
+
+  if (props.sectionsForRender.length === 0) {
+    return <ScrollableOverlay useScrollShadow scrollShadowSize={96} outerClassName="flex-1 min-h-0" className={cn('space-y-1 pb-1 pl-2.5 pr-2', props.mobileVariant ? '' : '')}>{props.searchEmptyState}</ScrollableOverlay>;
+  }
+
+  return (
+    <ScrollableOverlay useScrollShadow scrollShadowSize={96} outerClassName="flex-1 min-h-0" className={cn('space-y-1 pb-1 pl-2.5 pr-2', props.mobileVariant ? '' : '')}>
+      {props.topContent}
+      {inner}
     </ScrollableOverlay>
   );
 }

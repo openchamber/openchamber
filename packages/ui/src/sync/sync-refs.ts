@@ -70,7 +70,7 @@ export function getAllSyncSessions() {
   if (!stores) return []
 
   const deduped = new Map<string, State["session"][number]>()
-  for (const store of stores.children.values()) {
+  for (const store of stores.getAllStores()) {
     for (const session of store.getState().session) {
       if (!session?.id) continue
       deduped.set(session.id, session)

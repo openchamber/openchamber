@@ -311,7 +311,12 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     d.last = Date.now()
     syncDebug.pipeline.flush(events.length)
     for (const payload of events) {
-      onEvent(directory, payload)
+      try {
+        onEvent(directory, payload)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.error('[EventPipeline] Error processing event:', msg)
+      }
     }
 
     d.buffer.length = 0
