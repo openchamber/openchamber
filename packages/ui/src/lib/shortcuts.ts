@@ -201,6 +201,13 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
     customizable: true,
   },
   {
+    id: 'rename_session',
+    defaultCombo: 'ctrl+r',
+    label: 'Rename session',
+    description: 'Rename the current session',
+    customizable: true,
+  },
+  {
     id: 'new_chat',
     defaultCombo: 'mod+n',
     label: 'New session',

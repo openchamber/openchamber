@@ -35,6 +35,7 @@ export const useKeyboardShortcuts = () => {
   const setModelSelectorOpen = useUIStore((s) => s.setModelSelectorOpen);
   const setTimelineDialogOpen = useUIStore((s) => s.setTimelineDialogOpen);
   const toggleExpandedInput = useUIStore((s) => s.toggleExpandedInput);
+  const setPendingSessionRenameId = useUIStore((s) => s.setPendingSessionRenameId);
   const shortcutOverrides = useUIStore((s) => s.shortcutOverrides);
   const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
   const activeProject = useProjectsStore((s) => s.getActiveProject());
@@ -156,6 +157,14 @@ export const useKeyboardShortcuts = () => {
         }
 
         openNewSessionDraft();
+        return;
+      }
+
+      if (eventMatchesShortcut(e, combo('rename_session'))) {
+        e.preventDefault();
+        if (currentSessionId) {
+          setPendingSessionRenameId(currentSessionId);
+        }
         return;
       }
 
@@ -559,6 +568,7 @@ export const useKeyboardShortcuts = () => {
     armAbortPrompt,
     resetAbortPriming,
     currentSessionId,
+    setPendingSessionRenameId,
     currentDirectory,
     activeProject?.id,
     activeProject?.path,

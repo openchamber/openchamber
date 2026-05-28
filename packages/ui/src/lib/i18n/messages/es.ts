@@ -1768,6 +1768,7 @@ export const dict: Record<I18nKey, string> = {
   "commandPalette.item.newSession": "Nueva sesión",
   "commandPalette.item.newMiniChat": "Nueva ventana Mini Chat",
   "commandPalette.item.newWorktreeDraft": "Nuevo borrador de worktree",
+  "commandPalette.item.renameSession": "Rename Session",
   "commandPalette.item.addProject": "Añadir proyecto",
   "commandPalette.item.showSessionSwitcher": "Mostrar cambiador de sesiones",
   "commandPalette.item.toggleSidebar": "Mostrar u ocultar barra lateral",

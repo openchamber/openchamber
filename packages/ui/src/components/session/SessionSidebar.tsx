@@ -263,6 +263,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const notifyOnSubtasks = useUIStore((state) => state.notifyOnSubtasks);
   const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
   const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
+  const pendingSessionRenameId = useUIStore((state) => state.pendingSessionRenameId);
+  const setPendingSessionRenameId = useUIStore((state) => state.setPendingSessionRenameId);
 
   const debouncedSessionSearchQuery = useDebouncedValue(sessionSearchQuery, 120);
   const normalizedSessionSearchQuery = React.useMemo(
@@ -647,6 +649,19 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       return next;
     });
   }, [currentSessionId, sessions, safeStorage]);
+
+  // Handle rename session triggered via keyboard shortcut (Ctrl+R).
+  // The global keyboard handler sets pendingSessionRenameId; we consume
+  // it here to enter inline-edit mode for the target session.
+  React.useEffect(() => {
+    if (!pendingSessionRenameId) return;
+    const session = sessions.find((s) => s.id === pendingSessionRenameId);
+    if (session) {
+      setEditingId(session.id);
+      setEditTitle(session.title);
+    }
+    setPendingSessionRenameId(null);
+  }, [pendingSessionRenameId, sessions, setPendingSessionRenameId]);
 
   const toggleParent = React.useCallback((expansionKey: string) => {
     setExpandedParents((prev) => {

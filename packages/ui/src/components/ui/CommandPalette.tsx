@@ -81,6 +81,8 @@ export const CommandPalette: React.FC = () => {
   const shortcutOverrides = useUIStore((s) => s.shortcutOverrides);
 
   const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
+  const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
+  const setPendingSessionRenameId = useUIStore((s) => s.setPendingSessionRenameId);
   const setCurrentSession = useSessionUIStore((s) => s.setCurrentSession);
 
   const activeSessions = useGlobalSessionsStore((s) => s.activeSessions);
@@ -162,6 +164,20 @@ export const CommandPalette: React.FC = () => {
           void createWorktreeSession();
         }),
       },
+      ...(currentSessionId
+        ? [
+            {
+              id: 'rename-session',
+              title: t('commandPalette.item.renameSession'),
+              icon: <Icon name="edit" className="mr-2 h-4 w-4" />,
+              shortcutId: 'rename_session',
+              searchText: 'Rename session',
+              onSelect: run(() => {
+                setPendingSessionRenameId(currentSessionId);
+              }),
+            },
+          ]
+        : []),
       {
         id: 'add-project',
         title: t('commandPalette.item.addProject'),
@@ -257,6 +273,8 @@ export const CommandPalette: React.FC = () => {
     setSettingsDialogOpen,
     activeProject?.id,
     activeProject?.path,
+    currentSessionId,
+    setPendingSessionRenameId,
   ]);
 
   // ---------------------------------------------------------------------------

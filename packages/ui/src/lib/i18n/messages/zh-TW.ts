@@ -1765,6 +1765,7 @@ export const dict: Record<I18nKey, string> = {
   'commandPalette.item.newSession': '新增會話',
   'commandPalette.item.newMiniChat': '新增 Mini Chat 視窗',
   'commandPalette.item.newWorktreeDraft': '新增 worktree 草稿',
+  'commandPalette.item.renameSession': 'Rename Session',
   'commandPalette.item.addProject': '新增專案',
   'commandPalette.item.showSessionSwitcher': '顯示會話切換器',
   'commandPalette.item.toggleSidebar': '切換側邊欄',
