@@ -60,24 +60,29 @@ export function resolveFallbackTaskSessionId(params: ResolveFallbackParams): str
     hasRetried = false,
   } = params;
 
-  if (!isTaskTool || isTaskFinalized || !parentSessionId || typeof taskStartTime !== 'number') {
+  if (!isTaskTool || !parentSessionId || typeof taskStartTime !== 'number') {
     return undefined;
   }
 
-  const windowMs = hasRetried ? TASK_SESSION_MATCH_WINDOW_WIDE_MS : TASK_SESSION_MATCH_WINDOW_MS;
-  const latestAllowed = taskStartTime + windowMs;
-
-  // Filter candidate sessions: parentID matches and created shortly after task start.
-  const candidates = sessions.filter((session) => {
+  // Filter candidate sessions: parentID matches the current session.
+  let candidates = sessions.filter((session) => {
     if (!session?.id || session.parentID !== parentSessionId) {
       return false;
     }
-    const created = session.time?.created;
-    if (typeof created !== 'number') {
-      return false;
-    }
-    return created >= taskStartTime && created <= latestAllowed;
+    return true;
   });
+
+  // When the task is still running, apply no time window — late-appearing
+  // child sessions should still match. Once finalized, restrict to sessions
+  // created shortly after the task started to avoid binding to stale siblings.
+  if (isTaskFinalized) {
+    const windowMs = hasRetried ? TASK_SESSION_MATCH_WINDOW_WIDE_MS : TASK_SESSION_MATCH_WINDOW_MS;
+    const latestAllowed = taskStartTime + windowMs;
+    candidates = candidates.filter((session) => {
+      const created = session.time?.created;
+      return typeof created === 'number' && created >= taskStartTime && created <= latestAllowed;
+    });
+  }
 
   if (candidates.length === 0) {
     return undefined;
