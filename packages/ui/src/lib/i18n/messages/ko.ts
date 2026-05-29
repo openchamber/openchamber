@@ -1141,6 +1141,8 @@ export const dict: Record<I18nKey, string> = {
   'inlineComment.actions.cancel': '취소',
   'inlineComment.actions.save': '저장',
   'inlineComment.actions.comment': '댓글',
+  'inlineComment.actions.revertHunk': '헝크 되돌리기',
+  'inlineComment.actions.revertingHunk': '되돌리는 중...',
   'inlineComment.actions.showLess': '간단히 보기',
   'inlineComment.actions.showMore': '더 보기',
   'inlineComment.actions.editComment': '편집 댓글',

@@ -6,6 +6,7 @@ vi.mock('@openchamber/ui/lib/gitApiHttp', () => ({
   getGitDiff: vi.fn(),
   getGitFileDiff: vi.fn(),
   revertGitFile: vi.fn(),
+  revertGitHunk: vi.fn(),
   stageGitFile: vi.fn(),
   stageGitFiles: vi.fn(),
   unstageGitFile: vi.fn(),
@@ -58,11 +59,12 @@ vi.mock('@openchamber/ui/lib/gitApiHttp', () => ({
 }));
 
 describe('createWebGitAPI', () => {
-  it('exposes bulk stage and unstage methods', async () => {
+  it('exposes bulk stage, unstage, and hunk revert methods', async () => {
     const { createWebGitAPI } = await import('./git');
     const api = createWebGitAPI();
 
     expect(typeof api.stageGitFiles).toBe('function');
     expect(typeof api.unstageGitFiles).toBe('function');
+    expect(typeof api.revertGitHunk).toBe('function');
   });
 });

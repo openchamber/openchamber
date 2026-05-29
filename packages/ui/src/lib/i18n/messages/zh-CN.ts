@@ -1104,6 +1104,8 @@ export const dict: Record<I18nKey, string> = {
   'inlineComment.actions.cancel': '取消',
   'inlineComment.actions.save': '保存',
   'inlineComment.actions.comment': '评论',
+  'inlineComment.actions.revertHunk': '还原区块',
+  'inlineComment.actions.revertingHunk': '正在还原...',
   'inlineComment.actions.showLess': '收起',
   'inlineComment.actions.showMore': '展开',
   'inlineComment.actions.editComment': '编辑评论',

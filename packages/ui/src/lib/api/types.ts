@@ -153,16 +153,24 @@ export interface GetGitDiffOptions {
   contextLines?: number;
 }
 
+export interface RevertGitHunkPayload {
+  path: string;
+  staged?: boolean;
+  patch: string;
+}
+
 export interface GitFileDiffResponse {
   original: string;
   modified: string;
   path: string;
   isBinary?: boolean;
+  hunkPatch?: string;
 }
 
 export interface GetGitFileDiffOptions {
   path: string;
   staged?: boolean;
+  includeHunkPatch?: boolean;
 }
 
 export interface GitBranchDetails {
@@ -465,6 +473,7 @@ export interface GitAPI {
   getGitDiff(directory: string, options: GetGitDiffOptions): Promise<GitDiffResponse>;
   getGitFileDiff(directory: string, options: GetGitFileDiffOptions): Promise<GitFileDiffResponse>;
   revertGitFile(directory: string, filePath: string, options?: { scope?: 'all' | 'working' }): Promise<void>;
+  revertGitHunk(directory: string, payload: RevertGitHunkPayload): Promise<void>;
   stageGitFile(directory: string, filePath: string): Promise<void>;
   stageGitFiles?(directory: string, filePaths: string[]): Promise<void>;
   unstageGitFile(directory: string, filePath: string): Promise<void>;

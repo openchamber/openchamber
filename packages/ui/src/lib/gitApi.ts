@@ -1,6 +1,7 @@
 
 
 import type { RuntimeAPIs } from './api/types';
+import type { RevertGitHunkPayload } from './api/types';
 import * as gitHttp from './gitApiHttp';
 import { opencodeClient } from './opencode/client';
 import { renderMagicPrompt } from './magicPrompts';
@@ -37,6 +38,7 @@ export type {
   GitRebaseResult,
   MergeConflictDetails,
   CommitFileDiffResponse,
+  RevertGitHunkPayload,
 } from './api/types';
 
 declare global {
@@ -134,6 +136,12 @@ export async function revertGitFile(
   const runtime = getRuntimeGit();
   if (runtime) return runtime.revertGitFile(directory, filePath, options);
   return gitHttp.revertGitFile(directory, filePath, options);
+}
+
+export async function revertGitHunk(directory: string, payload: RevertGitHunkPayload): Promise<void> {
+  const runtime = getRuntimeGit();
+  if (runtime) return runtime.revertGitHunk(directory, payload);
+  return gitHttp.revertGitHunk(directory, payload);
 }
 
 export async function stageGitFile(directory: string, filePath: string): Promise<void> {

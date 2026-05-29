@@ -1104,6 +1104,8 @@ export const dict: Record<I18nKey, string> = {
   "inlineComment.actions.cancel": "Скасувати",
   "inlineComment.actions.save": "Зберегти",
   "inlineComment.actions.comment": "Коментар",
+  "inlineComment.actions.revertHunk": "Скасувати фрагмент",
+  "inlineComment.actions.revertingHunk": "Скасування...",
   "inlineComment.actions.showLess": "Показувати менше",
   "inlineComment.actions.showMore": "Показати більше",
   "inlineComment.actions.editComment": "Редагувати коментар",

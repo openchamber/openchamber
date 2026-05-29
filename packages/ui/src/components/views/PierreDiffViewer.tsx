@@ -26,6 +26,7 @@ import { getDefaultTheme } from '@/lib/theme/themes';
 
 import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
+import type { RevertHunkAction } from '@/lib/gitDiffHunks';
 
 
 // Threshold (bytes) above which syntax highlighting is degraded for performance
@@ -39,6 +40,8 @@ interface PierreDiffViewerProps {
   renderSideBySide: boolean;
   wrapLines?: boolean;
   layout?: 'fill' | 'inline';
+  hunkActions?: RevertHunkAction[];
+  onRevertHunk?: (action: RevertHunkAction) => Promise<void> | void;
 }
 
 // CSS injected into Pierre's Shadow DOM for WebKit scroll optimization
@@ -201,6 +204,8 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
   renderSideBySide,
   wrapLines,
   layout = 'fill',
+  hunkActions,
+  onRevertHunk,
 }) => {
   const themeContext = useOptionalThemeSystem();
 
@@ -716,6 +721,8 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
         startEdit(draft);
       }}
       onDelete={deleteDraft}
+      hunkActions={hunkActions}
+      onRevertHunk={onRevertHunk}
     />
   );
 
