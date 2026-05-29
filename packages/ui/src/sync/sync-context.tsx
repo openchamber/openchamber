@@ -1494,7 +1494,10 @@ export function SyncProvider(props: {
                   directory: dir,
                   limit: 200,
                 })
-                allSessions = ((allResult as { data?: unknown }).data ?? []) as typeof rootSessions
+                const allError = (allResult as { error?: unknown }).error
+                if (!allError) {
+                  allSessions = ((allResult as { data?: unknown }).data ?? []) as typeof rootSessions
+                }
               } catch {
                 // Child load is best-effort; fall back to roots only
               }
@@ -1502,7 +1505,7 @@ export function SyncProvider(props: {
               // Merge: keep root sessions from the first query (for accurate
               // sessionTotal), plus any child sessions from the broader query.
               const rootIds = new Set(rootSessions.map((s: { id: string }) => s.id))
-              const childSessions = allSessions.filter((s: { id: string; parentID?: string | null }) => !rootIds.has(s.id) && s.parentID)
+              const childSessions = allSessions.filter((s: { id: string; parentID?: string | null }) => s?.id && !rootIds.has(s.id) && s.parentID)
 
               const sessions = rootSessions.concat(childSessions)
               // Race guard: if the list came back empty but event pipeline
