@@ -1470,6 +1470,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       return true;
     }
 
+    if (draftContent === '' && fileContent !== '') {
+      console.warn(
+        `[saveDraft] saving empty content for "${selectedFile.path}" (${fileContent.length} bytes were expected). ` +
+        'If this is unintentional, the server-side atomic write or read retry may have missed a race.',
+      )
+    }
+
     setIsSaving(true);
 
     try {
@@ -1495,7 +1502,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     } finally {
       setIsSaving(false);
     }
-  }, [draftContent, files, isDirty, loadedFileLineEnding, readFileStat, selectedFile, t]);
+  }, [draftContent, fileContent, files, isDirty, loadedFileLineEnding, readFileStat, selectedFile, t]);
 
   React.useEffect(() => {
     if (!isDirty) {
