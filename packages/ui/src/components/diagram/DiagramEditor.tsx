@@ -29,6 +29,15 @@ export const DiagramEditor = React.forwardRef<DiagramEditorHandle, DiagramEditor
     const [isDark, setIsDark] = React.useState(detectDark);
     const stableXmlRef = React.useRef(xml);
 
+    // When the parent switches files (xml prop changes), reset the stable
+    // reference so the new content renders instead of the first file's content.
+    const prevXmlRef = React.useRef(xml);
+    if (prevXmlRef.current !== xml) {
+      prevXmlRef.current = xml;
+      stableXmlRef.current = xml;
+      latestXmlRef.current = xml;
+    }
+
     const prevIsDark = React.useRef(isDark);
     if (prevIsDark.current !== isDark) {
       prevIsDark.current = isDark;
@@ -45,12 +54,15 @@ export const DiagramEditor = React.forwardRef<DiagramEditorHandle, DiagramEditor
       return () => observer.disconnect();
     }, []);
 
+    // Focus the iframe once on mount so keyboard shortcuts work without
+    // clicking the canvas. Intentionally not keyed on isDark — re-focusing
+    // on every theme toggle would steal keyboard focus from the user.
     React.useEffect(() => {
       const id = setTimeout(() => {
         containerRef.current?.querySelector<HTMLIFrameElement>('.diagrams-iframe')?.focus();
       }, 600);
       return () => clearTimeout(id);
-    }, [isDark]);
+    }, []);
 
     React.useImperativeHandle(ref, () => ({
       getXml: () => latestXmlRef.current,

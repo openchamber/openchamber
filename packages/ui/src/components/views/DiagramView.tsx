@@ -43,6 +43,7 @@ export function DiagramView() {
     const newXml = editorRef.current?.getXml();
     if (filePath && files?.writeFile && newXml && newXml !== xml) {
       await files.writeFile(filePath, newXml);
+      setXml(newXml);
     }
   }, [filePath, files, xml]);
 
