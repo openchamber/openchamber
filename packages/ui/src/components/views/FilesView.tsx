@@ -1488,12 +1488,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       return true;
     }
 
-    // Guard against persisting a stale empty read caused by a concurrent
-    // writer truncating the file (O_TRUNC race). If the draft is empty and
-    // the original content was not, something went wrong — don't save.
     if (draftContent === '' && fileContent !== '') {
-      console.warn(`[saveDraft] refusing to save empty draft for "${selectedFile.path}" (${fileContent.length} bytes were expected)`);
-      return false;
+      console.warn(
+        `[saveDraft] saving empty content for "${selectedFile.path}" (${fileContent.length} bytes were expected). ` +
+        'If this is unintentional, the server-side atomic write or read retry may have missed a race.',
+      )
     }
 
     setIsSaving(true);
