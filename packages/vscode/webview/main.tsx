@@ -444,7 +444,7 @@ const handleLocalApiRequest = async (url: URL, init?: RequestInit) => {
   if (sessionAutoAcceptMatch && method === 'POST') {
     const bodyText = await extractBodyText(url, init, method);
     const body = bodyText
-      ? JSON.parse(bodyText) as { sessionId?: unknown; enabled?: unknown }
+      ? JSON.parse(bodyText) as { sessionId?: unknown; enabled?: unknown; directory?: unknown }
       : {};
     const sessionId = decodeURIComponent(sessionAutoAcceptMatch[1] || '');
     const result = await sendBridgeMessage<{ success?: boolean }>('api:sessions/permission-auto-accept', { ...body, sessionId })

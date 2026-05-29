@@ -1228,7 +1228,6 @@ function handleEvent(
     const permission = payload.properties as PermissionRequest
     const permissionStore = usePermissionStore.getState()
     if (permissionStore.isSessionAutoAccepting(permission.sessionID)) {
-      updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload)
       void sessionActions.respondToPermission(permission.sessionID, permission.id, "once").catch(() => undefined)
     } else {
       const toastKey = getPermissionToastKey(permission.sessionID, permission.id)
