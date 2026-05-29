@@ -34,17 +34,49 @@ export const createNotificationTriggerRuntime = (deps) => {
   const SESSION_PARENT_CACHE_TTL_MS = 60 * 1000;
 
   // Sessions where the client has enabled Permission Auto-Accept. Mirrored
-  // from the client-side permissionStore via POST /api/notifications/auto-accept
+  // from the client-side permissionStore via the session auto-accept endpoint
   // so the server can suppress permission notifications BEFORE dispatch (the
   // 500ms debounce race otherwise leaks notifications for auto-accepted
   // permissions when the replied round-trip is slower than the debounce).
   const autoAcceptingSessions = new Set();
-  const setAutoAcceptSession = (sessionId, enabled) => {
+  const autoAcceptingPermissionRequests = new Set();
+  const autoAcceptSessionDirectories = new Map();
+  let autoAcceptPollTimer = null;
+  let autoAcceptDrainInFlight = false;
+
+  const rememberAutoAcceptDirectory = (sessionId, directory) => {
     if (typeof sessionId !== 'string' || sessionId.length === 0) return;
+    if (typeof directory !== 'string' || directory.trim().length === 0) return;
+    const existing = autoAcceptSessionDirectories.get(sessionId) ?? new Set();
+    existing.add(directory.trim());
+    autoAcceptSessionDirectories.set(sessionId, existing);
+  };
+
+  const stopAutoAcceptPollerIfIdle = () => {
+    if (autoAcceptingSessions.size > 0 || !autoAcceptPollTimer) return;
+    clearInterval(autoAcceptPollTimer);
+    autoAcceptPollTimer = null;
+  };
+
+  const ensureAutoAcceptPoller = () => {
+    if (autoAcceptPollTimer || autoAcceptingSessions.size === 0) return;
+    autoAcceptPollTimer = setInterval(() => {
+      void drainAutoAcceptPermissions().catch(() => undefined);
+    }, 1500);
+    autoAcceptPollTimer.unref?.();
+  };
+
+  const setAutoAcceptSession = (sessionId, enabled, options = {}) => {
+    if (typeof sessionId !== 'string' || sessionId.length === 0) return;
+    rememberAutoAcceptDirectory(sessionId, options.directory);
     if (enabled) {
       autoAcceptingSessions.add(sessionId);
+      ensureAutoAcceptPoller();
+      void drainAutoAcceptPermissions().catch(() => undefined);
     } else {
       autoAcceptingSessions.delete(sessionId);
+      autoAcceptSessionDirectories.delete(sessionId);
+      stopAutoAcceptPollerIfIdle();
     }
   };
 
@@ -139,6 +171,91 @@ export const createNotificationTriggerRuntime = (deps) => {
       current = parent;
     }
     return false;
+  };
+
+  const getDirectoryFromPayload = (payload) => {
+    const directory = payload?.properties?.directory ?? payload?.directory;
+    return typeof directory === 'string' && directory.trim().length > 0 ? directory.trim() : '';
+  };
+
+  const autoAcceptPermission = async (sessionId, requestId, directory = '') => {
+    if (!sessionId || !requestId) return false;
+    const key = `${sessionId}:${requestId}`;
+    if (autoAcceptingPermissionRequests.has(key)) return false;
+    autoAcceptingPermissionRequests.add(key);
+    try {
+      const url = new URL(buildOpenCodeUrl(`/permission/${encodeURIComponent(requestId)}/reply`, ''));
+      if (directory) {
+        url.searchParams.set('directory', directory);
+      }
+      const response = await fetch(url.toString(), {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          ...getOpenCodeAuthHeaders(),
+        },
+        body: JSON.stringify({ reply: 'once' }),
+        signal: AbortSignal.timeout(5000),
+      });
+      return response.ok;
+    } catch (error) {
+      console.warn('[Notification] Background permission auto-accept failed:', error?.message || error);
+      return false;
+    } finally {
+      autoAcceptingPermissionRequests.delete(key);
+    }
+  };
+
+  const drainAutoAcceptPermissions = async () => {
+    if (autoAcceptingSessions.size === 0) return;
+    if (autoAcceptDrainInFlight) return;
+    autoAcceptDrainInFlight = true;
+    try {
+      const directories = new Set(['']);
+      for (const directorySet of autoAcceptSessionDirectories.values()) {
+        for (const directory of directorySet) {
+          directories.add(directory);
+        }
+      }
+
+      for (const directory of directories) {
+        try {
+          const url = new URL(buildOpenCodeUrl('/permission', ''));
+          if (directory) {
+            url.searchParams.set('directory', directory);
+          }
+          const response = await fetch(url.toString(), {
+            method: 'GET',
+            headers: {
+              Accept: 'application/json',
+              ...getOpenCodeAuthHeaders(),
+            },
+            signal: AbortSignal.timeout(5000),
+          });
+          if (!response.ok) continue;
+          const data = await response.json().catch(() => null);
+          const permissions = Array.isArray(data)
+            ? data
+            : Array.isArray(data?.items)
+              ? data.items
+              : Array.isArray(data?.data)
+                ? data.data
+                : [];
+          for (const permission of permissions) {
+            const sessionId = permission?.sessionID ?? permission?.sessionId;
+            const requestId = permission?.id ?? permission?.requestID ?? permission?.requestId;
+            if (typeof sessionId !== 'string' || typeof requestId !== 'string') continue;
+            rememberAutoAcceptDirectory(sessionId, permission?.directory ?? directory);
+            if (!await isSessionAutoAccepting(sessionId)) continue;
+            void autoAcceptPermission(sessionId, requestId, permission?.directory ?? directory);
+          }
+        } catch {
+        }
+      }
+    } finally {
+      autoAcceptDrainInFlight = false;
+    }
   };
 
   const extractSessionIdFromPayload = (payload) => {
@@ -464,6 +581,7 @@ export const createNotificationTriggerRuntime = (deps) => {
       // ancestor). Skip the whole notification path — the client responds
       // directly and the user has opted out of approval prompts.
       if (await isSessionAutoAccepting(sessionId)) {
+        void autoAcceptPermission(sessionId, requestId, getDirectoryFromPayload(payload));
         if (requestKey) notifiedPermissionRequests.add(requestKey);
         return;
       }
@@ -477,6 +595,7 @@ export const createNotificationTriggerRuntime = (deps) => {
         pushPermissionDebounceTimers.delete(sessionId);
 
         if (await isSessionAutoAccepting(sessionId)) {
+          void autoAcceptPermission(sessionId, requestId, getDirectoryFromPayload(payload));
           if (requestKey) notifiedPermissionRequests.add(requestKey);
           return;
         }
@@ -561,6 +680,7 @@ export const createNotificationTriggerRuntime = (deps) => {
   return {
     maybeSendPushForTrigger,
     setAutoAcceptSession,
+    drainAutoAcceptPermissions,
     setGetIsWindowFocused,
   };
 };

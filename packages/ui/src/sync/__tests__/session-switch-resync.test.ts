@@ -1,11 +1,15 @@
 import { describe, expect, test, beforeEach, mock } from "bun:test"
 import { create, type StoreApi } from "zustand"
-import type { PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2/client"
+import type { PermissionRequest, QuestionRequest, Todo } from "@opencode-ai/sdk/v2/client"
 
 const listPendingQuestionsCalls: Array<{ directories?: Array<string | null | undefined> }> = []
 const listPendingPermissionsCalls: Array<{ directories?: Array<string | null | undefined> }> = []
+const sessionTodoCalls: string[] = []
+const persistedTodoUpdates: Array<{ sessionId: string; todos: Todo[] | undefined }> = []
 let pendingQuestionsResponse: QuestionRequest[] = []
 let pendingPermissionsResponse: PermissionRequest[] = []
+let sessionTodoResponses: Record<string, Todo[]> = {}
+let sessionTodoShouldFail = false
 let pendingQuestionsShouldThrow = false
 let pendingPermissionsShouldThrow = false
 
@@ -22,7 +26,15 @@ mock.module("@/lib/opencode/client", () => ({
       return pendingPermissionsResponse
     }),
     getDirectory: () => "/repo",
-    getScopedSdkClient: () => ({}),
+    getScopedSdkClient: () => ({
+      session: {
+        todo: mock(async ({ sessionID }: { sessionID: string }) => {
+          sessionTodoCalls.push(sessionID)
+          if (sessionTodoShouldFail) return { error: { message: "simulated" } }
+          return { data: sessionTodoResponses[sessionID] ?? [] }
+        }),
+      },
+    }),
     setDirectory: () => undefined,
   },
 }))
@@ -41,7 +53,13 @@ mock.module("@/stores/useConfigStore", () => ({
 }))
 
 mock.module("@/stores/useTodosPersistStore", () => ({
-  useTodosPersistStore: { getState: () => ({}) },
+  useTodosPersistStore: {
+    getState: () => ({
+      setSessionTodos: (sessionId: string, todos: Todo[] | undefined) => {
+        persistedTodoUpdates.push({ sessionId, todos })
+      },
+    }),
+  },
 }))
 
 mock.module("@/components/ui", () => ({
@@ -50,7 +68,7 @@ mock.module("@/components/ui", () => ({
 
 import { INITIAL_STATE, type State } from "../types"
 import type { DirectoryStore } from "../child-store"
-import { resyncBlockingRequestsForDirectory } from "../sync-context"
+import { resyncBlockingRequestsForDirectory, resyncSessionTodosForDirectory } from "../sync-context"
 
 function buildQuestion(overrides: Partial<QuestionRequest> = {}): QuestionRequest {
   return {
@@ -87,8 +105,12 @@ describe("resyncBlockingRequestsForDirectory", () => {
   beforeEach(() => {
     listPendingQuestionsCalls.length = 0
     listPendingPermissionsCalls.length = 0
+    sessionTodoCalls.length = 0
+    persistedTodoUpdates.length = 0
     pendingQuestionsResponse = []
     pendingPermissionsResponse = []
+    sessionTodoResponses = {}
+    sessionTodoShouldFail = false
     pendingQuestionsShouldThrow = false
     pendingPermissionsShouldThrow = false
   })
@@ -204,5 +226,51 @@ describe("resyncBlockingRequestsForDirectory", () => {
     expect(store.getState().question["ses_a"]).toHaveLength(1)
     expect(store.getState().question["ses_a"]?.[0]?.id).toBe("que_1")
     expect(listPendingPermissionsCalls).toHaveLength(1)
+  })
+})
+
+describe("resyncSessionTodosForDirectory", () => {
+  beforeEach(() => {
+    sessionTodoCalls.length = 0
+    persistedTodoUpdates.length = 0
+    sessionTodoResponses = {}
+    sessionTodoShouldFail = false
+  })
+
+  test("refreshes session todos from the authoritative session.todo endpoint", async () => {
+    const store = createDirectoryStore({})
+    sessionTodoResponses = {
+      ses_a: [{ id: "todo_1", content: "Done", status: "completed", priority: "medium" } as Todo],
+    }
+
+    await resyncSessionTodosForDirectory("/repo", store, ["ses_a"])
+
+    expect(sessionTodoCalls).toEqual(["ses_a"])
+    expect(store.getState().todo["ses_a"]?.[0]?.status).toBe("completed")
+    expect(persistedTodoUpdates).toHaveLength(1)
+    expect((persistedTodoUpdates[0]?.todos?.[0] as Todo & { id?: string } | undefined)?.id).toBe("todo_1")
+  })
+
+  test("clears stale todos when the server returns an empty list", async () => {
+    const store = createDirectoryStore({
+      todo: { ses_a: [{ id: "todo_stale", content: "Old", status: "pending", priority: "medium" } as Todo] },
+    })
+    sessionTodoResponses = { ses_a: [] }
+
+    await resyncSessionTodosForDirectory("/repo", store, ["ses_a"])
+
+    expect(store.getState().todo["ses_a"]).toEqual(undefined)
+    expect(persistedTodoUpdates).toEqual([{ sessionId: "ses_a", todos: undefined }])
+  })
+
+  test("preserves existing todos when the todo fetch fails", async () => {
+    const existing = [{ id: "todo_existing", content: "Keep", status: "pending", priority: "medium" } as Todo]
+    const store = createDirectoryStore({ todo: { ses_a: existing } })
+    sessionTodoShouldFail = true
+
+    await resyncSessionTodosForDirectory("/repo", store, ["ses_a"])
+
+    expect(store.getState().todo["ses_a"]).toBe(existing)
+    expect(persistedTodoUpdates).toHaveLength(0)
   })
 })

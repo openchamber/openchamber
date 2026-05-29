@@ -628,6 +628,103 @@ const parseQuestionOutput = (output: string): Array<{ question: string; answer: 
     return pairs.length > 0 ? pairs : null;
 };
 
+type TodoToolItem = {
+    id?: string;
+    content: string;
+    status?: 'pending' | 'in_progress' | 'completed' | 'cancelled';
+    priority?: 'low' | 'medium' | 'high';
+};
+
+const parseTodoToolStatus = (value: unknown): TodoToolItem['status'] => {
+    if (typeof value !== 'string') {
+        return undefined;
+    }
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'pending') return 'pending';
+    if (normalized === 'in_progress' || normalized === 'in progress' || normalized === 'inprogress') return 'in_progress';
+    if (normalized === 'completed' || normalized === 'done') return 'completed';
+    if (normalized === 'cancelled' || normalized === 'canceled') return 'cancelled';
+    return undefined;
+};
+
+const parseTodoToolPriority = (value: unknown): TodoToolItem['priority'] => {
+    if (typeof value !== 'string') {
+        return undefined;
+    }
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'low') return 'low';
+    if (normalized === 'medium') return 'medium';
+    if (normalized === 'high') return 'high';
+    return undefined;
+};
+
+const parseTodoToolContent = (record: Record<string, unknown>): string => {
+    if (typeof record.content === 'string') {
+        return record.content;
+    }
+    if (typeof record.text === 'string') {
+        return record.text;
+    }
+    if (typeof record.title === 'string') {
+        return record.title;
+    }
+    return '';
+};
+
+const parseTodoToolItemsFromArray = (value: unknown[]): TodoToolItem[] => {
+    const items: TodoToolItem[] = [];
+    for (const item of value) {
+        if (!item || typeof item !== 'object') {
+            continue;
+        }
+        const record = item as Record<string, unknown>;
+        const content = parseTodoToolContent(record);
+        if (!content.trim()) {
+            continue;
+        }
+        items.push({
+            id: typeof record.id === 'string' ? record.id : undefined,
+            content,
+            status: parseTodoToolStatus(record.status),
+            priority: parseTodoToolPriority(record.priority),
+        });
+    }
+    return items;
+};
+
+const parseTodoToolItems = (value: unknown): TodoToolItem[] => {
+    if (Array.isArray(value)) {
+        return parseTodoToolItemsFromArray(value);
+    }
+    if (value && typeof value === 'object') {
+        const todos = (value as { todos?: unknown }).todos;
+        if (Array.isArray(todos)) {
+            return parseTodoToolItemsFromArray(todos);
+        }
+    }
+    if (typeof value === 'string' && value.trim()) {
+        try {
+            return parseTodoToolItems(JSON.parse(value) as unknown);
+        } catch {
+            return [];
+        }
+    }
+    return [];
+};
+
+const getTodoStatusStyle = (status: TodoToolItem['status']): React.CSSProperties => {
+    if (status === 'completed') {
+        return { color: 'var(--status-success)', backgroundColor: 'var(--status-success-background)', borderColor: 'var(--status-success-border)' };
+    }
+    if (status === 'in_progress') {
+        return { color: 'var(--status-info)', backgroundColor: 'var(--status-info-background)', borderColor: 'var(--status-info-border)' };
+    }
+    if (status === 'cancelled') {
+        return { color: 'var(--status-error)', backgroundColor: 'var(--status-error-background)', borderColor: 'var(--status-error-border)' };
+    }
+    return { color: 'var(--tools-description)', backgroundColor: 'var(--surface-elevated)', borderColor: 'var(--tools-border)' };
+};
+
 const getToolDescriptionPath = (part: ToolPartType, state: ToolStateUnion, currentDirectory: string): string | null => {
     const stateWithData = state as ToolStateWithMetadata;
     const metadata = stateWithData.metadata;
@@ -1468,6 +1565,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     const metadata = stateWithData.metadata;
     const input = stateWithData.input;
     const rawOutput = stateWithData.output;
+    const normalizedToolName = normalizeToolName(part.tool);
     const hasStringOutput = typeof rawOutput === 'string' && rawOutput.length > 0;
     const outputString = typeof rawOutput === 'string' ? rawOutput : '';
 
@@ -1583,6 +1681,60 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                 </div>
             );
         };
+
+        if (normalizedToolName === 'todowrite') {
+            const inputTodos = parseTodoToolItems(input?.todos);
+            const todos = inputTodos.length > 0
+                ? inputTodos
+                : parseTodoToolItems(rawOutput);
+
+            if (todos.length === 0) {
+                return renderScrollableBlock(
+                    <div className="typography-meta" style={{ color: 'var(--tools-description)' }}>{t('chat.toolPart.noOutputProduced')}</div>,
+                    { maxHeightClass: 'max-h-60' }
+                );
+            }
+
+            const getStatusLabel = (status: TodoToolItem['status']) => {
+                if (status === 'completed') return t('chat.todo.completed');
+                if (status === 'in_progress') return t('chat.todo.inProgress');
+                if (status === 'cancelled') return t('chat.todo.cancelled');
+                return t('chat.todo.pending');
+            };
+
+            const getPriorityLabel = (priority: TodoToolItem['priority']) => {
+                if (priority === 'high') return t('chat.statusRow.todo.priority.high');
+                if (priority === 'low') return t('chat.statusRow.todo.priority.low');
+                return t('chat.statusRow.todo.priority.medium');
+            };
+
+            return renderScrollableBlock(
+                <div className="space-y-1.5">
+                    {todos.map((todo, index) => {
+                        const status = todo.status ?? 'pending';
+                        const priority = todo.priority ?? 'medium';
+                        return (
+                            <div key={todo.id ?? `${index}:${todo.content}`} className="rounded-lg border px-2 py-1.5" style={{ backgroundColor: 'var(--surface-elevated)', borderColor: 'var(--tools-border)' }}>
+                                <div className="flex items-start gap-2 min-w-0">
+                                    <span className="mt-0.5 inline-flex shrink-0 rounded-full border px-1.5 py-0.5 typography-micro font-medium" style={getTodoStatusStyle(status)}>
+                                        {getStatusLabel(status)}
+                                    </span>
+                                    <div className="min-w-0 flex-1 space-y-0.5">
+                                        <div className="typography-meta whitespace-pre-wrap break-words" style={{ color: 'var(--surface-foreground)' }}>
+                                            {todo.content}
+                                        </div>
+                                        <div className="typography-micro" style={{ color: 'var(--surface-muted-foreground)' }}>
+                                            {getPriorityLabel(priority)}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>,
+                { maxHeightClass: 'max-h-[40vh]', className: 'p-1' }
+            );
+        }
 
         // Question tool: show parsed Q&A summary or question content from input
         if (part.tool === 'question') {
@@ -1727,7 +1879,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                 'relative pr-2 pb-2 pt-2 space-y-2 pl-4'
             )}
         >
-            {part.tool === 'question' ? (
+            {normalizedToolName === 'question' || normalizedToolName === 'todowrite' ? (
                 renderResultContent()
             ) : (
                 <>

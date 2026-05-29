@@ -107,6 +107,14 @@ const normalizeDirectoryCandidate = (value: unknown): string | null => {
     return trimmed.length > 0 ? trimmed : null;
 };
 
+const mirrorSessionPermissionAutoAccept = (sessionId: string, enabled: boolean, directory: string | null): void => {
+    void fetch(`/api/sessions/${encodeURIComponent(sessionId)}/permission-auto-accept`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled, directory: directory || '' }),
+    }).catch(() => { /* best-effort */ });
+};
+
 const collectPendingFromSyncStores = (): Array<{ id: string; sessionID: string }> => {
     try {
         const stores = getSyncChildStores();
@@ -236,25 +244,23 @@ export const usePermissionStore = create<PermissionStore>()(
                     // permission notifications before the client auto-response
                     // round-trip. Send known descendants too; server-side
                     // ancestry lookup can lag OpenCode session indexing.
+                    const sessionDirectory = useSessionUIStore.getState().getDirectoryForSession(sessionId);
+                    const currentDirectory = normalizeDirectoryCandidate(opencodeClient.getDirectory());
+                    const mappedSessionDirectory = normalizeDirectoryCandidate(sessionDirectory);
+
                     for (const scopedSessionId of sessionScope) {
-                        void fetch('/api/notifications/auto-accept', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ sessionId: scopedSessionId, enabled }),
-                        }).catch(() => { /* best-effort */ });
+                        const scopedDirectory = normalizeDirectoryCandidate(useSessionUIStore.getState().getDirectoryForSession(scopedSessionId)) || mappedSessionDirectory || currentDirectory;
+                        mirrorSessionPermissionAutoAccept(scopedSessionId, enabled, scopedDirectory);
                     }
 
                     if (!enabled) {
                         return;
                     }
 
-                    const sessionDirectory = useSessionUIStore.getState().getDirectoryForSession(sessionId);
                     const directories = new Set<string>();
-                    const currentDirectory = normalizeDirectoryCandidate(opencodeClient.getDirectory());
                     if (currentDirectory) {
                         directories.add(currentDirectory);
                     }
-                    const mappedSessionDirectory = normalizeDirectoryCandidate(sessionDirectory);
                     if (mappedSessionDirectory) {
                         directories.add(mappedSessionDirectory);
                     }
@@ -354,13 +360,11 @@ export const usePermissionStore = create<PermissionStore>()(
                     // Re-broadcast auto-accept state to the server after
                     // rehydration so server-side notification suppression
                     // survives page reloads / server restarts.
+                    const currentDirectory = normalizeDirectoryCandidate(opencodeClient.getDirectory());
                     for (const [sid, enabled] of Object.entries(state.autoAccept || {})) {
                         if (enabled === true) {
-                            void fetch('/api/notifications/auto-accept', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ sessionId: sid, enabled: true }),
-                            }).catch(() => { /* best-effort */ });
+                            const mappedDirectory = normalizeDirectoryCandidate(useSessionUIStore.getState().getDirectoryForSession(sid)) || currentDirectory;
+                            mirrorSessionPermissionAutoAccept(sid, true, mappedDirectory);
                         }
                     }
                 },

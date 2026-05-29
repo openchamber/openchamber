@@ -440,12 +440,14 @@ const handleLocalApiRequest = async (url: URL, init?: RequestInit) => {
     });
   }
 
-  if (normalizedPathname === '/api/notifications/auto-accept' && method === 'POST') {
+  const sessionAutoAcceptMatch = normalizedPathname.match(/^\/api\/sessions\/([^/]+)\/permission-auto-accept$/);
+  if (sessionAutoAcceptMatch && method === 'POST') {
     const bodyText = await extractBodyText(url, init, method);
     const body = bodyText
       ? JSON.parse(bodyText) as { sessionId?: unknown; enabled?: unknown }
       : {};
-    const result = await sendBridgeMessage<{ success?: boolean }>('api:notifications/auto-accept', body)
+    const sessionId = decodeURIComponent(sessionAutoAcceptMatch[1] || '');
+    const result = await sendBridgeMessage<{ success?: boolean }>('api:sessions/permission-auto-accept', { ...body, sessionId })
       .catch(() => ({ success: false }));
     return new Response(JSON.stringify(result), {
       status: result?.success === false ? 400 : 200,

@@ -35,13 +35,18 @@ This module provides notification message preparation utilities for the web serv
   - `POST /api/sessions/:id/view`
   - `POST /api/sessions/:id/unview`
   - `POST /api/sessions/:id/message-sent`
+  - `POST /api/sessions/:id/permission-auto-accept`
 
 ### Trigger runtime API (runtime.js)
 - `createNotificationTriggerRuntime(dependencies)`: creates runtime-owned debounced trigger handling for OpenCode events.
 - Returned API:
   - `maybeSendPushForTrigger(payload)`
+  - `setAutoAcceptSession(sessionId, enabled, options?)`
+  - `drainAutoAcceptPermissions()`
+  - `setGetIsWindowFocused(callback)`
 - Owns:
   - completion/error/question/permission trigger routing
+  - server-side Permission Auto-Accept for mirrored sessions while the client is backgrounded
   - session parent cache for subtask suppression
   - template resolution and fallback behavior
   - native notification fanout and web push payload fanout

@@ -498,7 +498,7 @@ export async function handleSystemBridgeMessage(
       }
     }
 
-    case 'api:notifications/auto-accept': {
+    case 'api:sessions/permission-auto-accept': {
       const request = (payload || {}) as { sessionId?: unknown; enabled?: unknown };
       const sessionId = typeof request.sessionId === 'string' ? request.sessionId.trim() : '';
       if (!sessionId) {

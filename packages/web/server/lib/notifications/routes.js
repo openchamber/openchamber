@@ -299,19 +299,22 @@ export const registerNotificationRoutes = (app, dependencies) => {
     });
   });
 
-  // Mirror client-side Permission Auto-Accept state to the server so it can
-  // suppress permission notifications at the source (the 500ms debounce race
-  // otherwise leaks notifications for auto-accepted permissions).
-  app.post('/api/notifications/auto-accept', (req, res) => {
+  const updateSessionPermissionAutoAccept = async (req, res, rawSessionId) => {
     const body = req.body && typeof req.body === 'object' ? req.body : {};
-    const sessionId = typeof body.sessionId === 'string' ? body.sessionId.trim() : '';
+    const sessionId = typeof rawSessionId === 'string' ? rawSessionId.trim() : '';
     const enabled = body.enabled === true;
+    const directory = typeof body.directory === 'string' ? body.directory.trim() : '';
     if (!sessionId) {
       return res.status(400).json({ error: 'sessionId required' });
     }
+    await ensureSessionWatcher();
     if (typeof setAutoAcceptSession === 'function') {
-      setAutoAcceptSession(sessionId, enabled);
+      setAutoAcceptSession(sessionId, enabled, { directory });
     }
     return res.json({ success: true, sessionId, enabled });
+  };
+
+  app.post('/api/sessions/:id/permission-auto-accept', async (req, res) => {
+    return updateSessionPermissionAutoAccept(req, res, req.params.id);
   });
 };
