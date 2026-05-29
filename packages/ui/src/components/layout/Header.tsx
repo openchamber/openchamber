@@ -749,6 +749,8 @@ export const Header: React.FC<HeaderProps> = ({
   const contextPanelByDirectory = useUIStore((state) => state.contextPanelByDirectory);
   const activeMainTab = useUIStore((state) => state.activeMainTab);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
+  const stickyUserHeader = useUIStore((state) => state.stickyUserHeader);
+  const setStickyUserHeader = useUIStore((state) => state.setStickyUserHeader);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
 
   const getCurrentModel = useConfigStore((state) => state.getCurrentModel);
@@ -1905,6 +1907,12 @@ export const Header: React.FC<HeaderProps> = ({
     return <React.Fragment key={tab.id}>{tabButton}</React.Fragment>;
   };
 
+  const stickyQuestionToggleTitle = stickyUserHeader ? t('header.actions.unstickLatestQuestion') : t('header.actions.stickLatestQuestion');
+  const stickyQuestionToggleAria = stickyUserHeader ? t('header.actions.unstickLatestQuestionAria') : t('header.actions.stickLatestQuestionAria');
+  const handleToggleStickyQuestion = React.useCallback(() => {
+    setStickyUserHeader(!stickyUserHeader);
+  }, [setStickyUserHeader, stickyUserHeader]);
+
   const desktopSidebarActions = (
     <>
       {showPlanTab && (
@@ -1953,6 +1961,13 @@ export const Header: React.FC<HeaderProps> = ({
         showDevShutdown={showDevShutdown}
         isDevShutdownInFlight={isDevShutdownInFlight}
         onDevShutdown={handleDevShutdown}
+      />
+      <HeaderIconActionButton
+        title={stickyQuestionToggleTitle}
+        ariaLabel={stickyQuestionToggleAria}
+        onClick={handleToggleStickyQuestion}
+        pressed={stickyUserHeader}
+        Icon="chat-1"
       />
       <HeaderIconActionButton
         title={t('header.actions.terminalPanelWithShortcut', { shortcut: shortcutLabel('toggle_terminal') })}
@@ -2499,6 +2514,26 @@ export const Header: React.FC<HeaderProps> = ({
                 </div>
               </DropdownMenuContent>
             </DropdownMenu>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={stickyQuestionToggleAria}
+                  aria-pressed={stickyUserHeader}
+                  onClick={handleToggleStickyQuestion}
+                  className={cn(
+                    mobileHeaderIconButtonClass,
+                    stickyUserHeader && 'bg-interactive-selection text-interactive-selection-foreground'
+                  )}
+                >
+                  <Icon name="chat-1" className="h-5 w-5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{stickyQuestionToggleTitle}</p>
+              </TooltipContent>
+            </Tooltip>
 
             {onToggleRightDrawer ? (
               <Tooltip>

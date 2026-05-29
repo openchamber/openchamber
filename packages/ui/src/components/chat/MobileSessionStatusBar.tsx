@@ -1391,7 +1391,7 @@ function CollapsedView({
 
   return (
     <div
-      className="w-full flex items-center justify-between px-2 py-1 border-b border-[var(--interactive-border)] bg-[var(--surface-muted)] order-first text-left overflow-hidden"
+      className="w-full flex items-center justify-between gap-1 px-2 py-1 border-b border-[var(--interactive-border)] bg-[var(--surface-muted)] order-first text-left overflow-hidden"
       style={{
         borderTopLeftRadius: 'var(--radius-lg)',
         borderTopRightRadius: 'var(--radius-lg)',
@@ -1400,6 +1400,14 @@ function CollapsedView({
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
     >
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-[var(--interactive-hover)] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        aria-label={t('chat.mobileStatus.expandPanelAria')}
+      >
+        <Icon name="arrow-up-s" className="h-4 w-4" />
+      </button>
       <div className="flex-1 min-w-0 mr-1">
         <SessionStatusHeader
           currentSessionId={currentSessionId}
@@ -1568,7 +1576,15 @@ function ExpandedView({
       onTouchEnd={handleTouchEnd}
     >
       {/* Header row */}
-      <div className="flex items-center justify-between px-2 py-1.5 border-b border-[var(--interactive-border)]">
+      <div className="flex items-center justify-between gap-1 px-2 py-1.5 border-b border-[var(--interactive-border)]">
+        <button
+          type="button"
+          onClick={onToggleCollapse}
+          className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-[var(--interactive-hover)] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          aria-label={t('chat.mobileStatus.collapsePanelAria')}
+        >
+          <Icon name="arrow-down-s" className="h-4 w-4" />
+        </button>
         <div className="flex-1 min-w-0 mr-1">
           <SessionStatusHeader
             currentSessionId={currentSessionId}
