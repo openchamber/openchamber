@@ -2,6 +2,7 @@ import React from 'react';
 import type { SessionGroup } from '../types';
 import type { ServerInfo } from '@/sync/server-context';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useI18n } from '@/lib/i18n';
 
 type ProjectItem = {
   id: string;
@@ -36,6 +37,7 @@ export function useServerSidebarSections(opts: {
 }): ServerSection[] {
   const { servers, projectSections, collapsedServers } = opts;
 
+  const { t } = useI18n();
   const projectsSub = useProjectsStore((s) => s.projects);
 
   const projectServerMap = React.useMemo(() => {
@@ -52,7 +54,7 @@ export function useServerSidebarSections(opts: {
     if (servers.length === 0) {
       return [{
         serverId: 'local',
-        label: 'Local',
+        label: t('server.sidebar.localLabel'),
         type: 'local' as const,
         status: 'connected' as const,
         isCollapsed: false,
@@ -101,7 +103,7 @@ export function useServerSidebarSections(opts: {
       } else {
         sections.push({
           serverId: 'local',
-          label: 'Local',
+          label: t('server.sidebar.localLabel'),
           type: 'local' as const,
           status: 'connected' as const,
           isCollapsed: collapsedServers.has('local'),

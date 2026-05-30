@@ -43,6 +43,7 @@ import { setSessionPrefetch } from "./session-prefetch-cache"
 import type { ServerTagged } from "./server-tagged"
 import { unwrapServerEvent } from "./server-tagged"
 import { useServerStore } from "./server-context"
+import { useDirectoryStore as useDirStore } from "@/stores/useDirectoryStore"
 
 // ---------------------------------------------------------------------------
 // Context
@@ -1137,13 +1138,11 @@ function handleEvent(
     } else if (result.type === "server.status") {
       const state = useServerStore.getState()
       const existing = state.servers.find((s) => s.id === serverId)
+      if (!existing) return
       state.upsertServer({
-        id: serverId,
-        label: existing?.label ?? serverId,
-        type: existing?.type ?? "local",
+        ...existing,
         status: result.status,
-        errorMessage: "errorMessage" in result ? (result as { errorMessage?: string }).errorMessage : existing?.errorMessage,
-        url: existing?.url ?? "",
+        errorMessage: "errorMessage" in result ? (result as { errorMessage?: string }).errorMessage : existing.errorMessage,
       })
     }
     // On server.connected / global.disposed, re-bootstrap all directories
@@ -1448,7 +1447,7 @@ export function SyncProvider(props: {
     const resyncKey = `${effectiveServerId}:${directory}`
     if (resyncing.has(resyncKey)) return
 
-    lastFullResyncAtByDirectoryRef.current.set(directory, Date.now())
+    lastFullResyncAtByDirectoryRef.current.set(resyncKey, Date.now())
     resyncing.add(resyncKey)
     void resyncDirectoryAfterReconnect(directory, store, routingIndex)
       .catch(() => {
@@ -1464,11 +1463,11 @@ export function SyncProvider(props: {
     const bootingDirs = new Set<string>()
 
     childStores.configure({
-      onBootstrap: (directory) => {
+      onBootstrap: (directory, serverId) => {
         if (bootingDirs.has(directory)) return
         bootingDirs.add(directory)
 
-        const store = childStores.getChild(directory)
+        const store = childStores.getChildByServer(serverId, directory)
         if (!store) return
 
         const runBootstrap = async (attempt: number) => {
@@ -1730,6 +1729,28 @@ export function SyncProvider(props: {
   useEffect(() => {
     setSyncRefs(props.sdk, childStores, props.directory, (sessionID, dir) => {
       setIndexedSessionDirectory(routingIndex, sessionID, dir)
+    }, () => {
+      const toRemove: string[] = []
+      for (const [sessionID] of routingIndex.sessionDirectoryById) {
+        let found = false
+        for (const { store } of childStores.getAllEntries()) {
+          const state = store.getState()
+          if (
+            state.session.some((s) => s.id === sessionID)
+            || Object.prototype.hasOwnProperty.call(state.message, sessionID)
+            || Object.prototype.hasOwnProperty.call(state.session_status ?? {}, sessionID)
+          ) {
+            found = true
+            break
+          }
+        }
+        if (!found) {
+          toRemove.push(sessionID)
+        }
+      }
+      for (const sessionID of toRemove) {
+        removeIndexedSession(routingIndex, sessionID)
+      }
     })
     setActionRefs(
       props.sdk,
@@ -1770,7 +1791,12 @@ export function useGlobalSyncSelector<T>(selector: (state: GlobalSyncStore) => T
 export function useDirectoryStore(directory?: string): StoreApi<DirectoryStore> {
   const system = useSyncSystem()
   const dir = directory ?? system.directory
-  return system.childStores.ensureChild(dir)
+  const serverId = useDirStore.getState().currentServerId
+  return (
+    system.childStores.getChildByServer(serverId, dir) ??
+    system.childStores.findChildByDirectory(dir) ??
+    system.childStores.ensureChild(dir)
+  )
 }
 
 /** Select from the current directory's store */

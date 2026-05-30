@@ -683,7 +683,8 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       toggleRowSelected(session.id, sessionDirectory ?? null, collectNodeDescendantIds(node));
       return;
     }
-    handleSessionSelect(session.id, sessionDirectory, isMissingDirectory, projectId, (session as unknown as { serverId?: string }).serverId ?? null);
+    const rawServerId = (session as Record<string, unknown>).serverId
+    handleSessionSelect(session.id, sessionDirectory, isMissingDirectory, projectId, typeof rawServerId === 'string' ? rawServerId : 'local');
   };
 
   const handleRowMouseDown = (event: React.MouseEvent<HTMLButtonElement>) => {

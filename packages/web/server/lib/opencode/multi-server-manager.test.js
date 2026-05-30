@@ -157,7 +157,7 @@ describe('MultiServerManager', () => {
       type: 'remote-url',
       status: 'error',
       url: 'http://a.com',
-      error: 'timeout',
+      errorMessage: 'timeout',
     });
   });
 

@@ -64,7 +64,6 @@ type Props = {
   openSidebarMenuKey: string | null;
   setOpenSidebarMenuKey: (key: string | null) => void;
   isInlineEditing: boolean;
-  serverId?: string;
   hideScrollWrapper?: boolean;
 };
 

@@ -47,34 +47,34 @@ type Args = {
   editTitle: string;
 };
 
-let sessionDirCache: Map<string, string | null> | null = null
-let sessionDirCacheKey = ''
-
-function resolveSessionDirectory(sessionId: string, serverId?: string | null): string | null {
-  const sessionsByDirectory = useGlobalSessionsStore.getState().sessionsByDirectory;
-  const effectiveServerId = serverId || 'local';
-  const cacheKey = `${effectiveServerId}::${useGlobalSessionsStore.getState().activeSessions.length}`
-  if (!sessionDirCache || sessionDirCacheKey !== cacheKey) {
-    sessionDirCache = new Map()
-    const serverMap = sessionsByDirectory.get(effectiveServerId)
-    if (serverMap) {
-      for (const [dir, sessions] of serverMap) {
-        for (const session of sessions) {
-          if (!sessionDirCache.has(session.id)) {
-            sessionDirCache.set(session.id, dir)
-          }
-        }
-      }
-    }
-    sessionDirCacheKey = cacheKey
-  }
-  return sessionDirCache.get(sessionId) ?? null
-}
-
 export const useSessionActions = (args: Args) => {
   const { t } = useI18n();
   const [copiedSessionId, setCopiedSessionId] = React.useState<string | null>(null);
   const copyTimeout = React.useRef<number | null>(null);
+
+  const sessionDirCacheRef = React.useRef<Map<string, string | null> | null>(null)
+  const sessionDirCacheKeyRef = React.useRef('')
+
+  function resolveSessionDirectory(sessionId: string, serverId?: string | null): string | null {
+    const sessionsByDirectory = useGlobalSessionsStore.getState().sessionsByDirectory;
+    const effectiveServerId = serverId || 'local';
+    const cacheKey = `${effectiveServerId}::${useGlobalSessionsStore.getState().activeSessions.length}`
+    if (!sessionDirCacheRef.current || sessionDirCacheKeyRef.current !== cacheKey) {
+      sessionDirCacheRef.current = new Map()
+      const serverMap = sessionsByDirectory.get(effectiveServerId)
+      if (serverMap) {
+        for (const [dir, sessions] of serverMap) {
+          for (const session of sessions) {
+            if (!sessionDirCacheRef.current.has(session.id)) {
+              sessionDirCacheRef.current.set(session.id, dir)
+            }
+          }
+        }
+      }
+      sessionDirCacheKeyRef.current = cacheKey
+    }
+    return sessionDirCacheRef.current.get(sessionId) ?? null
+  }
 
   React.useEffect(() => {
     return () => {
@@ -103,7 +103,7 @@ export const useSessionActions = (args: Args) => {
       }
 
       if (sessionDirectory && sessionDirectory !== args.currentDirectory) {
-        const effectiveServerId = serverId || 'local';
+    const effectiveServerId = serverId ?? 'local';
         const currentServerId = useDirectoryStore.getState().currentServerId;
         if (effectiveServerId !== currentServerId) {
           useDirectoryStore.getState().setDirectory(sessionDirectory, { showOverlay: false, serverId: effectiveServerId });

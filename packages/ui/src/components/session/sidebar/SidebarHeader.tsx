@@ -36,7 +36,6 @@ type Props = {
   selectionModeEnabled: boolean;
   onToggleSelectionMode: () => void;
   servers?: ServerInfo[];
-  activeServerId?: string;
 };
 
 export function SidebarHeader(props: Props): React.ReactNode {
@@ -235,7 +234,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
                 <span>{searchMatchCount === 1
                   ? t('sessions.sidebar.header.search.matchCountSingle', { count: searchMatchCount })
                   : t('sessions.sidebar.header.search.matchCountPlural', { count: searchMatchCount })}</span>
-              ) : <span>{servers && servers.length > 1 ? `Searching ${servers.length} servers` : ''}</span>}
+              ) : <span>{servers && servers.length > 1 ? t('server.sidebar.search.searchingServers', { count: servers.length }) : ''}</span>}
               <span>{t('sessions.sidebar.header.search.escapeHint')}</span>
             </div>
             <div className="relative">

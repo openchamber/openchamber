@@ -378,7 +378,7 @@ export const useProjectsStore = create<ProjectsStore>()(
       const now = Date.now();
       const label = options?.label?.trim() || deriveProjectLabel(normalizedPath);
       const id = createProjectIdFromPath(normalizedPath);
-      const currentServerId = useDirectoryStore.getState().currentServerId || 'local';
+      const currentServerId = useDirectoryStore.getState().currentServerId ?? 'local';
       const entry: ProjectEntry = {
         id,
         path: normalizedPath,
@@ -431,7 +431,8 @@ export const useProjectsStore = create<ProjectsStore>()(
         const nextActive = nextProjects.find((project) => project.id === nextActiveId);
         if (nextActive) {
           opencodeClient.setDirectory(nextActive.path);
-          useDirectoryStore.getState().setDirectory(nextActive.path, { showOverlay: false });
+          const rawServerId = (nextActive as unknown as Record<string, unknown>).serverId
+          useDirectoryStore.getState().setDirectory(nextActive.path, { showOverlay: false, serverId: typeof rawServerId === 'string' ? rawServerId : undefined });
         }
       } else {
         void useDirectoryStore.getState().goHome();
@@ -460,7 +461,8 @@ export const useProjectsStore = create<ProjectsStore>()(
       persistProjects(nextProjects, id);
 
       opencodeClient.setDirectory(target.path);
-      useDirectoryStore.getState().setDirectory(target.path, { showOverlay: false });
+      const targetRawServerId = (target as unknown as Record<string, unknown>).serverId
+      useDirectoryStore.getState().setDirectory(target.path, { showOverlay: false, serverId: typeof targetRawServerId === 'string' ? targetRawServerId : undefined });
     },
 
     setActiveProjectIdOnly: (id: string) => {
@@ -706,7 +708,8 @@ export const useProjectsStore = create<ProjectsStore>()(
         const activeProject = incomingProjects.find((project) => project.id === incomingActive);
         if (activeProject) {
           opencodeClient.setDirectory(activeProject.path);
-          useDirectoryStore.getState().setDirectory(activeProject.path, { showOverlay: false });
+          const activeRawServerId = (activeProject as unknown as Record<string, unknown>).serverId
+          useDirectoryStore.getState().setDirectory(activeProject.path, { showOverlay: false, serverId: typeof activeRawServerId === 'string' ? activeRawServerId : undefined });
         }
       }
     },

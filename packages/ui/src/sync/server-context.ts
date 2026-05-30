@@ -4,7 +4,8 @@ import { useStore } from "zustand"
 import { toast } from "@/components/ui"
 import { useDirectoryStore } from "@/stores/useDirectoryStore"
 import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
-import { getSyncChildStores } from "./sync-refs"
+import { getSyncChildStores, cleanRoutingIndex } from "./sync-refs"
+import { getSafeStorage } from "@/stores/utils/safeStorage"
 
 export interface ServerInfo {
   id: string
@@ -117,7 +118,6 @@ export function useActiveServerId(): string {
 
 export function useServerActions() {
   const upsertServer = useServerStore(useCallback((s) => s.upsertServer, []))
-  const setServers = useServerStore(useCallback((s) => s.setServers, []))
   const setError = useServerStore(useCallback((s) => s.setError, []))
   const setLoading = useServerStore(useCallback((s) => s.setLoading, []))
 
@@ -148,12 +148,23 @@ export function useServerActions() {
         try {
           getSyncChildStores().removeAllForServer(id)
         } catch { /* childStores may not be initialized yet */ }
+        try { cleanRoutingIndex() } catch { /* routing index may not be initialized */ }
         useGlobalSessionsStore.getState().removeServerEntries(id)
         const { currentServerId, setDirectory, currentDirectory } = useDirectoryStore.getState()
         if (currentServerId === id) {
           setDirectory(currentDirectory, { serverId: 'local' })
         }
-        setServers(useServerStore.getState().servers.filter((s) => s.id !== id))
+        useServerStore.setState((state) => ({ servers: state.servers.filter((s) => s.id !== id) }))
+        try {
+          const storage = getSafeStorage()
+          const raw = storage.getItem('oc.sessions.serverCollapse')
+          if (raw) {
+            const parsed = JSON.parse(raw)
+            if (Array.isArray(parsed)) {
+              storage.setItem('oc.sessions.serverCollapse', JSON.stringify(parsed.filter((item) => item !== id)))
+            }
+          }
+        } catch { /* ignore storage cleanup errors */ }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         toast.error(message)
@@ -161,7 +172,7 @@ export function useServerActions() {
         setLoading(false)
       }
     },
-    [setServers, setLoading],
+    [setLoading],
   )
 
   return useMemo(() => ({ connectServer, disconnectServer }), [connectServer, disconnectServer])

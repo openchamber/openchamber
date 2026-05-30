@@ -41,7 +41,7 @@ export class ChildStoreManager {
   private readonly disposers = new Map<string, () => void>()
   private readonly registrySubscribers = new Set<() => void>()
 
-  private onBootstrap?: (directory: string) => void
+  private onBootstrap?: (directory: string, serverId: string) => void
   private onDispose?: (directory: string) => void
   private isBooting?: (directory: string) => boolean
   private isLoadingSessions?: (directory: string) => boolean
@@ -63,7 +63,7 @@ export class ChildStoreManager {
   }
 
   configure(callbacks: {
-    onBootstrap?: (directory: string) => void
+    onBootstrap?: (directory: string, serverId: string) => void
     onDispose?: (directory: string) => void
     isBooting?: (directory: string) => boolean
     isLoadingSessions?: (directory: string) => boolean
@@ -129,7 +129,7 @@ export class ChildStoreManager {
 
     const shouldBootstrap = options?.bootstrap ?? true
     if (shouldBootstrap && store.getState().status === "loading") {
-      this.onBootstrap?.(directory)
+      this.onBootstrap?.(directory, serverId)
     }
 
     return store

@@ -12,6 +12,7 @@ interface DirectoryStore {
   currentDirectory: string;
   currentServerId: string;
   directoryHistory: string[];
+  serverIdHistory: string[];
   historyIndex: number;
   homeDirectory: string;
   hasPersistedDirectory: boolean;
@@ -261,6 +262,7 @@ export const useDirectoryStore = create<DirectoryStore>()(
       currentDirectory: initialCurrentDirectory,
       currentServerId: initialServerId,
       directoryHistory: [initialCurrentDirectory],
+      serverIdHistory: [initialServerId],
       historyIndex: 0,
       homeDirectory: initialHomeDirectory,
       hasPersistedDirectory: initialHasPersistedDirectory,
@@ -278,7 +280,7 @@ export const useDirectoryStore = create<DirectoryStore>()(
         opencodeClient.setDirectory(resolvedPath);
         invalidateFileSearchCache();
 
-        const serverId = options?.serverId || get().currentServerId;
+        const serverId = options?.serverId ?? get().currentServerId;
 
         set((state) => {
           const newHistory = [...state.directoryHistory.slice(0, state.historyIndex + 1), resolvedPath];
@@ -293,6 +295,7 @@ export const useDirectoryStore = create<DirectoryStore>()(
             currentDirectory: resolvedPath,
             currentServerId: serverId,
             directoryHistory: newHistory,
+            serverIdHistory: [...state.serverIdHistory.slice(0, state.historyIndex + 1), serverId],
             historyIndex: newHistory.length - 1,
             hasPersistedDirectory: true,
             isHomeReady: true,
@@ -306,6 +309,7 @@ export const useDirectoryStore = create<DirectoryStore>()(
         if (state.historyIndex > 0) {
           const newIndex = state.historyIndex - 1;
           const newDirectory = state.directoryHistory[newIndex];
+          const newServerId = state.serverIdHistory[newIndex] ?? 'local';
 
           opencodeClient.setDirectory(newDirectory);
           invalidateFileSearchCache();
@@ -316,6 +320,7 @@ export const useDirectoryStore = create<DirectoryStore>()(
 
           set({
             currentDirectory: newDirectory,
+            currentServerId: newServerId,
             historyIndex: newIndex,
             hasPersistedDirectory: true,
             isHomeReady: true,
@@ -329,6 +334,7 @@ export const useDirectoryStore = create<DirectoryStore>()(
         if (state.historyIndex < state.directoryHistory.length - 1) {
           const newIndex = state.historyIndex + 1;
           const newDirectory = state.directoryHistory[newIndex];
+          const newServerId = state.serverIdHistory[newIndex] ?? 'local';
 
           opencodeClient.setDirectory(newDirectory);
           invalidateFileSearchCache();
@@ -339,6 +345,7 @@ export const useDirectoryStore = create<DirectoryStore>()(
 
           set({
             currentDirectory: newDirectory,
+            currentServerId: newServerId,
             historyIndex: newIndex,
             hasPersistedDirectory: true,
             isHomeReady: true,
@@ -418,6 +425,7 @@ export const useDirectoryStore = create<DirectoryStore>()(
         if (shouldReplaceCurrent) {
           updates.currentDirectory = resolvedHome;
           updates.directoryHistory = [resolvedHome];
+          updates.serverIdHistory = [state.currentServerId];
           updates.historyIndex = 0;
           updates.isSwitchingDirectory = false;
         } else if (currentChanged || historyChanged) {

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
+import { useI18n } from '@/lib/i18n';
 
 export interface SidebarServerHeaderProps {
   serverId: string;
@@ -28,6 +29,7 @@ export const SidebarServerHeader: React.FC<SidebarServerHeaderProps> = ({
   onConnect,
   onDisconnect,
 }) => {
+  const { t } = useI18n();
   return (
     <div
       className={cn(
@@ -60,7 +62,7 @@ export const SidebarServerHeader: React.FC<SidebarServerHeaderProps> = ({
               status === 'connecting' && 'bg-status-warning animate-pulse',
               status === 'disconnected' && 'bg-muted-foreground/40',
               status === 'error' && 'bg-status-error',
-            )}               title={status === 'error' ? errorMessage || 'Connection error' : status === 'disconnected' ? 'Disconnected' : undefined} />
+            )}               title={status === 'error' ? errorMessage || t('server.sidebar.status.connectionError') : status === 'disconnected' ? t('server.sidebar.status.disconnected') : undefined} />
             </span>
           </span>
 

@@ -97,7 +97,7 @@ export class MultiServerManager {
       type: s.type,
       status: s.status,
       url: s.url,
-      error: s.errorMessage,
+      errorMessage: s.errorMessage,
     }));
   }
 

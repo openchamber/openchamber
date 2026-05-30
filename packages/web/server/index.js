@@ -9,6 +9,7 @@ import net from 'net';
 import { fileURLToPath } from 'url';
 import os from 'os';
 import crypto from 'crypto';
+import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import { createUiAuth } from './lib/ui-auth/ui-auth.js';
 import { createTunnelAuth } from './lib/opencode/tunnel-auth.js';
 import { createManagedTunnelConfigRuntime } from './lib/tunnels/managed-config.js';
@@ -699,10 +700,14 @@ const sseFanIn = new SseFanIn(serverManager);
 globalMessageStreamHub.subscribeStatus((status) => {
   if (status.type === 'connect') {
     serverManager.updateStatus('local', 'connected');
+    sseFanIn.dispatchSynthetic('local', 'server.status', { status: 'connected' });
   } else if (status.type === 'disconnect') {
     serverManager.updateStatus('local', 'disconnected');
+    sseFanIn.dispatchSynthetic('local', 'server.status', { status: 'disconnected' });
   } else if (status.type === 'error' || status.type === 'initial-error') {
-    serverManager.updateStatus('local', 'error', status.error?.error?.message ?? status.error?.message ?? String(status.error));
+    const msg = status.error?.error?.message ?? status.error?.message ?? String(status.error);
+    serverManager.updateStatus('local', 'error', msg);
+    sseFanIn.dispatchSynthetic('local', 'server.status', { status: 'error', errorMessage: msg });
   }
 });
 
@@ -714,7 +719,9 @@ sseFanIn.onEvent((batch) => {
       void maybeSendPushForTrigger(tagged);
       sessionRuntime.processOpenCodeSsePayload(tagged);
     }
-    globalMessageStreamHub.feedEvent({ payload: tagged });
+    if (tagged.serverId !== 'local') {
+      globalMessageStreamHub.feedEvent({ payload: tagged });
+    }
   }
 });
 
@@ -725,7 +732,7 @@ const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   parseSseDataPayload: (...args) => parseSseDataPayload(...args),
   globalEventHub: globalMessageStreamHub,
   onPayload: (payload) => {
-    if (payload && typeof payload === 'object' && 'serverId' in payload) return;
+    if (payload && typeof payload === 'object' && typeof payload.serverId === 'string' && payload.serverId !== 'local') return;
     // Feed local server events into the fan-in for serverId tagging + coalesce
     sseFanIn.feedLocal('local', payload);
   },
@@ -1008,11 +1015,17 @@ const bootstrapOpenCodeAtStartup = async (...args) => {
 
   // Register local server with the multi-server manager
   if (!serverManager.getServer('local')) {
+    const localBaseUrl = openCodeBaseUrl || `http://127.0.0.1:${openCodePort}`;
+    const localClient = createOpencodeClient({
+      baseUrl: localBaseUrl,
+      headers: getOpenCodeAuthHeaders(),
+    });
     serverManager.registerServer({
       id: 'local',
       label: 'Local',
       type: 'local',
-      url: openCodeBaseUrl || `http://127.0.0.1:${openCodePort}`,
+      url: localBaseUrl,
+      client: localClient,
     });
   }
 

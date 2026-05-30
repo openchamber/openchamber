@@ -180,7 +180,18 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const addActiveNowSessionToStore = useActiveNowStore((state) => state.addSession);
   const pruneActiveNowEntriesInStore = useActiveNowStore((state) => state.prune);
   const [collapsedProjects, setCollapsedProjects] = React.useState<Set<string>>(new Set());
-  const [collapsedServers, setCollapsedServers] = React.useState<Set<string>>(new Set());
+  const [collapsedServers, setCollapsedServers] = React.useState<Set<string>>(() => {
+    try {
+      const raw = getSafeStorage().getItem(SERVER_COLLAPSE_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          return new Set(parsed.filter((item) => typeof item === 'string'));
+        }
+      }
+    } catch { /* ignored */ }
+    return new Set();
+  });
 
   const [projectRepoStatus, setProjectRepoStatus] = React.useState<Map<string, boolean | null>>(new Map());
   const [expandedSessionGroups, setExpandedSessionGroups] = React.useState<Set<string>>(new Set());
@@ -875,6 +886,21 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const servers = useServerList();
   const activeServerId = useActiveServerId();
   const { connectServer, disconnectServer } = useServerActions();
+
+  React.useEffect(() => {
+    const serverIds = new Set(servers.map((s) => s.id))
+    setCollapsedServers((prev) => {
+      const next = new Set(prev)
+      let changed = false
+      for (const id of prev) {
+        if (!serverIds.has(id)) {
+          next.delete(id)
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [servers])
   const serverSections = useServerSidebarSections({
     servers,
     projectSections,
@@ -891,18 +917,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         .map((ps) => filteredByProjectId.get(ps.project.id)!),
     }));
   }, [hasSessionSearchQuery, serverSections, sectionsForRender]);
-
-  React.useEffect(() => {
-    try {
-      const raw = safeStorage.getItem(SERVER_COLLAPSE_STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          setCollapsedServers(new Set(parsed.filter((item) => typeof item === 'string')));
-        }
-      }
-    } catch { /* ignored */ }
-  }, [safeStorage]);
 
   const toggleServerCollapse = React.useCallback((serverId: string) => {
     setCollapsedServers((prev) => {
@@ -1626,7 +1640,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         selectionModeEnabled={selectionModeEnabled}
         onToggleSelectionMode={handleToggleSelectionMode}
         servers={servers}
-        activeServerId={activeServerId}
       />
 
       <ScrollableOverlay useScrollShadow scrollShadowSize={96} outerClassName="flex-1 min-h-0" className={cn('space-y-1 pb-1 pl-2.5 pr-2', mobileVariant ? '' : '')}>
@@ -1662,7 +1675,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                   serverSection.status === 'disconnected' && 'pointer-events-none opacity-50',
                 )}>
                   <SidebarProjectsList
-                    serverId={serverSection.serverId}
                     hideScrollWrapper
                     topContent={undefined}
                     sectionsForRender={serverSection.projectSections}

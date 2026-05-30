@@ -953,13 +953,16 @@ const registerPersistedActiveServers = async () => {
                 const { createOpencodeClient } = await import('@opencode-ai/sdk/v2');
                 const client = createOpencodeClient({ baseUrl: status.localUrl });
                 sm.registerServer({ id, label, type: 'ssh', url: status.localUrl, client });
-              } catch {
+              } catch (err) {
                 sm.registerServer({ id, label, type: 'ssh', url: status.localUrl });
+                sm.updateStatus(id, 'error', err?.message || 'SDK import failed');
+                sf.dispatchSynthetic(id, 'server.status', { status: 'error', errorMessage: err?.message || 'SDK import failed' });
               }
               sf.subscribeServer(id);
             }
           }
-        } catch {
+        } catch (err) {
+          log.warn(`Failed to query SSH status for server ${id}:`, err?.message || err)
         }
         continue;
       }
@@ -973,8 +976,10 @@ const registerPersistedActiveServers = async () => {
             const { createOpencodeClient } = await import('@opencode-ai/sdk/v2');
             const client = createOpencodeClient({ baseUrl: url });
             sm.registerServer({ id, label: host.label, type: 'remote-url', url, client });
-          } catch {
+          } catch (err) {
             sm.registerServer({ id, label: host.label, type: 'remote-url', url });
+            sm.updateStatus(id, 'error', err?.message || 'SDK import failed');
+            sf.dispatchSynthetic(id, 'server.status', { status: 'error', errorMessage: err?.message || 'SDK import failed' });
           }
           sf.subscribeServer(id);
         }
@@ -990,7 +995,8 @@ const registerPersistedActiveServers = async () => {
         root.desktopActiveServerIds = currentIds.filter((i) => !orphanedIds.includes(i));
       });
     }
-  } catch {
+  } catch (err) {
+    log.warn('Failed to restore persisted servers:', err?.message || err)
   }
 };
 
@@ -2765,10 +2771,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         state.installingUpdate = true;
         state.quitConfirmationPending = false;
         if (state.mainWindow && !state.mainWindow.isDestroyed()) {
-          try {
             debounceWindowStatePersist(state.mainWindow, true);
-          } catch {
-          }
         }
       }
       // Defer so the IPC reply flushes before the app starts shutting down.
@@ -2946,6 +2949,9 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       if (!id || id === LOCAL_HOST_ID) throw new Error('Invalid server id');
       if (!url) throw new Error('URL is required');
 
+      const normalizedUrl = normalizeHostUrl(url);
+      if (!normalizedUrl) throw new Error('Invalid or unsupported server URL');
+
       const sm = state.serverHandle?.getServerManager?.();
       const sf = state.serverHandle?.getSseFanIn?.();
       if (!sm || !sf) throw new Error('Server is not ready');
@@ -2960,14 +2966,16 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
 
       try {
         const { createOpencodeClient } = await import('@opencode-ai/sdk/v2');
-        const client = createOpencodeClient({ baseUrl: url });
+        const client = createOpencodeClient({ baseUrl: normalizedUrl });
 
-        sm.registerServer({ id, label, type, url, client });
+        sm.registerServer({ id, label, type, url: normalizedUrl, client });
         sf.subscribeServer(id);
+        sf.dispatchSynthetic(id, 'server.status', { status: 'connecting' });
       } catch (err) {
         log.error(`Failed to import SDK for server ${id}:`, err?.message || err);
-        sm.registerServer({ id, label, type, url });
+        sm.registerServer({ id, label, type, url: normalizedUrl });
         sm.updateStatus(id, 'error', err?.message || 'SDK import failed');
+        sf.dispatchSynthetic(id, 'server.status', { status: 'error', errorMessage: err?.message || 'SDK import failed' });
       }
 
       await mutateSettingsRoot((root) => {

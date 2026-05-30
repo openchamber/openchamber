@@ -15,7 +15,7 @@ function createMockServerManager() {
         type: s.type,
         status: s.status,
         url: s.url,
-        error: s.errorMessage,
+        errorMessage: s.errorMessage,
       }));
     }),
     getServer: mock((id) => servers.get(id) || null),
@@ -105,7 +105,7 @@ describe('aggregate-routes', () => {
         type: 'remote-url',
         status: 'connecting',
         url: 'http://a.com',
-        error: null,
+        errorMessage: null,
       });
     });
 

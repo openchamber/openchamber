@@ -9,17 +9,20 @@ import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
 import type { ChildStoreManager } from "./child-store"
 import { getSessionMaterializationStatus } from "./materialization"
 import type { State } from "./types"
+import { useDirectoryStore as useDirStore } from "@/stores/useDirectoryStore"
 
 let _sdk: OpencodeClient | null = null
 let _childStores: ChildStoreManager | null = null
 let _directory: string = ""
 let _registerSessionDirectory: ((sessionID: string, directory: string) => void) | null = null
+let _cleanRoutingIndex: (() => void) | null = null
 
 export function setSyncRefs(
   sdk: OpencodeClient,
   childStores: ChildStoreManager,
   directory: string,
   registerSessionDirectory?: (sessionID: string, directory: string) => void,
+  cleanRoutingIndex?: () => void,
 ) {
   _sdk = sdk
   _childStores = childStores
@@ -27,6 +30,13 @@ export function setSyncRefs(
   if (registerSessionDirectory) {
     _registerSessionDirectory = registerSessionDirectory
   }
+  if (cleanRoutingIndex) {
+    _cleanRoutingIndex = cleanRoutingIndex
+  }
+}
+
+export function cleanRoutingIndex() {
+  _cleanRoutingIndex?.()
 }
 
 /** Pre-register a session→directory mapping in the routing index.
@@ -56,7 +66,11 @@ export function getDirectoryState(directory?: string): State | undefined {
   if (!stores) return undefined
   const dir = directory || _directory
   if (!dir) return undefined
-  return stores.getState(dir)
+  const serverId = useDirStore.getState().currentServerId
+  return (
+    stores.getStateByServer(serverId, dir) ??
+    (stores.findChildByDirectory?.(dir)?.getState())
+  )
 }
 
 /** Read sessions from current directory's child store */

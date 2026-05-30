@@ -210,19 +210,25 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
 
     inflightLoad = (async () => {
       const current = get();
+      const FETCH_TIMEOUT_MS = 30000;
 
       try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
         const [activeResult, archivedResult] = await Promise.allSettled([
-          fetch('/api/servers/all/sessions'),
-          fetch('/api/servers/all/sessions?archived=true'),
+          fetch('/api/servers/all/sessions', { signal: controller.signal }),
+          fetch('/api/servers/all/sessions?archived=true', { signal: controller.signal }),
         ]);
+
+        clearTimeout(timeoutId);
 
         let nextActiveSessions: GlobalSessionEntry[] = [];
         let nextArchivedSessions: GlobalSessionEntry[] = [];
 
         if (activeResult.status === 'fulfilled' && activeResult.value.ok) {
           const activeJson = await activeResult.value.json() as { sessions?: GlobalSessionEntry[] };
-          nextActiveSessions = activeJson.sessions ?? [];
+          nextActiveSessions = mergeSessionLists(current.activeSessions, activeJson.sessions);
         } else {
           console.warn('[GlobalSessions] Failed to load active sessions, using fallback:', activeResult.status === 'fulfilled' ? `HTTP ${activeResult.value.status}` : activeResult.reason);
           const fallbackSnapshot = mergeSessionLists(
@@ -259,13 +265,17 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
   },
 
   upsertSession: (session) => {
+    const rawServerId = (session as GlobalSessionEntry).serverId
+    const normalized = typeof rawServerId === 'string' && rawServerId.length > 0
+      ? session as GlobalSessionEntry
+      : { ...session, serverId: 'local' as const };
     set((state) => {
       const isArchived = Boolean(session.time?.archived);
       const nextActiveSessions = isArchived
         ? state.activeSessions.filter((candidate) => candidate.id !== session.id)
-        : upsertSessionIntoList(state.activeSessions, session);
+        : upsertSessionIntoList(state.activeSessions, normalized);
       const nextArchivedSessions = isArchived
-        ? upsertSessionIntoList(state.archivedSessions, session)
+        ? upsertSessionIntoList(state.archivedSessions, normalized)
         : state.archivedSessions.filter((candidate) => candidate.id !== session.id);
 
       if (

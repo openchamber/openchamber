@@ -21,6 +21,7 @@ import { Icon } from "@/components/icon/Icon";
 import { isTauriShell, isDesktopShell } from '@/lib/desktop';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useUIStore } from '@/stores/useUIStore';
+import { useDirectoryStore as useDirStore } from '@/stores/useDirectoryStore';
 import { useI18n } from '@/lib/i18n';
 import {
   desktopHostProbe,
@@ -669,6 +670,10 @@ export function DesktopHostSwitcherDialog({
     const localTarget = toNavigationUrl(getLocalOrigin());
     onHostSwitched?.();
     if (window.__OPENCHAMBER_MULTI_SERVER__) {
+      useDirStore.getState().setDirectory(
+        useDirStore.getState().currentDirectory,
+        { serverId: 'local' },
+      );
       return;
     }
     window.location.assign(localTarget);
