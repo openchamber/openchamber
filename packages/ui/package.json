@@ -42,6 +42,7 @@
     "@lezer/highlight": "^1.2.3",
     "@opencode-ai/sdk": "^1.15.10",
     "@pierre/diffs": "1.1.0-beta.13",
+    "@replit/codemirror-vim": "^6.3.0",
     "@simplewebauthn/browser": "13.3.0",
     "@tanstack/react-virtual": "^3.13.18",
     "@types/react-syntax-highlighter": "^15.5.13",

@@ -234,7 +234,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-export type VisibleSetting = 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'stickyUserHeader' | 'wideChatLayout' | 'splitAssistantMessageActions' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'showToolFileIcons' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage';
+export type VisibleSetting = 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'stickyUserHeader' | 'wideChatLayout' | 'splitAssistantMessageActions' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'showToolFileIcons' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage';
 
 interface OpenChamberVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
@@ -284,6 +284,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setDiffViewMode = useUIStore(state => state.setDiffViewMode);
     const showTerminalQuickKeysOnDesktop = useUIStore(state => state.showTerminalQuickKeysOnDesktop);
     const setShowTerminalQuickKeysOnDesktop = useUIStore(state => state.setShowTerminalQuickKeysOnDesktop);
+    const fileEditorKeymap = useUIStore(state => state.fileEditorKeymap);
+    const setFileEditorKeymap = useUIStore(state => state.setFileEditorKeymap);
     const queueModeEnabled = useMessageQueueStore(state => state.queueModeEnabled);
     const setQueueMode = useMessageQueueStore(state => state.setQueueMode);
     const persistChatDraft = useUIStore(state => state.persistChatDraft);
@@ -487,7 +489,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         ? hasLocalizationSettings
         : (shouldShow('theme') || shouldShow('pwaInstallName') || shouldShow('pwaOrientation') || shouldShow('timeFormat') || shouldShow('weekStart'));
     const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('spacing') || shouldShow('inputBarOffset');
-    const hasNavigationSettings = shouldShow('terminalQuickKeys') && !isMobile;
+    const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || shouldShow('fileEditorKeymap');
     const hasBehaviorSettings = shouldShow('mermaidRendering')
         || shouldShow('userMessageRendering')
         || shouldShow('chatRenderMode')
@@ -1150,6 +1152,48 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                     <div className="space-y-3">
                         <section className="px-2 pb-2 pt-0">
                             <h4 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.visual.section.navigation')}</h4>
+                            {shouldShow('fileEditorKeymap') && (
+                                <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-start sm:gap-8">
+                                    <span className="typography-ui-label text-foreground sm:w-56 shrink-0">
+                                        {t('settings.openchamber.visual.field.fileEditorKeymap')}
+                                    </span>
+                                    <div
+                                        role="radiogroup"
+                                        aria-label={t('settings.openchamber.visual.field.fileEditorKeymap')}
+                                        className="space-y-0"
+                                    >
+                                        {(['default', 'vim'] as const).map((keymap) => {
+                                            const selected = fileEditorKeymap === keymap;
+                                            const selectKeymap = () => setFileEditorKeymap(keymap);
+                                            return (
+                                                <div
+                                                    key={keymap}
+                                                    className="flex cursor-pointer items-center gap-2 py-0.5"
+                                                    role="button"
+                                                    tabIndex={0}
+                                                    aria-pressed={selected}
+                                                    onClick={selectKeymap}
+                                                    onKeyDown={(event) => {
+                                                        if (event.key === ' ' || event.key === 'Enter') {
+                                                            event.preventDefault();
+                                                            selectKeymap();
+                                                        }
+                                                    }}
+                                                >
+                                                    <Radio
+                                                        checked={selected}
+                                                        onChange={selectKeymap}
+                                                        ariaLabel={t(`settings.openchamber.visual.option.fileEditorKeymap.${keymap}`)}
+                                                    />
+                                                    <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
+                                                        {t(`settings.openchamber.visual.option.fileEditorKeymap.${keymap}`)}
+                                                    </span>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            )}
                             {shouldShow('terminalQuickKeys') && !isMobile && (
                                 <div
                                     className="group flex cursor-pointer items-center gap-2 py-1.5"
