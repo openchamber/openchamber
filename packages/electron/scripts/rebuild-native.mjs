@@ -129,6 +129,75 @@ const ensureWindowsNodeAddonApiForNodePty = async (rebuildRootPath) => {
   };
 };
 
+const patchNodeGypForVS2026 = () => {
+  if (process.platform === 'win32') {
+    try {
+      const fs = require('fs');
+      const bunDir = path.join(repoRoot, 'node_modules', '.bun');
+      if (!existsSync(bunDir)) return;
+
+      const entries = fs.readdirSync(bunDir, { withFileTypes: true });
+      const nodeGypDirs = entries
+        .filter((e) => e.isDirectory() && (e.name.startsWith('@electron+node-gyp@') || e.name.startsWith('node-gyp@')))
+        .map((e) => path.join(bunDir, e.name));
+
+      for (const pkgDir of nodeGypDirs) {
+        const findGlob = (base, pattern) => {
+          const results = [];
+          const walk = (dir) => {
+            if (!existsSync(dir)) return;
+            for (const item of fs.readdirSync(dir, { withFileTypes: true })) {
+              const full = path.join(dir, item.name);
+              if (item.isDirectory()) walk(full);
+              else if (item.name === pattern) results.push(full);
+            }
+          };
+          walk(base);
+          return results;
+        };
+
+        const vsJsFiles = findGlob(path.join(pkgDir, 'node_modules'), 'find-visualstudio.js');
+        for (const fullPath of vsJsFiles) {
+          let content = fs.readFileSync(fullPath, 'utf8');
+          if (!content.includes('ret.versionMajor === 18')) {
+            content = content.replace(
+              /(if \(ret\.versionMajor === 17\) \{\s+ret\.versionYear = 2022\s+return ret\s+\})/,
+              '$1\n    if (ret.versionMajor === 18) {\n      ret.versionYear = 2026\n      return ret\n    }',
+            );
+            console.log(`[electron] patched ${path.relative(repoRoot, fullPath)} for VS 2026`);
+          }
+          if (!content.includes('versionYear === 2026')) {
+            content = content.replace(
+              /(} else if \(versionYear === 2022\) \{\s+return 'v143'\s+\})/,
+              "$1 else if (versionYear === 2026) {\n      return 'v145'\n    }",
+            );
+            content = content.replace(/\[2019, 2022\]/g, '[2019, 2022, 2026]');
+            fs.writeFileSync(fullPath, content);
+            console.log(`[electron] patched ${path.relative(repoRoot, fullPath)} for v145 toolset`);
+          }
+        }
+
+        const buildJsFiles = findGlob(path.join(pkgDir, 'node_modules'), 'build.js');
+        for (const fullPath of buildJsFiles) {
+          let content = fs.readFileSync(fullPath, 'utf8');
+          if (!content.includes('SpectreMitigation=false')) {
+            content = content.replace(
+              "/p:Configuration=' + buildType + ';Platform=' + p)",
+              "/p:Configuration=' + buildType + ';Platform=' + p + ';SpectreMitigation=false')",
+            );
+            fs.writeFileSync(fullPath, content);
+            console.log(`[electron] patched ${path.relative(repoRoot, fullPath)} for SpectreMitigation`);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[electron] could not patch node-gyp for VS 2026:', err.message);
+    }
+  }
+};
+
+patchNodeGypForVS2026();
+
 console.log(`[electron] rebuilding native modules against Electron ${electronVersion}...`);
 
 // Rebuild against the hoisted root node_modules (bun workspace layout).

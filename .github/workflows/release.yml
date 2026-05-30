@@ -276,7 +276,6 @@ jobs:
           retention-days: 1
 
   build-desktop-electron-windows:
-    if: ${{ false }} # Windows artifact is disabled until the build is release-ready.
     needs: create-release
     runs-on: windows-latest
     strategy:
@@ -512,7 +511,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   combine-electron-manifests:
-    needs: [create-release, build-desktop-electron-macos]
+    needs: [create-release, build-desktop-electron-macos, build-desktop-electron-windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -528,6 +527,12 @@ jobs:
           pattern: latest-yml-*-apple-darwin
           path: artifacts
 
+      - name: Download per-arch latest.yml (Windows)
+        uses: actions/download-artifact@v4
+        with:
+          pattern: latest-yml-*-pc-windows-msvc
+          path: artifacts
+
       - name: Finalize combined latest-mac.yml
         env:
           LATEST_YML_DIR: ${{ github.workspace }}/artifacts
@@ -541,11 +546,12 @@ jobs:
           tag_name: v${{ needs.create-release.outputs.version }}
           files: |
             ${{ runner.temp }}/latest-mac.yml
+            ${{ runner.temp }}/latest.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   finalize-release:
-    needs: [create-release, build-desktop-electron-macos, repackage-electron-as-tauri-update, publish-npm, combine-manifests, combine-electron-manifests]
+    needs: [create-release, build-desktop-electron-macos, build-desktop-electron-windows, repackage-electron-as-tauri-update, publish-npm, combine-manifests, combine-electron-manifests]
     runs-on: ubuntu-latest
     env:
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
