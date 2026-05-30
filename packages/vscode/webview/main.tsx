@@ -453,6 +453,15 @@ const handleLocalApiRequest = async (url: URL, init?: RequestInit) => {
     });
   }
 
+  const sessionPermissionAuditMatch = normalizedPathname.match(/^\/api\/sessions\/([^/]+)\/permission-audit$/);
+  if (sessionPermissionAuditMatch && method === 'GET') {
+    const sessionId = decodeURIComponent(sessionPermissionAuditMatch[1] || '');
+    return new Response(JSON.stringify({ sessionId, error: 'Permission audit is not available in VS Code runtime' }), {
+      status: 503,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
   if (/^\/api\/sessions\/[^/]+\/message-sent$/.test(normalizedPathname) && method === 'POST') {
     const sessionId = normalizedPathname.split('/')[3] || '';
     return new Response(

@@ -16,12 +16,15 @@ import { hasPendingUserSendAnimation, consumePendingUserSendAnimation } from '@/
 import { streamPerfCount, streamPerfMeasure } from '@/stores/utils/streamDebug';
 import type { StreamPhase } from './message/types';
 import { normalizeParts } from './message/partUtils';
+import { PermissionAuditRow } from './PermissionAuditRow';
+import type { PermissionAuditEntry } from '@/types/permissionAudit';
 
 const MESSAGE_LIST_VIRTUALIZE_THRESHOLD = 5;
 const MESSAGE_LIST_OVERSCAN = 6;
 const EMPTY_STATIC_ENTRY_MESSAGES: ChatMessageEntry[] = [];
 const EMPTY_UNGROUPED_MESSAGE_IDS = new Set<string>();
 const EMPTY_VIRTUAL_ROWS: VirtualItem[] = [];
+const EMPTY_PERMISSION_AUDITS: PermissionAuditEntry[] = [];
 
 const estimateHistoryEntryHeight = (entry: RenderEntry | undefined): number => {
     if (!entry) {
@@ -29,7 +32,7 @@ const estimateHistoryEntryHeight = (entry: RenderEntry | undefined): number => {
     }
 
     if (entry.kind === 'turn') {
-        return 180 + Math.min(entry.turn.assistantMessages.length, 4) * 100;
+        return 180 + Math.min(entry.turn.assistantMessages.length, 4) * 100 + (entry.permissionAudits?.length ?? 0) * 44;
     }
 
     return 140;
@@ -162,6 +165,34 @@ const getMessageId = (message: ChatMessageEntry | undefined): string | null => {
 const getMessageParentId = (message: ChatMessageEntry): string | null => {
     const parentID = (message.info as unknown as { parentID?: unknown }).parentID;
     return typeof parentID === 'string' && parentID.trim().length > 0 ? parentID : null;
+};
+
+const getMessageCreatedAt = (message: ChatMessageEntry): number | undefined => {
+    const created = (message.info.time as { created?: unknown } | undefined)?.created;
+    return typeof created === 'number' ? created : undefined;
+};
+
+const resolvePermissionAuditMessageId = (entry: PermissionAuditEntry, turns: TurnRecord[]): string | null => {
+    const explicitMessageID = entry.tool?.messageID;
+    if (explicitMessageID) {
+        return explicitMessageID;
+    }
+
+    let fallback: TurnRecord | undefined;
+    for (const turn of turns) {
+        const startedAt = turn.startedAt ?? getMessageCreatedAt(turn.userMessage);
+        if (typeof startedAt === 'number' && startedAt > entry.requestedAt) {
+            break;
+        }
+        fallback = turn;
+    }
+
+    const anchor = fallback ?? turns[turns.length - 1];
+    if (!anchor) {
+        return null;
+    }
+
+    return anchor.assistantMessages[anchor.assistantMessages.length - 1]?.info.id ?? anchor.userMessage.info.id;
 };
 
 const isUserShellMarkerMessage = (message: ChatMessageEntry | undefined): boolean => {
@@ -394,6 +425,7 @@ interface MessageListProps {
     turnStart: number;
     disableStaging?: boolean;
     messages: ChatMessageEntry[];
+    permissionAudits?: PermissionAuditEntry[];
     sessionIsWorking?: boolean;
     activeStreamingMessageId?: string | null;
     activeStreamingPhase?: StreamPhase | null;
@@ -428,7 +460,8 @@ type RenderEntry =
         previousMessage?: ChatMessageEntry;
         nextMessage?: ChatMessageEntry;
     }
-    | { kind: 'turn'; key: string; turn: TurnRecord; isLastTurn: boolean };
+    | { kind: 'permissionAudit'; key: string; entry: PermissionAuditEntry }
+    | { kind: 'turn'; key: string; turn: TurnRecord; isLastTurn: boolean; permissionAudits?: PermissionAuditEntry[] };
 
 type TurnUiState = { isExpanded: boolean };
 
@@ -438,6 +471,7 @@ interface MessageRowProps {
     message: ChatMessageEntry;
     previousMessage?: ChatMessageEntry;
     nextMessage?: ChatMessageEntry;
+    permissionAudits?: PermissionAuditEntry[];
     turnGroupingContext?: TurnGroupingContext;
     assistantHeaderMessageId?: string;
     isInActiveTurn?: boolean;
@@ -453,6 +487,7 @@ const MessageRow = React.memo<MessageRowProps>(({
     message,
     previousMessage,
     nextMessage,
+    permissionAudits,
     turnGroupingContext,
     assistantHeaderMessageId,
     isInActiveTurn,
@@ -468,6 +503,7 @@ const MessageRow = React.memo<MessageRowProps>(({
             message={message}
             previousMessage={previousMessage}
             nextMessage={nextMessage}
+            permissionAudits={permissionAudits}
             animateUserOnMount={animateUserOnMount}
             onUserAnimationConsumed={onUserAnimationConsumed}
             onContentChange={onContentChange}
@@ -486,6 +522,7 @@ const MessageRow = React.memo<MessageRowProps>(({
     return areRenderRelevantMessagesEqual(prev.message, next.message)
         && areOptionalRenderRelevantMessagesEqual(prev.previousMessage, next.previousMessage)
         && areOptionalRenderRelevantMessagesEqual(prev.nextMessage, next.nextMessage)
+        && prev.permissionAudits === next.permissionAudits
         && prev.animateUserOnMount === next.animateUserOnMount
         && prev.onUserAnimationConsumed === next.onUserAnimationConsumed
         && prev.onContentChange === next.onContentChange
@@ -508,6 +545,7 @@ MessageRow.displayName = 'MessageRow';
 interface TurnBlockProps {
     turn: TurnRecord;
     isLastTurn: boolean;
+    permissionAudits?: PermissionAuditEntry[];
     sessionIsWorking: boolean;
     defaultActivityExpanded: boolean;
     turnUiStates: Map<string, TurnUiState>;
@@ -526,6 +564,7 @@ interface TurnBlockProps {
 const TurnBlock = React.memo(({
     turn,
     isLastTurn,
+    permissionAudits = [],
     sessionIsWorking,
     defaultActivityExpanded,
     turnUiStates,
@@ -694,7 +733,7 @@ const TurnBlock = React.memo(({
     }, [turn.diffStats, turn.hasReasoning, turn.hasTools, turn.headerMessageId, turn.summaryText, turn.turnId, turn.userMessage.info, visibleActivityParts, visibleActivitySegments]);
 
     const renderMessage = React.useCallback(
-        (message: ChatMessageEntry) => {
+        (message: ChatMessageEntry, messagePermissionAudits?: PermissionAuditEntry[]) => {
             const messageRole = resolveMessageRole(message);
             const isUserMessage = messageRole === 'user';
             const messageIndex = messageOrder.lookup.get(message.info.id);
@@ -753,6 +792,7 @@ const TurnBlock = React.memo(({
                     message={message}
                     previousMessage={previousMessage}
                     nextMessage={nextMessage}
+                    permissionAudits={messagePermissionAudits}
                     turnGroupingContext={turnGroupingContext}
                     assistantHeaderMessageId={assistantHeaderMessageId}
                     isInActiveTurn={Boolean(streamingAssistantMessageId) && message.info.id === streamingAssistantMessageId}
@@ -804,7 +844,7 @@ const TurnBlock = React.memo(({
     }, [turn, visibleAssistantMessages]);
 
     return (
-        <TurnItem turn={renderableTurn} stickyUserHeader={stickyUserHeader} renderMessage={renderMessage} />
+        <TurnItem turn={renderableTurn} stickyUserHeader={stickyUserHeader} renderMessage={renderMessage} permissionAudits={permissionAudits} />
     );
 });
 
@@ -915,10 +955,15 @@ const MessageListEntry = React.memo(({
         );
     }
 
+    if (entry.kind === 'permissionAudit') {
+        return <PermissionAuditRow entry={entry.entry} collapsePreviousSpacing />;
+    }
+
     return (
         <TurnBlock
             turn={entry.turn}
             isLastTurn={entry.isLastTurn}
+            permissionAudits={entry.permissionAudits}
             sessionIsWorking={sessionIsWorking}
             defaultActivityExpanded={defaultActivityExpanded}
             turnUiStates={turnUiStates}
@@ -1110,6 +1155,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     turnStart,
     disableStaging: _disableStaging,
     messages,
+    permissionAudits = [],
     sessionIsWorking = false,
     activeStreamingMessageId = null,
     activeStreamingPhase = null,
@@ -1227,6 +1273,15 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         sessionKey,
         showTextJustificationActivity: chatRenderMode === 'sorted',
     });
+    const streamingTurnMessageIds = React.useMemo(() => {
+        const ids = new Set<string>();
+        if (!streamingTurn) return ids;
+        ids.add(streamingTurn.userMessage.info.id);
+        for (const assistant of streamingTurn.assistantMessages) {
+            ids.add(assistant.info.id);
+        }
+        return ids;
+    }, [streamingTurn]);
     const hasUngroupedStaticEntries = projection.ungroupedMessageIds.size > 0;
     const staticEntryMessages = hasUngroupedStaticEntries ? displayMessages : EMPTY_STATIC_ENTRY_MESSAGES;
     const staticEntryUngroupedIds = hasUngroupedStaticEntries ? projection.ungroupedMessageIds : EMPTY_UNGROUPED_MESSAGE_IDS;
@@ -1236,10 +1291,47 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
             key: `turn:${turn.turnId}`,
             turn,
             isLastTurn: turn.turnId === projection.lastTurnId,
+            permissionAudits: [] as PermissionAuditEntry[],
         }));
 
+        const auditEntriesByMessageId = new Map<string, PermissionAuditEntry[]>();
+        for (const entry of permissionAudits) {
+            const messageID = resolvePermissionAuditMessageId(entry, staticTurns);
+            if (!messageID || streamingTurnMessageIds.has(messageID)) {
+                continue;
+            }
+            const existing = auditEntriesByMessageId.get(messageID);
+            if (existing) existing.push(entry);
+            else auditEntriesByMessageId.set(messageID, [entry]);
+        }
+
+        const appendAuditEntries = (output: PermissionAuditEntry[], messageID: string | null | undefined) => {
+            if (!messageID) return;
+            const rows = auditEntriesByMessageId.get(messageID);
+            if (!rows) return;
+            for (const row of rows) {
+                output.push(row);
+            }
+            auditEntriesByMessageId.delete(messageID);
+        };
+
+        const appendAuditEntriesForTurn = (output: PermissionAuditEntry[], turn: TurnRecord) => {
+            appendAuditEntries(output, turn.userMessage.info.id);
+            for (const assistant of turn.assistantMessages) {
+                appendAuditEntries(output, assistant.info.id);
+            }
+        };
+
         if (staticEntryUngroupedIds.size === 0) {
-            return turnEntries;
+            const orderedEntries: RenderEntry[] = [];
+            for (const turnEntry of turnEntries) {
+                appendAuditEntriesForTurn(turnEntry.permissionAudits, turnEntry.turn);
+                orderedEntries.push(turnEntry);
+            }
+            for (const rows of auditEntriesByMessageId.values()) {
+                for (const row of rows) orderedEntries.push({ kind: 'permissionAudit', key: `permission-audit:${row.requestID}`, entry: row });
+            }
+            return orderedEntries;
         }
 
         const turnEntryByUserMessageId = new Map<string, RenderEntry>();
@@ -1250,7 +1342,8 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         const orderedEntries: RenderEntry[] = [];
         staticEntryMessages.forEach((message, index) => {
             const turnEntry = turnEntryByUserMessageId.get(message.info.id);
-            if (turnEntry) {
+            if (turnEntry?.kind === 'turn') {
+                appendAuditEntriesForTurn(turnEntry.permissionAudits ?? [], turnEntry.turn);
                 orderedEntries.push(turnEntry);
                 return;
             }
@@ -1266,10 +1359,41 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                 previousMessage: index > 0 ? staticEntryMessages[index - 1] : undefined,
                 nextMessage: index < staticEntryMessages.length - 1 ? staticEntryMessages[index + 1] : undefined,
             });
+            const auditRows: PermissionAuditEntry[] = [];
+            appendAuditEntries(auditRows, message.info.id);
+            for (const row of auditRows) {
+                orderedEntries.push({ kind: 'permissionAudit', key: `permission-audit:${row.requestID}`, entry: row });
+            }
         });
 
+        for (const rows of auditEntriesByMessageId.values()) {
+            for (const row of rows) orderedEntries.push({ kind: 'permissionAudit', key: `permission-audit:${row.requestID}`, entry: row });
+        }
+
         return orderedEntries;
-    }), [projection.lastTurnId, staticEntryMessages, staticEntryUngroupedIds, staticTurns]);
+    }), [permissionAudits, projection.lastTurnId, staticEntryMessages, staticEntryUngroupedIds, staticTurns, streamingTurnMessageIds]);
+
+    const trailingPermissionAuditEntries = React.useMemo(() => {
+        return permissionAudits.filter((entry) => {
+            const messageID = resolvePermissionAuditMessageId(entry, staticTurns);
+            return !messageID && !streamingTurn;
+        });
+    }, [permissionAudits, staticTurns, streamingTurn]);
+
+    const streamingPermissionAuditEntries = React.useMemo(() => {
+        if (!streamingTurn) {
+            return EMPTY_PERMISSION_AUDITS;
+        }
+
+        return permissionAudits.filter((entry) => {
+            const explicitMessageID = entry.tool?.messageID;
+            if (explicitMessageID) {
+                return streamingTurnMessageIds.has(explicitMessageID);
+            }
+
+            return !resolvePermissionAuditMessageId(entry, staticTurns);
+        });
+    }, [permissionAudits, staticTurns, streamingTurn, streamingTurnMessageIds]);
 
     const trailingStreamingEntry = React.useMemo<RenderEntry | undefined>(() => {
         if (streamingTurn) {
@@ -1278,6 +1402,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                 key: `turn:${streamingTurn.turnId}`,
                 turn: streamingTurn,
                 isLastTurn: streamingTurn.turnId === projection.lastTurnId,
+                permissionAudits: streamingPermissionAuditEntries,
             } satisfies RenderEntry;
         }
 
@@ -1297,7 +1422,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
             previousMessage: displayMessages.length > 1 ? displayMessages[displayMessages.length - 2] : undefined,
             nextMessage: undefined,
         } satisfies RenderEntry;
-    }, [displayMessages, projection.lastTurnId, projection.ungroupedMessageIds, streamingTurn]);
+    }, [displayMessages, projection.lastTurnId, projection.ungroupedMessageIds, streamingPermissionAuditEntries, streamingTurn]);
 
     if (trailingStreamingEntry) {
         streamPerfCount('ui.message_list.render.streaming');
@@ -1508,8 +1633,11 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                 indexMap.set(entry.message.info.id, index);
                 return;
             }
+            if (entry.kind === 'permissionAudit') {
+                return;
+            }
             indexMap.set(entry.turn.userMessage.info.id, index);
-            entry.turn.assistantMessages.forEach((message) => {
+            entry.turn.assistantMessages.forEach((message: ChatMessageEntry) => {
                 indexMap.set(message.info.id, index);
             });
         });
@@ -1766,6 +1894,11 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                                 activeStreamingPhase={activeStreamingPhase}
                             />
                         ) : null}
+                        {trailingPermissionAuditEntries.map((entry) => (
+                            <div key={`permission-audit:${entry.requestID}`} data-turn-entry={`permission-audit:${entry.requestID}`}>
+                                <PermissionAuditRow entry={entry} collapsePreviousSpacing />
+                            </div>
+                        ))}
                     </div>
                 </FadeInDisabledProvider>
 
