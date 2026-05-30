@@ -793,3 +793,48 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
   // Clear existing attachments and restore file parts from the forked message.
   restoreFilePartsToInput(fileParts)
 }
+
+// ---------------------------------------------------------------------------
+// Loop Detection — Force Next Step
+// ---------------------------------------------------------------------------
+
+const LOOP_NUDGE_MESSAGE =
+  "[System: You appear to be stuck in a loop. Reassess your approach and try a different method.]"
+
+export async function forceNextStep(sessionId: string): Promise<void> {
+  const store = dirStore()
+  const state = store.getState()
+  const sessions = state.session
+  const session = sessions.find((s) => s.id === sessionId)
+  if (!session) return
+
+  try {
+    await sdk().session.abort({ sessionID: sessionId, directory: dir() })
+  } catch {
+    // Best-effort abort — session may already be idle
+  }
+
+  // Small delay to let abort propagate through the event pipeline
+  await wait(300)
+
+  const model = session.model
+  if (!model) return
+
+  try {
+    await sdk().session.promptAsync({
+      sessionID: sessionId,
+      directory: dir(),
+      model: { providerID: model.providerID, modelID: model.id },
+      agent: session.agent,
+      variant: model.variant,
+      parts: [{
+        type: "text",
+        text: LOOP_NUDGE_MESSAGE,
+        synthetic: true,
+      }],
+    })
+  } catch (error) {
+    console.error("[session-actions] forceNextStep failed", error)
+    throw error
+  }
+}
