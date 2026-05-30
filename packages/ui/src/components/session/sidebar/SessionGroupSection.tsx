@@ -21,6 +21,7 @@ import { compareSessionsByPinnedAndTime, isBranchDifferentFromLabel, normalizePa
 import type { SessionFolder } from '@/stores/useSessionFoldersStore';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { openExternalUrl } from '@/lib/url';
 import { useI18n } from '@/lib/i18n';
 
@@ -100,6 +101,7 @@ type Props = {
 
 export function SessionGroupSection(props: Props): React.ReactNode {
   const { t } = useI18n();
+  const hideSidebarEmptyState = useUIStore((s) => s.hideSidebarEmptyState);
   const {
     group,
     groupKey,
@@ -613,7 +615,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
       ) : (
         visibleSessions.map((node) => renderSessionNode(node, 0, group.directory, projectId, group.isArchivedBucket === true))
       )}
-      {totalSessions === 0 && allFoldersForGroup.length === 0 ? (
+      {totalSessions === 0 && allFoldersForGroup.length === 0 && !hideSidebarEmptyState ? (
         <div className="py-1 text-left typography-micro text-muted-foreground">
           {group.isArchivedBucket
             ? t('sessions.sidebar.group.empty.noArchivedSessions')
