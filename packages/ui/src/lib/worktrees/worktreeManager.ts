@@ -152,8 +152,22 @@ const _worktreeListCache = new Map<string, { value: WorktreeMetadata[]; at: numb
 const _worktreeListInflight = new Map<string, Promise<WorktreeMetadata[]>>();
 const WORKTREE_LIST_CACHE_TTL = 30_000; // 30 seconds
 
-export async function listProjectWorktrees(project: ProjectRef): Promise<WorktreeMetadata[]> {
+export const invalidateProjectWorktreeCache = (project?: ProjectRef | string | null): void => {
+  if (!project) {
+    _worktreeListCache.clear();
+    return;
+  }
+
+  const projectDirectory = normalizePath(typeof project === 'string' ? project : project.path);
+  _worktreeListCache.delete(projectDirectory);
+};
+
+export async function listProjectWorktrees(project: ProjectRef, options: { forceRefresh?: boolean } = {}): Promise<WorktreeMetadata[]> {
   const projectDirectory = normalizePath(project.path);
+
+  if (options.forceRefresh) {
+    _worktreeListCache.delete(projectDirectory);
+  }
 
   // Return cached if fresh
   const cached = _worktreeListCache.get(projectDirectory);
@@ -209,6 +223,47 @@ export async function listProjectWorktrees(project: ProjectRef): Promise<Worktre
 
   _worktreeListInflight.set(projectDirectory, promise);
   return promise;
+}
+
+const mergeAvailableWorktrees = (
+  current: WorktreeMetadata[],
+  projectDirectory: string,
+  nextForProject: WorktreeMetadata[],
+): WorktreeMetadata[] => {
+  const normalizedProjectDirectory = normalizePath(projectDirectory);
+  const byPath = new Map<string, WorktreeMetadata>();
+
+  for (const entry of current) {
+    if (normalizePath(entry.projectDirectory) !== normalizedProjectDirectory) {
+      byPath.set(normalizePath(entry.path), entry);
+    }
+  }
+
+  for (const entry of nextForProject) {
+    byPath.set(normalizePath(entry.path), entry);
+  }
+
+  return Array.from(byPath.values());
+};
+
+export async function refreshProjectWorktrees(project: ProjectRef): Promise<WorktreeMetadata[]> {
+  const projectDirectory = normalizePath(project.path);
+  const worktrees = await listProjectWorktrees(project, { forceRefresh: true });
+
+  const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
+  const updatedByProject = new Map(currentByProject);
+  updatedByProject.set(projectDirectory, worktrees);
+
+  useSessionUIStore.setState({
+    availableWorktreesByProject: updatedByProject,
+    availableWorktrees: mergeAvailableWorktrees(
+      useSessionUIStore.getState().availableWorktrees,
+      projectDirectory,
+      worktrees,
+    ),
+  });
+
+  return worktrees;
 }
 
 export type CreateWorktreeArgs = {

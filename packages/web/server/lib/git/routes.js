@@ -864,6 +864,71 @@ export function registerGitRoutes(app) {
     }
   });
 
+  app.get('/api/git/worktrees/events', async (req, res) => {
+    const { watchWorktreeChanges } = await getGitLibraries();
+    if (typeof watchWorktreeChanges !== 'function') {
+      return res.status(501).json({ error: 'Worktree watching is not available' });
+    }
+
+    const directory = req.query.directory;
+    if (!directory || typeof directory !== 'string') {
+      return res.status(400).json({ error: 'directory parameter is required' });
+    }
+
+    let unsubscribe = null;
+    let heartbeat = null;
+    let closed = false;
+
+    try {
+      unsubscribe = await watchWorktreeChanges(directory, (event) => {
+        sendEvent('worktree.changed', {
+          directory,
+          reason: event?.reason || 'changed',
+          at: Date.now(),
+        });
+      });
+    } catch (error) {
+      console.warn('Failed to watch worktree metadata:', error?.message || error);
+      return res.status(500).json({ error: error.message || 'Failed to watch worktree metadata' });
+    }
+
+    const cleanup = () => {
+      if (closed) return;
+      closed = true;
+      if (heartbeat) {
+        clearInterval(heartbeat);
+        heartbeat = null;
+      }
+      if (unsubscribe) {
+        unsubscribe();
+        unsubscribe = null;
+      }
+    };
+
+    function sendEvent(event, data) {
+      if (closed || res.destroyed) return;
+      res.write(`event: ${event}\n`);
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    }
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+
+    sendEvent('ready', { directory, at: Date.now() });
+    heartbeat = setInterval(() => {
+      if (closed || res.destroyed) return;
+      res.write(`: heartbeat ${Date.now()}\n\n`);
+    }, 25_000);
+
+    req.on('close', cleanup);
+    req.on('error', cleanup);
+    res.on('error', cleanup);
+  });
+
   app.post('/api/git/worktrees/validate', async (req, res) => {
     const { validateWorktreeCreate } = await getGitLibraries();
     if (typeof validateWorktreeCreate !== 'function') {

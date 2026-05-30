@@ -37,6 +37,8 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
   const [isGitRepoLocal, setIsGitRepoLocal] = React.useState<boolean | null>(null);
   const [availableWorktrees, setAvailableWorktrees] = React.useState<WorktreeMetadata[]>([]);
   const [isLoadingWorktrees, setIsLoadingWorktrees] = React.useState(false);
+  const sharedAvailableWorktrees = useSessionUIStore((s) => projectPath ? s.availableWorktreesByProject.get(projectPath) : undefined);
+  const displayedWorktrees = sharedAvailableWorktrees ?? availableWorktrees;
 
   const projectRef = React.useMemo(() => {
     if (projectRefProp?.id && projectRefProp?.path) {
@@ -344,13 +346,13 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
 
         {isLoadingWorktrees ? (
           <p className="typography-meta text-muted-foreground px-1">{t('settings.openchamber.worktrees.list.loading')}</p>
-        ) : availableWorktrees.length === 0 ? (
+        ) : displayedWorktrees.length === 0 ? (
           <p className="typography-meta text-muted-foreground/70 px-1">
             {t('settings.openchamber.worktrees.list.empty')}
           </p>
         ) : (
           <div className="space-y-1 px-1 max-w-[32.5rem]">
-            {availableWorktrees.map((worktree) => (
+            {displayedWorktrees.map((worktree) => (
               <div
                 key={worktree.path}
                 className="group flex w-full items-center gap-2 py-1.5"
