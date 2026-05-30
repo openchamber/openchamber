@@ -507,6 +507,7 @@ interface UIStore {
   todoPanelHeight: number;
   isSessionSwitcherOpen: boolean;
   isSessionDropdownOpen: boolean;
+  pendingSessionRenameId: string | null;
   activeMainTab: MainTab;
   mainTabGuard: MainTabGuard | null;
   sidebarOpenBeforeFullscreenTab: boolean | null;
@@ -643,6 +644,7 @@ interface UIStore {
   setTodoPanelHeight: (height: number) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
   setSessionDropdownOpen: (open: boolean) => void;
+  setPendingSessionRenameId: (id: string | null) => void;
   setActiveMainTab: (tab: MainTab) => void;
   setMainTabGuard: (guard: MainTabGuard | null) => void;
   setPendingDiffFile: (filePath: string | null, staged?: boolean) => void;
@@ -779,6 +781,7 @@ export const useUIStore = create<UIStore>()(
         todoPanelHeight: 259,
         isSessionSwitcherOpen: false,
         isSessionDropdownOpen: false,
+        pendingSessionRenameId: null,
         activeMainTab: 'chat',
         mainTabGuard: null,
         sidebarOpenBeforeFullscreenTab: null,
@@ -1334,6 +1337,10 @@ export const useUIStore = create<UIStore>()(
             return;
           }
           set({ isSessionDropdownOpen: open });
+        },
+
+        setPendingSessionRenameId: (id) => {
+          set({ pendingSessionRenameId: id });
         },
 
         setMainTabGuard: (guard) => {

@@ -1827,6 +1827,7 @@ export const dict: Record<I18nKey, string> = {
   'commandPalette.item.newSession': '새 세션',
   'commandPalette.item.newMiniChat': '새 Mini Chat 창',
   'commandPalette.item.newWorktreeDraft': '새 워크트리 드래프트',
+  'commandPalette.item.renameSession': 'Rename Session',
   'commandPalette.item.addProject': '프로젝트 추가',
   'commandPalette.item.showSessionSwitcher': '세션 전환기 표시',
   'commandPalette.item.toggleSidebar': '토글 사이드바',

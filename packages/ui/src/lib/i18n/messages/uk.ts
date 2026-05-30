@@ -1793,6 +1793,7 @@ export const dict: Record<I18nKey, string> = {
   "commandPalette.item.newSession": "Нова сесія",
   "commandPalette.item.newMiniChat": "Нове вікно Mini Chat",
   "commandPalette.item.newWorktreeDraft": "Чернетка нового worktree",
+  "commandPalette.item.renameSession": "Rename Session",
   "commandPalette.item.addProject": "Додати проєкт",
   "commandPalette.item.showSessionSwitcher": "Показати перемикач сесій",
   "commandPalette.item.toggleSidebar": "Перемкнути бічну панель",
