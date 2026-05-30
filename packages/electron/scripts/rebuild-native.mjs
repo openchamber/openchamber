@@ -159,12 +159,13 @@ const patchNodeGypForVS2026 = () => {
         const vsJsFiles = findGlob(path.join(pkgDir, 'node_modules'), 'find-visualstudio.js');
         for (const fullPath of vsJsFiles) {
           let content = fs.readFileSync(fullPath, 'utf8');
+          let changed = false;
           if (!content.includes('ret.versionMajor === 18')) {
             content = content.replace(
               /(if \(ret\.versionMajor === 17\) \{\s+ret\.versionYear = 2022\s+return ret\s+\})/,
               '$1\n    if (ret.versionMajor === 18) {\n      ret.versionYear = 2026\n      return ret\n    }',
             );
-            console.log(`[electron] patched ${path.relative(repoRoot, fullPath)} for VS 2026`);
+            changed = true;
           }
           if (!content.includes('versionYear === 2026')) {
             content = content.replace(
@@ -172,8 +173,11 @@ const patchNodeGypForVS2026 = () => {
               "$1 else if (versionYear === 2026) {\n      return 'v145'\n    }",
             );
             content = content.replace(/\[2019, 2022\]/g, '[2019, 2022, 2026]');
+            changed = true;
+          }
+          if (changed) {
             fs.writeFileSync(fullPath, content);
-            console.log(`[electron] patched ${path.relative(repoRoot, fullPath)} for v145 toolset`);
+            console.log(`[electron] patched ${path.relative(repoRoot, fullPath)} for VS 2026 + v145 toolset`);
           }
         }
 

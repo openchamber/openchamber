@@ -533,7 +533,7 @@ jobs:
           pattern: latest-yml-*-pc-windows-msvc
           path: artifacts
 
-      - name: Finalize combined latest-mac.yml
+      - name: Finalize combined electron manifests
         env:
           LATEST_YML_DIR: ${{ github.workspace }}/artifacts
           GH_REPO: ${{ github.repository }}
