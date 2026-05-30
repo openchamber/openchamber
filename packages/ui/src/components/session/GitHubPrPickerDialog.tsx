@@ -19,6 +19,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { useDeviceInfo } from '@/lib/device';
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import type { GitHubPullRequestContextResult, GitHubPullRequestSummary, GitHubPullRequestsListResult, GitHubRepoSelector } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 
@@ -88,6 +89,10 @@ export function GitHubPrPickerDialog({
   const [isLoadingMore, setIsLoadingMore] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
+  const directNumber = React.useMemo(() => parsePrNumber(query), [query]);
+  const debouncedQuery = useDebouncedValue(query, 350);
+  const isTextSearch = debouncedQuery.trim().length > 0 && !directNumber;
+
   const refresh = React.useCallback(async () => {
     if (!projectDirectory) {
       setResult(null);
@@ -126,6 +131,35 @@ export function GitHubPrPickerDialog({
     }
   }, [github, githubAuthChecked, githubAuthStatus, projectDirectory, t]);
 
+  React.useEffect(() => {
+    if (!open || !projectDirectory) return;
+    if (githubAuthChecked && githubAuthStatus?.connected === false) return;
+    if (!github?.prsList) return;
+    if (!debouncedQuery.trim()) return;
+
+    const controller = new AbortController();
+    setIsLoading(true);
+    setError(null);
+
+    github.prsList(projectDirectory, { page: 1, query: debouncedQuery.trim() })
+      .then((next) => {
+        if (controller.signal.aborted) return;
+        setResult(next);
+        setPrs(next.prs ?? []);
+        setPage(next.page ?? 1);
+        setHasMore(Boolean(next.hasMore));
+      })
+      .catch((e) => {
+        if (controller.signal.aborted) return;
+        setError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setIsLoading(false);
+      });
+
+    return () => controller.abort();
+  }, [open, projectDirectory, github, githubAuthChecked, githubAuthStatus, debouncedQuery, directNumber, t]);
+
   const loadMore = React.useCallback(async () => {
     if (!projectDirectory) return;
     if (!github?.prsList) return;
@@ -135,7 +169,9 @@ export function GitHubPrPickerDialog({
     setIsLoadingMore(true);
     try {
       const nextPage = page + 1;
-      const next = await github.prsList(projectDirectory, { page: nextPage });
+      const next = isTextSearch
+        ? await github.prsList(projectDirectory, { page: nextPage, query: debouncedQuery.trim() })
+        : await github.prsList(projectDirectory, { page: nextPage });
       setResult(next);
       setPrs((prev) => [...prev, ...(next.prs ?? [])]);
       setPage(next.page ?? nextPage);
@@ -146,7 +182,7 @@ export function GitHubPrPickerDialog({
     } finally {
       setIsLoadingMore(false);
     }
-  }, [github, hasMore, isLoading, isLoadingMore, page, projectDirectory, t]);
+  }, [github, hasMore, isLoading, isLoadingMore, isTextSearch, debouncedQuery, page, projectDirectory, t]);
 
   React.useEffect(() => {
     if (!open) {
@@ -181,17 +217,6 @@ export function GitHubPrPickerDialog({
     setSettingsPage('github');
     setSettingsDialogOpen(true);
   }, [setSettingsDialogOpen, setSettingsPage]);
-
-  const filtered = React.useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return prs;
-    return prs.filter((pr) => {
-      if (String(pr.number) === q.replace(/^#/, '')) return true;
-      return pr.title.toLowerCase().includes(q);
-    });
-  }, [prs, query]);
-
-  const directNumber = React.useMemo(() => parsePrNumber(query), [query]);
 
   const attachPr = React.useCallback(async (prNumber: number, sourceRepo?: GitHubRepoSelector | null) => {
     if (!projectDirectory) {
@@ -341,11 +366,11 @@ export function GitHubPrPickerDialog({
             </div>
           ) : null}
 
-          {filtered.length === 0 && !isLoading && connected && github && projectDirectory ? (
-            <div className="text-center text-muted-foreground py-8">{query ? t('session.githubPrPicker.empty.noPullRequestsFound') : t('session.githubPrPicker.empty.noOpenPullRequestsFound')}</div>
+          {prs.length === 0 && !isLoading && connected && github && projectDirectory ? (
+            <div className="text-center text-muted-foreground py-8">{debouncedQuery.trim() ? t('session.githubPrPicker.empty.noPullRequestsFound') : t('session.githubPrPicker.empty.noOpenPullRequestsFound')}</div>
           ) : null}
 
-          {filtered.map((pr) => (
+          {prs.map((pr) => (
             <div
               key={`${pr.sourceRepo?.owner ?? ''}-${pr.sourceRepo?.repo ?? ''}-${pr.number}`}
               className={cn(

@@ -43,15 +43,15 @@ export const createVSCodeGitHubAPI = (): GitHubAPI => ({
   prReady: async (payload: GitHubPullRequestReadyInput) =>
     sendBridgeMessage<GitHubPullRequestReadyResult>('api:github/pr:ready', payload),
 
-  issuesList: async (directory: string, options?: { page?: number }) =>
-    sendBridgeMessage<GitHubIssuesListResult>('api:github/issues:list', { directory, page: options?.page ?? 1 }),
+  issuesList: async (directory: string, options?: { page?: number; query?: string }) =>
+    sendBridgeMessage<GitHubIssuesListResult>('api:github/issues:list', { directory, page: options?.page ?? 1, query: options?.query ?? '' }),
   issueGet: async (directory: string, number: number, options?: { sourceRepo?: { owner: string; repo: string } | null }) =>
     sendBridgeMessage<GitHubIssueGetResult>('api:github/issues:get', { directory, number, sourceRepo: options?.sourceRepo ?? null }),
   issueComments: async (directory: string, number: number, options?: { sourceRepo?: { owner: string; repo: string } | null }) =>
     sendBridgeMessage<GitHubIssueCommentsResult>('api:github/issues:comments', { directory, number, sourceRepo: options?.sourceRepo ?? null }),
 
-  prsList: async (directory: string, options?: { page?: number }) =>
-    sendBridgeMessage<GitHubPullRequestsListResult>('api:github/pulls:list', { directory, page: options?.page ?? 1 }),
+  prsList: async (directory: string, options?: { page?: number; query?: string }) =>
+    sendBridgeMessage<GitHubPullRequestsListResult>('api:github/pulls:list', { directory, page: options?.page ?? 1, query: options?.query ?? '' }),
   prContext: async (directory: string, number: number, options?: { includeDiff?: boolean; includeCheckDetails?: boolean; sourceRepo?: { owner: string; repo: string } | null }) =>
     sendBridgeMessage<GitHubPullRequestContextResult>('api:github/pulls:context', {
       directory,

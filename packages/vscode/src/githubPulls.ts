@@ -285,10 +285,82 @@ export const listPullRequests = async (
   accessToken: string,
   directory: string,
   page: number = 1,
+  searchQuery?: string,
 ): Promise<GitHubPullRequestsListResult> => {
   const repo = await resolveRepoFromDirectory(directory);
   if (!repo) {
     return { connected: true, repo: null, prs: [] };
+  }
+
+  if (searchQuery) {
+    const q = `repo:${repo.owner}/${repo.repo} ${searchQuery} type:pr state:open`;
+    const searchUrl = new URL(`${API_BASE}/search/issues`);
+    searchUrl.searchParams.set('q', q);
+    searchUrl.searchParams.set('per_page', '50');
+    searchUrl.searchParams.set('page', String(page));
+
+    const searchResp = await githubFetch(searchUrl.toString(), accessToken);
+    if (searchResp.status === 401) return { connected: false };
+
+    const searchJson = await jsonOrNull<{ total_count?: number; items?: unknown[] }>(searchResp);
+    if (!searchResp.ok || !searchJson) {
+      throw new Error('Failed to search PRs');
+    }
+
+    const totalCount = typeof searchJson.total_count === 'number' ? searchJson.total_count : 0;
+    const searchItems = Array.isArray(searchJson.items) ? searchJson.items : [];
+    const prNumbers = searchItems.map((item) => {
+      const rec = item && typeof item === 'object' ? (item as JsonRecord) : null;
+      return typeof rec?.number === 'number' ? rec.number : 0;
+    }).filter((n) => n > 0);
+
+    let prs: GitHubPullRequestSummary[] = [];
+    if (prNumbers.length > 0) {
+      const listUrl = new URL(`${API_BASE}/repos/${repo.owner}/${repo.repo}/pulls`);
+      listUrl.searchParams.set('state', 'open');
+      listUrl.searchParams.set('per_page', '50');
+      listUrl.searchParams.set('page', '1');
+
+      const listResp = await githubFetch(listUrl.toString(), accessToken);
+      if (listResp.status === 401) return { connected: false };
+      const listJson = await jsonOrNull<unknown[]>(listResp);
+      if (listResp.ok && Array.isArray(listJson)) {
+        const numberSet = new Set(prNumbers);
+        prs = listJson
+          .filter((entry) => {
+            const rec = entry && typeof entry === 'object' ? (entry as JsonRecord) : null;
+            return numberSet.has(typeof rec?.number === 'number' ? rec.number : 0);
+          })
+          .map((entry) => {
+            const rec = entry && typeof entry === 'object' ? (entry as JsonRecord) : null;
+            const number = typeof rec?.number === 'number' ? rec.number : 0;
+            const mergedAt = readString(rec?.merged_at);
+            const stateRaw = readString(rec?.state);
+            const state = mergedAt ? 'merged' : (stateRaw === 'closed' ? 'closed' : 'open');
+            const base = rec?.base && typeof rec.base === 'object' ? (rec.base as JsonRecord) : null;
+            const head = rec?.head && typeof rec.head === 'object' ? (rec.head as JsonRecord) : null;
+            return {
+              number,
+              title: readString(rec?.title) || '',
+              url: readString(rec?.html_url) || '',
+              state,
+              draft: Boolean(rec?.draft),
+              base: readString(base?.ref) || '',
+              head: readString(head?.ref) || '',
+              headSha: readString(head?.sha) || undefined,
+              mergeable: typeof rec?.mergeable === 'boolean' ? rec.mergeable : null,
+              mergeableState: readString(rec?.mergeable_state) || undefined,
+              author: mapUser(rec?.user),
+              headLabel: readString(head?.label) || undefined,
+              headRepo: mapHeadRepo(head?.repo),
+            } as GitHubPullRequestSummary;
+          });
+      }
+    }
+
+    const fetchedCount = (page - 1) * 50 + searchItems.length;
+    const hasMore = fetchedCount < totalCount;
+    return { connected: true, repo, prs, page, hasMore };
   }
 
   const url = new URL(`${API_BASE}/repos/${repo.owner}/${repo.repo}/pulls`);

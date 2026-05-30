@@ -947,6 +947,7 @@ export function registerGitHubRoutes(app) {
     try {
       const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
       const page = typeof req.query?.page === 'string' ? Number(req.query.page) : 1;
+      const searchQuery = typeof req.query?.query === 'string' ? req.query.query.trim() : '';
       if (!directory) {
         return res.status(400).json({ error: 'directory is required' });
       }
@@ -969,6 +970,54 @@ export function registerGitHubRoutes(app) {
       const effectivePage = Number.isFinite(page) && page > 0 ? page : 1;
       const reposToQuery = repoNetwork || [{ ...repo, source: 'origin' }];
 
+      const mapIssueSummary = (item, repoRef) => ({
+        number: item.number,
+        title: item.title,
+        url: item.html_url,
+        state: item.state === 'closed' ? 'closed' : 'open',
+        author: item.user ? { login: item.user.login, id: item.user.id, avatarUrl: item.user.avatar_url } : null,
+        labels: Array.isArray(item.labels)
+          ? item.labels
+              .map((label) => {
+                if (typeof label === 'string') return null;
+                const name = typeof label?.name === 'string' ? label.name : '';
+                if (!name) return null;
+                return { name, color: typeof label?.color === 'string' ? label.color : undefined };
+              })
+              .filter(Boolean)
+          : [],
+        sourceRepo: { owner: repoRef.owner, repo: repoRef.repo, source: repoRef.source },
+      });
+
+      if (searchQuery) {
+        const repoQualifiers = reposToQuery
+          .map((r) => `repo:${r.owner}/${r.repo}`)
+          .join(' ');
+        const q = `${repoQualifiers} ${searchQuery} type:issue state:open`;
+        try {
+          const searchResult = await octokit.rest.search.issuesAndPullRequests({
+            q,
+            per_page: 50,
+            page: effectivePage,
+          });
+          const totalCount = searchResult.data.total_count;
+          const items = Array.isArray(searchResult.data.items) ? searchResult.data.items : [];
+          const issues = items
+            .filter((item) => !item?.pull_request)
+            .map((item) => {
+              const repoFullName = (item.repository_url || '').replace('https://api.github.com/repos/', '');
+              const matched = reposToQuery.find((r) => `${r.owner}/${r.repo}` === repoFullName);
+              return mapIssueSummary(item, matched || reposToQuery[0]);
+            });
+          const fetchedCount = (effectivePage - 1) * 50 + items.length;
+          const hasMore = fetchedCount < totalCount;
+          return res.json({ connected: true, repo, issues, page: effectivePage, hasMore });
+        } catch (error) {
+          console.error('Failed to search GitHub issues:', error);
+          return res.json({ connected: true, repo, issues: [], page: effectivePage, hasMore: false });
+        }
+      }
+
       const queryRepo = async (repoRef) => {
         try {
           const list = await octokit.rest.issues.listForRepo({
@@ -982,24 +1031,7 @@ export function registerGitHubRoutes(app) {
           const hasMore = /rel="next"/.test(link);
           const issues = (Array.isArray(list?.data) ? list.data : [])
             .filter((item) => !item?.pull_request)
-            .map((item) => ({
-              number: item.number,
-              title: item.title,
-              url: item.html_url,
-              state: item.state === 'closed' ? 'closed' : 'open',
-              author: item.user ? { login: item.user.login, id: item.user.id, avatarUrl: item.user.avatar_url } : null,
-              labels: Array.isArray(item.labels)
-                ? item.labels
-                    .map((label) => {
-                      if (typeof label === 'string') return null;
-                      const name = typeof label?.name === 'string' ? label.name : '';
-                      if (!name) return null;
-                      return { name, color: typeof label?.color === 'string' ? label.color : undefined };
-                    })
-                    .filter(Boolean)
-                : [],
-              sourceRepo: { owner: repoRef.owner, repo: repoRef.repo, source: repoRef.source },
-            }));
+            .map((item) => mapIssueSummary(item, repoRef));
           return { issues, hasMore };
         } catch (error) {
           console.warn(`Failed to list issues for ${repoRef.owner}/${repoRef.repo}:`, error?.message || error);
@@ -1128,6 +1160,7 @@ export function registerGitHubRoutes(app) {
     try {
       const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
       const page = typeof req.query?.page === 'string' ? Number(req.query.page) : 1;
+      const searchQuery = typeof req.query?.query === 'string' ? req.query.query.trim() : '';
       if (!directory) {
         return res.status(400).json({ error: 'directory is required' });
       }
@@ -1150,6 +1183,93 @@ export function registerGitHubRoutes(app) {
       const effectivePage = Number.isFinite(page) && page > 0 ? page : 1;
       const reposToQuery = repoNetwork || [{ ...repo, source: 'origin' }];
 
+      const mapPrSummary = (pr, repoRef) => {
+        const mergedState = pr.merged_at ? 'merged' : (pr.state === 'closed' ? 'closed' : 'open');
+        const headRepo = pr.head?.repo
+          ? {
+              owner: pr.head.repo.owner?.login,
+              repo: pr.head.repo.name,
+              url: pr.head.repo.html_url,
+              cloneUrl: pr.head.repo.clone_url,
+              sshUrl: pr.head.repo.ssh_url,
+            }
+          : null;
+        return {
+          number: pr.number,
+          title: pr.title,
+          url: pr.html_url,
+          state: mergedState,
+          draft: Boolean(pr.draft),
+          base: pr.base?.ref,
+          head: pr.head?.ref,
+          headSha: pr.head?.sha,
+          mergeable: pr.mergeable,
+          mergeableState: pr.mergeable_state,
+          author: pr.user ? { login: pr.user.login, id: pr.user.id, avatarUrl: pr.user.avatar_url } : null,
+          headLabel: pr.head?.label,
+          headRepo: headRepo && headRepo.owner && headRepo.repo && headRepo.url
+            ? headRepo
+            : null,
+          sourceRepo: { owner: repoRef.owner, repo: repoRef.repo, source: repoRef.source },
+        };
+      };
+
+      if (searchQuery) {
+        const repoQualifiers = reposToQuery
+          .map((r) => `repo:${r.owner}/${r.repo}`)
+          .join(' ');
+        const q = `${repoQualifiers} ${searchQuery} type:pr state:open`;
+        try {
+          const searchResult = await octokit.rest.search.issuesAndPullRequests({
+            q,
+            per_page: 50,
+            page: effectivePage,
+          });
+          const totalCount = searchResult.data.total_count;
+          const items = Array.isArray(searchResult.data.items) ? searchResult.data.items : [];
+          const prNumbers = items.map((item) => item.number);
+          let prs;
+          if (prNumbers.length === 0) {
+            prs = [];
+          } else if (reposToQuery.length === 1) {
+            const list = await octokit.rest.pulls.list({
+              owner: reposToQuery[0].owner,
+              repo: reposToQuery[0].repo,
+              state: 'open',
+              per_page: 50,
+              page: 1,
+            });
+            const allPrs = Array.isArray(list?.data) ? list.data : [];
+            const numberSet = new Set(prNumbers);
+            prs = allPrs.filter((pr) => numberSet.has(pr.number)).map((pr) => mapPrSummary(pr, reposToQuery[0]));
+          } else {
+            const results = await Promise.all(reposToQuery.map(async (repoRef) => {
+              try {
+                const list = await octokit.rest.pulls.list({
+                  owner: repoRef.owner,
+                  repo: repoRef.repo,
+                  state: 'open',
+                  per_page: 50,
+                  page: 1,
+                });
+                return (Array.isArray(list?.data) ? list.data : []).map((pr) => mapPrSummary(pr, repoRef));
+              } catch {
+                return [];
+              }
+            }));
+            const allPrs = results.flat();
+            const numberSet = new Set(prNumbers);
+            prs = allPrs.filter((pr) => numberSet.has(pr.number));
+          }
+          const fetchedCount = (effectivePage - 1) * 50 + items.length;
+          const hasMore = fetchedCount < totalCount;
+          return res.json({ connected: true, repo, prs, page: effectivePage, hasMore });
+        } catch (error) {
+          console.error('Failed to search GitHub PRs:', error);
+          return res.json({ connected: true, repo, prs: [], page: effectivePage, hasMore: false });
+        }
+      }
+
       const queryRepo = async (repoRef) => {
         try {
           const list = await octokit.rest.pulls.list({
@@ -1161,36 +1281,7 @@ export function registerGitHubRoutes(app) {
           });
           const link = typeof list?.headers?.link === 'string' ? list.headers.link : '';
           const hasMore = /rel="next"/.test(link);
-          const prs = (Array.isArray(list?.data) ? list.data : []).map((pr) => {
-            const mergedState = pr.merged_at ? 'merged' : (pr.state === 'closed' ? 'closed' : 'open');
-            const headRepo = pr.head?.repo
-              ? {
-                  owner: pr.head.repo.owner?.login,
-                  repo: pr.head.repo.name,
-                  url: pr.head.repo.html_url,
-                  cloneUrl: pr.head.repo.clone_url,
-                  sshUrl: pr.head.repo.ssh_url,
-                }
-              : null;
-            return {
-              number: pr.number,
-              title: pr.title,
-              url: pr.html_url,
-              state: mergedState,
-              draft: Boolean(pr.draft),
-              base: pr.base?.ref,
-              head: pr.head?.ref,
-              headSha: pr.head?.sha,
-              mergeable: pr.mergeable,
-              mergeableState: pr.mergeable_state,
-              author: pr.user ? { login: pr.user.login, id: pr.user.id, avatarUrl: pr.user.avatar_url } : null,
-              headLabel: pr.head?.label,
-              headRepo: headRepo && headRepo.owner && headRepo.repo && headRepo.url
-                ? headRepo
-                : null,
-              sourceRepo: { owner: repoRef.owner, repo: repoRef.repo, source: repoRef.source },
-            };
-          });
+          const prs = (Array.isArray(list?.data) ? list.data : []).map((pr) => mapPrSummary(pr, repoRef));
           return { prs, hasMore };
         } catch (error) {
           console.warn(`Failed to list PRs for ${repoRef.owner}/${repoRef.repo}:`, error?.message || error);
