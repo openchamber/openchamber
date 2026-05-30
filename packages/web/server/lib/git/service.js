@@ -2789,6 +2789,104 @@ export async function resetToCommit(directory, hash, mode, force = false) {
   }
 }
 
+const resolveGitCommonDirectory = async (directory) => {
+  const directoryPath = normalizeDirectoryPath(directory);
+  if (!directoryPath || !fs.existsSync(directoryPath)) {
+    throw new Error('Directory does not exist');
+  }
+
+  const directoryGit = await createGit(directoryPath);
+  const repoRoot = await resolveGitRepositoryRoot(directoryPath, directoryGit);
+  const repoGit = path.resolve(directoryPath) === repoRoot ? directoryGit : await createGit(repoRoot);
+  const commonDirRaw = await repoGit.raw(['rev-parse', '--git-common-dir']);
+  const commonDir = commonDirRaw.trim();
+  if (!commonDir) {
+    throw new Error('Failed to resolve git common directory');
+  }
+
+  return path.isAbsolute(commonDir)
+    ? path.resolve(commonDir)
+    : path.resolve(repoRoot, commonDir);
+};
+
+export async function watchWorktreeChanges(directory, onChange) {
+  if (typeof onChange !== 'function') {
+    throw new Error('Worktree change callback is required');
+  }
+
+  const commonGitDir = await resolveGitCommonDirectory(directory);
+  const worktreesDir = path.join(commonGitDir, 'worktrees');
+  const watchers = [];
+  let closed = false;
+  let debounceTimer = null;
+  let watchingWorktreesDir = false;
+
+  const notify = (reason) => {
+    if (closed) return;
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+    }
+    debounceTimer = setTimeout(() => {
+      debounceTimer = null;
+      if (closed) return;
+      onChange({ reason, commonGitDir, worktreesDir, at: Date.now() });
+    }, 200);
+  };
+
+  const closeWatcher = (watcher) => {
+    try {
+      watcher.close();
+    } catch {
+      // ignored
+    }
+  };
+
+  const addWatcher = async (targetPath, handleEvent) => {
+    const stat = await fsp.stat(targetPath).catch(() => null);
+    if (!stat?.isDirectory()) {
+      return;
+    }
+
+    const watcher = fs.watch(targetPath, { persistent: false }, (eventType, filename) => {
+      handleEvent(eventType, typeof filename === 'string' ? filename : null);
+    });
+    watcher.on('error', (error) => {
+      console.warn('Git worktree watcher error:', error?.message || error);
+    });
+    watchers.push(watcher);
+  };
+
+  const ensureWorktreesWatcher = async () => {
+    if (closed || watchingWorktreesDir) {
+      return;
+    }
+    await addWatcher(worktreesDir, () => notify('worktrees-directory-changed'));
+    watchingWorktreesDir = watchers.length > 1;
+  };
+
+  await addWatcher(commonGitDir, (_eventType, filename) => {
+    if (!filename || filename === 'worktrees') {
+      void ensureWorktreesWatcher();
+      notify('common-git-directory-changed');
+    }
+  });
+
+  await ensureWorktreesWatcher();
+
+  if (watchers.length === 0) {
+    throw new Error('Failed to watch git worktree metadata');
+  }
+
+  return () => {
+    closed = true;
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+    }
+    watchers.splice(0).forEach(closeWatcher);
+  };
+}
+
 export async function getWorktrees(directory) {
   const directoryPath = normalizeDirectoryPath(directory);
   if (!directoryPath || !fs.existsSync(directoryPath)) {

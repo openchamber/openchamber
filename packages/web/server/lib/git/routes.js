@@ -1,10 +1,44 @@
-export function registerGitRoutes(app) {
+export function registerGitRoutes(app, options = {}) {
+  const broadcastEvent = typeof options.broadcastEvent === 'function' ? options.broadcastEvent : null;
+  const worktreeWatchers = new Map();
   let gitLibraries = null;
   const getGitLibraries = async () => {
     if (!gitLibraries) {
       gitLibraries = await import('./index.js');
     }
     return gitLibraries;
+  };
+
+  const ensureWorktreeWatcher = async (directory) => {
+    if (!broadcastEvent || typeof directory !== 'string' || directory.trim().length === 0) {
+      return;
+    }
+
+    const key = directory.trim();
+    if (worktreeWatchers.has(key)) {
+      return;
+    }
+
+    try {
+      const { watchWorktreeChanges } = await getGitLibraries();
+      if (typeof watchWorktreeChanges !== 'function') {
+        return;
+      }
+
+      const unsubscribe = await watchWorktreeChanges(key, (event) => {
+        broadcastEvent({
+          type: 'worktree.changed',
+          properties: {
+            directory: key,
+            reason: event?.reason || 'changed',
+            at: Date.now(),
+          },
+        }, { directory: key });
+      });
+      worktreeWatchers.set(key, unsubscribe);
+    } catch (error) {
+      console.warn('Failed to watch worktree metadata:', error?.message || error);
+    }
   };
 
   app.get('/api/git/identities', async (req, res) => {
@@ -854,6 +888,7 @@ export function registerGitRoutes(app) {
       }
 
       const worktrees = await getWorktrees(directory);
+      void ensureWorktreeWatcher(directory);
       res.json(worktrees);
     } catch (error) {
       // Worktrees are an optional feature. Avoid repeated 500s (and repeated client retries)

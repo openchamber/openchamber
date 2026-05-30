@@ -1197,6 +1197,7 @@ async function main(options = {}) {
     scheduledTasksRuntime,
     getOpenChamberEventClients: () => uiOpenChamberEventClients,
     writeSseEvent,
+    broadcastEvent: broadcastGlobalUiEvent,
   });
 
   const previewProxyRuntime = createPreviewProxyRuntime({
