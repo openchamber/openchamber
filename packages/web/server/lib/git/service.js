@@ -18,6 +18,28 @@ const SIMPLE_GIT_UNSAFE_BINARY_WARNING = 'Invalid value supplied for custom bina
 const REMOTE_EXISTENCE_CACHE_TTL_MS = 30_000;
 const gitIndexMutationQueues = new Map();
 
+// Periodic cleanup to prevent memory leaks (every 1 hour, entries older than 24 hours)
+const GIT_STATE_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+const GIT_STATE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+const cleanupStaleGitState = () => {
+  const now = Date.now();
+  // Clean up stale worktree bootstrap state
+  for (const [key, state] of worktreeBootstrapState) {
+    if (now - state.updatedAt > GIT_STATE_MAX_AGE_MS) {
+      worktreeBootstrapState.delete(key);
+    }
+  }
+  // Clean up stale mutation queues
+  for (const [key, queue] of gitIndexMutationQueues) {
+    const lastActivity = queue.lastActivity || queue.updatedAt || 0;
+    if (now - lastActivity > GIT_STATE_MAX_AGE_MS) {
+      gitIndexMutationQueues.delete(key);
+    }
+  }
+};
+setInterval(cleanupStaleGitState, GIT_STATE_CLEANUP_INTERVAL_MS);
+
 const WORKTREE_BOOTSTRAP_PENDING = 'pending';
 const WORKTREE_BOOTSTRAP_READY = 'ready';
 const WORKTREE_BOOTSTRAP_FAILED = 'failed';

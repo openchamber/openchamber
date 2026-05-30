@@ -24,6 +24,20 @@ export const createPushRuntime = (deps) => {
   let pushInitialized = false;
 
   const uiVisibilityByToken = new Map();
+  const UI_VISIBILITY_TTL_MS = 24 * 60 * 60 * 1000; // 24 hour TTL
+
+  // Periodic cleanup for uiVisibilityByToken to prevent memory leak
+  const UI_VISIBILITY_CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // Every 1 hour
+  const cleanStaleUiVisibility = () => {
+    const now = Date.now();
+    for (const [token, state] of uiVisibilityByToken) {
+      if (now - state.updatedAt > UI_VISIBILITY_TTL_MS) {
+        uiVisibilityByToken.delete(token);
+      }
+    }
+  };
+  setInterval(cleanStaleUiVisibility, UI_VISIBILITY_CLEANUP_INTERVAL_MS);
+
   let globalVisibilityState = false;
 
   const readPushSubscriptionsFromDisk = async () => {
@@ -234,7 +248,11 @@ export const createPushRuntime = (deps) => {
     if (!token) return;
     const now = Date.now();
     const nextVisible = Boolean(visible);
-    uiVisibilityByToken.set(token, { visible: nextVisible, updatedAt: now });
+    uiVisibilityByToken.set(token, {
+      visible: nextVisible,
+      updatedAt: now,
+      expiresAt: now + UI_VISIBILITY_TTL_MS,
+    });
     globalVisibilityState = nextVisible;
   };
 
