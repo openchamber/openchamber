@@ -398,6 +398,12 @@ export interface CreateGitWorktreePayload {
   /** Optional remote provisioning (used for fork PR workflows). */
   ensureRemoteName?: string;
   ensureRemoteUrl?: string;
+  /**
+   * Place the worktree as a sibling of the repo (<repo>.<name>) instead of the hidden data dir.
+   * Per-request counterpart of the global `worktreeSiblingsEnabled` setting; defaulted from that
+   * setting by `toCreatePayload` (an explicit value on the payload overrides the setting).
+   */
+  siblingWorktree?: boolean;
 }
 
 export interface GitWorktreeCreateResult {
@@ -647,6 +653,7 @@ export interface SettingsPayload {
   sessionRetentionAction?: 'archive' | 'delete';
   queueModeEnabled?: boolean;
   gitmojiEnabled?: boolean;
+  worktreeSiblingsEnabled?: boolean;
   inputSpellcheckEnabled?: boolean;
   showToolFileIcons?: boolean;
   showExpandedBashTools?: boolean;

@@ -948,11 +948,20 @@ const resolveWorktreeNameCandidates = (baseName) => {
   });
 };
 
-const resolveCandidateDirectory = async (worktreeRoot, preferredName, explicitBranchName, primaryWorktree) => {
+// NOTE: keep in sync with packages/vscode/src/gitService.ts buildWorktreeDirectory
+export const buildWorktreeDirectory = ({ worktreeRoot, primaryWorktree, name, sibling }) => {
+  if (sibling) {
+    return path.join(path.dirname(primaryWorktree), `${path.basename(primaryWorktree)}.${name}`);
+  }
+  return path.join(worktreeRoot, name);
+};
+
+export const resolveCandidateDirectory = async (worktreeRoot, preferredName, explicitBranchName, primaryWorktree, options = {}) => {
+  const sibling = options.sibling === true;
   const candidates = resolveWorktreeNameCandidates(preferredName);
 
   for (const name of candidates) {
-    const directory = path.join(worktreeRoot, name);
+    const directory = buildWorktreeDirectory({ worktreeRoot, primaryWorktree, name, sibling });
     if (await checkPathExists(directory)) {
       continue;
     }
@@ -2991,8 +3000,11 @@ export async function validateWorktreeCreate(directory, input = {}) {
 
 export async function previewWorktreeCreate(directory, input = {}) {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
+  const sibling = input?.siblingWorktree === true;
   const context = await resolveWorktreeProjectContext(directory);
-  await fsp.mkdir(context.worktreeRoot, { recursive: true });
+  if (!sibling) {
+    await fsp.mkdir(context.worktreeRoot, { recursive: true });
+  }
 
   const preferredName = String(input?.worktreeName || input?.name || '').trim();
   const preferredBranchName = cleanBranchName(String(input?.branchName || '').trim());
@@ -3000,7 +3012,8 @@ export async function previewWorktreeCreate(directory, input = {}) {
     context.worktreeRoot,
     preferredName,
     mode === 'new' && preferredBranchName ? preferredBranchName : '',
-    context.primaryWorktree
+    context.primaryWorktree,
+    { sibling }
   );
 
   return {
@@ -3012,8 +3025,11 @@ export async function previewWorktreeCreate(directory, input = {}) {
 
 export async function createWorktree(directory, input = {}) {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
+  const sibling = input?.siblingWorktree === true;
   const context = await resolveWorktreeProjectContext(directory);
-  await fsp.mkdir(context.worktreeRoot, { recursive: true });
+  if (!sibling) {
+    await fsp.mkdir(context.worktreeRoot, { recursive: true });
+  }
 
   const preferredName = String(input?.worktreeName || input?.name || '').trim();
   const preferredBranchName = cleanBranchName(String(input?.branchName || '').trim());
@@ -3025,7 +3041,8 @@ export async function createWorktree(directory, input = {}) {
     context.worktreeRoot,
     preferredName,
     mode === 'new' && preferredBranchName ? preferredBranchName : '',
-    context.primaryWorktree
+    context.primaryWorktree,
+    { sibling }
   );
 
   let localBranch = '';
@@ -3100,7 +3117,29 @@ export async function createWorktree(directory, input = {}) {
     }
   }
 
-  await runGitCommandOrThrow(context.primaryWorktree, worktreeAddArgs, 'Failed to create git worktree');
+  if (sibling) {
+    try {
+      await runGitCommandOrThrow(context.primaryWorktree, worktreeAddArgs, 'Failed to create git worktree');
+    } catch (error) {
+      // NOTE: keep in sync with packages/vscode/src/gitService.ts createWorktree sibling error handling.
+      // Only add the parent-dir-writability hint when the failure looks filesystem/permission-related.
+      // Otherwise (bad startRef, checkout/lock failures, etc.) rethrow the original git error unchanged.
+      const code = typeof error?.code === 'string' ? error.code : '';
+      const message = error instanceof Error ? error.message : String(error);
+      const isFilesystemError =
+        /^(EACCES|EPERM|EROFS|ENOENT)$/i.test(code) ||
+        /permission denied|read-only|not writable|no such file or directory/i.test(message);
+      if (isFilesystemError) {
+        throw new Error(
+          `Cannot create worktree at ${candidate.directory}: ensure the parent directory is writable, ` +
+          `or disable "Create Worktrees as Siblings". (${message})`
+        );
+      }
+      throw error;
+    }
+  } else {
+    await runGitCommandOrThrow(context.primaryWorktree, worktreeAddArgs, 'Failed to create git worktree');
+  }
 
   try {
     await syncProjectSandboxAdd(context.projectID, context.primaryWorktree, candidate.directory);

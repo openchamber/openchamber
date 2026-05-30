@@ -52,6 +52,23 @@ describe('settings helpers', () => {
     });
   });
 
+  it('accepts worktreeSiblingsEnabled as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ worktreeSiblingsEnabled: true })).toEqual({
+      worktreeSiblingsEnabled: true,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ worktreeSiblingsEnabled: false })).toEqual({
+      worktreeSiblingsEnabled: false,
+    });
+  });
+
+  it('rejects non-boolean worktreeSiblingsEnabled values', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ worktreeSiblingsEnabled: 'yes' })).toEqual({});
+  });
+
   it('accepts desktopUiPassword as a persisted shared setting', () => {
     const helpers = createTestHelpers();
 

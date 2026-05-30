@@ -850,6 +850,12 @@ export interface CreateGitWorktreePayload {
   upstreamBranch?: string;
   ensureRemoteName?: string;
   ensureRemoteUrl?: string;
+  /**
+   * Place the worktree as a sibling of the repo (<repo>.<name>) instead of the hidden data dir.
+   * Per-request counterpart of the global `worktreeSiblingsEnabled` setting; defaulted from that
+   * setting by `toCreatePayload` (an explicit value on the payload overrides the setting).
+   */
+  siblingWorktree?: boolean;
 }
 
 export interface RemoveGitWorktreePayload {
@@ -1133,16 +1139,29 @@ const resolveWorktreeNameCandidates = (baseName: string): string[] => {
   });
 };
 
+// NOTE: keep in sync with packages/web/server/lib/git/service.js buildWorktreeDirectory
+export const buildWorktreeDirectory = (
+  { worktreeRoot, primaryWorktree, name, sibling }:
+  { worktreeRoot: string; primaryWorktree: string; name: string; sibling: boolean }
+): string => {
+  if (sibling) {
+    return path.join(path.dirname(primaryWorktree), `${path.basename(primaryWorktree)}.${name}`);
+  }
+  return path.join(worktreeRoot, name);
+};
+
 const resolveCandidateDirectory = async (
   worktreeRoot: string,
   preferredName: string,
   explicitBranchName: string,
-  primaryWorktree: string
+  primaryWorktree: string,
+  options: { sibling?: boolean } = {}
 ) => {
+  const sibling = options.sibling === true;
   const candidates = resolveWorktreeNameCandidates(preferredName);
 
   for (const name of candidates) {
-    const directory = path.join(worktreeRoot, name);
+    const directory = buildWorktreeDirectory({ worktreeRoot, primaryWorktree, name, sibling });
     if (await checkPathExists(directory)) {
       continue;
     }
@@ -1705,8 +1724,11 @@ export async function validateWorktreeCreate(directory: string, input: CreateGit
 
 export async function previewWorktreeCreate(directory: string, input: CreateGitWorktreePayload = {}): Promise<GitWorktreeInfo> {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
+  const sibling = input?.siblingWorktree === true;
   const context = await resolveWorktreeProjectContext(directory);
-  await fs.promises.mkdir(context.worktreeRoot, { recursive: true });
+  if (!sibling) {
+    await fs.promises.mkdir(context.worktreeRoot, { recursive: true });
+  }
 
   const preferredName = String(input?.worktreeName || input?.name || '').trim();
   const preferredBranchName = cleanBranchName(String(input?.branchName || '').trim());
@@ -1714,7 +1736,8 @@ export async function previewWorktreeCreate(directory: string, input: CreateGitW
     context.worktreeRoot,
     preferredName,
     mode === 'new' && preferredBranchName ? preferredBranchName : '',
-    context.primaryWorktree
+    context.primaryWorktree,
+    { sibling }
   );
 
   return {
@@ -1727,8 +1750,11 @@ export async function previewWorktreeCreate(directory: string, input: CreateGitW
 
 export async function createWorktree(directory: string, input: CreateGitWorktreePayload = {}): Promise<GitWorktreeInfo> {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
+  const sibling = input?.siblingWorktree === true;
   const context = await resolveWorktreeProjectContext(directory);
-  await fs.promises.mkdir(context.worktreeRoot, { recursive: true });
+  if (!sibling) {
+    await fs.promises.mkdir(context.worktreeRoot, { recursive: true });
+  }
 
   const preferredName = String(input?.worktreeName || input?.name || '').trim();
   const preferredBranchName = cleanBranchName(String(input?.branchName || '').trim());
@@ -1740,7 +1766,8 @@ export async function createWorktree(directory: string, input: CreateGitWorktree
     context.worktreeRoot,
     preferredName,
     mode === 'new' && preferredBranchName ? preferredBranchName : '',
-    context.primaryWorktree
+    context.primaryWorktree,
+    { sibling }
   );
 
   let localBranch = '';
@@ -1815,7 +1842,32 @@ export async function createWorktree(directory: string, input: CreateGitWorktree
     }
   }
 
-  await runGitCommandOrThrow(context.primaryWorktree, worktreeAddArgs, 'Failed to create git worktree');
+  if (sibling) {
+    try {
+      await runGitCommandOrThrow(context.primaryWorktree, worktreeAddArgs, 'Failed to create git worktree');
+    } catch (error) {
+      // NOTE: keep in sync with packages/web/server/lib/git/service.js createWorktree sibling error handling.
+      // Only add the parent-dir-writability hint when the failure looks filesystem/permission-related.
+      // Otherwise (bad startRef, checkout/lock failures, etc.) rethrow the original git error unchanged.
+      const code =
+        error && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string'
+          ? (error as { code: string }).code
+          : '';
+      const message = error instanceof Error ? error.message : String(error);
+      const isFilesystemError =
+        /^(EACCES|EPERM|EROFS|ENOENT)$/i.test(code) ||
+        /permission denied|read-only|not writable|no such file or directory/i.test(message);
+      if (isFilesystemError) {
+        throw new Error(
+          `Cannot create worktree at ${candidate.directory}: ensure the parent directory is writable, ` +
+          `or disable "Create Worktrees as Siblings". (${message})`
+        );
+      }
+      throw error;
+    }
+  } else {
+    await runGitCommandOrThrow(context.primaryWorktree, worktreeAddArgs, 'Failed to create git worktree');
+  }
 
   try {
     await syncProjectSandboxAdd(context.projectID, context.primaryWorktree, candidate.directory);

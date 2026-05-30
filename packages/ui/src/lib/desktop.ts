@@ -120,6 +120,7 @@ export type DesktopSettings = {
   autoCreateWorktree?: boolean;
   queueModeEnabled?: boolean;
   gitmojiEnabled?: boolean;
+  worktreeSiblingsEnabled?: boolean;
   defaultFileViewerPreview?: boolean;
   zenModel?: string;
   gitProviderId?: string;

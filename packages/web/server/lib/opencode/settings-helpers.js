@@ -328,6 +328,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.gitmojiEnabled === 'boolean') {
       result.gitmojiEnabled = candidate.gitmojiEnabled;
     }
+    if (typeof candidate.worktreeSiblingsEnabled === 'boolean') {
+      result.worktreeSiblingsEnabled = candidate.worktreeSiblingsEnabled;
+    }
     if (typeof candidate.defaultFileViewerPreview === 'boolean') {
       result.defaultFileViewerPreview = candidate.defaultFileViewerPreview;
     }

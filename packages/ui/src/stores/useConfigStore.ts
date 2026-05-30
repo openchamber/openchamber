@@ -47,6 +47,7 @@ interface OpenChamberDefaults {
     defaultAgent?: string;
     autoCreateWorktree?: boolean;
     gitmojiEnabled?: boolean;
+    worktreeSiblingsEnabled?: boolean;
     defaultFileViewerPreview?: boolean;
     zenModel?: string;
     messageStreamTransport?: 'auto' | 'ws' | 'sse';
@@ -72,6 +73,7 @@ const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
                     const defaultVariant = typeof data?.defaultVariant === 'string' ? data.defaultVariant.trim() : '';
                     const defaultAgent = typeof data?.defaultAgent === 'string' ? data.defaultAgent.trim() : '';
                     const gitmojiEnabled = typeof data?.gitmojiEnabled === 'boolean' ? data.gitmojiEnabled : undefined;
+                    const worktreeSiblingsEnabled = typeof data?.worktreeSiblingsEnabled === 'boolean' ? data.worktreeSiblingsEnabled : undefined;
                     const defaultFileViewerPreview = typeof data?.defaultFileViewerPreview === 'boolean' ? data.defaultFileViewerPreview : undefined;
                     const zenModel = typeof data?.zenModel === 'string' ? data.zenModel.trim() : '';
                     const messageStreamTransport =
@@ -91,6 +93,7 @@ const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
                         defaultAgent: defaultAgent.length > 0 ? defaultAgent : undefined,
                         autoCreateWorktree: typeof data?.autoCreateWorktree === 'boolean' ? data.autoCreateWorktree : undefined,
                         gitmojiEnabled,
+                        worktreeSiblingsEnabled,
                         defaultFileViewerPreview,
                         zenModel: zenModel.length > 0 ? zenModel : undefined,
                         messageStreamTransport,
@@ -120,6 +123,7 @@ const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
         const defaultVariant = typeof data?.defaultVariant === 'string' ? data.defaultVariant.trim() : '';
         const defaultAgent = typeof data?.defaultAgent === 'string' ? data.defaultAgent.trim() : '';
         const gitmojiEnabled = typeof data?.gitmojiEnabled === 'boolean' ? data.gitmojiEnabled : undefined;
+        const worktreeSiblingsEnabled = typeof data?.worktreeSiblingsEnabled === 'boolean' ? data.worktreeSiblingsEnabled : undefined;
         const defaultFileViewerPreview = typeof data?.defaultFileViewerPreview === 'boolean' ? data.defaultFileViewerPreview : undefined;
         const zenModel = typeof data?.zenModel === 'string' ? data.zenModel.trim() : '';
         const messageStreamTransport =
@@ -139,6 +143,7 @@ const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
             defaultAgent: defaultAgent.length > 0 ? defaultAgent : undefined,
             autoCreateWorktree: typeof data?.autoCreateWorktree === 'boolean' ? data.autoCreateWorktree : undefined,
             gitmojiEnabled,
+            worktreeSiblingsEnabled,
             defaultFileViewerPreview,
             zenModel: zenModel.length > 0 ? zenModel : undefined,
             messageStreamTransport,
@@ -535,6 +540,7 @@ interface ConfigStore {
     settingsDefaultAgent: string | undefined;
     settingsAutoCreateWorktree: boolean;
     settingsGitmojiEnabled: boolean;
+    settingsWorktreeSiblingsEnabled: boolean;
     settingsDefaultFileViewerPreview: boolean;
     settingsZenModel: string | undefined;
     settingsMessageStreamTransport: 'auto' | 'ws' | 'sse';
@@ -614,6 +620,7 @@ interface ConfigStore {
     setSettingsDefaultAgent: (agent: string | undefined) => void;
     setSettingsAutoCreateWorktree: (enabled: boolean) => void;
     setSettingsGitmojiEnabled: (enabled: boolean) => void;
+    setSettingsWorktreeSiblingsEnabled: (enabled: boolean) => void;
     setSettingsDefaultFileViewerPreview: (enabled: boolean) => void;
     setSettingsZenModel: (model: string | undefined) => void;
     setSettingsMessageStreamTransport: (transport: 'auto' | 'ws' | 'sse') => void;
@@ -670,6 +677,7 @@ export const useConfigStore = create<ConfigStore>()(
                 settingsDefaultAgent: undefined,
                 settingsAutoCreateWorktree: false,
                 settingsGitmojiEnabled: false,
+                settingsWorktreeSiblingsEnabled: false,
                 settingsDefaultFileViewerPreview: false,
                 settingsZenModel: undefined,
                 settingsMessageStreamTransport: 'auto',
@@ -1378,6 +1386,7 @@ export const useConfigStore = create<ConfigStore>()(
                                     settingsDefaultAgent: openChamberDefaults.defaultAgent,
                                     settingsAutoCreateWorktree: openChamberDefaults.autoCreateWorktree ?? false,
                                     settingsGitmojiEnabled: openChamberDefaults.gitmojiEnabled ?? false,
+                                    settingsWorktreeSiblingsEnabled: openChamberDefaults.worktreeSiblingsEnabled ?? false,
                                     settingsDefaultFileViewerPreview: openChamberDefaults.defaultFileViewerPreview ?? false,
                                     settingsZenModel: resolvedZenModel,
                                     settingsMessageStreamTransport: openChamberDefaults.messageStreamTransport ?? state.settingsMessageStreamTransport ?? 'auto',
@@ -1817,6 +1826,9 @@ export const useConfigStore = create<ConfigStore>()(
                 setSettingsGitmojiEnabled: (enabled: boolean) => {
                     set({ settingsGitmojiEnabled: enabled });
                 },
+                setSettingsWorktreeSiblingsEnabled: (enabled: boolean) => {
+                    set({ settingsWorktreeSiblingsEnabled: enabled });
+                },
 
                 setSettingsDefaultFileViewerPreview: (enabled: boolean) => {
                     set({ settingsDefaultFileViewerPreview: enabled });
@@ -2212,6 +2224,7 @@ export const useConfigStore = create<ConfigStore>()(
                     settingsDefaultAgent: state.settingsDefaultAgent,
                     settingsAutoCreateWorktree: state.settingsAutoCreateWorktree,
                     settingsGitmojiEnabled: state.settingsGitmojiEnabled,
+                    settingsWorktreeSiblingsEnabled: state.settingsWorktreeSiblingsEnabled,
                     settingsDefaultFileViewerPreview: state.settingsDefaultFileViewerPreview,
                     settingsZenModel: state.settingsZenModel,
                     settingsMessageStreamTransport: state.settingsMessageStreamTransport,
