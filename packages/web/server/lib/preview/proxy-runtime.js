@@ -948,21 +948,29 @@ export const rewritePreviewBody = ({ bodyText, proxyBasePath, targetOrigin, kind
     }
     return value;
   };
-  const rewriteHtml = (text) => text
-    .replace(/\b(src|href|action)=(['"])([^'"]*)\2/gi, (_match, attr, quote, value) => {
-      return `${attr}=${quote}${rewriteResourceUrl(value)}${quote}`;
-    })
-    .replace(/\bsrcset=(['"])([^'"]*)\1/gi, (_match, quote, value) => {
-      const rewritten = String(value).split(',').map((part) => {
-        const trimmed = part.trim();
-        if (!trimmed) return trimmed;
-        const segments = trimmed.split(/\s+/);
-        const url = segments[0] || '';
-        segments[0] = rewriteResourceUrl(url);
-        return segments.join(' ');
-      }).join(', ');
-      return `srcset=${quote}${rewritten}${quote}`;
+  const rewriteHtml = (text) => {
+    let rewritten = text
+      .replace(/\b(src|href|action)=(['"])([^'"]*)\2/gi, (_match, attr, quote, value) => {
+        return `${attr}=${quote}${rewriteResourceUrl(value)}${quote}`;
+      })
+      .replace(/\bsrcset=(['"])([^'"]*)\1/gi, (_match, quote, value) => {
+        const rewritten = String(value).split(',').map((part) => {
+          const trimmed = part.trim();
+          if (!trimmed) return trimmed;
+          const segments = trimmed.split(/\s+/);
+          const url = segments[0] || '';
+          segments[0] = rewriteResourceUrl(url);
+          return segments.join(' ');
+        }).join(', ');
+        return `srcset=${quote}${rewritten}${quote}`;
+      });
+
+    rewritten = rewritten.replace(/(<script\b[^>]*type\s*=\s*['"]module['"][^>]*>)([\s\S]*?)(<\/script>)/gi, (match, openTag, scriptContent, closeTag) => {
+      return `${openTag}${rewriteJavaScript(scriptContent)}${closeTag}`;
     });
+
+    return rewritten;
+  };
   const rewriteCss = (text) => text
     .replace(/url\((['"]?)([^)'"]*)\1\)/gi, (_match, quote, value) => {
       const q = quote || '';

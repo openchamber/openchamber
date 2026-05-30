@@ -90,6 +90,29 @@ describe('preview body URL rewriting', () => {
     expect(output).toContain('const url = "/api/data";');
   });
 
+  it('rewrites inline module scripts in HTML responses', () => {
+    const input = `
+      <script type="module">
+        import { injectIntoGlobalHook } from "/@react-refresh";
+        import value from "/module.js";
+        const url = "/api/data";
+      </script>
+      <script type='module'>
+        import "/entry.js";
+      </script>
+      <script type="text/javascript">
+        import "/not-rewritten.js";
+      </script>
+    `;
+    const output = rewrite(input, 'html');
+
+    expect(output).toContain('import { injectIntoGlobalHook } from "/api/preview/proxy/abc123/@react-refresh";');
+    expect(output).toContain('import value from "/api/preview/proxy/abc123/module.js";');
+    expect(output).toContain('const url = "/api/data";');
+    expect(output).toContain('import "/api/preview/proxy/abc123/entry.js";');
+    expect(output).toContain('import "/not-rewritten.js";');
+  });
+
   it('rewrites only CSS imports and url references in CSS responses', () => {
     const input = '@import "/theme.css"; .hero { background: url(/hero.png); } .copy::after { content: "/not-a-url"; }';
     const output = rewrite(input, 'css');
