@@ -54,7 +54,7 @@ import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Icon } from "@/components/icon/Icon";
 import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
 import { getDefaultTheme } from '@/lib/theme/themes';
-import { openDesktopFileInApp, openDesktopPath, isRemoteSshActive, openDesktopRemoteFileInApp } from '@/lib/desktop';
+import { openDesktopFileInApp, openDesktopPath, isRemoteSshActive, openDesktopRemoteFileInApp, isOpenInAppAvailable } from '@/lib/desktop';
 import { useOpenInAppsStore } from '@/stores/useOpenInAppsStore';
 import { OPEN_IN_APPS } from '@/lib/openInApps';
 import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts';
@@ -2756,6 +2756,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           </>
         )}
 
+        {isOpenInAppAvailable() && (displayableOpenInApps.length > 0 || openInCacheStale) && (
         <DropdownMenu onOpenChange={handleToolbarDropdownOpenChange}>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -2797,6 +2798,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
+        )}
 
         {!isSelectedImage && (
           <>

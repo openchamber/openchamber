@@ -181,6 +181,7 @@ export const useOpenInAppsStore = create<OpenInAppsState>()((set, get) => ({
     };
 
     const updateHandler = (event: Event) => {
+      if (!isDesktopLoopbackOrigin()) return;
       const detail = (event as CustomEvent<InstalledDesktopAppInfo[]>).detail;
       if (!Array.isArray(detail)) {
         return;

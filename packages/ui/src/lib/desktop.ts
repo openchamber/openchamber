@@ -340,7 +340,7 @@ export const isDesktopLoopbackOrigin = (): boolean => {
   return Boolean(currentUrl && isLoopbackHost(currentUrl.hostname));
 };
 
-let _remoteSshCache: { value: boolean; checkedAt: number } | null = null;
+let _remoteSshCache: { value: boolean; checkedAt: number; verified: boolean } | null = null;
 const REMOTE_SSH_CACHE_TTL_MS = 10_000;
 
 export const isRemoteSshActive = (): boolean => {
@@ -348,17 +348,28 @@ export const isRemoteSshActive = (): boolean => {
   if (!isDesktopShell()) return false;
   if (isDesktopLocalOriginActive()) return false;
 
+  const currentUrl = parseUrl(window.location.origin);
+  if (!currentUrl || !isLoopbackHost(currentUrl.hostname)) {
+    _remoteSshCache = { value: false, checkedAt: Date.now(), verified: true };
+    return false;
+  }
+
+  // Return cached verified result within TTL
   if (_remoteSshCache && (Date.now() - _remoteSshCache.checkedAt) < REMOTE_SSH_CACHE_TTL_MS) {
     return _remoteSshCache.value;
   }
 
-  const currentUrl = parseUrl(window.location.origin);
-  if (!currentUrl || !isLoopbackHost(currentUrl.hostname)) {
-    _remoteSshCache = { value: false, checkedAt: Date.now() };
-    return false;
-  }
+  // Initial heuristic: a non-local loopback origin is likely an SSH
+  // tunnel. Eagerly verify against the main process; on the next call
+  // the verified result takes effect.
+  _remoteSshCache = { value: true, checkedAt: Date.now(), verified: false };
 
-  _remoteSshCache = { value: true, checkedAt: Date.now() };
+  getActiveSshContext().then((ctx) => {
+    _remoteSshCache = { value: ctx !== null, checkedAt: Date.now(), verified: true };
+  }).catch(() => {
+    _remoteSshCache = { value: false, checkedAt: Date.now(), verified: true };
+  });
+
   return true;
 };
 
@@ -374,7 +385,7 @@ export type SshContext = {
 };
 
 export const getActiveSshContext = async (): Promise<SshContext | null> => {
-  if (!isRemoteSshActive()) return null;
+  if (!isTauriShell() || !isRemoteSshActive()) return null;
 
   try {
     const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
@@ -890,9 +901,9 @@ export const fetchDesktopAppIcons = async (apps: string[]): Promise<Record<strin
     const map: Record<string, string> = {};
     for (const entry of result) {
       if (!entry || typeof entry !== 'object') continue;
-      const candidateEntry = entry as { app?: unknown; data_url?: unknown };
-      if (typeof candidateEntry.app !== 'string' || typeof candidateEntry.data_url !== 'string') continue;
-      map[candidateEntry.app] = candidateEntry.data_url;
+      const candidateEntry = entry as { app?: unknown; dataUrl?: unknown };
+      if (typeof candidateEntry.app !== 'string' || typeof candidateEntry.dataUrl !== 'string') continue;
+      map[candidateEntry.app] = candidateEntry.dataUrl;
     }
     return map;
   } catch (error) {

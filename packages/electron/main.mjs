@@ -2137,13 +2137,15 @@ const REMOTE_URI_SCHEME_BY_APP_ID = {
   cursor: 'cursor',
   vscodium: 'vscodium',
   windsurf: 'windsurf',
+  zed: 'zed',
 };
 
 const buildOpenRemoteProjectSpecs = ({ projectPath, appId, appName, sshInfo }) => {
   const specs = [];
   const cli = CLI_BY_APP_ID[appId];
   if (cli) {
-    const remoteTarget = `ssh-remote+${sshInfo.host}`;
+    const hostPort = sshInfo.port && sshInfo.port !== 22 ? `${sshInfo.host}:${sshInfo.port}` : sshInfo.host;
+    const remoteTarget = `ssh-remote+${hostPort}`;
     specs.push({ program: cli, args: ['--remote', remoteTarget, '--new-window', projectPath] });
     const scheme = REMOTE_URI_SCHEME_BY_APP_ID[appId] || 'vscode';
     const deepLinkUri = `${scheme}://vscode-remote/${remoteTarget}${projectPath}`;
@@ -2156,7 +2158,8 @@ const buildOpenRemoteFileSpecs = ({ filePath, appId, appName, sshInfo }) => {
   const specs = [];
   const cli = CLI_BY_APP_ID[appId];
   if (cli) {
-    const remoteTarget = `ssh-remote+${sshInfo.host}`;
+    const hostPort = sshInfo.port && sshInfo.port !== 22 ? `${sshInfo.host}:${sshInfo.port}` : sshInfo.host;
+    const remoteTarget = `ssh-remote+${hostPort}`;
     specs.push({ program: cli, args: ['--remote', remoteTarget, '--goto', filePath] });
     const scheme = REMOTE_URI_SCHEME_BY_APP_ID[appId] || 'vscode';
     const deepLinkUri = `${scheme}://vscode-remote/${remoteTarget}${filePath}`;
@@ -2167,9 +2170,10 @@ const buildOpenRemoteFileSpecs = ({ filePath, appId, appName, sshInfo }) => {
 
 const buildWindowsOpenRemoteProjectSpecs = ({ projectPath, appId, appName, sshInfo }) => {
   const specs = [];
+  const hostPort = sshInfo.port && sshInfo.port !== 22 ? `${sshInfo.host}:${sshInfo.port}` : sshInfo.host;
+  const remoteTarget = `ssh-remote+${hostPort}`;
   const cli = WINDOWS_CLI_BY_APP_ID[appId];
   if (cli) {
-    const remoteTarget = `ssh-remote+${sshInfo.host}`;
     const resolvedCli = runWhere(cli);
     if (resolvedCli) {
       specs.push({ program: resolvedCli, args: ['--remote', remoteTarget, '--new-window', projectPath] });
@@ -2177,7 +2181,6 @@ const buildWindowsOpenRemoteProjectSpecs = ({ projectPath, appId, appName, sshIn
   }
   const exe = findWindowsExecutable(appId);
   if (exe) {
-    const remoteTarget = `ssh-remote+${sshInfo.host}`;
     specs.push({ program: exe, args: ['--remote', remoteTarget, '--new-window', projectPath] });
   }
   return specs;
@@ -2185,9 +2188,10 @@ const buildWindowsOpenRemoteProjectSpecs = ({ projectPath, appId, appName, sshIn
 
 const buildWindowsOpenRemoteFileSpecs = ({ filePath, appId, appName, sshInfo }) => {
   const specs = [];
+  const hostPort = sshInfo.port && sshInfo.port !== 22 ? `${sshInfo.host}:${sshInfo.port}` : sshInfo.host;
+  const remoteTarget = `ssh-remote+${hostPort}`;
   const cli = WINDOWS_CLI_BY_APP_ID[appId];
   if (cli) {
-    const remoteTarget = `ssh-remote+${sshInfo.host}`;
     const resolvedCli = runWhere(cli);
     if (resolvedCli) {
       specs.push({ program: resolvedCli, args: ['--remote', remoteTarget, '--goto', filePath] });
@@ -2195,7 +2199,6 @@ const buildWindowsOpenRemoteFileSpecs = ({ filePath, appId, appName, sshInfo }) 
   }
   const exe = findWindowsExecutable(appId);
   if (exe) {
-    const remoteTarget = `ssh-remote+${sshInfo.host}`;
     specs.push({ program: exe, args: ['--remote', remoteTarget, '--goto', filePath] });
   }
   return specs;
@@ -2226,13 +2229,15 @@ const getSshInfoByOrigin = (requestOrigin) => {
     if (!parsed || !parsed.destination) continue;
 
     let port = 22;
-    const portFlagIndex = parsed.args.findIndex((a) => a === '-p' || a.startsWith('-p'));
-    if (portFlagIndex >= 0) {
-      const arg = parsed.args[portFlagIndex];
-      if (arg === '-p' && portFlagIndex + 1 < parsed.args.length) {
-        port = parseInt(parsed.args[portFlagIndex + 1], 10) || 22;
-      } else if (arg.startsWith('-p') && arg.length > 2) {
+    for (let i = parsed.args.length - 1; i >= 0; i--) {
+      const arg = parsed.args[i];
+      if (arg === '-p' && i + 1 < parsed.args.length) {
+        port = parseInt(parsed.args[i + 1], 10) || 22;
+        break;
+      }
+      if (arg.startsWith('-p') && arg.length > 2) {
         port = parseInt(arg.slice(2), 10) || 22;
+        break;
       }
     }
 
