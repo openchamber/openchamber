@@ -506,7 +506,9 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     return map;
   }, [sortedSessions, pinnedSessionIds]);
 
-  const emptyState = (
+  const hideSidebarEmptyState = useUIStore((s) => s.hideSidebarEmptyState);
+
+  const emptyState = hideSidebarEmptyState ? null : (
     <div className="py-6 text-center text-muted-foreground">
       <p className="typography-ui-label font-semibold">{t('sessions.sidebar.empty.noSessions.title')}</p>
       <p className="typography-meta mt-1">{t('sessions.sidebar.empty.noSessions.description')}</p>

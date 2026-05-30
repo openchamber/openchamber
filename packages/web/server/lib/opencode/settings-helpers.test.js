@@ -117,4 +117,39 @@ describe('settings helpers', () => {
     const response = helpers.formatSettingsResponse({});
     expect(response.collapsibleThinkingBlocks).toBe(true);
   });
+
+  it('accepts hideSidebarEmptyState as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ hideSidebarEmptyState: true })).toEqual({
+      hideSidebarEmptyState: true,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ hideSidebarEmptyState: false })).toEqual({
+      hideSidebarEmptyState: false,
+    });
+  });
+
+  it('rejects non-boolean hideSidebarEmptyState values', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ hideSidebarEmptyState: 'true' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ hideSidebarEmptyState: 1 })).toEqual({});
+  });
+
+  it('includes hideSidebarEmptyState in formatSettingsResponse', () => {
+    const helpers = createTestHelpers();
+
+    const response = helpers.formatSettingsResponse({ hideSidebarEmptyState: false });
+    expect(response.hideSidebarEmptyState).toBe(false);
+
+    const responseTrue = helpers.formatSettingsResponse({ hideSidebarEmptyState: true });
+    expect(responseTrue.hideSidebarEmptyState).toBe(true);
+  });
+
+  it('defaults hideSidebarEmptyState to false in formatSettingsResponse when absent', () => {
+    const helpers = createTestHelpers();
+
+    const response = helpers.formatSettingsResponse({});
+    expect(response.hideSidebarEmptyState).toBe(false);
+  });
 });

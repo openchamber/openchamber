@@ -16,6 +16,7 @@ import type { SortableDragHandleProps } from './sortableItems';
 import { SortableGroupItem, SortableProjectItem } from './sortableItems';
 import { formatProjectLabel } from './utils';
 import { useI18n } from '@/lib/i18n';
+import { useUIStore } from '@/stores/useUIStore';
 import type { MainTab } from '@/stores/useUIStore';
 
 type ProjectSection = {
@@ -68,6 +69,7 @@ type Props = {
 
 export function SidebarProjectsList(props: Props): React.ReactNode {
   const { t } = useI18n();
+  const hideSidebarEmptyState = useUIStore((s) => s.hideSidebarEmptyState);
   const projectSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -100,7 +102,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
               ?? activeSection.groups.find((candidate) => candidate.isMain)
               ?? activeSection.groups[0];
             if (!primaryGroup) {
-              return <div className="py-1 text-left typography-micro text-muted-foreground">{t('sessions.sidebar.empty.noSessions.title')}</div>;
+              return hideSidebarEmptyState ? null : <div className="py-1 text-left typography-micro text-muted-foreground">{t('sessions.sidebar.empty.noSessions.title')}</div>;
             }
             const archivedGroup = activeSection.groups.find((candidate) => candidate.isArchivedBucket);
             const groupsToRender = [
@@ -226,7 +228,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                             </SortableContext>
                             <DragOverlay dropAnimation={null} />
                           </DndContext>
-                        ) : (
+                        ) : hideSidebarEmptyState ? null : (
                           <div className="py-1 text-left typography-micro text-muted-foreground">{t('sessions.sidebar.empty.noSessions.title')}</div>
                         )}
                       </div>
