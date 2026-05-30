@@ -1103,14 +1103,14 @@ async function resyncDirectoryAfterReconnect(
 
 function handleEvent(
   rawDirectory: string,
-  rawPayload: Event,
+  rawPayload: ServerTagged<Event>,
   childStores: ChildStoreManager,
   routingIndex: EventRoutingIndex,
 ) {
   let serverId: string
   let payload: Event
   try {
-    const result = unwrapServerEvent(rawPayload as ServerTagged<Event>)
+    const result = unwrapServerEvent(rawPayload)
     serverId = result.serverId
     payload = result.event
   } catch (err) {
@@ -1589,7 +1589,7 @@ export function SyncProvider(props: {
           }
         }
         const taggedPayload: ServerTagged<Event> = { ...payload, serverId: typeof (payload as Record<string, unknown>).serverId === 'string' ? (payload as Record<string, unknown>).serverId as string : 'local' }
-        handleEvent(directory, taggedPayload as unknown as Event, childStores, routingIndex)
+        handleEvent(directory, taggedPayload, childStores, routingIndex)
       },
       onReconnect: () => {
         useConfigStore.setState({

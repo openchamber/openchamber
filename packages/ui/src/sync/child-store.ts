@@ -270,7 +270,15 @@ export class ChildStoreManager {
   }
 
   update(directory: string, fn: (state: State) => Partial<State>) {
-    this.updateByServer("local", directory, fn)
+    for (const serverMap of this.children.values()) {
+      const store = serverMap.get(directory)
+      if (store) {
+        const current = store.getState()
+        const patch = fn(current)
+        store.setState(patch)
+        return
+      }
+    }
   }
 
   updateByServer(serverId: string, directory: string, fn: (state: State) => Partial<State>) {
@@ -282,7 +290,11 @@ export class ChildStoreManager {
   }
 
   getState(directory: string): State | undefined {
-    return this.getStateByServer("local", directory)
+    for (const serverMap of this.children.values()) {
+      const state = serverMap.get(directory)?.getState()
+      if (state) return state
+    }
+    return undefined
   }
 
   getStateByServer(serverId: string, directory: string): State | undefined {

@@ -45,20 +45,20 @@ export class SseFanIn {
     this.dispatchSynthetic(serverId, 'server.status', { status: 'connecting' });
     this.subscribedAt.set(serverId, Date.now());
 
-      try {
-        const subscription = client.events.subscribe((event) => {
-          try {
-            this.lastEventAt.set(serverId, Date.now());
-            const currentStatus = this.serverManager.getServer(serverId)?.status;
-            if (currentStatus !== 'connected') {
-              this.serverManager.updateStatus(serverId, 'connected');
-              this.dispatchSynthetic(serverId, 'server.status', { status: 'connected' });
-            }
-            this.onServerEvent(serverId, event);
-          } catch (err) {
-            console.error(`[SseFanIn] Error processing event for '${serverId}':`, err?.message || err);
+    try {
+      const subscription = client.events.subscribe((event) => {
+        try {
+          this.lastEventAt.set(serverId, Date.now());
+          const currentStatus = this.serverManager.getServer(serverId)?.status;
+          if (currentStatus !== 'connected') {
+            this.serverManager.updateStatus(serverId, 'connected');
+            this.dispatchSynthetic(serverId, 'server.status', { status: 'connected' });
           }
-        });
+          this.onServerEvent(serverId, event);
+        } catch (err) {
+          console.error(`[SseFanIn] Error processing event for '${serverId}':`, err?.message || err);
+        }
+      });
 
       this.subscriptions.set(serverId, subscription);
     } catch (err) {

@@ -114,5 +114,5 @@ export function useServerSidebarSections(opts: {
     }
 
     return sections;
-  }, [servers, projectSections, collapsedServers, projectServerMap]);
+  }, [servers, projectSections, collapsedServers, projectServerMap, t]);
 }

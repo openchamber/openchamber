@@ -3,6 +3,14 @@ import express from 'express';
 import request from 'supertest';
 import { registerAggregateRoutes } from './aggregate-routes.js';
 
+mock.module('@opencode-ai/sdk', () => ({
+  createOpencodeClient: (opts) => ({
+    baseUrl: opts?.baseUrl,
+    health: { check: async () => true },
+    session: { list: async () => [] },
+  }),
+}));
+
 function createMockServerManager() {
   const servers = new Map();
 
@@ -290,12 +298,56 @@ describe('aggregate-routes', () => {
       expect(res.body.error).toContain('Cannot re-register local server via API');
     });
 
-    test('returns 501 when url is provided (remote not implemented)', async () => {
+    test('registers new server with url successfully', async () => {
       const res = await request(app)
         .post('/api/servers')
         .send({ id: 's1', label: 'My Remote', type: 'remote-url', url: 'http://remote.example.com' })
-        .expect(501);
-      expect(res.body.error).toContain('not yet implemented');
+        .expect(200);
+      expect(res.body.id).toBe('s1');
+      expect(res.body.status).toBe('connecting');
+      expect(sseFanIn.subscribeServer).toHaveBeenCalledWith('s1');
+    });
+
+    test('returns 500 when SDK import fails', async () => {
+      mock.module('@opencode-ai/sdk', () => ({
+        createOpencodeClient: () => { throw new Error('SDK not available'); },
+      }));
+
+      const res = await request(app)
+        .post('/api/servers')
+        .send({ id: 's1', label: 'My Remote', type: 'remote-url', url: 'http://remote.example.com' })
+        .expect(500);
+      expect(res.body.error).toContain('SDK client');
+
+      mock.module('@opencode-ai/sdk', () => ({
+        createOpencodeClient: (opts) => ({
+          baseUrl: opts?.baseUrl,
+          health: { check: async () => true },
+          session: { list: async () => [] },
+        }),
+      }));
+    });
+
+    test('returns 502 when health check fails', async () => {
+      mock.module('@opencode-ai/sdk', () => ({
+        createOpencodeClient: () => ({
+          health: { check: async () => { throw new Error('Connection refused'); } },
+        }),
+      }));
+
+      const res = await request(app)
+        .post('/api/servers')
+        .send({ id: 's1', label: 'My Remote', type: 'remote-url', url: 'http://dead.example.com' })
+        .expect(502);
+      expect(res.body.error).toContain('not reachable');
+
+      mock.module('@opencode-ai/sdk', () => ({
+        createOpencodeClient: (opts) => ({
+          baseUrl: opts?.baseUrl,
+          health: { check: async () => true },
+          session: { list: async () => [] },
+        }),
+      }));
     });
 
     test('returns 400 when url is missing for new server', async () => {

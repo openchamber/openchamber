@@ -96,14 +96,22 @@ export function registerAggregateRoutes(router, serverManager, sseFanIn) {
 
       let client = null;
       if (url) {
-        // TODO: create OpencodeClient for remote server URL
-        // const { createOpencodeClient } = await import('@opencode-ai/sdk');
-        // client = createOpencodeClient({ baseUrl: url });
-        // await client.health.check();
-        return res.status(501).json({
-          error: 'Remote server registration requires SDK integration (not yet implemented)',
-          hint: 'Use the desktop Electron shell to connect via SSH tunnel',
-        });
+        try {
+          const { createOpencodeClient } = await import('@opencode-ai/sdk');
+          client = createOpencodeClient({ baseUrl: url });
+        } catch (sdkErr) {
+          return res.status(500).json({
+            error: `Failed to create SDK client for remote server: ${sdkErr?.message || sdkErr}`,
+          });
+        }
+
+        try {
+          await client.health.check();
+        } catch (healthErr) {
+          return res.status(502).json({
+            error: `Remote server at "${url}" is not reachable: ${healthErr?.message || healthErr}`,
+          });
+        }
       }
 
       if (!url && !isReconnect) {
