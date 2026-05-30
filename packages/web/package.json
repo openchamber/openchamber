@@ -28,7 +28,7 @@
     "@opencode-ai/sdk": "^1.15.10",
     "@simplewebauthn/server": "13.3.0",
     "adm-zip": "^0.5.16",
-    "better-sqlite3": "^11.7.0",
+    "better-sqlite3": "^12.10.0",
     "bun-pty": "^0.4.5",
     "compression": "^1.8.1",
     "cron-parser": "^4.9.0",

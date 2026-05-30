@@ -256,7 +256,7 @@
         "@opencode-ai/sdk": "^1.15.10",
         "@simplewebauthn/server": "13.3.0",
         "adm-zip": "^0.5.16",
-        "better-sqlite3": "^11.7.0",
+        "better-sqlite3": "^12.10.0",
         "bun-pty": "^0.4.5",
         "compression": "^1.8.1",
         "cron-parser": "^4.9.0",
@@ -644,7 +644,7 @@
 
     "@electron/get": ["@electron/get@2.0.3", "", { "dependencies": { "debug": "^4.1.1", "env-paths": "^2.2.0", "fs-extra": "^8.1.0", "got": "^11.8.5", "progress": "^2.0.3", "semver": "^6.2.0", "sumchecker": "^3.0.1" }, "optionalDependencies": { "global-agent": "^3.0.0" } }, "sha512-Qkzpg2s9GnVV2I2BjRksUi43U5e6+zaQMcjoJy0C+C5oxaKl+fmckGDQFtRpZpZV0NQekuZZ+tGz7EA9TVnQtQ=="],
 
-    "@electron/node-gyp": ["@electron/node-gyp@github:electron/node-gyp#06b29aa", { "dependencies": { "env-paths": "^2.2.0", "exponential-backoff": "^3.1.1", "glob": "^8.1.0", "graceful-fs": "^4.2.6", "make-fetch-happen": "^10.2.1", "nopt": "^6.0.0", "proc-log": "^2.0.1", "semver": "^7.3.5", "tar": "^6.2.1", "which": "^2.0.2" }, "bin": "./bin/node-gyp.js" }, "electron-node-gyp-06b29aa", "sha512-UJwi6aXMAiUaOvqPHVlMtCOLRa1QAU2SqYD9H07KHpN+I2mBoFuxP1HnUOkt86+j+/o/XyHpM7D33JFFQi/jfA=="],
+    "@electron/node-gyp": ["@electron/node-gyp@github:electron/node-gyp#06b29aa", { "dependencies": { "env-paths": "^2.2.0", "exponential-backoff": "^3.1.1", "glob": "^8.1.0", "graceful-fs": "^4.2.6", "make-fetch-happen": "^10.2.1", "nopt": "^6.0.0", "proc-log": "^2.0.1", "semver": "^7.3.5", "tar": "^6.2.1", "which": "^2.0.2" }, "bin": "./bin/node-gyp.js" }, "electron-node-gyp-06b29aa"],
 
     "@electron/notarize": ["@electron/notarize@2.5.0", "", { "dependencies": { "debug": "^4.1.1", "fs-extra": "^9.0.1", "promise-retry": "^2.0.1" } }, "sha512-jNT8nwH1f9X5GEITXaQ8IF/KdskvIkOFfB2CvwumsveVidzpSc+mvhhTMdAGSYF3O+Nq49lJ7y+ssODRXu06+A=="],
 
@@ -1552,7 +1552,7 @@
 
     "before-after-hook": ["before-after-hook@4.0.0", "", {}, "sha512-q6tR3RPqIB1pMiTRMFcZwuG5T8vwp+vUvEG0vuI6B+Rikh5BfPp2fQ82c925FOs+b0lcFQ8CFrL+KbilfZFhOQ=="],
 
-    "better-sqlite3": ["better-sqlite3@11.10.0", "", { "dependencies": { "bindings": "^1.5.0", "prebuild-install": "^7.1.1" } }, "sha512-EwhOpyXiOEL/lKzHz9AW1msWFNzGc/z+LzeB3/jnFJpxu+th2yqvzsSWas1v9jgs9+xiXJcD5A8CJxAG2TaghQ=="],
+    "better-sqlite3": ["better-sqlite3@12.10.0", "", { "dependencies": { "bindings": "^1.5.0", "prebuild-install": "^7.1.1" } }, "sha512-CyzaZRQKyHkB2ZInfTTl2nvT33EbDpjkLEbE8/Zck3Ll6O0qqvuGdrJ45HgtH+HykRg88ITY3AdreBGN70aBSQ=="],
 
     "binary-extensions": ["binary-extensions@2.3.0", "", {}, "sha512-Ceh+7ox5qe7LJuLHoY0feh3pHuUDHAcRUeyL2VYghZwfpkNIy/+8Ocg0a3UuSoYzavmylwuLWQOf3hl0jjMMIw=="],
 
