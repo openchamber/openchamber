@@ -13,7 +13,8 @@ export type QuotaProviderId =
   | 'minimax-coding-plan'
   | 'minimax-cn-coding-plan'
   | 'ollama-cloud'
-  | 'wafer';
+  | 'wafer'
+  | 'opencode-go';
 
 export interface UsageWindow {
   usedPercent: number | null;
