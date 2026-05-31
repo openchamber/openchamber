@@ -65,6 +65,9 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
                         </div>
                     )}
                     <div className="border-t border-border/40 pt-6">
+                        <SidebarEmptyStateSettings />
+                    </div>
+                    <div className="border-t border-border/40 pt-6">
                         <SessionRetentionSettings />
                     </div>
                     <div className="border-t border-border/40 pt-6">

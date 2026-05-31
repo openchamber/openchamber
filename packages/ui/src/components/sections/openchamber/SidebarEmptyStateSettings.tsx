@@ -2,11 +2,18 @@ import React from 'react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
+import { updateDesktopSettings } from '@/lib/persistence';
 
 export const SidebarEmptyStateSettings: React.FC = () => {
   const { t } = useI18n();
   const hide = useUIStore((s) => s.hideSidebarEmptyState);
   const setHide = useUIStore((s) => s.setHideSidebarEmptyState);
+
+  const handleToggle = React.useCallback(() => {
+    const next = !hide;
+    setHide(next);
+    void updateDesktopSettings({ hideSidebarEmptyState: next });
+  }, [hide, setHide]);
 
   return (
     <div className="mb-8">
@@ -21,17 +28,17 @@ export const SidebarEmptyStateSettings: React.FC = () => {
           role="button"
           tabIndex={0}
           aria-pressed={hide}
-          onClick={() => setHide(!hide)}
+          onClick={handleToggle}
           onKeyDown={(event) => {
             if (event.key === ' ' || event.key === 'Enter') {
               event.preventDefault();
-              setHide(!hide);
+              handleToggle();
             }
           }}
         >
           <Checkbox
             checked={hide}
-            onChange={setHide}
+            onChange={handleToggle}
             ariaLabel={t('settings.openchamber.sidebar.emptyState.hideAria')}
           />
           <span className="typography-ui-label text-foreground">
