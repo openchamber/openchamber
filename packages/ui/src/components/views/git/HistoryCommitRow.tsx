@@ -18,6 +18,7 @@ import type { LanedCommit } from './gitGraph';
 import { GitGraphSegment } from './GitGraphSegment';
 import * as git from '@/lib/gitApi';
 import { toast } from '@/components/ui/toast';
+import { getCurrentIntlLocale } from '@/lib/i18n';
 
 const HISTORY_DIFF_REQUEST_TIMEOUT_MS = 15000;
 const HISTORY_DIFF_LARGE_CHANGED_LINES = 500;
@@ -83,7 +84,7 @@ function formatCommitDate(date: string) {
     return date;
   }
 
-  return value.toLocaleString(undefined, {
+  return value.toLocaleString(getCurrentIntlLocale(), {
     hour12: false,
     year: 'numeric',
     month: 'short',

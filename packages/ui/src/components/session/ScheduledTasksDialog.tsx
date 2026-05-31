@@ -21,7 +21,7 @@ import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { cn, formatDirectoryName } from '@/lib/utils';
-import { useI18n } from '@/lib/i18n';
+import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import type { ProjectEntry } from '@/lib/api/types';
 import {
   deleteScheduledTask,
@@ -104,7 +104,7 @@ const formatClockTime = (value?: number): string => {
   if (!value || !Number.isFinite(value)) {
     return '';
   }
-  return new Date(value).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  return new Date(value).toLocaleTimeString(getCurrentIntlLocale(), { hour: 'numeric', minute: '2-digit' });
 };
 
 const formatRelativeTime = (value: number | undefined, t: ReturnType<typeof useI18n>['t']): string => {

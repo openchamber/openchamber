@@ -8,6 +8,8 @@ import { openSseProxy } from './sseProxy';
 import { resolveWebviewDevServerUrl } from './webviewDevServer';
 import { normalizeWindowsDriveLetter } from './pathUtils';
 
+const t = vscode.l10n.t;
+
 export class AgentManagerPanelProvider {
   public static readonly viewType = 'openchamber.agentManager';
 
@@ -40,7 +42,7 @@ export class AgentManagerPanelProvider {
     // Create new panel
     this._panel = vscode.window.createWebviewPanel(
       AgentManagerPanelProvider.viewType,
-      'Agent Manager',
+      t('Agent Manager'),
       vscode.ViewColumn.One,
       {
         enableScripts: true,

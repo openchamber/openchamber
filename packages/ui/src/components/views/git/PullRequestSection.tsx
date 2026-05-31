@@ -41,7 +41,7 @@ import type {
   GitHubPullRequestStatus,
   GitRemote,
 } from '@/lib/api/types';
-import { useI18n } from '@/lib/i18n';
+import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 
 type MergeMethod = 'merge' | 'squash' | 'rebase';
 type DetectedUpstream = { owner: string; repo: string; url: string; defaultBranch?: string; defaultBranchSha?: string | null; remoteName?: string | null };
@@ -627,7 +627,7 @@ export const PullRequestSection: React.FC<{
     if (!Number.isFinite(ts)) {
       return value;
     }
-    return new Date(ts).toLocaleString();
+    return new Date(ts).toLocaleString(getCurrentIntlLocale());
   }, []);
 
   const connectedGitHubLogin = React.useMemo(() => {

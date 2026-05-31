@@ -20,14 +20,14 @@ import { cn } from '@/lib/utils';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { openExternalUrl } from '@/lib/url';
 import type { ModelMetadata } from '@/types';
-import { useI18n } from '@/lib/i18n';
+import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 
-const COMPACT_NUMBER_FORMATTER = new Intl.NumberFormat('en-US', {
+const formatCompactNumber = (value: number) => new Intl.NumberFormat(getCurrentIntlLocale(), {
   notation: 'compact',
   compactDisplay: 'short',
   maximumFractionDigits: 1,
   minimumFractionDigits: 0,
-});
+}).format(value);
 
 const formatTokens = (value?: number | null) => {
   if (typeof value !== 'number' || Number.isNaN(value)) {
@@ -36,7 +36,7 @@ const formatTokens = (value?: number | null) => {
   if (value === 0) {
     return '0';
   }
-  const formatted = COMPACT_NUMBER_FORMATTER.format(value);
+  const formatted = formatCompactNumber(value);
   return formatted.endsWith('.0') ? formatted.slice(0, -2) : formatted;
 };
 

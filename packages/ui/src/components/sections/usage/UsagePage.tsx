@@ -15,12 +15,12 @@ import type { UsageWindows, QuotaProviderId } from '@/types';
 import { getAllModelFamilies, getDisplayModelName, sortModelFamilies, groupModelsByFamilyWithGetter } from '@/lib/quota/model-families';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
-import { useI18n } from '@/lib/i18n';
+import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 
 const formatTime = (timestamp: number | null) => {
   if (!timestamp) return '-';
   try {
-    return new Date(timestamp).toLocaleTimeString(undefined, {
+    return new Date(timestamp).toLocaleTimeString(getCurrentIntlLocale(), {
       hour: 'numeric',
       minute: '2-digit'
     });

@@ -1,5 +1,10 @@
 import type { FilesAPI } from '@/lib/api/types';
 import { MAX_OPEN_FILE_LINES, countLinesWithLimit } from '@/lib/fileOpenLimits';
+import { getCurrentIntlLocale } from '@/lib/i18n';
+import { formatMessage, useI18nStore } from '@/lib/i18n/store';
+
+const t = (key: Parameters<typeof formatMessage>[1], params?: Parameters<typeof formatMessage>[2]) =>
+  formatMessage(useI18nStore.getState().dictionary, key, params);
 
 export type ContextFileOpenFailureReason = 'too-large' | 'missing' | 'unreadable';
 
@@ -59,12 +64,13 @@ export const validateContextFileOpen = async (files: FilesAPI, path: string): Pr
 
 export const getContextFileOpenFailureMessage = (reason: ContextFileOpenFailureReason): string => {
   if (reason === 'too-large') {
-    return `File is too large to open (>${MAX_OPEN_FILE_LINES.toLocaleString()} lines)`;
+    const lines = MAX_OPEN_FILE_LINES.toLocaleString(getCurrentIntlLocale());
+    return t('contextFileOpen.failure.tooLarge', { count: lines });
   }
 
   if (reason === 'missing') {
-    return 'File not found';
+    return t('contextFileOpen.failure.missing');
   }
 
-  return 'Failed to open file';
+  return t('contextFileOpen.failure.unreadable');
 };

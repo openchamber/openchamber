@@ -8,6 +8,7 @@ import {
   type VSCodeThemeKind,
   type VSCodeThemePayload,
 } from '@openchamber/ui/lib/theme/vscode/adapter';
+import { getBootstrapMessages, readStoredLocaleForBootstrap } from '@openchamber/ui/lib/i18n';
 import type { VSCodeActiveEditorFile } from '@/sync/input-store';
 
 type ConnectionStatus = 'connecting' | 'connected' | 'error' | 'disconnected';
@@ -52,6 +53,9 @@ try {
 }
 
 window.__OPENCHAMBER_RUNTIME_APIS__ = createVSCodeAPIs();
+
+const bootstrapLocale = readStoredLocaleForBootstrap();
+const bootstrapMessages = getBootstrapMessages(bootstrapLocale);
 
 const bootstrapConnectionStatus = () => {
   const initialStatus = (window.__VSCODE_CONFIG__?.connectionStatus as ConnectionStatus | undefined) || 'connecting';
@@ -171,7 +175,7 @@ const maybeHideLoadingOverlay = () => {
 
   if (connectionStatus === 'connected') {
     if (bootstrapFailed) {
-      setLoadingStatusText('OpenCode connected, but initial data load failed.', 'error');
+      setLoadingStatusText(bootstrapMessages.initialDataLoadFailed, 'error');
       fadeOutLoadingScreen();
       return;
     }
@@ -188,13 +192,13 @@ const maybeHideLoadingOverlay = () => {
 
   if (connectionStatus === 'error') {
     const error = window.__OPENCHAMBER_CONNECTION__?.error;
-    setLoadingStatusText(error || 'Connection error', 'error');
+    setLoadingStatusText(error || bootstrapMessages.connectionError, 'error');
     fadeOutLoadingScreen();
     return;
   }
 
   if (connectionStatus === 'disconnected') {
-    setLoadingStatusText('Disconnected', 'error');
+    setLoadingStatusText(bootstrapMessages.disconnected, 'error');
     fadeOutLoadingScreen();
     return;
   }

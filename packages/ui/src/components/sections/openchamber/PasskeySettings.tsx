@@ -14,14 +14,14 @@ import {
   type PasskeyStatus,
   type StoredPasskey,
 } from '@/lib/passkeys';
-import { useI18n } from '@/lib/i18n';
+import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 
 const formatTimestamp = (timestamp: number | null, neverUsedText: string) => {
   if (!timestamp || !Number.isFinite(timestamp)) {
     return neverUsedText;
   }
 
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(getCurrentIntlLocale(), {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(timestamp);

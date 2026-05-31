@@ -164,9 +164,10 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
         <path class="logo-fill-dim" d="M-8 -4 L8 -4 L8 12 L-8 12 Z"/>
       </g>
     </svg>
+<<<<<<< HEAD
     <!-- Status text stays empty while things are fine; populated only on error. -->
     <div class="status-text" id="loading-status"></div>
-    ${!cliAvailable ? `<div class="error-text">OpenCode CLI not found. Please install it first.</div>` : ''}
+    ${!cliAvailable ? `<div class="error-text" id="cli-missing-text">OpenCode CLI not found. Please install it first.</div>` : ''}
   </div>
   
   <div id="root"></div>
@@ -188,16 +189,62 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
     };
     window.__OPENCHAMBER_HOME__ = "${workspaceFolder.replace(/\\/g, '\\\\')}";
     
+    function getBootstrapMessages() {
+      var locale = 'en';
+      try {
+        var rawLocale = window.localStorage.getItem('openchamber.i18n.v1');
+        if (rawLocale) {
+          var parsedLocale = JSON.parse(rawLocale);
+          if (parsedLocale && typeof parsedLocale.locale === 'string' && parsedLocale.locale.toLowerCase().indexOf('fr') === 0) {
+            locale = 'fr';
+          }
+        }
+      } catch {}
+
+      return locale === 'fr'
+        ? {
+            startingApi: 'Démarrage de l’API OpenCode…',
+            initializing: 'Initialisation…',
+            connecting: 'Connexion…',
+            connected: 'Connecté !',
+            connectionError: 'Erreur de connexion',
+            reconnecting: 'Reconnexion…',
+            cliNotFound: 'L’interface en ligne de commande OpenCode est introuvable. Veuillez l’installer d’abord.',
+          }
+        : {
+            startingApi: 'Starting OpenCode API…',
+            initializing: 'Initializing…',
+            connecting: 'Connecting…',
+            connected: 'Connected!',
+            connectionError: 'Connection error',
+            reconnecting: 'Reconnecting…',
+            cliNotFound: 'OpenCode CLI not found. Please install it first.',
+          };
+    }
+
+    (function applyBootstrapLocale() {
+      var statusEl = document.getElementById('loading-status');
+      var cliMissingEl = document.getElementById('cli-missing-text');
+      var messages = getBootstrapMessages();
+      if (cliMissingEl) {
+        cliMissingEl.textContent = messages.cliNotFound;
+      }
+      if (statusEl) {
+        statusEl.textContent = '';
+      }
+    })();
+
     // Handle connection status updates to update loading screen
     window.addEventListener('message', function(event) {
       var msg = event.data;
       if (msg && msg.type === 'connectionStatus') {
+        var messages = getBootstrapMessages();
         var statusEl = document.getElementById('loading-status');
         if (statusEl) {
           // Only show text when something is wrong — progress states stay silent
           // (the animated logo already signals "working").
           if (msg.status === 'error') {
-            statusEl.textContent = msg.error || 'Connection error';
+            statusEl.textContent = msg.error || messages.connectionError;
             statusEl.classList.add('error-text');
           } else {
             statusEl.textContent = '';
@@ -224,6 +271,24 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
       const baseUrl = devServerUrl;
 
       const statusEl = document.getElementById('loading-status');
+      const getDevMessages = () => {
+        try {
+          const rawLocale = window.localStorage.getItem('openchamber.i18n.v1');
+          if (rawLocale) {
+            const parsedLocale = JSON.parse(rawLocale);
+            if (parsedLocale && typeof parsedLocale.locale === 'string' && parsedLocale.locale.toLowerCase().indexOf('fr') === 0) {
+              return {
+                startingDevServer: (host) => 'Démarrage du serveur de développement de la webview (' + host + ')...',
+                waitingDevServer: (host, attempt) => 'En attente du serveur de développement de la webview (' + host + ')... tentative ' + attempt,
+              };
+            }
+          }
+        } catch {}
+        return {
+          startingDevServer: (host) => 'Starting webview dev server (' + host + ')...',
+          waitingDevServer: (host, attempt) => 'Waiting for webview dev server (' + host + ')... attempt ' + attempt,
+        };
+      };
       const setStatus = (text) => {
         if (statusEl) {
           statusEl.textContent = text;
@@ -272,7 +337,8 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
           }
         })();
 
-        setStatus('Starting webview dev server (' + hostLabel + ')...');
+        const devMessages = getDevMessages();
+        setStatus(devMessages.startingDevServer(hostLabel));
 
         Promise.resolve()
           .then(() => import(viteClientUrl))
@@ -296,7 +362,7 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
           .catch((error) => {
             attempt += 1;
             console.warn('[OpenChamber] VS Code webview dev bundle unavailable, retrying...', error);
-            setStatus('Waiting for webview dev server (' + hostLabel + ')... attempt ' + attempt);
+            setStatus(devMessages.waitingDevServer(hostLabel, attempt));
             window.setTimeout(() => {
               tryLoadDevBundle();
             }, retryDelayMs);
