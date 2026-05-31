@@ -41,6 +41,10 @@ export const createNotificationTriggerRuntime = (deps) => {
   const sessionParentIdCache = new Map();
   const SESSION_PARENT_CACHE_TTL_MS = 60 * 1000;
   const MAX_PERMISSION_AUDIT_ROWS_PER_SESSION = 200;
+  const PERMISSION_AUDIT_PERSIST_DEBOUNCE_MS = 250;
+  let permissionAuditPersistTimer = null;
+  let permissionAuditPersistInFlight = false;
+  let permissionAuditPersistPending = false;
 
   const normalizeStringArray = (value) => Array.isArray(value)
     ? value.filter((item) => typeof item === 'string')
@@ -85,13 +89,36 @@ export const createNotificationTriggerRuntime = (deps) => {
     }
   };
 
-  const persistPermissionAudit = () => {
-    if (!permissionAuditFile || !fs) return;
-    try {
-      fs.mkdirSync(path.dirname(permissionAuditFile), { recursive: true });
-      fs.writeFileSync(permissionAuditFile, JSON.stringify({ sessions: Object.fromEntries(permissionAuditBySession) }), 'utf8');
-    } catch {
+  const flushPermissionAudit = async () => {
+    if (!permissionAuditFile || !fs?.promises) return;
+    if (permissionAuditPersistInFlight) {
+      permissionAuditPersistPending = true;
+      return;
     }
+    permissionAuditPersistInFlight = true;
+    permissionAuditPersistPending = false;
+    try {
+      await fs.promises.mkdir(path.dirname(permissionAuditFile), { recursive: true });
+      await fs.promises.writeFile(permissionAuditFile, JSON.stringify({ sessions: Object.fromEntries(permissionAuditBySession) }), 'utf8');
+    } catch {
+    } finally {
+      permissionAuditPersistInFlight = false;
+      if (permissionAuditPersistPending) {
+        persistPermissionAudit();
+      }
+    }
+  };
+
+  const persistPermissionAudit = () => {
+    if (!permissionAuditFile || !fs?.promises) return;
+    if (permissionAuditPersistTimer) {
+      clearTimeout(permissionAuditPersistTimer);
+    }
+    permissionAuditPersistTimer = setTimeout(() => {
+      permissionAuditPersistTimer = null;
+      void flushPermissionAudit();
+    }, PERMISSION_AUDIT_PERSIST_DEBOUNCE_MS);
+    permissionAuditPersistTimer.unref?.();
   };
 
   const normalizePermissionAuditRows = (rows) => rows

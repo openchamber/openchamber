@@ -892,7 +892,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.permissionAudit.status.approvedAlways': 'Zatwierdzono zawsze',
   'chat.permissionAudit.status.denied': 'Odmówiono',
   'chat.permissionAudit.status.autoApproved': 'Zatwierdzono automatycznie',
-  'chat.permissionAudit.patterns': 'Wzorce: {patterns}',
   'chat.permissionAudit.toolFallback': 'narzędzie',
   'chat.chatInput.placeholder.chat': '@ dla plików/agentów; / dla poleceń i umiejętności; ! dla shell; # dla fragmentów',
   'chat.chatInput.placeholder.chatCompact': 'Użyj @ / ! # dla pomocników',

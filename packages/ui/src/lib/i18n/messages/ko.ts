@@ -1614,7 +1614,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.permissionAudit.status.approvedAlways': '항상 승인됨',
   'chat.permissionAudit.status.denied': '거부됨',
   'chat.permissionAudit.status.autoApproved': '자동 승인됨',
-  'chat.permissionAudit.patterns': '패턴: {patterns}',
   'chat.permissionAudit.toolFallback': '도구',
   'chat.chatInput.linked.byAuthor': '작성자: {author}',
   'chat.chatInput.linked.issue.openInBrowserAria': '브라우저에서 이슈 열기',

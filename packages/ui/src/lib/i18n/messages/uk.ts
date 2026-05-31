@@ -1580,7 +1580,6 @@ export const dict: Record<I18nKey, string> = {
   "chat.permissionAudit.status.approvedAlways": "Завжди схвалено",
   "chat.permissionAudit.status.denied": "Відхилено",
   "chat.permissionAudit.status.autoApproved": "Схвалено автоматично",
-  "chat.permissionAudit.patterns": "Шаблони: {patterns}",
   "chat.permissionAudit.toolFallback": "інструмент",
   "chat.chatInput.linked.byAuthor": "за {author}",
   "chat.chatInput.linked.issue.openInBrowserAria": "Відкрити issue в браузері",

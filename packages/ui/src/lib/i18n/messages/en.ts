@@ -1614,7 +1614,6 @@ export const dict = {
   'chat.permissionAudit.status.approvedAlways': 'Approved always',
   'chat.permissionAudit.status.denied': 'Denied',
   'chat.permissionAudit.status.autoApproved': 'Auto-approved',
-  'chat.permissionAudit.patterns': 'Patterns: {patterns}',
   'chat.permissionAudit.toolFallback': 'tool',
   'chat.chatInput.linked.byAuthor': 'by {author}',
   'chat.chatInput.linked.issue.openInBrowserAria': 'Open issue in browser',

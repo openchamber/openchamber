@@ -488,7 +488,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         }
         return rows.sort((a, b) => a.requestedAt - b.requestedAt || a.requestID.localeCompare(b.requestID));
     }));
-    const auditRefreshKey = `${sessionStatusForCurrent.type ?? 'idle'}:${sessionMessages.length}:${sessionPermissions.length}`;
+    const auditRefreshKey = `${sessionStatusForCurrent.type ?? 'idle'}:${sessionMessages.length}`;
 
     React.useEffect(() => {
         if (scopedSessionIds.length === 0) return;
