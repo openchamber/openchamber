@@ -20,6 +20,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useDeviceInfo } from '@/lib/device';
+import { useVisualViewport } from '@/hooks/useVisualViewport';
 import { cn } from '@/lib/utils';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 
@@ -59,6 +60,8 @@ export const MainLayout: React.FC = () => {
     const setMultiRunLauncherOpen = useUIStore((state) => state.setMultiRunLauncherOpen);
     const multiRunLauncherPrefillPrompt = useUIStore((state) => state.multiRunLauncherPrefillPrompt);
     const { isMobile, isTablet } = useDeviceInfo();
+    const mobileKeyboardMode = useUIStore((state) => state.mobileKeyboardMode);
+    const visualViewport = useVisualViewport();
     const sidebarWidth = useUIStore((state) => state.sidebarWidth);
     const rightSidebarWidth = useUIStore((state) => state.rightSidebarWidth);
     const rightSidebarAutoClosedRef = React.useRef(false);
@@ -414,6 +417,16 @@ export const MainLayout: React.FC = () => {
     }, [activeMainTab]);
 
     const isChatActive = activeMainTab === 'chat';
+    // Resize-content keyboard handling. `interactive-widget=resizes-content` does
+    // not resize the layout viewport on every browser (here it leaves 100dvh
+    // untouched), so when the on-screen keyboard shrinks the *visual* viewport we
+    // constrain the app to the visible height ourselves, keeping the composer
+    // above the keyboard. Key this off the actual keyboard inset rather than
+    // `isMobile`: soft keyboards also appear on touch devices that aren't
+    // classified as mobile (large/desktop-class screens), and a hardware keyboard
+    // never produces an inset, so this stays inert on real desktops.
+    const keyboardInset = mobileKeyboardMode === 'resize-content' ? visualViewport.keyboardHeight : 0;
+    const resizeForKeyboard = keyboardInset > 0 && visualViewport.height > 0;
     const visibleSidebarWidth = React.useMemo(() => {
         const rawWidth = sidebarWidth || SIDEBAR_CONTENT_WIDTH;
         return Math.min(DESKTOP_SIDEBAR_MAX_WIDTH, Math.max(DESKTOP_SIDEBAR_MIN_WIDTH, rawWidth));
@@ -432,6 +445,7 @@ export const MainLayout: React.FC = () => {
                     isMobile ? 'flex h-[100dvh] flex-col' : 'flex h-[100dvh]',
                     'bg-background'
                 )}
+                style={resizeForKeyboard ? { height: visualViewport.height } : undefined}
             >
                 <CommandPalette />
                 <HelpDialog />
