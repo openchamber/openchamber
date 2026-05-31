@@ -1064,6 +1064,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.todo.completed': 'Ukończone',
   'chat.todo.inProgress': 'W trakcie',
   'chat.todo.pending': 'Oczekujące',
+  'chat.todo.summary.empty': '0/0 ukończone',
+  'chat.todo.summary.progress': '{completed}/{total} ukończone',
   'chat.todo.total': 'Łącznie',
   'chat.toolOutputDialog.commandCompleted': 'Polecenie zakończone pomyślnie',
   'chat.toolOutputDialog.image.closeAria': 'Zamknij podgląd obrazu',

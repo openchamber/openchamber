@@ -1679,6 +1679,8 @@ export const dict: Record<I18nKey, string> = {
   "chat.todo.pending": "Pendente",
   "chat.todo.completed": "Concluído",
   "chat.todo.cancelled": "Cancelado",
+  "chat.todo.summary.empty": "0/0 concluídos",
+  "chat.todo.summary.progress": "{completed}/{total} concluídos",
   "chat.permissionCard.workingDirectory": "Diretório de trabalho:",
   "chat.permissionCard.timeout": "Tempo limite:",
   "chat.permissionCard.request": "Solicitação:",

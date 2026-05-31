@@ -1679,6 +1679,8 @@ export const dict: Record<I18nKey, string> = {
   "chat.todo.pending": "В очікуванні",
   "chat.todo.completed": "Виконано",
   "chat.todo.cancelled": "Скасовано",
+  "chat.todo.summary.empty": "0/0 виконано",
+  "chat.todo.summary.progress": "{completed}/{total} виконано",
   "chat.permissionCard.workingDirectory": "Робочий каталог:",
   "chat.permissionCard.timeout": "Час очікування:",
   "chat.permissionCard.request": "запит:",
