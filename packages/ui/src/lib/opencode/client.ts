@@ -1321,41 +1321,35 @@ class OpencodeService {
 
   // Command Management
   async listCommands(): Promise<Array<{ name: string; description?: string; agent?: string; model?: string; source?: string }>> {
-    try {
-      const response = await this.client.command.list(
-        this.currentDirectory ? { directory: this.currentDirectory } : undefined
-      );
-      // Return only lightweight info for autocomplete
-      return (response.data || []).map((cmd: Record<string, unknown>) => ({
-        name: cmd.name as string,
-        description: cmd.description as string | undefined,
-        agent: cmd.agent as string | undefined,
-        model: cmd.model as string | undefined,
-        source: cmd.source as string | undefined,
-        // Intentionally excluding template to keep memory usage low
-      }));
-    } catch {
-      return [];
-    }
+    const response = await this.client.command.list(
+      this.currentDirectory ? { directory: this.currentDirectory } : undefined
+    );
+    const commands = unwrapSdkData(response, 'command.list');
+    // Return only lightweight info for autocomplete
+    return (commands || []).map((cmd: Record<string, unknown>) => ({
+      name: cmd.name as string,
+      description: cmd.description as string | undefined,
+      agent: cmd.agent as string | undefined,
+      model: cmd.model as string | undefined,
+      source: cmd.source as string | undefined,
+      // Intentionally excluding template to keep memory usage low
+    }));
   }
 
   async listCommandsWithDetails(): Promise<Array<{ name: string; description?: string; agent?: string; model?: string; source?: string; template?: string }>> {
-    try {
-      const response = await this.client.command.list(
-        this.currentDirectory ? { directory: this.currentDirectory } : undefined
-      );
-      // Return full command details including template
-      return (response.data || []).map((cmd: Record<string, unknown>) => ({
-        name: cmd.name as string,
-        description: cmd.description as string | undefined,
-        agent: cmd.agent as string | undefined,
-        model: cmd.model as string | undefined,
-        source: cmd.source as string | undefined,
-        template: cmd.template as string | undefined,
-      }));
-    } catch {
-      return [];
-    }
+    const response = await this.client.command.list(
+      this.currentDirectory ? { directory: this.currentDirectory } : undefined
+    );
+    const commands = unwrapSdkData(response, 'command.list');
+    // Return full command details including template
+    return (commands || []).map((cmd: Record<string, unknown>) => ({
+      name: cmd.name as string,
+      description: cmd.description as string | undefined,
+      agent: cmd.agent as string | undefined,
+      model: cmd.model as string | undefined,
+      source: cmd.source as string | undefined,
+      template: cmd.template as string | undefined,
+    }));
   }
 
   async listSkillsWithDetails(): Promise<Array<{ name: string; description?: string; location: string; content?: string }>> {

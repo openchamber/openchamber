@@ -27,7 +27,7 @@ Before editing, classify every endpoint or capability involved:
 | SDK gap to official OpenCode | Central helper in `opencodeClient` using `runtimeFetch`, documented as SDK gap |
 | OpenChamber-owned feature route | `RuntimeAPIs` first, otherwise `runtimeFetch` to explicit OC route |
 | Native/runtime capability | Extend `RuntimeAPIs`, implement per runtime, consume via hook/registry |
-| Realtime/SSE/WebSocket/raw asset | `getRuntimeUrlResolver()` helpers, not hardcoded URLs |
+| Browser-consumed URL (iframe/img/download), SSE, or WebSocket | `getRuntimeUrlResolver()` helpers, not hardcoded URLs |
 
 ## Mandatory Rules
 
@@ -70,6 +70,45 @@ Before editing, classify every endpoint or capability involved:
    - If a caller uses returned data to replace, delete, or clear authoritative state, the method must throw or return `null` on failure.
    - Do not swallow errors and return `[]`, `{}`, or `null` when that value is also a valid empty success unless the caller treats it as display-only.
 
+## HTTP Request Decision Rules
+
+For normal HTTP requests to the active OpenChamber runtime, use `runtimeFetch` with the route path. Let `runtimeFetch` resolve the current runtime base URL and auth at call time.
+
+```ts
+// Good: runtimeFetch owns base URL, runtime auth, and runtime switching.
+await runtimeFetch('/health');
+await runtimeFetch('/auth/session', { method: 'GET' });
+await runtimeFetch('/api/config/settings');
+await runtimeFetch('/api/fs/raw', { query: { path: absolutePath } });
+
+// Bad: callers should not prebuild runtime HTTP URLs for fetches.
+await fetch(getRuntimeUrlResolver().health());
+await runtimeFetch(getRuntimeUrlResolver().api('/api/config/settings'));
+await runtimeFetch(getRuntimeUrlResolver().rawFile(absolutePath));
+```
+
+Use `runtimeFetch(..., { query })` instead of manually appending query strings when the request targets `/api`, `/auth`, or `/health`.
+
+```ts
+// Good
+await runtimeFetch('/api/git/status', { query: { directory, mode: 'light' } });
+
+// Avoid
+await runtimeFetch(`/api/git/status?directory=${encodeURIComponent(directory)}&mode=light`);
+```
+
+Use `getRuntimeUrlResolver()` only when the resulting URL is consumed by the browser or a realtime transport, not immediately fetched as HTTP:
+
+```ts
+// Good resolver usage: URL is assigned to browser/realtime consumers.
+const imageSrc = getRuntimeUrlResolver().api('/api/fs/raw', { path });
+const iframeSrc = getRuntimeUrlResolver().authenticatedAsset(proxyPath);
+const eventUrl = getRuntimeUrlResolver().sse('/api/event');
+const socketUrl = getRuntimeUrlResolver().websocket('/api/terminal/ws');
+```
+
+Plain `fetch` is acceptable only for intentional external network requests that do not target the OpenChamber runtime, such as npm registry, models.dev, or a user-provided `https://...` URL.
+
 ## Runtime API Extension Pattern
 
 When adding a native/per-runtime capability:
@@ -107,6 +146,9 @@ Electron exposes API base and shell identity broadly, but privileged local capab
 |--------------|-------------|
 | `fetch('/api/session/...')` in shared UI | SDK through `opencodeClient` |
 | `runtimeFetch('/api/session/...')` from a component | SDK wrapper or documented SDK-gap helper |
+| `fetch(getRuntimeUrlResolver().health())` | `runtimeFetch('/health')` |
+| `runtimeFetch(getRuntimeUrlResolver().api('/api/foo'))` | `runtimeFetch('/api/foo')` |
+| `runtimeFetch(getRuntimeUrlResolver().rawFile(path))` | `runtimeFetch('/api/fs/raw', { query: { path } })` |
 | New `/api/foo` only in web server | Web + VS Code route decision |
 | Component reads `window.__OPENCHAMBER_RUNTIME_APIS__` | `useRuntimeAPIs()` / `useRuntimeAPI()` |
 | Rebuilding `new Request(newUrl)` only | `new Request(newUrl, oldRequest)` plus merged headers |
@@ -132,9 +174,9 @@ Before finalizing a UI/API decoupling change:
 
 `packages/ui/src/lib/opencode/client.ts` is the central OpenCode SDK wrapper. It creates `@opencode-ai/sdk/v2` clients with `fetch: runtimeFetch`, runtime auth headers, current-directory handling, scoped clients, and convenience wrappers. Add official OpenCode API behavior here unless a feature directly consumes `getSdkClient()` in sync/runtime code.
 
-`packages/ui/src/lib/runtime-fetch.ts` rewrites `/api`, `/auth`, and `/health` through the active runtime URL resolver and injects runtime auth. Its key contract is preserving SDK-created `Request` objects, including method, body, headers, query, and signal.
+`packages/ui/src/lib/runtime-fetch.ts` rewrites `/api`, `/auth`, and `/health` through the active runtime URL resolver and injects runtime auth. Its key contract is preserving SDK-created `Request` objects, including method, body, headers, query, and signal. For ordinary HTTP calls, pass route paths directly to `runtimeFetch`; do not pre-resolve them with `getRuntimeUrlResolver()` first.
 
-`packages/ui/src/lib/runtime-url.ts` owns HTTP, auth, health, raw-file, SSE, and WebSocket URL construction. `getRuntimeUrlResolver()` is the call-time source. `runtimeUrl` is not safe for new code that must survive runtime switches.
+`packages/ui/src/lib/runtime-url.ts` owns HTTP, auth, health, raw-file, SSE, and WebSocket URL construction. `getRuntimeUrlResolver()` is the call-time source for browser-consumed URLs like iframe `src`, image `src`, download/open links, SSE URLs, and WebSocket URLs. `runtimeUrl` is not safe for new code that must survive runtime switches.
 
 `packages/ui/src/lib/runtime-auth.ts` owns bearer-token state. `runtimeFetch` merges Authorization unless a caller already supplied one. Realtime URLs add `oc_client_token` through resolver helpers.
 
@@ -156,7 +198,7 @@ Before finalizing a UI/API decoupling change:
 
 `packages/web/src/api/index.ts` composes web `RuntimeAPIs` from implementations such as `files.ts`, `git.ts`, `terminal.ts`, `settings.ts`, `permissions.ts`, `github.ts`, `clientAuth.ts`, `push.ts`, and `tools.ts`.
 
-Web runtime API implementations are normally HTTP clients for OpenChamber-owned server routes. Use `runtimeFetch` or the configured URL resolver rather than plain same-origin assumptions.
+Web runtime API implementations are normally HTTP clients for OpenChamber-owned server routes. Use `runtimeFetch` for HTTP requests; use `getRuntimeUrlResolver()` only when producing browser/realtime URLs that will not be immediately fetched by code.
 
 ### Server Routes And Proxy
 
