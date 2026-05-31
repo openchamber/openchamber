@@ -2004,6 +2004,7 @@ export const dict: Record<I18nKey, string> = {
   'openInApp.actions.copyPath': '경로 복사',
   'openInApp.actions.refreshApps': '앱 새로고침',
   'openInApp.toast.pathCopied': '경로를 클립보드에 복사했습니다',
+  'openInApp.toast.remoteOpenFailed': '원격 경로를 앱에서 열 수 없습니다',
   'projectActions.actions.addActionAria': '작업 추가',
   'projectActions.actions.addAction': '작업 추가',
   'projectActions.actions.addNewAction': '새 작업 추가',

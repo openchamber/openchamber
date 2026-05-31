@@ -1970,6 +1970,7 @@ export const dict: Record<I18nKey, string> = {
   "openInApp.actions.copyPath": "Copiar ruta",
   "openInApp.actions.refreshApps": "Actualizar aplicaciones",
   "openInApp.toast.pathCopied": "Ruta copiada al portapapeles",
+  "openInApp.toast.remoteOpenFailed": "No se pudo abrir la ruta remota en la aplicación",
   "projectActions.actions.addActionAria": "Añadir acción",
   "projectActions.actions.addAction": "Añadir acción",
   "projectActions.actions.addNewAction": "Añadir nueva acción",
