@@ -1,3 +1,6 @@
+import { getCurrentIntlLocale } from '@/lib/i18n';
+import { useI18nStore } from '@/lib/i18n/store';
+
 export const clampPercent = (value: number | null): number | null => {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return null;
@@ -285,5 +288,3 @@ export const formatRemainingTime = (seconds: number): string => {
 export const calculateExpectedUsagePercent = (elapsedRatio: number): number => {
   return Math.min(100, Math.max(0, elapsedRatio * 100));
 };
-import { getCurrentIntlLocale } from '@/lib/i18n';
-import { useI18nStore } from '@/lib/i18n/store';
