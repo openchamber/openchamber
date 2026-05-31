@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useEffect, useRef, useCallback, useMemo } from "react"
-import type { Event, Message, Part } from "@opencode-ai/sdk/v2/client"
+import type { Event, Message, Part, Todo } from "@opencode-ai/sdk/v2/client"
 import type { Session } from "@opencode-ai/sdk/v2"
 import type { StoreApi } from "zustand"
 import { useStore } from "zustand"
@@ -409,6 +409,60 @@ async function resyncDirectorySessionStatuses(
   if (relevantStatuses === null) return null
   applySessionStatusSnapshot(store, relevantStatuses)
   return relevantStatuses
+}
+
+export async function resyncSessionTodosForDirectory(
+  directory: string,
+  store: StoreApi<DirectoryStore>,
+  candidateSessionIds: string[],
+) {
+  if (candidateSessionIds.length === 0) return
+
+  const before = store.getState()
+  const beforeSignatures = new Map(
+    candidateSessionIds.map((sessionId) => [sessionId, syncSnapshotSignature(before.todo[sessionId] ?? [])]),
+  )
+  const scopedClient = opencodeClient.getScopedSdkClient(directory)
+  const results = await Promise.all(candidateSessionIds.map(async (sessionId) => {
+    const response = await scopedClient.session.todo({ sessionID: sessionId }).catch(() => null)
+    if (!response || response.error) {
+      return null
+    }
+    return [sessionId, (response.data ?? []) as Todo[]] as const
+  }))
+
+  store.setState((state: DirectoryStore) => {
+    let nextTodo = state.todo
+    let changed = false
+
+    for (const result of results) {
+      if (!result) continue
+      const [sessionId, todos] = result
+      const beforeSignature = beforeSignatures.get(sessionId) ?? "[]"
+      const currentSignature = syncSnapshotSignature(state.todo[sessionId] ?? [])
+      if (currentSignature !== beforeSignature) continue
+
+      if (todos.length === 0) {
+        const todosPersistStore = useTodosPersistStore.getState()
+        const hasPersistedTodos = (todosPersistStore.getSessionTodos(sessionId)?.length ?? 0) > 0
+        if (!state.todo[sessionId] && !hasPersistedTodos) continue
+        todosPersistStore.setSessionTodos(sessionId, undefined)
+        if (!state.todo[sessionId]) continue
+        if (!changed) nextTodo = { ...state.todo }
+        delete nextTodo[sessionId]
+        changed = true
+        continue
+      }
+
+      if (currentSignature === syncSnapshotSignature(todos)) continue
+      if (!changed) nextTodo = { ...state.todo }
+      nextTodo[sessionId] = todos
+      useTodosPersistStore.getState().setSessionTodos(sessionId, todos)
+      changed = true
+    }
+
+    return changed ? { todo: nextTodo } : state
+  })
 }
 
 function needsSnapshotAfterStatusPoll(
@@ -1016,6 +1070,8 @@ async function resyncDirectoryAfterReconnect(
   routingIndex: EventRoutingIndex,
 ) {
   const current = store.getState()
+  await resyncBlockingRequestsForDirectory(directory, store)
+
   const candidateSessionIds = getActiveSessionCandidateIds(directory, current)
   if (candidateSessionIds.length === 0) return
 
@@ -1091,7 +1147,7 @@ async function resyncDirectoryAfterReconnect(
     setIndexedSessionMessages(routingIndex, sessionId, directory, nextMessages)
   }))
 
-  await resyncBlockingRequestsForDirectory(directory, store, candidateSessionIds)
+  await resyncSessionTodosForDirectory(directory, store, candidateSessionIds)
 
   ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
 }

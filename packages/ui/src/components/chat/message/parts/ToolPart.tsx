@@ -152,13 +152,14 @@ const normalizeToolName = (toolName: string | undefined | null): string => {
         return '';
     }
 
-    if (trimmed.includes('.')) {
-        const dotParts = trimmed.split('.').filter(Boolean);
+    const withoutIndex = trimmed.replace(/:\d+$/, '');
+    if (withoutIndex.includes('.')) {
+        const dotParts = withoutIndex.split('.').filter(Boolean);
         const last = dotParts[dotParts.length - 1];
         if (last) return last;
     }
 
-    return trimmed;
+    return withoutIndex;
 };
 
 const MAX_DURATION_MS = 5 * 60 * 1000; // 5 minutes cap
@@ -626,6 +627,123 @@ const parseQuestionOutput = (output: string): Array<{ question: string; answer: 
     }
 
     return pairs.length > 0 ? pairs : null;
+};
+
+type TodoToolItem = {
+    id?: string;
+    content: string;
+    status?: 'pending' | 'in_progress' | 'completed' | 'cancelled';
+    priority?: 'low' | 'medium' | 'high';
+};
+
+const parseTodoToolStatus = (value: unknown): TodoToolItem['status'] => {
+    if (typeof value !== 'string') {
+        return undefined;
+    }
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'pending') return 'pending';
+    if (normalized === 'in_progress' || normalized === 'in progress' || normalized === 'inprogress') return 'in_progress';
+    if (normalized === 'completed' || normalized === 'done') return 'completed';
+    if (normalized === 'cancelled' || normalized === 'canceled') return 'cancelled';
+    return undefined;
+};
+
+const parseTodoToolPriority = (value: unknown): TodoToolItem['priority'] => {
+    if (typeof value !== 'string') {
+        return undefined;
+    }
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'low') return 'low';
+    if (normalized === 'medium') return 'medium';
+    if (normalized === 'high') return 'high';
+    return undefined;
+};
+
+const parseTodoToolContent = (record: Record<string, unknown>): string => {
+    if (typeof record.content === 'string') {
+        return record.content;
+    }
+    if (typeof record.text === 'string') {
+        return record.text;
+    }
+    if (typeof record.title === 'string') {
+        return record.title;
+    }
+    return '';
+};
+
+const parseTodoToolItemsFromArray = (value: unknown[]): TodoToolItem[] => {
+    const items: TodoToolItem[] = [];
+    for (const item of value) {
+        if (!item || typeof item !== 'object') {
+            continue;
+        }
+        const record = item as Record<string, unknown>;
+        const content = parseTodoToolContent(record);
+        if (!content.trim()) {
+            continue;
+        }
+        items.push({
+            id: typeof record.id === 'string' ? record.id : undefined,
+            content,
+            status: parseTodoToolStatus(record.status),
+            priority: parseTodoToolPriority(record.priority),
+        });
+    }
+    return items;
+};
+
+const parseTodoToolItems = (value: unknown): TodoToolItem[] => {
+    if (Array.isArray(value)) {
+        return parseTodoToolItemsFromArray(value);
+    }
+    if (value && typeof value === 'object') {
+        const todos = (value as { todos?: unknown }).todos;
+        if (Array.isArray(todos)) {
+            return parseTodoToolItemsFromArray(todos);
+        }
+    }
+    if (typeof value === 'string' && value.trim()) {
+        try {
+            return parseTodoToolItems(JSON.parse(value) as unknown);
+        } catch {
+            return [];
+        }
+    }
+    return [];
+};
+
+const summarizeTodoToolItems = (todos: TodoToolItem[]): { completed: number; total: number } => {
+    let completed = 0;
+    let total = 0;
+
+    for (const todo of todos) {
+        if (todo.status === 'cancelled') {
+            continue;
+        }
+
+        total += 1;
+        if (todo.status === 'completed') {
+            completed += 1;
+            continue;
+        }
+
+    }
+
+    return { completed, total };
+};
+
+const getTodoStatusStyle = (status: TodoToolItem['status']): React.CSSProperties => {
+    if (status === 'completed') {
+        return { color: 'var(--status-success)', backgroundColor: 'var(--status-success-background)', borderColor: 'var(--status-success-border)' };
+    }
+    if (status === 'in_progress') {
+        return { color: 'var(--status-info)', backgroundColor: 'var(--status-info-background)', borderColor: 'var(--status-info-border)' };
+    }
+    if (status === 'cancelled') {
+        return { color: 'var(--status-error)', backgroundColor: 'var(--status-error-background)', borderColor: 'var(--status-error-border)' };
+    }
+    return { color: 'var(--tools-description)', backgroundColor: 'var(--surface-elevated)', borderColor: 'var(--tools-border)' };
 };
 
 const getToolDescriptionPath = (part: ToolPartType, state: ToolStateUnion, currentDirectory: string): string | null => {
@@ -1468,6 +1586,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     const metadata = stateWithData.metadata;
     const input = stateWithData.input;
     const rawOutput = stateWithData.output;
+    const normalizedToolName = normalizeToolName(part.tool);
     const hasStringOutput = typeof rawOutput === 'string' && rawOutput.length > 0;
     const outputString = typeof rawOutput === 'string' ? rawOutput : '';
 
@@ -1584,8 +1703,62 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
             );
         };
 
+        if (normalizedToolName === 'todowrite') {
+            const inputTodos = parseTodoToolItems(input?.todos);
+            const todos = inputTodos.length > 0
+                ? inputTodos
+                : parseTodoToolItems(rawOutput);
+
+            if (todos.length === 0) {
+                return renderScrollableBlock(
+                    <div className="typography-meta" style={{ color: 'var(--tools-description)' }}>{t('chat.toolPart.noOutputProduced')}</div>,
+                    { maxHeightClass: 'max-h-60' }
+                );
+            }
+
+            const getStatusLabel = (status: TodoToolItem['status']) => {
+                if (status === 'completed') return t('chat.todo.completed');
+                if (status === 'in_progress') return t('chat.todo.inProgress');
+                if (status === 'cancelled') return t('chat.todo.cancelled');
+                return t('chat.todo.pending');
+            };
+
+            const getPriorityLabel = (priority: TodoToolItem['priority']) => {
+                if (priority === 'high') return t('chat.statusRow.todo.priority.high');
+                if (priority === 'low') return t('chat.statusRow.todo.priority.low');
+                return t('chat.statusRow.todo.priority.medium');
+            };
+
+            return renderScrollableBlock(
+                <div className="space-y-1.5">
+                    {todos.map((todo, index) => {
+                        const status = todo.status ?? 'pending';
+                        const priority = todo.priority ?? 'medium';
+                        return (
+                            <div key={todo.id ?? `${index}:${todo.content}`} className="rounded-lg border px-2 py-1.5" style={{ backgroundColor: 'var(--surface-elevated)', borderColor: 'var(--tools-border)' }}>
+                                <div className="flex items-start gap-2 min-w-0">
+                                    <span className="mt-0.5 inline-flex shrink-0 rounded-full border px-1.5 py-0.5 typography-micro font-medium" style={getTodoStatusStyle(status)}>
+                                        {getStatusLabel(status)}
+                                    </span>
+                                    <div className="min-w-0 flex-1 space-y-0.5">
+                                        <div className="typography-meta whitespace-pre-wrap break-words" style={{ color: 'var(--surface-foreground)' }}>
+                                            {todo.content}
+                                        </div>
+                                        <div className="typography-micro" style={{ color: 'var(--surface-muted-foreground)' }}>
+                                            {getPriorityLabel(priority)}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>,
+                { maxHeightClass: 'max-h-[40vh]', className: 'p-1' }
+            );
+        }
+
         // Question tool: show parsed Q&A summary or question content from input
-        if (part.tool === 'question') {
+        if (normalizedToolName === 'question') {
             if (state.status === 'completed' && hasStringOutput) {
                 const parsedQA = parseQuestionOutput(outputString);
                 if (parsedQA && parsedQA.length > 0) {
@@ -1727,7 +1900,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                 'relative pr-2 pb-2 pt-2 space-y-2 pl-4'
             )}
         >
-            {part.tool === 'question' ? (
+            {normalizedToolName === 'question' || normalizedToolName === 'todowrite' ? (
                 renderResultContent()
             ) : (
                 <>
@@ -1804,6 +1977,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     onShowPopup,
     animateTailText = true,
 }) => {
+    const { t } = useI18n();
     const state = part.state;
     const showToolFileIcons = useUIStore((s) => s.showToolFileIcons);
     const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
@@ -2451,6 +2625,24 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     const normalizedPart = normalizedPartTool !== part.tool ? ({ ...part, tool: normalizedPartTool } as ToolPartType) : part;
     const descriptionPath = getToolDescriptionPath(normalizedPart, state, currentDirectory);
     const description = getToolDescription(normalizedPart, state, currentDirectory);
+    const todoDescription = React.useMemo(() => {
+        if (normalizedPartTool !== 'todowrite') {
+            return null;
+        }
+
+        const inputTodos = parseTodoToolItems(input?.todos);
+        const todos = inputTodos.length > 0
+            ? inputTodos
+            : parseTodoToolItems(stateWithData.output);
+        const summary = summarizeTodoToolItems(todos);
+        if (summary.total === 0) {
+            return t('chat.todo.summary.empty');
+        }
+        return t('chat.todo.summary.progress', {
+            completed: summary.completed,
+            total: summary.total,
+        });
+    }, [input?.todos, normalizedPartTool, stateWithData.output, t]);
     const displayName = getToolMetadata(normalizedPartTool || part.tool).displayName;
     
     // Tool title/description — shown inline as context
@@ -2459,6 +2651,9 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
             return null;
         }
         if (normalizedPartTool === 'apply_patch') {
+            return null;
+        }
+        if (normalizedPartTool === 'todowrite') {
             return null;
         }
         if (
@@ -2632,17 +2827,17 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                                     {justificationText}
                                 </span>
                             )}
-                            {!justificationText && description && (
-                                descriptionPath && description === descriptionPath ? (
+                            {!justificationText && (todoDescription || description) && (
+                                !todoDescription && descriptionPath && description === descriptionPath ? (
                                     renderAnimatedPathWithIcon(descriptionPath, animateTailText, false, showToolFileIcons)
                                 ) : (
                                     <Text
                                         variant={animateTailText ? 'generate-effect' : 'static'}
                                         className={cn('min-w-0 truncate', TOOL_ROW_DESCRIPTION_CLASS)}
                                         style={{ color: 'var(--tools-description)' }}
-                                        title={description}
+                                        title={todoDescription ?? description}
                                     >
-                                        {description}
+                                        {todoDescription ?? description}
                                     </Text>
                                 )
                             )}

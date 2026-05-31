@@ -202,11 +202,11 @@ export const StatusRow: React.FC<StatusRowProps> = ({
 
   const statusSummary = React.useMemo(() => {
     const active = visibleTodos.filter((t) => t.status === "in_progress").length;
-    const left = visibleTodos.filter((t) => t.status === "in_progress" || t.status === "pending").length;
+    const left = visibleTodos.filter((t) => t.status === "pending").length;
     return { active, left };
   }, [visibleTodos]);
 
-  const hasTodoContent = showTodos && statusSummary.left > 0;
+  const hasTodoContent = showTodos && (statusSummary.active > 0 || statusSummary.left > 0);
   const hasAssistantContent = showAssistantStatus && (
     isWorking ||
     Boolean(wasAborted) ||

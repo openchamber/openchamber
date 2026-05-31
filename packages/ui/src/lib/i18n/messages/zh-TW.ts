@@ -1651,6 +1651,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.todo.pending': '待處理',
   'chat.todo.completed': '已完成',
   'chat.todo.cancelled': '已取消',
+  'chat.todo.summary.empty': '0/0 已完成',
+  'chat.todo.summary.progress': '{completed}/{total} 已完成',
   'chat.permissionCard.workingDirectory': '工作目錄：',
   'chat.permissionCard.timeout': '逾時：',
   'chat.permissionCard.request': 'Request：',

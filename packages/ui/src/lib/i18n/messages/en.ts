@@ -1688,6 +1688,8 @@ export const dict = {
   'chat.todo.pending': 'Pending',
   'chat.todo.completed': 'Completed',
   'chat.todo.cancelled': 'Cancelled',
+  'chat.todo.summary.empty': '0/0 done',
+  'chat.todo.summary.progress': '{completed}/{total} done',
   'chat.permissionCard.workingDirectory': 'Working Directory:',
   'chat.permissionCard.timeout': 'Timeout:',
   'chat.permissionCard.request': 'Request:',
