@@ -506,6 +506,42 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     return map;
   }, [sortedSessions, pinnedSessionIds]);
 
+  // Sessions whose subtree contains a running (busy/retry) session, so a
+  // collapsed parent can surface that work is happening deeper in the tree
+  // without the user having to expand every level to find it. The result is
+  // kept reference-stable when its contents don't change: status events fire
+  // often, and SessionNodeItem walks its subtree whenever this set's identity
+  // changes, so a fresh-but-equal Set would trigger needless full-tree walks.
+  const runningAncestorIdsRef = React.useRef<Set<string>>(new Set());
+  const runningAncestorIds = React.useMemo(() => {
+    const result = new Set<string>();
+    const running: string[] = [];
+    for (const [id, status] of Object.entries(liveSessionStatuses)) {
+      if (status?.type === 'busy' || status?.type === 'retry') {
+        running.push(id);
+      }
+    }
+    if (running.length > 0) {
+      const parentOf = new Map<string, string>();
+      childrenMap.forEach((children, parentId) => {
+        children.forEach((child) => parentOf.set(child.id, parentId));
+      });
+      running.forEach((id) => {
+        let parent = parentOf.get(id);
+        while (parent && !result.has(parent)) {
+          result.add(parent);
+          parent = parentOf.get(parent);
+        }
+      });
+    }
+    const previous = runningAncestorIdsRef.current;
+    if (previous.size === result.size && [...result].every((id) => previous.has(id))) {
+      return previous;
+    }
+    runningAncestorIdsRef.current = result;
+    return result;
+  }, [liveSessionStatuses, childrenMap]);
+
   const emptyState = (
     <div className="py-6 text-center text-muted-foreground">
       <p className="typography-ui-label font-semibold">{t('sessions.sidebar.empty.noSessions.title')}</p>
@@ -1175,6 +1211,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         currentSessionId={currentSessionId}
         pinnedSessionIds={pinnedSessionIds}
         expandedParents={expandedParents}
+        runningAncestorIds={runningAncestorIds}
         hasSessionSearchQuery={hasSessionSearchQuery}
         normalizedSessionSearchQuery={normalizedSessionSearchQuery}
         notifyOnSubtasks={notifyOnSubtasks}
@@ -1214,6 +1251,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       currentSessionId,
       pinnedSessionIds,
       expandedParents,
+      runningAncestorIds,
       hasSessionSearchQuery,
       normalizedSessionSearchQuery,
       notifyOnSubtasks,

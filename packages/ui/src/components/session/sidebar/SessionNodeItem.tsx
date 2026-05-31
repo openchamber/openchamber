@@ -51,6 +51,7 @@ type Props = {
   currentSessionId: string | null;
   pinnedSessionIds: Set<string>;
   expandedParents: Set<string>;
+  runningAncestorIds: Set<string>;
   hasSessionSearchQuery: boolean;
   normalizedSessionSearchQuery: string;
   notifyOnSubtasks: boolean;
@@ -137,6 +138,50 @@ const treeContainsMenuKey = (
   return false;
 };
 
+// A node renders its descendants inside its own output, so its memo must bust
+// when the expansion state of ANY node in its subtree changes — not just its
+// own key. Otherwise toggling a child (L1→L2, L2→L3) leaves the ancestor
+// memoized and the child's subtree never re-renders. Walks only when the
+// expandedParents reference actually changed, and early-exits on first diff.
+const expansionStateDiffersInTree = (
+  node: SessionNode,
+  prevSet: Set<string>,
+  nextSet: Set<string>,
+  renderContext: 'project' | 'recent',
+  archivedBucket: boolean,
+): boolean => {
+  const bucket = archivedBucket ? 'archived' : 'active';
+  const visit = (n: SessionNode): boolean => {
+    const key = `${renderContext}:${bucket}:${n.session.id}`;
+    if (prevSet.has(key) !== nextSet.has(key)) return true;
+    for (const child of n.children) {
+      if (visit(child)) return true;
+    }
+    return false;
+  };
+  return visit(node);
+};
+
+// Same reasoning as expansion: a node renders its descendants, so it must bust
+// when the running-descendant membership of ANY node in its subtree changes —
+// not just its own. Otherwise, when the running session moves between sibling
+// branches, an ancestor whose own membership is unchanged stays memoized and
+// the newly-matching collapsed sibling never re-renders to show its indicator.
+const sessionIdMembershipDiffersInTree = (
+  node: SessionNode,
+  prevSet: Set<string>,
+  nextSet: Set<string>,
+): boolean => {
+  const visit = (n: SessionNode): boolean => {
+    if (prevSet.has(n.session.id) !== nextSet.has(n.session.id)) return true;
+    for (const child of n.children) {
+      if (visit(child)) return true;
+    }
+    return false;
+  };
+  return visit(node);
+};
+
 const areEqual = (prev: Props, next: Props): boolean => {
   const prevSession = prev.node.session;
   const nextSession = next.node.session;
@@ -161,14 +206,16 @@ const areEqual = (prev: Props, next: Props): boolean => {
   // Expansion is keyed per render context, so compare the composite key
   // matching the one isExpanded reads from in render. If a session appears
   // in two contexts (project + recent), they have independent state.
-  {
-    const prevRenderContext = prev.renderContext ?? 'project';
-    const nextRenderContext = next.renderContext ?? 'project';
-    const prevArchived = prev.archivedBucket ?? false;
-    const nextArchived = next.archivedBucket ?? false;
-    const prevExpansionKey = `${prevRenderContext}:${prevArchived ? 'archived' : 'active'}:${prevSessionId}`;
-    const nextExpansionKey = `${nextRenderContext}:${nextArchived ? 'archived' : 'active'}:${nextSessionId}`;
-    if (prev.expandedParents.has(prevExpansionKey) !== next.expandedParents.has(nextExpansionKey)) return false;
+  if (prev.expandedParents !== next.expandedParents) {
+    const renderContext = next.renderContext ?? 'project';
+    const archivedBucket = next.archivedBucket ?? false;
+    if (expansionStateDiffersInTree(next.node, prev.expandedParents, next.expandedParents, renderContext, archivedBucket)) {
+      return false;
+    }
+  }
+  if (prev.runningAncestorIds !== next.runningAncestorIds
+    && sessionIdMembershipDiffersInTree(next.node, prev.runningAncestorIds, next.runningAncestorIds)) {
+    return false;
   }
   if (prev.hasSessionSearchQuery !== next.hasSessionSearchQuery) return false;
   if (prev.normalizedSessionSearchQuery !== next.normalizedSessionSearchQuery) return false;
@@ -222,6 +269,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     currentSessionId,
     pinnedSessionIds,
     expandedParents,
+    runningAncestorIds,
     hasSessionSearchQuery,
     normalizedSessionSearchQuery,
     notifyOnSubtasks,
@@ -464,11 +512,19 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     return () => document.removeEventListener('mousedown', handleDocMouseDown);
   }, [editingId, session.id]);
 
+  // Indent each nesting level so L1 / L2 / L3 read as a hierarchy instead of a
+  // flat list. Use margin (not padding) so the chevron and status indicators —
+  // absolutely positioned at left-[-10px] relative to the row — shift along with
+  // it. Cap the depth so very deep subagent chains don't run off a narrow
+  // sidebar. 14px + the row's 6px px-1.5 keeps level 1 at the prior 20px indent.
+  const indentStyle = depth > 0 ? { marginLeft: `${Math.min(depth, 6) * 14}px` } : undefined;
+
   if (editingId === session.id) {
     return (
       <div
         key={session.id}
-        className={cn('group relative flex items-center rounded-sm px-1.5 py-1', depth > 0 && 'pl-[20px]')}
+        className={cn('group relative flex items-center rounded-sm px-1.5 py-1')}
+        style={indentStyle}
       >
         <div className="flex min-w-0 flex-1 flex-col gap-0">
           <form
@@ -532,9 +588,13 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
 
   const statusType = sessionStatus?.type ?? 'idle';
   const isStreaming = statusType === 'busy' || statusType === 'retry';
+  // Surface deeper activity on a collapsed parent: when a subagent somewhere in
+  // this node's subtree is running but the subtree is collapsed, the running
+  // row itself isn't visible, so show an aggregate (hollow) marker here.
+  const hasRunningDescendant = !isStreaming && !isExpanded && hasChildren && runningAncestorIds.has(session.id);
   const pendingPermissionCount = sessionPermissions.length;
-  const showUnreadStatus = !isStreaming && needsAttention && !isActive;
-  const showStatusMarker = isStreaming || showUnreadStatus;
+  const showUnreadStatus = !isStreaming && !hasRunningDescendant && needsAttention && !isActive;
+  const showStatusMarker = isStreaming || hasRunningDescendant || showUnreadStatus;
   const statusMarkerContent = isStreaming
     ? (
         <span
@@ -543,13 +603,21 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           title={t('sessions.sidebar.session.status.active')}
         />
       )
-    : (
-        <span
-          className="h-1.5 w-1.5 rounded-full bg-[var(--status-info)]"
-          aria-label={t('sessions.sidebar.session.status.unread')}
-          title={t('sessions.sidebar.session.status.unread')}
-        />
-      );
+    : hasRunningDescendant
+      ? (
+          <span
+            className="h-1.5 w-1.5 rounded-full border border-primary bg-transparent animate-busy-pulse"
+            aria-label={t('sessions.sidebar.session.status.active')}
+            title={t('sessions.sidebar.session.status.active')}
+          />
+        )
+      : (
+          <span
+            className="h-1.5 w-1.5 rounded-full bg-[var(--status-info)]"
+            aria-label={t('sessions.sidebar.session.status.unread')}
+            title={t('sessions.sidebar.session.status.unread')}
+          />
+        );
   const leadingIndicators = showStatusMarker || isPinnedSession ? (
     <span
       className={cn(
@@ -833,9 +901,9 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           className={cn(
             'group relative my-0.5 flex items-center rounded-sm px-1.5 py-1',
             isMissingDirectory ? 'opacity-75' : '',
-            depth > 0 && 'pl-[20px]',
             isRowSelected && 'bg-primary/15',
           )}
+          style={indentStyle}
         >
           {leadingIndicators}
           {subsessionChevron}
