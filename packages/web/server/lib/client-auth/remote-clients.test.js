@@ -47,4 +47,20 @@ describe('remote client auth runtime', () => {
       await fs.rm(dir, { recursive: true, force: true });
     }
   });
+
+  it('rejects expired client tokens', async () => {
+    const { dir, runtime } = await createRuntime();
+    try {
+      const expired = await runtime.createClient({ label: 'Expired', expiresAt: '2000-01-01T00:00:00.000Z' });
+      expect(expired.client.expiresAt).toBe('2000-01-01T00:00:00.000Z');
+      expect(await runtime.authenticateBearerToken(expired.token)).toBe(null);
+
+      const active = await runtime.createClient({ label: 'Active', expiresAt: '2999-01-01T00:00:00.000Z' });
+      const authenticated = await runtime.authenticateBearerToken(active.token);
+      expect(authenticated?.ok).toBe(true);
+      expect(authenticated?.clientId).toBe(active.client.id);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
 });

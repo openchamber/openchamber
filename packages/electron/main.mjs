@@ -421,6 +421,24 @@ const sanitizeClientTokenForStorage = (raw) => {
   return token.length > 0 ? token : null;
 };
 
+const sameOrigin = (left, right) => {
+  if (!left || !right) return false;
+  try {
+    return new URL(left).origin === new URL(right).origin;
+  } catch {
+    return false;
+  }
+};
+
+const readDesktopLocalClientToken = () => {
+  return sanitizeClientTokenForStorage(readSettingsRoot().desktopLocalClientToken) || '';
+};
+
+const isLocalRuntimeUrl = (targetUrl) => {
+  const localUrl = state.sidecarUrl || state.localOrigin || '';
+  return Boolean(localUrl && sameOrigin(targetUrl, localUrl));
+};
+
 const readDesktopHostsConfig = () => {
   const root = readSettingsRoot();
   const hostsRaw = Array.isArray(root.desktopHosts) ? root.desktopHosts : [];
@@ -470,6 +488,14 @@ const writeDesktopHostsConfig = async (config) => {
       : null;
     if (typeof config?.initialHostChoiceCompleted === 'boolean') {
       root.desktopInitialHostChoiceCompleted = config.initialHostChoiceCompleted;
+    }
+    if (Object.prototype.hasOwnProperty.call(config || {}, 'localClientToken')) {
+      const localClientToken = sanitizeClientTokenForStorage(config.localClientToken);
+      if (localClientToken) {
+        root.desktopLocalClientToken = localClientToken;
+      } else {
+        delete root.desktopLocalClientToken;
+      }
     }
   });
 };
@@ -633,6 +659,9 @@ const probeHostWithTimeout = async (url, timeoutMs, clientToken = '') => {
 const resolveStoredClientTokenForUrl = (targetUrl, config = readDesktopHostsConfig()) => {
   const normalizedTarget = normalizeHostUrl(targetUrl);
   if (!normalizedTarget) return '';
+  if (isLocalRuntimeUrl(normalizedTarget)) {
+    return readDesktopLocalClientToken();
+  }
   for (const host of config.hosts || []) {
     const hostUrl = normalizeHostUrl(host?.url || '');
     const apiUrl = normalizeHostUrl(host?.apiUrl || host?.url || '');
@@ -1279,7 +1308,12 @@ const loginRemoteAndIssueClientToken = async ({ url, password, trustDevice }) =>
       Accept: 'application/json',
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ password: candidatePassword, trustDevice: trustDevice === true }),
+    body: JSON.stringify({
+      password: candidatePassword,
+      trustDevice: trustDevice === true,
+      issueClientToken: true,
+      clientLabel: 'OpenChamber Desktop',
+    }),
   });
   if (!loginResponse.ok) {
     return { ok: false, status: loginResponse.status };
@@ -1412,6 +1446,7 @@ const switchToHostById = async (rawId) => {
   if (id === LOCAL_HOST_ID) {
     targetUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : (state.sidecarUrl || state.localOrigin);
     apiBaseUrl = state.sidecarUrl;
+    clientToken = readDesktopLocalClientToken();
   } else {
     const host = config.hosts.find((entry) => entry.id === id);
     if (!host) {
@@ -1830,7 +1865,7 @@ const openMainWindow = async () => {
     ? config.hosts.find((entry) => entry.id === config.defaultHostId)
     : null;
   const apiBaseUrl = host?.apiUrl || host?.url || state.sidecarUrl || state.apiBaseUrl || '';
-  const clientToken = host?.clientToken || state.clientToken || '';
+  const clientToken = host?.clientToken || resolveStoredClientTokenForUrl(apiBaseUrl, config) || state.clientToken || '';
   const targetUrl = host?.url && apiBaseUrl && !state.unreachableHosts.has(apiBaseUrl)
     ? (shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : host.url)
     : localUiUrl;
@@ -2020,9 +2055,10 @@ const resolveMiniChatRuntimeConfig = (browserWindow, args = {}) => {
   const targetUrl = normalizeHostUrl(argApiBaseUrl || windowConfig.apiBaseUrl || state.apiBaseUrl || state.localOrigin || state.sidecarUrl || '');
   const providedToken = sanitizeClientTokenForStorage(args.clientToken);
   const storedToken = targetUrl ? resolveStoredClientTokenForUrl(targetUrl) : '';
+  const windowToken = targetUrl && sameOrigin(windowConfig.apiBaseUrl, targetUrl) ? windowConfig.clientToken : '';
   return {
     apiBaseUrl: targetUrl,
-    clientToken: providedToken || windowConfig.clientToken || storedToken || '',
+    clientToken: providedToken || windowToken || storedToken || '',
   };
 };
 
@@ -2047,13 +2083,14 @@ const resolveInitialUrl = async () => {
   const localOrigin = new URL(localUrl).origin;
   let initialUrl = localUiUrl;
   let apiBaseUrl = localUrl;
-  let clientToken = '';
+  let clientToken = readDesktopLocalClientToken();
   let remoteProbe = null;
 
   const envTarget = normalizeHostUrl(process.env.OPENCHAMBER_SERVER_URL || '');
   const config = readDesktopHostsConfig();
   if (envTarget) {
     apiBaseUrl = envTarget;
+    clientToken = '';
     initialUrl = shouldUsePackagedUi() ? localUiUrl : envTarget;
   } else if (config.defaultHostId && config.defaultHostId !== LOCAL_HOST_ID) {
     const host = config.hosts.find((entry) => entry.id === config.defaultHostId);
@@ -2072,7 +2109,7 @@ const resolveInitialUrl = async () => {
     if (remoteProbe.status === 'unreachable') {
       state.unreachableHosts.add(apiBaseUrl);
       apiBaseUrl = localUrl;
-      clientToken = '';
+      clientToken = readDesktopLocalClientToken();
       initialUrl = localUiUrl;
     }
   }
@@ -2873,9 +2910,14 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       };
 
     case 'desktop_hosts_set': {
-      await writeDesktopHostsConfig(args.input || args.config || {});
+      const nextConfigInput = args.input || args.config || {};
+      const updatesLocalToken = Object.prototype.hasOwnProperty.call(nextConfigInput, 'localClientToken');
+      await writeDesktopHostsConfig(nextConfigInput);
       const updatedConfig = readDesktopHostsConfig();
       const envTarget = normalizeHostUrl(process.env.OPENCHAMBER_SERVER_URL || '');
+      if (updatesLocalToken && isLocalRuntimeUrl(state.apiBaseUrl || state.sidecarUrl || state.localOrigin || '')) {
+        state.clientToken = readDesktopLocalClientToken();
+      }
       state.bootOutcome = computeBootOutcome({
         envTargetUrl: envTarget || null,
         probe: null,
@@ -3073,7 +3115,10 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       const config = readDesktopHostsConfig();
       const localUiUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : (state.sidecarUrl || state.localOrigin);
       let targetUrl = localUiUrl;
-      let runtimeConfig = {};
+      let runtimeConfig = {
+        apiBaseUrl: state.sidecarUrl || state.localOrigin || '',
+        clientToken: readDesktopLocalClientToken(),
+      };
       if (config.defaultHostId && config.defaultHostId !== LOCAL_HOST_ID) {
         const host = config.hosts.find((entry) => entry.id === config.defaultHostId);
         const apiUrl = host?.apiUrl || host?.url;

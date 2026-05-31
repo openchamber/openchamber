@@ -120,6 +120,15 @@ const persistDesktopClientToken = async (apiBaseUrl: string, clientToken: string
   if (!isDesktopShell() || !clientToken) return;
   const cfg = await desktopHostsGet().catch(() => null);
   if (!cfg) return;
+  if (cfg.localOrigin && sameOrigin(cfg.localOrigin, apiBaseUrl)) {
+    await desktopHostsSet({
+      hosts: cfg.hosts,
+      defaultHostId: cfg.defaultHostId,
+      initialHostChoiceCompleted: cfg.initialHostChoiceCompleted,
+      localClientToken: clientToken,
+    }).catch(() => undefined);
+    return;
+  }
   let changed = false;
   const hosts = cfg.hosts.map((host) => {
     if (!sameOrigin(getDesktopHostApiUrl(host), apiBaseUrl)) {
@@ -137,6 +146,13 @@ const persistDesktopClientToken = async (apiBaseUrl: string, clientToken: string
     defaultHostId: cfg.defaultHostId,
     initialHostChoiceCompleted: cfg.initialHostChoiceCompleted,
   }).catch(() => undefined);
+};
+
+const applyDesktopClientToken = async (clientToken: string): Promise<void> => {
+  if (!clientToken) return;
+  const apiBaseUrl = getRuntimeApiBaseUrl();
+  await persistDesktopClientToken(apiBaseUrl, clientToken);
+  switchRuntimeEndpoint({ apiBaseUrl, clientToken, runtimeKey: getRuntimeKey() });
 };
 
 const AuthShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -442,9 +458,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
         setPassword('');
         setIsTunnelLocked(false);
         if (clientToken) {
-          const apiBaseUrl = getRuntimeApiBaseUrl();
-          await persistDesktopClientToken(apiBaseUrl, clientToken);
-          switchRuntimeEndpoint({ apiBaseUrl, clientToken, runtimeKey: getRuntimeKey() });
+          await applyDesktopClientToken(clientToken);
         }
         if (enrollPasskey && supportsPasskeys) {
           try {
@@ -510,7 +524,16 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
     setErrorMessage('');
 
     try {
-      await authenticateWithPasskey(trustDevice);
+      const payload = await authenticateWithPasskey(trustDevice, {
+        issueClientToken: isDesktopShell(),
+        clientLabel: 'OpenChamber Desktop',
+      }) as { clientToken?: unknown } | null;
+      const clientToken = typeof payload?.clientToken === 'string' && payload.clientToken.trim()
+        ? payload.clientToken.trim()
+        : '';
+      if (clientToken) {
+        await applyDesktopClientToken(clientToken);
+      }
 
       setPassword('');
       setState('authenticated');

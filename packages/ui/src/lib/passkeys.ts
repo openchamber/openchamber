@@ -30,6 +30,11 @@ export type StoredPasskey = {
   backedUp: boolean;
 };
 
+type PasskeyAuthenticationOptions = {
+  issueClientToken?: boolean;
+  clientLabel?: string;
+};
+
 export const defaultPasskeyStatus: PasskeyStatus = {
   enabled: false,
   hasPasskeys: false,
@@ -109,7 +114,7 @@ export const registerCurrentDevicePasskey = async () => {
   return verifyResponse.json().catch(() => null);
 };
 
-export const authenticateWithPasskey = async (trustDevice: boolean) => {
+export const authenticateWithPasskey = async (trustDevice: boolean, options: PasskeyAuthenticationOptions = {}) => {
   const support = getPasskeySupportState();
   if (!support.supported) {
     throw new Error(support.reason);
@@ -126,6 +131,8 @@ export const authenticateWithPasskey = async (trustDevice: boolean) => {
     requestId,
     response: authResponse,
     trustDevice,
+    issueClientToken: options.issueClientToken === true,
+    clientLabel: options.clientLabel,
   });
 
   if (!verifyResponse.ok) {

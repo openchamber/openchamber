@@ -629,12 +629,15 @@ export const createUiAuth = ({
 
     await clearRateLimit(req);
 
-    await issueSession(req, res, {
-      trustDevice: isTrustedDeviceRequest(req.body?.trustDevice),
-    });
+    const trustDevice = isTrustedDeviceRequest(req.body?.trustDevice);
+    const ttlMs = resolveSessionTtlMs(trustDevice);
+    await issueSession(req, res, { trustDevice });
     let clientTokenResult = null;
     if (req.body?.issueClientToken === true && typeof clientAuthController?.createClient === 'function') {
-      clientTokenResult = await clientAuthController.createClient({ label: req.body?.clientLabel });
+      clientTokenResult = await clientAuthController.createClient({
+        label: req.body?.clientLabel,
+        expiresAt: new Date(Date.now() + ttlMs).toISOString(),
+      });
     }
     res.setHeader('Cache-Control', 'no-store');
     res.json({
@@ -687,10 +690,20 @@ export const createUiAuth = ({
   const handlePasskeyAuthenticationVerify = async (req, res) => {
     try {
       await passkeyController.finishAuthentication(req.body);
-      await issueSession(req, res, {
-        trustDevice: isTrustedDeviceRequest(req.body?.trustDevice),
+      const trustDevice = isTrustedDeviceRequest(req.body?.trustDevice);
+      const ttlMs = resolveSessionTtlMs(trustDevice);
+      await issueSession(req, res, { trustDevice });
+      let clientTokenResult = null;
+      if (req.body?.issueClientToken === true && typeof clientAuthController?.createClient === 'function') {
+        clientTokenResult = await clientAuthController.createClient({
+          label: req.body?.clientLabel,
+          expiresAt: new Date(Date.now() + ttlMs).toISOString(),
+        });
+      }
+      res.json({
+        authenticated: true,
+        ...(clientTokenResult?.token ? { clientToken: clientTokenResult.token, client: clientTokenResult.client } : {}),
       });
-      res.json({ authenticated: true });
     } catch (error) {
       respondPasskeyError(res, error);
     }

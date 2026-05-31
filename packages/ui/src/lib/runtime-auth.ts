@@ -12,6 +12,12 @@ const normalizeBearerToken = (token: string | null | undefined): string => {
   return token.trim();
 };
 
+const readInjectedBearerToken = (): string => {
+  if (typeof window === 'undefined') return '';
+  const injected = (window as typeof window & { __OPENCHAMBER_CLIENT_TOKEN__?: string }).__OPENCHAMBER_CLIENT_TOKEN__;
+  return normalizeBearerToken(injected);
+};
+
 export const setRuntimeAuthCredentialProvider = (provider: RuntimeAuthCredentialProvider): void => {
   runtimeBearerToken = '';
   credentialProvider = provider;
@@ -28,12 +34,13 @@ export const setRuntimeBearerToken = (token: string | null | undefined): void =>
   credentialProvider = () => normalized ? { type: 'bearer', token: normalized } : null;
 };
 
-export const getRuntimeBearerTokenSync = (): string => runtimeBearerToken;
+export const getRuntimeBearerTokenSync = (): string => runtimeBearerToken || readInjectedBearerToken();
 
 export const getRuntimeAuthCredential = async (): Promise<RuntimeAuthCredential> => {
   const credential = await credentialProvider();
-  if (!credential || credential.type !== 'bearer') return null;
-  const token = normalizeBearerToken(credential.token);
+  const token = credential?.type === 'bearer'
+    ? normalizeBearerToken(credential.token)
+    : getRuntimeBearerTokenSync();
   return token ? { type: 'bearer', token } : null;
 };
 

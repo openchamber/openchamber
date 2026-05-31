@@ -106,4 +106,49 @@ describe('ui auth client credential seam', () => {
 
     expect(res.body).toEqual({ authenticated: true, scope: 'client' });
   });
+
+  it('issues desktop client tokens with the UI session expiry', async () => {
+    const createUiAuth = await loadCreateUiAuth();
+    let createClientInput = null;
+    const auth = createUiAuth({
+      password: 'secret',
+      sessionTtlMs: 123_000,
+      clientAuthController: {
+        createClient: async (input) => {
+          createClientInput = input;
+          return {
+            token: 'client-token',
+            client: {
+              id: 'device-1',
+              label: input.label,
+              createdAt: new Date().toISOString(),
+              lastUsedAt: null,
+              revokedAt: null,
+              expiresAt: input.expiresAt,
+            },
+          };
+        },
+      },
+    });
+
+    const before = Date.now();
+    const req = {
+      method: 'POST',
+      headers: {},
+      body: {
+        password: 'secret',
+        issueClientToken: true,
+        clientLabel: 'OpenChamber Desktop',
+      },
+    };
+    const res = createResponse();
+
+    await auth.handleSessionCreate(req, res);
+
+    expect(res.body.clientToken).toBe('client-token');
+    expect(createClientInput.label).toBe('OpenChamber Desktop');
+    const expiresAt = Date.parse(createClientInput.expiresAt);
+    expect(expiresAt).toBeGreaterThanOrEqual(before + 122_000);
+    expect(expiresAt).toBeLessThanOrEqual(Date.now() + 124_000);
+  });
 });

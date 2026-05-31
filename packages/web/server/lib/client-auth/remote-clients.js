@@ -10,6 +10,14 @@ const normalizeLabel = (value) => {
   return trimmed.length > MAX_LABEL_LENGTH ? trimmed.slice(0, MAX_LABEL_LENGTH) : trimmed;
 };
 
+const normalizeTimestamp = (value) => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const time = Date.parse(trimmed);
+  return Number.isFinite(time) ? new Date(time).toISOString() : null;
+};
+
 const safeJsonParse = (raw) => {
   try {
     return JSON.parse(raw);
@@ -44,6 +52,7 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
           createdAt: typeof client.createdAt === 'string' ? client.createdAt : nowIso(),
           lastUsedAt: typeof client.lastUsedAt === 'string' ? client.lastUsedAt : null,
           revokedAt: typeof client.revokedAt === 'string' ? client.revokedAt : null,
+          expiresAt: normalizeTimestamp(client.expiresAt),
         }))
         .filter((client) => client.tokenHash.length > 0)
       : [],
@@ -70,6 +79,7 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
     createdAt: client.createdAt,
     lastUsedAt: client.lastUsedAt,
     revokedAt: client.revokedAt,
+    expiresAt: client.expiresAt,
   });
 
   const listClients = async () => {
@@ -77,7 +87,7 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
     return store.clients.map(publicClient);
   };
 
-  const createClient = async ({ label } = {}) => {
+  const createClient = async ({ label, expiresAt } = {}) => {
     const store = await readStore();
     const token = generateToken();
     const client = {
@@ -87,6 +97,7 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
       createdAt: nowIso(),
       lastUsedAt: null,
       revokedAt: null,
+      expiresAt: normalizeTimestamp(expiresAt),
     };
     store.clients.push(client);
     await writeStore(store);
@@ -124,6 +135,7 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
     const store = await readStore();
     const client = store.clients.find((entry) => !entry.revokedAt && constantTimeEqual(entry.tokenHash, tokenHash, crypto));
     if (!client) return null;
+    if (client.expiresAt && Date.parse(client.expiresAt) <= Date.now()) return null;
     client.lastUsedAt = nowIso();
     await writeStore(store);
     return { ok: true, clientId: client.id, sessionToken: client.id, client: publicClient(client) };

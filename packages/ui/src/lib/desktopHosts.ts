@@ -31,6 +31,7 @@ export type DesktopHostsConfigInput = {
   hosts: DesktopHost[];
   defaultHostId: string | null;
   initialHostChoiceCompleted?: boolean;
+  localClientToken?: string | null;
 };
 
 export type HostProbeResult = {
@@ -212,12 +213,16 @@ export const desktopHostsGet = async (): Promise<DesktopHostsConfig> => {
 export const desktopHostsSet = async (config: DesktopHostsConfigInput): Promise<void> => {
   const invoke = getInvoke();
   if (!invoke) return;
+  const input: Record<string, unknown> = {
+    hosts: config.hosts,
+    defaultHostId: config.defaultHostId,
+    initialHostChoiceCompleted: config.initialHostChoiceCompleted,
+  };
+  if (config.localClientToken !== undefined) {
+    input.localClientToken = config.localClientToken;
+  }
   await invoke('desktop_hosts_set', {
-    input: {
-      hosts: config.hosts,
-      defaultHostId: config.defaultHostId,
-      initialHostChoiceCompleted: config.initialHostChoiceCompleted,
-    },
+    input,
   });
 };
 
