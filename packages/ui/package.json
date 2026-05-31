@@ -68,6 +68,7 @@
     "qrcode": "^1.5.4",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
+    "react-drawio": "1.0.7",
     "react-syntax-highlighter": "^15.6.6",
     "rehype-katex": "^7.0.1",
     "remark-math": "^6.0.0",
