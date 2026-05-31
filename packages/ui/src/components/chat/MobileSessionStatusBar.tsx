@@ -2,12 +2,30 @@ import React from 'react';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import {
-  useSessions,
   useAllSessionStatuses,
+  useAllLiveSessions,
   useLiveSessionStatusCounts,
   useSession,
   useDirectorySync,
 } from '@/sync/sync-context';
+import { useGlobalSessionsStore, ensureGlobalSessionsLoaded, refreshGlobalSessions } from '@/stores/useGlobalSessionsStore';
+import {
+  DndContext,
+  type DragEndEvent,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -15,27 +33,15 @@ import type { Session } from '@opencode-ai/sdk/v2';
 import type { ProjectEntry } from '@/lib/api/types';
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { getAgentColor } from '@/lib/agentColors';
-import {
-  DndContext,
-  closestCenter,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from '@dnd-kit/core';
-import {
-  arrayMove,
-  SortableContext,
-  sortableKeyboardCoordinates,
-  useSortable,
-  verticalListSortingStrategy,
-} from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
 import { PROJECT_ICON_MAP, PROJECT_COLOR_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { sessionEvents } from '@/lib/sessionEvents';
+import { Icon } from "@/components/icon/Icon";
+import { useThemeSystem } from '@/contexts/useThemeSystem';
+import { useNotificationStore } from '@/sync/notification-store';
+import { useI18n } from '@/lib/i18n';
+import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
@@ -44,14 +50,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
 import { ProjectEditDialog } from '@/components/layout/ProjectEditDialog';
 import { useDrawerSwipe } from '@/hooks/useDrawerSwipe';
-import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
-import { Icon } from "@/components/icon/Icon";
-import { useThemeSystem } from '@/contexts/useThemeSystem';
-import { useNotificationStore } from '@/sync/notification-store';
-import { useI18n } from '@/lib/i18n';
+import { sessionEvents } from '@/lib/sessionEvents';
 
 interface MobileSessionStatusBarProps {
   onSessionSwitch?: (sessionId: string) => void;
@@ -64,11 +65,50 @@ interface SessionWithStatus extends Session {
   _childIndicators?: Array<{ session: Session; isRunning: boolean }>;
 }
 
+// Cross-project session source. Mirrors the dedicated MobileSessionsSheet:
+// global sessions cover all directories (even unbootstrapped ones), while the
+// live aggregate (`useAllLiveSessions`) surfaces fresher data and every
+// bootstrapped directory. Merging both is what makes other projects' sessions
+// appear — the global store alone only reliably holds the active directory.
+function useAllProjectSessions(): Session[] {
+  const liveSessions = useAllLiveSessions();
+  const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
+  return React.useMemo(() => {
+    const liveById = new Map(liveSessions.map((session) => [session.id, session]));
+    const merged = globalActiveSessions.map((session) => liveById.get(session.id) ?? session);
+    const seen = new Set(merged.map((session) => session.id));
+    for (const session of liveSessions) {
+      if (!seen.has(session.id)) merged.push(session);
+    }
+    return merged;
+  }, [globalActiveSessions, liveSessions]);
+}
+
+// Max sessions shown per (filtered) project list — a "recent" cap applied
+// after filtering, so each project view shows at most this many.
+const MAX_RECENT_SESSIONS = 25;
+
 // Normalize path for comparison
 const normalize = (value: string): string => {
   if (!value) return '';
   const replaced = value.replace(/\\/g, '/');
   return replaced === '/' ? '/' : replaced.replace(/\/+$/, '');
+};
+
+// A session's directory, mirroring the store's canonical resolution.
+const sessionDirectory = (session: Session): string => {
+  const record = session as Session & {
+    directory?: string | null;
+    project?: { worktree?: string | null } | null;
+  };
+  return normalize(record.directory ?? record.project?.worktree ?? '');
+};
+
+// Prefix-match used to group a session under a project root or worktree.
+const pathBelongsToRoot = (path: string, root: string): boolean => {
+  const p = normalize(path);
+  const r = normalize(root);
+  return Boolean(p && r && (p === r || p.startsWith(`${r}/`)));
 };
 
 const getDisplaySessionTitle = (session: Session): string => {
@@ -224,10 +264,7 @@ function useSessionGrouping(
   return { sessions: processedSessions, totalRunning, totalUnread, totalCount: processedSessions.length };
 }
 
-function useSessionHelpers(
-  agents: Array<{ name: string }>,
-  sessionStatus: Record<string, { type: string }> | undefined
-) {
+function useSessionHelpers(agents: Array<{ name: string }>) {
   const getSessionAgentName = React.useCallback((session: Session): string => {
     const agent = (session as { agent?: string }).agent;
     if (agent) return agent;
@@ -242,30 +279,24 @@ function useSessionHelpers(
     return getDisplaySessionTitle(session);
   }, []);
 
-  const isRunning = React.useCallback((sessionId: string): boolean => {
-    const status = sessionStatus?.[sessionId];
-    return status?.type === 'busy' || status?.type === 'retry';
-  }, [sessionStatus]);
-
   const unseenCounts = useNotificationStore((s) => s.index.session.unseenCount);
   const needsAttention = React.useCallback((sessionId: string): boolean => {
     return (unseenCounts[sessionId] ?? 0) > 0;
   }, [unseenCounts]);
 
-  return { getSessionAgentName, getSessionTitle, isRunning, needsAttention };
+  return { getSessionAgentName, getSessionTitle, needsAttention };
 }
 
-// Hook to calculate project status indicators
+// Per-project status indicators (running / unread) for the filter chips.
 function useProjectStatus(
   sessions: Session[],
   sessionStatus: Record<string, { type: string }> | undefined,
   currentSessionId: string | null
 ) {
   const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
-  const getSessionsByDirectory = useSessionUIStore((state) => state.getSessionsByDirectory);
   const notifUnseenCounts = useNotificationStore((s) => s.index.session.unseenCount);
 
-  const projectStatusMap = React.useCallback((projectPath: string): { hasRunning: boolean; hasUnread: boolean } => {
+  return React.useCallback((projectPath: string): { hasRunning: boolean; hasUnread: boolean } => {
     const getStatusType = (sessionId: string): 'busy' | 'retry' | 'idle' => {
       const status = sessionStatus?.[sessionId];
       if (status?.type === 'busy' || status?.type === 'retry') return status.type;
@@ -273,9 +304,7 @@ function useProjectStatus(
     };
 
     const projectRoot = normalize(projectPath);
-    if (!projectRoot) {
-      return { hasRunning: false, hasUnread: false };
-    }
+    if (!projectRoot) return { hasRunning: false, hasUnread: false };
 
     const dirs: string[] = [projectRoot];
     const worktrees = availableWorktreesByProject.get(projectRoot) ?? [];
@@ -283,9 +312,7 @@ function useProjectStatus(
       const p = (meta && typeof meta === 'object' && 'path' in meta) ? (meta as { path?: unknown }).path : null;
       if (typeof p === 'string' && p.trim()) {
         const normalized = normalize(p);
-        if (normalized && normalized !== projectRoot) {
-          dirs.push(normalized);
-        }
+        if (normalized && normalized !== projectRoot) dirs.push(normalized);
       }
     }
 
@@ -293,46 +320,49 @@ function useProjectStatus(
     let hasRunning = false;
     let hasUnread = false;
 
-    for (const dir of dirs) {
-      const list = getSessionsByDirectory(dir);
-      for (const session of list) {
-        if (!session?.id || seen.has(session.id)) {
-          continue;
-        }
-        seen.add(session.id);
+    for (const session of sessions) {
+      if (!session?.id || seen.has(session.id)) continue;
+      const dir = sessionDirectory(session);
+      if (!dirs.some((root) => pathBelongsToRoot(dir, root))) continue;
+      seen.add(session.id);
 
-        const statusType = getStatusType(session.id);
-        if (statusType === 'busy' || statusType === 'retry') {
-          hasRunning = true;
-        }
-
-        if (session.id !== currentSessionId && (notifUnseenCounts[session.id] ?? 0) > 0) {
-          hasUnread = true;
-        }
-
-        if (hasRunning && hasUnread) {
-          break;
-        }
-      }
-      if (hasRunning && hasUnread) {
-        break;
-      }
+      if (getStatusType(session.id) !== 'idle') hasRunning = true;
+      if (session.id !== currentSessionId && (notifUnseenCounts[session.id] ?? 0) > 0) hasUnread = true;
+      if (hasRunning && hasUnread) break;
     }
 
     return { hasRunning, hasUnread };
-  }, [getSessionsByDirectory, availableWorktreesByProject, sessionStatus, notifUnseenCounts, currentSessionId]);
+  }, [sessions, availableWorktreesByProject, sessionStatus, notifUnseenCounts, currentSessionId]);
+}
 
-  return projectStatusMap;
+// Resolves the project's root directories (root + known worktrees) for
+// prefix-matching sessions, mirroring the dedicated MobileSessionsSheet.
+function useProjectRootsResolver() {
+  const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
+
+  return React.useCallback((project: ProjectEntry): string[] => {
+    const projectRoot = normalize(project.path);
+    const roots = [projectRoot];
+    const worktrees = availableWorktreesByProject.get(projectRoot) ?? [];
+    for (const meta of worktrees) {
+      const p = (meta && typeof meta === 'object' && 'path' in meta) ? (meta as { path?: unknown }).path : null;
+      if (typeof p === 'string' && p.trim()) {
+        const normalized = normalize(p);
+        if (normalized) roots.push(normalized);
+      }
+    }
+    return roots;
+  }, [availableWorktreesByProject]);
 }
 
 function StatusIndicator({ isRunning, needsAttention }: { isRunning: boolean; needsAttention: boolean }) {
   if (isRunning) {
-    return <Icon name="loader-4" className="h-2.5 w-2.5 animate-spin text-[var(--status-info)]" />;
+    return <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin text-[var(--status-info)]" />;
   }
   if (needsAttention) {
-    return <div className="h-1.5 w-1.5 rounded-full bg-[var(--status-error)]" />;
+    return <div className="h-2 w-2 rounded-full bg-[var(--status-error)]" />;
   }
-  return <div className="h-1.5 w-1.5 rounded-full border border-[var(--surface-mutedForeground)]" />;
+  return <div className="h-2 w-2 rounded-full border border-[var(--surface-mutedForeground)]" />;
 }
 
 function RunningIndicator({ count }: { count: number }) {
@@ -1513,60 +1543,11 @@ function ExpandedView({
 }) {
   const { t } = useI18n();
   const containerRef = React.useRef<HTMLDivElement>(null);
-  const [collapsedHeight, setCollapsedHeight] = React.useState<number | null>(null);
-  const [hasMeasured, setHasMeasured] = React.useState(false);
-  const { handleTouchStart, handleTouchMove, handleTouchEnd } = useDrawerSwipe();
-  const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
-
-  React.useEffect(() => {
-    if (containerRef.current && !hasMeasured && !isExpanded) {
-      setCollapsedHeight(containerRef.current.offsetHeight);
-      setHasMeasured(true);
-    }
-  }, [hasMeasured, isExpanded]);
-
-  // Filter sessions by active project
-  const filteredSessions = React.useMemo(() => {
-    if (!activeProjectId) return sessions;
-    
-    const activeProject = projects.find(p => p.id === activeProjectId);
-    if (!activeProject) return sessions;
-
-    const projectRoot = normalize(activeProject.path);
-    const projectDirs = new Set<string>([projectRoot]);
-    
-    // Add worktrees
-    const worktrees = availableWorktreesByProject.get(projectRoot) ?? [];
-    for (const meta of worktrees) {
-      const p = (meta && typeof meta === 'object' && 'path' in meta) ? (meta as { path?: unknown }).path : null;
-      if (typeof p === 'string' && p.trim()) {
-        const normalized = normalize(p);
-        if (normalized) projectDirs.add(normalized);
-      }
-    }
-
-    return sessions.filter(session => {
-      const sessionDir = normalize((session as { directory?: string | null }).directory ?? '');
-      return projectDirs.has(sessionDir);
-    });
-  }, [sessions, activeProjectId, projects, availableWorktreesByProject]);
-
-  const previewHeight = collapsedHeight ?? undefined;
-  const displaySessions = hasMeasured || isExpanded
-    ? filteredSessions.filter(s => s.id !== currentSessionId)
-    : filteredSessions.slice(0, 3);
+  const previewHeight = '40vh';
+  const displaySessions = sessions;
 
   return (
-    <div
-      className="w-full border-b border-[var(--interactive-border)] bg-[var(--surface-muted)] order-first overflow-hidden"
-      style={{
-        borderTopLeftRadius: 'var(--radius-lg)',
-        borderTopRightRadius: 'var(--radius-lg)',
-      }}
-      onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
-    >
+    <div className="w-full flex flex-col border-b border-[var(--interactive-border)] bg-[var(--surface-muted)] order-first overflow-hidden">
       {/* Header row */}
       <div className="flex items-center justify-between px-2 py-1.5 border-b border-[var(--interactive-border)]">
         <div className="flex-1 min-w-0 mr-1">
@@ -1617,7 +1598,6 @@ function ExpandedView({
         </div>
       </div>
 
-      {/* Project switcher bar */}
       <ProjectBar
         projects={projects}
         activeProjectId={activeProjectId}
@@ -1640,9 +1620,6 @@ function ExpandedView({
           </div>
         ) : (
           displaySessions.map((session) => {
-            // When the current session is being edited, the sticky header
-            // already renders the rename input; suppress the duplicate
-            // input on this row to avoid two simultaneous editors.
             const isCurrent = session.id === currentSessionId;
             const isEditingHere = editingSessionId === session.id && !isCurrent;
             return (
@@ -1668,6 +1645,59 @@ function ExpandedView({
     </div>
   );
 }
+
+// The chip that lives in the composer footer and toggles the slide-up sheet.
+// This is the only persistent affordance — there is no longer a permanent bar.
+interface MobileSessionPanelTriggerProps {
+  footerIconButtonClass: string;
+  iconSizeClass: string;
+}
+
+export const MobileSessionPanelTrigger: React.FC<MobileSessionPanelTriggerProps> = ({
+  footerIconButtonClass,
+  iconSizeClass,
+}) => {
+  const { t } = useI18n();
+  const isMobile = useUIStore((state) => state.isMobile);
+  const showMobileSessionStatusBar = useUIStore((state) => state.showMobileSessionStatusBar);
+  const open = useUIStore((state) => state.mobileSessionPanelOpen);
+  const setOpen = useUIStore((state) => state.setMobileSessionPanelOpen);
+
+  // Ensure the cross-project session list is loaded once, so the panel reflects
+  // every project — not just the active directory.
+  React.useEffect(() => {
+    if (isMobile && showMobileSessionStatusBar) {
+      void ensureGlobalSessionsLoaded();
+    }
+  }, [isMobile, showMobileSessionStatusBar]);
+
+  if (!isMobile || !showMobileSessionStatusBar) {
+    return null;
+  }
+
+  return (
+    <button
+      type="button"
+      className={cn(
+        footerIconButtonClass,
+        'rounded-md relative hover:bg-interactive-hover/40',
+        open && 'text-[var(--primary-base)]'
+      )}
+      onPointerDownCapture={(event) => {
+        if (event.pointerType === 'touch') {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      }}
+      onClick={() => setOpen(!open)}
+      title={t('mobile.sessions.search.section.sessions')}
+      aria-label={t('mobile.sessions.search.section.sessions')}
+      aria-expanded={open}
+    >
+      <Icon name="stack" className={cn(iconSizeClass)} />
+    </button>
+  );
+};
 
 const MobileSessionStatusBarCollapsed: React.FC<{ onExpand: () => void }> = ({
   onExpand,
@@ -1753,8 +1783,7 @@ const MobileSessionStatusBarExpanded: React.FC<MobileSessionStatusBarProps & { o
   onSessionSwitch,
   onCollapse,
 }) => {
-  const { t } = useI18n();
-  const sessions = useSessions();
+  const sessions = useAllProjectSessions();
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const sessionStatus = useAllSessionStatuses();
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
@@ -1762,7 +1791,6 @@ const MobileSessionStatusBarExpanded: React.FC<MobileSessionStatusBarProps & { o
   const updateSessionTitle = useSessionUIStore((state) => state.updateSessionTitle);
   const agents = useConfigStore((state) => state.agents);
   const setActiveProject = useProjectsStore((state) => state.setActiveProject);
-  const setActiveProjectIdOnly = useProjectsStore((state) => state.setActiveProjectIdOnly);
   const removeProject = useProjectsStore((state) => state.removeProject);
   const contextUsage = useCurrentContextUsage();
   const {
@@ -1777,17 +1805,36 @@ const MobileSessionStatusBarExpanded: React.FC<MobileSessionStatusBarProps & { o
   } = useCurrentProjectDisplay();
 
   const { sessions: sortedSessions, totalRunning, totalUnread, totalCount } = useSessionGrouping(sessions, sessionStatus);
-  const { getSessionAgentName, getSessionTitle, needsAttention } = useSessionHelpers(agents, sessionStatus);
+  const { getSessionAgentName, getSessionTitle, needsAttention } = useSessionHelpers(agents);
   const getProjectStatus = useProjectStatus(sessions, sessionStatus, currentSessionId);
+  const resolveProjectRoots = useProjectRootsResolver();
 
-  const currentSession = sessions.find((s) => s.id === currentSessionId);
-  const currentSessionTitle = currentSession
-    ? getSessionTitle(currentSession)
-    : t('chat.mobileStatus.swipeHint');
+  // Refresh the cross-project session list when the panel opens (mirrors the
+  // dedicated MobileSessionsSheet). The active-directory sync only upserts the
+  // current project's sessions, so other projects need this global load.
+  React.useEffect(() => {
+    void refreshGlobalSessions(sessions);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Calculate current session's child indicators
-  const currentSessionWithStatus = sortedSessions.find((s) => s.id === currentSessionId);
-  const currentSessionChildIndicators = currentSessionWithStatus?._childIndicators ?? [];
+  // Filter sessions by the selected project (root + worktrees), using the
+  // store's canonical directory keying.
+  const filteredSessions = React.useMemo(() => {
+    if (!activeProjectId) return sortedSessions;
+    const project = projects.find((p) => p.id === activeProjectId);
+    if (!project) return sortedSessions;
+    const roots = resolveProjectRoots(project);
+    return sortedSessions.filter((session) => {
+      const dir = sessionDirectory(session);
+      return roots.some((root) => pathBelongsToRoot(dir, root));
+    });
+  }, [sortedSessions, activeProjectId, projects, resolveProjectRoots]);
+
+  // Cap to the most recent N (already sorted running-first, then by updated).
+  const visibleSessions = React.useMemo(
+    () => filteredSessions.slice(0, MAX_RECENT_SESSIONS),
+    [filteredSessions],
+  );
 
   const [isExpanded, setIsExpanded] = React.useState(false);
   const [editingSessionId, setEditingSessionId] = React.useState<string | null>(null);
@@ -1797,11 +1844,16 @@ const MobileSessionStatusBarExpanded: React.FC<MobileSessionStatusBarProps & { o
     return null;
   }
 
+  const currentSession = sessions.find((session) => session.id === currentSessionId) ?? null;
+  const currentSessionTitle = currentSession
+    ? getSessionTitle(currentSession)
+    : '';
+  const currentSessionChildIndicators = sortedSessions.find((session) => session.id === currentSessionId)?._childIndicators ?? [];
+
   const handleSessionClick = (sessionId: string) => {
     if (editingSessionId) return;
     setCurrentSession(sessionId);
     onSessionSwitch?.(sessionId);
-    setIsExpanded(false);
   };
 
   const handleSessionDoubleClick = (sessionId: string, sessionTitle: string) => {
@@ -1835,28 +1887,6 @@ const MobileSessionStatusBarExpanded: React.FC<MobileSessionStatusBarProps & { o
   };
 
   const handleProjectSwitch = (projectId: string) => {
-    if (projectId === activeProjectId) {
-      return;
-    }
-    const draft = useSessionUIStore.getState().newSessionDraft;
-    if (draft?.open) {
-      if (
-        draft.pendingWorktreeRequestId ||
-        draft.bootstrapPendingDirectory ||
-        draft.preserveDirectoryOverride
-      ) {
-        return;
-      }
-      const project = projects.find((p) => p.id === projectId);
-      if (project) {
-        setActiveProjectIdOnly(projectId);
-        useSessionUIStore.getState().setNewSessionDraftTarget({
-          projectId,
-          directoryOverride: project.path,
-        });
-      }
-      return;
-    }
     setActiveProject(projectId);
   };
 
@@ -1866,7 +1896,7 @@ const MobileSessionStatusBarExpanded: React.FC<MobileSessionStatusBarProps & { o
 
   return (
     <ExpandedView
-      sessions={sortedSessions}
+      sessions={visibleSessions}
       currentSessionId={currentSessionId ?? ''}
       runningCount={totalRunning}
       unreadCount={totalUnread}

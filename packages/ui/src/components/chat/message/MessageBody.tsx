@@ -31,6 +31,7 @@ import { TextSelectionMenu } from './TextSelectionMenu';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useChatSurfaceMode } from '@/components/chat/useChatSurfaceMode';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { toPng } from 'html-to-image';
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
@@ -1034,6 +1035,7 @@ const AssistantMessageBody = React.memo(({
     const collapsibleThinkingBlocks = useUIStore((state) => state.collapsibleThinkingBlocks);
     const groupReasoningBlocks = useUIStore((state) => state.groupReasoningBlocks);
     const showSplitAssistantMessageActions = useUIStore((state) => state.showSplitAssistantMessageActions);
+    const vscodeApi = useRuntimeAPIs().vscode;
     const isSortedRenderMode = chatRenderMode === 'sorted';
     const collapsedPreviewCount = 7;
     const isLastAssistantInTurn = turnGroupingContext?.isLastAssistantInTurn ?? false;
@@ -1319,17 +1321,10 @@ const AssistantMessageBody = React.memo(({
                 const fileName = `message-${messageId}.png`;
 
                 if (isVSCodeRuntime()) {
-                    const response = await fetch('/api/vscode/save-image', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ fileName, dataUrl }),
-                    });
-
-                    if (!response.ok) {
+                    const payload = await vscodeApi?.saveImage?.({ fileName, dataUrl }) as { saved?: boolean; canceled?: boolean; error?: string } | undefined;
+                    if (!payload) {
                         throw new Error('Failed to save image in VS Code');
                     }
-
-                    const payload = await response.json() as { saved?: boolean; canceled?: boolean; error?: string };
                     if (payload.saved !== true) {
                         if (payload.canceled) {
                             return;
@@ -1355,7 +1350,7 @@ const AssistantMessageBody = React.memo(({
                 }
             }
         },
-        [messageId, t]
+        [messageId, t, vscodeApi]
     );
 
     const activityPartsForTurn = React.useMemo(() => {

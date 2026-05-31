@@ -510,6 +510,7 @@ export function NewWorktreeDialog({
 
   const sendLinkedContextMessage = React.useCallback(async (args: {
     sessionId: string;
+    directory: string;
     issue: GitHubIssue | null;
     pr: GitHubPullRequestSummary | null;
     includeDiff: boolean;
@@ -565,7 +566,7 @@ export function NewWorktreeDialog({
         comments: commentsRes.comments ?? [],
       });
 
-      await opencodeClient.sendMessage({
+      await opencodeClient.withDirectory(args.directory, () => opencodeClient.sendMessage({
         id: args.sessionId,
         providerID,
         modelID,
@@ -576,7 +577,7 @@ export function NewWorktreeDialog({
           { text: instructionsText, synthetic: true },
           { text: contextText, synthetic: true },
         ],
-      });
+      }));
 
       toast.success(t('session.newWorktree.toast.sessionFromIssue'));
       return;
@@ -601,7 +602,7 @@ export function NewWorktreeDialog({
       const instructionsText = await renderMagicPrompt('github.pr.review.instructions');
       const contextText = buildPullRequestContextText(prContext);
 
-      await opencodeClient.sendMessage({
+      await opencodeClient.withDirectory(args.directory, () => opencodeClient.sendMessage({
         id: args.sessionId,
         providerID,
         modelID,
@@ -612,7 +613,7 @@ export function NewWorktreeDialog({
           { text: instructionsText, synthetic: true },
           { text: contextText, synthetic: true },
         ],
-      });
+      }));
 
       toast.success(t('session.newWorktree.toast.sessionFromPr'));
     }
@@ -935,6 +936,7 @@ export function NewWorktreeDialog({
         onWorktreeCreated?.(metadata.path, { sessionId: createdSessionId });
         void sendLinkedContextMessage({
           sessionId: createdSessionId,
+          directory: metadata.path,
           issue: linkedIssue,
           pr: linkedPrState,
           includeDiff: includePrDiff,

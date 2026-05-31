@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { getSafeStorage } from './utils/safeStorage';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 // --- Types ---
 
@@ -90,7 +91,7 @@ const schedulePersistToDisk = (foldersMap: SessionFoldersMap, collapsedFolderIds
       collapsedFolderIds: collapsedSnapshot,
       updatedAt: Date.now(),
     };
-    void fetch(SESSION_FOLDERS_API_PATH, {
+    void runtimeFetch(SESSION_FOLDERS_API_PATH, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -502,7 +503,7 @@ const hydrateSessionFoldersFromDisk = async (): Promise<void> => {
   diskHydrationInFlight = true;
 
   try {
-    const response = await fetch(SESSION_FOLDERS_API_PATH).catch(() => null);
+    const response = await runtimeFetch(SESSION_FOLDERS_API_PATH).catch(() => null);
     if (!response || !response.ok) {
       return;
     }

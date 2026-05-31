@@ -11,13 +11,19 @@ type TauriGlobal = {
 export type DesktopHost = {
   id: string;
   label: string;
+  /** Legacy/UI URL. During migration this may equal apiUrl. */
   url: string;
+  /** API endpoint used by packaged Electron UI for this instance. */
+  apiUrl?: string;
+  /** Remote client bearer token for packaged-client API access. */
+  clientToken?: string;
 };
 
 export type DesktopHostsConfig = {
   hosts: DesktopHost[];
   defaultHostId: string | null;
   initialHostChoiceCompleted: boolean;
+  localOrigin?: string | null;
 };
 
 /** Backward-compatible input type — callers may omit `initialHostChoiceCompleted`. */
@@ -25,14 +31,21 @@ export type DesktopHostsConfigInput = {
   hosts: DesktopHost[];
   defaultHostId: string | null;
   initialHostChoiceCompleted?: boolean;
+  localClientToken?: string | null;
 };
 
 export type HostProbeResult = {
-  status: 'ok' | 'auth' | 'wrong-service' | 'unreachable';
+  status: 'ok' | 'auth' | 'update-recommended' | 'incompatible' | 'wrong-service' | 'unreachable';
   latencyMs: number;
 };
 
-const SENSITIVE_QUERY_KEY = /token|auth|secret|api/i;
+export type DesktopHostUrlResolution = {
+  persistedUrl: string;
+  redeemUrl: string | null;
+  kind: 'normal-host' | 'tunnel-connect-link';
+};
+
+const SENSITIVE_QUERY_KEY = /^(t|.*(?:token|auth|secret|api).*)$/i;
 
 export const normalizeHostUrl = (raw: string): string | null => {
   const trimmed = raw.trim();
@@ -46,6 +59,31 @@ export const normalizeHostUrl = (raw: string): string | null => {
   } catch {
     return null;
   }
+};
+
+export const resolveDesktopHostUrl = (raw: string): DesktopHostUrlResolution | null => {
+  const normalized = normalizeHostUrl(raw);
+  if (!normalized) return null;
+
+  try {
+    const url = new URL(normalized);
+    const pathname = url.pathname.replace(/\/+$/, '') || '/';
+    if (pathname === '/connect' && url.searchParams.has('t')) {
+      return {
+        persistedUrl: url.origin,
+        redeemUrl: url.toString(),
+        kind: 'tunnel-connect-link',
+      };
+    }
+  } catch {
+    return null;
+  }
+
+  return {
+    persistedUrl: normalized,
+    redeemUrl: null,
+    kind: 'normal-host',
+  };
 };
 
 export const redactSensitiveUrl = (raw: string): string => {
@@ -122,8 +160,20 @@ const parseHost = (value: unknown): DesktopHost | null => {
   const id = readString(value, 'id');
   const label = readString(value, 'label');
   const url = readString(value, 'url');
+  const apiUrl = readString(value, 'apiUrl') || readString(value, 'api_url');
+  const clientToken = readString(value, 'clientToken') || readString(value, 'client_token');
   if (!id || !label || !url) return null;
-  return { id, label, url };
+  return {
+    id,
+    label,
+    url,
+    ...(apiUrl ? { apiUrl } : {}),
+    ...(clientToken ? { clientToken } : {}),
+  };
+};
+
+export const getDesktopHostApiUrl = (host: DesktopHost): string => {
+  return normalizeHostUrl(host.apiUrl || host.url) || host.apiUrl || host.url;
 };
 
 const getInvoke = (): TauriInvoke | null => {
@@ -155,36 +205,48 @@ export const desktopHostsGet = async (): Promise<DesktopHostsConfig> => {
 
   const initialHostChoiceCompleted =
     raw.initialHostChoiceCompleted === true || raw.initial_host_choice_completed === true;
+  const localOrigin = readString(raw, 'localOrigin') || readString(raw, 'local_origin');
 
-  return { hosts, defaultHostId, initialHostChoiceCompleted };
+  return { hosts, defaultHostId, initialHostChoiceCompleted, localOrigin };
 };
 
 export const desktopHostsSet = async (config: DesktopHostsConfigInput): Promise<void> => {
   const invoke = getInvoke();
   if (!invoke) return;
+  const input: Record<string, unknown> = {
+    hosts: config.hosts,
+    defaultHostId: config.defaultHostId,
+    initialHostChoiceCompleted: config.initialHostChoiceCompleted,
+  };
+  if (config.localClientToken !== undefined) {
+    input.localClientToken = config.localClientToken;
+  }
   await invoke('desktop_hosts_set', {
-    input: {
-      hosts: config.hosts,
-      defaultHostId: config.defaultHostId,
-      initialHostChoiceCompleted: config.initialHostChoiceCompleted,
-    },
+    input,
   });
 };
 
-export const desktopHostProbe = async (url: string): Promise<HostProbeResult> => {
+export const desktopLocalClientTokenGet = async (): Promise<string> => {
+  const invoke = getInvoke();
+  if (!invoke) return '';
+  const raw = await invoke('desktop_local_client_token_get').catch(() => null);
+  return typeof raw === 'string' ? raw.trim() : '';
+};
+
+export const desktopHostProbe = async (url: string, options?: { clientToken?: string | null }): Promise<HostProbeResult> => {
   const invoke = getInvoke();
   if (!invoke) {
     return { status: 'unreachable', latencyMs: 0 };
   }
 
-  const raw = await invoke('desktop_host_probe', { url });
+  const raw = await invoke('desktop_host_probe', { url, clientToken: options?.clientToken || undefined });
   if (!isRecord(raw)) {
     return { status: 'unreachable', latencyMs: 0 };
   }
 
   const rawStatus = raw.status;
   const status: HostProbeResult['status'] =
-    rawStatus === 'ok' || rawStatus === 'auth' || rawStatus === 'wrong-service' || rawStatus === 'unreachable'
+    rawStatus === 'ok' || rawStatus === 'auth' || rawStatus === 'update-recommended' || rawStatus === 'incompatible' || rawStatus === 'wrong-service' || rawStatus === 'unreachable'
       ? rawStatus
       : 'unreachable';
 
@@ -192,8 +254,8 @@ export const desktopHostProbe = async (url: string): Promise<HostProbeResult> =>
   return { status, latencyMs };
 };
 
-export const desktopOpenNewWindowAtUrl = async (url: string): Promise<void> => {
+export const desktopOpenNewWindowAtUrl = async (url: string, options?: { clientToken?: string | null }): Promise<void> => {
   const invoke = getInvoke();
   if (!invoke) return;
-  await invoke('desktop_new_window_at_url', { url });
+  await invoke('desktop_new_window_at_url', { url, clientToken: options?.clientToken || undefined });
 };

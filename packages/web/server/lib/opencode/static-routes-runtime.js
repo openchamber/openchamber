@@ -59,7 +59,14 @@ export const createStaticRoutesRuntime = (dependencies) => {
     });
   };
 
+  const registerApiOnlyFallbackRoutes = (app) => {
+    app.get(/^(?!\/api|\/auth|\/health|.*\.(js|css|svg|png|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|map)).*$/, (_req, res) => {
+      res.status(404).json({ error: 'OpenChamber is running in API-only mode' });
+    });
+  };
+
   return {
+    registerApiOnlyFallbackRoutes,
     registerStaticRoutes,
   };
 };

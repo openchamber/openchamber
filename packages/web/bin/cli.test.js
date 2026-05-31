@@ -10,6 +10,40 @@ describe('cli args', () => {
     expect(parseArgs(['serve', '--daemon']).removedFlagErrors).toEqual([]);
     expect(parseArgs(['serve', '-d']).removedFlagErrors).toEqual([]);
   });
+
+  it('parses explicit connect-url server overrides', () => {
+    const parsed = parseArgs(['connect-url', '--server', 'https://openchamber.example.com', '--port', '3002']);
+
+    expect(parsed.command).toBe('connect-url');
+    expect(parsed.options.server).toBe('https://openchamber.example.com');
+    expect(parsed.options.port).toBe(3002);
+  });
+
+  it('parses connect-url server-url alias', () => {
+    const parsed = parseArgs(['connect-url', '--server-url=http://homebridge:3002']);
+
+    expect(parsed.options.server).toBe('http://homebridge:3002');
+  });
+
+  it('maps --lan to wildcard bind host', () => {
+    const parsed = parseArgs(['serve', '--lan', '--port', '3002']);
+
+    expect(parsed.options.host).toBe('0.0.0.0');
+    expect(parsed.options.lan).toBe(true);
+  });
+
+  it('supports --hostname as top-level bind alias', () => {
+    const parsed = parseArgs(['serve', '--hostname', '0.0.0.0']);
+
+    expect(parsed.options.host).toBe('0.0.0.0');
+  });
+
+  it('keeps --hostname for tunnel commands', () => {
+    const parsed = parseArgs(['tunnel', 'start', '--hostname', 'app.example.com']);
+
+    expect(parsed.options.hostname).toBe('app.example.com');
+    expect(parsed.options.host).toBeUndefined();
+  });
 });
 
 describe('cli entry detection', () => {

@@ -12,6 +12,8 @@ const readArgValue = (name) => {
 };
 
 const localOrigin = readArgValue('--openchamber-local-origin');
+const apiBaseUrl = readArgValue('--openchamber-api-base-url');
+const clientToken = readArgValue('--openchamber-client-token');
 const homeDirectory = readArgValue('--openchamber-home');
 const macosMajorRaw = readArgValue('--openchamber-macos-major');
 const macosMajor = Number.parseInt(macosMajorRaw, 10);
@@ -37,6 +39,7 @@ const currentOrigin = (() => {
 })();
 const isLoopbackOrigin = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(currentOrigin);
 const isLocalPage = currentOrigin === 'null'
+  || currentOrigin === 'openchamber-ui://app'
   || isLoopbackOrigin
   || (localOrigin && currentOrigin === localOrigin);
 
@@ -47,6 +50,14 @@ const isLocalPage = currentOrigin === 'null'
 // IPC channel, and CORS on the local server prevents remote-origin fetches.
 if (localOrigin) {
   contextBridge.exposeInMainWorld('__OPENCHAMBER_LOCAL_ORIGIN__', localOrigin);
+}
+
+if (apiBaseUrl) {
+  contextBridge.exposeInMainWorld('__OPENCHAMBER_API_BASE_URL__', apiBaseUrl);
+}
+
+if (clientToken && isLocalPage) {
+  contextBridge.exposeInMainWorld('__OPENCHAMBER_CLIENT_TOKEN__', clientToken);
 }
 
 // Home directory leaks the OS username — keep local-only. Remote pages

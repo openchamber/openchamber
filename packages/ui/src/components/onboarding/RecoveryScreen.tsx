@@ -4,6 +4,7 @@ import { DesktopConnectionRecovery, type RecoveryVariant } from './DesktopConnec
 import { RemoteConnectionForm } from './RemoteConnectionForm';
 import { resolveRecoveryNextStep } from './desktopRecoveryRouting';
 import { desktopHostsGet, desktopHostsSet } from '@/lib/desktopHosts';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 type RecoveryScreenProps = {
   /** Recovery variant */
@@ -62,7 +63,7 @@ export function RecoveryScreen({
       return;
     }
 
-    await fetch('/api/config/reload', { method: 'POST' });
+    await runtimeFetch('/api/config/reload', { method: 'POST' });
     onRetry?.();
   }, [onRetry]);
 

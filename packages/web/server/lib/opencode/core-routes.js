@@ -56,6 +56,19 @@ export const registerServerStatusRoutes = (app, dependencies) => {
     });
   };
 
+  const compatibility = {
+    apiVersion: 1,
+    minClientApiVersion: 1,
+    capabilities: [
+      'api.health.v1',
+      'api.runtime-url.v1',
+      'api.raw-file.v1',
+      'realtime.sse.v1',
+      'realtime.websocket.global-events.v1',
+      'terminal.websocket.v1',
+    ],
+  };
+
   const isDevShutdownAllowed = () => {
     // Dev-only escape hatch: allow terminating the whole dev process group.
     // This should never be enabled in production runtimes.
@@ -166,7 +179,20 @@ export const registerServerStatusRoutes = (app, dependencies) => {
     res.json({
       status: 'ok',
       timestamp: new Date().toISOString(),
+      openchamberVersion,
+      runtime: runtimeName,
+      compatibility,
       ...getHealthSnapshot(),
+    });
+  });
+
+  app.get('/api/version', (_req, res) => {
+    res.json({
+      status: 'ok',
+      openchamberVersion,
+      runtime: runtimeName,
+      startedAt: serverStartedAt,
+      compatibility,
     });
   });
 
@@ -271,9 +297,20 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     express,
     tunnelAuthController,
     uiAuthController,
+    remoteClientAuthRuntime,
     readSettingsFromDiskMigrated,
     normalizeTunnelSessionTtlMs,
   } = dependencies;
+
+  const runWithUiAuth = async (req, res, next, handler) => {
+    try {
+      await uiAuthController.requireAuth(req, res, async () => {
+        await handler();
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
 
   const requireApiAuth = async (req, res, next) => {
     const requestScope = tunnelAuthController.classifyRequestScope(req);
@@ -401,6 +438,38 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     } catch (error) {
       next(error);
     }
+  });
+
+  app.get('/api/client-auth/clients', async (req, res, next) => {
+    await runWithUiAuth(req, res, next, async () => {
+      const clients = await remoteClientAuthRuntime.listClients();
+      res.json({ clients });
+    });
+  });
+
+  app.post('/api/client-auth/clients', express.json({ limit: '64kb' }), async (req, res, next) => {
+    await runWithUiAuth(req, res, next, async () => {
+      const result = await remoteClientAuthRuntime.createClient({ label: req.body?.label });
+      res.setHeader('Cache-Control', 'no-store');
+      res.status(201).json(result);
+    });
+  });
+
+  app.delete('/api/client-auth/clients/:id', async (req, res, next) => {
+    await runWithUiAuth(req, res, next, async () => {
+      const result = await remoteClientAuthRuntime.revokeClient(req.params?.id);
+      if (!result.revoked) {
+        return res.status(404).json({ revoked: false, error: 'Client not found' });
+      }
+      res.json(result);
+    });
+  });
+
+  app.delete('/api/client-auth/clients', async (req, res, next) => {
+    await runWithUiAuth(req, res, next, async () => {
+      const result = await remoteClientAuthRuntime.purgeRevokedClients();
+      res.json(result);
+    });
   });
 
   app.get('/connect', async (req, res) => {

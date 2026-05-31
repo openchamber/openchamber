@@ -243,6 +243,27 @@ const parseCookies = (cookieHeader) => {
   }, {});
 };
 
+const getBearerTokenFromRequest = (req) => {
+  const header = req?.headers?.authorization;
+  const value = Array.isArray(header) ? header[0] : header;
+  if (typeof value === 'string') {
+    const match = value.match(/^Bearer\s+(.+)$/i);
+    const token = match?.[1]?.trim() || '';
+    if (token) return token;
+  }
+
+  const queryToken = req?.query?.oc_client_token;
+  let token = Array.isArray(queryToken) ? queryToken[0] : queryToken;
+  if (typeof token !== 'string' && typeof req?.url === 'string') {
+    try {
+      token = new URL(req.url, 'http://localhost').searchParams.get('oc_client_token') || undefined;
+    } catch {
+      token = undefined;
+    }
+  }
+  return typeof token === 'string' && token.trim() ? token.trim() : null;
+};
+
 const buildCookie = ({
   name,
   value,
@@ -330,8 +351,31 @@ export const createUiAuth = ({
   cookieName = SESSION_COOKIE_NAME,
   sessionTtlMs = SESSION_TTL_MS,
   readSettingsFromDiskMigrated,
+  clientAuthController = null,
+  requireClientAuth = false,
 } = {}) => {
   const normalizedPassword = normalizePassword(password);
+
+  const authenticateClientRequest = async (req) => {
+    const token = getBearerTokenFromRequest(req);
+    if (!token || typeof clientAuthController?.authenticateBearerToken !== 'function') {
+      return null;
+    }
+    try {
+      const result = await clientAuthController.authenticateBearerToken(token, req);
+      if (result?.ok) {
+        return result;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
+  const clientSessionToken = (clientAuth) => {
+    const raw = clientAuth?.sessionToken || clientAuth?.clientId || clientAuth?.id;
+    return typeof raw === 'string' && raw.length > 0 ? `client:${raw}` : 'client:authenticated';
+  };
 
   if (!normalizedPassword) {
     const setSessionCookie = (req, res, token, ttlMs = sessionTtlMs) => {
@@ -356,10 +400,31 @@ export const createUiAuth = ({
       return token;
     };
 
+    const requireAuth = async (req, res, next) => {
+      if (!requireClientAuth) {
+        return next();
+      }
+      if (req.method === 'OPTIONS') {
+        return next();
+      }
+      const clientAuth = await authenticateClientRequest(req);
+      if (clientAuth) {
+        return next();
+      }
+      return res.status(401).json({ error: 'Client authentication required', locked: true, clientAuthRequired: true });
+    };
+
     return {
       enabled: false,
-      requireAuth: (_req, _res, next) => next(),
-      handleSessionStatus: (_req, res) => {
+      requireAuth,
+      handleSessionStatus: async (req, res) => {
+        if (requireClientAuth) {
+          const clientAuth = await authenticateClientRequest(req);
+          if (clientAuth) {
+            return res.json({ authenticated: true, disabled: true, scope: 'client' });
+          }
+          return res.status(401).json({ authenticated: false, locked: true, clientAuthRequired: true });
+        }
         res.json({ authenticated: true, disabled: true });
       },
       handleSessionCreate: (_req, res) => {
@@ -389,7 +454,11 @@ export const createUiAuth = ({
       handleResetAuth: (_req, res) => {
         res.status(400).json({ error: 'UI password not configured' });
       },
-      ensureSessionToken,
+      ensureSessionToken: async (req, res) => {
+        const clientAuth = await authenticateClientRequest(req);
+        if (clientAuth) return clientSessionToken(clientAuth);
+        return ensureSessionToken(req, res);
+      },
       dispose: () => {
 
       },
@@ -511,6 +580,10 @@ export const createUiAuth = ({
     if (await isSessionValid(token)) {
       return next();
     }
+    const clientAuth = await authenticateClientRequest(req);
+    if (clientAuth) {
+      return next();
+    }
     clearSessionCookie(req, res);
     return respondUnauthorized(req, res);
   };
@@ -519,6 +592,11 @@ export const createUiAuth = ({
     const token = getTokenFromRequest(req);
     if (await isSessionValid(token)) {
       res.json({ authenticated: true });
+      return;
+    }
+    const clientAuth = await authenticateClientRequest(req);
+    if (clientAuth) {
+      res.json({ authenticated: true, scope: 'client' });
       return;
     }
     clearSessionCookie(req, res);
@@ -551,10 +629,21 @@ export const createUiAuth = ({
 
     await clearRateLimit(req);
 
-    await issueSession(req, res, {
-      trustDevice: isTrustedDeviceRequest(req.body?.trustDevice),
+    const trustDevice = isTrustedDeviceRequest(req.body?.trustDevice);
+    const ttlMs = resolveSessionTtlMs(trustDevice);
+    await issueSession(req, res, { trustDevice });
+    let clientTokenResult = null;
+    if (req.body?.issueClientToken === true && typeof clientAuthController?.createClient === 'function') {
+      clientTokenResult = await clientAuthController.createClient({
+        label: req.body?.clientLabel,
+        expiresAt: new Date(Date.now() + ttlMs).toISOString(),
+      });
+    }
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      authenticated: true,
+      ...(clientTokenResult?.token ? { clientToken: clientTokenResult.token, client: clientTokenResult.client } : {}),
     });
-    res.json({ authenticated: true });
   };
 
   const respondPasskeyError = (res, error) => {
@@ -601,10 +690,20 @@ export const createUiAuth = ({
   const handlePasskeyAuthenticationVerify = async (req, res) => {
     try {
       await passkeyController.finishAuthentication(req.body);
-      await issueSession(req, res, {
-        trustDevice: isTrustedDeviceRequest(req.body?.trustDevice),
+      const trustDevice = isTrustedDeviceRequest(req.body?.trustDevice);
+      const ttlMs = resolveSessionTtlMs(trustDevice);
+      await issueSession(req, res, { trustDevice });
+      let clientTokenResult = null;
+      if (req.body?.issueClientToken === true && typeof clientAuthController?.createClient === 'function') {
+        clientTokenResult = await clientAuthController.createClient({
+          label: req.body?.clientLabel,
+          expiresAt: new Date(Date.now() + ttlMs).toISOString(),
+        });
+      }
+      res.json({
+        authenticated: true,
+        ...(clientTokenResult?.token ? { clientToken: clientTokenResult.token, client: clientTokenResult.client } : {}),
       });
-      res.json({ authenticated: true });
     } catch (error) {
       respondPasskeyError(res, error);
     }
@@ -666,7 +765,9 @@ export const createUiAuth = ({
     handleResetAuth,
     ensureSessionToken: async (req, _res) => {
       const token = getTokenFromRequest(req);
-      return (await isSessionValid(token)) ? token : null;
+      if (await isSessionValid(token)) return token;
+      const clientAuth = await authenticateClientRequest(req);
+      return clientAuth ? clientSessionToken(clientAuth) : null;
     },
     dispose,
   };

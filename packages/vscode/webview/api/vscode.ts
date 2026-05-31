@@ -14,4 +14,27 @@ export const createVSCodeActionsAPI = (): VSCodeAPI => ({
   async openExternalUrl(url: string): Promise<void> {
     await openVSCodeExternalUrl(url);
   },
+
+  async pickFiles(): Promise<unknown> {
+    const response = await fetch('/api/vscode/pick-files');
+    return response.json();
+  },
+
+  async saveImage(payload: unknown): Promise<unknown> {
+    const response = await fetch('/api/vscode/save-image', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return response.json();
+  },
+
+  async saveMarkdown(payload: unknown): Promise<unknown> {
+    const response = await fetch('/api/vscode/save-markdown', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return response.json();
+  },
 });

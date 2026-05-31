@@ -1,8 +1,9 @@
 import React from 'react';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { isDesktopShell, isTauriShell } from '@/lib/desktop';
-import { desktopHostsGet, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
+import { isDesktopLocalOriginActive, isDesktopShell, isTauriShell } from '@/lib/desktop';
+import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { setDesktopWindowTitle } from '@/lib/desktopNative';
+import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 
 const APP_TITLE = 'OpenChamber';
 
@@ -59,10 +60,17 @@ export const useWindowTitle = () => {
 
     const refreshInstanceLabel = async () => {
       try {
-        const currentHref = window.location.href;
-        const localOrigin = window.__OPENCHAMBER_LOCAL_ORIGIN__ || window.location.origin;
+        if (isDesktopLocalOriginActive()) {
+          if (!cancelled) {
+            setInstanceLabel(null);
+          }
+          return;
+        }
 
-        if (locationMatchesHost(currentHref, localOrigin)) {
+        const localOrigin = window.__OPENCHAMBER_LOCAL_ORIGIN__ || window.location.origin;
+        const runtimeApiBaseUrl = getRuntimeApiBaseUrl();
+
+        if (runtimeApiBaseUrl && locationMatchesHost(runtimeApiBaseUrl, localOrigin)) {
           if (!cancelled) {
             setInstanceLabel(null);
           }
@@ -70,7 +78,7 @@ export const useWindowTitle = () => {
         }
 
         const cfg = await desktopHostsGet();
-        const match = cfg.hosts.find((host) => locationMatchesHost(currentHref, host.url));
+        const match = cfg.hosts.find((host) => runtimeApiBaseUrl ? locationMatchesHost(runtimeApiBaseUrl, getDesktopHostApiUrl(host)) : false);
         const nextLabel = match?.label?.trim() ? redactSensitiveUrl(match.label.trim()) : 'Instance';
         if (!cancelled) {
           setInstanceLabel(nextLabel);

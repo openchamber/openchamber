@@ -1,4 +1,5 @@
 import type { CommandExecResult, FilesAPI, RuntimeAPIs } from '@/lib/api/types';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 type ExecResult = { success: boolean; results: CommandExecResult[] };
 
@@ -26,7 +27,7 @@ export async function execCommands(commands: string[], cwd: string): Promise<Exe
     return runtimeFiles.execCommands(commands, cwd);
   }
 
-  const response = await fetch(`${getBaseUrl()}/fs/exec`, {
+  const response = await runtimeFetch(`${getBaseUrl()}/fs/exec`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ commands, cwd, background: false }),

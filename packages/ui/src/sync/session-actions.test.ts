@@ -3,6 +3,7 @@ import type { PermissionRequest } from "@/types/permission"
 
 // Mock SDK client that records permission.reply / question.reply calls
 const replyCalls: Array<{ method: string; params: Record<string, unknown> }> = []
+let sessionRevertResult: { data?: unknown; error?: unknown; response?: { status?: number } } = {}
 
 const mockScopedClient = {
   permission: {
@@ -24,6 +25,20 @@ const mockScopedClient = {
 }
 
 const mockSdk = {
+  session: {
+    messages: mock((params: Record<string, unknown>) => {
+      replyCalls.push({ method: "session.messages", params })
+      return Promise.resolve({ data: [] })
+    }),
+    revert: mock((params: Record<string, unknown>) => {
+      replyCalls.push({ method: "session.revert", params })
+      return Promise.resolve(sessionRevertResult)
+    }),
+    abort: mock((params: Record<string, unknown>) => {
+      replyCalls.push({ method: "session.abort", params })
+      return Promise.resolve({ data: true })
+    }),
+  },
   permission: {
     reply: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "permission.reply", params })
@@ -48,6 +63,25 @@ mock.module("@/lib/opencode/client", () => ({
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     getScopedSdkClient: (_: string) => mockScopedClient,
     getDirectory: () => "/test/project",
+    replyToPermission: mock((requestId: string, reply: string, options?: { directory?: string | null }) => {
+      replyCalls.push({ method: "permission.reply", params: { requestID: requestId, reply, directory: options?.directory } })
+      return Promise.resolve(true)
+    }),
+    replyToQuestion: mock((requestId: string, answers: string[] | string[][], directory?: string | null) => {
+      replyCalls.push({ method: "question.reply", params: { requestID: requestId, answers, directory } })
+      return Promise.resolve(true)
+    }),
+    revertSession: mock((sessionId: string, messageId: string, partId?: string, directory?: string | null) => {
+      replyCalls.push({
+        method: "session.revert",
+        params: { sessionID: sessionId, messageID: messageId, partID: partId, directory },
+      })
+      if (sessionRevertResult.error) {
+        const status = sessionRevertResult.response?.status
+        throw new Error(`session.revert failed${status ? ` (${status})` : ""}: rejected`)
+      }
+      return Promise.resolve(sessionRevertResult.data)
+    }),
   },
 }))
 
@@ -74,9 +108,24 @@ mock.module("./session-ui-store", () => ({
   },
 }))
 
-// Mock useInputStore (imported but not used in permission functions)
+// Mock useInputStore
+const inputState = {
+  pendingInputText: "",
+  pendingInputMode: "normal" as const,
+  attachedFiles: [],
+  clearAttachedFiles: () => {
+    inputState.attachedFiles = []
+  },
+  addRestoredAttachment: (attachment: never) => {
+    inputState.attachedFiles = [...inputState.attachedFiles, attachment]
+  },
+}
+
 mock.module("./input-store", () => ({
-  useInputStore: {},
+  useInputStore: {
+    getState: () => inputState,
+    setState: (patch: Partial<typeof inputState>) => Object.assign(inputState, patch),
+  },
 }))
 
 // Mock useGlobalSessionsStore (imported but not used in permission functions)
@@ -92,11 +141,15 @@ mock.module("./sync-refs", () => ({
 import { create, type StoreApi } from "zustand"
 import { INITIAL_STATE } from "./types"
 import type { DirectoryStore } from "./child-store"
-import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
+import type { Message, OpencodeClient, Part, Session } from "@opencode-ai/sdk/v2/client"
 
-function createStore(permissions: Record<string, PermissionRequest[]>): StoreApi<DirectoryStore> {
+function createStore(
+  permissions: Record<string, PermissionRequest[]>,
+  state?: Partial<DirectoryStore>,
+): StoreApi<DirectoryStore> {
   return create<DirectoryStore>()((set) => ({
     ...INITIAL_STATE,
+    ...state,
     permission: permissions,
     patch: (partial) => set(partial),
     replace: (next) => set(next),
@@ -117,6 +170,7 @@ function createChildStores(entries: Array<[string, StoreApi<DirectoryStore>]>) {
 describe("respondToPermission passes directory", () => {
   beforeEach(() => {
     replyCalls.length = 0
+    sessionRevertResult = {}
   })
 
   test("passes directory from child store when permission is found", async () => {
@@ -169,6 +223,73 @@ describe("respondToPermission passes directory", () => {
     expect(replyCalls[0].params.requestID).toBe("perm-3")
     expect(replyCalls[0].params.reply).toBe("reject")
     expect(replyCalls[0].params.directory).toBe("/fallback/dir")
+  })
+})
+
+describe("revertToMessage passes session directory", () => {
+  beforeEach(() => {
+    replyCalls.length = 0
+    sessionRevertResult = {}
+    Object.assign(inputState, {
+      pendingInputText: "previous draft",
+      pendingInputMode: "normal" as const,
+      attachedFiles: [],
+    })
+  })
+
+  test("routes revert through the session directory instead of the current directory", async () => {
+    const session = { id: "session-a", time: { created: 1 } } as Session
+    const targetMessage = { id: "msg_2", sessionID: "session-a", role: "user", time: { created: 2 } } as Message
+    const targetPart = { id: "prt_2", messageID: "msg_2", type: "text", text: "edit this" } as Part
+    const sessionStore = createStore({}, {
+      session: [session],
+      message: { "session-a": [targetMessage] },
+      part: { "msg_2": [targetPart] },
+    })
+    const currentStore = createStore({})
+    const childStores = createChildStores([
+      ["/test/project", sessionStore],
+      ["/current/project", currentStore],
+    ])
+    sessionRevertResult = { data: { id: "session-a", time: { created: 1, updated: 2 }, revert: { messageID: "msg_2" } } }
+
+    const { setActionRefs, revertToMessage } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/current/project")
+
+    await revertToMessage("session-a", "msg_2")
+
+    expect(replyCalls.find((call) => call.method === "session.revert")?.params.directory).toBe("/test/project")
+    expect((sessionStore.getState().session[0] as Session & { revert?: { messageID?: string } }).revert?.messageID).toBe("msg_2")
+    expect(currentStore.getState().session).toHaveLength(0)
+    expect(inputState.pendingInputText).toBe("edit this")
+  })
+
+  test("rolls back optimistic revert when the SDK returns an error", async () => {
+    const session = { id: "session-a", time: { created: 1 } } as Session
+    const targetMessage = { id: "msg_2", sessionID: "session-a", role: "user", time: { created: 2 } } as Message
+    const targetPart = { id: "prt_2", messageID: "msg_2", type: "text", text: "edit this" } as Part
+    const sessionStore = createStore({}, {
+      session: [session],
+      message: { "session-a": [targetMessage] },
+      part: { "msg_2": [targetPart] },
+    })
+    const childStores = createChildStores([["/test/project", sessionStore]])
+    sessionRevertResult = { error: { message: "rejected" }, response: { status: 500 } }
+
+    const { setActionRefs, revertToMessage } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    let thrown: unknown
+    try {
+      await revertToMessage("session-a", "msg_2")
+    } catch (error) {
+      thrown = error
+    }
+
+    expect(thrown).toBeInstanceOf(Error)
+    expect((thrown as Error).message).toContain("session.revert failed (500)")
+    expect((sessionStore.getState().session[0] as Session & { revert?: { messageID?: string } }).revert).toBe(undefined)
+    expect(inputState.pendingInputText).toBe("previous draft")
   })
 })
 

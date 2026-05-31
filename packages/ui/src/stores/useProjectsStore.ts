@@ -10,6 +10,8 @@ import { useDirectoryStore } from './useDirectoryStore';
 import { streamDebugEnabled } from '@/stores/utils/streamDebug';
 import { PROJECT_COLORS } from '@/lib/projectMeta';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { runtimeFetch } from '@/lib/runtime-fetch';
+import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 
 /** Pick a color key that's least used among existing projects */
 const pickAutoColor = (projects: ProjectEntry[]): string => {
@@ -49,6 +51,7 @@ interface ProjectsStore {
   removeProjectIcon: (id: string) => Promise<{ ok: boolean; error?: string }>;
   discoverProjectIcon: (id: string, options?: { force?: boolean }) => Promise<{ ok: boolean; skipped?: boolean; reason?: string; error?: string }>;
   reorderProjects: (fromIndex: number, toIndex: number) => void;
+  resetForRuntimeSwitch: () => void;
   validateProjectPath: (path: string) => ProjectPathValidationResult;
   synchronizeFromSettings: (settings: DesktopSettings) => void;
   getActiveProject: () => ProjectEntry | null;
@@ -57,6 +60,35 @@ interface ProjectsStore {
 const safeStorage = getSafeStorage();
 const PROJECTS_STORAGE_KEY = 'projects';
 const ACTIVE_PROJECT_STORAGE_KEY = 'activeProjectId';
+
+const getLocalRuntimeOrigin = (): string => {
+  if (typeof window === 'undefined') return '';
+  const value = (window as typeof window & { __OPENCHAMBER_LOCAL_ORIGIN__?: string }).__OPENCHAMBER_LOCAL_ORIGIN__;
+  return typeof value === 'string' ? value.trim().replace(/\/+$/, '') : '';
+};
+
+const getProjectsStorageNamespace = (): string => {
+  const apiBaseUrl = getRuntimeApiBaseUrl().trim().replace(/\/+$/, '');
+  if (!apiBaseUrl) return '';
+  return apiBaseUrl;
+};
+
+const getProjectsStorageKey = (): string => {
+  const namespace = getProjectsStorageNamespace();
+  return namespace ? `${PROJECTS_STORAGE_KEY}:${encodeURIComponent(namespace)}` : PROJECTS_STORAGE_KEY;
+};
+
+const getActiveProjectStorageKey = (): string => {
+  const namespace = getProjectsStorageNamespace();
+  return namespace ? `${ACTIVE_PROJECT_STORAGE_KEY}:${encodeURIComponent(namespace)}` : ACTIVE_PROJECT_STORAGE_KEY;
+};
+
+const shouldReadLegacyProjectsCache = (): boolean => {
+  const namespace = getProjectsStorageNamespace();
+  if (!namespace) return true;
+  const localOrigin = getLocalRuntimeOrigin();
+  return Boolean(localOrigin && namespace === localOrigin);
+};
 
 const resolveTildePath = (value: string, homeDir?: string | null): string => {
   const trimmed = value.trim();
@@ -240,7 +272,8 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
 
 const readPersistedProjects = (): ProjectEntry[] => {
   try {
-    const raw = safeStorage.getItem(PROJECTS_STORAGE_KEY);
+    const raw = safeStorage.getItem(getProjectsStorageKey())
+      || (shouldReadLegacyProjectsCache() ? safeStorage.getItem(PROJECTS_STORAGE_KEY) : null);
     if (!raw) {
       return [];
     }
@@ -252,7 +285,8 @@ const readPersistedProjects = (): ProjectEntry[] => {
 
 const readPersistedActiveProjectId = (): string | null => {
   try {
-    const raw = safeStorage.getItem(ACTIVE_PROJECT_STORAGE_KEY);
+    const raw = safeStorage.getItem(getActiveProjectStorageKey())
+      || (shouldReadLegacyProjectsCache() ? safeStorage.getItem(ACTIVE_PROJECT_STORAGE_KEY) : null);
     if (typeof raw === 'string' && raw.trim().length > 0) {
       return raw.trim();
     }
@@ -264,16 +298,17 @@ const readPersistedActiveProjectId = (): string | null => {
 
 const cacheProjects = (projects: ProjectEntry[], activeProjectId: string | null) => {
   try {
-    safeStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(projects));
+    safeStorage.setItem(getProjectsStorageKey(), JSON.stringify(projects));
   } catch {
     // ignored
   }
 
   try {
+    const activeProjectStorageKey = getActiveProjectStorageKey();
     if (activeProjectId) {
-      safeStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, activeProjectId);
+      safeStorage.setItem(activeProjectStorageKey, activeProjectId);
     } else {
-      safeStorage.removeItem(ACTIVE_PROJECT_STORAGE_KEY);
+      safeStorage.removeItem(activeProjectStorageKey);
     }
   } catch {
     // ignored
@@ -539,7 +574,7 @@ export const useProjectsStore = create<ProjectsStore>()(
         const dataUrl = await readFileAsDataUrl(file);
         const normalizedDataUrl = dataUrl.replace(/^data:[^;]+;/i, `data:${mime};`);
 
-        const response = await fetch(`/api/projects/${encodeURIComponent(id)}/icon`, {
+        const response = await runtimeFetch(`/api/projects/${encodeURIComponent(id)}/icon`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
@@ -570,7 +605,7 @@ export const useProjectsStore = create<ProjectsStore>()(
       }
 
       try {
-        const response = await fetch(`/api/projects/${encodeURIComponent(id)}/icon`, {
+        const response = await runtimeFetch(`/api/projects/${encodeURIComponent(id)}/icon`, {
           method: 'DELETE',
           headers: {
             Accept: 'application/json',
@@ -599,7 +634,7 @@ export const useProjectsStore = create<ProjectsStore>()(
       }
 
       try {
-        const response = await fetch(`/api/projects/${encodeURIComponent(id)}/icon/discover`, {
+        const response = await runtimeFetch(`/api/projects/${encodeURIComponent(id)}/icon/discover`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -655,6 +690,18 @@ export const useProjectsStore = create<ProjectsStore>()(
 
       set({ projects: nextProjects });
       persistProjects(nextProjects, activeProjectId);
+    },
+
+    resetForRuntimeSwitch: () => {
+      if (vscodeWorkspace) {
+        return;
+      }
+      const projects = readPersistedProjects();
+      const activeProjectId = readPersistedActiveProjectId();
+      const nextActiveProjectId = projects.some((project) => project.id === activeProjectId)
+        ? activeProjectId
+        : projects[0]?.id ?? null;
+      set({ projects, activeProjectId: nextActiveProjectId });
     },
 
     synchronizeFromSettings: (settings: DesktopSettings) => {

@@ -1,3 +1,5 @@
+import { runtimeFetch } from './runtime-fetch';
+
 export type MagicPromptId =
   | 'git.commit.generate.visible'
   | 'git.commit.generate.instructions'
@@ -841,7 +843,7 @@ export const fetchMagicPromptOverrides = async (): Promise<Record<string, string
   }
 
   if (!inFlightOverridesRequest) {
-    inFlightOverridesRequest = fetch(API_ENDPOINT, {
+    inFlightOverridesRequest = runtimeFetch(API_ENDPOINT, {
       method: 'GET',
       headers: { Accept: 'application/json' },
     })
@@ -894,7 +896,7 @@ export const renderMagicPrompt = async (id: MagicPromptId, variables: Record<str
 };
 
 export const saveMagicPromptOverride = async (id: MagicPromptId, text: string): Promise<MagicPromptOverridesPayload> => {
-  const response = await fetch(`${API_ENDPOINT}/${encodeURIComponent(id)}`, {
+  const response = await runtimeFetch(`${API_ENDPOINT}/${encodeURIComponent(id)}`, {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
@@ -915,7 +917,7 @@ export const saveMagicPromptOverride = async (id: MagicPromptId, text: string): 
 };
 
 export const resetMagicPromptOverride = async (id: MagicPromptId): Promise<MagicPromptOverridesPayload> => {
-  const response = await fetch(`${API_ENDPOINT}/${encodeURIComponent(id)}`, {
+  const response = await runtimeFetch(`${API_ENDPOINT}/${encodeURIComponent(id)}`, {
     method: 'DELETE',
     headers: { Accept: 'application/json' },
   });
@@ -932,7 +934,7 @@ export const resetMagicPromptOverride = async (id: MagicPromptId): Promise<Magic
 };
 
 export const resetAllMagicPromptOverrides = async (): Promise<MagicPromptOverridesPayload> => {
-  const response = await fetch(API_ENDPOINT, {
+  const response = await runtimeFetch(API_ENDPOINT, {
     method: 'DELETE',
     headers: { Accept: 'application/json' },
   });

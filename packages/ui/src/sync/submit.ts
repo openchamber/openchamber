@@ -1,7 +1,7 @@
 import type { Message, Part } from "@opencode-ai/sdk/v2/client"
 import { useCallback } from "react"
-import { useSyncSDK } from "./sync-context"
-import { useDirectoryStore } from "./sync-context"
+import { opencodeClient } from "@/lib/opencode/client"
+import { useDirectoryStore, useSyncDirectory } from "./sync-context"
 import { useSync } from "./use-sync"
 
 // ---------------------------------------------------------------------------
@@ -33,8 +33,8 @@ export type SubmitInput = {
 }
 
 export function usePromptSubmit() {
-  const sdk = useSyncSDK()
   const store = useDirectoryStore()
+  const directory = useSyncDirectory()
   const sync = useSync()
 
   const submit = useCallback(
@@ -82,41 +82,31 @@ export function usePromptSubmit() {
       try {
         if (input.command) {
           // Slash command
-          await sdk.session.command({
-            sessionID: input.sessionID,
-            command: input.command.name,
-            arguments: input.command.arguments,
+          await opencodeClient.withDirectory(directory, () => opencodeClient.sendCommand({
+            id: input.sessionID,
+            command: input.command?.name ?? "",
+            arguments: input.command?.arguments ?? "",
             agent: input.agent,
-            model: `${input.model.providerID}/${input.model.modelID}`,
+            providerID: input.model.providerID,
+            modelID: input.model.modelID,
             variant: input.variant,
-            parts: input.images,
+            files: input.images,
+            messageId: messageID,
           })
+          ).then(() => undefined)
         } else {
           // Regular prompt
-          const requestParts: Array<{ id: string; type: "text"; text: string }
-            | { id: string; type: "file"; mime: string; url: string; filename?: string }> = [
-            { id: textPart.id, type: "text" as const, text: input.text },
-          ]
-          if (input.images) {
-            for (const img of input.images) {
-              requestParts.push({
-                id: img.id ?? ascending("part"),
-                type: "file" as const,
-                mime: img.mime,
-                url: img.url,
-                filename: img.filename,
-              })
-            }
-          }
-
-          await sdk.session.promptAsync({
-            sessionID: input.sessionID,
+          await opencodeClient.withDirectory(directory, () => opencodeClient.sendMessage({
+            id: input.sessionID,
             agent: input.agent,
-            model: input.model,
-            messageID,
-            parts: requestParts,
+            providerID: input.model.providerID,
+            modelID: input.model.modelID,
+            messageId: messageID,
+            text: input.text,
+            files: input.images,
             variant: input.variant,
           })
+          ).then(() => undefined)
         }
         return true
       } catch (error) {
@@ -136,7 +126,7 @@ export function usePromptSubmit() {
         throw error
       }
     },
-    [sdk, store, sync],
+    [directory, store, sync],
   )
 
   return submit

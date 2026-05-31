@@ -1,5 +1,7 @@
 const DEFAULT_TARGET_TTL_MS = 30 * 60 * 1000;
 const TOKEN_COOKIE_NAME = 'oc_preview_token';
+const TOKEN_QUERY_PARAM = 'oc_preview_token';
+const CLIENT_TOKEN_QUERY_PARAM = 'oc_client_token';
 
 const LOOPBACK_HOSTS = new Set([
   'localhost',
@@ -177,11 +179,20 @@ export const classifyPreviewNavigation = ({ url, currentUrl, targetOrigin }) => 
   let nativeMatchMedia = null;
   const colorSchemeListeners = new Set();
 
+  const parentOrigin = (() => {
+    try {
+      const origin = document.referrer ? new URL(document.referrer).origin : '*';
+      return origin && origin !== 'null' ? origin : '*';
+    } catch {
+      return '*';
+    }
+  })();
+
   const post = (payload) => {
     try {
       if (window.parent && typeof window.parent.postMessage === 'function') {
         const message = Object.assign({ source: SOURCE, version: VERSION }, payload || {});
-        window.parent.postMessage(message, window.location.origin);
+        window.parent.postMessage(message, parentOrigin);
       }
     } catch {}
   };
@@ -435,6 +446,9 @@ export const classifyPreviewNavigation = ({ url, currentUrl, targetOrigin }) => 
     const proxyMatch = window.location.pathname.match(/^(\/api\/preview\/proxy\/[a-f0-9]{16,64})(?:\/|$)/i);
     if (!proxyMatch) return;
     const proxyBase = proxyMatch[1] + '/';
+    const currentSearchParams = new URL(window.location.href).searchParams;
+    const previewToken = currentSearchParams.get('oc_preview_token') || '';
+    const clientToken = currentSearchParams.get('oc_client_token') || '';
     let reloadTimer = 0;
 
     const schedulePreviewReload = () => {
@@ -454,8 +468,11 @@ export const classifyPreviewNavigation = ({ url, currentUrl, targetOrigin }) => 
       try {
         const parsed = new URL(String(url), window.location.href);
         if (parsed.host !== window.location.host) return url;
-        if (parsed.pathname.indexOf(proxyBase) === 0) return url;
-        parsed.pathname = proxyBase;
+        if (parsed.pathname.indexOf(proxyBase) !== 0) {
+          parsed.pathname = proxyBase;
+        }
+        if (previewToken) parsed.searchParams.set('oc_preview_token', previewToken);
+        if (clientToken) parsed.searchParams.set('oc_client_token', clientToken);
         return parsed.toString();
       } catch {
         return url;
@@ -496,6 +513,21 @@ export const classifyPreviewNavigation = ({ url, currentUrl, targetOrigin }) => 
     const proxyMatch = window.location.pathname.match(/^(\/api\/preview\/proxy\/[a-f0-9]{16,64})(?:\/|$)/i);
     if (!proxyMatch) return;
     const proxyBase = proxyMatch[1];
+    const currentSearchParams = new URL(window.location.href).searchParams;
+    const previewToken = currentSearchParams.get('oc_preview_token') || '';
+    const clientToken = currentSearchParams.get('oc_client_token') || '';
+
+    const withProxyAuth = (value) => {
+      if ((!previewToken && !clientToken) || typeof value !== 'string' || value.indexOf(proxyBase) !== 0) return value;
+      try {
+        const parsed = new URL(value, window.location.origin);
+        if (previewToken) parsed.searchParams.set('oc_preview_token', previewToken);
+        if (clientToken) parsed.searchParams.set('oc_client_token', clientToken);
+        return parsed.pathname + parsed.search + parsed.hash;
+      } catch {
+        return value;
+      }
+    };
 
     const shouldProxyPath = (pathname) => {
       if (typeof pathname !== 'string' || !pathname.startsWith('/') || pathname.startsWith('//')) return false;
@@ -506,14 +538,15 @@ export const classifyPreviewNavigation = ({ url, currentUrl, targetOrigin }) => 
     const proxiedUrl = (value) => {
       if (typeof value !== 'string') return value;
       if (value.startsWith('/')) {
+        if (value.indexOf(proxyBase) === 0) return withProxyAuth(value);
         if (!shouldProxyPath(value)) return value;
-        return proxyBase + value;
+        return withProxyAuth(proxyBase + value);
       }
 
       try {
         const parsed = new URL(value, window.location.href);
         if (parsed.origin === window.location.origin && shouldProxyPath(parsed.pathname)) {
-          return proxyBase + parsed.pathname + parsed.search + parsed.hash;
+          return withProxyAuth(proxyBase + parsed.pathname + parsed.search + parsed.hash);
         }
       } catch {}
 
@@ -529,11 +562,45 @@ export const classifyPreviewNavigation = ({ url, currentUrl, targetOrigin }) => 
         const isWebSocketProtocol = parsed.protocol === 'ws:' || parsed.protocol === 'wss:';
         if (sameHost && isWebSocketProtocol && shouldProxyPath(parsed.pathname)) {
           parsed.pathname = proxyBase + parsed.pathname;
+          if (previewToken) parsed.searchParams.set('oc_preview_token', previewToken);
+          if (clientToken) parsed.searchParams.set('oc_client_token', clientToken);
           return parsed.toString();
         }
       } catch {}
       return value;
     };
+
+    const proxiedNavigationUrl = (value) => {
+      if (typeof value !== 'string') return value;
+      try {
+        const parsed = new URL(value, window.location.href);
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return value;
+        if (parsed.origin === window.location.origin && parsed.pathname.indexOf(proxyBase) === 0) {
+          return withProxyAuth(parsed.pathname + parsed.search + parsed.hash);
+        }
+        const host = parsed.hostname;
+        const isLoopback = host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '::1' || host === '[::1]';
+        if (!isLoopback && parsed.origin !== window.location.origin) return value;
+        if (!shouldProxyPath(parsed.pathname)) return value;
+        return withProxyAuth(proxyBase + parsed.pathname + parsed.search + parsed.hash);
+      } catch {
+        return proxiedUrl(value);
+      }
+    };
+
+    if (window.history && typeof window.history.pushState === 'function') {
+      const nativePushState = window.history.pushState.bind(window.history);
+      window.history.pushState = function(state, unused, url) {
+        return nativePushState(state, unused, url === undefined ? url : proxiedNavigationUrl(String(url)));
+      };
+    }
+
+    if (window.history && typeof window.history.replaceState === 'function') {
+      const nativeReplaceState = window.history.replaceState.bind(window.history);
+      window.history.replaceState = function(state, unused, url) {
+        return nativeReplaceState(state, unused, url === undefined ? url : proxiedNavigationUrl(String(url)));
+      };
+    }
 
     if (typeof window.fetch === 'function') {
       const nativeFetch = window.fetch.bind(window);
@@ -545,7 +612,7 @@ export const classifyPreviewNavigation = ({ url, currentUrl, targetOrigin }) => 
           try {
             const parsed = new URL(input.url);
             if (parsed.origin === window.location.origin && shouldProxyPath(parsed.pathname)) {
-              const nextUrl = proxyBase + parsed.pathname + parsed.search + parsed.hash;
+              const nextUrl = withProxyAuth(proxyBase + parsed.pathname + parsed.search + parsed.hash);
               return nativeFetch(new Request(nextUrl, input), init);
             }
           } catch {}
@@ -912,9 +979,21 @@ export const normalizeProxyTargetUrl = (rawUrl, { allowExternal = false } = {}) 
   return { ok: true, origin: url.origin };
 };
 
+const appendProxyAuthToProxyUrl = (value, { previewToken = '', clientToken = '' } = {}) => {
+  if ((!previewToken && !clientToken) || typeof value !== 'string' || !value) return value;
+  try {
+    const parsed = new URL(value, 'http://openchamber-preview.local');
+    if (previewToken) parsed.searchParams.set(TOKEN_QUERY_PARAM, previewToken);
+    if (clientToken) parsed.searchParams.set(CLIENT_TOKEN_QUERY_PARAM, clientToken);
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return value;
+  }
+};
+
 const normalizeLoopbackUrl = (rawUrl) => normalizeProxyTargetUrl(rawUrl, { allowExternal: false });
 
-export const rewritePreviewBody = ({ bodyText, proxyBasePath, targetOrigin, kind }) => {
+export const rewritePreviewBody = ({ bodyText, proxyBasePath, targetOrigin, kind, previewToken = '', clientToken = '' }) => {
   if (typeof bodyText !== 'string' || bodyText.length === 0) {
     return bodyText;
   }
@@ -935,13 +1014,13 @@ export const rewritePreviewBody = ({ bodyText, proxyBasePath, targetOrigin, kind
   const rewriteResourceUrl = (value) => {
     if (typeof value !== 'string' || value.length === 0) return value;
     if (value.startsWith('/') && !value.startsWith('//')) {
-      if (value.startsWith('/api/preview/proxy/')) return value;
-      return `${prefix}${value}`;
+      if (value.startsWith('/api/preview/proxy/')) return appendProxyAuthToProxyUrl(value, { previewToken, clientToken });
+      return appendProxyAuthToProxyUrl(`${prefix}${value}`, { previewToken, clientToken });
     }
     try {
       const parsed = new URL(value);
       if (isSameTargetOrigin(parsed)) {
-        return `${prefix}${parsed.pathname}${parsed.search}${parsed.hash}`;
+        return appendProxyAuthToProxyUrl(`${prefix}${parsed.pathname}${parsed.search}${parsed.hash}`, { previewToken, clientToken });
       }
     } catch {
       return value;
@@ -963,6 +1042,9 @@ export const rewritePreviewBody = ({ bodyText, proxyBasePath, targetOrigin, kind
       }).join(', ');
       return `srcset=${quote}${rewritten}${quote}`;
     });
+  const stripPreviewCspMeta = (text) => text
+    .replace(/<meta\b(?=[^>]*\bhttp-equiv\s*=\s*(['"])content-security-policy\1)[^>]*>/gi, '')
+    .replace(/<meta\b(?=[^>]*\bhttp-equiv\s*=\s*content-security-policy\b)[^>]*>/gi, '');
   const rewriteCss = (text) => text
     .replace(/url\((['"]?)([^)'"]*)\1\)/gi, (_match, quote, value) => {
       const q = quote || '';
@@ -982,10 +1064,26 @@ export const rewritePreviewBody = ({ bodyText, proxyBasePath, targetOrigin, kind
       return `import(${quote}${rewriteResourceUrl(`/${path}`)}${quote})`;
     });
 
-  if (kind === 'html') return rewriteHtml(bodyText);
+  if (kind === 'html') return stripPreviewCspMeta(rewriteHtml(bodyText));
   if (kind === 'css') return rewriteCss(bodyText);
   if (kind === 'javascript') return rewriteJavaScript(bodyText);
   return bodyText;
+};
+
+export const rewritePreviewRedirectLocation = ({ location, proxyBasePath, targetOrigin, previewToken = '', clientToken = '' }) => {
+  if (typeof location !== 'string' || !location) return location;
+  const prefix = proxyBasePath.endsWith('/') ? proxyBasePath.slice(0, -1) : proxyBasePath;
+  const target = targetOrigin ? new URL(targetOrigin) : null;
+  try {
+    const parsed = new URL(location, target || 'http://127.0.0.1');
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return location;
+    const host = parsed.hostname;
+    const isLoopback = host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '::1' || host === '[::1]';
+    if (!isLoopback || (target && parsed.port !== target.port)) return location;
+    return appendProxyAuthToProxyUrl(`${prefix}${parsed.pathname}${parsed.search}${parsed.hash}`, { previewToken, clientToken });
+  } catch {
+    return location;
+  }
 };
 
 export const createPreviewProxyRuntime = ({
@@ -1050,7 +1148,7 @@ export const createPreviewProxyRuntime = ({
     }
 
     const cookies = parseCookieHeader(req.headers?.cookie);
-    const token = cookies.get(TOKEN_COOKIE_NAME) || '';
+    const token = parsed.searchParams.get(TOKEN_QUERY_PARAM) || cookies.get(TOKEN_COOKIE_NAME) || '';
     if (!token || token !== entry.token) {
       return { ok: false, status: 403, error: 'Preview token missing' };
     }
@@ -1079,30 +1177,8 @@ export const createPreviewProxyRuntime = ({
     return parts.length > 0 ? `?${parts.join('&')}` : '';
   };
 
-  // Strip the `frame-ancestors` directive from a CSP header value while
-  // preserving every other directive. Returns null if no directives remain.
-  const removeFrameAncestorsDirective = (cspValue) => {
-    if (typeof cspValue !== 'string' || cspValue.length === 0) {
-      return cspValue;
-    }
-    const directives = cspValue
-      .split(';')
-      .map((part) => part.trim())
-      .filter((part) => part.length > 0);
-
-    const filtered = directives.filter((directive) => {
-      const name = directive.split(/\s+/, 1)[0]?.toLowerCase() ?? '';
-      return name !== 'frame-ancestors';
-    });
-
-    if (filtered.length === 0) {
-      return null;
-    }
-    return filtered.join('; ');
-  };
-
-  // Drop response headers that prevent the dev server from being framed.
-  // The proxy itself is same-origin, so embedding is otherwise safe.
+  // Drop response headers that prevent framing or block the injected preview bridge.
+  // Preview targets are restricted to loopback dev servers.
   const stripFrameBustingHeaders = (headers) => {
     if (!headers || typeof headers !== 'object') {
       return;
@@ -1116,16 +1192,7 @@ export const createPreviewProxyRuntime = ({
         continue;
       }
       if (lowerKey === 'content-security-policy' || lowerKey === 'content-security-policy-report-only') {
-        const original = headers[key];
-        const values = Array.isArray(original) ? original : [original];
-        const rewritten = values
-          .map((value) => removeFrameAncestorsDirective(value))
-          .filter((value) => typeof value === 'string' && value.length > 0);
-        if (rewritten.length === 0) {
-          delete headers[key];
-        } else {
-          headers[key] = Array.isArray(original) ? rewritten : rewritten[0];
-        }
+        delete headers[key];
       }
     }
   };
@@ -1216,6 +1283,7 @@ export const createPreviewProxyRuntime = ({
         return res.json({
           id: target.id,
           proxyBasePath: cookiePath,
+          previewToken: target.token,
           expiresAt: target.expiresAt,
         });
       } catch (error) {
@@ -1260,7 +1328,10 @@ export const createPreviewProxyRuntime = ({
         const parsed = new URL(req.originalUrl || req.url || '', 'http://localhost');
         // Never forward our auth cookie token to the dev server.
         const strippedPath = stripProxyPrefix(parsed.pathname, resolved.id);
-        return `${strippedPath}${removeRawQueryParam(parsed.search, 'ocPreview')}`;
+        const withoutReloadParam = removeRawQueryParam(parsed.search, 'ocPreview');
+        const withoutPreviewToken = removeRawQueryParam(withoutReloadParam, TOKEN_QUERY_PARAM);
+        const withoutClientToken = removeRawQueryParam(withoutPreviewToken, CLIENT_TOKEN_QUERY_PARAM);
+        return `${strippedPath}${withoutClientToken}`;
       },
       on: {
         proxyReq: (proxyReq) => {
@@ -1276,6 +1347,23 @@ export const createPreviewProxyRuntime = ({
           // The proxy is same-origin so embedding is otherwise safe.
           stripFrameBustingHeaders(proxyRes.headers);
 
+          const resolved = resolveTargetFromRequest(req);
+          if (!resolved.ok) {
+            return responseBuffer;
+          }
+
+          const proxyBasePath = `/api/preview/proxy/${resolved.id}`;
+          if (typeof proxyRes.headers?.location === 'string') {
+            const requestSearchParams = new URL(req.originalUrl || req.url || '', 'http://localhost').searchParams;
+            proxyRes.headers.location = rewritePreviewRedirectLocation({
+              location: proxyRes.headers.location,
+              proxyBasePath,
+              targetOrigin: resolved.entry.origin,
+              previewToken: resolved.entry.token,
+              clientToken: requestSearchParams.get(CLIENT_TOKEN_QUERY_PARAM) || '',
+            });
+          }
+
           const contentType = String(proxyRes.headers?.['content-type'] || '').toLowerCase();
           const isHtml = contentType.includes('text/html');
           const isCss = contentType.includes('text/css');
@@ -1290,13 +1378,8 @@ export const createPreviewProxyRuntime = ({
           delete proxyRes.headers.etag;
           delete proxyRes.headers['last-modified'];
 
-          const resolved = resolveTargetFromRequest(req);
-          if (!resolved.ok) {
-            return responseBuffer;
-          }
-
-          const proxyBasePath = `/api/preview/proxy/${resolved.id}`;
           const parsed = new URL(req.originalUrl || req.url || '', 'http://localhost');
+          const clientToken = parsed.searchParams.get(CLIENT_TOKEN_QUERY_PARAM) || '';
           const upstreamPath = stripProxyPrefix(parsed.pathname, resolved.id);
           if (isJavaScript && upstreamPath === '/@vite/client') {
             return rewritePreviewBody({
@@ -1304,6 +1387,8 @@ export const createPreviewProxyRuntime = ({
               proxyBasePath,
               targetOrigin: resolved.entry.origin,
               kind: 'javascript',
+              previewToken: resolved.entry.token,
+              clientToken,
             });
           }
 
@@ -1312,6 +1397,8 @@ export const createPreviewProxyRuntime = ({
             proxyBasePath,
             targetOrigin: resolved.entry.origin,
             kind: isHtml ? 'html' : isCss ? 'css' : 'javascript',
+            previewToken: resolved.entry.token,
+            clientToken,
           });
           return isHtml ? injectPreviewBridge(rewrittenBody, resolved.entry.origin) : rewrittenBody;
         }),
@@ -1384,6 +1471,9 @@ export const createPreviewProxyRuntime = ({
           req.originalUrl = rawUrl;
           const parsed = new URL(rawUrl, 'http://localhost');
           const nextPath = stripProxyPrefix(parsed.pathname, resolved.id);
+          parsed.searchParams.delete('ocPreview');
+          parsed.searchParams.delete(TOKEN_QUERY_PARAM);
+          parsed.searchParams.delete(CLIENT_TOKEN_QUERY_PARAM);
           const search = parsed.searchParams.toString();
           req.url = `${nextPath}${search ? `?${search}` : ''}`;
           proxy.upgrade(req, socket, head);

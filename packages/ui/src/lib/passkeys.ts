@@ -4,6 +4,7 @@ import {
   WebAuthnAbortService,
   WebAuthnError,
 } from '@simplewebauthn/browser';
+import { runtimeFetch } from './runtime-fetch';
 
 const PASSKEY_AUTH_OPTIONS_ENDPOINT = '/auth/passkey/authenticate/options';
 const PASSKEY_AUTH_VERIFY_ENDPOINT = '/auth/passkey/authenticate/verify';
@@ -29,6 +30,11 @@ export type StoredPasskey = {
   backedUp: boolean;
 };
 
+type PasskeyAuthenticationOptions = {
+  issueClientToken?: boolean;
+  clientLabel?: string;
+};
+
 export const defaultPasskeyStatus: PasskeyStatus = {
   enabled: false,
   hasPasskeys: false,
@@ -36,7 +42,7 @@ export const defaultPasskeyStatus: PasskeyStatus = {
   rpID: null,
 };
 
-const postJson = async (url: string, body?: unknown): Promise<Response> => fetch(url, {
+const postJson = async (url: string, body?: unknown): Promise<Response> => runtimeFetch(url, {
   method: 'POST',
   credentials: 'include',
   headers: {
@@ -108,7 +114,7 @@ export const registerCurrentDevicePasskey = async () => {
   return verifyResponse.json().catch(() => null);
 };
 
-export const authenticateWithPasskey = async (trustDevice: boolean) => {
+export const authenticateWithPasskey = async (trustDevice: boolean, options: PasskeyAuthenticationOptions = {}) => {
   const support = getPasskeySupportState();
   if (!support.supported) {
     throw new Error(support.reason);
@@ -125,6 +131,8 @@ export const authenticateWithPasskey = async (trustDevice: boolean) => {
     requestId,
     response: authResponse,
     trustDevice,
+    issueClientToken: options.issueClientToken === true,
+    clientLabel: options.clientLabel,
   });
 
   if (!verifyResponse.ok) {
@@ -135,7 +143,7 @@ export const authenticateWithPasskey = async (trustDevice: boolean) => {
 };
 
 export const fetchPasskeyStatus = async (): Promise<PasskeyStatus> => {
-  const response = await fetch(PASSKEY_STATUS_ENDPOINT, {
+  const response = await runtimeFetch(PASSKEY_STATUS_ENDPOINT, {
     method: 'GET',
     credentials: 'include',
     headers: {
@@ -157,7 +165,7 @@ export const fetchPasskeyStatus = async (): Promise<PasskeyStatus> => {
 };
 
 export const fetchStoredPasskeys = async (): Promise<StoredPasskey[]> => {
-  const response = await fetch(PASSKEY_LIST_ENDPOINT, {
+  const response = await runtimeFetch(PASSKEY_LIST_ENDPOINT, {
     method: 'GET',
     credentials: 'include',
     headers: {
@@ -174,7 +182,7 @@ export const fetchStoredPasskeys = async (): Promise<StoredPasskey[]> => {
 };
 
 export const revokeStoredPasskey = async (id: string) => {
-  const response = await fetch(`${PASSKEY_LIST_ENDPOINT}/${encodeURIComponent(id)}`, {
+  const response = await runtimeFetch(`${PASSKEY_LIST_ENDPOINT}/${encodeURIComponent(id)}`, {
     method: 'DELETE',
     credentials: 'include',
     headers: {

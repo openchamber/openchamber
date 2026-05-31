@@ -366,7 +366,7 @@ export function GitHubIssuePickerDialog({
 
       const sessionTitle = `#${issue.number} ${issue.title}`.trim();
 
-      const sessionId = await (async () => {
+      const { sessionId, sessionDirectory } = await (async () => {
         if (createInWorktree) {
           const preferred = `issue-${issue.number}-${generateBranchSlug()}`;
           const created = await createWorktreeSessionForNewBranch(
@@ -376,14 +376,14 @@ export function GitHubIssuePickerDialog({
           if (!created?.id) {
             throw new Error('Failed to create worktree session');
           }
-          return created.id;
+          return { sessionId: created.id, sessionDirectory: created.path };
         }
 
         const session = await sessionActions.createSession(sessionTitle, projectDirectory, null);
         if (!session?.id) {
           throw new Error('Failed to create session');
         }
-        return session.id;
+        return { sessionId: session.id, sessionDirectory: session.directory ?? projectDirectory };
       })();
 
       // Ensure worktree-based sessions also get the issue title.
@@ -457,7 +457,7 @@ export function GitHubIssuePickerDialog({
       const instructionsText = await renderMagicPrompt('github.issue.review.instructions');
       const contextText = buildIssueContextText({ repo: issueRes.repo, issue, comments });
 
-      void opencodeClient.sendMessage({
+      void opencodeClient.withDirectory(sessionDirectory, () => opencodeClient.sendMessage({
         id: sessionId,
         providerID,
         modelID,
@@ -468,7 +468,7 @@ export function GitHubIssuePickerDialog({
           { text: instructionsText, synthetic: true },
           { text: contextText, synthetic: true },
         ],
-      }).catch((e) => {
+      })).catch((e) => {
         const message = e instanceof Error ? e.message : String(e);
         toast.error(t('session.githubIssuePicker.toast.sendContextFailed'), {
           description: message,

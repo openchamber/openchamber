@@ -35,32 +35,13 @@ import type {
   RevertCommitResponse,
   ResetToCommitResponse,
 } from './api/types';
-
-declare global {
-  interface Window {
-    __OPENCHAMBER_DESKTOP_SERVER__?: {
-      origin: string;
-      opencodePort: number | null;
-      apiPrefix: string;
-      cliAvailable: boolean;
-    };
-  }
-}
-
-const resolveBaseOrigin = (): string => {
-  if (typeof window === 'undefined') {
-    return '';
-  }
-  const desktopOrigin = window.__OPENCHAMBER_DESKTOP_SERVER__?.origin;
-  if (desktopOrigin) {
-    return desktopOrigin;
-  }
-  return window.location.origin;
-};
+import { runtimeFetch } from './runtime-fetch';
+import { getRuntimeUrlResolver } from './runtime-url';
 
 const API_BASE = '/api/git';
 const GIT_STATUS_CACHE_TTL_MS = 1200;
 const GIT_REPO_CHECK_CACHE_TTL_MS = 5000;
+const fetch = runtimeFetch;
 
 const gitStatusCache = new Map<string, { value: GitStatus; expiresAt: number }>();
 const gitStatusInFlight = new Map<string, Promise<GitStatus>>();
@@ -74,19 +55,10 @@ function buildUrl(
   directory: string | null | undefined,
   params?: Record<string, string | number | boolean | undefined>
 ): string {
-  const url = new URL(path, resolveBaseOrigin());
-  if (directory) {
-    url.searchParams.set('directory', directory);
-  }
+  const query: Record<string, string | number | boolean | undefined> = { ...params };
+  if (directory) query.directory = directory;
 
-  if (params) {
-    for (const [key, value] of Object.entries(params)) {
-      if (value === undefined) continue;
-      url.searchParams.set(key, String(value));
-    }
-  }
-
-  return url.toString();
+  return getRuntimeUrlResolver().api(path, query);
 }
 
 export async function checkIsGitRepository(directory: string): Promise<boolean> {

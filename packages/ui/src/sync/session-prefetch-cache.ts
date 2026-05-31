@@ -38,15 +38,16 @@ export function shouldSkipSessionPrefetch(input: {
   pageSize: number
   now?: number
 }): boolean {
-  if (input.hasMessages) {
-    if (!input.info) return true
-    if (input.info.complete) return true
-    if (input.info.limit > input.pageSize) return true
-    if (input.info.limit < input.pageSize) return false
-  } else {
-    if (!input.info) return false
+  if (!input.hasMessages) {
+    return false
   }
-  return (input.now ?? Date.now()) - input.info.at < SESSION_PREFETCH_TTL
+
+  const info = input.info
+  if (!info) return true
+  if (info.complete) return true
+  if (info.limit > input.pageSize) return true
+  if (info.limit < input.pageSize) return false
+  return (input.now ?? Date.now()) - info.at < SESSION_PREFETCH_TTL
 }
 
 export function getSessionPrefetch(directory: string, sessionID: string): Meta | undefined {

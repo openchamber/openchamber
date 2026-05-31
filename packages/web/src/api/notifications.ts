@@ -55,6 +55,10 @@ const notifyWithServiceWorker = async (payload?: NotificationPayload): Promise<b
 };
 
 const notifyWithWebAPI = async (payload?: NotificationPayload): Promise<boolean> => {
+  if (payload?.requireHidden && typeof document !== 'undefined' && document.hasFocus()) {
+    return true;
+  }
+
   if (typeof Notification === 'undefined') {
     console.info('Notifications not supported in this environment', payload);
     return false;
@@ -91,7 +95,7 @@ const notifyWithWebAPI = async (payload?: NotificationPayload): Promise<boolean>
   }
 };
 
-const notifyWithTauri = async (payload?: NotificationPayload): Promise<boolean> => {
+const notifyWithDesktop = async (payload?: NotificationPayload): Promise<boolean> => {
   if (typeof window === 'undefined') {
     return false;
   }
@@ -107,18 +111,22 @@ const notifyWithTauri = async (payload?: NotificationPayload): Promise<boolean> 
         title: payload?.title,
         body: payload?.body,
         tag: payload?.tag,
+        kind: payload?.kind,
+        sessionId: payload?.sessionId,
+        directory: payload?.directory,
+        requireHidden: payload?.requireHidden,
       },
     });
     return true;
   } catch (error) {
-    console.warn('Failed to send native notification (tauri)', error);
+    console.warn('Failed to send native notification (desktop)', error);
     return false;
   }
 };
 
 export const createWebNotificationsAPI = (): NotificationsAPI => ({
   async notifyAgentCompletion(payload?: NotificationPayload): Promise<boolean> {
-    return (await notifyWithTauri(payload)) || (await notifyWithWebAPI(payload));
+    return (await notifyWithDesktop(payload)) || (await notifyWithWebAPI(payload));
   },
   canNotify: () => {
     if (typeof window !== 'undefined') {

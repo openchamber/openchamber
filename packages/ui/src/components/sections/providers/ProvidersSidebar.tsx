@@ -9,6 +9,7 @@ import { SettingsProjectSelector } from '@/components/sections/shared/SettingsPr
 import { Icon } from "@/components/icon/Icon";
 import { opencodeClient } from '@/lib/opencode/client';
 import { useI18n } from '@/lib/i18n';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 const ADD_PROVIDER_ID = '__add_provider__';
 
@@ -61,7 +62,9 @@ export const ProvidersSidebar: React.FC<ProvidersSidebarProps> = ({ onItemSelect
       const tasks = providers.map(async (provider) => {
         try {
           const query = directory ? `?directory=${encodeURIComponent(directory)}` : '';
-          const response = await fetch(`/api/provider/${encodeURIComponent(provider.id)}/source${query}`, {
+          // OpenChamber-only metadata endpoint: the SDK exposes provider data but
+          // not local auth/source-file provenance used by this settings sidebar.
+          const response = await runtimeFetch(`/api/provider/${encodeURIComponent(provider.id)}/source${query}`, {
             method: 'GET',
             headers: { Accept: 'application/json' },
           });

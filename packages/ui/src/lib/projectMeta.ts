@@ -1,4 +1,5 @@
 import type { ProjectEntry } from '@/lib/api/types';
+import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import type { IconName } from "@/components/icon/icons";
 
 type ThemeVariant = 'light' | 'dark';
@@ -61,5 +62,5 @@ export const getProjectIconImageUrl = (
     params.set('theme', options.themeVariant);
   }
 
-  return `/api/projects/${encodeURIComponent(project.id)}/icon?${params.toString()}`;
+  return getRuntimeUrlResolver().authenticatedAsset(`/api/projects/${encodeURIComponent(project.id)}/icon`, params);
 };

@@ -5,12 +5,16 @@ import * as path from 'path';
 import {
   createAgent,
   createCommand,
+  createSnippet,
   deleteAgent,
   deleteCommand,
+  deleteSnippet,
   getAgentSources,
   getCommandSources,
+  getSnippet,
   updateAgent,
   updateCommand,
+  updateSnippet,
   type AgentScope,
   type CommandScope,
   AGENT_SCOPE,
@@ -28,10 +32,13 @@ import {
   type DiscoveredSkill,
   SKILL_SCOPE,
   listMcpConfigs,
+  listSnippets,
   getMcpConfig,
   createMcpConfig,
   updateMcpConfig,
   deleteMcpConfig,
+  expandSnippets,
+  type SnippetScope,
 } from './opencodeConfig';
 import {
   getSkillsCatalog,
@@ -457,6 +464,54 @@ export async function handleConfigBridgeMessage(
             reloadDelayMs: deps.clientReloadDelayMs,
           },
         };
+      }
+
+      return { id, type, success: false, error: `Unsupported method: ${normalizedMethod}` };
+    }
+
+    case 'api:config/snippets': {
+      const { method, name, body, directory } = (payload || {}) as {
+        method?: string;
+        name?: string;
+        body?: Record<string, unknown>;
+        directory?: string;
+      };
+      const normalizedMethod = typeof method === 'string' && method.trim() ? method.trim().toUpperCase() : 'GET';
+      const snippetName = typeof name === 'string' ? name.trim() : '';
+      const workingDirectory = resolveWorkingDirectory(ctx, directory);
+
+      if (normalizedMethod === 'GET' && !snippetName) {
+        return { id, type, success: true, data: listSnippets(workingDirectory) };
+      }
+
+      if (normalizedMethod === 'POST' && !snippetName) {
+        return { id, type, success: true, data: { text: expandSnippets(typeof body?.text === 'string' ? body.text : '', workingDirectory) } };
+      }
+
+      if (!snippetName) {
+        return { id, type, success: false, error: 'Snippet name is required' };
+      }
+
+      if (normalizedMethod === 'GET') {
+        const snippet = getSnippet(snippetName, workingDirectory);
+        if (!snippet) return { id, type, success: false, error: `Snippet "${snippetName}" not found` };
+        return { id, type, success: true, data: snippet };
+      }
+
+      if (normalizedMethod === 'POST') {
+        const scope = body?.scope === 'project' ? 'project' : 'global';
+        const snippet = createSnippet(snippetName, (body || {}) as Record<string, unknown>, workingDirectory, scope as SnippetScope);
+        return { id, type, success: true, data: { success: true, snippet } };
+      }
+
+      if (normalizedMethod === 'PATCH') {
+        const snippet = updateSnippet(snippetName, (body || {}) as Record<string, unknown>, workingDirectory);
+        return { id, type, success: true, data: { success: true, snippet } };
+      }
+
+      if (normalizedMethod === 'DELETE') {
+        deleteSnippet(snippetName, workingDirectory);
+        return { id, type, success: true, data: { success: true } };
       }
 
       return { id, type, success: false, error: `Unsupported method: ${normalizedMethod}` };

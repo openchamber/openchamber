@@ -8,6 +8,7 @@ import { streamDebugEnabled } from '@/stores/utils/streamDebug';
 import { copyTextToClipboard as copyPlainTextToClipboard } from '@/lib/clipboard';
 import { getSyncSessions, getSyncMessages, getSyncParts } from '@/sync/sync-refs';
 import { useStreamingStore } from '@/sync/streaming';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 export interface DebugMessageInfo {
   messageId: string;
@@ -241,7 +242,7 @@ export const debugUtils = {
 
     const safeFetchJson = async (url: string): Promise<unknown> => {
       try {
-        const resp = await fetch(url);
+        const resp = await runtimeFetch(url);
         return resp.ok ? await safeJson(resp) : { status: resp.status };
       } catch (error) {
         return { error: error instanceof Error ? error.message : String(error) };
@@ -253,20 +254,28 @@ export const debugUtils = {
     let settingsInfo: unknown = null;
     let opencodeHealth: unknown = null;
 
-    const pathUrl = currentDirectory
-      ? `/api/path?directory=${encodeURIComponent(currentDirectory)}`
-      : '/api/path';
-    pathInfo = await safeFetchJson(pathUrl);
+    try {
+      const pathResult = await opencodeClient.getSdkClient().path.get(
+        currentDirectory ? { directory: currentDirectory } : undefined
+      );
+      pathInfo = pathResult.error ? { error: pathResult.error } : pathResult.data;
+    } catch (error) {
+      pathInfo = { error: error instanceof Error ? error.message : String(error) };
+    }
 
-    const projectUrl = currentDirectory
-      ? `/api/project/current?directory=${encodeURIComponent(currentDirectory)}`
-      : '/api/project/current';
-    projectInfo = await safeFetchJson(projectUrl);
+    try {
+      const projectResult = await opencodeClient.getSdkClient().project.current(
+        currentDirectory ? { directory: currentDirectory } : undefined
+      );
+      projectInfo = projectResult.error ? { error: projectResult.error } : projectResult.data;
+    } catch (error) {
+      projectInfo = { error: error instanceof Error ? error.message : String(error) };
+    }
 
     settingsInfo = await safeFetchJson('/api/config/settings');
 
     try {
-      const resp = await fetch('/api/health');
+      const resp = await runtimeFetch('/api/health');
       const contentType = resp.headers.get('content-type') || '';
       const body = await safeText(resp);
       const isJson = contentType.toLowerCase().includes('application/json');

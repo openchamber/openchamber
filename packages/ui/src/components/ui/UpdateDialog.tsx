@@ -12,6 +12,8 @@ import type { UpdateInfo, UpdateProgress } from '@/lib/desktop';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { openExternalUrl } from '@/lib/url';
 import { useI18n } from '@/lib/i18n';
+import { getRuntimeUrlResolver } from '@/lib/runtime-url';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 type WebUpdateState = 'idle' | 'updating' | 'restarting' | 'reconnecting' | 'error';
 
@@ -120,7 +122,7 @@ const WEB_UPDATE_MAX_WAIT_MS = 10 * 60 * 1000;
 
 async function installWebUpdate(): Promise<InstallWebUpdateResult> {
   try {
-    const response = await fetch('/api/openchamber/update-install', {
+    const response = await runtimeFetch('/api/openchamber/update-install', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
     });
@@ -142,7 +144,7 @@ async function installWebUpdate(): Promise<InstallWebUpdateResult> {
 
 async function isServerReachable(): Promise<boolean> {
   try {
-    const response = await fetch('/health', {
+    const response = await fetch(getRuntimeUrlResolver().health(), {
       method: 'GET',
       headers: { Accept: 'application/json' },
     });
@@ -159,7 +161,7 @@ async function waitForUpdateApplied(
 ): Promise<boolean> {
   for (let i = 0; i < maxAttempts; i++) {
     try {
-      const response = await fetch('/api/openchamber/update-check', {
+      const response = await runtimeFetch('/api/openchamber/update-check', {
         method: 'GET',
         headers: { Accept: 'application/json' },
       });

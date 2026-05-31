@@ -32,6 +32,9 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { opencodeClient } from '@/lib/opencode/client';
+import { disposeTerminalInputTransport } from '@/lib/terminalApi';
+import { getRuntimeUrlResolver } from '@/lib/runtime-url';
+import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { SyncProvider } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
 import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
@@ -51,6 +54,7 @@ import { useI18n } from '@/lib/i18n';
 import { applyMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { SyncAppEffects } from '@/apps/AppEffects';
 import { useAppFontEffects } from '@/apps/useAppFontEffects';
+import { resetStreamingState } from '@/sync/streaming';
 import { OpenCodeUpdateToast } from '@/components/update/OpenCodeUpdateToast';
 
 // Lazy-loaded heavy views — loaded on demand to reduce initial bundle size.
@@ -215,6 +219,7 @@ function App({ apis }: AppProps) {
   const [isEmbeddedVisible, setIsEmbeddedVisible] = React.useState(true);
   const [initRetryExhausted, setInitRetryExhausted] = React.useState(false);
   const [initRetryEpoch, setInitRetryEpoch] = React.useState(0);
+  const [runtimeEndpointEpoch, setRuntimeEndpointEpoch] = React.useState(0);
   const [manualInitRetrying, setManualInitRetrying] = React.useState(false);
   const wideChatLayoutEnabled = useUIStore((state) => state.wideChatLayoutEnabled);
   const mobileKeyboardMode = useUIStore((state) => state.mobileKeyboardMode);
@@ -248,6 +253,30 @@ function App({ apis }: AppProps) {
   React.useEffect(() => {
     setIsVSCodeRuntime(apis.runtime.isVSCode);
   }, [apis.runtime.isVSCode]);
+
+  React.useEffect(() => {
+    return subscribeRuntimeEndpointChanged((detail) => {
+      useSessionUIStore.getState().prepareForRuntimeSwitch(detail.previousRuntimeKey);
+      useUIStore.getState().prepareForRuntimeSwitch(detail.previousRuntimeKey);
+      disposeTerminalInputTransport();
+      opencodeClient.reconnectToRuntimeBaseUrl();
+      useConfigStore.setState({
+        providers: [],
+        agents: [],
+        isConnected: false,
+        isInitialized: false,
+        connectionPhase: 'connecting',
+        lastDisconnectReason: null,
+      });
+      useProjectsStore.getState().resetForRuntimeSwitch();
+      useSessionUIStore.getState().restoreForRuntimeSwitch(detail.runtimeKey);
+      useUIStore.getState().restoreForRuntimeSwitch(detail.runtimeKey);
+      resetStreamingState();
+      setRuntimeEndpointEpoch((epoch) => epoch + 1);
+      setInitRetryExhausted(false);
+      setInitRetryEpoch((epoch) => epoch + 1);
+    });
+  }, []);
 
   React.useEffect(() => {
     document.documentElement.classList.toggle('wide-chat-layout', wideChatLayoutEnabled);
@@ -337,7 +366,7 @@ function App({ apis }: AppProps) {
     let cancelled = false;
 
     const run = async () => {
-      const res = await fetch('/health', { method: 'GET' }).catch(() => null);
+      const res = await fetch(getRuntimeUrlResolver().health(), { method: 'GET' }).catch(() => null);
       if (!res || !res.ok || cancelled) return;
       const data = (await res.json().catch(() => null)) as null | {
         planModeExperimentalEnabled?: unknown;
@@ -810,7 +839,7 @@ function App({ apis }: AppProps) {
   if (embeddedSessionChat) {
     return (
       <ErrorBoundary>
-        <SyncProvider sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
+        <SyncProvider key={runtimeEndpointEpoch} sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
           <RuntimeAPIProvider apis={apis}>
             <TooltipProvider delayDuration={300} skipDelayDuration={150}>
               <div className="h-full text-foreground bg-background">
@@ -853,7 +882,7 @@ function App({ apis }: AppProps) {
 
   return (
     <ErrorBoundary>
-      <SyncProvider sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
+      <SyncProvider key={runtimeEndpointEpoch} sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
         <RuntimeAPIProvider apis={apis}>
           <FireworksProvider>
             <VoiceProvider>

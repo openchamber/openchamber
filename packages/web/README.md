@@ -23,6 +23,7 @@ Or install manually: `bun add -g @openchamber/web` (or npm, pnpm, yarn).
 ```bash
 openchamber                          # Start on port 3000
 openchamber --port 8080              # Custom port
+openchamber --lan --port 3000        # Listen on LAN (0.0.0.0)
 openchamber --ui-password secret     # Password-protect UI
 openchamber startup enable           # Start at login as a native service
 OPENCHAMBER_UI_PASSWORD=secret openchamber startup enable # Save service password env
@@ -36,6 +37,9 @@ openchamber tunnel start --provider cloudflare --mode quick --qr
 openchamber tunnel start --provider cloudflare --mode managed-local --config ~/.cloudflared/config.yml
 openchamber tunnel status --all      # Show tunnel state across instances
 openchamber tunnel stop --port 3000  # Stop tunnel only (server stays running)
+openchamber connect-url --port 3000  # Add this server to OpenChamber Desktop
+openchamber connect-url --server http://host:3000 --qr
+openchamber connect-url --port 3000 --qr
 openchamber logs                     # Follow latest instance logs
 OPENCODE_PORT=4096 OPENCODE_SKIP_START=true openchamber                    # Connect to external OpenCode server
 OPENCODE_HOST=https://myhost:4096 OPENCODE_SKIP_START=true openchamber  # Connect via custom host/HTTPS
@@ -51,6 +55,30 @@ openchamber update                   # Update to latest version
 - Starting a different tunnel mode/provider on the same instance replaces the active tunnel.
 - Replacing or stopping a tunnel revokes existing connect links and invalidates remote tunnel sessions.
 - Connect links are one-time tokens; generating a new link revokes the previous unused link.
+
+### Connect other OpenChamber apps
+
+Use `connect-url` when an already-running web/API server should be added to OpenChamber Desktop or another OpenChamber app.
+
+```bash
+openchamber connect-url --port 3000
+openchamber connect-url --port 3000 --qr
+openchamber connect-url --port 3000 --json
+openchamber connect-url --port 3000 --name "Workstation"
+openchamber connect-url --server http://workstation.local:3000 --qr
+```
+
+This creates a remote client token and prints an `openchamber://connect?...` link. The link contains the server URL, token, label, and payload version. In OpenChamber Desktop, paste it in **Settings -> Remote Instances -> Direct Instances -> Import Link** to add that server as an Instance.
+
+If the server was started with `--lan` or `--host 0.0.0.0`, `connect-url` automatically advertises a detected LAN IP instead of `127.0.0.1`. Use `--server <url>` when you want to advertise a specific DNS name, Tailscale address, reverse proxy URL, or HTTPS endpoint.
+
+If you are exposing the server beyond localhost, start it with a password:
+
+```bash
+openchamber serve --lan --port 3000 --ui-password your-password
+```
+
+Generating a client token does not automatically password-protect the hosted browser UI. `--ui-password` protects browser access; the client token lets another OpenChamber app connect to this server.
 
 <details>
 <summary>Connect to external OpenCode server</summary>

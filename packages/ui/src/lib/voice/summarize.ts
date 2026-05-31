@@ -6,18 +6,7 @@
  */
 
 import { useConfigStore } from '@/stores/useConfigStore';
-
-const resolveSummarizeUrl = (): string => {
-    if (typeof window === 'undefined') {
-        return '/api/text/summarize';
-    }
-
-    const desktopServer = (window as typeof window & {
-        __OPENCHAMBER_DESKTOP_SERVER__?: { origin: string };
-    }).__OPENCHAMBER_DESKTOP_SERVER__;
-    const baseOrigin = desktopServer?.origin || window.location.origin;
-    return new URL('/api/text/summarize', baseOrigin).toString();
-};
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 /**
  * Summarize text using the server-side zen API endpoint
@@ -52,7 +41,7 @@ export async function summarizeText(
     }
     
     try {
-         const response = await fetch(resolveSummarizeUrl(), {
+         const response = await runtimeFetch('/api/text/summarize', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

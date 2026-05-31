@@ -1,6 +1,9 @@
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { getSyncSessions } from '@/sync/sync-refs';
 import { useUIStore } from '@/stores/useUIStore';
+import { getRuntimeUrlResolver } from './runtime-url';
+import { opencodeClient } from './opencode/client';
+import { runtimeFetch } from './runtime-fetch';
 
 declare const __APP_VERSION__: string | undefined;
 
@@ -57,7 +60,7 @@ const safeFetch = async (input: string, timeoutMs = 6000): Promise<ProbeResult> 
   const startedAt = Date.now();
 
   try {
-    const resp = await fetch(input, {
+    const resp = await runtimeFetch(input, {
       method: 'GET',
       headers: { Accept: 'application/json' },
       signal: controller.signal,
@@ -152,14 +155,16 @@ export const buildOpenCodeStatusReport = async (): Promise<string> => {
   const directory = getCurrentDirectory();
   const eventStreamStatus = useUIStore.getState().eventStreamStatus;
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
-  const apiBase = origin ? `${origin.replace(/\/+$/, '')}/api/` : '';
+  const urls = getRuntimeUrlResolver();
+  const healthUrl = urls.health();
+  const apiBase = urls.api('/api/');
 
   const openChamberHealth: OpenChamberHealthSnapshot | null = await (async () => {
-    if (!origin) return null;
+    if (!healthUrl) return null;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
     try {
-      const resp = await fetch(`${origin.replace(/\/+$/, '')}/health`, {
+      const resp = await runtimeFetch(healthUrl, {
         method: 'GET',
         headers: { Accept: 'application/json' },
         signal: controller.signal,
@@ -180,11 +185,11 @@ export const buildOpenCodeStatusReport = async (): Promise<string> => {
     status: number | null;
     error: string | null;
   } = await (async () => {
-    if (!origin) return null;
+    if (!apiBase) return null;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 7000);
     try {
-      const resp = await fetch(`${origin.replace(/\/+$/, '')}/api/config/opencode-resolution`, {
+      const resp = await runtimeFetch(urls.api('/api/config/opencode-resolution'), {
         method: 'GET',
         headers: { Accept: 'application/json' },
         signal: controller.signal,
@@ -255,7 +260,8 @@ export const buildOpenCodeStatusReport = async (): Promise<string> => {
   const lines: string[] = [];
   lines.push(`Time: ${now.toISOString()}`);
   lines.push(`OpenChamber version: ${appVersion}`);
-  lines.push(`Runtime: ${origin || '(unknown)'} (api=${origin ? origin + '/api' : '(unknown)'})`);
+  lines.push(`Runtime: ${origin || '(unknown)'} (api=${apiBase || '(unknown)'})`);
+  lines.push(`OpenCode SDK base: ${opencodeClient.getBaseUrl()}`);
   lines.push(`Event stream: ${eventStreamStatus}`);
   lines.push(`Directory: ${directory || '(none)'}`);
   lines.push(`Platform: ${platform}`);
