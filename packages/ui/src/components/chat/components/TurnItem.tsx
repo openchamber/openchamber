@@ -2,14 +2,16 @@ import React from 'react';
 
 import type { ChatMessageEntry, Turn } from '../lib/turns/types';
 import TurnAssistantBlock from './TurnAssistantBlock';
+import type { PermissionAuditEntry } from '@/types/permissionAudit';
 
 interface TurnItemProps {
     turn: Turn;
     stickyUserHeader?: boolean;
-    renderMessage: (message: ChatMessageEntry) => React.ReactNode;
+    renderMessage: (message: ChatMessageEntry, permissionAudits?: PermissionAuditEntry[]) => React.ReactNode;
+    permissionAudits?: PermissionAuditEntry[];
 }
 
-const TurnItem: React.FC<TurnItemProps> = ({ turn, stickyUserHeader = true, renderMessage }) => {
+const TurnItem: React.FC<TurnItemProps> = ({ turn, stickyUserHeader = true, renderMessage, permissionAudits = [] }) => {
     return (
         <section
             className="relative w-full"
@@ -30,8 +32,7 @@ const TurnItem: React.FC<TurnItemProps> = ({ turn, stickyUserHeader = true, rend
             ) : (
                 renderMessage(turn.userMessage)
             )}
-
-            <TurnAssistantBlock assistantMessages={turn.assistantMessages} renderMessage={renderMessage} />
+            <TurnAssistantBlock assistantMessages={turn.assistantMessages} renderMessage={renderMessage} permissionAudits={permissionAudits} />
         </section>
     );
 };

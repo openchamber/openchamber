@@ -678,10 +678,14 @@ const notificationTriggerRuntime = createNotificationTriggerRuntime({
   sendPushToAllUiSessions,
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
+  fs,
+  path,
+  openchamberDataDir: OPENCHAMBER_DATA_DIR,
 });
 
 const maybeSendPushForTrigger = (...args) => notificationTriggerRuntime.maybeSendPushForTrigger(...args);
 const setAutoAcceptSession = (...args) => notificationTriggerRuntime.setAutoAcceptSession(...args);
+const getPermissionAudit = (...args) => notificationTriggerRuntime.getPermissionAudit(...args);
 
 const globalMessageStreamHub = createGlobalMessageStreamHub({
   buildOpenCodeUrl,
@@ -1158,6 +1162,7 @@ async function main(options = {}) {
     fetchFreeZenModels,
     getCachedZenModels,
     setAutoAcceptSession,
+    getPermissionAudit,
   });
   uiAuthController = bootstrapResult.uiAuthController;
 

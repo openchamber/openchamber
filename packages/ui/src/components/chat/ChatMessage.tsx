@@ -31,6 +31,7 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { FadeInOnReveal } from './message/FadeInOnReveal';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
 import { areOptionalRenderRelevantMessagesEqual, areRenderRelevantMessagesEqual, areRelevantTurnGroupingContextsEqual } from './message/renderCompare';
+import type { PermissionAuditEntry } from '@/types/permissionAudit';
 
 const ToolOutputDialog = lazyWithChunkRecovery(() => import('./message/ToolOutputDialog'));
 
@@ -124,6 +125,7 @@ interface ChatMessageProps {
         info: Message;
         parts: Part[];
     };
+    permissionAudits?: PermissionAuditEntry[];
     onContentChange?: (reason?: ContentChangeReason) => void;
     animationHandlers?: AnimationHandlers;
     scrollToBottom?: () => void;
@@ -139,6 +141,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     message,
     previousMessage,
     nextMessage,
+    permissionAudits,
     onContentChange,
     animationHandlers,
     turnGroupingContext,
@@ -1136,6 +1139,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                 showReasoningTraces={showReasoningTraces}
                                 agentMention={agentMention}
                                 turnGroupingContext={turnGroupingContext}
+                                permissionAudits={permissionAudits}
                                 errorMessage={assistantErrorText}
                                 errorVariant={assistantErrorVariant}
                             />
@@ -1169,6 +1173,7 @@ export default React.memo(ChatMessage, (prev, next) => {
             prev.nextMessage ? { info: prev.nextMessage.info, parts: prev.nextMessage.parts } : undefined,
             next.nextMessage ? { info: next.nextMessage.info, parts: next.nextMessage.parts } : undefined
         )
+        && prev.permissionAudits === next.permissionAudits
         && prev.isInActiveTurn === next.isInActiveTurn
         && prev.activeStreamingPhase === next.activeStreamingPhase
         && prev.assistantHeaderMessageId === next.assistantHeaderMessageId
