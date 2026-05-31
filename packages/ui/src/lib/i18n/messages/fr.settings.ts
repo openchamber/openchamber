@@ -270,7 +270,7 @@ export const settingsDict = {
   'settings.remoteInstances.page.confirm.bindAllInterfaces': 'La liaison à 0.0.0.0 expose les ports transférés à votre réseau local. Continuer?',
   'settings.remoteInstances.page.preview.localSocks5': '(SOCKS5 local)',
   'settings.remoteInstances.page.preview.local': '(local)',
-  'settings.remoteInstances.page.preview.remote': '(remote distant)',
+  'settings.remoteInstances.page.preview.remote': '(côté remote)',
   'settings.remoteInstances.page.toast.openLocalEndpointFailed': 'Échec de l\'ouverture du point de terminaison local',
   'settings.remoteInstances.page.toast.localUrlCopied': 'URL locale copiée',
   'settings.remoteInstances.page.actions.copyLocalUrl': 'Copier l’URL locale',
