@@ -1,5 +1,5 @@
 import { getCurrentIntlLocale } from '@/lib/i18n';
-import { useI18nStore } from '@/lib/i18n/store';
+import { formatMessage, useI18nStore } from '@/lib/i18n/store';
 
 const isSameDay = (left: Date, right: Date): boolean => {
     return (
@@ -27,7 +27,7 @@ export const formatTimestampForDisplay = (timestamp: number): string => {
     const date = new Date(timestamp);
     const now = new Date();
     const locale = getCurrentIntlLocale();
-    const isFrench = useI18nStore.getState().locale === 'fr';
+    const dictionary = useI18nStore.getState().dictionary;
     const timePart = new Intl.DateTimeFormat(locale, {
         hour: '2-digit',
         minute: '2-digit',
@@ -38,7 +38,7 @@ export const formatTimestampForDisplay = (timestamp: number): string => {
     }
 
     if (isYesterday(date, now)) {
-        return `${isFrench ? 'Hier' : 'Yesterday'} ${timePart}`;
+        return formatMessage(dictionary, 'common.date.yesterdayWithTime', { time: timePart });
     }
 
     const monthPart = date.toLocaleString(locale, { month: 'short' });

@@ -1,10 +1,11 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { getCurrentIntlLocale } from '@/lib/i18n';
-import { useI18nStore } from '@/lib/i18n/store';
+import { formatMessage, useI18nStore } from '@/lib/i18n/store';
 import type { SessionSummaryMeta } from './types';
 
-const isFrenchLocale = () => useI18nStore.getState().locale === 'fr';
+const t = (key: Parameters<typeof formatMessage>[1], params?: Parameters<typeof formatMessage>[2]) =>
+  formatMessage(useI18nStore.getState().dictionary, key, params);
 
 const formatDateLabel = (value: string | number) => {
   const targetDate = new Date(value);
@@ -18,10 +19,10 @@ const formatDateLabel = (value: string | number) => {
   yesterday.setDate(today.getDate() - 1);
 
   if (isSameDay(targetDate, today)) {
-    return isFrenchLocale() ? 'Aujourd’hui' : 'Today';
+    return t('common.date.today');
   }
   if (isSameDay(targetDate, yesterday)) {
-    return isFrenchLocale() ? 'Hier' : 'Yesterday';
+    return t('common.date.yesterday');
   }
   const formatted = targetDate.toLocaleDateString(getCurrentIntlLocale(), {
     month: 'short',
@@ -41,9 +42,9 @@ export const formatSessionDateLabel = (updatedMs: number): string => {
 
   if (isSameDay(updatedDate, today)) {
     const diff = Date.now() - updatedMs;
-    if (diff < 60_000) return isFrenchLocale() ? 'À l’instant' : 'Just now';
-    if (diff < 3_600_000) return isFrenchLocale() ? `il y a ${Math.floor(diff / 60_000)} min` : `${Math.floor(diff / 60_000)}min ago`;
-    return isFrenchLocale() ? `il y a ${Math.floor(diff / 3_600_000)} h` : `${Math.floor(diff / 3_600_000)}h ago`;
+    if (diff < 60_000) return t('common.relative.justNow');
+    if (diff < 3_600_000) return t('common.relative.minutesAgoShort', { count: Math.floor(diff / 60_000) });
+    return t('common.relative.hoursAgoShort', { count: Math.floor(diff / 3_600_000) });
   }
 
   return formatDateLabel(updatedMs);
@@ -66,15 +67,15 @@ export const formatSessionCompactDateLabel = (updatedMs: number): string => {
     return `${Math.floor(diff / hour)}h`;
   }
   if (diff < week) {
-    return isFrenchLocale() ? `${Math.floor(diff / day)}j` : `${Math.floor(diff / day)}d`;
+    return t('common.relative.daysAgoShort', { count: Math.floor(diff / day) }).replace(/^il y a /, '');
   }
   if (diff < 5 * week) {
-    return isFrenchLocale() ? `${Math.floor(diff / week)}sem` : `${Math.floor(diff / week)}w`;
+    return t('common.relative.weeksAgoShort', { count: Math.floor(diff / week) }).replace(/^il y a /, '');
   }
   if (diff < year) {
     return `${Math.floor(diff / month)}mo`;
   }
-  return isFrenchLocale() ? `${Math.floor(diff / year)}a` : `${Math.floor(diff / year)}y`;
+  return t('common.relative.yearsAgoShort', { count: Math.floor(diff / year) }).replace(/^il y a /, '');
 };
 
 export const normalizePath = (value?: string | null) => {

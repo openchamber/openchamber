@@ -915,12 +915,13 @@ export function createOpenCodeManager(_context: vscode.ExtensionContext): OpenCo
         if (!cliPath) {
           cliPath = resolveOpencodeCliPath();
         }
+        const moreInfoLabel = t('More Info');
         setStatus('error', t('OpenCode CLI not found. Install it and ensure it\'s in PATH.'));
         vscode.window.showErrorMessage(
           t('OpenCode CLI not found. Please install it and ensure it\'s in PATH.'),
-          t('More Info')
+          moreInfoLabel
         ).then(selection => {
-          if (selection === t('More Info')) {
+          if (selection === moreInfoLabel) {
             vscode.env.openExternal(vscode.Uri.parse('https://github.com/anomalyco/opencode'));
           }
         });

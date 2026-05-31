@@ -1,7 +1,10 @@
 import type { FilesAPI } from '@/lib/api/types';
 import { MAX_OPEN_FILE_LINES, countLinesWithLimit } from '@/lib/fileOpenLimits';
 import { getCurrentIntlLocale } from '@/lib/i18n';
-import { useI18nStore } from '@/lib/i18n/store';
+import { formatMessage, useI18nStore } from '@/lib/i18n/store';
+
+const t = (key: Parameters<typeof formatMessage>[1], params?: Parameters<typeof formatMessage>[2]) =>
+  formatMessage(useI18nStore.getState().dictionary, key, params);
 
 export type ContextFileOpenFailureReason = 'too-large' | 'missing' | 'unreadable';
 
@@ -60,17 +63,14 @@ export const validateContextFileOpen = async (files: FilesAPI, path: string): Pr
 };
 
 export const getContextFileOpenFailureMessage = (reason: ContextFileOpenFailureReason): string => {
-  const isFrench = useI18nStore.getState().locale === 'fr';
   if (reason === 'too-large') {
     const lines = MAX_OPEN_FILE_LINES.toLocaleString(getCurrentIntlLocale());
-    return isFrench
-      ? `Le fichier est trop volumineux pour être ouvert (> ${lines} lignes)`
-      : `File is too large to open (>${lines} lines)`;
+    return t('contextFileOpen.failure.tooLarge', { count: lines });
   }
 
   if (reason === 'missing') {
-    return isFrench ? 'Fichier introuvable' : 'File not found';
+    return t('contextFileOpen.failure.missing');
   }
 
-  return isFrench ? 'Impossible d’ouvrir le fichier' : 'Failed to open file';
+  return t('contextFileOpen.failure.unreadable');
 };

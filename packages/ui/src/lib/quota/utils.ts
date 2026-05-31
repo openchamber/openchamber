@@ -1,5 +1,7 @@
 import { getCurrentIntlLocale } from '@/lib/i18n';
-import { useI18nStore } from '@/lib/i18n/store';
+import { formatMessage, useI18nStore } from '@/lib/i18n/store';
+
+const t = (key: Parameters<typeof formatMessage>[1]) => formatMessage(useI18nStore.getState().dictionary, key);
 
 export const clampPercent = (value: number | null): number | null => {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
@@ -72,20 +74,19 @@ export const resolveUsageTone = (percent: number | null): 'safe' | 'warn' | 'cri
 };
 
 export const formatWindowLabel = (label: string): string => {
-  const isFrench = useI18nStore.getState().locale === 'fr';
-  if (label === '5h') return isFrench ? '5 heures' : '5-Hour';
-  if (label === '7d') return isFrench ? 'Limite sur 7 jours' : '7-Day Limit';
-  if (label === '7d-sonnet') return isFrench ? 'Limite Sonnet sur 7 jours' : '7-Day Sonnet Limit';
-  if (label === '7d-opus') return isFrench ? 'Limite Opus sur 7 jours' : '7-Day Opus Limit';
-  if (label === 'weekly') return isFrench ? 'Limite hebdomadaire' : 'Weekly Limit';
-  if (label === 'daily') return isFrench ? 'Quotidien' : 'Daily';
-  if (label === 'monthly') return isFrench ? 'Limite mensuelle' : 'Monthly Limit';
-  if (label === 'credits') return isFrench ? 'Crédits' : 'Credits';
-  if (label === 'session') return isFrench ? 'Session' : 'Session';
-  if (label === 'premium') return isFrench ? 'Interactions premium' : 'Premium Interactions';
-  if (label === 'chat') return isFrench ? 'Requêtes de chat' : 'Chat Requests';
-  if (label === 'completions') return isFrench ? 'Complétions' : 'Completions';
-  if (label === 'premium_interactions') return isFrench ? 'Interactions premium' : 'Premium interactions';
+  if (label === '5h') return t('quota.window.5h');
+  if (label === '7d') return t('quota.window.7d');
+  if (label === '7d-sonnet') return t('quota.window.7dSonnet');
+  if (label === '7d-opus') return t('quota.window.7dOpus');
+  if (label === 'weekly') return t('quota.window.weekly');
+  if (label === 'daily') return t('quota.window.daily');
+  if (label === 'monthly') return t('quota.window.monthly');
+  if (label === 'credits') return t('quota.window.credits');
+  if (label === 'session') return t('quota.window.session');
+  if (label === 'premium') return t('quota.window.premium');
+  if (label === 'chat') return t('quota.window.chat');
+  if (label === 'completions') return t('quota.window.completions');
+  if (label === 'premium_interactions') return t('quota.window.premiumInteractions');
   return label;
 };
 
