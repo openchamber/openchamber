@@ -1,4 +1,5 @@
-const pad2 = (value: number): string => String(value).padStart(2, '0');
+import { getCurrentIntlLocale } from '@/lib/i18n';
+import { useI18nStore } from '@/lib/i18n/store';
 
 const isSameDay = (left: Date, right: Date): boolean => {
     return (
@@ -25,18 +26,22 @@ export const formatTimestampForDisplay = (timestamp: number): string => {
 
     const date = new Date(timestamp);
     const now = new Date();
-
-    const timePart = `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+    const locale = getCurrentIntlLocale();
+    const isFrench = useI18nStore.getState().locale === 'fr';
+    const timePart = new Intl.DateTimeFormat(locale, {
+        hour: '2-digit',
+        minute: '2-digit',
+    }).format(date);
 
     if (isSameDay(date, now)) {
         return timePart;
     }
 
     if (isYesterday(date, now)) {
-        return `Yesterday ${timePart}`;
+        return `${isFrench ? 'Hier' : 'Yesterday'} ${timePart}`;
     }
 
-    const monthPart = date.toLocaleString(undefined, { month: 'short' });
+    const monthPart = date.toLocaleString(locale, { month: 'short' });
     const dayPart = date.getDate();
     const datePart = `${monthPart} ${dayPart}`;
 

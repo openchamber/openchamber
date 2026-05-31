@@ -1,5 +1,6 @@
 import type { Message, Part } from '@opencode-ai/sdk/v2';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { getCurrentIntlLocale } from '@/lib/i18n';
 import { isVSCodeRuntime, openDesktopPath, revealDesktopPath, saveDesktopMarkdownFile } from '@/lib/desktop';
 import { getRevealLabelKey } from '@/lib/utils';
 
@@ -22,7 +23,7 @@ function formatTimestamp(timestamp: number | undefined): string {
     return '';
   }
 
-  const monthPart = date.toLocaleString(undefined, { month: 'short' });
+  const monthPart = date.toLocaleString(getCurrentIntlLocale(), { month: 'short' });
   const dayPart = date.getDate();
   const yearPart = date.getFullYear();
   const hours = String(date.getHours()).padStart(2, '0');

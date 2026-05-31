@@ -21,7 +21,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import { useI18n } from '@/lib/i18n';
+import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { UsageProgressBar } from '@/components/sections/usage/UsageProgressBar';
 import { PaceIndicator } from '@/components/sections/usage/PaceIndicator';
@@ -39,7 +39,7 @@ const SettingsView = lazyWithChunkRecovery(() => import('@/components/views/Sett
 const formatTime = (timestamp: number | null) => {
   if (!timestamp) return '-';
   try {
-    return new Date(timestamp).toLocaleTimeString(undefined, {
+    return new Date(timestamp).toLocaleTimeString(getCurrentIntlLocale(), {
       hour: 'numeric',
       minute: '2-digit',
     });

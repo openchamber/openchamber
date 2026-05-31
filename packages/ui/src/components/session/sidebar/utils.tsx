@@ -1,6 +1,10 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
+import { getCurrentIntlLocale } from '@/lib/i18n';
+import { useI18nStore } from '@/lib/i18n/store';
 import type { SessionSummaryMeta } from './types';
+
+const isFrenchLocale = () => useI18nStore.getState().locale === 'fr';
 
 const formatDateLabel = (value: string | number) => {
   const targetDate = new Date(value);
@@ -14,12 +18,12 @@ const formatDateLabel = (value: string | number) => {
   yesterday.setDate(today.getDate() - 1);
 
   if (isSameDay(targetDate, today)) {
-    return 'Today';
+    return isFrenchLocale() ? 'Aujourd’hui' : 'Today';
   }
   if (isSameDay(targetDate, yesterday)) {
-    return 'Yesterday';
+    return isFrenchLocale() ? 'Hier' : 'Yesterday';
   }
-  const formatted = targetDate.toLocaleDateString('en-US', {
+  const formatted = targetDate.toLocaleDateString(getCurrentIntlLocale(), {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
@@ -37,9 +41,9 @@ export const formatSessionDateLabel = (updatedMs: number): string => {
 
   if (isSameDay(updatedDate, today)) {
     const diff = Date.now() - updatedMs;
-    if (diff < 60_000) return 'Just now';
-    if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}min ago`;
-    return `${Math.floor(diff / 3_600_000)}h ago`;
+    if (diff < 60_000) return isFrenchLocale() ? 'À l’instant' : 'Just now';
+    if (diff < 3_600_000) return isFrenchLocale() ? `il y a ${Math.floor(diff / 60_000)} min` : `${Math.floor(diff / 60_000)}min ago`;
+    return isFrenchLocale() ? `il y a ${Math.floor(diff / 3_600_000)} h` : `${Math.floor(diff / 3_600_000)}h ago`;
   }
 
   return formatDateLabel(updatedMs);
@@ -62,15 +66,15 @@ export const formatSessionCompactDateLabel = (updatedMs: number): string => {
     return `${Math.floor(diff / hour)}h`;
   }
   if (diff < week) {
-    return `${Math.floor(diff / day)}d`;
+    return isFrenchLocale() ? `${Math.floor(diff / day)}j` : `${Math.floor(diff / day)}d`;
   }
   if (diff < 5 * week) {
-    return `${Math.floor(diff / week)}w`;
+    return isFrenchLocale() ? `${Math.floor(diff / week)}sem` : `${Math.floor(diff / week)}w`;
   }
   if (diff < year) {
     return `${Math.floor(diff / month)}mo`;
   }
-  return `${Math.floor(diff / year)}y`;
+  return isFrenchLocale() ? `${Math.floor(diff / year)}a` : `${Math.floor(diff / year)}y`;
 };
 
 export const normalizePath = (value?: string | null) => {

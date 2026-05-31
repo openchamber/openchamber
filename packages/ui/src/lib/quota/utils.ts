@@ -37,13 +37,13 @@ export const formatQuotaResetLabel = (
     const isToday = resetDate.toDateString() === now.toDateString();
 
     if (isToday) {
-      return resetDate.toLocaleTimeString(undefined, {
+      return resetDate.toLocaleTimeString(getCurrentIntlLocale(), {
         hour: 'numeric',
         minute: '2-digit',
       });
     }
 
-    return resetDate.toLocaleString(undefined, {
+    return resetDate.toLocaleString(getCurrentIntlLocale(), {
       month: 'short',
       day: 'numeric',
       weekday: 'short',
@@ -69,19 +69,20 @@ export const resolveUsageTone = (percent: number | null): 'safe' | 'warn' | 'cri
 };
 
 export const formatWindowLabel = (label: string): string => {
-  if (label === '5h') return '5-Hour';
-  if (label === '7d') return '7-Day Limit';
-  if (label === '7d-sonnet') return '7-Day Sonnet Limit';
-  if (label === '7d-opus') return '7-Day Opus Limit';
-  if (label === 'weekly') return 'Weekly Limit';
-  if (label === 'daily') return 'Daily';
-  if (label === 'monthly') return 'Monthly Limit';
-  if (label === 'credits') return 'Credits';
-  if (label === 'session') return 'Session';
-  if (label === 'premium') return 'Premium Interactions';
-  if (label === 'chat') return 'Chat Requests';
-  if (label === 'completions') return 'Completions';
-  if (label === 'premium_interactions') return 'Premium interactions';
+  const isFrench = useI18nStore.getState().locale === 'fr';
+  if (label === '5h') return isFrench ? '5 heures' : '5-Hour';
+  if (label === '7d') return isFrench ? 'Limite sur 7 jours' : '7-Day Limit';
+  if (label === '7d-sonnet') return isFrench ? 'Limite Sonnet sur 7 jours' : '7-Day Sonnet Limit';
+  if (label === '7d-opus') return isFrench ? 'Limite Opus sur 7 jours' : '7-Day Opus Limit';
+  if (label === 'weekly') return isFrench ? 'Limite hebdomadaire' : 'Weekly Limit';
+  if (label === 'daily') return isFrench ? 'Quotidien' : 'Daily';
+  if (label === 'monthly') return isFrench ? 'Limite mensuelle' : 'Monthly Limit';
+  if (label === 'credits') return isFrench ? 'Crédits' : 'Credits';
+  if (label === 'session') return isFrench ? 'Session' : 'Session';
+  if (label === 'premium') return isFrench ? 'Interactions premium' : 'Premium Interactions';
+  if (label === 'chat') return isFrench ? 'Requêtes de chat' : 'Chat Requests';
+  if (label === 'completions') return isFrench ? 'Complétions' : 'Completions';
+  if (label === 'premium_interactions') return isFrench ? 'Interactions premium' : 'Premium interactions';
   return label;
 };
 
@@ -284,3 +285,5 @@ export const formatRemainingTime = (seconds: number): string => {
 export const calculateExpectedUsagePercent = (elapsedRatio: number): number => {
   return Math.min(100, Math.max(0, elapsedRatio * 100));
 };
+import { getCurrentIntlLocale } from '@/lib/i18n';
+import { useI18nStore } from '@/lib/i18n/store';
