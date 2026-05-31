@@ -2,6 +2,7 @@ import React from 'react';
 import { OpenChamberVisualSettings } from './OpenChamberVisualSettings';
 import { AboutSettings } from './AboutSettings';
 import { SessionRetentionSettings } from './SessionRetentionSettings';
+import { SidebarEmptyStateSettings } from './SidebarEmptyStateSettings';
 import { PasskeySettings } from './PasskeySettings';
 import { DefaultsSettings } from './DefaultsSettings';
 import { GitSettings } from './GitSettings';
@@ -50,6 +51,9 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
                             <OpenCodeCliSettings />
                         </div>
                     )}
+                    <div className="border-t border-border/40 pt-6">
+                        <SidebarEmptyStateSettings />
+                    </div>
                     <div className="border-t border-border/40 pt-6">
                         <SessionRetentionSettings />
                     </div>
@@ -149,6 +153,9 @@ const SessionsSectionContent: React.FC = () => {
                     <OpenCodeCliSettings />
                 </div>
             )}
+            <div className="border-t border-border/40 pt-6">
+                <SidebarEmptyStateSettings />
+            </div>
             <div className="border-t border-border/40 pt-6">
                 <SessionRetentionSettings />
             </div>

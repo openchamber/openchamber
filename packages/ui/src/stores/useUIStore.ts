@@ -535,6 +535,7 @@ interface UIStore {
   eventStreamHint: string | null;
   showReasoningTraces: boolean;
   collapsibleThinkingBlocks: boolean;
+  hideSidebarEmptyState: boolean;
   groupReasoningBlocks: boolean;
   chatRenderMode: ChatRenderMode;
   activityRenderMode: ActivityRenderMode;
@@ -670,6 +671,7 @@ interface UIStore {
   setEventStreamStatus: (status: EventStreamStatus, hint?: string | null) => void;
   setShowReasoningTraces: (value: boolean) => void;
   setCollapsibleThinkingBlocks: (value: boolean) => void;
+  setHideSidebarEmptyState: (value: boolean) => void;
   setChatRenderMode: (value: ChatRenderMode) => void;
   setActivityRenderMode: (value: ActivityRenderMode) => void;
   setShowDeletionDialog: (value: boolean) => void;
@@ -805,6 +807,7 @@ export const useUIStore = create<UIStore>()(
         eventStreamHint: null,
         showReasoningTraces: true,
         collapsibleThinkingBlocks: true,
+        hideSidebarEmptyState: false,
         groupReasoningBlocks: true,
         chatRenderMode: 'live',
         activityRenderMode: 'summary',
@@ -1466,6 +1469,10 @@ export const useUIStore = create<UIStore>()(
           set({ collapsibleThinkingBlocks: value });
         },
 
+        setHideSidebarEmptyState: (value) => {
+          set({ hideSidebarEmptyState: value });
+        },
+
         setChatRenderMode: (value) => {
           set({ chatRenderMode: value });
         },
@@ -2110,6 +2117,7 @@ export const useUIStore = create<UIStore>()(
           // Note: isSettingsDialogOpen intentionally NOT persisted
           showReasoningTraces: state.showReasoningTraces,
           collapsibleThinkingBlocks: state.collapsibleThinkingBlocks,
+          hideSidebarEmptyState: state.hideSidebarEmptyState,
           chatRenderMode: state.chatRenderMode,
           activityRenderMode: state.activityRenderMode,
           showDeletionDialog: state.showDeletionDialog,
