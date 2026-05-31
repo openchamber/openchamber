@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..');
-const useDetachedChildren = process.platform === 'darwin';
+const useDetachedChildren = process.platform === 'darwin' || process.platform === 'linux';
 const webRoot = path.join(repoRoot, 'packages/web');
 
 const quoteWindowsCommandArg = (value) => `"${String(value).replace(/"/g, '""')}"`;
