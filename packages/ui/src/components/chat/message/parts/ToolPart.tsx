@@ -725,9 +725,7 @@ const summarizeTodoToolItems = (todos: TodoToolItem[]): { completed: number; tot
         total += 1;
         if (todo.status === 'completed') {
             completed += 1;
-            continue;
         }
-
     }
 
     return { completed, total };
@@ -2635,8 +2633,8 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
             ? inputTodos
             : parseTodoToolItems(stateWithData.output);
         const summary = summarizeTodoToolItems(todos);
-        if (summary.total === 0) {
-            return t('chat.todo.summary.empty');
+        if (todos.length === 0 || summary.total === 0) {
+            return todos.length === 0 ? t('chat.todo.summary.empty') : t('chat.todo.cancelled');
         }
         return t('chat.todo.summary.progress', {
             completed: summary.completed,
