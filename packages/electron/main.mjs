@@ -2144,7 +2144,8 @@ const buildOpenRemoteProjectSpecs = ({ projectPath, appId, appName, sshInfo }) =
   const specs = [];
   const cli = CLI_BY_APP_ID[appId];
   if (cli) {
-    const hostPort = sshInfo.port && sshInfo.port !== 22 ? `${sshInfo.host}:${sshInfo.port}` : sshInfo.host;
+    const hostPart = sshInfo.user ? `${sshInfo.user}@${sshInfo.host}` : sshInfo.host;
+    const hostPort = sshInfo.port && sshInfo.port !== 22 ? `${hostPart}:${sshInfo.port}` : hostPart;
     const remoteTarget = `ssh-remote+${hostPort}`;
     specs.push({ program: cli, args: ['--remote', remoteTarget, '--new-window', projectPath] });
     const scheme = REMOTE_URI_SCHEME_BY_APP_ID[appId] || 'vscode';
@@ -2159,7 +2160,8 @@ const buildOpenRemoteFileSpecs = ({ filePath, appId, appName, sshInfo }) => {
   const specs = [];
   const cli = CLI_BY_APP_ID[appId];
   if (cli) {
-    const hostPort = sshInfo.port && sshInfo.port !== 22 ? `${sshInfo.host}:${sshInfo.port}` : sshInfo.host;
+    const hostPart = sshInfo.user ? `${sshInfo.user}@${sshInfo.host}` : sshInfo.host;
+    const hostPort = sshInfo.port && sshInfo.port !== 22 ? `${hostPart}:${sshInfo.port}` : hostPart;
     const remoteTarget = `ssh-remote+${hostPort}`;
     specs.push({ program: cli, args: ['--remote', remoteTarget, '--goto', filePath] });
     const scheme = REMOTE_URI_SCHEME_BY_APP_ID[appId] || 'vscode';
@@ -2172,7 +2174,8 @@ const buildOpenRemoteFileSpecs = ({ filePath, appId, appName, sshInfo }) => {
 
 const buildWindowsOpenRemoteProjectSpecs = ({ projectPath, appId, appName, sshInfo }) => {
   const specs = [];
-  const hostPort = sshInfo.port && sshInfo.port !== 22 ? `${sshInfo.host}:${sshInfo.port}` : sshInfo.host;
+  const hostPart = sshInfo.user ? `${sshInfo.user}@${sshInfo.host}` : sshInfo.host;
+  const hostPort = sshInfo.port && sshInfo.port !== 22 ? `${hostPart}:${sshInfo.port}` : hostPart;
   const remoteTarget = `ssh-remote+${hostPort}`;
   const cli = WINDOWS_CLI_BY_APP_ID[appId];
   if (cli) {
@@ -2190,7 +2193,8 @@ const buildWindowsOpenRemoteProjectSpecs = ({ projectPath, appId, appName, sshIn
 
 const buildWindowsOpenRemoteFileSpecs = ({ filePath, appId, appName, sshInfo }) => {
   const specs = [];
-  const hostPort = sshInfo.port && sshInfo.port !== 22 ? `${sshInfo.host}:${sshInfo.port}` : sshInfo.host;
+  const hostPart = sshInfo.user ? `${sshInfo.user}@${sshInfo.host}` : sshInfo.host;
+  const hostPort = sshInfo.port && sshInfo.port !== 22 ? `${hostPart}:${sshInfo.port}` : hostPart;
   const remoteTarget = `ssh-remote+${hostPort}`;
   const cli = WINDOWS_CLI_BY_APP_ID[appId];
   if (cli) {
