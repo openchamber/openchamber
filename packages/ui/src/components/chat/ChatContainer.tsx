@@ -2,9 +2,12 @@ import React from 'react';
 import type { Message, Part, Session } from '@opencode-ai/sdk/v2';
 
 import { ChatInput } from './ChatInput';
+import { DraftPresetChips } from './DraftPresetChips';
+import { useInputStore } from '@/sync/input-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { Skeleton } from '@/components/ui/skeleton';
 import ChatEmptyState from './ChatEmptyState';
+import { useGlobalSyncStore } from '@/sync/global-sync-store';
 import MessageList, { type MessageListHandle } from './MessageList';
 import { PermissionCard } from './PermissionCard';
 import { QuestionCard } from './QuestionCard';
@@ -156,6 +159,7 @@ type ChatViewportProps = {
     handleMessageContentChange: (reason?: ContentChangeReason) => void;
     getAnimationHandlers: (messageId: string) => AnimationHandlers;
     handleLoadOlder: () => void;
+    handleHistoryScroll: () => void;
     scrollToBottom: () => void;
     sessionQuestions: QuestionRequest[];
     sessionPermissions: PermissionRequest[];
@@ -181,6 +185,7 @@ const ChatViewport = React.memo(({
     handleMessageContentChange,
     getAnimationHandlers,
     handleLoadOlder,
+    handleHistoryScroll,
     scrollToBottom,
     sessionQuestions,
     sessionPermissions,
@@ -217,6 +222,7 @@ const ChatViewport = React.memo(({
                     hideTopShadow={isMobile && stickyUserHeader}
                     tabIndex={0}
                     onClick={focusScrollContainer}
+                    onScroll={handleHistoryScroll}
                     data-scroll-shadow="true"
                     data-scrollbar="chat"
                 >
@@ -280,6 +286,7 @@ const ChatViewport = React.memo(({
         && prev.handleMessageContentChange === next.handleMessageContentChange
         && prev.getAnimationHandlers === next.getAnimationHandlers
         && prev.handleLoadOlder === next.handleLoadOlder
+        && prev.handleHistoryScroll === next.handleHistoryScroll
         && prev.scrollToBottom === next.scrollToBottom
         && prev.sessionQuestions === next.sessionQuestions
         && prev.sessionPermissions === next.sessionPermissions
@@ -546,6 +553,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     const isVSCode = isVSCodeRuntime();
     const chatSurfaceMode = useChatSurfaceMode();
     const draftOpen = Boolean(newSessionDraft?.open);
+    const initError = useGlobalSyncStore((s) => s.error);
     const isDesktopExpandedInput = isExpandedInput && !isMobile;
     const useCompactDraftLayout = isMobile || isVSCode || chatSurfaceMode === 'mini-chat';
     const messageListRef = React.useRef<MessageListHandle | null>(null);
@@ -655,7 +663,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     }, [handleMessageContentChange, sessionPermissions, sessionQuestions]);
 
     const handleLoadOlder = React.useCallback(() => {
-        void loadEarlier();
+        void loadEarlier({ userInitiated: true });
     }, [loadEarlier]);
 
     const navigation = useChatTurnNavigation({
@@ -796,6 +804,13 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     }, [currentSessionId, ensureSessionRenderable, hasRenderableSessionSnapshot]);
 
 	if (!currentSessionId && !draftOpen) {
+		// With auto-open, the draft welcome opens on the next tick (effect below),
+		// so the empty state is only ever transient here — render a neutral
+		// background instead of flashing the logo / "start a new chat" on refresh.
+		// Keep the empty state when there's nothing to auto-open or an init error to show.
+		if (autoOpenDraft && !initError) {
+			return <div className="flex h-full flex-col bg-background" />;
+		}
 		return (
 			<div className="flex flex-col h-full bg-background">
 				<ChatEmptyState />
@@ -807,7 +822,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 		return (
 			<div className="relative flex h-full flex-col bg-background transform-gpu">
 				{useCompactDraftLayout && !isDesktopExpandedInput ? (
-					<div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
+					<div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
 						<h1 className="text-balance text-3xl font-normal tracking-tight text-foreground">
 							{renderDraftTitle(
 								draftProjectLabel
@@ -816,6 +831,10 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 								draftProjectLabel,
 							)}
 						</h1>
+						<DraftPresetChips
+							onSubmit={(text) => useInputStore.getState().requestPresetSubmit(text)}
+							className="mt-8 max-w-md"
+						/>
 					</div>
 				) : null}
 				<div
@@ -950,6 +969,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 handleMessageContentChange={handleMessageContentChange}
                 getAnimationHandlers={getAnimationHandlers}
                 handleLoadOlder={handleLoadOlder}
+                handleHistoryScroll={timelineController.handleHistoryScroll}
                 scrollToBottom={resumeToLatestInstant}
                 sessionQuestions={sessionQuestions}
                 sessionPermissions={sessionPermissions}

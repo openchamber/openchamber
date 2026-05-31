@@ -1,4 +1,5 @@
 import type { WorktreeMetadata } from '@/types/worktree';
+import type { DraftStarterRef } from '@/lib/draftStarters';
 
 export type RuntimePlatform = 'web' | 'desktop' | 'vscode';
 
@@ -672,6 +673,7 @@ export interface SettingsPayload {
   gitModelId?: string;
   pwaAppName?: string;
   mobileKeyboardMode?: 'native' | 'resize-content';
+  draftStarters?: DraftStarterRef[];
 
   [key: string]: unknown;
 }

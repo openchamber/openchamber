@@ -107,6 +107,17 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
       opacity: 0;
       pointer-events: none;
     }
+    /* Glow pulse on the OpenCode mark on the cube's top face — signals loading without text. */
+    @keyframes oc-logo-glow {
+      0%, 100% { filter: drop-shadow(0 0 0 transparent); }
+      50% { filter: drop-shadow(0 0 4px var(--vscode-foreground)); }
+    }
+    #initial-loading .logo-inner {
+      animation: oc-logo-glow 1.8s ease-in-out infinite;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #initial-loading .logo-inner { animation: none; }
+    }
     /* Logo colors use VS Code foreground color */
     #initial-loading .logo-stroke {
       stroke: var(--vscode-foreground);
@@ -153,9 +164,9 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
         <path class="logo-fill-dim" d="M-8 -4 L8 -4 L8 12 L-8 12 Z"/>
       </g>
     </svg>
-    <div class="status-text" id="loading-status">
-      ${initialStatus === 'connecting' ? 'Starting OpenCode API…' : initialStatus === 'connected' ? 'Initializing…' : 'Connecting…'}
-    </div>
+<<<<<<< HEAD
+    <!-- Status text stays empty while things are fine; populated only on error. -->
+    <div class="status-text" id="loading-status"></div>
     ${!cliAvailable ? `<div class="error-text" id="cli-missing-text">OpenCode CLI not found. Please install it first.</div>` : ''}
   </div>
   
@@ -219,11 +230,7 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
         cliMissingEl.textContent = messages.cliNotFound;
       }
       if (statusEl) {
-        statusEl.textContent = ${JSON.stringify(initialStatus)} === 'connecting'
-          ? messages.startingApi
-          : ${JSON.stringify(initialStatus)} === 'connected'
-            ? messages.initializing
-            : messages.connecting;
+        statusEl.textContent = '';
       }
     })();
 
@@ -234,17 +241,13 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
         var messages = getBootstrapMessages();
         var statusEl = document.getElementById('loading-status');
         if (statusEl) {
-          if (msg.status === 'connecting') {
-            statusEl.textContent = messages.startingApi;
-            statusEl.classList.remove('error-text');
-          } else if (msg.status === 'connected') {
-            statusEl.textContent = messages.connected;
-            statusEl.classList.remove('error-text');
-          } else if (msg.status === 'error') {
+          // Only show text when something is wrong — progress states stay silent
+          // (the animated logo already signals "working").
+          if (msg.status === 'error') {
             statusEl.textContent = msg.error || messages.connectionError;
             statusEl.classList.add('error-text');
           } else {
-            statusEl.textContent = messages.reconnecting;
+            statusEl.textContent = '';
             statusEl.classList.remove('error-text');
           }
         }

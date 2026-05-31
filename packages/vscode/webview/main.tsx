@@ -185,9 +185,8 @@ const maybeHideLoadingOverlay = () => {
       return;
     }
 
-    const providersText = bootstrapProvidersReady ? bootstrapMessages.providersReady : bootstrapMessages.providersLoading;
-    const agentsText = bootstrapAgentsReady ? bootstrapMessages.agentsReady : bootstrapMessages.agentsLoading;
-    setLoadingStatusText(bootstrapMessages.loadingData(providersText, agentsText));
+    // Still loading providers/agents — stay silent (the animated logo signals work).
+    setLoadingStatusText('');
     return;
   }
 
@@ -204,7 +203,8 @@ const maybeHideLoadingOverlay = () => {
     return;
   }
 
-  setLoadingStatusText(bootstrapMessages.startingApi);
+  // Connecting — no jargon; the animated logo conveys progress.
+  setLoadingStatusText('');
 };
 
 const applyInitialTheme = (theme: { metadata?: { variant?: string }; colors?: { surface?: { background?: string; foreground?: string } } }) => {
@@ -1285,6 +1285,15 @@ onCommand('newSession', () => {
 onCommand('showSettings', () => {
   // Dispatch event to navigate to settings view in VSCodeLayout
   window.dispatchEvent(new CustomEvent('openchamber:navigate', { detail: { view: 'settings' } }));
+});
+
+// Run the same full OpenCode reload flow the app uses after an update: shows the
+// reload overlay, restarts the managed OpenCode (via the bridge's /api/config/reload),
+// and refreshes config/data. Triggered by the "Restart API Connection" command.
+onCommand('reloadOpenCode', () => {
+  void import('@openchamber/ui/stores/useAgentsStore').then(({ reloadOpenCodeConfiguration }) => {
+    void reloadOpenCodeConfiguration();
+  });
 });
 
 const getNotificationClaimKey = (payload: { title?: unknown; body?: unknown; sessionId?: unknown; tag?: unknown } | undefined): string => {
