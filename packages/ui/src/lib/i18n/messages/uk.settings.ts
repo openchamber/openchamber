@@ -1721,3 +1721,4 @@ export const settingsDict = {
   "settings.promptTemplates.page.toast.createFailed": "Не вдалося створити шаблон",
   "settings.promptTemplates.page.toast.saveUnexpectedError": "Сталася неочікувана помилка під час збереження",
 } as const;
+

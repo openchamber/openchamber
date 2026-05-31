@@ -1721,3 +1721,4 @@ export const settingsDict = {
   'settings.magicPrompts.page.toast.resetAllSuccess': 'All prompt overrides reset',
   'settings.magicPrompts.page.toast.resetAllFailed': 'Failed to reset all prompts',
 } as const;
+

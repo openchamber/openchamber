@@ -1721,3 +1721,4 @@ export const settingsDict = {
   "settings.promptTemplates.page.toast.createFailed": "Error al crear la plantilla",
   "settings.promptTemplates.page.toast.saveUnexpectedError": "Ocurrió un error inesperado al guardar",
 } as const;
+

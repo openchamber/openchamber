@@ -1721,3 +1721,4 @@ export const settingsDict = {
   'settings.promptTemplates.page.toast.createFailed': '创建模板失败',
   'settings.promptTemplates.page.toast.saveUnexpectedError': '保存时发生意外错误',
 } as const;
+

@@ -1709,3 +1709,4 @@ export const settingsDict = {
   'settings.voice.page.tooltip.sttServer': 'Serwer Whisper zgodny z OpenAI. Lepsza dokładność, dowolny język.',
   'settings.window.description': 'Okno ustawień OpenChamber.',
 };
+

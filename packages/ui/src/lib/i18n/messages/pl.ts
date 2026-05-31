@@ -14,6 +14,7 @@ export const dict: Record<I18nKey, string> = {
   'common.language.brazilianPortuguese': 'Portugalski (Brazylia)',
   'common.language.korean': 'Koreański',
   'common.language.polish': 'Polski',
+  'common.language.russian': 'Rosyjski',
   'common.revealPath.finder': 'Pokaż w Finderze',
   'common.revealPath.fileExplorer': 'Otwórz w Eksploratorze plików',
   'common.revealPath.fileManager': 'Otwórz w Menedżerze plików',
@@ -2401,3 +2402,4 @@ export const dict: Record<I18nKey, string> = {
   'filesView.editor.saveNowManualTitle': 'Zapisz teraz (tryb ręczny)',
   'chat.commandAutocomplete.command.timelineDescription': 'Pokaż oś czasu sesji',
 } as const;
+

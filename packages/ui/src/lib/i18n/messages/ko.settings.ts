@@ -1721,3 +1721,4 @@ export const settingsDict = {
   'settings.promptTemplates.page.toast.createFailed': '템플릿 생성 실패',
   'settings.promptTemplates.page.toast.saveUnexpectedError': '저장 중 예기치 않은 오류가 발생했습니다',
 } as const;
+

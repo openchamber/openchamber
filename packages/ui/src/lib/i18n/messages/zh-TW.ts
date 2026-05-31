@@ -13,6 +13,7 @@ export const dict: Record<I18nKey, string> = {
   'common.language.brazilianPortuguese': '巴西葡萄牙語',
   'common.language.korean': '韓語',
   'common.language.polish': '波蘭語',
+  'common.language.russian': '俄語',
   'common.revealPath.finder': '在 Finder 中顯示',
   'common.revealPath.fileExplorer': '在檔案總管中開啟',
   'common.revealPath.fileManager': '在檔案管理員中開啟',
@@ -2384,3 +2385,4 @@ export const dict: Record<I18nKey, string> = {
   'filesView.tree.actions.refreshTitle': '重新整理',
   'sidebarFilesTree.actions.fileMenuTitle': '檔案選單',
 };
+

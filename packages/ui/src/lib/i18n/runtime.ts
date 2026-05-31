@@ -1,10 +1,10 @@
-export type Locale = 'en' | 'zh-CN' | 'zh-TW' | 'uk' | 'es' | 'pt-BR' | 'ko' | 'pl';
+﻿export type Locale = 'en' | 'zh-CN' | 'zh-TW' | 'uk' | 'es' | 'pt-BR' | 'ko' | 'pl' | 'ru';
 
-export const LOCALES = ['en', 'zh-CN', 'zh-TW', 'uk', 'es', 'pt-BR', 'ko', 'pl'] as const satisfies readonly Locale[];
+export const LOCALES = ['en', 'zh-CN', 'zh-TW', 'uk', 'es', 'pt-BR', 'ko', 'pl', 'ru'] as const satisfies readonly Locale[];
 
 export const DEFAULT_LOCALE: Locale = 'en';
 
-export const LOCALE_LABEL_KEYS: Record<Locale, 'common.language.english' | 'common.language.simplifiedChinese' | 'common.language.traditionalChinese' | 'common.language.ukrainian' | 'common.language.spanish' | 'common.language.brazilianPortuguese' | 'common.language.korean' | 'common.language.polish'> = {
+export const LOCALE_LABEL_KEYS: Record<Locale, 'common.language.english' | 'common.language.simplifiedChinese' | 'common.language.traditionalChinese' | 'common.language.ukrainian' | 'common.language.spanish' | 'common.language.brazilianPortuguese' | 'common.language.korean' | 'common.language.polish' | 'common.language.russian'> = {
   en: 'common.language.english',
   'zh-CN': 'common.language.simplifiedChinese',
   'zh-TW': 'common.language.traditionalChinese',
@@ -13,6 +13,7 @@ export const LOCALE_LABEL_KEYS: Record<Locale, 'common.language.english' | 'comm
   'pt-BR': 'common.language.brazilianPortuguese',
   ko: 'common.language.korean',
   pl: 'common.language.polish',
+  ru: 'common.language.russian',
 };
 
 export const LOCALE_STORAGE_KEY = 'openchamber.i18n.v1';
@@ -54,6 +55,9 @@ export function normalizeLocale(value: string | undefined | null): Locale {
   if (normalized === 'pl' || normalized.startsWith('pl-')) {
     return 'pl';
   }
+  if (normalized === 'ru' || normalized.startsWith('ru-')) {
+    return 'ru';
+  }
   return DEFAULT_LOCALE;
 }
 
@@ -94,3 +98,8 @@ export function detectInitialLocale(): Locale {
 
   return DEFAULT_LOCALE;
 }
+
+
+
+
+

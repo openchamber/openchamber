@@ -12,6 +12,7 @@ export const dict = {
   'common.language.brazilianPortuguese': 'Brazilian Portuguese',
   'common.language.korean': 'Korean',
   'common.language.polish': 'Polish',
+  'common.language.russian': 'Russian',
   'common.revealPath.finder': 'Reveal in Finder',
   'common.revealPath.fileExplorer': 'Open in File Explorer',
   'common.revealPath.fileManager': 'Open in File Manager',
@@ -2386,3 +2387,4 @@ export const dict = {
 } as const;
 
 export type I18nKey = keyof typeof dict;
+

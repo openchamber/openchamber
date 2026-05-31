@@ -1,4 +1,4 @@
-﻿export const settingsDict = {
+export const settingsDict = {
   'settings.appearance.language.label': '語言',
   'settings.appearance.language.description': '選擇介面語言。',
   'settings.appearance.language.select': '選擇語言',
@@ -1721,3 +1721,4 @@
   'settings.view.home.cards.plugins.description': '管理 opencode 外掛',
   'settings.view.home.cards.plugins.title': '外掛',
 } as const;
+
