@@ -5,6 +5,7 @@ export const dict = {
   'common.loading': 'Loading...',
   'common.unavailable': 'Unavailable',
   'common.language.english': 'English',
+  'common.language.french': 'French',
   'common.language.simplifiedChinese': 'Chinese (Simplified)',
   'common.language.traditionalChinese': 'Chinese (Traditional)',
   'common.language.ukrainian': 'Ukrainian',

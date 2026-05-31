@@ -6,6 +6,7 @@ export const dict: Record<I18nKey, string> = {
   "common.loading": "Carregando...",
   "common.unavailable": "Indisponível",
   "common.language.english": "Inglês",
+  "common.language.french": "Francês",
   "common.language.simplifiedChinese": "Chinês (simplificado)",
   "common.language.traditionalChinese": "Chinês (tradicional)",
   "common.language.ukrainian": "Ucraniano",

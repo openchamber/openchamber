@@ -6,6 +6,7 @@ export const dict: Record<I18nKey, string> = {
   'common.loading': '加载中...',
   'common.unavailable': '不可用',
   'common.language.english': 'English',
+  'common.language.french': '法语',
   'common.language.simplifiedChinese': '简体中文',
   'common.language.traditionalChinese': '繁体中文',
   'common.language.ukrainian': '乌克兰语',
