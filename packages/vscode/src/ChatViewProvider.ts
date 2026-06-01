@@ -264,14 +264,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  public createNewSession() {
+  public createNewSession(options?: { directory?: string }) {
     if (this._view) {
       // Reveal the webview panel
       this._view.show(true);
-      
+
       this._view.webview.postMessage({
         type: 'command',
-        command: 'newSession'
+        command: 'newSession',
+        ...(options?.directory && { payload: { directory: options.directory } }),
       });
     }
   }

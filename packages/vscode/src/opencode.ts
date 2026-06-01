@@ -38,11 +38,15 @@ export type OpenCodeDebugInfo = {
   authSource: 'user-env' | 'generated' | 'rotated' | null;
 };
 
+export type SetWorkingDirectoryResult =
+  | { success: true; restarted: boolean; path: string }
+  | { success: false; error: string };
+
 export interface OpenCodeManager {
   start(workdir?: string): Promise<void>;
   stop(): Promise<void>;
   restart(): Promise<void>;
-  setWorkingDirectory(path: string): Promise<{ success: boolean; restarted: boolean; path: string }>;
+  setWorkingDirectory(path: string): Promise<SetWorkingDirectoryResult>;
   getStatus(): ConnectionStatus;
   getApiUrl(): string | null;
   getOpenCodeAuthHeaders(): Record<string, string>;
@@ -1021,22 +1025,30 @@ export function createOpenCodeManager(_context: vscode.ExtensionContext): OpenCo
     }
   }
 
-  async function setWorkingDirectory(newPath: string): Promise<{ success: boolean; restarted: boolean; path: string }> {
-    void newPath;
-    const workspacePath = workspaceDirectory();
-    const nextDirectory = workspacePath;
-
-    if (workingDirectory === nextDirectory) {
-      return { success: true, restarted: false, path: nextDirectory };
+  async function setWorkingDirectory(newPath: string): Promise<SetWorkingDirectoryResult> {
+    const trimmed = newPath.trim();
+    if (!trimmed) {
+      return { success: false, error: 'path not found' };
     }
 
-    workingDirectory = nextDirectory;
-
-    if (useConfiguredUrl && configuredApiUrl) {
-      return { success: true, restarted: false, path: nextDirectory };
+    let isDir: boolean;
+    try {
+      isDir = fs.statSync(trimmed).isDirectory();
+    } catch {
+      return { success: false, error: 'path not found' };
+    }
+    if (!isDir) {
+      return { success: false, error: 'path not found' };
     }
 
-    return { success: true, restarted: false, path: nextDirectory };
+    const normalized = normalizeWindowsDriveLetter(trimmed);
+    if (workingDirectory === normalized || useConfiguredUrl && configuredApiUrl) {
+      return { success: true, restarted: false, path: normalized };
+    }
+
+    workingDirectory = normalized;
+    await restartInternal();
+    return { success: true, restarted: true, path: normalized };
   }
 
   return {

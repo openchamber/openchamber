@@ -1268,11 +1268,11 @@ onCommand('createSessionWithPrompt', (payload) => {
 });
 
 // Listen for newSession command from extension title bar button
-onCommand('newSession', () => {
+onCommand('newSession', (payload) => {
   import('@/sync/session-ui-store').then(({ useSessionUIStore }) => {
-    useSessionUIStore.getState().openNewSessionDraft();
+    useSessionUIStore.getState().openNewSessionDraft({ directoryOverride: (payload as { directory?: string })?.directory });
   });
-  
+
   // Also dispatch event to navigate to chat view in VSCodeLayout
   window.dispatchEvent(new CustomEvent('openchamber:navigate', { detail: { view: 'chat' } }));
 });
