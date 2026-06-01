@@ -3124,10 +3124,10 @@ export async function createWorktree(directory, input = {}) {
       // NOTE: keep in sync with packages/vscode/src/gitService.ts createWorktree sibling error handling.
       // Only add the parent-dir-writability hint when the failure looks filesystem/permission-related.
       // Otherwise (bad startRef, checkout/lock failures, etc.) rethrow the original git error unchanged.
-      const code = typeof error?.code === 'string' ? error.code : '';
+      // runGitCommandOrThrow throws a plain Error built from git's stderr/stdout, so there is no
+      // OS-level error.code to key off of; detect filesystem/permission failures from the message.
       const message = error instanceof Error ? error.message : String(error);
       const isFilesystemError =
-        /^(EACCES|EPERM|EROFS|ENOENT)$/i.test(code) ||
         /permission denied|read-only|not writable|no such file or directory/i.test(message);
       if (isFilesystemError) {
         throw new Error(
