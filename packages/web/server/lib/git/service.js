@@ -2819,7 +2819,12 @@ export async function watchWorktreeChanges(directory, onChange) {
   const watchers = [];
   let closed = false;
   let debounceTimer = null;
-  let watchingWorktreesDir = false;
+  let worktreesWatcher = null;
+  // Inode the worktrees watcher is bound to. git removes `.git/worktrees` when
+  // the last worktree is deleted and recreates it (with a fresh inode) on the
+  // next add, silently invalidating the fs.watch handle; tracking the inode
+  // lets us notice the swap and re-attach even if the two events coalesce.
+  let worktreesWatchIno = null;
 
   const notify = (reason) => {
     if (closed) return;
@@ -2841,10 +2846,23 @@ export async function watchWorktreeChanges(directory, onChange) {
     }
   };
 
-  const addWatcher = async (targetPath, handleEvent) => {
-    const stat = await fsp.stat(targetPath).catch(() => null);
-    if (!stat?.isDirectory()) {
-      return false;
+  const removeWatcher = (watcher) => {
+    const index = watchers.indexOf(watcher);
+    if (index !== -1) {
+      watchers.splice(index, 1);
+    }
+    closeWatcher(watcher);
+  };
+
+  const attachWatcher = (targetPath, handleEvent) => {
+    let stat;
+    try {
+      stat = fs.statSync(targetPath);
+    } catch {
+      return null;
+    }
+    if (!stat.isDirectory()) {
+      return null;
     }
 
     const watcher = fs.watch(targetPath, { persistent: false }, (eventType, filename) => {
@@ -2854,31 +2872,57 @@ export async function watchWorktreeChanges(directory, onChange) {
       console.warn('Git worktree watcher error:', error?.message || error);
     });
     watchers.push(watcher);
-    return true;
+    return watcher;
   };
 
-  const ensureWorktreesWatcher = async () => {
-    if (closed || watchingWorktreesDir) {
+  // Keep the `.git/worktrees` watcher in sync with the directory's current
+  // existence and identity. Runs synchronously from watcher callbacks, so
+  // events are processed one at a time — there is no await window for a
+  // concurrent invocation to attach a duplicate watcher, and a deleted dir is
+  // re-watched as soon as git recreates it (otherwise granular add/remove
+  // events stop arriving after the last worktree is removed and a new one
+  // added).
+  const syncWorktreesWatcher = () => {
+    if (closed) {
       return;
     }
-    // Claim the slot synchronously, before the first await, so a concurrent
-    // invocation (the common-dir watcher fires this fire-and-forget on every
-    // relevant event) can't pass the guard and add a duplicate fs.watch.
-    watchingWorktreesDir = true;
-    const added = await addWatcher(worktreesDir, () => notify('worktrees-directory-changed'));
-    // If the worktrees directory didn't exist yet, release the slot so a later
-    // event can retry once it's created.
-    watchingWorktreesDir = added;
+    let stat;
+    try {
+      stat = fs.statSync(worktreesDir);
+    } catch {
+      stat = null;
+    }
+    if (!stat?.isDirectory()) {
+      if (worktreesWatcher) {
+        removeWatcher(worktreesWatcher);
+        worktreesWatcher = null;
+        worktreesWatchIno = null;
+      }
+      return;
+    }
+    if (worktreesWatcher && worktreesWatchIno === stat.ino) {
+      return;
+    }
+    if (worktreesWatcher) {
+      removeWatcher(worktreesWatcher);
+      worktreesWatcher = null;
+      worktreesWatchIno = null;
+    }
+    const watcher = attachWatcher(worktreesDir, () => notify('worktrees-directory-changed'));
+    if (watcher) {
+      worktreesWatcher = watcher;
+      worktreesWatchIno = stat.ino;
+    }
   };
 
-  await addWatcher(commonGitDir, (_eventType, filename) => {
+  attachWatcher(commonGitDir, (_eventType, filename) => {
     if (!filename || filename === 'worktrees') {
-      void ensureWorktreesWatcher();
+      syncWorktreesWatcher();
       notify('common-git-directory-changed');
     }
   });
 
-  await ensureWorktreesWatcher();
+  syncWorktreesWatcher();
 
   if (watchers.length === 0) {
     throw new Error('Failed to watch git worktree metadata');
