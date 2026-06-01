@@ -556,7 +556,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
         'pointer-events-none absolute inline-flex h-3.5 w-3.5 items-center justify-center transition-opacity',
         isMinimalMode ? 'top-1/2 -translate-y-1/2' : 'top-[14.5px] -translate-y-1/2',
         'left-[-10px]',
-        hasChildren && !alwaysShowActions ? 'opacity-100 group-hover:opacity-0 group-focus-within:opacity-0' : '',
+        '',
       )}
     >
       {statusMarkerContent}
@@ -581,8 +581,8 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     </button>
   ) : null;
   const pinnedIndicator = isPinnedSession ? (
-    <span className="inline-flex flex-shrink-0 items-center justify-center text-primary" title={t('sessions.sidebar.session.status.pinned')} aria-label={t('sessions.sidebar.session.status.pinned')}>
-      <Icon name="pushpin" className="h-3 w-3" />
+    <span className="inline-flex flex-shrink-0 items-center justify-center text-primary" title={t('sessions.sidebar.session.status.pinned')}>
+      <Icon name="pushpin" className="h-3 w-3" aria-hidden="true" />
     </span>
   ) : null;
   const sessionTitleLine = (
