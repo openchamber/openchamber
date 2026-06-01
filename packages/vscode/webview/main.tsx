@@ -1269,8 +1269,11 @@ onCommand('createSessionWithPrompt', (payload) => {
 
 // Listen for newSession command from extension title bar button
 onCommand('newSession', (payload) => {
+  const directory = (payload as { directory?: string } | undefined)?.directory;
+  const directoryOverride = typeof directory === 'string' && directory.length > 0 ? directory : undefined;
+
   import('@/sync/session-ui-store').then(({ useSessionUIStore }) => {
-    useSessionUIStore.getState().openNewSessionDraft({ directoryOverride: (payload as { directory?: string })?.directory });
+    useSessionUIStore.getState().openNewSessionDraft(directoryOverride ? { directoryOverride } : undefined);
   });
 
   // Also dispatch event to navigate to chat view in VSCodeLayout

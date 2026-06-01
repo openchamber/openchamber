@@ -1031,22 +1031,25 @@ export function createOpenCodeManager(_context: vscode.ExtensionContext): OpenCo
       return { success: false, error: 'path not found' };
     }
 
-    let isDir: boolean;
+    let stat;
     try {
-      isDir = fs.statSync(trimmed).isDirectory();
+      stat = await fs.promises.stat(trimmed);
     } catch {
       return { success: false, error: 'path not found' };
     }
-    if (!isDir) {
+    if (!stat.isDirectory()) {
       return { success: false, error: 'path not found' };
     }
 
     const normalized = normalizeWindowsDriveLetter(trimmed);
-    if (workingDirectory === normalized || useConfiguredUrl && configuredApiUrl) {
+    if (workingDirectory === normalized) {
       return { success: true, restarted: false, path: normalized };
     }
 
     workingDirectory = normalized;
+    if (useConfiguredUrl && configuredApiUrl) {
+      return { success: true, restarted: false, path: normalized };
+    }
     await restartInternal();
     return { success: true, restarted: true, path: normalized };
   }
