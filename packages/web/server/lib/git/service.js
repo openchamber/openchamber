@@ -2844,7 +2844,7 @@ export async function watchWorktreeChanges(directory, onChange) {
   const addWatcher = async (targetPath, handleEvent) => {
     const stat = await fsp.stat(targetPath).catch(() => null);
     if (!stat?.isDirectory()) {
-      return;
+      return false;
     }
 
     const watcher = fs.watch(targetPath, { persistent: false }, (eventType, filename) => {
@@ -2854,14 +2854,21 @@ export async function watchWorktreeChanges(directory, onChange) {
       console.warn('Git worktree watcher error:', error?.message || error);
     });
     watchers.push(watcher);
+    return true;
   };
 
   const ensureWorktreesWatcher = async () => {
     if (closed || watchingWorktreesDir) {
       return;
     }
-    await addWatcher(worktreesDir, () => notify('worktrees-directory-changed'));
-    watchingWorktreesDir = watchers.length > 1;
+    // Claim the slot synchronously, before the first await, so a concurrent
+    // invocation (the common-dir watcher fires this fire-and-forget on every
+    // relevant event) can't pass the guard and add a duplicate fs.watch.
+    watchingWorktreesDir = true;
+    const added = await addWatcher(worktreesDir, () => notify('worktrees-directory-changed'));
+    // If the worktrees directory didn't exist yet, release the slot so a later
+    // event can retry once it's created.
+    watchingWorktreesDir = added;
   };
 
   await addWatcher(commonGitDir, (_eventType, filename) => {

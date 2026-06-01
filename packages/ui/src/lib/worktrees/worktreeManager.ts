@@ -183,7 +183,11 @@ export async function listProjectWorktrees(project: ProjectRef, options: { force
     const metadataProjectDirectory = await resolveProjectRoot(projectDirectory).catch(() => projectDirectory);
     const normalizedProjectDirectory = normalizePath(projectDirectory);
 
-    const worktrees = await git.worktree.list(projectDirectory).catch(() => []);
+    // Let a genuine git failure reject (every caller wraps this in try/catch).
+    // Swallowing to `[]` here would both poison the 30s cache with an empty
+    // result and let callers conflate a transient fetch failure with an
+    // empty-but-successful list. See refreshProjectWorktrees.
+    const worktrees = await git.worktree.list(projectDirectory);
     const results: WorktreeMetadata[] = worktrees
       .filter((entry) => typeof entry.path === 'string' && entry.path.trim().length > 0)
       .map((entry) => {
@@ -248,7 +252,17 @@ const mergeAvailableWorktrees = (
 
 export async function refreshProjectWorktrees(project: ProjectRef): Promise<WorktreeMetadata[]> {
   const projectDirectory = normalizePath(project.path);
-  const worktrees = await listProjectWorktrees(project, { forceRefresh: true });
+
+  let worktrees: WorktreeMetadata[];
+  try {
+    worktrees = await listProjectWorktrees(project, { forceRefresh: true });
+  } catch (error) {
+    // Distinguish fetch failure from empty success: a transient git error
+    // (lock file, slow remote, etc.) must not wipe the project's worktrees
+    // from the shared store. Leave the existing entries untouched.
+    console.warn('Skipping worktree store update after refresh failure:', error);
+    return useSessionUIStore.getState().availableWorktreesByProject.get(projectDirectory) ?? [];
+  }
 
   const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
   const updatedByProject = new Map(currentByProject);
