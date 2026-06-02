@@ -47,6 +47,7 @@ export const registerNotificationRoutes = (app, dependencies) => {
     markUserMessageSent,
     setPushInitialized,
     setAutoAcceptSession,
+    getPermissionAudit,
   } = dependencies;
 
   const ensureSessionWatcher = async () => {
@@ -297,6 +298,13 @@ export const registerNotificationRoutes = (app, dependencies) => {
       sessionId,
       messageSent: true,
     });
+  });
+
+  app.get('/api/sessions/:id/permission-audit', async (req, res) => {
+    await ensureSessionWatcher();
+    const sessionId = req.params.id;
+    const rows = typeof getPermissionAudit === 'function' ? getPermissionAudit(sessionId) : [];
+    return res.json({ sessionId, rows });
   });
 
   // Mirror client-side Permission Auto-Accept state to the server so it can

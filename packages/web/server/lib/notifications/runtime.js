@@ -12,6 +12,9 @@ export const createNotificationTriggerRuntime = (deps) => {
     sendPushToAllUiSessions,
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
+    fs,
+    path,
+    openchamberDataDir,
   } = deps;
 
   let getIsWindowFocused = typeof deps.getIsWindowFocused === 'function'
@@ -29,9 +32,161 @@ export const createNotificationTriggerRuntime = (deps) => {
   const pushPermissionDebounceTimers = new Map();
   const notifiedPermissionRequests = new Set();
   const lastReadyNotificationAt = new Map();
+  const permissionAuditBySession = new Map();
+  const permissionAuditFile = fs && path && openchamberDataDir
+    ? path.join(openchamberDataDir, 'permission-audit.json')
+    : null;
+  let permissionAuditLoaded = false;
 
   const sessionParentIdCache = new Map();
   const SESSION_PARENT_CACHE_TTL_MS = 60 * 1000;
+  const MAX_PERMISSION_AUDIT_ROWS_PER_SESSION = 200;
+  const PERMISSION_AUDIT_PERSIST_DEBOUNCE_MS = 250;
+  let permissionAuditPersistTimer = null;
+  let permissionAuditPersistInFlight = false;
+  let permissionAuditPersistPending = false;
+
+  const normalizeStringArray = (value) => Array.isArray(value)
+    ? value.filter((item) => typeof item === 'string')
+    : [];
+
+  const normalizePermissionAuditRow = (row) => {
+    if (!row || typeof row !== 'object') return null;
+    const sessionID = typeof row.sessionID === 'string' ? row.sessionID : '';
+    const requestID = typeof row.requestID === 'string' ? row.requestID : '';
+    if (!sessionID || !requestID) return null;
+    return {
+      id: typeof row.id === 'string' && row.id.length > 0 ? row.id : `${sessionID}:${requestID}`,
+      sessionID,
+      requestID,
+      permission: typeof row.permission === 'string' ? row.permission : '',
+      patterns: normalizeStringArray(row.patterns),
+      metadata: row.metadata && typeof row.metadata === 'object' ? row.metadata : {},
+      always: normalizeStringArray(row.always),
+      tool: row.tool && typeof row.tool === 'object' ? row.tool : undefined,
+      directory: typeof row.directory === 'string' ? row.directory : undefined,
+      requestedAt: typeof row.requestedAt === 'number' ? row.requestedAt : Date.now(),
+      status: row.status === 'approved' || row.status === 'denied' ? row.status : 'requested',
+      response: row.response === 'always' || row.response === 'reject' ? row.response : (row.response === 'once' ? 'once' : undefined),
+      autoApproved: row.autoApproved === true ? true : undefined,
+      respondedAt: typeof row.respondedAt === 'number' ? row.respondedAt : undefined,
+    };
+  };
+
+  const loadPermissionAudit = () => {
+    if (permissionAuditLoaded) return;
+    permissionAuditLoaded = true;
+    if (!permissionAuditFile || !fs?.existsSync(permissionAuditFile)) return;
+    try {
+      const parsed = JSON.parse(fs.readFileSync(permissionAuditFile, 'utf8'));
+      const sessions = parsed && typeof parsed === 'object' ? parsed.sessions : null;
+      if (!sessions || typeof sessions !== 'object') return;
+      for (const [sessionId, rows] of Object.entries(sessions)) {
+        if (typeof sessionId !== 'string' || !Array.isArray(rows)) continue;
+        permissionAuditBySession.set(sessionId, normalizePermissionAuditRows(rows));
+      }
+    } catch {
+    }
+  };
+
+  const flushPermissionAudit = async () => {
+    if (!permissionAuditFile || !fs?.promises) return;
+    if (permissionAuditPersistInFlight) {
+      permissionAuditPersistPending = true;
+      return;
+    }
+    permissionAuditPersistInFlight = true;
+    permissionAuditPersistPending = false;
+    try {
+      await fs.promises.mkdir(path.dirname(permissionAuditFile), { recursive: true });
+      await fs.promises.writeFile(permissionAuditFile, JSON.stringify({ sessions: Object.fromEntries(permissionAuditBySession) }), 'utf8');
+    } catch {
+    } finally {
+      permissionAuditPersistInFlight = false;
+      if (permissionAuditPersistPending) {
+        persistPermissionAudit();
+      }
+    }
+  };
+
+  const persistPermissionAudit = () => {
+    if (!permissionAuditFile || !fs?.promises) return;
+    if (permissionAuditPersistTimer) {
+      clearTimeout(permissionAuditPersistTimer);
+    }
+    permissionAuditPersistTimer = setTimeout(() => {
+      permissionAuditPersistTimer = null;
+      void flushPermissionAudit();
+    }, PERMISSION_AUDIT_PERSIST_DEBOUNCE_MS);
+    permissionAuditPersistTimer.unref?.();
+  };
+
+  const normalizePermissionAuditRows = (rows) => rows
+    .map((row) => normalizePermissionAuditRow(row))
+    .filter((row) => row)
+    .sort((a, b) => (a.requestedAt ?? 0) - (b.requestedAt ?? 0) || a.requestID.localeCompare(b.requestID))
+    .slice(-MAX_PERMISSION_AUDIT_ROWS_PER_SESSION);
+
+  const recordPermissionAuditRequest = (permission, options = {}) => {
+    if (!permission || typeof permission !== 'object') return;
+    const sessionID = typeof permission.sessionID === 'string' ? permission.sessionID : '';
+    const requestID = typeof permission.id === 'string' ? permission.id : '';
+    if (!sessionID || !requestID) return;
+    loadPermissionAudit();
+    const now = Date.now();
+    const rows = permissionAuditBySession.get(sessionID) ?? [];
+    const existing = rows.find((row) => row.requestID === requestID);
+    const next = {
+      ...(existing ?? {}),
+      id: existing?.id ?? `${sessionID}:${requestID}`,
+      sessionID,
+      requestID,
+      permission: typeof permission.permission === 'string' ? permission.permission : '',
+      patterns: Array.isArray(permission.patterns) ? permission.patterns.filter((item) => typeof item === 'string') : [],
+      metadata: permission.metadata && typeof permission.metadata === 'object' ? permission.metadata : {},
+      always: Array.isArray(permission.always) ? permission.always.filter((item) => typeof item === 'string') : [],
+      tool: permission.tool && typeof permission.tool === 'object' ? permission.tool : existing?.tool,
+      directory: typeof options.directory === 'string' ? options.directory : existing?.directory,
+      requestedAt: existing?.requestedAt ?? now,
+      status: options.autoApproved ? 'approved' : (existing?.status ?? 'requested'),
+      response: options.autoApproved ? 'once' : existing?.response,
+      autoApproved: options.autoApproved === true ? true : existing?.autoApproved,
+      respondedAt: options.autoApproved ? (existing?.respondedAt ?? now) : existing?.respondedAt,
+    };
+    permissionAuditBySession.set(sessionID, normalizePermissionAuditRows([...rows.filter((row) => row.requestID !== requestID), next]));
+    persistPermissionAudit();
+  };
+
+  const recordPermissionAuditResponse = (sessionID, requestID, reply, options = {}) => {
+    if (!sessionID || !requestID) return;
+    loadPermissionAudit();
+    const now = Date.now();
+    const rows = permissionAuditBySession.get(sessionID) ?? [];
+    const existing = rows.find((row) => row.requestID === requestID);
+    const next = {
+      id: existing?.id ?? `${sessionID}:${requestID}`,
+      sessionID,
+      requestID,
+      permission: existing?.permission ?? '',
+      patterns: existing?.patterns ?? [],
+      metadata: existing?.metadata ?? {},
+      always: existing?.always ?? [],
+      tool: existing?.tool,
+      directory: existing?.directory,
+      requestedAt: existing?.requestedAt ?? now,
+      status: reply === 'reject' ? 'denied' : 'approved',
+      response: reply === 'always' || reply === 'reject' ? reply : 'once',
+      autoApproved: reply === 'reject' ? undefined : (options.autoApproved === true ? true : existing?.autoApproved),
+      respondedAt: now,
+    };
+    permissionAuditBySession.set(sessionID, normalizePermissionAuditRows([...rows.filter((row) => row.requestID !== requestID), next]));
+    persistPermissionAudit();
+  };
+
+  const getPermissionAudit = (sessionID) => {
+    loadPermissionAudit();
+    return [...(permissionAuditBySession.get(sessionID) ?? [])];
+  };
 
   // Sessions where the client has enabled Permission Auto-Accept. Mirrored
   // from the client-side permissionStore via POST /api/notifications/auto-accept
@@ -450,6 +605,12 @@ export const createNotificationTriggerRuntime = (deps) => {
 
     if (payload.type === 'permission.replied' && sessionId) {
       const requestId = payload.properties?.requestID ?? payload.properties?.requestId ?? payload.properties?.id;
+      const reply = payload.properties?.reply ?? payload.properties?.response;
+      if (typeof requestId === 'string' && (reply === 'once' || reply === 'always' || reply === 'reject')) {
+        recordPermissionAuditResponse(sessionId, requestId, reply, {
+          autoApproved: payload.properties?.autoApproved === true,
+        });
+      }
       const requestKey = typeof requestId === 'string' ? `${sessionId}:${requestId}` : null;
       const pendingNotification = pushPermissionDebounceTimers.get(sessionId);
       if (!pendingNotification) {
@@ -470,6 +631,8 @@ export const createNotificationTriggerRuntime = (deps) => {
       const requestId = payload.properties?.id ?? payload.properties?.requestID ?? payload.properties?.requestId;
       const permission = payload.properties?.permission;
       const requestKey = typeof requestId === 'string' ? `${sessionId}:${requestId}` : null;
+      recordPermissionAuditRequest(payload.properties);
+      const autoAccepting = await isSessionAutoAccepting(sessionId);
       if (requestKey && notifiedPermissionRequests.has(requestKey)) {
         return;
       }
@@ -477,7 +640,7 @@ export const createNotificationTriggerRuntime = (deps) => {
       // Client may be in Permission Auto-Accept for this session (or any
       // ancestor). Skip the whole notification path — the client responds
       // directly and the user has opted out of approval prompts.
-      if (await isSessionAutoAccepting(sessionId)) {
+      if (autoAccepting) {
         if (requestKey) notifiedPermissionRequests.add(requestKey);
         return;
       }
@@ -578,5 +741,6 @@ export const createNotificationTriggerRuntime = (deps) => {
     maybeSendPushForTrigger,
     setAutoAcceptSession,
     setGetIsWindowFocused,
+    getPermissionAudit,
   };
 };

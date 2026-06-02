@@ -11,6 +11,7 @@ import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from "@/components/icon/Icon";
 import { DiffPreview, WritePreview } from './DiffPreview';
 import { useI18n } from '@/lib/i18n';
+import { usePermissionAuditStore } from '@/stores/permissionAuditStore';
 
 const PERMISSION_BASH_CUSTOM_STYLE: React.CSSProperties = {
   margin: 0,
@@ -112,6 +113,7 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
 
     try {
       await respondToPermission(permission.sessionID, permission.id, response);
+      usePermissionAuditStore.getState().recordResponse(permission.sessionID, permission.id, response);
       setHasResponded(true);
       onResponse?.(response);
     } catch (error) {

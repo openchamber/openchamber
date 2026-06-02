@@ -1,5 +1,6 @@
 import React from 'react';
 import type { Message, Part, Session } from '@opencode-ai/sdk/v2';
+import { useShallow } from 'zustand/react/shallow';
 
 import { ChatInput } from './ChatInput';
 import { DraftPresetChips } from './DraftPresetChips';
@@ -25,8 +26,10 @@ import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
 import { Icon } from "@/components/icon/Icon";
 import type { PermissionRequest } from '@/types/permission';
 import type { QuestionRequest } from '@/types/question';
+import type { PermissionAuditEntry } from '@/types/permissionAudit';
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { usePermissionAuditStore } from '@/stores/permissionAuditStore';
 import {
     collectVisibleSessionIdsForBlockingRequests,
     flattenBlockingRequests,
@@ -50,10 +53,12 @@ import { usePlanDetection } from '@/hooks/usePlanDetection';
 import { getAllSyncSessions } from '@/sync/sync-refs';
 import { useI18n } from '@/lib/i18n';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = [];
 const EMPTY_PERMISSIONS: PermissionRequest[] = [];
 const EMPTY_QUESTIONS: QuestionRequest[] = [];
+const EMPTY_PERMISSION_AUDITS: PermissionAuditEntry[] = [];
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
 const CHAT_FORCE_SCROLL_BOTTOM_EVENT = 'openchamber:chat-force-scroll-bottom';
 const DEFAULT_RETRY_MESSAGE = 'Quota limit reached. Retrying automatically.';
@@ -144,6 +149,7 @@ type ChatViewportProps = {
     messageListRef: React.RefObject<MessageListHandle | null>;
     pendingRevealWork: boolean;
     renderedMessages: SessionMessageRecord[];
+    permissionAudits: PermissionAuditEntry[];
     isLoadingOlder: boolean;
     sessionIsWorking: boolean;
     streamingMessageId: string | null;
@@ -172,6 +178,7 @@ const ChatViewport = React.memo(({
     messageListRef,
     pendingRevealWork,
     renderedMessages,
+    permissionAudits,
     isLoadingOlder,
     sessionIsWorking,
     streamingMessageId,
@@ -226,6 +233,7 @@ const ChatViewport = React.memo(({
                             sessionKey={currentSessionId}
                             disableStaging={pendingRevealWork}
                             messages={renderedMessages}
+                            permissionAudits={permissionAudits}
                             sessionIsWorking={sessionIsWorking}
                             activeStreamingMessageId={streamingMessageId}
                             activeStreamingPhase={activeStreamingPhase}
@@ -267,6 +275,7 @@ const ChatViewport = React.memo(({
         && prev.messageListRef === next.messageListRef
         && prev.pendingRevealWork === next.pendingRevealWork
         && prev.renderedMessages === next.renderedMessages
+        && prev.permissionAudits === next.permissionAudits
         && prev.isLoadingOlder === next.isLoadingOlder
         && prev.sessionIsWorking === next.sessionIsWorking
         && prev.streamingMessageId === next.streamingMessageId
@@ -467,6 +476,37 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         if (scopedSessionIds.length === 0) return EMPTY_QUESTIONS;
         return flattenBlockingRequests(questionsMap, scopedSessionIds);
     }, [questionsMap, scopedSessionIds]);
+    const setPermissionAuditRows = usePermissionAuditStore((state) => state.setSessionRows);
+    const sessionPermissionAudits = usePermissionAuditStore(useShallow((state) => {
+        if (scopedSessionIds.length === 0) return EMPTY_PERMISSION_AUDITS;
+        const rows: PermissionAuditEntry[] = [];
+        for (const sessionId of scopedSessionIds) {
+            rows.push(...(state.rowsBySession[sessionId] ?? []));
+        }
+        return rows.sort((a, b) => a.requestedAt - b.requestedAt || a.requestID.localeCompare(b.requestID));
+    }));
+    const auditRefreshKey = `${sessionStatusForCurrent.type ?? 'idle'}:${sessionMessages.length}`;
+
+    React.useEffect(() => {
+        if (scopedSessionIds.length === 0) return;
+        let cancelled = false;
+        for (const sessionId of scopedSessionIds) {
+            void runtimeFetch(`/api/sessions/${encodeURIComponent(sessionId)}/permission-audit`, {
+                headers: { Accept: 'application/json' },
+            }).then(async (response) => {
+                if (!response.ok) {
+                    throw new Error(`permission audit fetch failed: ${response.status}`);
+                }
+                return await response.json() as { rows?: PermissionAuditEntry[] };
+            }).then((data) => {
+                if (cancelled) return;
+                setPermissionAuditRows(sessionId, Array.isArray(data.rows) ? data.rows : []);
+            }).catch(() => {});
+        }
+        return () => {
+            cancelled = true;
+        };
+    }, [auditRefreshKey, scopedSessionIds, setPermissionAuditRows]);
     const sessionIsWorking = React.useMemo(() => {
         if (!currentSessionId || sessionPermissions.length > 0 || sessionQuestions.length > 0) {
             return false;
@@ -941,6 +981,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 messageListRef={messageListRef}
                 pendingRevealWork={timelineController.pendingRevealWork}
                 renderedMessages={timelineController.renderedMessages}
+                permissionAudits={sessionPermissionAudits}
                 isLoadingOlder={timelineController.isLoadingOlder}
                 sessionIsWorking={sessionIsWorking}
                 streamingMessageId={streamingMessageId}

@@ -29,6 +29,7 @@ import { syncDebug } from "./debug"
 import { getReconnectCandidateSessionIds } from "./reconnect-recovery"
 import { opencodeClient } from "@/lib/opencode/client"
 import { usePermissionStore } from "@/stores/permissionStore"
+import { usePermissionAuditStore } from "@/stores/permissionAuditStore"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { toast } from "@/components/ui"
@@ -1039,6 +1040,8 @@ export async function resyncBlockingRequestsForDirectory(
         (grouped[sessionId] ?? []).map(async (permission) => {
           try {
             await sessionActions.respondToPermission(permission.sessionID, permission.id, "once")
+            usePermissionAuditStore.getState().recordRequest(permission, { autoApproved: true, directory })
+            usePermissionAuditStore.getState().recordResponse(permission.sessionID, permission.id, "once", { autoApproved: true })
             const accepted = acceptedIdsBySession.get(sessionId) ?? new Set<string>()
             accepted.add(permission.id)
             acceptedIdsBySession.set(sessionId, accepted)
@@ -1275,9 +1278,15 @@ function handleEvent(
   if (payload.type === "permission.asked") {
     const permission = payload.properties as PermissionRequest
     const permissionStore = usePermissionStore.getState()
+    usePermissionAuditStore.getState().recordRequest(permission, {
+      directory: resolvedDirectory,
+    })
     if (permissionStore.isSessionAutoAccepting(permission.sessionID)) {
       updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload)
-      void sessionActions.respondToPermission(permission.sessionID, permission.id, "once").catch(() => undefined)
+      void sessionActions.respondToPermission(permission.sessionID, permission.id, "once").then(() => {
+        usePermissionAuditStore.getState().recordResponse(permission.sessionID, permission.id, "once", { autoApproved: true })
+      }).catch(() => undefined)
+      return
     }
 
     const toastKey = getPermissionToastKey(permission.sessionID, permission.id)
@@ -1299,7 +1308,13 @@ function handleEvent(
   }
 
   if (payload.type === "permission.replied") {
-    const props = payload.properties as { sessionID?: string; requestID?: string }
+    const props = payload.properties as { sessionID?: string; requestID?: string; reply?: "once" | "always" | "reject"; response?: "once" | "always" | "reject"; autoApproved?: boolean }
+    const reply = props.reply ?? props.response
+    if (props.sessionID && props.requestID && (reply === "once" || reply === "always" || reply === "reject")) {
+      usePermissionAuditStore.getState().recordResponse(props.sessionID, props.requestID, reply, {
+        autoApproved: props.autoApproved === true,
+      })
+    }
     const toastKey = getPermissionToastKey(props.sessionID, props.requestID)
     if (toastKey) {
       pendingPermissionToastIds.delete(toastKey)

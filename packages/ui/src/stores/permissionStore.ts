@@ -10,6 +10,8 @@ import { getAllSyncSessions, getSyncChildStores } from "@/sync/sync-refs";
 import { opencodeClient } from "@/lib/opencode/client";
 import { respondToPermission } from "@/sync/session-actions";
 import { useSessionUIStore } from "@/sync/session-ui-store";
+import { usePermissionAuditStore } from "@/stores/permissionAuditStore";
+import type { PermissionRequest } from "@/types/permission";
 import { runtimeFetch } from "@/lib/runtime-fetch";
 
 interface PermissionState {
@@ -126,6 +128,15 @@ const collectPendingFromSyncStores = (): Array<{ id: string; sessionID: string }
         return [];
     }
 };
+
+const createPlaceholderPermissionRequest = (permission: { id: string; sessionID: string }): PermissionRequest => ({
+    id: permission.id,
+    sessionID: permission.sessionID,
+    permission: "",
+    patterns: [],
+    metadata: {},
+    always: [],
+});
 
 const sessionBelongsToScope = async (
     sessionID: string,
@@ -274,15 +285,15 @@ export const usePermissionStore = create<PermissionStore>()(
                     const pendingFromApi = await opencodeClient
                       .listPendingPermissions({ directories: Array.from(directories) })
                       .catch(() => []);
-                    const mergedPending = new Map<string, { id: string; sessionID: string }>();
+                    const mergedPending = new Map<string, PermissionRequest>();
 
                     for (const permission of pendingFromStores) {
                         if (sessionScope.has(permission.sessionID)) {
-                            mergedPending.set(permission.id, permission);
+                            mergedPending.set(permission.id, createPlaceholderPermissionRequest(permission));
                             continue;
                         }
                         if (await sessionBelongsToScope(permission.sessionID, sessionId, sessions, directoryList)) {
-                            mergedPending.set(permission.id, permission);
+                            mergedPending.set(permission.id, createPlaceholderPermissionRequest(permission));
                         }
                     }
                     for (const permission of pendingFromApi) {
@@ -295,12 +306,16 @@ export const usePermissionStore = create<PermissionStore>()(
                                 continue;
                             }
                         }
-                        mergedPending.set(permission.id, { id: permission.id, sessionID: permission.sessionID });
+                        mergedPending.set(permission.id, permission);
                     }
 
                     await Promise.all(
                         Array.from(mergedPending.values())
-                            .map((permission) => respondToPermission(permission.sessionID, permission.id, "once").catch(() => undefined)),
+                            .map((permission) => respondToPermission(permission.sessionID, permission.id, "once").then(() => {
+                                const auditDirectory = normalizeDirectoryCandidate(useSessionUIStore.getState().getDirectoryForSession(permission.sessionID)) || mappedSessionDirectory || currentDirectory || undefined;
+                                usePermissionAuditStore.getState().recordRequest(permission, { autoApproved: true, directory: auditDirectory });
+                                usePermissionAuditStore.getState().recordResponse(permission.sessionID, permission.id, "once", { autoApproved: true });
+                            }).catch(() => undefined)),
                     );
                 },
             }),

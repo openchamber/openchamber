@@ -41,12 +41,14 @@ import { ToolRevealOnMount } from './parts/ToolRevealOnMount';
 import { StaticToolRow } from './parts/ProgressiveGroup';
 import { isExpandableTool, isStandaloneTool } from './parts/toolRenderUtils';
 import TurnActivity from '../components/TurnActivity';
+import { PermissionAuditRow } from '../PermissionAuditRow';
 import { createProjectPlanFile } from '@/lib/openchamberConfig';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useI18n } from '@/lib/i18n';
 import { extractLoopbackUrls } from '@/lib/url';
 import { useDeviceInfo } from '@/lib/device';
+import type { PermissionAuditEntry } from '@/types/permissionAudit';
 
 
 const CONTAIN_LAYOUT_STYLE = { contain: 'layout' as const, transform: 'translateZ(0)' };
@@ -316,6 +318,7 @@ interface MessageBodyProps {
     showReasoningTraces?: boolean;
     agentMention?: AgentMentionInfo;
     turnGroupingContext?: TurnGroupingContext;
+    permissionAudits?: PermissionAuditEntry[];
     onRevert?: () => void;
     onFork?: () => void;
     errorMessage?: string;
@@ -871,6 +874,7 @@ const AssistantMessageBody = React.memo(({
     onAuxiliaryContentComplete,
     showReasoningTraces = false,
     turnGroupingContext,
+    permissionAudits = [],
     errorMessage,
     errorVariant = 'error',
 }: Omit<MessageBodyProps, 'isUser'>) => {
@@ -903,6 +907,23 @@ const AssistantMessageBody = React.memo(({
     const toolParts = React.useMemo(() => {
         return visibleParts.filter((part): part is ToolPartType => part.type === 'tool');
     }, [visibleParts]);
+
+    const permissionAuditsByCallId = React.useMemo(() => {
+        const grouped = new Map<string, PermissionAuditEntry[]>();
+        for (const entry of permissionAudits) {
+            const callID = entry.tool?.callID;
+            if (!callID) {
+                continue;
+            }
+            const existing = grouped.get(callID);
+            if (existing) {
+                existing.push(entry);
+            } else {
+                grouped.set(callID, [entry]);
+            }
+        }
+        return grouped;
+    }, [permissionAudits]);
 
     const toolRevealStateRef = React.useRef<{
         messageId: string;
@@ -1499,6 +1520,17 @@ const AssistantMessageBody = React.memo(({
 
     const renderedParts = React.useMemo(() => {
         const rendered: React.ReactNode[] = [];
+        const renderedPermissionAuditIds = new Set<string>();
+        const appendPermissionAuditsForTool = (toolId: string) => {
+            const rows = permissionAuditsByCallId.get(toolId);
+            if (!rows) {
+                return;
+            }
+            for (const entry of rows) {
+                renderedPermissionAuditIds.add(entry.requestID);
+                rendered.push(<PermissionAuditRow key={`permission-audit-${entry.requestID}`} entry={entry} />);
+            }
+        };
 
         if (shouldRenderActivityGroup && toggleActivityGroup) {
             activityGroupSegmentsForMessage.forEach((segment) => {
@@ -1530,6 +1562,12 @@ const AssistantMessageBody = React.memo(({
                         />
                     </div>
                 );
+                for (const activity of visibleSegmentParts) {
+                    if (activity.kind === 'tool') {
+                        const toolPart = activity.part as ToolPartType;
+                        appendPermissionAuditsForTool(toolPart.callID ?? toolPart.id);
+                    }
+                }
             });
         }
 
@@ -1674,38 +1712,47 @@ const AssistantMessageBody = React.memo(({
                                 />
                             </ToolRevealOnMount>
                         </FadeInOnReveal>
-                    );
-                    i++;
-                    continue;
-                }
-
-                // Static tools: one row per tool call (no grouping)
-                rendered.push(
-                    <FadeInOnReveal key={`static-tools-${toolPart.id}`}>
-                        <ToolRevealOnMount animate={animatedToolIdsLookup.has(toolPart.id)} wipe>
-                            <StaticToolRow
-                                toolName={toolName}
-                                activities={[
-                                    {
-                                        id: toolPart.id,
-                                        turnId: '',
-                                        messageId,
-                                        partIndex: 0,
-                                        part: toolPart,
-                                        kind: 'tool' as const,
-                                    },
-                                ]}
-                                animateTailText={animatedToolIdsLookup.has(toolPart.id)}
-                            />
-                        </ToolRevealOnMount>
-                    </FadeInOnReveal>
                 );
+                appendPermissionAuditsForTool(toolPart.callID ?? toolPart.id);
                 i++;
                 continue;
             }
 
+            // Static tools: one row per tool call (no grouping)
+            rendered.push(
+                <FadeInOnReveal key={`static-tools-${toolPart.id}`}>
+                    <ToolRevealOnMount animate={animatedToolIdsLookup.has(toolPart.id)} wipe>
+                        <StaticToolRow
+                            toolName={toolName}
+                            activities={[
+                                {
+                                    id: toolPart.id,
+                                    turnId: '',
+                                    messageId,
+                                    partIndex: 0,
+                                    part: toolPart,
+                                    kind: 'tool' as const,
+                                },
+                            ]}
+                            animateTailText={animatedToolIdsLookup.has(toolPart.id)}
+                        />
+                    </ToolRevealOnMount>
+                </FadeInOnReveal>
+            );
+            appendPermissionAuditsForTool(toolPart.callID ?? toolPart.id);
+            i++;
+            continue;
+        }
+
             // Unknown part type — skip
             i++;
+        }
+
+        for (const entry of permissionAudits) {
+            if (renderedPermissionAuditIds.has(entry.requestID)) {
+                continue;
+            }
+            rendered.push(<PermissionAuditRow key={`permission-audit-${entry.requestID}`} entry={entry} collapsePreviousSpacing={rendered.length > 0} />);
         }
 
         return rendered;
@@ -1727,6 +1774,8 @@ const AssistantMessageBody = React.memo(({
         messageId,
         messageActionButtons,
         renderJustificationActions,
+        permissionAudits,
+        permissionAuditsByCallId,
         sessionId,
         onContentChange,
         onShowPopup,

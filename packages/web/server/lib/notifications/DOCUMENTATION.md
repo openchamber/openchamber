@@ -35,6 +35,7 @@ This module provides notification message preparation utilities for the web serv
   - `POST /api/sessions/:id/view`
   - `POST /api/sessions/:id/unview`
   - `POST /api/sessions/:id/message-sent`
+  - `GET /api/sessions/:id/permission-audit`
 
 ### Trigger runtime API (runtime.js)
 - `createNotificationTriggerRuntime(dependencies)`: creates runtime-owned debounced trigger handling for OpenCode events.
@@ -42,6 +43,7 @@ This module provides notification message preparation utilities for the web serv
   - `maybeSendPushForTrigger(payload)`
 - Owns:
   - completion/error/question/permission trigger routing
+  - UI-only permission audit persistence for chat history presentation
   - session parent cache for subtask suppression
   - template resolution and fallback behavior
   - native notification fanout and web push payload fanout
