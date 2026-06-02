@@ -1828,6 +1828,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.todo.pending': '대기 중',
   'chat.todo.completed': '완료됨',
   'chat.todo.cancelled': '취소됨',
+  'chat.todo.summary.empty': '0/0 완료',
+  'chat.todo.summary.progress': '{completed}/{total} 완료',
   'chat.permissionCard.workingDirectory': '작업 디렉터리:',
   'chat.permissionCard.timeout': '시간 제한:',
   'chat.permissionCard.request': '요청:',
