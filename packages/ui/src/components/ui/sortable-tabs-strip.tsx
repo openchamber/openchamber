@@ -31,11 +31,17 @@ export type SortableTabsStripItem = {
   closeLabel?: string;
 };
 
+type SortableTabsStripContextPoint = {
+  x: number;
+  y: number;
+};
+
 type SortableTabsStripProps = {
   items: SortableTabsStripItem[];
   activeId: string | null;
   onSelect: (id: string) => void;
   onClose?: (id: string) => void;
+  onContextMenu?: (id: string, point: SortableTabsStripContextPoint, event?: React.SyntheticEvent) => void;
   onReorder?: (activeId: string, overId: string) => void;
   layoutMode?: 'scrollable' | 'fit';
   variant?: 'default' | 'active-pill' | 'animated';
@@ -89,6 +95,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
   activeId,
   onSelect,
   onClose,
+  onContextMenu,
   onReorder,
   layoutMode = 'scrollable',
   variant = 'default',
@@ -120,6 +127,9 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
   const reorderEnabled = typeof onReorder === 'function';
   const Wrapper = reorderEnabled ? SortableTabWrapper : StaticTabWrapper;
   const tabRefs = React.useRef<Map<string, HTMLElement>>(new Map());
+  const tabLongPressTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tabLongPressStartRef = React.useRef<SortableTabsStripContextPoint | null>(null);
+  const tabLongPressTriggeredRef = React.useRef(false);
   const [pillRect, setPillRect] = React.useState<{ left: number; top: number; width: number; height: number } | null>(null);
 
   const sensors = useSensors(
@@ -296,6 +306,59 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
     onReorder(String(active.id), String(over.id));
   }, [onReorder]);
 
+  const clearTabLongPress = React.useCallback(() => {
+    if (tabLongPressTimerRef.current !== null) {
+      clearTimeout(tabLongPressTimerRef.current);
+      tabLongPressTimerRef.current = null;
+    }
+    tabLongPressStartRef.current = null;
+  }, []);
+
+  React.useEffect(() => clearTabLongPress, [clearTabLongPress]);
+
+  const startTabLongPress = React.useCallback((id: string, event: React.PointerEvent) => {
+    if (!onContextMenu || event.pointerType === 'mouse') {
+      return;
+    }
+
+    clearTabLongPress();
+    tabLongPressTriggeredRef.current = false;
+    const point = { x: event.clientX, y: event.clientY };
+    tabLongPressStartRef.current = point;
+    tabLongPressTimerRef.current = setTimeout(() => {
+      tabLongPressTimerRef.current = null;
+      tabLongPressStartRef.current = null;
+      tabLongPressTriggeredRef.current = true;
+      onContextMenu(id, point);
+    }, 550);
+  }, [clearTabLongPress, onContextMenu]);
+
+  const cancelTabLongPressOnMove = React.useCallback((event: React.PointerEvent) => {
+    if (event.pointerType === 'mouse') {
+      return;
+    }
+
+    const start = tabLongPressStartRef.current;
+    if (!start) {
+      return;
+    }
+
+    if (Math.abs(event.clientX - start.x) > 8 || Math.abs(event.clientY - start.y) > 8) {
+      clearTabLongPress();
+    }
+  }, [clearTabLongPress]);
+
+  const consumeTabLongPressClick = React.useCallback((event: React.MouseEvent) => {
+    if (!tabLongPressTriggeredRef.current) {
+      return false;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    tabLongPressTriggeredRef.current = false;
+    return true;
+  }, []);
+
   const list = (
     <div className={cn('relative flex h-full min-w-0 flex-1', className)}>
       {isScrollable && overflow.left ? (
@@ -401,7 +464,12 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
               <div
                 ref={(element) => setTabRef(item.id, element)}
                 onAuxClick={handleAuxClick}
+                onContextMenu={onContextMenu ? (event) => onContextMenu(item.id, { x: event.clientX, y: event.clientY }, event) : undefined}
                 onMouseDown={handleMouseDown}
+                onPointerDown={(event) => startTabLongPress(item.id, event)}
+                onPointerMove={cancelTabLongPressOnMove}
+                onPointerUp={clearTabLongPress}
+                onPointerCancel={clearTabLongPress}
                 className={cn(
                   'group flex h-full min-w-0 flex-nowrap items-center',
                   (isScrollable || useIntrinsicPillSizing)
@@ -421,7 +489,12 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                   role="tab"
                   aria-selected={isActive}
                   aria-label={showInactiveIconOnly ? (item.title ?? item.label) : undefined}
-                  onClick={() => onSelect(item.id)}
+                  onClick={(event) => {
+                    if (consumeTabLongPressClick(event)) {
+                      return;
+                    }
+                    onSelect(item.id);
+                  }}
                   className={cn(
                     usesActivePillIndicator
                       ? 'animated-tabs__button pill-tabs__button relative z-10 flex flex-1 min-w-0 flex-nowrap items-center justify-center rounded-[9px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] text-sm font-medium transition-colors duration-150 !min-h-0'

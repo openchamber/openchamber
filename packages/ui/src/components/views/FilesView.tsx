@@ -811,6 +811,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const skipDirtyOnceRef = React.useRef(false);
   const editorTabLongPressTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const editorTabLongPressTriggeredRef = React.useRef(false);
+  const editorTabLongPressStartRef = React.useRef<{ x: number; y: number } | null>(null);
   const copiedContentTimeoutRef = React.useRef<number | null>(null);
   const copiedPathTimeoutRef = React.useRef<number | null>(null);
   const editorViewRef = React.useRef<EditorView | null>(null);
@@ -2058,6 +2059,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       clearTimeout(editorTabLongPressTimerRef.current);
       editorTabLongPressTimerRef.current = null;
     }
+    editorTabLongPressStartRef.current = null;
   }, []);
 
   const startEditorTabPointerLongPress = React.useCallback((event: React.PointerEvent, path: string, keepOpenFilesMenuOpen = false) => {
@@ -2072,12 +2074,30 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     clearEditorTabLongPress();
     editorTabLongPressTriggeredRef.current = false;
     const { clientX, clientY } = event;
+    editorTabLongPressStartRef.current = { x: clientX, y: clientY };
     editorTabLongPressTimerRef.current = setTimeout(() => {
+      editorTabLongPressTimerRef.current = null;
+      editorTabLongPressStartRef.current = null;
       editorTabLongPressTriggeredRef.current = true;
       setMobileOpenFilesMenuOpen(keepOpenFilesMenuOpen);
       setEditorTabMenu({ path, x: clientX, y: clientY });
     }, 550);
   }, [clearEditorTabLongPress, isMobile]);
+
+  const cancelEditorTabLongPressOnMove = React.useCallback((event: React.PointerEvent) => {
+    if (event.pointerType === 'mouse') {
+      return;
+    }
+
+    const start = editorTabLongPressStartRef.current;
+    if (!start) {
+      return;
+    }
+
+    if (Math.abs(event.clientX - start.x) > 8 || Math.abs(event.clientY - start.y) > 8) {
+      clearEditorTabLongPress();
+    }
+  }, [clearEditorTabLongPress]);
 
   const handleEditorTabClickAfterLongPress = React.useCallback((event: React.SyntheticEvent) => {
     if (!editorTabLongPressTriggeredRef.current) {
@@ -3226,6 +3246,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                       className="inline-flex min-w-0 flex-1 items-center gap-1 text-left typography-ui-label font-medium"
                       aria-label={t('filesView.editor.openFilesAria')}
                       onPointerDown={(event) => startEditorTabPointerLongPress(event, selectedFile.path)}
+                      onPointerMove={cancelEditorTabLongPressOnMove}
                       onPointerUp={clearEditorTabLongPress}
                       onPointerCancel={clearEditorTabLongPress}
                       onContextMenu={(event) => {
@@ -3252,7 +3273,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                       return (
                         <DropdownMenuItem
                           key={file.path}
-                          onPointerMove={() => setMobileOpenFilesMenuInteracted(true)}
+                          onPointerMove={(event) => {
+                            setMobileOpenFilesMenuInteracted(true);
+                            cancelEditorTabLongPressOnMove(event);
+                          }}
                           onPointerDown={(event) => {
                             const target = event.target as HTMLElement;
                             if (target.closest('[data-close-open-file]')) {
@@ -3368,7 +3392,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                               : 'bg-transparent border-[var(--interactive-border)] text-[var(--surface-muted-foreground)] hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]'
                           )}
                         >
-                          {renderEditorTabMenuTrigger()}
+                          {editorTabMenu?.path === file.path ? renderEditorTabMenuTrigger() : null}
                           <FileTypeIcon filePath={file.path} extension={file.extension} className="size-3.5 flex-shrink-0" />
                           <button
                             type="button"
