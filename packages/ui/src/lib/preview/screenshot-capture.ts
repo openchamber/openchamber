@@ -1,5 +1,6 @@
 import { snapdom } from '@zumer/snapdom';
 import { getFontEmbedCSS, toJpeg } from 'html-to-image';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 export type PreviewElementMetadata = {
   frame: 'top';
@@ -200,7 +201,7 @@ const TRANSPARENT_IMAGE_PLACEHOLDER = 'data:image/png;base64,iVBORw0KGgoAAAANSUh
 // the proxy id, so a stale persisted entry would 404 after a server restart.
 // Entries are evicted on registration error (refetched) or when the upstream
 // returns 403 (cookie expired) / 404 (target unknown) at iframe load time.
-export type CachedProxyTarget = { proxyBasePath: string; expiresAt: number };
+export type CachedProxyTarget = { proxyBasePath: string; previewToken?: string; expiresAt: number };
 export const previewProxyTargetCache = new Map<string, CachedProxyTarget>();
 const previewProxyTargetRequests = new Map<string, Promise<CachedProxyTarget | null>>();
 const PREVIEW_PROXY_CACHE_SAFETY_MS = 30_000;
@@ -475,7 +476,7 @@ const getExternalResourceProxyUrl = async (url: URL): Promise<string> => {
   const existingRequest = previewProxyTargetRequests.get(targetKey);
   const request = existingRequest ?? (async () => {
     try {
-      const response = await fetch('/api/preview/targets', {
+      const response = await runtimeFetch('/api/preview/targets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',

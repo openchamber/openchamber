@@ -6,8 +6,6 @@
 [![Discord](https://img.shields.io/badge/Discord-join.svg?style=flat&labelColor=100F0F&color=8B7EC8&logo=discord&logoColor=FFFCF0)](https://discord.gg/ZYRSdnwwKA)
 [![Support the project](https://img.shields.io/badge/Support-Project-black?style=flat&labelColor=100F0F&color=EC8B49&logo=ko-fi&logoColor=FFFCF0)](https://ko-fi.com/G2G41SAWNS)
 
-> [!IMPORTANT]
-> 🏖️ I’m on vacation from 28 May to 02 Jun. All issues and PRs will continue being reviewed after that. Thanks for the patience.
 
 ## **OpenCode, everywhere.** Desktop. Browser. Phone.
 
@@ -107,6 +105,7 @@ openchamber --ui-password be-creative-here
 
 ```bash
 openchamber --port 8080              # Custom port
+openchamber --lan --port 3000        # Listen on LAN (0.0.0.0)
 openchamber --ui-password secret     # Password-protect UI
 openchamber startup enable           # Start at login as a native service
 OPENCHAMBER_UI_PASSWORD=secret openchamber startup enable # Save service password env
@@ -120,6 +119,9 @@ openchamber tunnel start --provider cloudflare --mode quick --qr
 openchamber tunnel start --provider cloudflare --mode managed-local --config ~/.cloudflared/config.yml
 openchamber tunnel status --all      # Show tunnel state across instances
 openchamber tunnel stop --port 3000  # Stop tunnel only (server stays running)
+openchamber connect-url --port 3000  # Add this server to OpenChamber Desktop
+openchamber connect-url --server http://host:3000 --qr
+openchamber connect-url --port 3000 --qr
 openchamber logs                     # Follow latest instance logs
 OPENCODE_PORT=4096 OPENCODE_SKIP_START=true openchamber                    # Connect to external OpenCode server
 OPENCODE_HOST=https://myhost:4096 OPENCODE_SKIP_START=true openchamber  # Connect via custom host/HTTPS
@@ -140,6 +142,29 @@ Bind managed OpenCode server to all interfaces (use only on trusted networks):
 OPENCHAMBER_OPENCODE_HOSTNAME=0.0.0.0 openchamber --port 3000
 ```
 
+Expose OpenChamber itself on your LAN:
+```bash
+openchamber --lan --port 3000 --ui-password secret
+```
+
+Add this server to OpenChamber Desktop or another OpenChamber app:
+```bash
+openchamber connect-url --port 3000 --qr
+```
+
+If no OpenChamber server is running on that port, `connect-url` starts one before generating the link.
+
+Headless/API-only setup for a remote machine:
+```bash
+openchamber connect-url --port 3000 --api-only --lan --server http://your-host-or-ip:3000 --qr --ui-password secret
+```
+
+This runs OpenChamber as an API-only server without the desktop app or browser UI assets on that machine, then creates a link for Desktop to import. `--lan` makes the server reachable from other machines. `--server` is the address Desktop should use.
+
+When OpenChamber was started with `--lan` or `--host 0.0.0.0`, `connect-url` automatically uses a detected LAN IP instead of `127.0.0.1`. Use `--server http://host:3000` to override the advertised address, and include `--lan` when `connect-url` needs to start the server for LAN access.
+
+Paste the printed `openchamber://connect?...` link in Desktop under Settings -> Remote Instances -> Direct Instances -> Import Link. The link contains the server URL and a client token. It does not enable browser UI password protection; use `--ui-password` when exposing a server beyond localhost.
+
 </details>
 
 <details>
@@ -150,7 +175,7 @@ dev machine over a VPN (e.g. Tailscale) or LAN without a Cloudflare tunnel.
 
 **How it works:**
 - OpenCode runs as its own service, binding only to `localhost`.
-- OpenChamber connects to it via `OPENCODE_HOST` and `--host 0.0.0.0` makes it reachable on your VPN IP.
+- OpenChamber connects to it via `OPENCODE_HOST` and `--lan` makes it reachable on your VPN IP.
 - `--foreground` keeps the CLI process alive so systemd can track and restart it.
 
 **`~/.config/systemd/user/opencode.service`**

@@ -1,4 +1,5 @@
 import React from 'react';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
@@ -27,6 +28,7 @@ import { CODE_FONT_OPTIONS, DEFAULT_MONO_FONT, DEFAULT_UI_FONT, UI_FONT_OPTIONS,
 import { useI18n, type Locale } from '@/lib/i18n';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { normalizeMobileKeyboardMode, supportsMobileKeyboardResizeContent, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
+import { getStoredMobileLayoutPreference, setStoredMobileLayoutPreference, type MobileLayoutPreference } from '@/lib/mobileLayoutPreference';
 import {
     setDirectoryShowHidden,
     useDirectoryShowHidden,
@@ -126,6 +128,17 @@ const MOBILE_KEYBOARD_MODE_OPTIONS: Option<MobileKeyboardMode>[] = [
         id: 'resize-content',
         labelKey: 'settings.openchamber.visual.option.mobileKeyboardMode.resizeContent.label',
         descriptionKey: 'settings.openchamber.visual.option.mobileKeyboardMode.resizeContent.description',
+    },
+];
+
+const MOBILE_LAYOUT_OPTIONS: Array<{ value: MobileLayoutPreference; labelKey: string }> = [
+    {
+        value: 'default',
+        labelKey: 'settings.openchamber.visual.option.mobileLayout.default',
+    },
+    {
+        value: 'new',
+        labelKey: 'settings.openchamber.visual.option.mobileLayout.new',
     },
 ];
 
@@ -483,9 +496,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const isVSCode = isVSCodeRuntime();
     const hasThemeSettings = shouldShow('theme') && !isVSCode;
     const hasLocalizationSettings = shouldShow('theme') || shouldShow('timeFormat') || shouldShow('weekStart');
+    const showMobileLayoutSetting = isMobile && isWebRuntime() && !isDesktopShell() && !isVSCode;
     const hasAppearanceSettings = isVSCode
         ? hasLocalizationSettings
-        : (shouldShow('theme') || shouldShow('pwaInstallName') || shouldShow('pwaOrientation') || shouldShow('timeFormat') || shouldShow('weekStart'));
+        : (shouldShow('theme') || showMobileLayoutSetting || shouldShow('pwaInstallName') || shouldShow('pwaOrientation') || shouldShow('timeFormat') || shouldShow('weekStart'));
     const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('spacing') || shouldShow('inputBarOffset');
     const hasNavigationSettings = shouldShow('terminalQuickKeys') && !isMobile;
     const hasBehaviorSettings = shouldShow('mermaidRendering')
@@ -509,6 +523,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const showPwaInstallNameSetting = shouldShow('pwaInstallName') && isWebRuntime() && browserTab && !isDesktopShell() && !isVSCode;
     const showPwaOrientationSetting = shouldShow('pwaOrientation') && isWebRuntime() && !isDesktopShell() && !isVSCode;
     const showMobileKeyboardModeSetting = shouldShow('mobileKeyboardMode') && isWebRuntime() && !isDesktopShell() && !isVSCode && supportsMobileKeyboardResizeContent();
+    const [mobileLayoutPreference, setMobileLayoutPreference] = React.useState<MobileLayoutPreference>(() => getStoredMobileLayoutPreference());
     const [pwaInstallName, setPwaInstallName] = React.useState('');
     const [pwaOrientation, setPwaOrientation] = React.useState<'system' | 'portrait' | 'landscape'>('system');
     const selectedTimeFormatLabel = React.useMemo(() => {
@@ -527,6 +542,16 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         const option = MOBILE_KEYBOARD_MODE_OPTIONS.find((item) => item.id === mobileKeyboardMode);
         return option ? tUnsafe(option.labelKey) : undefined;
     }, [mobileKeyboardMode, tUnsafe]);
+
+    const handleMobileLayoutPreferenceChange = React.useCallback((value: MobileLayoutPreference) => {
+        if (value === mobileLayoutPreference) {
+            return;
+        }
+
+        setMobileLayoutPreference(value);
+        setStoredMobileLayoutPreference(value);
+        window.location.reload();
+    }, [mobileLayoutPreference]);
 
     const applyPwaInstallName = React.useCallback(async (value: string) => {
         if (typeof window === 'undefined') {
@@ -578,7 +603,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
         const loadPwaInstallName = async () => {
             try {
-                const response = await fetch('/api/config/settings', {
+                const response = await runtimeFetch('/api/config/settings', {
                     method: 'GET',
                     headers: { Accept: 'application/json' },
                     cache: 'no-store',
@@ -655,6 +680,26 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         ))}
                                     </div>
                                 </div>
+
+                                {showMobileLayoutSetting && (
+                                    <div className="flex min-w-0 flex-col gap-1.5 py-1.5">
+                                        <span className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.visual.section.mobileLayout')}</span>
+                                        <div className="flex flex-wrap items-center gap-1">
+                                            {MOBILE_LAYOUT_OPTIONS.map((option) => (
+                                                <Button
+                                                    key={option.value}
+                                                    variant="chip"
+                                                    size="xs"
+                                                    aria-pressed={mobileLayoutPreference === option.value}
+                                                    className="!font-normal"
+                                                    onClick={() => handleMobileLayoutPreferenceChange(option.value)}
+                                                >
+                                                    {tUnsafe(option.labelKey)}
+                                                </Button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
 
                                 <div className="grid grid-cols-1 gap-2 py-1.5 md:grid-cols-[14rem_auto] md:gap-x-8 md:gap-y-2">
                                     <div className="flex min-w-0 items-center gap-2">

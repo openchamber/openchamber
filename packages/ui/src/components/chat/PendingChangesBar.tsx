@@ -3,6 +3,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useGitStore, useIsGitRepo } from '@/stores/useGitStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
+import { useMobileAppActions } from '@/apps/mobileAppContext';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { normalizePath } from '@/components/session/sidebar/utils';
 import { Icon } from "@/components/icon/Icon";
@@ -29,6 +30,7 @@ export const PendingChangesBar: React.FC = React.memo(() => {
     );
     const ensureStatus = useGitStore((s) => s.ensureStatus);
     const fetchStatus = useGitStore((s) => s.fetchStatus);
+    const mobileActions = useMobileAppActions();
 
     // Close popover when clicking outside
     React.useEffect(() => {
@@ -89,6 +91,16 @@ export const PendingChangesBar: React.FC = React.memo(() => {
         const absolutePath = file.path.startsWith('/')
             ? file.path
             : (currentDirectory.endsWith('/') ? currentDirectory : currentDirectory + '/') + file.path;
+
+        // Dedicated mobile root: open the per-file diff inside the mobile Changes surface.
+        if (mobileActions) {
+            mobileActions.openChanges({
+                diffPath: file.relativePath,
+                staged: file.hasStagedChanges && !file.hasWorkingChanges,
+            });
+            setIsExpanded(false);
+            return;
+        }
 
         const editor = runtime?.editor;
         if (editor) {

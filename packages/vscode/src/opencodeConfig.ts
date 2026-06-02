@@ -7,11 +7,17 @@ import { parse as parseJsonc } from 'jsonc-parser';
 const OPENCODE_CONFIG_DIR = path.join(os.homedir(), '.config', 'opencode');
 const AGENT_DIR = path.join(OPENCODE_CONFIG_DIR, 'agents');
 const COMMAND_DIR = path.join(OPENCODE_CONFIG_DIR, 'commands');
+const GLOBAL_SNIPPET_DIR = path.join(OPENCODE_CONFIG_DIR, 'snippet');
+const GLOBAL_SNIPPET_DIR_ALT = path.join(OPENCODE_CONFIG_DIR, 'snippets');
 const CONFIG_FILE = path.join(OPENCODE_CONFIG_DIR, 'config.json');
 const CUSTOM_CONFIG_FILE = process.env.OPENCODE_CONFIG
   ? path.resolve(process.env.OPENCODE_CONFIG)
   : null;
 const PROMPT_FILE_PATTERN = /^\{file:(.+)\}$/i;
+const SNIPPET_EXTENSION = '.md';
+const SNIPPET_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,79}$/i;
+const HASHTAG_PATTERN = /#([a-z0-9_-]+)/gi;
+const MAX_SNIPPET_EXPANSION_COUNT = 15;
 
 // Scope types (shared by agents and commands)
 export const AGENT_SCOPE = {
@@ -26,6 +32,46 @@ export const COMMAND_SCOPE = {
 
 export type AgentScope = typeof AGENT_SCOPE[keyof typeof AGENT_SCOPE];
 export type CommandScope = typeof COMMAND_SCOPE[keyof typeof COMMAND_SCOPE];
+
+export type SnippetScope = 'global' | 'project';
+
+export type Snippet = {
+  name: string;
+  content: string;
+  aliases: string[];
+  description?: string;
+  filePath: string;
+  source: SnippetScope;
+};
+
+export type PluginScope = 'user' | 'project';
+export type PluginParsedKind = 'npm' | 'path';
+
+export type PluginEntry = {
+  id: string;
+  spec: string;
+  options?: Record<string, unknown>;
+  scope: PluginScope;
+  kind: 'config';
+  parsedKind: PluginParsedKind;
+};
+
+export type PluginFile = {
+  id: string;
+  fileName: string;
+  scope: PluginScope;
+  kind: 'file';
+};
+
+export type PluginRegistryResult =
+  | { kind: 'npm-ok'; spec: string; name: string; currentVersion: string | null; latestVersion: string | null; versions: string[]; hasUpdate: boolean }
+  | { kind: 'npm-missing-version'; spec: string; name: string; currentVersion: string; latestVersion: string | null; versions: string[] }
+  | { kind: 'npm-missing-package'; spec: string; name: string; error: string }
+  | { kind: 'npm-malformed'; spec: string; error: string }
+  | { kind: 'npm-network'; spec: string; error: string }
+  | { kind: 'path-ok'; spec: string; absolutePath: string }
+  | { kind: 'path-missing'; spec: string; absolutePath: string }
+  | { kind: 'path-unreadable'; spec: string; absolutePath: string };
 
 export type ConfigSources = {
   md: { exists: boolean; path: string | null; fields: string[]; scope?: AgentScope | CommandScope | null };
@@ -263,6 +309,174 @@ const getCommandWritePath = (commandName: string, workingDirectory?: string, req
   };
 };
 
+// ============== SNIPPET HELPERS ==============
+
+const getProjectSnippetDirs = (workingDirectory?: string): Array<{ dir: string; source: SnippetScope }> => {
+  if (!workingDirectory) return [];
+  return [
+    { dir: path.join(workingDirectory, '.opencode', 'snippets'), source: 'project' },
+    { dir: path.join(workingDirectory, '.opencode', 'snippet'), source: 'project' },
+  ];
+};
+
+const getGlobalSnippetDirs = (): Array<{ dir: string; source: SnippetScope }> => [
+  { dir: GLOBAL_SNIPPET_DIR_ALT, source: 'global' },
+  { dir: GLOBAL_SNIPPET_DIR, source: 'global' },
+];
+
+const assertValidSnippetName = (name: string): void => {
+  if (typeof name !== 'string' || !SNIPPET_NAME_PATTERN.test(name)) {
+    throw new Error('Snippet name must use letters, numbers, dashes, or underscores');
+  }
+};
+
+const normalizeSnippetAliases = (frontmatter: Record<string, unknown>): string[] => {
+  const raw = frontmatter.aliases ?? frontmatter.alias;
+  if (!raw) return [];
+  const aliases = Array.isArray(raw) ? raw : [raw];
+  return aliases.map((alias) => String(alias).trim()).filter(Boolean);
+};
+
+const loadSnippetFile = (dir: string, filename: string, source: SnippetScope): Snippet | null => {
+  const name = path.basename(filename, SNIPPET_EXTENSION);
+  if (!SNIPPET_NAME_PATTERN.test(name)) return null;
+  const filePath = path.join(dir, filename);
+  const { frontmatter, body } = parseMdFile(filePath);
+  return {
+    name,
+    content: body,
+    aliases: normalizeSnippetAliases(frontmatter),
+    description: typeof frontmatter.description === 'string' ? frontmatter.description : undefined,
+    filePath,
+    source,
+  };
+};
+
+const registerSnippet = (registry: Map<string, Snippet>, snippet: Snippet): void => {
+  const key = snippet.name.toLowerCase();
+  const existing = registry.get(key);
+  if (existing) {
+    for (const alias of existing.aliases) registry.delete(alias.toLowerCase());
+  }
+  registry.set(key, snippet);
+  for (const alias of snippet.aliases) {
+    if (SNIPPET_NAME_PATTERN.test(alias)) registry.set(alias.toLowerCase(), snippet);
+  }
+};
+
+const loadSnippetRegistry = (workingDirectory?: string): Map<string, Snippet> => {
+  const registry = new Map<string, Snippet>();
+  for (const { dir, source } of [...getGlobalSnippetDirs(), ...getProjectSnippetDirs(workingDirectory)]) {
+    if (!fs.existsSync(dir)) continue;
+    for (const filename of fs.readdirSync(dir)) {
+      if (!filename.endsWith(SNIPPET_EXTENSION)) continue;
+      try {
+        const snippet = loadSnippetFile(dir, filename, source);
+        if (snippet) registerSnippet(registry, snippet);
+      } catch (error) {
+        console.warn(`[OpenChamber][VSCode] Failed to load snippet ${path.join(dir, filename)}:`, error);
+      }
+    }
+  }
+  return registry;
+};
+
+const listUniqueSnippets = (registry: Map<string, Snippet>): Snippet[] => {
+  const seen = new Set<string>();
+  const snippets: Snippet[] = [];
+  for (const snippet of registry.values()) {
+    const key = `${snippet.source}:${snippet.filePath}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    snippets.push(snippet);
+  }
+  return snippets.sort((a, b) => a.name.localeCompare(b.name));
+};
+
+const getWritableSnippetDir = (scope: SnippetScope, workingDirectory?: string): string => {
+  if (scope === 'project') {
+    if (!workingDirectory) throw new Error('Project directory is required for project snippets');
+    const preferred = path.join(workingDirectory, '.opencode', 'snippet');
+    const alternate = path.join(workingDirectory, '.opencode', 'snippets');
+    return fs.existsSync(alternate) && !fs.existsSync(preferred) ? alternate : preferred;
+  }
+  return fs.existsSync(GLOBAL_SNIPPET_DIR_ALT) && !fs.existsSync(GLOBAL_SNIPPET_DIR)
+    ? GLOBAL_SNIPPET_DIR_ALT
+    : GLOBAL_SNIPPET_DIR;
+};
+
+const findSnippetByName = (name: string, workingDirectory?: string): Snippet | null => {
+  assertValidSnippetName(name);
+  return loadSnippetRegistry(workingDirectory).get(name.toLowerCase()) ?? null;
+};
+
+const writeSnippetFile = (filePath: string, config: Record<string, unknown>): void => {
+  const aliases = Array.isArray(config.aliases)
+    ? config.aliases.map((alias) => String(alias).trim()).filter(Boolean)
+    : [];
+  const frontmatter: Record<string, unknown> = {};
+  if (aliases.length > 0) frontmatter.aliases = aliases;
+  if (typeof config.description === 'string' && config.description.trim()) {
+    frontmatter.description = config.description.trim();
+  }
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  writeMdFile(filePath, frontmatter, typeof config.content === 'string' ? config.content : '');
+};
+
+const parseSnippetBlocks = (content: string): { inline: string; prepend: string[]; append: string[] } => {
+  const blocks = { prepend: [] as string[], append: [] as string[] };
+  let inline = content;
+  for (const type of ['prepend', 'append'] as const) {
+    const regex = new RegExp(`<${type}>([\\s\\S]*?)(?:<\\/${type}>|$)`, 'gi');
+    inline = inline.replace(regex, (_match, value: string) => {
+      const normalized = String(value).trim();
+      if (normalized) blocks[type].push(normalized);
+      return '';
+    });
+  }
+  inline = inline.replace(/<inject>[\s\S]*?(?:<\/inject>|$)/gi, '').trim();
+  return { inline, prepend: blocks.prepend, append: blocks.append };
+};
+
+const expandSnippetText = (
+  text: string,
+  registry: Map<string, Snippet>,
+  expansionCounts: Map<string, number>,
+  collector: { prepend: string[]; append: string[] },
+): string => {
+  let expanded = text;
+  let changed = true;
+
+  while (changed) {
+    const previous = expanded;
+    let loopDetected = false;
+    HASHTAG_PATTERN.lastIndex = 0;
+
+    expanded = expanded.replace(HASHTAG_PATTERN, (match, name: string, offset: number, input: string) => {
+      if (name.toLowerCase() === 'skill' && input[offset + match.length] === '(') return match;
+      const snippet = registry.get(name.toLowerCase());
+      if (!snippet) return match;
+
+      const key = snippet.name.toLowerCase();
+      const count = (expansionCounts.get(key) || 0) + 1;
+      if (count > MAX_SNIPPET_EXPANSION_COUNT) {
+        loopDetected = true;
+        return match;
+      }
+      expansionCounts.set(key, count);
+
+      const parsed = parseSnippetBlocks(snippet.content);
+      for (const block of parsed.prepend) collector.prepend.push(expandSnippetText(block, registry, expansionCounts, collector));
+      for (const block of parsed.append) collector.append.push(expandSnippetText(block, registry, expansionCounts, collector));
+      return expandSnippetText(parsed.inline, registry, expansionCounts, collector);
+    });
+
+    changed = expanded !== previous && !loopDetected;
+  }
+
+  return expanded;
+};
+
 const isPromptFileReference = (value: unknown): value is string => {
   return typeof value === 'string' && PROMPT_FILE_PATTERN.test(value.trim());
 };
@@ -490,6 +704,494 @@ const writeConfig = (config: Record<string, unknown>, filePath: string = CONFIG_
   }
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, JSON.stringify(config, null, 2), 'utf8');
+};
+
+const codedError = (message: string, code: string): Error & { code: string } => {
+  const error = new Error(message) as Error & { code: string };
+  error.code = code;
+  return error;
+};
+
+const validatePluginScope = (scope: unknown): PluginScope => {
+  if (scope === 'user' || scope === 'project') return scope;
+  throw codedError('Plugin scope must be user or project', 'INVALID_SCOPE');
+};
+
+const validatePluginSpec = (spec: unknown): string => {
+  if (typeof spec !== 'string' || spec.trim().length === 0) {
+    throw codedError('Plugin spec must be a non-empty string', 'INVALID_SPEC');
+  }
+  if (spec.includes('\0')) {
+    throw codedError('Plugin spec cannot contain null bytes', 'INVALID_SPEC');
+  }
+  return spec.trim();
+};
+
+const PLUGIN_FILE_NAME_PATTERN = /^[a-z0-9][a-z0-9-_.]*\.(js|ts|mjs|cjs)$/;
+
+const validatePluginFileName = (fileName: unknown): string => {
+  if (typeof fileName !== 'string' || fileName.trim().length === 0) {
+    throw codedError('Plugin file name is required', 'INVALID_FILENAME');
+  }
+  const normalized = fileName.trim();
+  if (
+    normalized.includes('/') ||
+    normalized.includes('\\') ||
+    normalized.includes('..') ||
+    !PLUGIN_FILE_NAME_PATTERN.test(normalized)
+  ) {
+    throw codedError('Plugin file name must match /^[a-z0-9][a-z0-9-_.]*\\.(js|ts|mjs|cjs)$/ and cannot contain path traversal', 'INVALID_FILENAME');
+  }
+  return normalized;
+};
+
+const encodePluginId = (prefix: 'config' | 'file', value: string): string =>
+  Buffer.from(`${prefix}:${value}`, 'utf8').toString('base64url');
+
+const decodePluginId = (id: string): { prefix: string; value: string } => {
+  try {
+    const decoded = Buffer.from(id, 'base64url').toString('utf8');
+    const separator = decoded.indexOf(':');
+    if (separator <= 0) throw new Error('invalid plugin id');
+    return { prefix: decoded.slice(0, separator), value: decoded.slice(separator + 1) };
+  } catch {
+    throw codedError('Invalid plugin id', 'INVALID_SPEC');
+  }
+};
+
+const parsePluginIdValue = (value: string): { scope: PluginScope; rest: string } => {
+  const separator = value.indexOf(':');
+  if (separator <= 0) {
+    throw codedError('Plugin id value must include scope', 'INVALID_SPEC');
+  }
+  return {
+    scope: validatePluginScope(value.slice(0, separator)),
+    rest: value.slice(separator + 1),
+  };
+};
+
+const parsePluginRaw = (raw: unknown): { spec: string; options?: Record<string, unknown> } => {
+  if (typeof raw === 'string') {
+    return { spec: validatePluginSpec(raw) };
+  }
+  if (Array.isArray(raw) && typeof raw[0] === 'string' && isPlainObject(raw[1])) {
+    return { spec: validatePluginSpec(raw[0]), options: { ...raw[1] } };
+  }
+  throw codedError('Plugin spec must be a string or [string, object]', 'INVALID_SPEC');
+};
+
+const serializePluginEntry = (entry: { spec?: unknown; options?: unknown }): string | [string, Record<string, unknown>] => {
+  const spec = validatePluginSpec(entry.spec);
+  if (isPlainObject(entry.options) && Object.keys(entry.options).length > 0) {
+    return [spec, { ...entry.options }];
+  }
+  return spec;
+};
+
+const isPluginPathSpec = (spec: string): boolean =>
+  spec.startsWith('/') || spec.startsWith('./') || spec.startsWith('../') || spec.startsWith('~') || path.win32.isAbsolute(spec);
+
+const parsePluginPathSpec = (spec: string, workingDirectory?: string | null): { absolutePath: string } => {
+  if (spec === '~') return { absolutePath: path.resolve(os.homedir()) };
+  if (spec.startsWith('~/')) return { absolutePath: path.resolve(os.homedir(), spec.slice(2)) };
+  if (spec.startsWith('./') || spec.startsWith('../')) {
+    return { absolutePath: path.resolve(workingDirectory || os.homedir(), spec) };
+  }
+  if (path.win32.isAbsolute(spec)) return { absolutePath: spec };
+  return { absolutePath: path.resolve(spec) };
+};
+
+const parsePluginNpmSpec = (spec: string): { name: string; version: string | null } | { malformed: true } => {
+  if (spec.startsWith('@')) {
+    const slashIdx = spec.indexOf('/');
+    if (slashIdx < 2) return { malformed: true };
+    const afterSlash = spec.slice(slashIdx + 1);
+    if (!afterSlash) return { malformed: true };
+    const atIdx = afterSlash.indexOf('@');
+    if (atIdx === -1) return { name: spec, version: null };
+    const version = afterSlash.slice(atIdx + 1);
+    if (!version) return { malformed: true };
+    return { name: spec.slice(0, slashIdx + 1 + atIdx), version };
+  }
+  if (!spec) return { malformed: true };
+  const atIdx = spec.indexOf('@');
+  if (atIdx === -1) return { name: spec, version: null };
+  if (atIdx === 0) return { malformed: true };
+  const version = spec.slice(atIdx + 1);
+  if (!version) return { malformed: true };
+  return { name: spec.slice(0, atIdx), version };
+};
+
+const isExactPluginSemver = (version: string): boolean => /^\d+\.\d+\.\d+([-+][\w.-]+)?$/.test(version);
+
+const getActiveCustomConfigPath = (): string | null =>
+  process.env.OPENCODE_CONFIG ? path.resolve(process.env.OPENCODE_CONFIG) : null;
+
+const getActiveOpencodeConfigDir = (): string => {
+  const customConfigPath = getActiveCustomConfigPath();
+  return customConfigPath ? path.dirname(customConfigPath) : OPENCODE_CONFIG_DIR;
+};
+
+const getActiveUserConfigPaths = (): string[] => {
+  const configDir = getActiveOpencodeConfigDir();
+  return [
+    path.join(configDir, 'config.json'),
+    path.join(configDir, 'opencode.json'),
+    path.join(configDir, 'opencode.jsonc'),
+  ];
+};
+
+const getActivePrimaryUserConfigPath = (): string => {
+  const [defaultPath, ...fallbackPaths] = getActiveUserConfigPaths();
+  for (const userPath of [defaultPath, ...fallbackPaths]) {
+    if (fs.existsSync(userPath)) {
+      return userPath;
+    }
+  }
+  return defaultPath;
+};
+
+const ensureProjectPluginConfigPath = (workingDirectory?: string | null): string => {
+  if (!workingDirectory) throw codedError('Project plugin scope requires working directory', 'INVALID_SCOPE');
+  return path.join(workingDirectory, '.opencode', 'opencode.json');
+};
+
+const getPluginConfigSources = (workingDirectory?: string | null): Array<{ scope: PluginScope; path: string; config: Record<string, unknown> }> => {
+  const customPath = getActiveCustomConfigPath();
+  const userPath = getActivePrimaryUserConfigPath();
+  const projectPath = getProjectConfigPath(workingDirectory || undefined);
+  return [
+    customPath
+      ? { scope: 'user', path: customPath, config: readConfigFile(customPath) }
+      : { scope: 'user', path: userPath, config: readConfigFile(userPath) },
+    ...(projectPath
+      ? [{ scope: 'project' as const, path: projectPath, config: readConfigFile(projectPath) }]
+      : []),
+  ];
+};
+
+const readPluginArray = (config: Record<string, unknown>): unknown[] => Array.isArray(config.plugin) ? config.plugin : [];
+
+const writePluginArray = (config: Record<string, unknown>, plugin: unknown[]): Record<string, unknown> => {
+  const next = { ...config };
+  if (plugin.length > 0) {
+    next.plugin = plugin;
+  } else {
+    delete next.plugin;
+  }
+  return next;
+};
+
+const hasPluginSpec = (plugin: unknown[], spec: string): boolean => plugin.some((raw) => {
+  try {
+    return parsePluginRaw(raw).spec === spec;
+  } catch {
+    return false;
+  }
+});
+
+const getPluginTarget = (id: string, workingDirectory?: string | null): null | {
+  scope: PluginScope;
+  path: string;
+  config: Record<string, unknown>;
+  plugin: unknown[];
+  index: number;
+  spec: string;
+} => {
+  const decoded = decodePluginId(id);
+  if (decoded.prefix !== 'config') {
+    throw codedError('Plugin entry id must use config prefix', 'INVALID_SPEC');
+  }
+  const { scope, rest: spec } = parsePluginIdValue(decoded.value);
+  const source = getPluginConfigSources(workingDirectory).find((candidate) => candidate.scope === scope);
+  if (!source) return null;
+  const plugin = readPluginArray(source.config);
+  const index = plugin.findIndex((raw) => {
+    try {
+      return parsePluginRaw(raw).spec === spec;
+    } catch {
+      return false;
+    }
+  });
+  if (index < 0) return null;
+  return { scope, path: source.path, config: source.config, plugin: [...plugin], index, spec };
+};
+
+export const listPluginEntries = (workingDirectory?: string): PluginEntry[] => {
+  const entries: PluginEntry[] = [];
+  for (const source of getPluginConfigSources(workingDirectory)) {
+    for (const raw of readPluginArray(source.config)) {
+      try {
+        const parsed = parsePluginRaw(raw);
+        entries.push({
+          id: encodePluginId('config', `${source.scope}:${parsed.spec}`),
+          spec: parsed.spec,
+          ...(parsed.options ? { options: parsed.options } : {}),
+          scope: source.scope,
+          kind: 'config',
+          parsedKind: isPluginPathSpec(parsed.spec) ? 'path' : 'npm',
+        });
+      } catch {
+        // Ignore malformed persisted plugin entries so the settings page remains usable.
+      }
+    }
+  }
+  return entries;
+};
+
+export const getPluginEntry = (id: string, workingDirectory?: string): PluginEntry | null =>
+  listPluginEntries(workingDirectory).find((entry) => entry.id === id) || null;
+
+export const createPluginEntry = (entry: { spec?: unknown; options?: unknown; scope?: unknown }, workingDirectory?: string): void => {
+  const spec = validatePluginSpec(entry.spec);
+  const scope = validatePluginScope(entry.scope || 'user');
+  const sources = getPluginConfigSources(workingDirectory);
+  if (sources.some((source) => source.scope === scope && hasPluginSpec(readPluginArray(source.config), spec))) {
+    throw codedError(`Plugin "${spec}" already exists`, 'ENTRY_EXISTS');
+  }
+  const userSource = sources.find((source) => source.scope === 'user');
+  const targetPath = scope === 'project'
+    ? ensureProjectPluginConfigPath(workingDirectory)
+    : userSource?.path ?? getActivePrimaryUserConfigPath();
+  const config = fs.existsSync(targetPath) ? readConfigFile(targetPath) : {};
+  const plugin = readPluginArray(config);
+  writeConfig(writePluginArray(config, [...plugin, serializePluginEntry({ spec, options: entry.options })]), targetPath);
+};
+
+export const updatePluginEntry = (id: string, updates: { spec?: unknown; options?: unknown }, workingDirectory?: string): void => {
+  const target = getPluginTarget(id, workingDirectory);
+  if (!target) throw codedError('Plugin entry not found', 'NOT_FOUND');
+  const existing = parsePluginRaw(target.plugin[target.index]);
+  const nextSpec = updates.spec === undefined ? existing.spec : validatePluginSpec(updates.spec);
+  const nextOptions = updates.options === undefined ? existing.options : updates.options;
+  target.plugin[target.index] = serializePluginEntry({ spec: nextSpec, options: nextOptions });
+  writeConfig(writePluginArray(target.config, target.plugin), target.path);
+};
+
+export const deletePluginEntry = (id: string, workingDirectory?: string): void => {
+  const target = getPluginTarget(id, workingDirectory);
+  if (!target) throw codedError('Plugin entry not found', 'NOT_FOUND');
+  target.plugin.splice(target.index, 1);
+  writeConfig(writePluginArray(target.config, target.plugin), target.path);
+};
+
+const getPluginDir = (scope: PluginScope, workingDirectory?: string | null): string => {
+  if (scope === 'project') {
+    if (!workingDirectory) throw codedError('Project plugin scope requires working directory', 'INVALID_SCOPE');
+    return path.join(workingDirectory, '.opencode', 'plugins');
+  }
+  return path.join(getActiveOpencodeConfigDir(), 'plugins');
+};
+
+const getPluginFileTarget = (id: string, workingDirectory?: string): { scope: PluginScope; fileName: string; filePath: string } => {
+  const decoded = decodePluginId(id);
+  if (decoded.prefix !== 'file') {
+    throw codedError('Plugin file id must use file prefix', 'INVALID_FILENAME');
+  }
+  const { scope, rest } = parsePluginIdValue(decoded.value);
+  const fileName = validatePluginFileName(rest);
+  return { scope, fileName, filePath: path.join(getPluginDir(scope, workingDirectory), fileName) };
+};
+
+export const listPluginDirFiles = (workingDirectory?: string): PluginFile[] => {
+  const files: PluginFile[] = [];
+  for (const scope of ['user', 'project'] as const) {
+    let dir: string;
+    try {
+      dir = getPluginDir(scope, workingDirectory);
+    } catch {
+      continue;
+    }
+    if (!fs.existsSync(dir)) continue;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isFile()) continue;
+      try {
+        const fileName = validatePluginFileName(entry.name);
+        files.push({
+          id: encodePluginId('file', `${scope}:${fileName}`),
+          fileName,
+          scope,
+          kind: 'file',
+        });
+      } catch {
+        // Ignore unsupported files in the plugins directory.
+      }
+    }
+  }
+  return files.sort((a, b) => `${a.scope}:${a.fileName}`.localeCompare(`${b.scope}:${b.fileName}`));
+};
+
+export const readPluginDirFile = (id: string, workingDirectory?: string): { fileName: string; scope: PluginScope; content: string } | null => {
+  const target = getPluginFileTarget(id, workingDirectory);
+  if (!fs.existsSync(target.filePath)) return null;
+  return {
+    fileName: target.fileName,
+    scope: target.scope,
+    content: fs.readFileSync(target.filePath, 'utf8'),
+  };
+};
+
+export const writePluginDirFile = (
+  file: { fileName?: unknown; content?: unknown; scope?: unknown },
+  workingDirectory?: string,
+  opts: { overwrite?: boolean } = {},
+): void => {
+  const scope = validatePluginScope(file.scope || 'user');
+  const fileName = validatePluginFileName(file.fileName);
+  const filePath = path.join(getPluginDir(scope, workingDirectory), fileName);
+  if (!opts.overwrite && fs.existsSync(filePath)) {
+    throw codedError(`Plugin file "${fileName}" already exists`, 'FILE_EXISTS');
+  }
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, typeof file.content === 'string' ? file.content : '', 'utf8');
+};
+
+export const deletePluginDirFile = (id: string, workingDirectory?: string): void => {
+  const target = getPluginFileTarget(id, workingDirectory);
+  if (!fs.existsSync(target.filePath)) {
+    throw codedError(`Plugin file "${target.fileName}" not found`, 'NOT_FOUND');
+  }
+  fs.rmSync(target.filePath, { force: true });
+};
+
+type NpmLookupResult =
+  | { ok: true; latest: string | null; versions: string[] }
+  | { ok: false; status: number | 'network'; error: string };
+
+const npmInfoCache = new Map<string, { fetchedAt: number; payload: NpmLookupResult }>();
+const npmInfoInFlight = new Map<string, Promise<NpmLookupResult>>();
+const NPM_CACHE_TTL_MS = 3_600_000;
+
+const lookupNpmPackage = async (name: string): Promise<NpmLookupResult> => {
+  try {
+    const response = await fetch(`https://registry.npmjs.org/${encodeURIComponent(name).replace(/^%40/, '@')}`, {
+      headers: { Accept: 'application/json', 'User-Agent': 'openchamber-vscode/dev' },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (response.ok) {
+      const data = await response.json() as { versions?: unknown; 'dist-tags'?: { latest?: unknown } };
+      return {
+        ok: true,
+        latest: typeof data['dist-tags']?.latest === 'string' ? data['dist-tags'].latest : null,
+        versions: isPlainObject(data.versions) ? Object.keys(data.versions) : [],
+      };
+    }
+    if (response.status === 404) return { ok: false, status: 404, error: 'Package not found' };
+    return { ok: false, status: response.status, error: `Registry returned ${response.status}` };
+  } catch (error) {
+    return { ok: false, status: 'network', error: error instanceof Error ? error.message : String(error) };
+  }
+};
+
+const getNpmInfo = async (name: string, forceRefresh = false): Promise<NpmLookupResult> => {
+  const cached = npmInfoCache.get(name);
+  if (cached && !forceRefresh && Date.now() - cached.fetchedAt < NPM_CACHE_TTL_MS) {
+    return cached.payload;
+  }
+  const existing = npmInfoInFlight.get(name);
+  if (existing && !forceRefresh) return existing;
+  const lookup = lookupNpmPackage(name);
+  npmInfoInFlight.set(name, lookup);
+  try {
+    const result = await lookup;
+    if (result.ok || result.status === 404) {
+      npmInfoCache.set(name, { fetchedAt: Date.now(), payload: result });
+    }
+    return result;
+  } finally {
+    if (npmInfoInFlight.get(name) === lookup) {
+      npmInfoInFlight.delete(name);
+    }
+  }
+};
+
+export const queryPluginRegistry = async (
+  specs: string[],
+  opts: { refresh?: boolean; workingDirectory?: string } = {},
+): Promise<{ results: PluginRegistryResult[] }> => {
+  const uniqueSpecs = Array.from(new Set(specs.filter((spec) => spec.length > 0)));
+  if (uniqueSpecs.length > 100) {
+    throw codedError('too many specs', 'INVALID_SPEC');
+  }
+
+  const npmJobs = new Map<string, string[]>();
+  const malformedSpecs = new Set<string>();
+  for (const spec of uniqueSpecs) {
+    if (isPluginPathSpec(spec)) continue;
+    const parsed = parsePluginNpmSpec(spec);
+    if ('malformed' in parsed) {
+      malformedSpecs.add(spec);
+      continue;
+    }
+    npmJobs.set(parsed.name, [...(npmJobs.get(parsed.name) || []), spec]);
+  }
+
+  const npmInfoByName = new Map<string, NpmLookupResult>();
+  await Promise.all(Array.from(npmJobs.keys()).map(async (name) => {
+    npmInfoByName.set(name, await getNpmInfo(name, opts.refresh === true));
+  }));
+
+  const results: PluginRegistryResult[] = [];
+  for (const spec of uniqueSpecs) {
+    if (malformedSpecs.has(spec)) {
+      results.push({ kind: 'npm-malformed', spec, error: 'Spec syntax is malformed' });
+      continue;
+    }
+
+    if (isPluginPathSpec(spec)) {
+      const { absolutePath } = parsePluginPathSpec(spec, opts.workingDirectory || os.homedir());
+      try {
+        fs.statSync(absolutePath);
+      } catch {
+        results.push({ kind: 'path-missing', spec, absolutePath });
+        continue;
+      }
+      try {
+        fs.accessSync(absolutePath, fs.constants.R_OK);
+        results.push({ kind: 'path-ok', spec, absolutePath });
+      } catch {
+        results.push({ kind: 'path-unreadable', spec, absolutePath });
+      }
+      continue;
+    }
+
+    const parsed = parsePluginNpmSpec(spec);
+    if ('malformed' in parsed) {
+      results.push({ kind: 'npm-malformed', spec, error: 'Spec syntax is malformed' });
+      continue;
+    }
+    const info = npmInfoByName.get(parsed.name);
+    if (!info?.ok) {
+      if (info?.status === 404) {
+        results.push({ kind: 'npm-missing-package', spec, name: parsed.name, error: info.error });
+      } else {
+        results.push({ kind: 'npm-network', spec, error: info?.status === 'network' ? info.error : `Registry returned ${info?.status ?? 'unknown'}` });
+      }
+      continue;
+    }
+    const currentVersion = parsed.version;
+    if (currentVersion !== null && isExactPluginSemver(currentVersion) && !info.versions.includes(currentVersion)) {
+      results.push({
+        kind: 'npm-missing-version',
+        spec,
+        name: parsed.name,
+        currentVersion,
+        latestVersion: info.latest,
+        versions: info.versions,
+      });
+      continue;
+    }
+    results.push({
+      kind: 'npm-ok',
+      spec,
+      name: parsed.name,
+      currentVersion,
+      latestVersion: info.latest,
+      versions: info.versions,
+      hasUpdate: currentVersion !== null && isExactPluginSemver(currentVersion) && currentVersion !== info.latest,
+    });
+  }
+  return { results };
 };
 
 export type McpLocalConfig = {
@@ -1282,6 +1984,48 @@ export const deleteCommand = (commandName: string, workingDirectory?: string) =>
   if (!deleted) {
     throw new Error(`Command "${commandName}" not found`);
   }
+};
+
+export const listSnippets = (workingDirectory?: string): Snippet[] => {
+  return listUniqueSnippets(loadSnippetRegistry(workingDirectory));
+};
+
+export const getSnippet = (name: string, workingDirectory?: string): Snippet | null => {
+  return findSnippetByName(name, workingDirectory);
+};
+
+export const createSnippet = (
+  name: string,
+  config: Record<string, unknown>,
+  workingDirectory?: string,
+  scope: SnippetScope = 'global',
+): Snippet | null => {
+  assertValidSnippetName(name);
+  const dir = getWritableSnippetDir(scope, workingDirectory);
+  const filePath = path.join(dir, `${name}${SNIPPET_EXTENSION}`);
+  if (fs.existsSync(filePath)) throw new Error(`Snippet "${name}" already exists`);
+  writeSnippetFile(filePath, config || {});
+  return getSnippet(name, workingDirectory);
+};
+
+export const updateSnippet = (name: string, updates: Record<string, unknown>, workingDirectory?: string): Snippet | null => {
+  const existing = findSnippetByName(name, workingDirectory);
+  if (!existing) throw new Error(`Snippet "${name}" not found`);
+  writeSnippetFile(existing.filePath, { ...existing, ...(updates || {}) });
+  return getSnippet(name, workingDirectory);
+};
+
+export const deleteSnippet = (name: string, workingDirectory?: string): void => {
+  const existing = findSnippetByName(name, workingDirectory);
+  if (!existing) throw new Error(`Snippet "${name}" not found`);
+  fs.unlinkSync(existing.filePath);
+};
+
+export const expandSnippets = (text: string, workingDirectory?: string): string => {
+  const registry = loadSnippetRegistry(workingDirectory);
+  const collector = { prepend: [] as string[], append: [] as string[] };
+  const expanded = expandSnippetText(text || '', registry, new Map(), collector).trim();
+  return [...collector.prepend, expanded, ...collector.append].filter(Boolean).join('\n\n');
 };
 
 // ============== SKILL SCOPE HELPERS ==============

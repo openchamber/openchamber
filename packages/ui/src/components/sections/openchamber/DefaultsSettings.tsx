@@ -10,6 +10,7 @@ import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 const getDisplayModel = (
   storedModel: string | undefined
@@ -76,7 +77,7 @@ export const DefaultsSettings: React.FC = () => {
         }
 
         if (!data) {
-          const response = await fetch('/api/config/settings', {
+          const response = await runtimeFetch('/api/config/settings', {
             method: 'GET',
             headers: { Accept: 'application/json' },
           });
@@ -131,7 +132,7 @@ export const DefaultsSettings: React.FC = () => {
 
       try {
         await updateDesktopSettings({ defaultModel: newValue ?? '', defaultVariant: '' });
-        const response = await fetch('/api/config/settings', {
+        const response = await runtimeFetch('/api/config/settings', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ defaultModel: newValue }),

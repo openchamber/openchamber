@@ -19,6 +19,10 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
 import { ContextPanelContent } from './ContextSidebarTab';
 import { toast } from '@/components/ui';
+import { runtimeFetch } from '@/lib/runtime-fetch';
+import { refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
+import { getRuntimeUrlResolver } from '@/lib/runtime-url';
+import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { Icon } from "@/components/icon/Icon";
 import { OpenChamberLogo } from "@/components/ui/OpenChamberLogo";
 import { invokeDesktopCommand } from '@/lib/desktopNative';
@@ -436,15 +440,42 @@ type PreviewPaneProps = {
 type PreviewProxyState =
   | { status: 'idle' }
   | { status: 'loading' }
-  | { status: 'ready'; proxyBasePath: string; expiresAt: number }
+  | { status: 'ready'; proxyBasePath: string; previewToken?: string; expiresAt: number }
   | { status: 'error'; message: string };
 
+const getPreviewProxyOrigin = (proxySrc: string): string => {
+  if (typeof window === 'undefined') return '';
+  try {
+    return new URL(proxySrc || window.location.href, window.location.href).origin;
+  } catch {
+    return window.location.origin;
+  }
+};
+
+const postPreviewBridgeMessage = (frameWindow: Window, proxySrc: string, payload: Record<string, unknown>): void => {
+  const targetOrigin = getPreviewProxyOrigin(proxySrc);
+  frameWindow.postMessage(payload, targetOrigin);
+};
+
+const stripPreviewTokenFromUrl = (value: string): string => {
+  if (!value) return value;
+  try {
+    const parsed = new URL(value);
+    parsed.searchParams.delete('oc_preview_token');
+    parsed.searchParams.delete('oc_client_token');
+    parsed.searchParams.delete('oc_url_token');
+    return parsed.toString();
+  } catch {
+    return value;
+  }
+};
 const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
   const { t } = useI18n();
   const { currentTheme } = useThemeSystem();
   const [reloadNonce, bumpReload] = React.useReducer((x: number) => x + 1, 0);
   const [proxyRegistrationNonce, bumpProxyRegistration] = React.useReducer((x: number) => x + 1, 0);
   const [proxyState, setProxyState] = React.useState<PreviewProxyState>({ status: 'idle' });
+  const [urlAuthReadyKey, setUrlAuthReadyKey] = React.useState('');
   const iframeRef = React.useRef<HTMLIFrameElement | null>(null);
   const nextConsoleEventIdRef = React.useRef(1);
   const [bridgeReady, setBridgeReady] = React.useState(false);
@@ -480,6 +511,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
     : null;
 
   const targetKey = normalizedUrl ? normalizedUrl.toString() : '';
+  const proxyCacheKey = targetKey ? `${getRuntimeApiBaseUrl() || 'same-origin'}|${targetKey}` : '';
   const previewColorScheme = currentTheme.metadata.variant;
 
   React.useEffect(() => {
@@ -488,10 +520,13 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
       return;
     }
 
-    const cached = getCachedProxyTarget(targetKey);
-    if (cached) {
-      setProxyState({ status: 'ready', proxyBasePath: cached.proxyBasePath, expiresAt: cached.expiresAt });
+    const cached = getCachedProxyTarget(proxyCacheKey);
+    if (cached?.previewToken) {
+      setProxyState({ status: 'ready', proxyBasePath: cached.proxyBasePath, previewToken: cached.previewToken, expiresAt: cached.expiresAt });
       return;
+    }
+    if (cached) {
+      previewProxyTargetCache.delete(proxyCacheKey);
     }
 
     let cancelled = false;
@@ -499,7 +534,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
 
     void (async () => {
       try {
-        const response = await fetch('/api/preview/targets', {
+        const response = await runtimeFetch('/api/preview/targets', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
@@ -507,7 +542,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
         });
 
         if (!response.ok) {
-          previewProxyTargetCache.delete(targetKey);
+          previewProxyTargetCache.delete(proxyCacheKey);
           const errorBody = await response.json().catch(() => ({}));
           const message = typeof errorBody?.error === 'string'
             ? errorBody.error
@@ -518,23 +553,24 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
           return;
         }
 
-        const body = await response.json() as { proxyBasePath?: unknown; expiresAt?: unknown };
+        const body = await response.json() as { proxyBasePath?: unknown; previewToken?: unknown; expiresAt?: unknown };
         const proxyBasePath = typeof body.proxyBasePath === 'string' ? body.proxyBasePath : '';
+        const previewToken = typeof body.previewToken === 'string' ? body.previewToken : '';
         const expiresAt = typeof body.expiresAt === 'number' ? body.expiresAt : 0;
-        if (!proxyBasePath) {
-          previewProxyTargetCache.delete(targetKey);
+        if (!proxyBasePath || !previewToken) {
+          previewProxyTargetCache.delete(proxyCacheKey);
           if (!cancelled) {
             setProxyState({ status: 'error', message: t('contextPanel.preview.proxyError') });
           }
           return;
         }
 
-        previewProxyTargetCache.set(targetKey, { proxyBasePath, expiresAt });
+        previewProxyTargetCache.set(proxyCacheKey, { proxyBasePath, previewToken, expiresAt });
         if (!cancelled) {
-          setProxyState({ status: 'ready', proxyBasePath, expiresAt });
+          setProxyState({ status: 'ready', proxyBasePath, previewToken, expiresAt });
         }
       } catch (error) {
-        previewProxyTargetCache.delete(targetKey);
+        previewProxyTargetCache.delete(proxyCacheKey);
         if (!cancelled) {
           const message = error instanceof Error ? error.message : String(error);
           setProxyState({ status: 'error', message });
@@ -545,27 +581,51 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
     return () => {
       cancelled = true;
     };
-  }, [isLoopback, proxyRegistrationNonce, t, targetKey]);
+  }, [isLoopback, proxyCacheKey, proxyRegistrationNonce, t, targetKey]);
 
   const directSrc = normalizedUrl
     && (normalizedUrl.protocol === 'http:' || normalizedUrl.protocol === 'https:')
     ? normalizedUrl.toString()
     : '';
 
-  const proxySrc = isLoopback && proxyState.status === 'ready' && normalizedUrl
+  const proxyUrlAuthKey = isLoopback && proxyState.status === 'ready'
+    ? `${proxyState.proxyBasePath}|${proxyState.previewToken || ''}|${reloadNonce}`
+    : '';
+
+  React.useEffect(() => {
+    if (!proxyUrlAuthKey) {
+      setUrlAuthReadyKey('');
+      return;
+    }
+
+    let cancelled = false;
+    setUrlAuthReadyKey('');
+    void refreshRuntimeUrlAuthToken(getRuntimeApiBaseUrl())
+      .then((token) => {
+        if (!cancelled && token) setUrlAuthReadyKey(proxyUrlAuthKey);
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [proxyUrlAuthKey]);
+
+  const proxySrc = isLoopback && proxyState.status === 'ready' && normalizedUrl && urlAuthReadyKey === proxyUrlAuthKey
     ? (() => {
       const path = normalizedUrl.pathname || '/';
       const searchParams = new URLSearchParams(normalizedUrl.search);
       searchParams.set('ocPreview', String(reloadNonce));
+      searchParams.set('oc_preview_token', proxyState.previewToken || '');
       const search = searchParams.toString();
       const hash = normalizedUrl.hash || '';
-      return `${proxyState.proxyBasePath}${path}${search ? `?${search}` : ''}${hash}`;
+      return getRuntimeUrlResolver().authenticatedAsset(`${proxyState.proxyBasePath}${path}${search ? `?${search}` : ''}${hash}`);
     })()
     : '';
 
   const effectiveSrc = isLoopback ? proxySrc : directSrc;
-  const headerSrc = effectiveSrc || directSrc;
-  const showLoading = isLoopback && (proxyState.status === 'loading' || proxyState.status === 'idle');
+  const headerSrc = isLoopback ? stripPreviewTokenFromUrl(proxySrc) : directSrc;
+  const showLoading = isLoopback && (proxyState.status === 'loading' || proxyState.status === 'idle' || urlAuthReadyKey !== proxyUrlAuthKey);
   const showError = isLoopback && proxyState.status === 'error';
 
   const attachPreviewAnnotation = React.useCallback((target: PreviewElementMetadata) => {
@@ -630,26 +690,26 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
     if (!bridgeReady || !frameWindow) {
       return;
     }
-    frameWindow.postMessage({
+    postPreviewBridgeMessage(frameWindow, proxySrc, {
       source: 'openchamber-preview-parent',
       version: 1,
       type: 'set-inspect-mode',
       enabled: inspectMode,
-    }, window.location.origin);
-  }, [bridgeReady, inspectMode]);
+    });
+  }, [bridgeReady, inspectMode, proxySrc]);
 
   React.useEffect(() => {
     const frameWindow = iframeRef.current?.contentWindow;
     if (!bridgeReady || !frameWindow) {
       return;
     }
-    frameWindow.postMessage({
+    postPreviewBridgeMessage(frameWindow, proxySrc, {
       source: 'openchamber-preview-parent',
       version: 1,
       type: 'set-color-scheme',
       scheme: previewColorScheme,
-    }, window.location.origin);
-  }, [bridgeReady, previewColorScheme]);
+    });
+  }, [bridgeReady, previewColorScheme, proxySrc]);
 
   React.useEffect(() => {
     if (!inspectMode || typeof window === 'undefined') return;
@@ -860,7 +920,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
     void (async () => {
       const probe = async (): Promise<Response | null> => {
         try {
-          return await fetch(proxySrc, {
+          return await runtimeFetch(proxySrc, {
             method: 'GET',
             credentials: 'include',
             cache: 'no-store',
@@ -882,7 +942,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
       }
 
       if (response.status === 403 || response.status === 404) {
-        previewProxyTargetCache.delete(targetKey);
+        previewProxyTargetCache.delete(proxyCacheKey);
         setProxyState({ status: 'loading' });
         bumpProxyRegistration();
         return;
@@ -918,7 +978,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
     return () => {
       cancelled = true;
     };
-  }, [proxySrc, reloadNonce, targetKey]);
+  }, [proxyCacheKey, proxySrc, reloadNonce]);
 
   const showUpstreamStarting = isLoopback
     && proxyState.status === 'ready'
@@ -943,7 +1003,8 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
 
     try {
       const location = frameWindow.location;
-      if (location.origin !== window.location.origin) {
+      const proxyOrigin = getPreviewProxyOrigin(proxySrc);
+      if (location.origin !== proxyOrigin) {
         return;
       }
       if (location.pathname.startsWith(proxyState.proxyBasePath)) {
@@ -955,7 +1016,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
     } catch {
       // Cross-origin frames are expected for non-loopback/direct previews.
     }
-  }, [isLoopback, proxyState]);
+  }, [isLoopback, proxySrc, proxyState]);
 
   return (
     <div className="absolute inset-0 flex flex-col">
@@ -1195,6 +1256,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
   const [isInspecting, setIsInspecting] = React.useState(false);
   const [hoverTarget, setHoverTarget] = React.useState<PreviewElementMetadata | null>(null);
   const [proxyState, setProxyState] = React.useState<PreviewProxyState>({ status: 'idle' });
+  const [urlAuthReadyKey, setUrlAuthReadyKey] = React.useState('');
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const newSessionDraftOpen = useSessionUIStore((state) => state.newSessionDraft?.open);
   const addInlineCommentDraft = useInlineCommentDraftStore((state) => state.addDraft);
@@ -1264,9 +1326,12 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
 
     const proxyTargetKey = getBrowserProxyTargetKey(currentUrl);
     const cached = getCachedProxyTarget(proxyTargetKey);
-    if (cached) {
-      setProxyState({ status: 'ready', proxyBasePath: cached.proxyBasePath, expiresAt: cached.expiresAt });
+    if (cached?.previewToken) {
+      setProxyState({ status: 'ready', proxyBasePath: cached.proxyBasePath, previewToken: cached.previewToken, expiresAt: cached.expiresAt });
       return;
+    }
+    if (cached) {
+      previewProxyTargetCache.delete(proxyTargetKey);
     }
 
     let cancelled = false;
@@ -1275,7 +1340,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
 
     void (async () => {
       try {
-        const response = await fetch('/api/preview/targets', {
+        const response = await runtimeFetch('/api/preview/targets', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
@@ -1293,19 +1358,20 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
           return;
         }
 
-        const body = await response.json() as { proxyBasePath?: unknown; expiresAt?: unknown };
+        const body = await response.json() as { proxyBasePath?: unknown; previewToken?: unknown; expiresAt?: unknown };
         const proxyBasePath = typeof body.proxyBasePath === 'string' ? body.proxyBasePath : '';
+        const previewToken = typeof body.previewToken === 'string' ? body.previewToken : '';
         const expiresAt = typeof body.expiresAt === 'number' ? body.expiresAt : 0;
-        if (!proxyBasePath) {
+        if (!proxyBasePath || !previewToken) {
           if (!cancelled) {
             setProxyState({ status: 'error', message: t('contextPanel.preview.proxyError') });
           }
           return;
         }
 
-        previewProxyTargetCache.set(proxyTargetKey, { proxyBasePath, expiresAt });
+        previewProxyTargetCache.set(proxyTargetKey, { proxyBasePath, previewToken, expiresAt });
         if (!cancelled) {
-          setProxyState({ status: 'ready', proxyBasePath, expiresAt });
+          setProxyState({ status: 'ready', proxyBasePath, previewToken, expiresAt });
         }
       } catch (error) {
         if (!cancelled) {
@@ -1320,16 +1386,44 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
     };
   }, [currentUrl, t]);
 
+  const proxyUrlAuthKey = currentUrl && proxyState.status === 'ready'
+    ? `${proxyState.proxyBasePath}|${proxyState.previewToken || ''}|${reloadNonce}`
+    : '';
+
+  React.useEffect(() => {
+    if (!proxyUrlAuthKey) {
+      setUrlAuthReadyKey('');
+      return;
+    }
+
+    let cancelled = false;
+    setUrlAuthReadyKey('');
+    void refreshRuntimeUrlAuthToken(getRuntimeApiBaseUrl())
+      .then((token) => {
+        if (!cancelled && token) setUrlAuthReadyKey(proxyUrlAuthKey);
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [proxyUrlAuthKey]);
+
   const proxySrc = React.useMemo(() => {
+    if (urlAuthReadyKey !== proxyUrlAuthKey) return '';
     if (!currentUrl || proxyState.status !== 'ready') return '';
     try {
       const parsed = new URL(currentUrl);
       const path = parsed.pathname || '/';
-      return `${proxyState.proxyBasePath}${path}${parsed.search}${parsed.hash}`;
+      const searchParams = new URLSearchParams(parsed.search);
+      searchParams.set('ocPreview', String(reloadNonce));
+      searchParams.set('oc_preview_token', proxyState.previewToken || '');
+      const search = searchParams.toString();
+      return getRuntimeUrlResolver().authenticatedAsset(`${proxyState.proxyBasePath}${path}${search ? `?${search}` : ''}${parsed.hash}`);
     } catch {
       return '';
     }
-  }, [currentUrl, proxyState]);
+  }, [currentUrl, proxyState, proxyUrlAuthKey, reloadNonce, urlAuthReadyKey]);
 
   const iframeSrc = proxySrc || (proxyState.status === 'error' ? currentUrl : '');
 

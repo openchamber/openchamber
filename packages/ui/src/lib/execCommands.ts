@@ -1,4 +1,6 @@
-import type { CommandExecResult, FilesAPI, RuntimeAPIs } from '@/lib/api/types';
+import type { CommandExecResult, FilesAPI } from '@/lib/api/types';
+import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 type ExecResult = { success: boolean; results: CommandExecResult[] };
 
@@ -12,8 +14,7 @@ const getBaseUrl = (): string => {
 };
 
 function getRuntimeFilesAPI(): FilesAPI | null {
-  if (typeof window === 'undefined') return null;
-  const apis = (window as typeof window & { __OPENCHAMBER_RUNTIME_APIS__?: RuntimeAPIs }).__OPENCHAMBER_RUNTIME_APIS__;
+  const apis = getRegisteredRuntimeAPIs();
   if (apis?.files) {
     return apis.files;
   }
@@ -26,7 +27,7 @@ export async function execCommands(commands: string[], cwd: string): Promise<Exe
     return runtimeFiles.execCommands(commands, cwd);
   }
 
-  const response = await fetch(`${getBaseUrl()}/fs/exec`, {
+  const response = await runtimeFetch(`${getBaseUrl()}/fs/exec`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ commands, cwd, background: false }),

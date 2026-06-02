@@ -12,6 +12,7 @@ import { respondToPermission } from "@/sync/session-actions";
 import { useSessionUIStore } from "@/sync/session-ui-store";
 import { usePermissionAuditStore } from "@/stores/permissionAuditStore";
 import type { PermissionRequest } from "@/types/permission";
+import { runtimeFetch } from "@/lib/runtime-fetch";
 
 interface PermissionState {
     autoAccept: PermissionAutoAcceptMap;
@@ -248,7 +249,7 @@ export const usePermissionStore = create<PermissionStore>()(
                     // round-trip. Send known descendants too; server-side
                     // ancestry lookup can lag OpenCode session indexing.
                     for (const scopedSessionId of sessionScope) {
-                        void fetch('/api/notifications/auto-accept', {
+                        void runtimeFetch('/api/notifications/auto-accept', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ sessionId: scopedSessionId, enabled }),
@@ -371,7 +372,7 @@ export const usePermissionStore = create<PermissionStore>()(
                     // survives page reloads / server restarts.
                     for (const [sid, enabled] of Object.entries(state.autoAccept || {})) {
                         if (enabled === true) {
-                            void fetch('/api/notifications/auto-accept', {
+                            void runtimeFetch('/api/notifications/auto-accept', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ sessionId: sid, enabled: true }),

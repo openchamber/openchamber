@@ -77,6 +77,7 @@ import { createPushRuntime } from './lib/notifications/push-runtime.js';
 import { createNotificationTemplateRuntime } from './lib/notifications/template-runtime.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
 import { createProjectConfigRuntime } from './lib/projects/project-config.js';
+import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.js';
 import { createPreviewProxyRuntime } from './lib/preview/proxy-runtime.js';
 import { createProxyMiddleware, responseInterceptor } from 'http-proxy-middleware';
 import webPush from 'web-push';
@@ -263,6 +264,7 @@ const OPENCHAMBER_DATA_DIR = process.env.OPENCHAMBER_DATA_DIR
   : path.join(os.homedir(), '.config', 'openchamber');
 const SETTINGS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'settings.json');
 const PUSH_SUBSCRIPTIONS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'push-subscriptions.json');
+const REMOTE_CLIENTS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'remote-clients.json');
 const CLOUDFLARE_MANAGED_REMOTE_TUNNELS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'cloudflare-managed-remote-tunnels.json');
 const CLOUDFLARE_LEGACY_NAMED_TUNNELS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'cloudflare-named-tunnels.json');
 const CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION = 1;
@@ -819,6 +821,12 @@ const staticRoutesRuntime = createStaticRoutesRuntime({
   normalizePwaAppName,
   normalizePwaOrientation,
 });
+const remoteClientAuthRuntime = createRemoteClientAuthRuntime({
+  fsPromises,
+  path,
+  crypto,
+  storePath: REMOTE_CLIENTS_FILE_PATH,
+});
 const featureRoutesRuntime = createFeatureRoutesRuntime({
   clientReloadDelayMs: CLIENT_RELOAD_DELAY_MS,
 });
@@ -1044,6 +1052,7 @@ async function main(options = {}) {
   const port = Number.isFinite(options.port) && options.port >= 0 ? Math.trunc(options.port) : DEFAULT_PORT;
   const host = typeof options.host === 'string' && options.host.length > 0 ? options.host : undefined;
   const tryCfTunnel = options.tryCfTunnel === true;
+  const apiOnly = options.apiOnly === true || isEnvFlagEnabled(process.env.OPENCHAMBER_API_ONLY);
   const shouldUseCanonicalTunnelConfig = typeof options.tunnelMode === 'string'
     || typeof options.tunnelProvider === 'string'
     || options.tunnelConfigPath === null
@@ -1085,7 +1094,24 @@ async function main(options = {}) {
 
   const app = express();
   const serverStartedAt = new Date().toISOString();
+  const packagedClientOrigins = new Set(['openchamber-ui://app']);
   app.set('trust proxy', true);
+  app.use((req, res, next) => {
+    const origin = typeof req.headers.origin === 'string' ? req.headers.origin : '';
+    if (packagedClientOrigins.has(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,X-Requested-With,Cache-Control,X-OpenCode-Directory');
+      res.setHeader('Access-Control-Expose-Headers', 'x-next-cursor');
+      res.setHeader('Vary', 'Origin');
+      if (req.method === 'OPTIONS') {
+        res.status(204).end();
+        return;
+      }
+    }
+    next();
+  });
   app.use(compression({
     filter: (req, res) => {
       if (shouldSkipCompression(req, res)) return false;
@@ -1130,11 +1156,13 @@ async function main(options = {}) {
         bunBinaryResolved: resolvedBunBinary || null,
         desktopNotifyEnabled: ENV_DESKTOP_NOTIFY,
         planModeExperimentalEnabled: PLAN_MODE_EXPERIMENT_ENABLED,
+        apiOnly,
       };
     },
     verboseRequestLogs: OPENCHAMBER_VERBOSE_REQUEST_LOGS,
     uiPassword,
     tunnelAuthController,
+    remoteClientAuthRuntime,
     readSettingsFromDiskMigrated,
     normalizeTunnelSessionTtlMs,
     sayTTSCapability,
@@ -1265,6 +1293,7 @@ async function main(options = {}) {
     onTunnelReady,
     tunnelRuntimeContext,
     attachSignals,
+    apiOnly,
   });
   terminalRuntime = startupPipelineResult.terminalRuntime;
   messageStreamRuntime = startupPipelineResult.messageStreamRuntime;

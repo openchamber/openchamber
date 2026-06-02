@@ -47,6 +47,7 @@ This module provides notification message preparation utilities for the web serv
   - session parent cache for subtask suppression
   - template resolution and fallback behavior
   - native notification fanout and web push payload fanout
+  - push suppression while any fresh UI visibility heartbeat reports a focused client
 
 ### Push runtime API (push-runtime.js)
 - `createPushRuntime(dependencies)`: creates runtime for web push and UI visibility state.

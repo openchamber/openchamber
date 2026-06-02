@@ -16,6 +16,7 @@ import { useFileSystemAccess } from '@/hooks/useFileSystemAccess';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui';
 import { IdentityDropdown } from '@/components/views/git/GitHeader';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useDeviceInfo } from '@/lib/device';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { Icon } from "@/components/icon/Icon";
@@ -120,7 +121,7 @@ const focusPathInput = (input: HTMLInputElement | null): void => {
 
 const resolveFreshFilesystemHome = async (): Promise<string | null> => {
   try {
-    const response = await fetch('/api/fs/home', {
+    const response = await runtimeFetch('/api/fs/home', {
       method: 'GET',
       headers: { Accept: 'application/json' },
     });

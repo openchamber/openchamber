@@ -15,6 +15,7 @@ import { useCommandsStore } from "@/stores/useCommandsStore";
 import { useProjectsStore } from "@/stores/useProjectsStore";
 import { useSkillsCatalogStore } from "@/stores/useSkillsCatalogStore";
 import { useSkillsStore } from "@/stores/useSkillsStore";
+import { runtimeFetch } from "@/lib/runtime-fetch";
 
 // Note: useDirectoryStore cannot be imported at top level to avoid circular dependency
 // useDirectoryStore -> useAgentsStore (for refreshAfterOpenCodeRestart)
@@ -239,7 +240,7 @@ export const useAgentsStore = create<AgentsStore>()(
                   agents.map(async (agent) => {
                     try {
                       // Force no-cache to ensure we get the latest scope info
-                      const response = await fetch(`/api/config/agents/${encodeURIComponent(agent.name)}${queryParams}`, {
+                      const response = await runtimeFetch(`/api/config/agents/${encodeURIComponent(agent.name)}${queryParams}`, {
                         headers: {
                           'Cache-Control': 'no-cache',
                           ...(configDirectory ? { 'x-opencode-directory': configDirectory } : {}),
@@ -328,7 +329,7 @@ export const useAgentsStore = create<AgentsStore>()(
             const configDirectory = getConfigDirectory();
             const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
 
-            const response = await fetch(`/api/config/agents/${encodeURIComponent(config.name)}${queryParams}`, {
+            const response = await runtimeFetch(`/api/config/agents/${encodeURIComponent(config.name)}${queryParams}`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -389,7 +390,7 @@ export const useAgentsStore = create<AgentsStore>()(
             const configDirectory = getConfigDirectory();
             const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
 
-            const response = await fetch(`/api/config/agents/${encodeURIComponent(name)}${queryParams}`, {
+            const response = await runtimeFetch(`/api/config/agents/${encodeURIComponent(name)}${queryParams}`, {
               method: 'PATCH',
               headers: {
                 'Content-Type': 'application/json',
@@ -439,7 +440,7 @@ export const useAgentsStore = create<AgentsStore>()(
             const configDirectory = getConfigDirectory();
             const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
 
-            const response = await fetch(`/api/config/agents/${encodeURIComponent(name)}${queryParams}`, {
+            const response = await runtimeFetch(`/api/config/agents/${encodeURIComponent(name)}${queryParams}`, {
               method: 'DELETE',
               headers: configDirectory ? { 'x-opencode-directory': configDirectory } : undefined,
             });
@@ -667,7 +668,7 @@ export async function reloadOpenCodeConfiguration(options?: {
 
   try {
 
-    const response = await fetch('/api/config/reload', {
+    const response = await runtimeFetch('/api/config/reload', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
     });

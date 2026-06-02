@@ -1,4 +1,5 @@
 import React from 'react';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 import { CodeMirrorEditor } from '@/components/ui/CodeMirrorEditor';
 import { PreviewToggleButton } from './PreviewToggleButton';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
@@ -371,7 +372,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
         return result?.content ?? '';
       }
 
-      const response = await fetch(`/api/fs/read?path=${encodeURIComponent(path)}&optional=true`, {
+      const response = await runtimeFetch(`/api/fs/read?path=${encodeURIComponent(path)}&optional=true`, {
         // Avoid conditional requests (304 + empty body).
         cache: 'no-store',
       });
@@ -475,7 +476,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
             throw new Error(t('planView.error.writeFailed'));
           }
         } else {
-          const response = await fetch('/api/fs/write', {
+          const response = await runtimeFetch('/api/fs/write', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ path: resolvedPath, content }),
@@ -544,7 +545,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
             return;
           }
           sessionId = created.id;
-          directoryHint = null;
+          directoryHint = created.path;
         } else {
           const sessionResult = await createSession(undefined, currentProjectRef.path, null);
           if (!sessionResult?.id) {

@@ -1,6 +1,9 @@
 import type { ProjectEntry } from '@/lib/api/types';
-import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
+import { getInjectedBootOutcome } from '@/lib/desktopBoot';
 import type { DraftStarterRef } from '@/lib/draftStarters';
+import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
+import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
+import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 
 export type AssistantNotificationPayload = {
   title?: string;
@@ -307,8 +310,34 @@ export const isDesktopLocalOriginActive = (): boolean => {
   if (typeof window === 'undefined') return false;
   if (!isDesktopShell()) return false;
 
+  if (getRuntimeKey() === 'local') {
+    return true;
+  }
+
   const local = typeof window.__OPENCHAMBER_LOCAL_ORIGIN__ === 'string' ? window.__OPENCHAMBER_LOCAL_ORIGIN__ : '';
   const localUrl = parseUrl(local);
+  const runtimeApiUrl = parseUrl(getRuntimeApiBaseUrl());
+
+  if (!runtimeApiUrl && localUrl && getInjectedBootOutcome()?.target === 'local') {
+    return true;
+  }
+
+  if (localUrl && runtimeApiUrl) {
+    if (localUrl.origin === runtimeApiUrl.origin) {
+      return true;
+    }
+
+    const localPort = localUrl.port || (localUrl.protocol === 'https:' ? '443' : '80');
+    const runtimePort = runtimeApiUrl.port || (runtimeApiUrl.protocol === 'https:' ? '443' : '80');
+
+    return (
+      localUrl.protocol === runtimeApiUrl.protocol &&
+      localPort === runtimePort &&
+      isLoopbackHost(localUrl.hostname) &&
+      isLoopbackHost(runtimeApiUrl.hostname)
+    );
+  }
+
   const currentUrl = parseUrl(window.location.origin);
 
   if (localUrl && currentUrl) {
@@ -357,14 +386,12 @@ export const startDesktopWindowDrag = async (): Promise<boolean> => {
 };
 
 export const isVSCodeRuntime = (): boolean => {
-  if (typeof window === "undefined") return false;
-  const apis = (window as { __OPENCHAMBER_RUNTIME_APIS__?: { runtime?: { isVSCode?: boolean } } }).__OPENCHAMBER_RUNTIME_APIS__;
+  const apis = getRegisteredRuntimeAPIs();
   return apis?.runtime?.isVSCode === true;
 };
 
 export const isWebRuntime = (): boolean => {
-  if (typeof window === "undefined") return false;
-  const apis = (window as { __OPENCHAMBER_RUNTIME_APIS__?: { runtime?: { platform?: string } } }).__OPENCHAMBER_RUNTIME_APIS__;
+  const apis = getRegisteredRuntimeAPIs();
   const platform = apis?.runtime?.platform;
   if (platform === 'web') {
     return true;
@@ -476,7 +503,7 @@ export const sendAssistantCompletionNotification = async (
 };
 
 export const checkForDesktopUpdates = async (): Promise<UpdateInfo | null> => {
-  if (!isTauriShell() || !isDesktopLocalOriginActive()) {
+  if (!isTauriShell()) {
     return null;
   }
 
@@ -493,7 +520,7 @@ export const checkForDesktopUpdates = async (): Promise<UpdateInfo | null> => {
 export const downloadDesktopUpdate = async (
   onProgress?: (progress: UpdateProgress) => void
 ): Promise<boolean> => {
-  if (!isTauriShell() || !isDesktopLocalOriginActive()) {
+  if (!isTauriShell()) {
     return false;
   }
 
@@ -553,7 +580,7 @@ export const downloadDesktopUpdate = async (
 };
 
 export const restartToApplyUpdate = async (): Promise<boolean> => {
-  if (!isTauriShell() || !isDesktopLocalOriginActive()) {
+  if (!isTauriShell()) {
     return false;
   }
 
