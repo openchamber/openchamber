@@ -2884,7 +2884,7 @@ export async function watchWorktreeChanges(directory, onChange) {
   // added).
   const syncWorktreesWatcher = () => {
     if (closed) {
-      return;
+      return false;
     }
     let stat;
     try {
@@ -2897,27 +2897,36 @@ export async function watchWorktreeChanges(directory, onChange) {
         removeWatcher(worktreesWatcher);
         worktreesWatcher = null;
         worktreesWatchIno = null;
+        return true;
       }
-      return;
+      return false;
     }
     if (worktreesWatcher && worktreesWatchIno === stat.ino) {
-      return;
+      return false;
     }
+    let changed = false;
     if (worktreesWatcher) {
       removeWatcher(worktreesWatcher);
       worktreesWatcher = null;
       worktreesWatchIno = null;
+      changed = true;
     }
     const watcher = attachWatcher(worktreesDir, () => notify('worktrees-directory-changed'));
     if (watcher) {
       worktreesWatcher = watcher;
       worktreesWatchIno = stat.ino;
+      changed = true;
     }
+    return changed;
   };
 
   attachWatcher(commonGitDir, (_eventType, filename) => {
-    if (!filename || filename === 'worktrees') {
+    if (filename === 'worktrees') {
       syncWorktreesWatcher();
+      notify('common-git-directory-changed');
+      return;
+    }
+    if (!filename && syncWorktreesWatcher()) {
       notify('common-git-directory-changed');
     }
   });

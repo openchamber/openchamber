@@ -24,15 +24,21 @@ export function useWorktreeDiscoveryEvents(
   options: UseWorktreeDiscoveryEventsOptions = {},
 ): void {
   const enabled = options.enabled ?? true;
-  const projectByPath = React.useMemo(() => {
-    const next = new Map<string, ProjectRef>();
+  const projectLookup = React.useMemo(() => {
+    const byPath = new Map<string, ProjectRef>();
+    const keyParts: string[] = [];
     for (const project of projects) {
       const path = normalizePath(project.path);
       if (!path) continue;
-      next.set(path, { id: project.id, path });
+      byPath.set(path, { id: project.id, path });
+      keyParts.push(`${project.id}:${path}`);
     }
-    return next;
+    return { byPath, key: keyParts.sort().join('|') };
   }, [projects]);
+  const projectLookupRef = React.useRef(projectLookup);
+  if (projectLookupRef.current.key !== projectLookup.key) {
+    projectLookupRef.current = projectLookup;
+  }
 
   React.useEffect(() => {
     if (!enabled || typeof window === 'undefined') {
@@ -61,7 +67,7 @@ export function useWorktreeDiscoveryEvents(
       const directory = typeof detail?.directory === 'string' ? normalizePath(detail.directory) : '';
       if (!directory) return;
 
-      const project = projectByPath.get(directory);
+      const project = projectLookupRef.current.byPath.get(directory);
       if (!project) return;
       scheduleRefresh(project);
     };
@@ -74,5 +80,5 @@ export function useWorktreeDiscoveryEvents(
       }
       refreshTimers.clear();
     };
-  }, [enabled, projectByPath]);
+  }, [enabled, projectLookup.key]);
 }

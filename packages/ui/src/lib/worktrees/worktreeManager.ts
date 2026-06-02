@@ -11,6 +11,7 @@ import {
 import { invalidateResolvedProjectRootCache, resolveProjectRoot } from '@/lib/worktrees/worktreeStatus';
 import type {
   CreateGitWorktreePayload,
+  GitWorktreeInfo,
   GitWorktreeValidationResult,
 } from '@/lib/api/types';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -152,6 +153,11 @@ const _worktreeListCache = new Map<string, { value: WorktreeMetadata[]; at: numb
 const _worktreeListInflight = new Map<string, Promise<WorktreeMetadata[]>>();
 const WORKTREE_LIST_CACHE_TTL = 30_000; // 30 seconds
 
+type ListProjectWorktreesOptions = {
+  forceRefresh?: boolean;
+  throwOnError?: boolean;
+};
+
 export const invalidateProjectWorktreeCache = (project?: ProjectRef | string | null): void => {
   if (!project) {
     _worktreeListCache.clear();
@@ -162,8 +168,9 @@ export const invalidateProjectWorktreeCache = (project?: ProjectRef | string | n
   _worktreeListCache.delete(projectDirectory);
 };
 
-export async function listProjectWorktrees(project: ProjectRef, options: { forceRefresh?: boolean } = {}): Promise<WorktreeMetadata[]> {
+export async function listProjectWorktrees(project: ProjectRef, options: ListProjectWorktreesOptions = {}): Promise<WorktreeMetadata[]> {
   const projectDirectory = normalizePath(project.path);
+  const inflightKey = `${projectDirectory}:${options.throwOnError ? 'throw' : 'safe'}`;
 
   if (options.forceRefresh) {
     _worktreeListCache.delete(projectDirectory);
@@ -176,18 +183,23 @@ export async function listProjectWorktrees(project: ProjectRef, options: { force
   }
 
   // Dedup in-flight requests
-  const inflight = _worktreeListInflight.get(projectDirectory);
+  const inflight = _worktreeListInflight.get(inflightKey);
   if (inflight) return inflight;
 
   const promise = (async (): Promise<WorktreeMetadata[]> => {
     const metadataProjectDirectory = await resolveProjectRoot(projectDirectory).catch(() => projectDirectory);
     const normalizedProjectDirectory = normalizePath(projectDirectory);
 
-    // Let a genuine git failure reject (every caller wraps this in try/catch).
-    // Swallowing to `[]` here would both poison the 30s cache with an empty
-    // result and let callers conflate a transient fetch failure with an
-    // empty-but-successful list. See refreshProjectWorktrees.
-    const worktrees = await git.worktree.list(projectDirectory);
+    let worktrees: GitWorktreeInfo[];
+    try {
+      worktrees = await git.worktree.list(projectDirectory);
+    } catch (error) {
+      if (options.throwOnError) {
+        throw error;
+      }
+      console.warn('Failed to list project worktrees:', error);
+      return [];
+    }
     const results: WorktreeMetadata[] = worktrees
       .filter((entry) => typeof entry.path === 'string' && entry.path.trim().length > 0)
       .map((entry) => {
@@ -222,10 +234,10 @@ export async function listProjectWorktrees(project: ProjectRef, options: { force
     _worktreeListCache.set(projectDirectory, { value: sorted, at: Date.now() });
     return sorted;
   })().finally(() => {
-    _worktreeListInflight.delete(projectDirectory);
+    _worktreeListInflight.delete(inflightKey);
   });
 
-  _worktreeListInflight.set(projectDirectory, promise);
+  _worktreeListInflight.set(inflightKey, promise);
   return promise;
 }
 
@@ -255,7 +267,7 @@ export async function refreshProjectWorktrees(project: ProjectRef): Promise<Work
 
   let worktrees: WorktreeMetadata[];
   try {
-    worktrees = await listProjectWorktrees(project, { forceRefresh: true });
+    worktrees = await listProjectWorktrees(project, { forceRefresh: true, throwOnError: true });
   } catch (error) {
     // Distinguish fetch failure from empty success: a transient git error
     // (lock file, slow remote, etc.) must not wipe the project's worktrees
