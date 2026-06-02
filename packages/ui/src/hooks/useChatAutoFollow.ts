@@ -67,10 +67,6 @@ const distanceFromBottom = (el: HTMLElement): number => {
     return el.scrollHeight - el.scrollTop - el.clientHeight;
 };
 
-const isNearBottom = (el: HTMLElement, isMobile: boolean): boolean => {
-    return distanceFromBottom(el) <= computeBottomZoneThreshold(isMobile, el);
-};
-
 const isReleaseKey = (event: KeyboardEvent): boolean => {
     if (event.altKey || event.ctrlKey || event.metaKey) {
         return false;
@@ -433,7 +429,10 @@ export const useChatAutoFollow = ({
             setShowScrollButton(false);
             return;
         }
-        const showButton = stateRef.current === 'released' && !isNearBottom(container, isMobile);
+        const showButtonThreshold = sessionIsWorkingRef.current
+            ? (isMobile ? 8 : 16)
+            : computeBottomZoneThreshold(isMobile, container);
+        const showButton = stateRef.current === 'released' && distanceFromBottom(container) > showButtonThreshold;
         setShowScrollButton(showButton);
     }, [isMobile]);
 

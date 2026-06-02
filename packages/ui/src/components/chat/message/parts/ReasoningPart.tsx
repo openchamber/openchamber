@@ -133,6 +133,10 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
     const handleToggle = React.useCallback(() => {
         setShouldRenderExpandedContent(true);
         setExpansion({ expanded: !isExpanded, source: 'user' });
+        // Reset internal scroll state so auto-scroll resumes after
+        // collapse → re-expand (see PR review feedback).
+        innerUserScrolledUpRef.current = false;
+        innerLastScrollTopRef.current = 0;
         onContentChange?.('structural');
     }, [isExpanded, onContentChange]);
 
