@@ -53,6 +53,7 @@ import { usePlanDetection } from '@/hooks/usePlanDetection';
 import { getAllSyncSessions } from '@/sync/sync-refs';
 import { useI18n } from '@/lib/i18n';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = [];
 const EMPTY_PERMISSIONS: PermissionRequest[] = [];
@@ -490,7 +491,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         if (scopedSessionIds.length === 0) return;
         let cancelled = false;
         for (const sessionId of scopedSessionIds) {
-            void fetch(`/api/sessions/${encodeURIComponent(sessionId)}/permission-audit`, {
+            void runtimeFetch(`/api/sessions/${encodeURIComponent(sessionId)}/permission-audit`, {
                 headers: { Accept: 'application/json' },
             }).then(async (response) => {
                 if (!response.ok) {
