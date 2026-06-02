@@ -810,6 +810,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const pendingClosePathsRef = React.useRef<string[] | null>(null);
   const skipDirtyOnceRef = React.useRef(false);
   const editorTabLongPressTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const editorTabLongPressSuppressClickTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const editorTabLongPressTriggeredRef = React.useRef(false);
   const editorTabLongPressStartRef = React.useRef<{ x: number; y: number } | null>(null);
   const copiedContentTimeoutRef = React.useRef<number | null>(null);
@@ -829,6 +830,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       if (editorTabLongPressTimerRef.current !== null) {
         clearTimeout(editorTabLongPressTimerRef.current);
         editorTabLongPressTimerRef.current = null;
+      }
+      if (editorTabLongPressSuppressClickTimerRef.current !== null) {
+        clearTimeout(editorTabLongPressSuppressClickTimerRef.current);
+        editorTabLongPressSuppressClickTimerRef.current = null;
       }
     };
   }, []);
@@ -2073,12 +2078,20 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
     clearEditorTabLongPress();
     editorTabLongPressTriggeredRef.current = false;
+    if (editorTabLongPressSuppressClickTimerRef.current !== null) {
+      clearTimeout(editorTabLongPressSuppressClickTimerRef.current);
+      editorTabLongPressSuppressClickTimerRef.current = null;
+    }
     const { clientX, clientY } = event;
     editorTabLongPressStartRef.current = { x: clientX, y: clientY };
     editorTabLongPressTimerRef.current = setTimeout(() => {
       editorTabLongPressTimerRef.current = null;
       editorTabLongPressStartRef.current = null;
       editorTabLongPressTriggeredRef.current = true;
+      editorTabLongPressSuppressClickTimerRef.current = setTimeout(() => {
+        editorTabLongPressTriggeredRef.current = false;
+        editorTabLongPressSuppressClickTimerRef.current = null;
+      }, 2000);
       setMobileOpenFilesMenuOpen(keepOpenFilesMenuOpen);
       setEditorTabMenu({ path, x: clientX, y: clientY });
     }, 550);
@@ -2107,6 +2120,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     event.preventDefault();
     event.stopPropagation();
     editorTabLongPressTriggeredRef.current = false;
+    if (editorTabLongPressSuppressClickTimerRef.current !== null) {
+      clearTimeout(editorTabLongPressSuppressClickTimerRef.current);
+      editorTabLongPressSuppressClickTimerRef.current = null;
+    }
     return true;
   }, []);
 

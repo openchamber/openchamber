@@ -128,6 +128,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
   const Wrapper = reorderEnabled ? SortableTabWrapper : StaticTabWrapper;
   const tabRefs = React.useRef<Map<string, HTMLElement>>(new Map());
   const tabLongPressTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tabLongPressSuppressClickTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const tabLongPressStartRef = React.useRef<SortableTabsStripContextPoint | null>(null);
   const tabLongPressTriggeredRef = React.useRef(false);
   const [pillRect, setPillRect] = React.useState<{ left: number; top: number; width: number; height: number } | null>(null);
@@ -314,7 +315,15 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
     tabLongPressStartRef.current = null;
   }, []);
 
-  React.useEffect(() => clearTabLongPress, [clearTabLongPress]);
+  React.useEffect(() => {
+    return () => {
+      clearTabLongPress();
+      if (tabLongPressSuppressClickTimerRef.current !== null) {
+        clearTimeout(tabLongPressSuppressClickTimerRef.current);
+        tabLongPressSuppressClickTimerRef.current = null;
+      }
+    };
+  }, [clearTabLongPress]);
 
   const startTabLongPress = React.useCallback((id: string, event: React.PointerEvent) => {
     if (!onContextMenu || event.pointerType === 'mouse') {
@@ -323,12 +332,20 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
 
     clearTabLongPress();
     tabLongPressTriggeredRef.current = false;
+    if (tabLongPressSuppressClickTimerRef.current !== null) {
+      clearTimeout(tabLongPressSuppressClickTimerRef.current);
+      tabLongPressSuppressClickTimerRef.current = null;
+    }
     const point = { x: event.clientX, y: event.clientY };
     tabLongPressStartRef.current = point;
     tabLongPressTimerRef.current = setTimeout(() => {
       tabLongPressTimerRef.current = null;
       tabLongPressStartRef.current = null;
       tabLongPressTriggeredRef.current = true;
+      tabLongPressSuppressClickTimerRef.current = setTimeout(() => {
+        tabLongPressTriggeredRef.current = false;
+        tabLongPressSuppressClickTimerRef.current = null;
+      }, 2000);
       onContextMenu(id, point);
     }, 550);
   }, [clearTabLongPress, onContextMenu]);
@@ -356,6 +373,10 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
     event.preventDefault();
     event.stopPropagation();
     tabLongPressTriggeredRef.current = false;
+    if (tabLongPressSuppressClickTimerRef.current !== null) {
+      clearTimeout(tabLongPressSuppressClickTimerRef.current);
+      tabLongPressSuppressClickTimerRef.current = null;
+    }
     return true;
   }, []);
 
