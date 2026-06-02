@@ -27,6 +27,16 @@ export type MagicPromptId =
   | 'session.summary.instructions'
   | 'session.review.visible'
   | 'session.review.instructions'
+  | 'session.plan.visible'
+  | 'session.plan.instructions'
+  | 'session.catchup.visible'
+  | 'session.catchup.instructions'
+  | 'session.debug.visible'
+  | 'session.debug.instructions'
+  | 'session.weigh.visible'
+  | 'session.weigh.instructions'
+  | 'session.explore.visible'
+  | 'session.explore.instructions'
   | 'session.fusion.visible'
   | 'session.fusion.instructions';
 
@@ -533,44 +543,213 @@ Respond in the same language the user used most in the conversation.`,
     id: 'session.review.instructions',
     title: 'Workspace Review Instructions',
     group: 'Session',
-    description: 'Hidden instructions attached to the /workspace-review command. Reviews current workspace changes for high-signal issues only.',
-    template: `
-Report only real, high-signal issues introduced by these changes.
+    description: 'Hidden instructions attached to the /workspace-review command. Reviews the workspace diff for intent, correctness, and adequacy, with severity-classified findings.',
+    template: `Review the changes in this workspace and judge whether they are correct and adequate — not just whether they contain catastrophic bugs.
 
-The diff is the source of truth. Use the local repo only as ancillary context when you need to validate a specific claim or check an applicable rule.
+The diff is the source of truth. Read the relevant code around the diff too, not only the diff itself, so you understand the change in context.
 
-Focus on:
-- runtime bugs
-- incorrect logic
-- broken assumptions in the changed code
-- clear regressions introduced by the changes
+First, understand the intent and whether it was achieved:
+- Work out what these changes are trying to do — the intent behind them — from the diff and the surrounding code.
+- Judge whether the implementation actually achieves that intent, and whether it is the smallest correct way to do it. Call out where the change is incomplete, only partially solves the goal, misses cases it clearly set out to handle, or solves it in a way that will not hold up.
+
+Then look for concrete problems. Report real failure modes, not abstract suspicions, and do not nitpick without impact.
+
+Correctness focus:
+- race conditions, stale async results, event ordering
+- data loss or failed writes
+- lifecycle and cleanup (listeners, timers, subscriptions, resources)
+- non-transitive comparators or unstable sorting
+- state/store fanout and render performance
+- optimistic state rollback and reconciliation
+- accessibility semantics
+- regressions introduced by the changes
 - missing implementations across affected modules or targets when the diff clearly introduced the gap
+- missing targeted tests for risky or regression-prone changes
 - clear CLAUDE.md or AGENTS.md violations that apply to the changed files
+
+Security and supply-chain focus (when the diff touches these):
+- dependencies, build/release/CI scripts
+- auth, tokens, secrets, credentials
+- filesystem boundaries and path traversal
+- shell execution
+- network calls, telemetry, exfiltration
+- IPC, native bridge, updater, desktop shell
+- hidden behavior behind small diffs or broad refactors
 
 Do not report:
 - pre-existing issues unrelated to the diff
-- pedantic nitpicks a senior engineer would not flag
-- issues a linter would catch
-- subjective style preferences not explicitly required by CLAUDE.md or AGENTS.md
-- speculative concerns or anything you cannot verify with high confidence
-- missing tests or coverage gaps unless an applicable CLAUDE.md or AGENTS.md explicitly requires them for the changed area
+- pedantic nitpicks a senior engineer would not flag, or issues a linter would catch
+- subjective style preferences not required by CLAUDE.md or AGENTS.md
+- speculative concerns you cannot tie to a concrete failure
 - rules mentioned in CLAUDE.md or AGENTS.md but explicitly silenced in the code
 
 Validation pass:
-- Before reporting an issue, re-check it against the diff plus only the local context you actually needed to read.
+- Before reporting an issue, re-check it against the diff plus only the context you actually read.
 - For CLAUDE.md or AGENTS.md violations, verify the rule applies to the affected file path and cite the exact rule.
-- If you are not certain an issue is real, omit it.
+- If you cannot tie a finding to a concrete impact, drop it.
+
+Classify each finding:
+- blocker: likely regression, data loss, security issue, broken invariant, or a serious correctness problem — or the change does not actually achieve its intent
+- non-blocker: a real but minor issue, a test gap, or a maintainability concern
+- nit: mention only if useful, never treat as blocking
+
+This is a review only — do not edit, fix, or commit anything unless the user asks you to.
 
 Output:
-- If no high-signal issues are found, respond with exactly: No high-signal issues found.
-- Otherwise, return a concise numbered list.
-- For each issue include:
-  - short title
-  - why it is a real problem
-  - affected file path
-  - category: bug or rule violation
+- Start with one or two sentences: what the change does and whether it achieves its intent.
+- Then list findings grouped by severity. For each: short title, why it is a real problem, the affected file path, and category (correctness / security / rule violation / adequacy gap).
+- If you find nothing real, say so plainly instead of inventing findings.
 
-Keep the review concise and practical.`,
+Keep the review concise and practical. Respond in the same language the user uses.`,
+  },
+  {
+    id: 'session.plan.visible',
+    title: 'Feature Planning Visible Prompt',
+    group: 'Session',
+    description: 'Visible user message sent by the /plan-feature command.',
+    template: 'I want to start planning a feature.',
+  },
+  {
+    id: 'session.plan.instructions',
+    title: 'Feature Planning Instructions',
+    group: 'Session',
+    description: 'Hidden instructions attached to the /plan-feature command. Runs a guided, batched-question dialogue that researches the code before producing an implementation plan.',
+    template: `The user wants to plan a feature through a guided, back-and-forth conversation. They will describe an idea — often briefly and informally. Your job is to turn that idea into a concrete, validated implementation plan, without guessing.
+
+Run this as a dialogue, not a one-shot answer.
+
+1. Understand before asking. Once the user describes the idea, first investigate the codebase yourself — read the relevant files, existing patterns, data flow, and constraints. Ground every question in what the code actually shows, not in assumptions.
+
+2. Ask in small batches. Ask at most 3 clarifying questions at a time — a number a person can comfortably answer in one reply. Prefer concrete, decision-oriented questions (option A/B/C, edge cases, scope boundaries) over vague open-ended ones. Number them.
+
+3. Keep going until it is resolved. After each batch of answers, integrate them, do any further code investigation the answers require, then ask the next batch. Continue until there are no unresolved decisions or implementation details left. Do not stop early or start summarizing prematurely.
+
+4. Surface what the user has not considered. Proactively raise edge cases, pitfalls, affected modules, migration/backward-compatibility concerns, and trade-offs the user likely did not think about. Fold these into your questions so the user decides — never silently decide for them.
+
+5. Do not write code or begin implementing during this phase. Planning is for understanding and deciding only.
+
+6. When everything is settled, produce the final implementation plan: a clear, ordered breakdown of the work, the files and areas affected, the decisions that were made (and why), known risks, and any remaining assumptions flagged explicitly. The plan must reflect the user's actual answers — never fill gaps with guesses.
+
+Respond in the same language the user uses.`,
+  },
+  {
+    id: 'session.catchup.visible',
+    title: 'Catch Up Visible Prompt',
+    group: 'Session',
+    description: 'Visible user message sent by the /catch-up command.',
+    template: 'Catch me up on where this project is right now.',
+  },
+  {
+    id: 'session.catchup.instructions',
+    title: 'Catch Up Instructions',
+    group: 'Session',
+    description: 'Hidden instructions attached to the /catch-up command. Inspects git state and branches on it: in-progress diff, open PR review state, or recent commits.',
+    template: `The user is returning to this project after stepping away and wants to quickly get their bearings — a quick, easy-to-digest "here's where you are and where to pick up", not a status report. Investigate the actual repository state first, then orient them conversationally. Do not assume; check.
+
+Quietly inspect git state first, and do this work silently — the user wants the takeaway, not a play-by-play of the commands you ran. Look at: the current branch and whether it is the repo's default branch (main/master, or whatever this repo uses), uncommitted changes (status and diff), recent commits, and where the branch stands relative to its remote.
+
+Build context in LAYERS — they combine, they are not either/or. Uncommitted changes (when present) are the focal point, but understand them THROUGH the surrounding context, because work in progress is usually part of something bigger.
+
+First, get the branch context:
+- If this is NOT the default branch (a feature branch): understand what the branch is for as a whole. Read its recent commits and their diffs — not all of them, just enough, going back until the intent and how it is being implemented become clear. Also check whether the branch has its OWN open pull request, even when there are uncommitted changes — the PR explains what the current diff is in service of (continuing the feature, or addressing review feedback) and helps you judge whether the work looks finished or still mid-flight. If the branch is behind its remote (someone pushed), mention that as a heads-up.
+- If this IS the default branch: take a light skim of the last few commits (no deep dive) to see whether the uncommitted work is a continuation of recent work, and of what.
+
+Then focus and synthesize:
+- If there are uncommitted changes, lead with them — what they were doing and why, what looks done versus still in progress, and where they likely stopped — interpreted through the branch context above (is this completing the feature? addressing review? a new direction?). Open with that, e.g. "Looks like you were in the middle of X…".
+- If the tree is clean, orient from the branch's own work and PR (feature branch) or the recent commits (default branch).
+
+End with a clear next step, and make it about continuing the actual work, not housekeeping. The fact that they ran this command means they stepped away — if the work were finished they would most likely have shipped it already, so assume there is more to do and point to the substantive next piece ("next you'd wire X into Y and handle Z"). Only suggest housekeeping — pushing, opening a PR, running checks — when there is genuinely nothing left to build, or when it is truly the most useful thing to do next.
+
+Hard rules:
+- Only ever discuss the CURRENT branch and its own work. Never mention unrelated branches, other people's PRs, review requests assigned to the user, or PRs that belong to other branches — that is noise here.
+- Use ahead/behind and commit history to understand intent, not as something to dump. Don't pad with raw git mechanics (exact commit counts, "ahead of origin by N", remote-tracking detail) unless it is genuinely the single most useful thing to say.
+- Depth goes into your understanding, not the length of the reply. Keep the output short, easy to digest, and scannable — a couple of sentences of orientation plus a clear next step. Write like a teammate catching them up, not a CI summary.
+
+Respond in the same language the user uses.`,
+  },
+  {
+    id: 'session.debug.visible',
+    title: 'Debugging Visible Prompt',
+    group: 'Session',
+    description: 'Visible user message sent by the /debug command.',
+    template: 'I want to debug an issue.',
+  },
+  {
+    id: 'session.debug.instructions',
+    title: 'Debugging Instructions',
+    group: 'Session',
+    description: 'Hidden instructions attached to the /debug command. Runs a guided root-cause investigation before proposing a fix.',
+    template: `The user wants help debugging an issue. Drive this as a focused root-cause investigation — not a plan, and not an immediate fix.
+
+1. Get the symptom. When the user describes the problem, capture exactly what is observed versus expected — error messages, stack traces, failing behavior, and when it started. If a key detail is missing to even begin, ask for it briefly.
+
+2. Form hypotheses. List the most likely causes, ordered by probability given the symptom and the code, and be explicit about your reasoning.
+
+3. Investigate to confirm or rule out. Read the relevant code, trace the data and control flow, and check the leading hypotheses against what the code actually does. Prefer evidence from the code over speculation.
+
+4. Ask only what you need. If you need a reproduction, logs, environment details, or a specific value to narrow it down, ask for the minimum required — in small batches — rather than guessing.
+
+5. Identify the root cause. Before touching any code, state the actual cause and the evidence for it, and distinguish the root cause from its symptoms.
+
+6. Only then propose a fix — the smallest change that addresses the root cause, plus how to verify it. Do not start editing code until the cause is confirmed or the user asks you to.
+
+Respond in the same language the user uses.`,
+  },
+  {
+    id: 'session.weigh.visible',
+    title: 'Weigh Options Visible Prompt',
+    group: 'Session',
+    description: 'Visible user message sent by the /weigh command.',
+    template: 'Help me decide how to approach this.',
+  },
+  {
+    id: 'session.weigh.instructions',
+    title: 'Weigh Options Instructions',
+    group: 'Session',
+    description: 'Hidden instructions attached to the /weigh command. Investigates the code, then compares distinct approaches with trade-offs and a recommendation — no plan, no code.',
+    template: `The user knows WHAT they want to do but not HOW to approach it. Help them choose a direction — this is about weighing options and recommending one, not producing a detailed plan and not writing code.
+
+First, investigate. Once the user describes the goal, read the relevant code, existing patterns, and constraints so your options are grounded in this codebase rather than generic advice. Make sure you actually understand what they are trying to achieve and why. Ask a clarifying question only if a key constraint is missing and would actually change the options.
+
+Then lay out 2-3 genuinely distinct approaches — real alternatives, not minor variations of one idea. Include the approaches that properly deliver what the user wants, even when they are more involved; never leave out a strong option just because it is harder to build. For each, cover:
+- what it involves, in a sentence or two
+- how well it actually satisfies the user's goal — does it fully solve it, or only partially?
+- how it fits (or fights) the existing patterns in this codebase
+- trade-offs and consequences: complexity, risk, blast radius, effort, long-term maintainability
+- when it is the right choice
+
+Then give a clear recommendation. Anchor it on what best serves the user's actual need and intent — NOT on whatever is fastest, easiest, or the path of least resistance. Effort and complexity are consequences to lay out honestly, never reasons to steer the user toward a weaker option. Never recommend a watered-down or partial solution just because the proper one is more work: if the approach that truly fits is also the hard one, recommend it and be upfront about what it will cost. Favor a simpler option only when it genuinely meets the goal about as well. State which one you would pick and why, and name what would change your mind (for example, "go with A unless you expect X, in which case B").
+
+Keep it concrete and scannable. Do not start implementing and do not write a step-by-step plan — once the user picks a direction, they can take it into planning or build it directly.
+
+Respond in the same language the user uses.`,
+  },
+  {
+    id: 'session.explore.visible',
+    title: 'Codebase Tour Visible Prompt',
+    group: 'Session',
+    description: 'Visible user message sent by the /explore command.',
+    template: 'Give me a high-level tour of this codebase.',
+  },
+  {
+    id: 'session.explore.instructions',
+    title: 'Codebase Tour Instructions',
+    group: 'Session',
+    description: 'Hidden instructions attached to the /explore command. Investigates the repository and gives a structured orientation rather than a file-by-file dump.',
+    template: `The user wants to get oriented in this codebase — a high-level tour, as if you were onboarding a new contributor. Investigate first, then explain; do not guess from file or symbol names alone.
+
+Explore the actual repository: entry points, the top-level structure, how it is built and run, and the main modules and how they connect. Read enough real code to be accurate.
+
+Then give a clear orientation covering:
+- The big picture: what this project is and how it is structured at a high level.
+- Main parts: the key modules, packages, or directories, what each is responsible for, and where they live.
+- How it fits together: the main flow — how a request or action moves through the system, and how the pieces talk to each other.
+- Conventions worth knowing: notable patterns, where shared code, types, and config live, and anything non-obvious a newcomer would trip on.
+- Where to start: a few concrete pointers for finding your way around or making a first change.
+
+Keep it a readable orientation, not an exhaustive file-by-file dump — favor the structure and the mental model over listing everything. Lead with the big picture, then drill down. If the user named a specific area, focus the tour there.
+
+Respond in the same language the user uses.`,
   },
   {
     id: 'session.fusion.visible',

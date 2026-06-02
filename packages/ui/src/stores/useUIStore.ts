@@ -4,6 +4,7 @@ import type { SidebarSection } from '@/constants/sidebar';
 import { getSafeStorage } from './utils/safeStorage';
 import { SEMANTIC_TYPOGRAPHY, getTypographyVariable, type SemanticTypographyKey } from '@/lib/typography';
 import type { ShortcutCombo } from '@/lib/shortcuts';
+import type { DraftStarterRef } from '@/lib/draftStarters';
 import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 
@@ -544,6 +545,8 @@ interface UIStore {
   autoDeleteLastRunAt: number | null;
   messageLimit: number;
   fontSize: number;
+  // Global draft welcome starters; null = unset (use the default built-in set).
+  globalDraftStarters: DraftStarterRef[] | null;
   terminalFontSize: number;
   uiFont: UiFontOption;
   monoFont: MonoFontOption;
@@ -676,6 +679,7 @@ interface UIStore {
   setAutoDeleteLastRunAt: (timestamp: number | null) => void;
   setMessageLimit: (value: number) => void;
   setFontSize: (size: number) => void;
+  setGlobalDraftStarters: (refs: DraftStarterRef[]) => void;
   setTerminalFontSize: (size: number) => void;
   setUiFont: (font: UiFontOption) => void;
   setMonoFont: (font: MonoFontOption) => void;
@@ -811,6 +815,7 @@ export const useUIStore = create<UIStore>()(
         autoDeleteLastRunAt: null,
         messageLimit: 200,
         fontSize: 100,
+        globalDraftStarters: null,
         terminalFontSize: 13,
         uiFont: DEFAULT_UI_FONT,
         monoFont: DEFAULT_MONO_FONT,
@@ -866,7 +871,7 @@ export const useUIStore = create<UIStore>()(
         userMessageRenderingMode: 'markdown',
         stickyUserHeader: true,
         showSplitAssistantMessageActions: false,
-        showMobileSessionStatusBar: true,
+        showMobileSessionStatusBar: false,
         isMobileSessionStatusBarCollapsed: false,
         isExpandedInput: false,
         reportUsage: true,
@@ -1502,6 +1507,10 @@ export const useUIStore = create<UIStore>()(
           get().applyTypography();
         },
 
+        setGlobalDraftStarters: (refs) => {
+          set({ globalDraftStarters: refs });
+        },
+
         setTerminalFontSize: (size) => {
           const rounded = Math.round(size);
           const clamped = Math.max(9, Math.min(52, rounded));
@@ -2110,6 +2119,7 @@ export const useUIStore = create<UIStore>()(
           autoDeleteLastRunAt: state.autoDeleteLastRunAt,
           messageLimit: state.messageLimit,
           fontSize: state.fontSize,
+          globalDraftStarters: state.globalDraftStarters,
           terminalFontSize: state.terminalFontSize,
           uiFont: state.uiFont,
           monoFont: state.monoFont,

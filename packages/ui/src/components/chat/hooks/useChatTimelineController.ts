@@ -50,22 +50,26 @@ export interface UseChatTimelineControllerResult {
     activeTurnId: string | null;
     showScrollToBottom: boolean;
     turnWindowModel: TurnWindowModel;
-    loadEarlier: () => Promise<void>;
+    loadEarlier: (options?: { userInitiated?: boolean }) => Promise<void>;
     revealBufferedTurns: () => Promise<boolean>;
     resumeToBottom: () => void;
     resumeToBottomInstant: () => Promise<void>;
     scrollToTurn: (turnId: string, options?: { behavior?: ScrollBehavior }) => Promise<boolean>;
     scrollToMessage: (messageId: string, options?: { behavior?: ScrollBehavior }) => Promise<boolean>;
+    handleHistoryScroll: () => void;
     captureViewportAnchor: () => ViewportAnchor | null;
     restoreViewportAnchor: (anchor: ViewportAnchor) => boolean;
     handleActiveTurnChange: (turnId: string | null) => void;
 }
 
 const TURN_MODEL_CACHE_MAX = 30
+const HISTORY_SCROLL_THRESHOLD = 200
 const VSCODE_TURN_MODEL_CACHE_MAX = 4
 const VSCODE_TURN_MODEL_CACHE_MAX_MESSAGES = 30
 const MOBILE_TURN_MODEL_CACHE_MAX = 4
 const MOBILE_TURN_MODEL_CACHE_MAX_MESSAGES = 30
+const HISTORY_RENDER_WAIT_TIMEOUT_MS = 250
+const HISTORY_INTERACTION_GUARD_MS = 2000
 const turnModelCache = new Map<string, { messages: ChatMessageEntry[]; model: TurnWindowModel }>()
 const getTurnModelCacheMax = () => {
     if (isVSCodeRuntime()) return VSCODE_TURN_MODEL_CACHE_MAX
@@ -150,6 +154,8 @@ export const useChatTimelineController = ({
     const initializedSessionRef = React.useRef<string | null>(null);
     const pendingRenderResolversRef = React.useRef<Array<() => void>>([]);
     const pendingScrollRequestRef = React.useRef<PendingScrollRequest | null>(null);
+    const historyInteractionRef = React.useRef(false);
+    const historyInteractionTimerRef = React.useRef<number | null>(null);
 
     const historySignals = React.useMemo(() => {
         const defaultLimit = getMemoryLimits().HISTORICAL_MESSAGES;
@@ -178,10 +184,38 @@ export const useChatTimelineController = ({
     messagesRef.current = messages;
     historyMetaRef.current = historyMeta;
 
+    const beginHistoryInteraction = React.useCallback(() => {
+        historyInteractionRef.current = true;
+        if (historyInteractionTimerRef.current !== null && typeof window !== 'undefined') {
+            window.clearTimeout(historyInteractionTimerRef.current);
+            historyInteractionTimerRef.current = null;
+        }
+    }, []);
+
+    const settleHistoryInteraction = React.useCallback(() => {
+        if (typeof window === 'undefined') {
+            historyInteractionRef.current = false;
+            return;
+        }
+
+        if (historyInteractionTimerRef.current !== null) {
+            window.clearTimeout(historyInteractionTimerRef.current);
+        }
+        historyInteractionTimerRef.current = window.setTimeout(() => {
+            historyInteractionTimerRef.current = null;
+            historyInteractionRef.current = false;
+        }, HISTORY_INTERACTION_GUARD_MS);
+    }, []);
+
     React.useLayoutEffect(() => {
         if (initializedSessionRef.current === sessionId) {
             return;
         }
+        if (historyInteractionTimerRef.current !== null && typeof window !== 'undefined') {
+            window.clearTimeout(historyInteractionTimerRef.current);
+            historyInteractionTimerRef.current = null;
+        }
+        historyInteractionRef.current = false;
         initializedSessionRef.current = sessionId;
         setTurnStart(getInitialTurnStart(turnWindowModel.turnCount));
         setIsLoadingOlder(false);
@@ -204,7 +238,13 @@ export const useChatTimelineController = ({
         setTurnStart((current) => {
             const previousInitial = getInitialTurnStart(previousTurnCount);
             const nextInitial = getInitialTurnStart(nextTurnCount);
-            if (isPinnedRef.current && current === previousInitial) {
+            if (
+                !historyInteractionRef.current
+                && !isLoadingOlderRef.current
+                && !pendingRevealWorkRef.current
+                && isPinnedRef.current
+                && current === previousInitial
+            ) {
                 return nextInitial;
             }
             return clampTurnStart(current, nextTurnCount);
@@ -225,6 +265,25 @@ export const useChatTimelineController = ({
     const waitForNextRenderCommit = React.useCallback((): Promise<void> => {
         return new Promise<void>((resolve) => {
             pendingRenderResolversRef.current.push(resolve);
+        });
+    }, []);
+
+    const waitForNextRenderCommitOrTimeout = React.useCallback((): Promise<void> => {
+        return new Promise<void>((resolve) => {
+            if (typeof window === 'undefined') {
+                resolve();
+                return;
+            }
+
+            let settled = false;
+            const finish = () => {
+                if (settled) return;
+                settled = true;
+                window.clearTimeout(timer);
+                resolve();
+            };
+            pendingRenderResolversRef.current.push(finish);
+            const timer = window.setTimeout(finish, HISTORY_RENDER_WAIT_TIMEOUT_MS);
         });
     }, []);
 
@@ -271,6 +330,10 @@ export const useChatTimelineController = ({
 
     React.useEffect(() => {
         return () => {
+            if (historyInteractionTimerRef.current !== null && typeof window !== 'undefined') {
+                window.clearTimeout(historyInteractionTimerRef.current);
+                historyInteractionTimerRef.current = null;
+            }
             resolvePendingRenderWaiters();
             resolvePendingScrollRequest(false);
         };
@@ -328,6 +391,7 @@ export const useChatTimelineController = ({
             return false;
         }
 
+        beginHistoryInteraction();
         const container = scrollRef.current;
         if (container) {
             prePrependScrollRef.current = {
@@ -343,10 +407,14 @@ export const useChatTimelineController = ({
             return next > 0 ? next : 0;
         });
 
-        await waitForNextRenderCommit();
-        setPendingRevealWork(false);
-        return true;
-    }, [captureViewportAnchor, scrollRef, waitForNextRenderCommit]);
+        try {
+            await waitForNextRenderCommit();
+            return true;
+        } finally {
+            setPendingRevealWork(false);
+            settleHistoryInteraction();
+        }
+    }, [beginHistoryInteraction, captureViewportAnchor, scrollRef, settleHistoryInteraction, waitForNextRenderCommit]);
 
     const fetchOlderHistory = React.useCallback(async (input: {
         preserveViewport: boolean;
@@ -374,6 +442,7 @@ export const useChatTimelineController = ({
             };
         }
 
+        beginHistoryInteraction();
         setIsLoadingOlder(true);
 
         try {
@@ -382,31 +451,112 @@ export const useChatTimelineController = ({
                 return false;
             }
 
-            await loadMoreMessages(targetSessionId, 'up');
+            let loadedMessageCount = beforeMessageCount;
+            let loadedOldestMessageId = beforeOldestMessageId;
+            let loadedLimit = beforeLimit;
+            const beforeTurnCount = turnModelRef.current.turnCount;
 
-            const afterMessages = messagesRef.current;
-            const afterMessageCount = afterMessages.length;
-            const afterOldestMessageId = afterMessages[0]?.info?.id ?? null;
-            const afterLimit = historyMetaRef.current?.limit ?? beforeLimit;
-            const historyGrew =
-                afterMessageCount > beforeMessageCount
-                || (typeof beforeOldestMessageId === 'string'
-                    && typeof afterOldestMessageId === 'string'
-                    && beforeOldestMessageId !== afterOldestMessageId);
+            while (true) {
+                await loadMoreMessages(targetSessionId, 'up');
+                if (sessionIdRef.current !== targetSessionId) {
+                    return false;
+                }
 
-            return historyGrew || afterLimit > beforeLimit;
+                await waitForNextRenderCommitOrTimeout();
+
+                const afterMessages = messagesRef.current;
+                const afterMessageCount = afterMessages.length;
+                const afterOldestMessageId = afterMessages[0]?.info?.id ?? null;
+                const afterLimit = historyMetaRef.current?.limit ?? loadedLimit;
+                const messageGrowth =
+                    afterMessageCount > loadedMessageCount
+                    || (typeof loadedOldestMessageId === 'string'
+                        && typeof afterOldestMessageId === 'string'
+                        && loadedOldestMessageId !== afterOldestMessageId)
+                    || afterLimit > loadedLimit;
+                const turnGrowth = turnModelRef.current.turnCount - beforeTurnCount;
+
+                if (turnGrowth > 0) {
+                    return true;
+                }
+                if (!messageGrowth) {
+                    return false;
+                }
+                if (!historySignalsRef.current.hasMoreAboveTurns) {
+                    return true;
+                }
+
+                loadedMessageCount = afterMessageCount;
+                loadedOldestMessageId = afterOldestMessageId;
+                loadedLimit = afterLimit;
+            }
         } finally {
             setIsLoadingOlder(false);
+            settleHistoryInteraction();
         }
-    }, [captureViewportAnchor, loadMoreMessages, scrollRef]);
+    }, [beginHistoryInteraction, captureViewportAnchor, loadMoreMessages, scrollRef, settleHistoryInteraction, waitForNextRenderCommitOrTimeout]);
 
-    const loadEarlier = React.useCallback(async () => {
-        if (await revealBufferedTurns()) {
+    const loadEarlier = React.useCallback(async (options?: { userInitiated?: boolean }) => {
+        beginHistoryInteraction();
+        if (options?.userInitiated) {
+            releaseAutoFollow();
+        }
+
+        try {
+            if (await revealBufferedTurns()) {
+                return;
+            }
+
+            void (await fetchOlderHistory({ preserveViewport: true }));
+        } finally {
+            settleHistoryInteraction();
+        }
+    }, [beginHistoryInteraction, fetchOlderHistory, releaseAutoFollow, revealBufferedTurns, settleHistoryInteraction]);
+
+    const handleHistoryScroll = React.useCallback(() => {
+        const container = scrollRef.current;
+        if (!container) return;
+        if (isPinnedRef.current) return;
+        if (container.scrollTop >= HISTORY_SCROLL_THRESHOLD) return;
+        if (!historySignalsRef.current.canLoadEarlier) return;
+        if (isLoadingOlderRef.current || pendingRevealWorkRef.current) return;
+
+        void loadEarlier({ userInitiated: true });
+    }, [loadEarlier, scrollRef]);
+
+    React.useEffect(() => {
+        if (!sessionId || isLoadingOlder || pendingRevealWork) {
+            return;
+        }
+        if (!isPinned || !historySignals.canLoadEarlier) {
+            return;
+        }
+        if (typeof window === 'undefined') {
             return;
         }
 
-        void (await fetchOlderHistory({ preserveViewport: true }));
-    }, [fetchOlderHistory, revealBufferedTurns]);
+        const frame = window.requestAnimationFrame(() => {
+            const container = scrollRef.current;
+            if (!container) return;
+            if (!isPinnedRef.current) return;
+            if (!historySignalsRef.current.canLoadEarlier) return;
+            if (isLoadingOlderRef.current || pendingRevealWorkRef.current) return;
+            if (container.scrollHeight > container.clientHeight + 1) return;
+
+            void loadEarlier();
+        });
+
+        return () => window.cancelAnimationFrame(frame);
+    }, [
+        historySignals.canLoadEarlier,
+        isLoadingOlder,
+        isPinned,
+        loadEarlier,
+        pendingRevealWork,
+        renderedMessages.length,
+        scrollRef,
+        sessionId,
+    ]);
 
     const scrollToTurn = React.useCallback(async (
         turnId: string,
@@ -552,6 +702,7 @@ export const useChatTimelineController = ({
         resumeToBottomInstant,
         scrollToTurn,
         scrollToMessage,
+        handleHistoryScroll,
         captureViewportAnchor,
         restoreViewportAnchor,
         handleActiveTurnChange,

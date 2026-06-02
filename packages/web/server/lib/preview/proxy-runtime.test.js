@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { classifyPreviewNavigation, classifyPreviewResourceError, rewritePreviewBody } from './proxy-runtime.js';
+import { classifyPreviewNavigation, classifyPreviewResourceError, normalizeProxyTargetUrl, rewritePreviewBody } from './proxy-runtime.js';
 
 const rewrite = (bodyText, kind) => rewritePreviewBody({
   bodyText,
@@ -128,6 +128,17 @@ describe('preview navigation policy', () => {
     });
   });
 
+  it('maps app-origin root links back to the upstream origin while proxied', () => {
+    expect(classifyPreviewNavigation({
+      url: 'http://127.0.0.1:57123/support',
+      currentUrl,
+      targetOrigin: 'https://openchamber.dev',
+    })).toEqual({
+      action: 'proxy',
+      url: 'https://openchamber.dev/support',
+    });
+  });
+
   it('sends non-loopback http links outside the preview iframe', () => {
     expect(classifyPreviewNavigation({ url: 'https://example.com/docs', currentUrl })).toEqual({
       action: 'external',
@@ -140,5 +151,39 @@ describe('preview navigation policy', () => {
       action: 'allow',
       url: 'mailto:test@example.com',
     });
+  });
+});
+
+describe('proxy target normalization (SSRF guard)', () => {
+  it('allows ordinary external hosts when allowExternal is set', () => {
+    expect(normalizeProxyTargetUrl('https://docs.openchamber.dev/security/', { allowExternal: true }))
+      .toEqual({ ok: true, origin: 'https://docs.openchamber.dev' });
+  });
+
+  it('rejects non-loopback hosts without allowExternal', () => {
+    expect(normalizeProxyTargetUrl('https://example.com/', {}).ok).toBe(false);
+  });
+
+  it('refuses private, loopback and link-local literals on the external path', () => {
+    for (const url of [
+      'http://127.0.0.1/',
+      'http://10.0.0.5/',
+      'http://172.16.9.9/',
+      'http://192.168.1.1/',
+      'http://169.254.169.254/latest/meta-data/',
+      'http://100.64.0.1/',
+      'http://localhost/',
+      'http://service.local/',
+      'http://[::1]/',
+      'http://[fd00::1]/',
+      'http://[fe80::1]/',
+      'http://2130706433/', // decimal form of 127.0.0.1, normalized by WHATWG URL
+    ]) {
+      expect(normalizeProxyTargetUrl(url, { allowExternal: true }).ok, url).toBe(false);
+    }
+  });
+
+  it('still blocks private hosts even via IPv4-mapped IPv6', () => {
+    expect(normalizeProxyTargetUrl('http://[::ffff:127.0.0.1]/', { allowExternal: true }).ok).toBe(false);
   });
 });

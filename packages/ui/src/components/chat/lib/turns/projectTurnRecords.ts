@@ -90,6 +90,61 @@ const DEFAULT_OPTIONS: ProjectTurnRecordsOptions = {
     showTextJustificationActivity: false,
 };
 
+const areSameMessageRefs = (left: ChatMessageEntry[], right: ChatMessageEntry[]): boolean => {
+    if (left === right) {
+        return true;
+    }
+    if (left.length !== right.length) {
+        return false;
+    }
+
+    for (let index = 0; index < left.length; index += 1) {
+        if (left[index] !== right[index]) {
+            return false;
+        }
+    }
+
+    return true;
+};
+
+const canReusePreviousTurn = (previous: TurnRecord, next: TurnRecord): boolean => {
+    return previous.userMessage === next.userMessage
+        && previous.headerMessageId === next.headerMessageId
+        && areSameMessageRefs(previous.assistantMessages, next.assistantMessages);
+};
+
+const stabilizeTurnRecords = (
+    turns: TurnRecord[],
+    previousProjection?: TurnProjectionResult | null,
+): TurnRecord[] => {
+    if (!previousProjection || previousProjection.turns.length === 0 || turns.length === 0) {
+        return turns;
+    }
+
+    let canReuseTurnArray = previousProjection.turns.length === turns.length;
+    let reusedAnyTurn = false;
+
+    const nextTurns = turns.map((turn, index) => {
+        const previousTurn = previousProjection.indexes.turnById.get(turn.turnId);
+        if (previousTurn && canReusePreviousTurn(previousTurn, turn)) {
+            reusedAnyTurn = true;
+            if (previousProjection.turns[index] !== previousTurn) {
+                canReuseTurnArray = false;
+            }
+            return previousTurn;
+        }
+
+        canReuseTurnArray = false;
+        return turn;
+    });
+
+    if (canReuseTurnArray && reusedAnyTurn) {
+        return previousProjection.turns;
+    }
+
+    return reusedAnyTurn ? nextTurns : turns;
+};
+
 export const projectTurnRecords = (
     messages: ChatMessageEntry[],
     options?: Partial<ProjectTurnRecordsOptions>,
@@ -179,7 +234,8 @@ export const projectTurnRecords = (
         turn.durationMs = turn.stream.durationMs;
     });
 
-    const projection = projectTurnIndexes(turns);
+    const stableTurns = stabilizeTurnRecords(turns, effectiveOptions.previousProjection);
+    const projection = projectTurnIndexes(stableTurns);
     const ungroupedMessageIds = new Set<string>();
     messages.forEach((message) => {
         if (resolveMessageRole(message) === 'assistant') {

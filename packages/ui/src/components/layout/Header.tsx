@@ -1960,7 +1960,7 @@ export const Header: React.FC<HeaderProps> = ({
         onClick={toggleBottomTerminal}
         Icon={'terminal-box'}
       />
-      {hasElectronDesktopIPC ? (
+      {!isMobile ? (
         <HeaderIconActionButton
           title={t('contextPanel.browser.open')}
           ariaLabel={t('contextPanel.browser.open')}

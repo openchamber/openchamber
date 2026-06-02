@@ -145,6 +145,21 @@ export const createSettingsHelpers = (dependencies) => {
           .filter((entry) => typeof entry === 'string' && entry.length > 0)
       );
     }
+    if (Array.isArray(candidate.draftStarters)) {
+      const seenStarters = new Set();
+      const starters = [];
+      for (const entry of candidate.draftStarters) {
+        if (!entry || typeof entry !== 'object') continue;
+        const type = entry.type === 'command' || entry.type === 'skill' ? entry.type : null;
+        const name = typeof entry.name === 'string' ? entry.name.trim() : '';
+        if (!type || !name) continue;
+        const key = `${type}:${name}`;
+        if (seenStarters.has(key)) continue;
+        seenStarters.add(key);
+        starters.push({ type, name });
+      }
+      result.draftStarters = starters;
+    }
 
 
     if (typeof candidate.uiFont === 'string' && candidate.uiFont.length > 0) {

@@ -19,6 +19,9 @@ import { normalizeParts } from './message/partUtils';
 
 const MESSAGE_LIST_VIRTUALIZE_THRESHOLD = 5;
 const MESSAGE_LIST_OVERSCAN = 6;
+const EMPTY_STATIC_ENTRY_MESSAGES: ChatMessageEntry[] = [];
+const EMPTY_UNGROUPED_MESSAGE_IDS = new Set<string>();
+const EMPTY_VIRTUAL_ROWS: VirtualItem[] = [];
 
 const estimateHistoryEntryHeight = (entry: RenderEntry | undefined): number => {
     if (!entry) {
@@ -936,7 +939,7 @@ const MessageListEntry = React.memo(({
 MessageListEntry.displayName = 'MessageListEntry';
 
 // Inner component that renders staged turn entries.
-const StaticHistoryList: React.FC<{
+type StaticHistoryListProps = {
     entries: RenderEntry[];
     shouldVirtualize: boolean;
     virtualRows: VirtualItem[];
@@ -954,7 +957,9 @@ const StaticHistoryList: React.FC<{
     shouldAnimateUserMessage: (message: ChatMessageEntry) => boolean;
     onUserAnimationConsumed: (messageId: string) => void;
     activeStreamingPhase?: StreamPhase | null;
-}> = ({ entries, shouldVirtualize, virtualRows, totalSize, measureElement, contentRef, onMessageContentChange, getAnimationHandlers, scrollToBottom, stickyUserHeader, defaultActivityExpanded, turnUiStates, onToggleTurnGroup, chatRenderMode, shouldAnimateUserMessage, onUserAnimationConsumed, activeStreamingPhase }) => {
+};
+
+const StaticHistoryList = React.memo(({ entries, shouldVirtualize, virtualRows, totalSize, measureElement, contentRef, onMessageContentChange, getAnimationHandlers, scrollToBottom, stickyUserHeader, defaultActivityExpanded, turnUiStates, onToggleTurnGroup, chatRenderMode, shouldAnimateUserMessage, onUserAnimationConsumed, activeStreamingPhase }: StaticHistoryListProps) => {
     const renderEntry = React.useCallback((entry: RenderEntry) => {
         return (
             <MessageListEntry
@@ -1000,15 +1005,9 @@ const StaticHistoryList: React.FC<{
     }
 
     if (virtualRows.length === 0 && entries.length > 0) {
-        const fallbackStart = Math.max(0, entries.length - MESSAGE_LIST_OVERSCAN * 2);
-        const fallbackEntries = entries.slice(fallbackStart);
-        const fallbackHeight = fallbackEntries.reduce((total, entry) => total + estimateHistoryEntryHeight(entry), 0);
-        const fallbackPaddingTop = Math.max(0, totalSize - fallbackHeight);
-
         return (
             <div ref={contentRef} className="relative w-full">
-                {fallbackPaddingTop > 0 ? <div aria-hidden="true" style={{ height: `${fallbackPaddingTop}px` }} /> : null}
-                {fallbackEntries.map((entry) => (
+                {entries.map((entry) => (
                     <div
                         key={entry.key}
                         data-turn-entry={entry.key}
@@ -1043,7 +1042,7 @@ const StaticHistoryList: React.FC<{
             {paddingBottom > 0 ? <div aria-hidden="true" style={{ height: `${paddingBottom}px` }} /> : null}
         </div>
     );
-};
+});
 
 StaticHistoryList.displayName = 'StaticHistoryList';
 
@@ -1103,7 +1102,7 @@ StreamingTailContent.displayName = 'StreamingTailContent';
 const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({ 
     sessionKey,
     turnStart,
-    disableStaging: _disableStaging,
+    disableStaging = false,
     messages,
     sessionIsWorking = false,
     activeStreamingMessageId = null,
@@ -1118,7 +1117,6 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     scrollRef,
 }, ref) => {
     streamPerfCount('ui.message_list.render');
-    void _disableStaging;
     const stickyUserHeader = useUIStore(state => state.stickyUserHeader);
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
     const activityRenderMode = useUIStore((state) => state.activityRenderMode);
@@ -1222,6 +1220,9 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         sessionKey,
         showTextJustificationActivity: chatRenderMode === 'sorted',
     });
+    const hasUngroupedStaticEntries = projection.ungroupedMessageIds.size > 0;
+    const staticEntryMessages = hasUngroupedStaticEntries ? displayMessages : EMPTY_STATIC_ENTRY_MESSAGES;
+    const staticEntryUngroupedIds = hasUngroupedStaticEntries ? projection.ungroupedMessageIds : EMPTY_UNGROUPED_MESSAGE_IDS;
     const staticRenderEntries = React.useMemo<RenderEntry[]>(() => streamPerfMeasure('ui.message_list.render_entries_ms', () => {
         const turnEntries = staticTurns.map((turn) => ({
             kind: 'turn' as const,
@@ -1230,7 +1231,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
             isLastTurn: turn.turnId === projection.lastTurnId,
         }));
 
-        if (projection.ungroupedMessageIds.size === 0) {
+        if (staticEntryUngroupedIds.size === 0) {
             return turnEntries;
         }
 
@@ -1240,14 +1241,14 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         });
 
         const orderedEntries: RenderEntry[] = [];
-        displayMessages.forEach((message, index) => {
+        staticEntryMessages.forEach((message, index) => {
             const turnEntry = turnEntryByUserMessageId.get(message.info.id);
             if (turnEntry) {
                 orderedEntries.push(turnEntry);
                 return;
             }
 
-            if (!projection.ungroupedMessageIds.has(message.info.id)) {
+            if (!staticEntryUngroupedIds.has(message.info.id)) {
                 return;
             }
 
@@ -1255,13 +1256,13 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                 kind: 'ungrouped',
                 key: `msg:${message.info.id}`,
                 message,
-                previousMessage: index > 0 ? displayMessages[index - 1] : undefined,
-                nextMessage: index < displayMessages.length - 1 ? displayMessages[index + 1] : undefined,
+                previousMessage: index > 0 ? staticEntryMessages[index - 1] : undefined,
+                nextMessage: index < staticEntryMessages.length - 1 ? staticEntryMessages[index + 1] : undefined,
             });
         });
 
         return orderedEntries;
-    }), [displayMessages, projection.lastTurnId, projection.ungroupedMessageIds, staticTurns]);
+    }), [projection.lastTurnId, staticEntryMessages, staticEntryUngroupedIds, staticTurns]);
 
     const trailingStreamingEntry = React.useMemo<RenderEntry | undefined>(() => {
         if (streamingTurn) {
@@ -1312,7 +1313,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
 
         const grew = currentLen > previousLen;
         const firstChanged = previousFirstKey !== currentFirstKey;
-        if (!shouldVirtualizeHistory || !grew || !firstChanged || previousLen === 0) {
+        if (!shouldVirtualizeHistory || isLoadingOlder || disableStaging || !grew || !firstChanged || previousLen === 0) {
             return;
         }
 
@@ -1371,36 +1372,9 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         if (!shouldVirtualizeHistory) {
             return;
         }
-        const scrollEl = resolveScrollContainer();
-        const prevTotal = historyVirtualizer.getTotalSize();
-        const nearBottom = scrollEl && prevTotal > 0
-            ? scrollEl.scrollTop + scrollEl.clientHeight >= prevTotal - 10
-            : false
 
         historyVirtualizer.measure();
-
-        // measure() defers via useAnimationFrameWithResizeObserver.
-        // Wait two frames then, if we were near the estimated bottom, scroll
-        // to the real bottom after measurements settle.
-        let frame2: number | null = null;
-        const frame1 = requestAnimationFrame(() => {
-            frame2 = requestAnimationFrame(() => {
-                if (!nearBottom) return
-                const el = resolveScrollContainer()
-                if (!el) return
-                const target = Math.max(0, el.scrollHeight - el.clientHeight)
-                if (target > 0 && Math.abs(el.scrollTop - target) > 5) {
-                    el.scrollTop = target
-                }
-            })
-        })
-        return () => {
-            cancelAnimationFrame(frame1)
-            if (frame2 !== null) {
-                cancelAnimationFrame(frame2)
-            }
-        }
-    }, [historyVirtualizer, resolveScrollContainer, shouldVirtualizeHistory]);
+    }, [historyEntries.length, historyVirtualizer, shouldVirtualizeHistory]);
 
     const scheduleVirtualMeasure = React.useCallback(() => {
         if (!shouldVirtualizeHistory) {
@@ -1428,7 +1402,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     }, []);
 
     const historyVirtualRows = React.useMemo(
-        () => (shouldVirtualizeHistory ? historyVirtualizer.getVirtualItems() : []),
+        () => (shouldVirtualizeHistory ? historyVirtualizer.getVirtualItems() : EMPTY_VIRTUAL_ROWS),
         [historyVirtualizer, shouldVirtualizeHistory],
     );
 
@@ -1665,7 +1639,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                 if (!applyAnchor()) {
                     const index = messageIndexMap.get(anchor.messageId);
                     if (typeof index === 'number' && index < historyEntries.length) {
-                        scrollHistoryIndexIntoView(index, 'auto');
+                        return scrollHistoryIndexIntoView(index, 'auto');
                     }
                 }
 

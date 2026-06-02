@@ -1010,7 +1010,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   });
 
   const sectionsForSidebarRender = React.useMemo(() => {
-    if (!isVSCode || hasSessionSearchQuery || recentSessionIds.size === 0) {
+    if (isVSCode || hasSessionSearchQuery || recentSessionIds.size === 0) {
       return sectionsForRender;
     }
 
@@ -1355,7 +1355,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     ],
   );
 
-  const topContent = showRecentSection && !hasSessionSearchQuery ? (
+  const topContent = showRecentSection && !isVSCode && !hasSessionSearchQuery ? (
     <SidebarActivitySections
       sections={activitySections}
       renderSessionNode={renderSessionNode}
@@ -1552,7 +1552,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     >
       <SidebarHeader
         hideDirectoryControls={hideDirectoryControls}
-        mobileVariant={mobileVariant}
+        showRecentControls={!isVSCode}
         handleOpenDirectoryDialog={handleOpenDirectoryDialog}
         openNewSessionDraft={handleOpenNewSessionDraftFromHeader}
         canOpenMultiRun={projects.length > 0}

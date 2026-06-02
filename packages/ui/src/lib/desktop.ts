@@ -1,5 +1,6 @@
 import type { ProjectEntry } from '@/lib/api/types';
 import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
+import type { DraftStarterRef } from '@/lib/draftStarters';
 
 export type AssistantNotificationPayload = {
   title?: string;
@@ -177,6 +178,8 @@ export type DesktopSettings = {
   sttSilenceThresholdDb?: number;
   sttSilenceHoldMs?: number;
   sttTranscribeOnStop?: boolean;
+  // Global draft welcome starters (pinned commands/skills), persisted to settings.json
+  draftStarters?: DraftStarterRef[];
 };
 
 type TauriGlobal = {
