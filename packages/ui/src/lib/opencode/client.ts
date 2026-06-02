@@ -1217,7 +1217,9 @@ class OpencodeService {
 
   // Configuration
   async getConfig(): Promise<Config> {
-    const response = await this.client.config.get();
+    const response = await this.client.config.get(
+      this.currentDirectory ? { directory: this.currentDirectory } : undefined
+    );
     if (!response.data) throw new Error('Failed to get config');
     return response.data;
   }

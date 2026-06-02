@@ -352,6 +352,26 @@ const activateConfigForDirectory = async (directory: string | null | undefined):
   await useConfigStore.getState().activateDirectory(normalizePath(directory))
 }
 
+// Resolve the agent a brand-new session should start on. Mirrors the priority
+// used by the config store's agent resolution:
+// settings.defaultAgent → opencode config default_agent → "build" → first visible agent.
+const resolveDefaultDraftAgentName = (): string | undefined => {
+  const configState = useConfigStore.getState()
+  const visibleAgents = configState.getVisibleAgents()
+
+  if (configState.settingsDefaultAgent) {
+    const settingsAgent = visibleAgents.find((agent) => agent.name === configState.settingsDefaultAgent)
+    if (settingsAgent) return settingsAgent.name
+  }
+
+  if (configState.opencodeDefaultAgent) {
+    const configAgent = visibleAgents.find((agent) => agent.name === configState.opencodeDefaultAgent)
+    if (configAgent) return configAgent.name
+  }
+
+  return visibleAgents.find((agent) => agent.name === "build")?.name ?? visibleAgents[0]?.name
+}
+
 const DEFAULT_DRAFT: NewSessionDraftState = {
   open: false,
   directoryOverride: null,
@@ -508,7 +528,24 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       useInputStore.getState().setPendingInputText(options.initialPrompt)
     }
 
+    // Activate the draft's directory first. activateDirectory restores state
+    // synchronously: for a previously-loaded directory it restores the cached
+    // snapshot (including its opencode default agent); for a first-visit
+    // directory it clears the agent to undefined. Either way the
+    // previously-active session's agent is dropped immediately. The async
+    // provider/agent refresh then continues in the background.
     void activateConfigForDirectory(directory)
+
+    // For a known directory the cached default is available now, so set it
+    // synchronously to avoid a stale capture if the user sends immediately.
+    // For a first-visit directory there is nothing to resolve yet (no agents
+    // loaded); the agent stays undefined until the background refresh — and
+    // the send path re-resolves the default after awaiting it — so the
+    // previous session's agent still never leaks into the new session.
+    const defaultDraftAgent = resolveDefaultDraftAgentName()
+    if (defaultDraftAgent) {
+      useConfigStore.getState().setAgent(defaultDraftAgent)
+    }
   },
 
   // ---------------------------------------------------------------------------

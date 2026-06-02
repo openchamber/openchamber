@@ -298,6 +298,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const currentAgentName = useConfigStore((state) => state.currentAgentName);
     const settingsDefaultVariant = useConfigStore((state) => state.settingsDefaultVariant);
     const settingsDefaultAgent = useConfigStore((state) => state.settingsDefaultAgent);
+    const opencodeDefaultAgent = useConfigStore((state) => state.opencodeDefaultAgent);
     const setProvider = useConfigStore((state) => state.setProvider);
     const setSelectedProvider = useConfigStore((state) => state.setSelectedProvider);
     const setModel = useConfigStore((state) => state.setModel);
@@ -496,10 +497,14 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             const found = selectableDesktopAgents.find(a => a.name === settingsDefaultAgent);
             if (found) return found.name;
         }
+        if (opencodeDefaultAgent) {
+            const found = selectableDesktopAgents.find(a => a.name === opencodeDefaultAgent);
+            if (found) return found.name;
+        }
         const buildAgent = selectableDesktopAgents.find(a => a.name === 'build');
         if (buildAgent) return buildAgent.name;
         return selectableDesktopAgents[0]?.name;
-    }, [settingsDefaultAgent, selectableDesktopAgents]);
+    }, [settingsDefaultAgent, opencodeDefaultAgent, selectableDesktopAgents]);
 
     const currentAgent = React.useMemo(() => {
         if (uiAgentName) {
@@ -943,7 +948,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 return;
             }
 
-            const fallbackAgent = agents.find(agent => agent.name === 'build') || primaryAgents[0] || agents[0];
+            const fallbackAgent =
+                (settingsDefaultAgent ? agents.find(agent => agent.name === settingsDefaultAgent) : undefined) ||
+                (opencodeDefaultAgent ? agents.find(agent => agent.name === opencodeDefaultAgent) : undefined) ||
+                agents.find(agent => agent.name === 'build') || primaryAgents[0] || agents[0];
             if (!fallbackAgent) {
                 return;
             }
@@ -984,6 +992,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         latestLoadedUserChoice,
         agents,
         primaryAgents,
+        settingsDefaultAgent,
+        opencodeDefaultAgent,
         currentAgentName,
         getSessionModelSelection,
         getAgentModelForSession,

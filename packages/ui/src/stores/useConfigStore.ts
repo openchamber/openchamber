@@ -504,6 +504,9 @@ interface DirectoryScopedConfig {
     currentModelId: string;
     currentVariant?: string | undefined;
     currentAgentName: string | undefined;
+    // Per-directory opencode config `default_agent` (cached so it can be
+    // restored instantly when switching back to a known directory).
+    opencodeDefaultAgent?: string | undefined;
     selectedProviderId: string;
     agentModelSelections: { [agentName: string]: { providerId: string; modelId: string } };
     defaultProviders: { [key: string]: string };
@@ -533,6 +536,8 @@ interface ConfigStore {
     settingsDefaultModel: string | undefined; // format: "provider/model"
     settingsDefaultVariant: string | undefined;
     settingsDefaultAgent: string | undefined;
+    // Default agent from the active directory's opencode config (`default_agent`)
+    opencodeDefaultAgent: string | undefined;
     settingsAutoCreateWorktree: boolean;
     settingsGitmojiEnabled: boolean;
     settingsDefaultFileViewerPreview: boolean;
@@ -668,6 +673,7 @@ export const useConfigStore = create<ConfigStore>()(
                 settingsDefaultModel: undefined,
                 settingsDefaultVariant: undefined,
                 settingsDefaultAgent: undefined,
+                opencodeDefaultAgent: undefined,
                 settingsAutoCreateWorktree: false,
                 settingsGitmojiEnabled: false,
                 settingsDefaultFileViewerPreview: false,
@@ -915,6 +921,7 @@ export const useConfigStore = create<ConfigStore>()(
                                 currentModelId: snapshot.currentModelId,
                                 currentVariant: snapshot.currentVariant,
                                 currentAgentName: snapshot.currentAgentName,
+                                opencodeDefaultAgent: snapshot.opencodeDefaultAgent,
                                 selectedProviderId: snapshot.selectedProviderId,
                                 agentModelSelections: snapshot.agentModelSelections,
                                 defaultProviders: snapshot.defaultProviders,
@@ -928,6 +935,7 @@ export const useConfigStore = create<ConfigStore>()(
                             currentProviderId: "",
                             currentModelId: "",
                             currentAgentName: undefined,
+                            opencodeDefaultAgent: undefined,
                             selectedProviderId: "",
                             agentModelSelections: {},
                             defaultProviders: {},
@@ -1324,13 +1332,22 @@ export const useConfigStore = create<ConfigStore>()(
 
                     for (let attempt = 0; attempt < 3; attempt++) {
                         try {
-                            // Fetch agents and OpenChamber settings in parallel
-                            const [agents, openChamberDefaults] = await Promise.all([
+                            // Fetch agents, OpenChamber settings, and the opencode
+                            // config (for its `default_agent`) in parallel.
+                            const [agents, openChamberDefaults, opencodeConfig] = await Promise.all([
                                 opencodeClient.withDirectory(fromDirectoryKey(directoryKey), () => opencodeClient.listAgents()),
                                 fetchOpenChamberDefaults(),
+                                opencodeClient
+                                    .withDirectory(fromDirectoryKey(directoryKey), () => opencodeClient.getConfig())
+                                    .catch(() => null),
                             ]);
 
                             const safeAgents = Array.isArray(agents) ? agents : [];
+
+                            const opencodeDefaultAgent =
+                                typeof opencodeConfig?.default_agent === 'string' && opencodeConfig.default_agent.trim().length > 0
+                                    ? opencodeConfig.default_agent.trim()
+                                    : undefined;
 
                             const providers = get().activeDirectoryKey === directoryKey
                                 ? get().providers
@@ -1370,12 +1387,14 @@ export const useConfigStore = create<ConfigStore>()(
                                     ...baseSnapshot,
                                     providers,
                                     agents: safeAgents,
+                                    opencodeDefaultAgent,
                                 };
 
                                 const nextState: Partial<ConfigStore> = {
                                     settingsDefaultModel: openChamberDefaults.defaultModel,
                                     settingsDefaultVariant: openChamberDefaults.defaultVariant,
                                     settingsDefaultAgent: openChamberDefaults.defaultAgent,
+                                    opencodeDefaultAgent,
                                     settingsAutoCreateWorktree: openChamberDefaults.autoCreateWorktree ?? false,
                                     settingsGitmojiEnabled: openChamberDefaults.gitmojiEnabled ?? false,
                                     settingsDefaultFileViewerPreview: openChamberDefaults.defaultFileViewerPreview ?? false,
@@ -1460,7 +1479,7 @@ export const useConfigStore = create<ConfigStore>()(
                             };
 
                             // --- Agent Selection ---
-                            // Priority: settings.defaultAgent → build → first primary → first agent
+                            // Priority: settings.defaultAgent → opencode default_agent → build → first primary → first agent
                             const primaryAgents = safeAgents.filter((agent) => isPrimaryMode(agent.mode));
                             const buildAgent = primaryAgents.find((agent) => agent.name === "build");
                             const fallbackAgent = buildAgent || primaryAgents[0] || safeAgents[0];
@@ -1471,13 +1490,23 @@ export const useConfigStore = create<ConfigStore>()(
                              const invalidSettings: { defaultModel?: string; defaultVariant?: string; defaultAgent?: string } = {};
 
                             // 1. Check OpenChamber settings for default agent
+                            let resolvedFromDefaults = false;
                             if (openChamberDefaults.defaultAgent) {
                                 const settingsAgent = safeAgents.find((agent) => agent.name === openChamberDefaults.defaultAgent);
                                 if (settingsAgent) {
                                     resolvedAgent = settingsAgent;
+                                    resolvedFromDefaults = true;
                                 } else {
                                     // Agent no longer exists - mark for clearing
                                     invalidSettings.defaultAgent = '';
+                                }
+                            }
+
+                            // 2. Fall back to the opencode config's `default_agent`
+                            if (!resolvedFromDefaults && opencodeDefaultAgent) {
+                                const configAgent = safeAgents.find((agent) => agent.name === opencodeDefaultAgent);
+                                if (configAgent) {
+                                    resolvedAgent = configAgent;
                                 }
                             }
 

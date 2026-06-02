@@ -70,6 +70,13 @@ const applyDefaultAgentAndModelSelection = (sessionId: string, configState = use
       }
     }
 
+    if (!agentName && configState.opencodeDefaultAgent) {
+      const configAgent = visibleAgents.find((a) => a.name === configState.opencodeDefaultAgent);
+      if (configAgent) {
+        agentName = configAgent.name;
+      }
+    }
+
     if (!agentName) {
       agentName =
         visibleAgents.find((agent) => agent.name === 'build')?.name ||
