@@ -30,6 +30,8 @@ ngrok config add-authtoken <your-ngrok-token>
 openchamber
 ```
 
+如果跳过这一步，`openchamber tunnel start` 可以自动启动 CLI 服务器。自动启动时可以传入服务器选项，例如 `--port`、`--host`、`--lan`、`--ui-password` 和 `--api-only`。
+
 2. 启动 Cloudflare 隧道：
 
 ```bash

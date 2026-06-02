@@ -44,6 +44,7 @@ import { createWorktreeSessionForNewBranch } from '@/lib/worktreeSessionCreator'
 import { cn } from '@/lib/utils';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 import { TodoSendDialog, type TodoSendExecution } from './TodoSendDialog';
 
 const TODO_PANEL_MIN_ITEMS = 5;
@@ -514,7 +515,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
             return;
           }
           sessionId = created.id;
-          directoryHint = null;
+          directoryHint = created.path;
         } else {
           const session = await createSession(undefined, projectRef.path, null);
           if (!session?.id) {
@@ -619,7 +620,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
           path: result.path,
           allowOutsideWorkspace: 'true',
         });
-        const response = await fetch(`/api/fs/read?${params.toString()}`, { cache: 'no-store' });
+        const response = await runtimeFetch(`/api/fs/read?${params.toString()}`, { cache: 'no-store' });
         if (!response.ok) {
           toast.error(t('rightSidebar.contextNotesTodo.toast.readPlanFileFailed'));
           return;

@@ -31,12 +31,13 @@ import { PendingChangesBar } from './PendingChangesBar';
 import { useChatSurfaceMode } from './useChatSurfaceMode';
 import { MobileAgentButton } from './MobileAgentButton';
 import { MobileModelButton } from './MobileModelButton';
-import { MobileSessionStatusBar } from './MobileSessionStatusBar';
+import { MobileSessionStatusBar, MobileSessionPanelTrigger } from './MobileSessionStatusBar';
 import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 // useMessageStore removed — messages now come from sync system
 import { isTauriShell, isVSCodeRuntime } from '@/lib/desktop';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { StopIcon } from '@/components/icons/StopIcon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -56,7 +57,7 @@ import { DraftPresetChips } from './DraftPresetChips';
 import { useChatSearchDirectory } from '@/hooks/useChatSearchDirectory';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
+import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/projectMeta';
 import { useGitBranches, useGitStore, useIsGitRepo } from '@/stores/useGitStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
@@ -1030,11 +1031,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const isExpandedInput = useUIStore((state) => state.isExpandedInput);
     const setExpandedInput = useUIStore((state) => state.setExpandedInput);
     const setTimelineDialogOpen = useUIStore((state) => state.setTimelineDialogOpen);
+    const { git: runtimeGit, vscode: vscodeApi } = useRuntimeAPIs();
     const cycleAgentShortcutOverride = useUIStore((state) => state.shortcutOverrides.cycle_agent);
     const cycleAgentShortcut = React.useMemo(() => (
         getEffectiveShortcutCombo('cycle_agent', cycleAgentShortcutOverride ? { cycle_agent: cycleAgentShortcutOverride } : undefined)
     ), [cycleAgentShortcutOverride]);
-    const { git: runtimeGit } = useRuntimeAPIs();
     const { currentTheme } = useThemeSystem();
     const chatSearchDirectory = useChatSearchDirectory();
     const isGitRepo = useIsGitRepo(currentDirectory);
@@ -1869,14 +1870,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             else if (commandName === 'compact' && currentSessionId) {
                 try {
                     await sessionActions.waitForConnectionOrThrow();
-                    const { opencodeClient } = await import('@/lib/opencode/client');
-                    const sdk = opencodeClient.getSdkClient();
-                    const configState = useConfigStore.getState();
-                    await sdk.session.summarize({
-                        sessionID: currentSessionId,
-                        modelID: configState.currentModelId || '',
-                        providerID: configState.currentProviderId || '',
-                    });
+                    const compactDirectory = useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || currentDirectory || undefined;
+                    await opencodeClient.summarizeSession(currentSessionId, currentProviderId, currentModelId, compactDirectory);
                 } catch (error) {
                     toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.compactFailed'));
                 }
@@ -2722,7 +2717,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         } else {
             setShowFileMention(false);
         }
-    }, [inputMode, setCommandQuery, setMentionQuery, setShowCommandAutocomplete, setShowFileMention, setShowSkillAutocomplete, setSkillQuery]);
+    }, [
+        inputMode,
+        setCommandQuery,
+        setMentionQuery,
+        setShowCommandAutocomplete,
+        setShowFileMention,
+        setShowSkillAutocomplete,
+        setShowSnippetAutocomplete,
+        setSkillQuery,
+        setSnippetQuery,
+    ]);
 
     const insertTextAtSelection = React.useCallback((text: string) => {
         if (!text) {
@@ -3469,7 +3474,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                     const blob = new Blob([byteArray], { type: result.mime || 'application/octet-stream' });
                                     file = new File([blob], fileName, { type: result.mime || 'application/octet-stream' });
                                 } else {
-                                    const response = await fetch(`/api/fs/raw?path=${encodeURIComponent(normalizedPath)}`);
+                                    const response = await runtimeFetch('/api/fs/raw', { query: { path: normalizedPath } });
                                     if (!response.ok) {
                                         throw new Error(`Failed to read dropped file (${response.status})`);
                                     }
@@ -3523,8 +3528,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     const handleVSCodePickFiles = React.useCallback(async () => {
         try {
-            const response = await fetch('/api/vscode/pick-files');
-            const data = await response.json();
+            const data = (await vscodeApi?.pickFiles?.()) as {
+                files?: Array<{ name: string; mimeType?: string; dataUrl?: string }>;
+                skipped?: Array<{ name?: string; reason?: string }>;
+            } | undefined;
             const picked = Array.isArray(data?.files) ? data.files : [];
             const skipped = Array.isArray(data?.skipped) ? data.skipped : [];
 
@@ -3563,7 +3570,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             console.error('VS Code file pick failed', error);
             toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.vscodePickFailed'));
         }
-    }, [attachFiles, t]);
+    }, [attachFiles, t, vscodeApi]);
 
     const handlePickLocalFiles = React.useCallback(() => {
         if (isVSCodeRuntime()) {
@@ -3823,30 +3830,32 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         iconImage?: { mime: string; updatedAt: number; source: 'custom' | 'auto' } | null;
         iconBackground?: string | null;
     }) => {
-        const imageUrl = getProjectIconImageUrl(
-            { id: project.id, iconImage: project.iconImage ?? null },
-            {
-                themeVariant: currentTheme.metadata.variant,
-                iconColor: currentTheme.colors.surface.foreground,
-            },
-        );
         const projectIconName = project.icon ? PROJECT_ICON_MAP[project.icon] : null;
         const iconColor = getProjectIconColor(project.color);
+        const fallbackIcon = projectIconName ? (
+            <Icon name={projectIconName} className="h-3.5 w-3.5 shrink-0" style={iconColor ? { color: iconColor } : undefined} />
+        ) : (
+            <Icon name="folder" className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80"  style={iconColor ? { color: iconColor } : undefined}/>
+        );
 
         return (
             <span className="inline-flex min-w-0 items-center gap-1.5">
-                {imageUrl ? (
+                {project.iconImage ? (
                     <span
                         className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center overflow-hidden rounded-[3px]"
                         style={project.iconBackground ? { backgroundColor: project.iconBackground } : undefined}
                     >
-                        <img src={imageUrl} alt="" className="h-full w-full object-contain" draggable={false} />
+                        <ProjectIconImage
+                            project={{ id: project.id, iconImage: project.iconImage ?? null }}
+                            options={{
+                                themeVariant: currentTheme.metadata.variant,
+                                iconColor: currentTheme.colors.surface.foreground,
+                            }}
+                            className="h-full w-full object-contain"
+                            fallback={fallbackIcon}
+                        />
                     </span>
-                ) : projectIconName ? (
-                    <Icon name={projectIconName} className="h-3.5 w-3.5 shrink-0" style={iconColor ? { color: iconColor } : undefined} />
-                ) : (
-                    <Icon name="folder" className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80"  style={iconColor ? { color: iconColor } : undefined}/>
-                )}
+                ) : fallbackIcon}
                 <span className="truncate">{getProjectDisplayLabel(project)}</span>
             </span>
         );
@@ -4426,6 +4435,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             <>
                                 <div className="flex w-full items-center justify-between gap-x-1.5">
                                     <div className="flex items-center gap-x-1.5">
+                                        <MobileSessionPanelTrigger
+                                            footerIconButtonClass={footerIconButtonClass}
+                                            iconSizeClass={iconSizeClass}
+                                        />
                                         <ComposerAttachmentControls
                                             isVSCode={isVSCode}
                                             footerIconButtonClass={footerIconButtonClass}
@@ -4530,7 +4543,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         )}
                     </div>
 
-                    {/* Mobile Session Status Bar - above input */}
+                    {/* Mobile session panel: slide-up overlay toggled by MobileSessionPanelTrigger. */}
                     {isMobile && <MobileSessionStatusBar />}
                 </div>
             </div>

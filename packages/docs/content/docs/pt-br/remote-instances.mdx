@@ -24,6 +24,18 @@ O OpenChamber percorre as etapas — verificando a conexão, configurando o remo
 
 Você decide se quer salvar as senhas SSH e de UI ou inseri-las a cada vez. Se a conexão cair, o OpenChamber informa qual etapa falhou para você corrigi-la — veja [Acesso remoto](/pt-br/troubleshooting/remote-access/).
 
+## Links de conexão direta
+
+Se uma máquina remota já executa OpenChamber, crie um link de conexão nela e importe em **Settings → Remote Instances → Server links**:
+
+```bash
+openchamber connect-url --port 3000 --server http://your-host:3000 --qr
+```
+
+`connect-url` inicia o servidor primeiro se nada estiver rodando nessa porta. Adicione `--api-only` para um servidor headless, `--lan` para escutar na LAN ao iniciar, `--ui-password` para proteger o acesso pelo navegador e `--name` para nomear a conexão salva.
+
+O link gerado contém um token de cliente para apps OpenChamber. Esse token é separado da senha da UI do navegador e sobrevive a reinícios até ser revogado ou removido.
+
 ## Relacionado
 
 - [OpenCode Server](/pt-br/opencode-server/) — conecte a um servidor remoto na web ou no VS Code

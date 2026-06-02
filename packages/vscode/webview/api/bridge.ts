@@ -40,6 +40,7 @@ const pendingRequests = new Map<string, {
   resolve: (value: unknown) => void;
   reject: (reason: Error) => void;
   timeout?: ReturnType<typeof setTimeout>;
+  onAbort?: () => void;
 }>();
 
 let requestIdCounter = 0;
@@ -59,6 +60,9 @@ window.addEventListener('message', (event: MessageEvent<BridgeResponse>) => {
     if (pending.timeout) {
       clearTimeout(pending.timeout);
     }
+    if (pending.onAbort) {
+      pending.onAbort();
+    }
     if (response.success) {
       pending.resolve(response.data);
     } else {
@@ -74,7 +78,7 @@ export function sendBridgeMessage<T = unknown>(type: string, payload?: unknown):
 export function sendBridgeMessageWithOptions<T = unknown>(
   type: string,
   payload?: unknown,
-  options?: { timeoutMs?: number }
+  options?: { timeoutMs?: number; signal?: AbortSignal; onAbort?: (id: string) => void }
 ): Promise<T> {
   return new Promise((resolve, reject) => {
     const id = `req_${++requestIdCounter}_${Date.now()}`;
@@ -84,10 +88,30 @@ export function sendBridgeMessageWithOptions<T = unknown>(
       resolve: (value: unknown) => void;
       reject: (reason: Error) => void;
       timeout?: ReturnType<typeof setTimeout>;
+      onAbort?: () => void;
     } = {
       resolve: resolve as (value: unknown) => void,
       reject,
     };
+
+    if (options?.signal) {
+      const abort = () => {
+        if (!pendingRequests.has(id)) return;
+        pendingRequests.delete(id);
+        if (pending.timeout) {
+          clearTimeout(pending.timeout);
+        }
+        options.onAbort?.(id);
+        reject(new DOMException('Aborted', 'AbortError'));
+      };
+      if (options.signal.aborted) {
+        reject(new DOMException('Aborted', 'AbortError'));
+        return;
+      }
+      options.signal.addEventListener('abort', abort, { once: true });
+      pending.onAbort = () => options.signal?.removeEventListener('abort', abort);
+    }
+
     pendingRequests.set(id, pending);
 
     const timeoutMs = typeof options?.timeoutMs === 'number' ? options.timeoutMs : 30000;
@@ -95,6 +119,9 @@ export function sendBridgeMessageWithOptions<T = unknown>(
       pending.timeout = setTimeout(() => {
         if (pendingRequests.has(id)) {
           pendingRequests.delete(id);
+          if (pending.onAbort) {
+            pending.onAbort();
+          }
           reject(new Error(`Request ${type} timed out`));
         }
       }, timeoutMs);
@@ -116,19 +143,31 @@ export async function proxyApiRequest(options: {
   path: string;
   headers?: Record<string, string>;
   bodyBase64?: string;
+  signal?: AbortSignal;
 }): Promise<ProxiedApiResponse> {
   // Do not impose a bridge-level timeout. Let the original fetch's AbortSignal
   // (or OpenCode server response timing) control the lifecycle.
-  return sendBridgeMessageWithOptions<ProxiedApiResponse>('api:proxy', options, { timeoutMs: 0 });
+  const { signal, ...payload } = options;
+  return sendBridgeMessageWithOptions<ProxiedApiResponse>('api:proxy', payload, {
+    timeoutMs: 0,
+    signal,
+    onAbort: (requestID) => getVSCodeAPI().postMessage({ id: `abort_${requestID}`, type: 'api:proxy:abort', payload: { requestID } }),
+  });
 }
 
 export async function proxySessionMessageRequest(options: {
   path: string;
   headers?: Record<string, string>;
   bodyText: string;
+  signal?: AbortSignal;
 }): Promise<ProxiedApiResponse> {
   // Keep parity with server-side direct forwarder: let extension host control timeout.
-  return sendBridgeMessageWithOptions<ProxiedApiResponse>('api:session:message', options, { timeoutMs: 0 });
+  const { signal, ...payload } = options;
+  return sendBridgeMessageWithOptions<ProxiedApiResponse>('api:session:message', payload, {
+    timeoutMs: 0,
+    signal,
+    onAbort: (requestID) => getVSCodeAPI().postMessage({ id: `abort_${requestID}`, type: 'api:proxy:abort', payload: { requestID } }),
+  });
 }
 
 export type ProxiedSseStartResponse = {

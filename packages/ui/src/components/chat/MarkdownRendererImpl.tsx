@@ -16,6 +16,7 @@ import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 import { getExternalFaviconUrl, isExternalHttpUrl, isLoopbackHttpUrl, openExternalUrl } from '@/lib/url';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
@@ -1341,7 +1342,7 @@ const fileReferenceExists = (resolvedPath: string): Promise<boolean> => {
   const request = new Promise<boolean>((resolve) => {
     const run = () => {
       activeFileReferenceStatCount += 1;
-      void fetch(`/api/fs/stat?path=${encodeURIComponent(normalizedPath)}`, {
+      void runtimeFetch(`/api/fs/stat?path=${encodeURIComponent(normalizedPath)}`, {
         method: 'GET',
         cache: 'no-store',
       })

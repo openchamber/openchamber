@@ -10,7 +10,7 @@ import {
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
-import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
+import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/projectMeta';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
 
@@ -86,23 +86,12 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
     isDragging,
   } = useSortable({ id });
 
-  const [imageFailed, setImageFailed] = React.useState(false);
   const suppressNextToggleRef = React.useRef(false);
   const menuInstanceKey = `project:${id}`;
   const isMenuOpen = openSidebarMenuKey === menuInstanceKey;
 
-  React.useEffect(() => {
-    setImageFailed(false);
-  }, [id, projectIconImage?.updatedAt]);
-
   const projectIconName = projectIcon ? PROJECT_ICON_MAP[projectIcon] : null;
   const iconColor = projectColor ? (PROJECT_COLOR_MAP[projectColor] ?? null) : null;
-  const imageUrl = !imageFailed
-    ? getProjectIconImageUrl({ id, iconImage: projectIconImage }, {
-      themeVariant: currentTheme.metadata.variant,
-      iconColor: currentTheme.colors.surface.foreground,
-    })
-    : null;
 
   const handleMenuOpenChange = React.useCallback((open: boolean) => {
     setOpenSidebarMenuKey(open ? menuInstanceKey : null);
@@ -179,7 +168,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                       )}>
                         {isCollapsed ? <Icon name="arrow-right-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-down-s" className="h-3.5 w-3.5" />}
                       </span>
-                      {imageUrl ? (
+                      {projectIconImage ? (
                         <span
                           className={cn(
                             'h-3.5 w-3.5 items-center justify-center overflow-hidden rounded-[3px]',
@@ -187,12 +176,18 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                           )}
                           style={projectIconBackground ? { backgroundColor: projectIconBackground } : undefined}
                         >
-                          <img
-                            src={imageUrl}
-                            alt=""
+                          <ProjectIconImage
+                            project={{ id, iconImage: projectIconImage }}
+                            options={{
+                              themeVariant: currentTheme.metadata.variant,
+                              iconColor: currentTheme.colors.surface.foreground,
+                            }}
                             className="h-full w-full object-contain"
-                            draggable={false}
-                            onError={() => setImageFailed(true)}
+                            fallback={projectIconName ? (
+                              <Icon name={projectIconName} className="h-3.5 w-3.5" style={iconColor ? { color: iconColor } : undefined} />
+                            ) : (
+                              <Icon name="folder" className="h-3.5 w-3.5 text-muted-foreground/80" style={iconColor ? { color: iconColor } : undefined} />
+                            )}
                           />
                         </span>
                       ) : projectIconName ? (

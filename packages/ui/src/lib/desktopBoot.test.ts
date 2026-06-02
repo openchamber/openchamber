@@ -63,6 +63,20 @@ describe('resolveDesktopBootView', () => {
     ).toEqual({ screen: 'recovery', variant: 'remote-wrong-service', hostId: 'bad-host', url: 'https://bad.test' });
   });
 
+  test('returns recovery-remote for incompatible remote', () => {
+    expect(
+      resolveDesktopBootView({
+        isDesktopShell: true,
+        bootOutcome: {
+          target: 'remote',
+          status: 'incompatible',
+          hostId: 'old-host',
+          url: 'https://old.test',
+        },
+      }),
+    ).toEqual({ screen: 'recovery', variant: 'remote-incompatible', hostId: 'old-host', url: 'https://old.test' });
+  });
+
   test('returns recovery view for local unreachable', () => {
     expect(
       resolveDesktopBootView({

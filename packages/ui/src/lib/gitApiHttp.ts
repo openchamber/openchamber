@@ -35,33 +35,12 @@ import type {
   RevertCommitResponse,
   ResetToCommitResponse,
 } from './api/types';
-
-declare global {
-  interface Window {
-    __OPENCHAMBER_DESKTOP_SERVER__?: {
-      origin: string;
-      opencodePort: number | null;
-      apiPrefix: string;
-      cliAvailable: boolean;
-    };
-  }
-}
-
-const resolveBaseOrigin = (): string => {
-  if (typeof window === 'undefined') {
-    return '';
-  }
-  const desktopOrigin = window.__OPENCHAMBER_DESKTOP_SERVER__?.origin;
-  if (desktopOrigin) {
-    return desktopOrigin;
-  }
-  return window.location.origin;
-};
+import { runtimeFetch } from './runtime-fetch';
+import { getRuntimeUrlResolver } from './runtime-url';
 
 const API_BASE = '/api/git';
 const GIT_STATUS_CACHE_TTL_MS = 1200;
 const GIT_REPO_CHECK_CACHE_TTL_MS = 5000;
-
 const gitStatusCache = new Map<string, { value: GitStatus; expiresAt: number }>();
 const gitStatusInFlight = new Map<string, Promise<GitStatus>>();
 const gitRepoCache = new Map<string, { value: boolean; expiresAt: number }>();
@@ -74,19 +53,10 @@ function buildUrl(
   directory: string | null | undefined,
   params?: Record<string, string | number | boolean | undefined>
 ): string {
-  const url = new URL(path, resolveBaseOrigin());
-  if (directory) {
-    url.searchParams.set('directory', directory);
-  }
+  const query: Record<string, string | number | boolean | undefined> = { ...params };
+  if (directory) query.directory = directory;
 
-  if (params) {
-    for (const [key, value] of Object.entries(params)) {
-      if (value === undefined) continue;
-      url.searchParams.set(key, String(value));
-    }
-  }
-
-  return url.toString();
+  return getRuntimeUrlResolver().api(path, query);
 }
 
 export async function checkIsGitRepository(directory: string): Promise<boolean> {
@@ -103,7 +73,7 @@ export async function checkIsGitRepository(directory: string): Promise<boolean> 
   }
 
   const task = (async () => {
-    const response = await fetch(buildUrl(`${API_BASE}/check`, directory));
+    const response = await runtimeFetch(buildUrl(`${API_BASE}/check`, directory));
     if (!response.ok) {
       throw new Error(`Failed to check git repository: ${response.statusText}`);
     }
@@ -141,7 +111,7 @@ export async function getGitStatus(directory: string, options?: { mode?: 'light'
   }
 
   const task = (async () => {
-    const response = await fetch(buildUrl(`${API_BASE}/status`, directory, mode ? { mode } : undefined));
+    const response = await runtimeFetch(buildUrl(`${API_BASE}/status`, directory, mode ? { mode } : undefined));
     if (!response.ok) {
       throw new Error(`Failed to get git status: ${response.statusText}`);
     }
@@ -169,7 +139,7 @@ export async function getGitDiff(directory: string, options: GetGitDiffOptions):
     throw new Error('path is required to fetch git diff');
   }
 
-  const response = await fetch(
+  const response = await runtimeFetch(
     buildUrl(`${API_BASE}/diff`, directory, {
       path,
       staged: staged ? 'true' : undefined,
@@ -190,7 +160,7 @@ export async function getGitFileDiff(directory: string, options: GetGitFileDiffO
     throw new Error('path is required to fetch git file diff');
   }
 
-  const response = await fetch(
+  const response = await runtimeFetch(
     buildUrl(`${API_BASE}/file-diff`, directory, {
       path,
       staged: staged ? 'true' : undefined,
@@ -213,7 +183,7 @@ export async function revertGitFile(
     throw new Error('path is required to revert git changes');
   }
 
-  const response = await fetch(buildUrl(`${API_BASE}/revert`, directory), {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/revert`, directory), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path: filePath, scope: options?.scope }),
@@ -238,7 +208,7 @@ export async function stageGitFiles(directory: string, filePaths: string[]): Pro
     throw new Error('path is required to stage git changes');
   }
 
-  const response = await fetch(buildUrl(`${API_BASE}/stage`, directory), {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/stage`, directory), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ paths }),
@@ -261,7 +231,7 @@ export async function unstageGitFiles(directory: string, filePaths: string[]): P
     throw new Error('path is required to unstage git changes');
   }
 
-  const response = await fetch(buildUrl(`${API_BASE}/unstage`, directory), {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/unstage`, directory), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ paths }),
@@ -277,7 +247,7 @@ export async function isLinkedWorktree(directory: string): Promise<boolean> {
   if (!directory) {
     return false;
   }
-  const response = await fetch(buildUrl(`${API_BASE}/worktree-type`, directory));
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/worktree-type`, directory));
   if (!response.ok) {
     throw new Error(`Failed to detect worktree type: ${response.statusText}`);
   }
@@ -286,7 +256,7 @@ export async function isLinkedWorktree(directory: string): Promise<boolean> {
 }
 
 export async function getGitBranches(directory: string): Promise<GitBranch> {
-  const response = await fetch(buildUrl(`${API_BASE}/branches`, directory));
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/branches`, directory));
   if (!response.ok) {
     throw new Error(`Failed to get branches: ${response.statusText}`);
   }
@@ -298,7 +268,7 @@ export async function deleteGitBranch(directory: string, payload: GitDeleteBranc
     throw new Error('branch is required to delete a branch');
   }
 
-  const response = await fetch(buildUrl(`${API_BASE}/branches`, directory), {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/branches`, directory), {
     method: 'DELETE',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -317,7 +287,7 @@ export async function deleteRemoteBranch(directory: string, payload: GitDeleteRe
     throw new Error('branch is required to delete remote branch');
   }
 
-  const response = await fetch(buildUrl(`${API_BASE}/remote-branches`, directory), {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/remote-branches`, directory), {
     method: 'DELETE',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -337,7 +307,7 @@ export async function removeRemote(directory: string, payload: GitRemoveRemotePa
     throw new Error('remote is required to remove a remote');
   }
 
-  const response = await fetch(buildUrl(`${API_BASE}/remotes`, directory), {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/remotes`, directory), {
     method: 'DELETE',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ remote }),
@@ -371,7 +341,7 @@ export async function generateCommitMessage(
     body.modelId = options.modelId;
   }
 
-  const response = await fetch(buildUrl(`${API_BASE}/commit-message`, directory), {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/commit-message`, directory), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -438,7 +408,7 @@ export async function generatePullRequestDescription(
     requestBody.modelId = modelId;
   }
 
-  const response = await fetch(buildUrl(`${API_BASE}/pr-description`, directory), {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/pr-description`, directory), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(requestBody),
@@ -459,7 +429,7 @@ export async function generatePullRequestDescription(
 }
 
 export async function listGitWorktrees(directory: string): Promise<GitWorktreeInfo[]> {
-  const response = await fetch(buildUrl(`${API_BASE}/worktrees`, directory));
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/worktrees`, directory));
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || 'Failed to list worktrees');
@@ -468,7 +438,7 @@ export async function listGitWorktrees(directory: string): Promise<GitWorktreeIn
 }
 
 export async function validateGitWorktree(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeValidationResult> {
-  const response = await fetch(buildUrl(`${API_BASE}/worktrees/validate`, directory), {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/worktrees/validate`, directory), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload ?? {}),
@@ -483,7 +453,7 @@ export async function validateGitWorktree(directory: string, payload: CreateGitW
 }
 
 export async function getGitWorktreeBootstrapStatus(directory: string): Promise<import('./api/types').GitWorktreeBootstrapStatus> {
-  const response = await fetch(buildUrl(`${API_BASE}/worktrees/bootstrap-status`, directory));
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/worktrees/bootstrap-status`, directory));
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || 'Failed to get worktree bootstrap status');
@@ -492,7 +462,7 @@ export async function getGitWorktreeBootstrapStatus(directory: string): Promise<
 }
 
 export async function previewGitWorktree(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult> {
-  const response = await fetch(buildUrl(`${API_BASE}/worktrees/preview`, directory), {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/worktrees/preview`, directory), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload ?? {}),
@@ -507,7 +477,7 @@ export async function previewGitWorktree(directory: string, payload: CreateGitWo
 }
 
 export async function createGitWorktree(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult> {
-  const response = await fetch(buildUrl(`${API_BASE}/worktrees`, directory), {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/worktrees`, directory), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload ?? {}),
@@ -522,7 +492,7 @@ export async function createGitWorktree(directory: string, payload: CreateGitWor
 }
 
 export async function deleteGitWorktree(directory: string, payload: RemoveGitWorktreePayload): Promise<{ success: boolean }> {
-  const response = await fetch(buildUrl(`${API_BASE}/worktrees`, directory), {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/worktrees`, directory), {
     method: 'DELETE',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload ?? {}),
@@ -541,7 +511,7 @@ export async function createGitCommit(
   message: string,
   options: CreateGitCommitOptions = {}
 ): Promise<GitCommitResult> {
-  const response = await fetch(buildUrl(`${API_BASE}/commit`, directory), {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/commit`, directory), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -562,7 +532,7 @@ export async function gitPush(
   directory: string,
   options: { remote?: string; branch?: string; options?: string[] | Record<string, unknown> } = {}
 ): Promise<GitPushResult> {
-  const response = await fetch(buildUrl(`${API_BASE}/push`, directory), {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/push`, directory), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(options),
@@ -578,7 +548,7 @@ export async function gitPull(
   directory: string,
   options: GitPullOptions = {}
 ): Promise<GitPullResult> {
-  const response = await fetch(buildUrl(`${API_BASE}/pull`, directory), {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/pull`, directory), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(options),
@@ -594,7 +564,7 @@ export async function gitFetch(
   directory: string,
   options: { remote?: string; branch?: string } = {}
 ): Promise<{ success: boolean }> {
-  const response = await fetch(buildUrl(`${API_BASE}/fetch`, directory), {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/fetch`, directory), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(options),
@@ -607,7 +577,7 @@ export async function gitFetch(
 }
 
 export async function listGitStashes(directory: string): Promise<{ stashes: GitStashEntry[] }> {
-  const response = await fetch(buildUrl(`${API_BASE}/stashes`, directory));
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/stashes`, directory));
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || 'Failed to list stashes');
@@ -616,7 +586,7 @@ export async function listGitStashes(directory: string): Promise<{ stashes: GitS
 }
 
 export async function countGitStashFiles(directory: string, refs: string[]): Promise<{ counts: Record<string, number> }> {
-  const response = await fetch(buildUrl(`${API_BASE}/stashes/file-counts`, directory), {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/stashes/file-counts`, directory), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ refs }),
@@ -629,7 +599,7 @@ export async function countGitStashFiles(directory: string, refs: string[]): Pro
 }
 
 export async function stashGitChanges(directory: string, options: { message?: string } = {}): Promise<{ success: boolean; created: boolean; message: string; output: string }> {
-  const response = await fetch(buildUrl(`${API_BASE}/stash`, directory), {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/stash`, directory), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(options),
@@ -642,7 +612,7 @@ export async function stashGitChanges(directory: string, options: { message?: st
 }
 
 const postStashRef = async (directory: string, path: string, options: { ref: string }): Promise<{ success: boolean; ref: string }> => {
-  const response = await fetch(buildUrl(`${API_BASE}/${path}`, directory), {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/${path}`, directory), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(options),
@@ -659,7 +629,7 @@ export const popGitStash = (directory: string, options: { ref: string }) => post
 export const dropGitStash = (directory: string, options: { ref: string }) => postStashRef(directory, 'stash/drop', options);
 
 export async function checkoutBranch(directory: string, branch: string): Promise<{ success: boolean; branch: string }> {
-  const response = await fetch(buildUrl(`${API_BASE}/checkout`, directory), {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/checkout`, directory), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ branch }),
@@ -676,7 +646,7 @@ export async function createBranch(
   name: string,
   startPoint?: string
 ): Promise<{ success: boolean; branch: string }> {
-  const response = await fetch(buildUrl(`${API_BASE}/branches`, directory), {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/branches`, directory), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, startPoint }),
@@ -693,7 +663,7 @@ export async function renameBranch(
   oldName: string,
   newName: string
 ): Promise<{ success: boolean; branch: string }> {
-  const response = await fetch(buildUrl(`${API_BASE}/branches/rename`, directory), {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/branches/rename`, directory), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ oldName, newName }),
@@ -709,7 +679,7 @@ export async function getGitLog(
   directory: string,
   options: GitLogOptions = {}
 ): Promise<GitLogResponse> {
-  const response = await fetch(
+  const response = await runtimeFetch(
     buildUrl(`${API_BASE}/log`, directory, {
       maxCount: options.maxCount,
       from: options.from,
@@ -729,7 +699,7 @@ export async function getCommitFiles(
   directory: string,
   hash: string
 ): Promise<GitCommitFilesResponse> {
-  const response = await fetch(
+  const response = await runtimeFetch(
     buildUrl(`${API_BASE}/commit-files`, directory, { hash })
   );
   if (!response.ok) {
@@ -744,7 +714,7 @@ export async function getCommitFileDiff(
   filePath: string,
   isBinary: boolean
 ): Promise<CommitFileDiffResponse> {
-  const response = await fetch(
+  const response = await runtimeFetch(
     buildUrl(`${API_BASE}/commit-file-diff`, directory, {
       hash,
       path: filePath,
@@ -758,7 +728,7 @@ export async function getCommitFileDiff(
 }
 
 export async function getGitIdentities(): Promise<GitIdentityProfile[]> {
-  const response = await fetch(buildUrl(`${API_BASE}/identities`, undefined));
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/identities`, undefined));
   if (!response.ok) {
     throw new Error(`Failed to get git identities: ${response.statusText}`);
   }
@@ -766,7 +736,7 @@ export async function getGitIdentities(): Promise<GitIdentityProfile[]> {
 }
 
 export async function createGitIdentity(profile: GitIdentityProfile): Promise<GitIdentityProfile> {
-  const response = await fetch(buildUrl(`${API_BASE}/identities`, undefined), {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/identities`, undefined), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(profile),
@@ -779,7 +749,7 @@ export async function createGitIdentity(profile: GitIdentityProfile): Promise<Gi
 }
 
 export async function updateGitIdentity(id: string, updates: GitIdentityProfile): Promise<GitIdentityProfile> {
-  const response = await fetch(buildUrl(`${API_BASE}/identities/${id}`, undefined), {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/identities/${id}`, undefined), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(updates),
@@ -792,7 +762,7 @@ export async function updateGitIdentity(id: string, updates: GitIdentityProfile)
 }
 
 export async function deleteGitIdentity(id: string): Promise<void> {
-  const response = await fetch(buildUrl(`${API_BASE}/identities/${id}`, undefined), {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/identities/${id}`, undefined), {
     method: 'DELETE',
   });
   if (!response.ok) {
@@ -805,7 +775,7 @@ export async function getCurrentGitIdentity(directory: string): Promise<GitIdent
   if (!directory) {
     return null;
   }
-  const response = await fetch(buildUrl(`${API_BASE}/current-identity`, directory));
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/current-identity`, directory));
   if (!response.ok) {
     throw new Error(`Failed to get current git identity: ${response.statusText}`);
   }
@@ -824,7 +794,7 @@ export async function hasLocalIdentity(directory: string): Promise<boolean> {
   if (!directory) {
     return false;
   }
-  const response = await fetch(buildUrl(`${API_BASE}/has-local-identity`, directory));
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/has-local-identity`, directory));
   if (!response.ok) {
     throw new Error(`Failed to check local identity: ${response.statusText}`);
   }
@@ -833,7 +803,7 @@ export async function hasLocalIdentity(directory: string): Promise<boolean> {
 }
 
 export async function getGlobalGitIdentity(): Promise<GitIdentitySummary | null> {
-  const response = await fetch(buildUrl(`${API_BASE}/global-identity`, undefined));
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/global-identity`, undefined));
   if (!response.ok) {
     throw new Error(`Failed to get global git identity: ${response.statusText}`);
   }
@@ -852,7 +822,7 @@ export async function setGitIdentity(
   directory: string,
   profileId: string
 ): Promise<{ success: boolean; profile: GitIdentityProfile }> {
-  const response = await fetch(buildUrl(`${API_BASE}/set-identity`, directory), {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/set-identity`, directory), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ profileId }),
@@ -865,7 +835,7 @@ export async function setGitIdentity(
 }
 
 export async function discoverGitCredentials(): Promise<DiscoveredGitCredential[]> {
-  const response = await fetch(buildUrl(`${API_BASE}/discover-credentials`, undefined));
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/discover-credentials`, undefined));
   if (!response.ok) {
     throw new Error(`Failed to discover git credentials: ${response.statusText}`);
   }
@@ -876,7 +846,7 @@ export async function getRemoteUrl(directory: string, remote?: string): Promise<
   if (!directory) {
     return null;
   }
-  const response = await fetch(buildUrl(`${API_BASE}/remote-url`, directory, { remote }));
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/remote-url`, directory, { remote }));
   if (!response.ok) {
     return null;
   }
@@ -885,7 +855,7 @@ export async function getRemoteUrl(directory: string, remote?: string): Promise<
 }
 
 export async function getRemotes(directory: string): Promise<Array<{ name: string; fetchUrl: string; pushUrl: string }>> {
-  const response = await fetch(buildUrl(`${API_BASE}/remotes`, directory));
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/remotes`, directory));
   if (!response.ok) {
     throw new Error(`Failed to get remotes: ${response.statusText}`);
   }
@@ -896,7 +866,7 @@ export async function rebase(
   directory: string,
   options: { onto: string }
 ): Promise<{ success: boolean; conflict?: boolean; conflictFiles?: string[] }> {
-  const response = await fetch(buildUrl(`${API_BASE}/rebase`, directory), {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/rebase`, directory), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(options),
@@ -909,7 +879,7 @@ export async function rebase(
 }
 
 export async function abortRebase(directory: string): Promise<{ success: boolean }> {
-  const response = await fetch(buildUrl(`${API_BASE}/rebase/abort`, directory), {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/rebase/abort`, directory), {
     method: 'POST',
   });
   if (!response.ok) {
@@ -923,7 +893,7 @@ export async function merge(
   directory: string,
   options: { branch: string }
 ): Promise<{ success: boolean; conflict?: boolean; conflictFiles?: string[] }> {
-  const response = await fetch(buildUrl(`${API_BASE}/merge`, directory), {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/merge`, directory), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(options),
@@ -939,7 +909,7 @@ export async function checkoutCommit(
   directory: string,
   hash: string
 ): Promise<CheckoutCommitResponse> {
-  const response = await fetch(buildUrl(`${API_BASE}/checkout-commit`, directory), {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/checkout-commit`, directory), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ hash }),
@@ -955,7 +925,7 @@ export async function cherryPick(
   directory: string,
   hash: string
 ): Promise<CherryPickResponse> {
-  const response = await fetch(buildUrl(`${API_BASE}/cherry-pick`, directory), {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/cherry-pick`, directory), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ hash }),
@@ -971,7 +941,7 @@ export async function revertCommit(
   directory: string,
   hash: string
 ): Promise<RevertCommitResponse> {
-  const response = await fetch(buildUrl(`${API_BASE}/revert-commit`, directory), {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/revert-commit`, directory), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ hash }),
@@ -989,7 +959,7 @@ export async function resetToCommit(
   mode: 'soft' | 'mixed' | 'hard',
   force?: boolean
 ): Promise<ResetToCommitResponse> {
-  const response = await fetch(buildUrl(`${API_BASE}/reset-to-commit`, directory), {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/reset-to-commit`, directory), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ hash, mode, force }),
@@ -1002,7 +972,7 @@ export async function resetToCommit(
 }
 
 export async function abortMerge(directory: string): Promise<{ success: boolean }> {
-  const response = await fetch(buildUrl(`${API_BASE}/merge/abort`, directory), {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/merge/abort`, directory), {
     method: 'POST',
   });
   if (!response.ok) {
@@ -1013,7 +983,7 @@ export async function abortMerge(directory: string): Promise<{ success: boolean 
 }
 
 export async function continueRebase(directory: string): Promise<{ success: boolean; conflict: boolean; conflictFiles?: string[] }> {
-  const response = await fetch(buildUrl(`${API_BASE}/rebase/continue`, directory), {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/rebase/continue`, directory), {
     method: 'POST',
   });
   if (!response.ok) {
@@ -1024,7 +994,7 @@ export async function continueRebase(directory: string): Promise<{ success: bool
 }
 
 export async function continueMerge(directory: string): Promise<{ success: boolean; conflict: boolean; conflictFiles?: string[] }> {
-  const response = await fetch(buildUrl(`${API_BASE}/merge/continue`, directory), {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/merge/continue`, directory), {
     method: 'POST',
   });
   if (!response.ok) {
@@ -1048,7 +1018,7 @@ export async function stashPop(directory: string): Promise<{ success: boolean }>
 }
 
 export async function getConflictDetails(directory: string): Promise<MergeConflictDetails> {
-  const response = await fetch(buildUrl(`${API_BASE}/conflict-details`, directory));
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/conflict-details`, directory));
   if (!response.ok) {
     throw new Error(`Failed to get conflict details: ${response.statusText}`);
   }
@@ -1064,7 +1034,7 @@ export async function validateWorktreeDirectory(
   resolvedWorktreeRoot: string | null;
   resolvedCwd: string | null;
 }> {
-  const response = await fetch(`${API_BASE}/validate-directory`, {
+  const response = await runtimeFetch(`${API_BASE}/validate-directory`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ directory, worktreeRoot }),
@@ -1087,7 +1057,7 @@ export async function canonicalizeWorktreeState(
   degraded: boolean;
   attentionReason?: 'merge' | 'rebase' | 'cherry-pick' | 'revert' | 'bisect' | null;
 }> {
-  const response = await fetch(`${API_BASE}/canonicalize-worktree-state`, {
+  const response = await runtimeFetch(`${API_BASE}/canonicalize-worktree-state`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ directory }),

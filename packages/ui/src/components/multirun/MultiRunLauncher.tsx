@@ -26,7 +26,7 @@ import { Icon } from "@/components/icon/Icon";
 import { isDesktopShell } from '@/lib/desktop';
 import { useTabletStandalonePwaRuntime } from '@/lib/device';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
-import { PROJECT_ICON_MAP, PROJECT_COLOR_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
+import { PROJECT_ICON_MAP, PROJECT_COLOR_MAP, ProjectIconImage } from '@/lib/projectMeta';
 import type { ProjectEntry } from '@/lib/api/types';
 import { startDesktopWindowDrag } from '@/lib/desktopNative';
 import { useI18n } from '@/lib/i18n';
@@ -145,30 +145,32 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
 
   const renderProjectLabel = React.useCallback((project: ProjectEntry) => {
     const displayLabel = project.label?.trim() || formatDirectoryName(project.path, homeDirectory);
-    const imageUrl = getProjectIconImageUrl(
-      { id: project.id, iconImage: project.iconImage ?? null },
-      {
-        themeVariant: currentTheme.metadata.variant,
-        iconColor: currentTheme.colors.surface.foreground,
-      },
-    );
     const projectIconName = project.icon ? PROJECT_ICON_MAP[project.icon] : null;
     const iconColor = project.color ? PROJECT_COLOR_MAP[project.color] : undefined;
+    const fallbackIcon = projectIconName ? (
+      <Icon name={projectIconName} className="h-3.5 w-3.5 shrink-0" style={iconColor ? { color: iconColor } : undefined} />
+    ) : (
+      <Icon name="folder" className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80"  style={iconColor ? { color: iconColor } : undefined}/>
+    );
 
     return (
       <span className="inline-flex min-w-0 items-center gap-1.5">
-        {imageUrl ? (
+        {project.iconImage ? (
           <span
             className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center overflow-hidden rounded-[3px]"
             style={project.iconBackground ? { backgroundColor: project.iconBackground } : undefined}
           >
-            <img src={imageUrl} alt="" className="h-full w-full object-contain" draggable={false} />
+            <ProjectIconImage
+              project={{ id: project.id, iconImage: project.iconImage ?? null }}
+              options={{
+                themeVariant: currentTheme.metadata.variant,
+                iconColor: currentTheme.colors.surface.foreground,
+              }}
+              className="h-full w-full object-contain"
+              fallback={fallbackIcon}
+            />
           </span>
-        ) : projectIconName ? (
-          <Icon name={projectIconName} className="h-3.5 w-3.5 shrink-0" style={iconColor ? { color: iconColor } : undefined} />
-        ) : (
-          <Icon name="folder" className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80"  style={iconColor ? { color: iconColor } : undefined}/>
-        )}
+        ) : fallbackIcon}
         <span className="truncate">{displayLabel}</span>
       </span>
     );

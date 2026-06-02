@@ -142,10 +142,8 @@ type ChatViewportProps = {
     stickyUserHeader: boolean;
     scrollRef: React.RefObject<HTMLDivElement | null>;
     messageListRef: React.RefObject<MessageListHandle | null>;
-    turnStart: number;
     pendingRevealWork: boolean;
     renderedMessages: SessionMessageRecord[];
-    hasMoreAboveTurns: boolean;
     isLoadingOlder: boolean;
     sessionIsWorking: boolean;
     streamingMessageId: string | null;
@@ -158,7 +156,6 @@ type ChatViewportProps = {
     } | null;
     handleMessageContentChange: (reason?: ContentChangeReason) => void;
     getAnimationHandlers: (messageId: string) => AnimationHandlers;
-    handleLoadOlder: () => void;
     handleHistoryScroll: () => void;
     scrollToBottom: () => void;
     sessionQuestions: QuestionRequest[];
@@ -173,10 +170,8 @@ const ChatViewport = React.memo(({
     stickyUserHeader,
     scrollRef,
     messageListRef,
-    turnStart,
     pendingRevealWork,
     renderedMessages,
-    hasMoreAboveTurns,
     isLoadingOlder,
     sessionIsWorking,
     streamingMessageId,
@@ -184,7 +179,6 @@ const ChatViewport = React.memo(({
     retryOverlay,
     handleMessageContentChange,
     getAnimationHandlers,
-    handleLoadOlder,
     handleHistoryScroll,
     scrollToBottom,
     sessionQuestions,
@@ -230,7 +224,6 @@ const ChatViewport = React.memo(({
                         <MessageList
                             ref={messageListRef}
                             sessionKey={currentSessionId}
-                            turnStart={turnStart}
                             disableStaging={pendingRevealWork}
                             messages={renderedMessages}
                             sessionIsWorking={sessionIsWorking}
@@ -239,9 +232,7 @@ const ChatViewport = React.memo(({
                             retryOverlay={retryOverlay}
                             onMessageContentChange={handleMessageContentChange}
                             getAnimationHandlers={getAnimationHandlers}
-                            hasMoreAbove={hasMoreAboveTurns}
                             isLoadingOlder={isLoadingOlder}
-                            onLoadOlder={handleLoadOlder}
                             scrollToBottom={scrollToBottom}
                             scrollRef={scrollRef}
                         />
@@ -274,10 +265,8 @@ const ChatViewport = React.memo(({
         && prev.stickyUserHeader === next.stickyUserHeader
         && prev.scrollRef === next.scrollRef
         && prev.messageListRef === next.messageListRef
-        && prev.turnStart === next.turnStart
         && prev.pendingRevealWork === next.pendingRevealWork
         && prev.renderedMessages === next.renderedMessages
-        && prev.hasMoreAboveTurns === next.hasMoreAboveTurns
         && prev.isLoadingOlder === next.isLoadingOlder
         && prev.sessionIsWorking === next.sessionIsWorking
         && prev.streamingMessageId === next.streamingMessageId
@@ -285,7 +274,6 @@ const ChatViewport = React.memo(({
         && prev.retryOverlay === next.retryOverlay
         && prev.handleMessageContentChange === next.handleMessageContentChange
         && prev.getAnimationHandlers === next.getAnimationHandlers
-        && prev.handleLoadOlder === next.handleLoadOlder
         && prev.handleHistoryScroll === next.handleHistoryScroll
         && prev.scrollToBottom === next.scrollToBottom
         && prev.sessionQuestions === next.sessionQuestions
@@ -645,8 +633,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         isPinned,
         showScrollButton,
     });
-    const { loadEarlier } = timelineController;
-
     const resumeToLatestInstant = React.useCallback(() => {
         goToBottom('instant');
     }, [goToBottom]);
@@ -661,10 +647,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         }
         handleMessageContentChange('permission');
     }, [handleMessageContentChange, sessionPermissions, sessionQuestions]);
-
-    const handleLoadOlder = React.useCallback(() => {
-        void loadEarlier({ userInitiated: true });
-    }, [loadEarlier]);
 
     const navigation = useChatTurnNavigation({
         sessionId: currentSessionId,
@@ -957,10 +939,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 stickyUserHeader={stickyUserHeader}
                 scrollRef={scrollRef}
                 messageListRef={messageListRef}
-                turnStart={timelineController.turnStart}
                 pendingRevealWork={timelineController.pendingRevealWork}
                 renderedMessages={timelineController.renderedMessages}
-                hasMoreAboveTurns={timelineController.historySignals.hasMoreAboveTurns}
                 isLoadingOlder={timelineController.isLoadingOlder}
                 sessionIsWorking={sessionIsWorking}
                 streamingMessageId={streamingMessageId}
@@ -968,7 +948,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 retryOverlay={retryOverlay}
                 handleMessageContentChange={handleMessageContentChange}
                 getAnimationHandlers={getAnimationHandlers}
-                handleLoadOlder={handleLoadOlder}
                 handleHistoryScroll={timelineController.handleHistoryScroll}
                 scrollToBottom={resumeToLatestInstant}
                 sessionQuestions={sessionQuestions}

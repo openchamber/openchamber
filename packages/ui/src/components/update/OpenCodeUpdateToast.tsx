@@ -4,6 +4,7 @@ import { toast } from '@/components/ui/toast';
 import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getSafeStorage } from '@/stores/utils/safeStorage';
 import {
   resolveOpenCodeUpdateVersion,
@@ -51,7 +52,7 @@ export const OpenCodeUpdateToast: React.FC = () => {
     });
 
     try {
-      const response = await fetch('/api/opencode/upgrade', {
+      const response = await runtimeFetch('/api/opencode/upgrade', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -134,7 +135,7 @@ export const OpenCodeUpdateToast: React.FC = () => {
 
     const checkForUpdate = async (attempt: number) => {
       try {
-        const response = await fetch('/api/opencode/upgrade-status', { headers: { Accept: 'application/json' } });
+        const response = await runtimeFetch('/api/opencode/upgrade-status', { headers: { Accept: 'application/json' } });
         if (!response.ok) throw new Error(response.statusText || 'OpenCode upgrade status check failed');
         const status = await response.json().catch(() => null) as OpenCodeUpgradeStatusLike | null;
         const version = resolveOpenCodeUpgradeStatusVersion(status);

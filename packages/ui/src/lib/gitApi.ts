@@ -1,12 +1,11 @@
 
-
-import type { RuntimeAPIs } from './api/types';
 import * as gitHttp from './gitApiHttp';
 import { opencodeClient } from './opencode/client';
 import { renderMagicPrompt } from './magicPrompts';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useContextStore } from '@/stores/contextStore';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 
 export type {
   GitStatus,
@@ -39,17 +38,8 @@ export type {
   CommitFileDiffResponse,
 } from './api/types';
 
-declare global {
-  interface Window {
-    __OPENCHAMBER_RUNTIME_APIS__?: RuntimeAPIs;
-  }
-}
-
 const getRuntimeGit = () => {
-  if (typeof window !== 'undefined' && window.__OPENCHAMBER_RUNTIME_APIS__?.git) {
-    return window.__OPENCHAMBER_RUNTIME_APIS__.git;
-  }
-  return null;
+  return getRegisteredRuntimeAPIs()?.git ?? null;
 };
 
 const requestChatForceScrollBottom = (sessionId: string) => {

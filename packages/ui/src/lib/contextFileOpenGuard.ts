@@ -5,6 +5,7 @@ import { formatMessage, useI18nStore } from '@/lib/i18n/store';
 
 const t = (key: Parameters<typeof formatMessage>[1], params?: Parameters<typeof formatMessage>[2]) =>
   formatMessage(useI18nStore.getState().dictionary, key, params);
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 export type ContextFileOpenFailureReason = 'too-large' | 'missing' | 'unreadable';
 
@@ -36,7 +37,7 @@ const readFileContent = async (files: FilesAPI, path: string): Promise<string> =
   }
 
   const params = new URLSearchParams({ path, allowOutsideWorkspace: 'true', optional: 'true' });
-  const response = await fetch(`/api/fs/read?${params.toString()}`, {
+  const response = await runtimeFetch(`/api/fs/read?${params.toString()}`, {
     // Avoid conditional requests (304 + empty body).
     cache: 'no-store',
   });

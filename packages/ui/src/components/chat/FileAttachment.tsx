@@ -6,7 +6,7 @@ import { toast } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { openExternalUrl } from '@/lib/url';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
-import { useIsVSCodeRuntime } from '@/hooks/useRuntimeAPIs';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
@@ -19,7 +19,8 @@ export const FileAttachmentButton = memo(() => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const addAttachedFile = useInputStore((state) => state.addAttachedFile);
   const isMobile = useUIStore((state) => state.isMobile);
-  const isVSCodeRuntime = useIsVSCodeRuntime();
+  const runtimeApis = useRuntimeAPIs();
+  const isVSCodeRuntime = runtimeApis.runtime.isVSCode;
   const buttonSizeClass = isMobile ? 'h-9 w-9' : 'h-7 w-7';
   const iconSizeClass = isMobile ? 'h-5 w-5' : 'h-[18px] w-[18px]';
 
@@ -47,8 +48,10 @@ export const FileAttachmentButton = memo(() => {
 
   const handleVSCodePick = async () => {
     try {
-      const response = await fetch('/api/vscode/pick-files');
-      const data = await response.json();
+      const data = (await runtimeApis.vscode?.pickFiles?.()) as {
+        files?: Array<{ name: string; mimeType?: string; dataUrl?: string }>;
+        skipped?: Array<{ name?: string; reason?: string }>;
+      } | undefined;
       const picked = Array.isArray(data?.files) ? data.files : [];
       const skipped = Array.isArray(data?.skipped) ? data.skipped : [];
 
@@ -449,7 +452,7 @@ export const ActiveEditorFileSuggestion = memo(() => {
   const attachedFiles = useInputStore((s) => s.attachedFiles)
   const addVSCodeFileAttachment = useInputStore((s) => s.addVSCodeFileAttachment)
   const addVSCodeSelectionAttachment = useInputStore((s) => s.addVSCodeSelectionAttachment)
-  const isVSCodeRuntime = useIsVSCodeRuntime();
+  const isVSCodeRuntime = useRuntimeAPIs().runtime.isVSCode;
 
   if (!isVSCodeRuntime || !activeEditorFile) return null;
 

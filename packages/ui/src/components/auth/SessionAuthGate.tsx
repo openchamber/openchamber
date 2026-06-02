@@ -11,6 +11,9 @@ import { DesktopHostSwitcherInline } from '@/components/desktop/DesktopHostSwitc
 import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
+import { runtimeFetch } from '@/lib/runtime-fetch';
+import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { desktopHostsGet, desktopHostsSet, getDesktopHostApiUrl, normalizeHostUrl } from '@/lib/desktopHosts';
 import {
   authenticateWithPasskey,
   cancelPasskeyCeremony,
@@ -23,9 +26,47 @@ import {
 
 const STATUS_CHECK_ENDPOINT = '/auth/session';
 const TRUST_DEVICE_STORAGE_KEY = 'openchamber.uiAuth.trustDevice';
+const LOCAL_DESKTOP_CLIENT_KIND = 'desktop-local';
+const LOCAL_DESKTOP_CLIENT_DEDUPE_KEY = 'desktop-local';
+
+const readLocalOrigin = (): string => {
+  if (typeof window === 'undefined') return '';
+  const injected = (window as typeof window & { __OPENCHAMBER_LOCAL_ORIGIN__?: string }).__OPENCHAMBER_LOCAL_ORIGIN__;
+  return typeof injected === 'string' ? injected.trim() : '';
+};
+
+const sameOrigin = (left: string, right: string): boolean => {
+  const normalizedLeft = normalizeHostUrl(left);
+  const normalizedRight = normalizeHostUrl(right);
+  if (!normalizedLeft || !normalizedRight) return false;
+  try {
+    return new URL(normalizedLeft).origin === new URL(normalizedRight).origin;
+  } catch {
+    return false;
+  }
+};
+
+const shouldIssueDesktopClientToken = (): boolean => {
+  return isDesktopShell();
+};
+
+const isLocalDesktopRuntime = (): boolean => {
+  if (!isDesktopShell()) return false;
+  const apiBaseUrl = getRuntimeApiBaseUrl();
+  const localOrigin = readLocalOrigin();
+  return Boolean(localOrigin && sameOrigin(localOrigin, apiBaseUrl));
+};
+
+const desktopClientAuthMetadata = (): { clientKind?: string; dedupeKey?: string } => {
+  if (!isLocalDesktopRuntime()) return {};
+  return {
+    clientKind: LOCAL_DESKTOP_CLIENT_KIND,
+    dedupeKey: LOCAL_DESKTOP_CLIENT_DEDUPE_KEY,
+  };
+};
 
 const fetchSessionStatus = async (): Promise<Response> => {
-  const response = await fetch(STATUS_CHECK_ENDPOINT, {
+  const response = await runtimeFetch(STATUS_CHECK_ENDPOINT, {
     method: 'GET',
     credentials: 'include',
     headers: {
@@ -43,16 +84,104 @@ const readStoredTrustDevice = (): boolean => {
 };
 
 const submitPassword = async (password: string, trustDevice: boolean): Promise<Response> => {
-  const response = await fetch(STATUS_CHECK_ENDPOINT, {
+  const issueClientToken = shouldIssueDesktopClientToken();
+  const response = await runtimeFetch(STATUS_CHECK_ENDPOINT, {
     method: 'POST',
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json',
     },
-    body: JSON.stringify({ password, trustDevice }),
+    body: JSON.stringify({
+      password,
+      trustDevice,
+      issueClientToken,
+      clientLabel: 'OpenChamber Desktop',
+      ...desktopClientAuthMetadata(),
+    }),
   });
   return response;
+};
+
+const issueDesktopClientToken = async (): Promise<string> => {
+  if (!isDesktopShell()) {
+    return '';
+  }
+
+  const response = await runtimeFetch('/api/client-auth/clients', {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({ label: 'OpenChamber Desktop', ...desktopClientAuthMetadata() }),
+  }).catch(() => null);
+  if (!response?.ok) {
+    return '';
+  }
+
+  const payload = await response.json().catch(() => null) as { token?: unknown } | null;
+  return typeof payload?.token === 'string' ? payload.token.trim() : '';
+};
+
+const issueDesktopClientTokenViaShell = async (password: string, trustDevice: boolean): Promise<string> => {
+  if (!isDesktopShell() || typeof window === 'undefined') {
+    return '';
+  }
+  const invoke = (window as unknown as { __TAURI__?: { core?: { invoke?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> } } }).__TAURI__?.core?.invoke;
+  if (typeof invoke !== 'function') {
+    return '';
+  }
+  const response = await invoke('desktop_remote_password_login', {
+    url: getRuntimeApiBaseUrl(),
+    password,
+    trustDevice,
+  }).catch(() => null);
+  if (!response || typeof response !== 'object') {
+    return '';
+  }
+  const token = (response as { token?: unknown }).token;
+  return typeof token === 'string' ? token.trim() : '';
+};
+
+const persistDesktopClientToken = async (apiBaseUrl: string, clientToken: string): Promise<void> => {
+  if (!isDesktopShell() || !clientToken) return;
+  const cfg = await desktopHostsGet().catch(() => null);
+  if (!cfg) return;
+  if (cfg.localOrigin && sameOrigin(cfg.localOrigin, apiBaseUrl)) {
+    await desktopHostsSet({
+      hosts: cfg.hosts,
+      defaultHostId: cfg.defaultHostId,
+      initialHostChoiceCompleted: cfg.initialHostChoiceCompleted,
+      localClientToken: clientToken,
+    }).catch(() => undefined);
+    return;
+  }
+  let changed = false;
+  const hosts = cfg.hosts.map((host) => {
+    if (!sameOrigin(getDesktopHostApiUrl(host), apiBaseUrl)) {
+      return host;
+    }
+    if (host.clientToken === clientToken) {
+      return host;
+    }
+    changed = true;
+    return { ...host, clientToken };
+  });
+  if (!changed) return;
+  await desktopHostsSet({
+    hosts,
+    defaultHostId: cfg.defaultHostId,
+    initialHostChoiceCompleted: cfg.initialHostChoiceCompleted,
+  }).catch(() => undefined);
+};
+
+const applyDesktopClientToken = async (clientToken: string): Promise<void> => {
+  if (!clientToken) return;
+  const apiBaseUrl = getRuntimeApiBaseUrl();
+  await persistDesktopClientToken(apiBaseUrl, clientToken);
+  switchRuntimeEndpoint({ apiBaseUrl, clientToken, runtimeKey: getRuntimeKey() });
 };
 
 const AuthShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -269,6 +398,21 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
   }, [checkStatus, skipAuth]);
 
   React.useEffect(() => {
+    if (skipAuth) {
+      return;
+    }
+
+    return subscribeRuntimeEndpointChanged(() => {
+      setPassword('');
+      setErrorMessage('');
+      setRetryAfter(undefined);
+      setIsTunnelLocked(false);
+      setState('pending');
+      void checkStatus();
+    });
+  }, [checkStatus, skipAuth]);
+
+  React.useEffect(() => {
     if (!skipAuth && state === 'locked') {
       hasResyncedRef.current = false;
     }
@@ -336,8 +480,18 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
     try {
       const response = await submitPassword(password, trustDevice);
       if (response.ok) {
+        const payload = await response.json().catch(() => null) as { clientToken?: unknown } | null;
+        const shouldUseClientToken = shouldIssueDesktopClientToken();
+        const clientToken = shouldUseClientToken
+          ? (typeof payload?.clientToken === 'string' && payload.clientToken.trim()
+            ? payload.clientToken.trim()
+            : await issueDesktopClientTokenViaShell(password, trustDevice) || await issueDesktopClientToken())
+          : '';
         setPassword('');
         setIsTunnelLocked(false);
+        if (clientToken) {
+          await applyDesktopClientToken(clientToken);
+        }
         if (enrollPasskey && supportsPasskeys) {
           try {
             await registerPasskeyForCurrentSession();
@@ -402,7 +556,17 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
     setErrorMessage('');
 
     try {
-      await authenticateWithPasskey(trustDevice);
+      const payload = await authenticateWithPasskey(trustDevice, {
+        issueClientToken: shouldIssueDesktopClientToken(),
+        clientLabel: 'OpenChamber Desktop',
+        ...desktopClientAuthMetadata(),
+      }) as { clientToken?: unknown } | null;
+      const clientToken = shouldIssueDesktopClientToken() && typeof payload?.clientToken === 'string' && payload.clientToken.trim()
+        ? payload.clientToken.trim()
+        : '';
+      if (clientToken) {
+        await applyDesktopClientToken(clientToken);
+      }
 
       setPassword('');
       setState('authenticated');

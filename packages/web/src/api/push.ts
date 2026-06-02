@@ -1,8 +1,9 @@
 import type { PushAPI, PushSubscribePayload, PushUnsubscribePayload } from '@openchamber/ui/lib/api/types';
+import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
 
-const fetchJson = async <T>(input: RequestInfo | URL, init?: RequestInit): Promise<T | null> => {
+const fetchJson = async <T>(input: string | URL | Request, init?: RequestInit): Promise<T | null> => {
   try {
-    const res = await fetch(input, {
+    const res = await runtimeFetch(input, {
       ...init,
       credentials: 'include',
       headers: {

@@ -17,6 +17,10 @@ const EXPECTED_ROUTING: Record<RecoveryVariant, Record<RecoveryPrimaryAction, Re
     'use-local': 'switch-default-to-local',
     'use-remote': 'remote-form',
   },
+  'remote-incompatible': {
+    'use-local': 'switch-default-to-local',
+    'use-remote': 'remote-form',
+  },
   'remote-wrong-service': {
     'use-local': 'switch-default-to-local',
     'use-remote': 'remote-form',

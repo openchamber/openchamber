@@ -32,6 +32,7 @@ import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
+import { UpdateDialog } from '@/components/ui/UpdateDialog';
 import { useDeviceInfo, useTabletStandalonePwaRuntime } from '@/lib/device';
 import { cn, hasModifier } from '@/lib/utils';
 import { McpDropdownContent } from '@/components/mcp/McpDropdown';
@@ -62,11 +63,14 @@ import { forceKillTerminal } from '@/lib/terminalApi';
 import { useTerminalStore } from '@/stores/useTerminalStore';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
-import { canUseElectronDesktopIPC, invokeDesktop, isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag } from '@/lib/desktop';
-import { desktopHostsGet, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
+import { canUseElectronDesktopIPC, invokeDesktop, isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag, type UpdateInfo } from '@/lib/desktop';
+import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { resolveSessionDiffStats } from '@/components/session/sidebar/utils';
 import { Icon } from "@/components/icon/Icon";
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
+import { runtimeFetch } from '@/lib/runtime-fetch';
+import { getRuntimeBearerTokenSync } from '@/lib/runtime-auth';
+import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import type { Session } from '@opencode-ai/sdk/v2/client';
 import type { IconName } from "@/components/icon/icons";
 
@@ -323,6 +327,7 @@ type DesktopServicesMenuProps = {
   isDesktopApp: boolean;
   currentInstanceLabel: string;
   compactCurrentInstanceLabel: string;
+  currentInstanceIsLocal: boolean;
   isDesktopServicesOpen: boolean;
   setIsDesktopServicesOpen: React.Dispatch<React.SetStateAction<boolean>>;
   refreshCurrentInstanceLabel: () => Promise<void>;
@@ -346,6 +351,10 @@ type DesktopServicesMenuProps = {
   showDevShutdown: boolean;
   isDevShutdownInFlight: boolean;
   onDevShutdown: () => Promise<void>;
+  remoteUpdateInfo: UpdateInfo | null;
+  remoteUpdateChecking: boolean;
+  remoteUpdateError: string | null;
+  onOpenRemoteUpdate: () => void;
   showPredValues: boolean;
 };
 
@@ -353,6 +362,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
   isDesktopApp,
   currentInstanceLabel,
   compactCurrentInstanceLabel,
+  currentInstanceIsLocal,
   isDesktopServicesOpen,
   setIsDesktopServicesOpen,
   refreshCurrentInstanceLabel,
@@ -376,6 +386,10 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
   showDevShutdown,
   isDevShutdownInFlight,
   onDevShutdown,
+  remoteUpdateInfo,
+  remoteUpdateChecking,
+  remoteUpdateError,
+  onOpenRemoteUpdate,
   showPredValues,
 }: DesktopServicesMenuProps) {
   const { t } = useI18n();
@@ -453,12 +467,39 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
         </div>
 
         {isDesktopApp && desktopServicesTab === 'instance' ? (
-          <DesktopHostSwitcherDialog
-            embedded
-            open={isDesktopServicesOpen && desktopServicesTab === 'instance'}
-            onOpenChange={() => {}}
-            onHostSwitched={() => setIsDesktopServicesOpen(false)}
-          />
+          <div>
+            {!currentInstanceIsLocal ? (
+              <div className="border-b border-[var(--interactive-border)] px-4 py-2.5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="typography-ui-label font-medium text-foreground">{t('header.services.remoteUpdate.title')}</div>
+                    <div className="typography-micro text-muted-foreground">
+                      {remoteUpdateInfo?.available
+                        ? t('header.services.remoteUpdate.available', { version: remoteUpdateInfo.version || '' })
+                        : remoteUpdateChecking
+                          ? t('header.services.remoteUpdate.checking')
+                          : remoteUpdateError || t('header.services.remoteUpdate.upToDate')}
+                    </div>
+                  </div>
+                  {remoteUpdateInfo?.available ? (
+                    <button
+                      type="button"
+                      className="shrink-0 rounded-md bg-[var(--primary-base)] px-3 py-1.5 typography-ui-label font-medium text-[var(--primary-foreground)] hover:opacity-90"
+                      onClick={onOpenRemoteUpdate}
+                    >
+                      {t('header.services.remoteUpdate.actions.open')}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+            <DesktopHostSwitcherDialog
+              embedded
+              open={isDesktopServicesOpen && desktopServicesTab === 'instance'}
+              onOpenChange={() => {}}
+              onHostSwitched={() => setIsDesktopServicesOpen(false)}
+            />
+          </div>
         ) : null}
 
         {desktopServicesTab === 'mcp' ? (
@@ -889,6 +930,11 @@ export const Header: React.FC<HeaderProps> = ({
   const [isDesktopServicesOpen, setIsDesktopServicesOpen] = React.useState(false);
   const [isUsageRefreshSpinning, setIsUsageRefreshSpinning] = React.useState(false);
   const [currentInstanceLabel, setCurrentInstanceLabel] = React.useState('Local');
+  const [currentInstanceIsLocal, setCurrentInstanceIsLocal] = React.useState(true);
+  const [remoteUpdateDialogOpen, setRemoteUpdateDialogOpen] = React.useState(false);
+  const [remoteUpdateInfo, setRemoteUpdateInfo] = React.useState<UpdateInfo | null>(null);
+  const [remoteUpdateChecking, setRemoteUpdateChecking] = React.useState(false);
+  const [remoteUpdateError, setRemoteUpdateError] = React.useState<string | null>(null);
   const compactCurrentInstanceLabel = React.useMemo(() => formatCompactHeaderLabel(currentInstanceLabel), [currentInstanceLabel]);
   const [desktopServicesTab, setDesktopServicesTab] = React.useState<'instance' | 'usage' | 'mcp'>(
     isDesktopApp ? 'instance' : 'usage'
@@ -912,17 +958,25 @@ export const Header: React.FC<HeaderProps> = ({
     }
 
     try {
-      const cfg = await desktopHostsGet();
-      const currentHref = window.location.href;
-      const localOrigin = window.__OPENCHAMBER_LOCAL_ORIGIN__ || window.location.origin;
-
-      if (locationMatchesHost(currentHref, localOrigin)) {
+      if (isDesktopLocalOriginActive()) {
         setCurrentInstanceLabel('Local');
+        setCurrentInstanceIsLocal(true);
+        return;
+      }
+      setCurrentInstanceIsLocal(false);
+
+      const cfg = await desktopHostsGet();
+      const localOrigin = window.__OPENCHAMBER_LOCAL_ORIGIN__ || window.location.origin;
+      const runtimeApiBaseUrl = getRuntimeApiBaseUrl();
+
+      if (runtimeApiBaseUrl && locationMatchesHost(runtimeApiBaseUrl, localOrigin)) {
+        setCurrentInstanceLabel('Local');
+        setCurrentInstanceIsLocal(true);
         return;
       }
 
       const match = cfg.hosts.find((host) => {
-        return locationMatchesHost(currentHref, host.url);
+        return runtimeApiBaseUrl ? locationMatchesHost(runtimeApiBaseUrl, getDesktopHostApiUrl(host)) : false;
       });
 
       if (match?.label?.trim()) {
@@ -933,12 +987,98 @@ export const Header: React.FC<HeaderProps> = ({
       setCurrentInstanceLabel('Instance');
     } catch {
       setCurrentInstanceLabel('Local');
+      setCurrentInstanceIsLocal(true);
     }
   }, [isDesktopApp]);
 
   useEffect(() => {
     void refreshCurrentInstanceLabel();
   }, [refreshCurrentInstanceLabel]);
+
+  const checkRemoteInstanceUpdate = React.useCallback(async () => {
+    if (currentInstanceIsLocal) {
+      setRemoteUpdateInfo(null);
+      setRemoteUpdateError(null);
+      return;
+    }
+
+    setRemoteUpdateChecking(true);
+    setRemoteUpdateError(null);
+    try {
+      const params = new URLSearchParams({ appType: 'web', instanceMode: 'remote' });
+      const response = await runtimeFetch(`/api/openchamber/update-check?${params.toString()}`, {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) {
+        throw new Error(`Server responded with ${response.status}`);
+      }
+      const data = await response.json();
+      setRemoteUpdateInfo({
+        available: data.available ?? false,
+        version: data.version,
+        currentVersion: data.currentVersion ?? 'unknown',
+        body: data.body,
+        nextSuggestedCheckInSec: typeof data.nextSuggestedCheckInSec === 'number' ? data.nextSuggestedCheckInSec : undefined,
+        packageManager: data.packageManager,
+        updateCommand: data.updateCommand,
+      });
+    } catch (error) {
+      setRemoteUpdateInfo(null);
+      setRemoteUpdateError(error instanceof Error ? error.message : t('header.services.remoteUpdate.error'));
+    } finally {
+      setRemoteUpdateChecking(false);
+    }
+  }, [currentInstanceIsLocal, t]);
+
+  React.useEffect(() => {
+    setRemoteUpdateInfo(null);
+    setRemoteUpdateError(null);
+    setRemoteUpdateDialogOpen(false);
+  }, [currentInstanceIsLocal, currentInstanceLabel]);
+
+  React.useEffect(() => {
+    if (!isDesktopApp || currentInstanceIsLocal) {
+      return;
+    }
+
+    const initialDelayMs = 3000;
+    const intervalMs = 60 * 60 * 1000;
+    let disposed = false;
+    let timer: number | null = null;
+
+    const schedule = (delayMs: number) => {
+      timer = window.setTimeout(() => {
+        if (disposed || (typeof document !== 'undefined' && document.visibilityState !== 'visible')) {
+          schedule(intervalMs);
+          return;
+        }
+        void checkRemoteInstanceUpdate().finally(() => {
+          if (!disposed) {
+            schedule(intervalMs);
+          }
+        });
+      }, delayMs);
+    };
+
+    schedule(initialDelayMs);
+
+    return () => {
+      disposed = true;
+      if (timer !== null) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [checkRemoteInstanceUpdate, currentInstanceIsLocal, currentInstanceLabel, isDesktopApp]);
+
+  const openRemoteInstanceUpdate = React.useCallback(() => {
+    if (remoteUpdateInfo?.available) {
+      setRemoteUpdateDialogOpen(true);
+      return;
+    }
+    void checkRemoteInstanceUpdate();
+  }, [checkRemoteInstanceUpdate, remoteUpdateInfo?.available]);
+
   useQuotaAutoRefresh();
   const selectedModels = useQuotaStore((state) => state.selectedModels);
   const expandedFamilies = useQuotaStore((state) => state.expandedFamilies);
@@ -1300,7 +1440,7 @@ export const Header: React.FC<HeaderProps> = ({
       const payload = runtimeApis.github
         ? await runtimeApis.github.authActivate(accountId)
         : await (async () => {
-          const response = await fetch('/api/github/auth/activate', {
+          const response = await runtimeFetch('/api/github/auth/activate', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -1366,6 +1506,8 @@ export const Header: React.FC<HeaderProps> = ({
     void invokeDesktop('desktop_open_draft_mini_chat_window', {
       directory: normalize(openDirectory || activeProject?.path || ''),
       projectId: activeProject?.id ?? null,
+      apiBaseUrl: getRuntimeApiBaseUrl(),
+      clientToken: getRuntimeBearerTokenSync(),
     }).catch((error) => {
       console.warn('[header] failed to open draft mini chat window', error);
     });
@@ -1383,6 +1525,8 @@ export const Header: React.FC<HeaderProps> = ({
     void invokeDesktop('desktop_open_session_mini_chat_window', {
       sessionId: currentSessionId,
       directory: normalize(openDirectory || activeProject?.path || ''),
+      apiBaseUrl: getRuntimeApiBaseUrl(),
+      clientToken: getRuntimeBearerTokenSync(),
     }).catch((error) => {
       console.warn('[header] failed to open session mini chat window', error);
     });
@@ -1740,7 +1884,7 @@ export const Header: React.FC<HeaderProps> = ({
       }
 
       try {
-        const devRes = await fetch('/api/system/dev-shutdown', {
+        const devRes = await runtimeFetch('/api/system/dev-shutdown', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ previewUrls }),
@@ -1748,7 +1892,7 @@ export const Header: React.FC<HeaderProps> = ({
         if (devRes.ok) {
           shutdownRequested = true;
         } else {
-          const shutdownRes = await fetch('/api/system/shutdown', { method: 'POST' });
+          const shutdownRes = await runtimeFetch('/api/system/shutdown', { method: 'POST' });
           shutdownRequested = shutdownRes.ok;
         }
       } catch {
@@ -1929,6 +2073,7 @@ export const Header: React.FC<HeaderProps> = ({
         isDesktopApp={isDesktopApp}
         currentInstanceLabel={currentInstanceLabel}
         compactCurrentInstanceLabel={compactCurrentInstanceLabel}
+        currentInstanceIsLocal={currentInstanceIsLocal}
         isDesktopServicesOpen={isDesktopServicesOpen}
         setIsDesktopServicesOpen={setIsDesktopServicesOpen}
         refreshCurrentInstanceLabel={refreshCurrentInstanceLabel}
@@ -1953,6 +2098,10 @@ export const Header: React.FC<HeaderProps> = ({
         showDevShutdown={showDevShutdown}
         isDevShutdownInFlight={isDevShutdownInFlight}
         onDevShutdown={handleDevShutdown}
+        remoteUpdateInfo={remoteUpdateInfo}
+        remoteUpdateChecking={remoteUpdateChecking}
+        remoteUpdateError={remoteUpdateError}
+        onOpenRemoteUpdate={openRemoteInstanceUpdate}
       />
       <HeaderIconActionButton
         title={t('header.actions.terminalPanelWithShortcut', { shortcut: shortcutLabel('toggle_terminal') })}
@@ -2533,12 +2682,26 @@ export const Header: React.FC<HeaderProps> = ({
   );
 
   return (
-    <header
-      ref={headerRef}
-      className={headerClassName}
-      style={{ ['--padding-scale' as string]: '1' } as React.CSSProperties}
-    >
-      {isMobile ? renderMobile() : renderDesktop()}
-    </header>
+    <>
+      <header
+        ref={headerRef}
+        className={headerClassName}
+        style={{ ['--padding-scale' as string]: '1' } as React.CSSProperties}
+      >
+        {isMobile ? renderMobile() : renderDesktop()}
+      </header>
+      <UpdateDialog
+        open={remoteUpdateDialogOpen}
+        onOpenChange={setRemoteUpdateDialogOpen}
+        info={remoteUpdateInfo}
+        downloading={false}
+        downloaded={false}
+        progress={null}
+        error={remoteUpdateError}
+        onDownload={() => {}}
+        onRestart={() => {}}
+        runtimeType="web"
+      />
+    </>
   );
 };

@@ -51,6 +51,7 @@ export const createStartupPipelineRuntime = (dependencies) => {
       onTunnelReady,
       tunnelRuntimeContext,
       attachSignals,
+      apiOnly,
     } = options;
 
     const terminalRuntime = createTerminalRuntime({
@@ -88,7 +89,11 @@ export const createStartupPipelineRuntime = (dependencies) => {
     scheduleOpenCodeApiDetection();
     void bootstrapOpenCodeAtStartup();
 
-    staticRoutesRuntime.registerStaticRoutes(app);
+    if (apiOnly) {
+      staticRoutesRuntime.registerApiOnlyFallbackRoutes(app);
+    } else {
+      staticRoutesRuntime.registerStaticRoutes(app);
+    }
 
     const serverStartupRuntime = createServerStartupRuntime({
       process,

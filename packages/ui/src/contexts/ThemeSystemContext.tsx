@@ -20,6 +20,7 @@ import {
 } from '@/lib/theme/themes';
 import { ThemeSystemContext, type ThemeContextValue } from './theme-system-context';
 import type { VSCodeThemePayload } from '@/lib/theme/vscode/adapter';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 type ThemePreferences = {
   themeMode: ThemeMode;
@@ -283,7 +284,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
 
     setCustomThemesLoading(true);
     try {
-      const res = await fetch('/api/config/themes', {
+      const res = await runtimeFetch('/api/config/themes', {
         method: 'GET',
         credentials: isLocalDesktopOrigin ? 'omit' : 'include',
         headers: {

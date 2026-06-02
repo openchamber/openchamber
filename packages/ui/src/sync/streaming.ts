@@ -31,6 +31,13 @@ export const useStreamingStore = create<StreamingStore>()(() => ({
   messageStreamStates: new Map(),
 }))
 
+export function resetStreamingState() {
+  useStreamingStore.setState({
+    streamingMessageIds: new Map(),
+    messageStreamStates: new Map(),
+  })
+}
+
 /**
  * Called from the SyncBridge/flush handler when child store state changes.
  * Derives streaming state from session_status + messages.

@@ -391,7 +391,6 @@ const getNormalizedMessageForDisplay = (message: ChatMessageEntry): ChatMessageE
 
 interface MessageListProps {
     sessionKey: string;
-    turnStart: number;
     disableStaging?: boolean;
     messages: ChatMessageEntry[];
     sessionIsWorking?: boolean;
@@ -405,9 +404,7 @@ interface MessageListProps {
     } | null;
     onMessageContentChange: (reason?: ContentChangeReason) => void;
     getAnimationHandlers: (messageId: string) => AnimationHandlers;
-    hasMoreAbove: boolean;
     isLoadingOlder: boolean;
-    onLoadOlder: () => void;
     scrollToBottom?: () => void;
     scrollRef?: React.RefObject<HTMLDivElement | null>;
 }
@@ -1101,7 +1098,6 @@ StreamingTailContent.displayName = 'StreamingTailContent';
 
 const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({ 
     sessionKey,
-    turnStart,
     disableStaging = false,
     messages,
     sessionIsWorking = false,
@@ -1110,9 +1106,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     retryOverlay = null,
     onMessageContentChange,
     getAnimationHandlers,
-    hasMoreAbove,
     isLoadingOlder,
-    onLoadOlder,
     scrollToBottom,
     scrollRef,
 }, ref) => {
@@ -1128,7 +1122,6 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         animatedIds: Set<string>;
     }>({ sessionKey: undefined, previousOrder: [], animatedIds: new Set() });
     const stableGetAnimationHandlers = useStableEvent(getAnimationHandlers);
-    const stableOnLoadOlder = useStableEvent(onLoadOlder);
     const stableScrollToBottom = useStableEvent(() => {
         scrollToBottom?.();
     });
@@ -1675,24 +1668,6 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
 
     return (
         <div>
-                {(turnStart > 0 || hasMoreAbove) && (
-                    <div className="flex justify-center py-3">
-                        {isLoadingOlder ? (
-                            <span className="text-xs uppercase tracking-wide text-muted-foreground/80">
-                                Loading…
-                            </span>
-                        ) : (
-                            <button
-                                type="button"
-                                onClick={stableOnLoadOlder}
-                                className="text-xs uppercase tracking-wide text-muted-foreground/80 hover:text-foreground"
-                            >
-                                Load older messages
-                            </button>
-                        )}
-                    </div>
-                )}
-
                 <FadeInDisabledProvider disabled={disableFadeIn}>
                     <div className="relative w-full">
                         <StaticHistoryList

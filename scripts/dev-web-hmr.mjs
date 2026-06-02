@@ -172,9 +172,10 @@ const vite = run(
   { cwd: webRoot },
 );
 
+const lanAddresses = hmrHost === '0.0.0.0' || hmrHost === '::' ? getLanAddresses() : [];
+
 console.log(`[dev:web:hmr] UI with HMR: http://127.0.0.1:${uiPort}`);
 if (hmrHost === '0.0.0.0' || hmrHost === '::') {
-  const lanAddresses = getLanAddresses();
   if (lanAddresses.length > 0) {
     for (const address of lanAddresses) {
       console.log(`[dev:web:hmr] LAN/mobile UI: http://${address}:${uiPort}`);
