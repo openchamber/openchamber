@@ -152,7 +152,7 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
       const settings = await loadSettings();
       const catalogs = (Array.isArray(settings?.skillCatalogs) ? settings?.skillCatalogs : []) as SkillCatalogConfig[];
       const updated = catalogs.filter((c) => c.id !== selectedSourceId);
-      await updateDesktopSettings({ skillCatalogs: updated });
+      await updateDesktopSettings({ skillCatalogs: updated }, { immediate: true });
       await loadCatalog({ refresh: true });
       setIsRemoveCatalogDialogOpen(false);
     } finally {

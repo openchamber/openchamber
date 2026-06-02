@@ -1253,7 +1253,10 @@ const _flushSettingsUpdate = async (): Promise<void> => {
   }
 };
 
-export const updateDesktopSettings = async (changes: Partial<DesktopSettings>): Promise<void> => {
+export const updateDesktopSettings = async (
+  changes: Partial<DesktopSettings>,
+  opts?: { immediate?: boolean },
+): Promise<void> => {
   if (typeof window === 'undefined') {
     return;
   }
@@ -1263,6 +1266,11 @@ export const updateDesktopSettings = async (changes: Partial<DesktopSettings>): 
   if (_settingsFlushTimer) {
     clearTimeout(_settingsFlushTimer);
   }
+
+  if (opts?.immediate) {
+    return _flushSettingsUpdate();
+  }
+
   _settingsFlushTimer = setTimeout(() => void _flushSettingsUpdate(), SETTINGS_DEBOUNCE_MS);
 };
 
