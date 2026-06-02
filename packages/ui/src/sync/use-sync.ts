@@ -22,9 +22,10 @@ import {
 import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./materialization"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
-const MESSAGE_PAGE_SIZE = 150
-const VSCODE_MESSAGE_PAGE_SIZE = 30
-const MOBILE_MESSAGE_PAGE_SIZE = 30
+const INITIAL_MESSAGE_PAGE_SIZE = 150
+const VSCODE_INITIAL_MESSAGE_PAGE_SIZE = 30
+const MOBILE_INITIAL_MESSAGE_PAGE_SIZE = 30
+const HISTORY_MESSAGE_PAGE_SIZE = 200
 const VSCODE_INITIAL_PAGE_EXPANSION_LIMITS = [50, 80, 120] as const
 const MAX_SEEN_DIRS = 30
 const VSCODE_SESSION_CACHE_LIMIT = 4
@@ -53,12 +54,12 @@ const getEffectiveSessionCacheLimit = () => {
   if (isMobileSurfaceRuntime()) return MOBILE_SESSION_CACHE_LIMIT
   return SESSION_CACHE_LIMIT
 }
-const getEffectiveMessagePageSize = () => {
-  if (isVSCodeRuntime()) return VSCODE_MESSAGE_PAGE_SIZE
-  if (isMobileSurfaceRuntime()) return MOBILE_MESSAGE_PAGE_SIZE
-  return MESSAGE_PAGE_SIZE
+const getInitialMessagePageSize = () => {
+  if (isVSCodeRuntime()) return VSCODE_INITIAL_MESSAGE_PAGE_SIZE
+  if (isMobileSurfaceRuntime()) return MOBILE_INITIAL_MESSAGE_PAGE_SIZE
+  return INITIAL_MESSAGE_PAGE_SIZE
 }
-const getDefaultMeta = (): SyncMeta => ({ limit: getEffectiveMessagePageSize(), cursor: undefined, complete: false, loading: false })
+const getDefaultMeta = (): SyncMeta => ({ limit: getInitialMessagePageSize(), cursor: undefined, complete: false, loading: false })
 
 function getPrefetchMeta(directory: string, sessionID: string): SyncMeta | undefined {
   const info = getSessionPrefetch(directory, sessionID)
@@ -78,7 +79,7 @@ function sortParts(parts: Part[]) {
 function isHeavyConstrainedSessionCache(state: Pick<State, "message" | "part">, sessionID: string): boolean {
   const messages = state.message[sessionID]
   if (!messages || messages.length === 0) return false
-  return messages.length > getEffectiveMessagePageSize()
+  return messages.length > getInitialMessagePageSize()
 }
 
 function isUserMessage(message: Message): boolean {
@@ -291,7 +292,7 @@ export function useSync() {
       setMetaFor(sessionID, { loading: true })
 
       try {
-        const limit = options?.before ? getEffectiveMessagePageSize() : m.limit
+        const limit = options?.before ? HISTORY_MESSAGE_PAGE_SIZE : m.limit
         let page = await fetchMessages(sessionID, limit, options?.before)
 
         // Constrained shells keep the initial page small for switch performance. Some
@@ -385,7 +386,7 @@ export function useSync() {
         if (shouldSkipSessionPrefetch({
           hasMessages: cachedReady,
           info: prefetchInfo,
-          pageSize: getEffectiveMessagePageSize(),
+          pageSize: getInitialMessagePageSize(),
         })) return
       }
 

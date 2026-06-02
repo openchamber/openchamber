@@ -107,7 +107,7 @@ export const classifyPreviewResourceError = ({ tagName, url }) => {
   return 'report';
 };
 
-export const classifyPreviewNavigation = ({ url, currentUrl }) => {
+export const classifyPreviewNavigation = ({ url, currentUrl, targetOrigin }) => {
   let parsed;
   try {
     parsed = new URL(String(url || ''), currentUrl || 'http://localhost/');
@@ -136,8 +136,20 @@ export const classifyPreviewNavigation = ({ url, currentUrl }) => {
   }
 
   const path = parsed.pathname || '/';
+  const proxyMatch = current?.pathname?.match(/^(\/api\/preview\/proxy\/[a-f0-9]{16,64})(?:\/|$)/i);
   if (parsed.origin === current?.origin && path.startsWith('/api/preview/proxy/')) {
     return { action: 'allow', url: parsed.toString() };
+  }
+
+  if (proxyMatch && parsed.origin === current?.origin && path.startsWith('/') && !path.startsWith(proxyMatch[1])) {
+    try {
+      if (targetOrigin) {
+        const upstreamUrl = new URL(`${parsed.pathname}${parsed.search}${parsed.hash}`, targetOrigin);
+        return { action: 'proxy', url: upstreamUrl.toString() };
+      }
+    } catch {
+      // fall through to the default policy
+    }
   }
 
   const host = parsed.hostname;
@@ -149,7 +161,7 @@ export const classifyPreviewNavigation = ({ url, currentUrl }) => {
   return { action: 'external', url: parsed.toString() };
 };
 
-const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
+  const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
   if (window.__openchamberPreviewBridgeInstalled) return;
   window.__openchamberPreviewBridgeInstalled = true;
 
@@ -157,6 +169,7 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
   const VERSION = 1;
   const MAX_TEXT = 500;
   const MAX_ARG = 1000;
+  const TARGET_ORIGIN = typeof window.__openchamberPreviewTargetOrigin === 'string' ? window.__openchamberPreviewTargetOrigin : '';
   let inspectMode = false;
   let lastHoverKey = '';
   let pendingHover = null;
@@ -368,11 +381,18 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
       const parsed = new URL(value, window.location.href);
       if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return { action: 'allow', url: parsed.toString() };
       const current = new URL(window.location.href);
+      const proxyMatch = current.pathname.match(/^(\/api\/preview\/proxy\/[a-f0-9]{16,64})(?:\/|$)/i);
       if (parsed.origin === current.origin && parsed.pathname === current.pathname && parsed.search === current.search && parsed.hash) {
         return { action: 'allow', url: parsed.toString() };
       }
       if (parsed.origin === current.origin && parsed.pathname.startsWith('/api/preview/proxy/')) {
         return { action: 'allow', url: parsed.toString() };
+      }
+      if (proxyMatch && parsed.origin === current.origin && parsed.pathname.startsWith('/') && parsed.pathname.indexOf(proxyMatch[1]) !== 0 && TARGET_ORIGIN) {
+        try {
+          const upstreamUrl = new URL(parsed.pathname + parsed.search + parsed.hash, TARGET_ORIGIN);
+          return { action: 'proxy', url: upstreamUrl.toString() };
+        } catch {}
       }
       const host = parsed.hostname;
       const isLoopback = host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '::1' || host === '[::1]';
@@ -819,7 +839,44 @@ const buildCookie = ({
   return chunks.join('; ');
 };
 
-const normalizeLoopbackUrl = (rawUrl) => {
+// SSRF guard for the `allowExternal` path: refuse to proxy private, loopback and
+// reserved addresses (incl. cloud-metadata 169.254.169.254). Operates on the
+// WHATWG-normalized hostname, so decimal/hex/octal IPv4 forms are already canonical
+// dotted-decimal here. NOTE: this blocks IP *literals* only — a hostname that
+// resolves to a private IP (DNS rebinding) is not caught and would need
+// resolve-time IP pinning. Loopback for local preview goes through the non-external
+// path (allowExternal=false), which is unaffected.
+const isBlockedExternalHost = (hostname) => {
+  if (!hostname) return true;
+  let host = hostname.toLowerCase();
+  if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1);
+
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) return true;
+
+  const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (v4) {
+    const a = Number(v4[1]);
+    const b = Number(v4[2]);
+    if (a === 0 || a === 127 || a === 10) return true;          // this-host / loopback / private
+    if (a === 169 && b === 254) return true;                    // link-local incl. cloud metadata
+    if (a === 172 && b >= 16 && b <= 31) return true;           // private
+    if (a === 192 && b === 168) return true;                    // private
+    if (a === 100 && b >= 64 && b <= 127) return true;          // carrier-grade NAT
+    return false;
+  }
+
+  if (host.includes(':')) {
+    if (host === '::1' || host === '::') return true;           // loopback / unspecified
+    if (host.startsWith('fe80')) return true;                   // link-local
+    if (host.startsWith('fc') || host.startsWith('fd')) return true; // unique local fc00::/7
+    if (host.includes('::ffff:')) return true;                       // IPv4-mapped (dotted or hex form)
+    return false;
+  }
+
+  return false;
+};
+
+export const normalizeProxyTargetUrl = (rawUrl, { allowExternal = false } = {}) => {
   let url;
   try {
     url = new URL(rawUrl);
@@ -832,8 +889,12 @@ const normalizeLoopbackUrl = (rawUrl) => {
   }
 
   const hostname = url.hostname;
-  if (!LOOPBACK_HOSTS.has(hostname)) {
-    return { ok: false, error: 'Only loopback hosts are supported' };
+  if (!allowExternal) {
+    if (!LOOPBACK_HOSTS.has(hostname)) {
+      return { ok: false, error: 'Only loopback hosts are supported' };
+    }
+  } else if (isBlockedExternalHost(hostname)) {
+    return { ok: false, error: 'Refusing to proxy private or reserved addresses' };
   }
 
   const port = url.port ? Number.parseInt(url.port, 10) : (url.protocol === 'https:' ? 443 : 80);
@@ -843,13 +904,15 @@ const normalizeLoopbackUrl = (rawUrl) => {
 
   // Normalize common loopback hostnames to IPv4 to avoid environments where
   // `localhost` resolves to ::1 but the dev server only binds IPv4.
-  if (hostname === '0.0.0.0' || hostname === 'localhost' || hostname === '::1' || hostname === '[::1]') {
+  if (LOOPBACK_HOSTS.has(hostname) && (hostname === '0.0.0.0' || hostname === 'localhost' || hostname === '::1' || hostname === '[::1]')) {
     url.hostname = '127.0.0.1';
   }
 
   // Only keep origin here; the proxy path is preserved on the OpenChamber side.
   return { ok: true, origin: url.origin };
 };
+
+const normalizeLoopbackUrl = (rawUrl) => normalizeProxyTargetUrl(rawUrl, { allowExternal: false });
 
 export const rewritePreviewBody = ({ bodyText, proxyBasePath, targetOrigin, kind }) => {
   if (typeof bodyText !== 'string' || bodyText.length === 0) {
@@ -858,9 +921,11 @@ export const rewritePreviewBody = ({ bodyText, proxyBasePath, targetOrigin, kind
 
   const prefix = proxyBasePath.endsWith('/') ? proxyBasePath.slice(0, -1) : proxyBasePath;
   const target = targetOrigin ? new URL(targetOrigin) : null;
-  const isSameLoopbackTarget = (url) => {
+  const isSameTargetOrigin = (url) => {
     if (!target) return false;
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+    if (url.origin === target.origin) return true;
+
     const host = url.hostname;
     if (host !== 'localhost' && host !== '127.0.0.1' && host !== '0.0.0.0' && host !== '::1' && host !== '[::1]') {
       return false;
@@ -875,7 +940,7 @@ export const rewritePreviewBody = ({ bodyText, proxyBasePath, targetOrigin, kind
     }
     try {
       const parsed = new URL(value);
-      if (isSameLoopbackTarget(parsed)) {
+      if (isSameTargetOrigin(parsed)) {
         return `${prefix}${parsed.pathname}${parsed.search}${parsed.hash}`;
       }
     } catch {
@@ -1074,12 +1139,13 @@ export const createPreviewProxyRuntime = ({
   }) => {
     ensureSweeper();
 
-    const injectPreviewBridge = (bodyText) => {
+    const injectPreviewBridge = (bodyText, targetOrigin) => {
       if (typeof bodyText !== 'string' || bodyText.includes(PREVIEW_BRIDGE_SCRIPT_ID)) {
         return bodyText;
       }
 
-      const script = `<script id="${PREVIEW_BRIDGE_SCRIPT_ID}">${PREVIEW_BRIDGE_SCRIPT}</script>`;
+      const targetOriginScript = `<script>window.__openchamberPreviewTargetOrigin=${JSON.stringify(targetOrigin || '')};</script>`;
+      const script = `${targetOriginScript}<script id="${PREVIEW_BRIDGE_SCRIPT_ID}">${PREVIEW_BRIDGE_SCRIPT}</script>`;
       if (/<head(?:\s[^>]*)?>/i.test(bodyText)) {
         return bodyText.replace(/<head(\s[^>]*)?>/i, (match) => `${match}${script}`);
       }
@@ -1128,7 +1194,10 @@ export const createPreviewProxyRuntime = ({
         }
 
         const ttlMs = typeof req.body?.ttlMs === 'number' ? req.body.ttlMs : DEFAULT_TARGET_TTL_MS;
-        const normalized = normalizeLoopbackUrl(rawUrl);
+        const allowExternal = req.body?.allowExternal === true;
+        const normalized = allowExternal
+          ? normalizeProxyTargetUrl(rawUrl, { allowExternal: true })
+          : normalizeLoopbackUrl(rawUrl);
         if (!normalized.ok) {
           return res.status(400).json({ error: normalized.error });
         }
@@ -1244,7 +1313,7 @@ export const createPreviewProxyRuntime = ({
             targetOrigin: resolved.entry.origin,
             kind: isHtml ? 'html' : isCss ? 'css' : 'javascript',
           });
-          return isHtml ? injectPreviewBridge(rewrittenBody) : rewrittenBody;
+          return isHtml ? injectPreviewBridge(rewrittenBody, resolved.entry.origin) : rewrittenBody;
         }),
         error: (err, _req, res) => {
           const isDev = typeof process !== 'undefined'

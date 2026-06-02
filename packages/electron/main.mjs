@@ -3062,6 +3062,29 @@ contextMenu({
   showCopyLink: true,
 });
 
+const loadUrlInsideWebContents = (contents, rawUrl) => {
+  try {
+    const url = new URL(rawUrl);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+    if (contents.isDestroyed()) return false;
+    void contents.loadURL(url.toString()).catch((error) => {
+      log.warn('[webview] failed to load popup URL in place:', error);
+    });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+app.on('web-contents-created', (_event, contents) => {
+  if (contents.getType() !== 'webview') return;
+
+  contents.setWindowOpenHandler(({ url }) => {
+    loadUrlInsideWebContents(contents, url);
+    return { action: 'deny' };
+  });
+});
+
 // All desktop_* IPC and dialog:open run with full Electron main privileges
 // (fs access, shell.openPath, spawn, app.relaunch, …). The preload shim is
 // injected into every webContents in the window, including remote hosts the
