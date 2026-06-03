@@ -6,11 +6,15 @@ import { afterEach, describe, expect, it } from 'vitest';
 import simpleGit from 'simple-git';
 
 import {
+  buildWorktreeDirectory,
   checkoutCommit,
   cherryPick,
+  createWorktree,
   getStatus,
+  previewWorktreeCreate,
   resetToCommit,
   resolveBaseRefForLog,
+  resolveCandidateDirectory,
   revertCommit,
   stageFiles,
   unstageFiles,
@@ -451,5 +455,207 @@ describe('hash validation', () => {
     await expect(
       resetToCommit('/tmp', '1234567890abcdef1234567890abcdef12345678', 'soft')
     ).rejects.not.toThrow('Invalid commit hash');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildWorktreeDirectory (pure helper)
+// ---------------------------------------------------------------------------
+
+describe('buildWorktreeDirectory', () => {
+  it('returns the data-dir path under worktreeRoot in default mode', () => {
+    expect(
+      buildWorktreeDirectory({
+        worktreeRoot: '/data/wt/proj',
+        primaryWorktree: '/my/repo',
+        name: 'feat-1234',
+        sibling: false,
+      })
+    ).toBe(path.join('/data/wt/proj', 'feat-1234'));
+  });
+
+  it('returns a sibling path next to the repo in sibling mode', () => {
+    expect(
+      buildWorktreeDirectory({
+        worktreeRoot: '/data/wt/proj',
+        primaryWorktree: '/my/repo',
+        name: 'feat-1234',
+        sibling: true,
+      })
+    ).toBe(path.join('/my', 'repo.feat-1234'));
+  });
+
+  it('handles nested repo paths in sibling mode', () => {
+    expect(
+      buildWorktreeDirectory({
+        worktreeRoot: '/data/wt/proj',
+        primaryWorktree: '/a/b/repo',
+        name: 'feat-1234',
+        sibling: true,
+      })
+    ).toBe(path.join('/a/b', 'repo.feat-1234'));
+  });
+
+  it('passes an already-slugged name through verbatim (does not re-slug)', () => {
+    const result = buildWorktreeDirectory({
+      worktreeRoot: '/data/wt/proj',
+      primaryWorktree: '/my/repo',
+      name: 'feat-1234',
+      sibling: true,
+    });
+    expect(path.basename(result)).toBe('repo.feat-1234');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Sibling worktree creation (resolveCandidateDirectory + create/preview)
+// ---------------------------------------------------------------------------
+
+describe('sibling worktree creation', () => {
+  let originalXdgDataHome;
+
+  /** Create a temp repo with an initial commit; returns the repo dir. */
+  const createCommittedRepo = () => {
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+    runGit(repo, ['add', 'README.md']);
+    runGit(repo, ['commit', '-m', 'Initial commit']);
+    return repo;
+  };
+
+  afterEach(() => {
+    if (originalXdgDataHome === undefined) {
+      delete process.env.XDG_DATA_HOME;
+    } else {
+      process.env.XDG_DATA_HOME = originalXdgDataHome;
+    }
+    originalXdgDataHome = undefined;
+  });
+
+  const sandboxXdg = () => {
+    originalXdgDataHome = process.env.XDG_DATA_HOME;
+    const xdg = createTempDir();
+    process.env.XDG_DATA_HOME = xdg;
+    return xdg;
+  };
+
+  it('resolveCandidateDirectory slugs the preferred name into the sibling basename', async () => {
+    if (!canRunGit()) return;
+    sandboxXdg();
+    const repo = createCommittedRepo();
+    const context = { primaryWorktree: repo, worktreeRoot: path.join(createTempDir(), 'wtroot') };
+
+    const candidate = await resolveCandidateDirectory(
+      context.worktreeRoot,
+      'feat/1234',
+      '',
+      context.primaryWorktree,
+      { sibling: true }
+    );
+
+    expect(path.basename(candidate.directory)).toBe(`${path.basename(repo)}.feat-1234`);
+    expect(path.dirname(candidate.directory)).toBe(path.dirname(repo));
+  });
+
+  it('resolveCandidateDirectory appends a random suffix on sibling collision', async () => {
+    if (!canRunGit()) return;
+    sandboxXdg();
+    const repo = createCommittedRepo();
+    const worktreeRoot = path.join(createTempDir(), 'wtroot');
+
+    // Pre-create the bare-slug sibling directory to force a collision.
+    const occupied = path.join(path.dirname(repo), `${path.basename(repo)}.feat-1234`);
+    fs.mkdirSync(occupied, { recursive: true });
+
+    const candidate = await resolveCandidateDirectory(
+      worktreeRoot,
+      'feat/1234',
+      '',
+      repo,
+      { sibling: true }
+    );
+
+    expect(path.basename(candidate.directory)).toMatch(
+      new RegExp(`^${path.basename(repo)}\\.feat-1234-.+`)
+    );
+  });
+
+  it('createWorktree places the worktree as a sibling and skips the data-dir', async () => {
+    if (!canRunGit()) return;
+    const xdg = sandboxXdg();
+    const repo = createCommittedRepo();
+
+    const created = await createWorktree(repo, {
+      mode: 'new',
+      worktreeName: 'feat-1234',
+      siblingWorktree: true,
+    });
+
+    const expectedPath = path.join(path.dirname(repo), `${path.basename(repo)}.feat-1234`);
+    expect(created.path).toBe(expectedPath);
+    expect(fs.existsSync(expectedPath)).toBe(true);
+
+    const list = runGit(repo, ['worktree', 'list', '--porcelain']);
+    expect(list).toContain(expectedPath);
+
+    // Data-dir worktreeRoot must NOT be created in sibling mode.
+    expect(fs.existsSync(path.join(xdg, 'opencode', 'worktree'))).toBe(false);
+  });
+
+  it('createWorktree places the worktree under the data dir in default mode', async () => {
+    if (!canRunGit()) return;
+    const xdg = sandboxXdg();
+    const repo = createCommittedRepo();
+
+    const created = await createWorktree(repo, {
+      mode: 'new',
+      worktreeName: 'feat-1234',
+      siblingWorktree: false,
+    });
+
+    const dataRoot = path.join(xdg, 'opencode', 'worktree');
+    expect(created.path.startsWith(dataRoot)).toBe(true);
+    expect(fs.existsSync(created.path)).toBe(true);
+  });
+
+  it('previewWorktreeCreate returns the sibling path without creating the data-dir', async () => {
+    if (!canRunGit()) return;
+    const xdg = sandboxXdg();
+    const repo = createCommittedRepo();
+
+    const preview = await previewWorktreeCreate(repo, {
+      mode: 'new',
+      worktreeName: 'feat-1234',
+      siblingWorktree: true,
+    });
+
+    const expectedPath = path.join(path.dirname(repo), `${path.basename(repo)}.feat-1234`);
+    expect(preview.path).toBe(expectedPath);
+    expect(fs.existsSync(path.join(xdg, 'opencode', 'worktree'))).toBe(false);
+    // Preview must not actually create the worktree on disk.
+    expect(fs.existsSync(expectedPath)).toBe(false);
+  });
+
+  it('createWorktree places an existing-branch worktree as a sibling', async () => {
+    if (!canRunGit()) return;
+    sandboxXdg();
+    const repo = createCommittedRepo();
+
+    // Create (but don't keep checked out) an existing branch to check out into the worktree.
+    runGit(repo, ['branch', 'feat/1234']);
+
+    const created = await createWorktree(repo, {
+      mode: 'existing',
+      worktreeName: 'feat-1234',
+      existingBranch: 'feat/1234',
+      siblingWorktree: true,
+    });
+
+    const expectedPath = path.join(path.dirname(repo), `${path.basename(repo)}.feat-1234`);
+    expect(created.path).toBe(expectedPath);
+    expect(fs.existsSync(expectedPath)).toBe(true);
   });
 });

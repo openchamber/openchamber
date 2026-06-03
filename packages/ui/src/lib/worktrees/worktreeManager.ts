@@ -14,6 +14,7 @@ import type {
   GitWorktreeValidationResult,
 } from '@/lib/api/types';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useConfigStore } from '@/stores/useConfigStore';
 
 type WorktreeListEntry = {
   path?: string;
@@ -101,7 +102,8 @@ export const buildSdkStartCommand = (args: {
   return joined.trim().length > 0 ? joined : undefined;
 };
 
-const toCreatePayload = (args: {
+// Exported for unit testing (toCreatePayload defaulting + D2 seed). Used internally below.
+export const toCreatePayload = (args: {
   preferredName?: string;
   setupCommands?: string[];
   mode?: 'new' | 'existing';
@@ -114,10 +116,13 @@ const toCreatePayload = (args: {
   upstreamBranch?: string;
   ensureRemoteName?: string;
   ensureRemoteUrl?: string;
+  siblingWorktree?: boolean;
 }, projectDirectory: string): CreateGitWorktreePayload => {
   const mode = args.mode === 'existing' ? 'existing' : 'new';
 
-  const worktreeNameSeed = args.worktreeName ?? args.preferredName ?? '';
+  // The `args.branchName` fallback is intentional (decision D2): a branch-only caller still yields
+  // `repo.<branch-slug>`. This applies in both sibling and default modes.
+  const worktreeNameSeed = args.worktreeName ?? args.preferredName ?? args.branchName ?? '';
   const worktreeName = slugifyWorktreeName(worktreeNameSeed);
 
   const branchNameSeed = args.branchName ?? (mode === 'new' ? args.preferredName : undefined) ?? '';
@@ -144,6 +149,7 @@ const toCreatePayload = (args: {
     ...(args.upstreamBranch ? { upstreamBranch: args.upstreamBranch } : {}),
     ...(args.ensureRemoteName ? { ensureRemoteName: args.ensureRemoteName } : {}),
     ...(args.ensureRemoteUrl ? { ensureRemoteUrl: args.ensureRemoteUrl } : {}),
+    ...((args.siblingWorktree ?? useConfigStore.getState().settingsWorktreeSiblingsEnabled) ? { siblingWorktree: true } : {}),
   };
 };
 
@@ -224,6 +230,7 @@ export type CreateWorktreeArgs = {
   upstreamBranch?: string;
   ensureRemoteName?: string;
   ensureRemoteUrl?: string;
+  siblingWorktree?: boolean;
 };
 
 export async function createWorktree(project: ProjectRef, args: CreateWorktreeArgs): Promise<WorktreeMetadata> {

@@ -78,6 +78,11 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
   } else {
     localStorage.removeItem('gitmojiEnabled');
   }
+  if (typeof settings.worktreeSiblingsEnabled === 'boolean') {
+    localStorage.setItem('worktreeSiblingsEnabled', String(settings.worktreeSiblingsEnabled));
+  } else {
+    localStorage.removeItem('worktreeSiblingsEnabled');
+  }
   if (typeof settings.directoryShowHidden === 'boolean') {
     localStorage.setItem('directoryTreeShowHidden', settings.directoryShowHidden ? 'true' : 'false');
   }
@@ -732,6 +737,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.gitmojiEnabled === 'boolean') {
     result.gitmojiEnabled = candidate.gitmojiEnabled;
+  }
+  if (typeof candidate.worktreeSiblingsEnabled === 'boolean') {
+    result.worktreeSiblingsEnabled = candidate.worktreeSiblingsEnabled;
   }
   if (typeof candidate.queueModeEnabled === 'boolean') {
     result.queueModeEnabled = candidate.queueModeEnabled;

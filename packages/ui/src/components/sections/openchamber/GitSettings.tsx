@@ -13,6 +13,8 @@ export const GitSettings: React.FC = () => {
   const { t } = useI18n();
   const settingsGitmojiEnabled = useConfigStore((state) => state.settingsGitmojiEnabled);
   const setSettingsGitmojiEnabled = useConfigStore((state) => state.setSettingsGitmojiEnabled);
+  const settingsWorktreeSiblingsEnabled = useConfigStore((state) => state.settingsWorktreeSiblingsEnabled);
+  const setSettingsWorktreeSiblingsEnabled = useConfigStore((state) => state.setSettingsWorktreeSiblingsEnabled);
   const showGitignored = useFilesViewShowGitignored();
   const gitChangesViewMode = useUIStore((state) => state.gitChangesViewMode);
   const setGitChangesViewMode = useUIStore((state) => state.setGitChangesViewMode);
@@ -28,6 +30,7 @@ export const GitSettings: React.FC = () => {
 
   type GitSettingsPayload = {
     gitmojiEnabled?: boolean;
+    worktreeSiblingsEnabled?: boolean;
     gitChangesViewMode?: 'flat' | 'tree';
   };
 
@@ -48,6 +51,9 @@ export const GitSettings: React.FC = () => {
                 data = {
                   gitmojiEnabled: typeof (settings as Record<string, unknown>).gitmojiEnabled === 'boolean'
                     ? ((settings as Record<string, unknown>).gitmojiEnabled as boolean)
+                    : undefined,
+                  worktreeSiblingsEnabled: typeof (settings as Record<string, unknown>).worktreeSiblingsEnabled === 'boolean'
+                    ? ((settings as Record<string, unknown>).worktreeSiblingsEnabled as boolean)
                     : undefined,
                   gitChangesViewMode:
                     (settings as Record<string, unknown>).gitChangesViewMode === 'flat'
@@ -77,6 +83,9 @@ export const GitSettings: React.FC = () => {
           if (typeof data.gitmojiEnabled === 'boolean') {
             setSettingsGitmojiEnabled(data.gitmojiEnabled);
           }
+          if (typeof data.worktreeSiblingsEnabled === 'boolean') {
+            setSettingsWorktreeSiblingsEnabled(data.worktreeSiblingsEnabled);
+          }
           if (data.gitChangesViewMode === 'flat' || data.gitChangesViewMode === 'tree') {
             setGitChangesViewMode(data.gitChangesViewMode);
           }
@@ -89,7 +98,7 @@ export const GitSettings: React.FC = () => {
       }
     };
     loadSettings();
-  }, [setGitChangesViewMode, setSettingsGitmojiEnabled]);
+  }, [setGitChangesViewMode, setSettingsGitmojiEnabled, setSettingsWorktreeSiblingsEnabled]);
 
   const handleGitmojiChange = React.useCallback(async (enabled: boolean) => {
     setSettingsGitmojiEnabled(enabled);
@@ -101,6 +110,17 @@ export const GitSettings: React.FC = () => {
       console.warn('Failed to save gitmoji setting:', error);
     }
   }, [setSettingsGitmojiEnabled]);
+
+  const handleWorktreeSiblingsChange = React.useCallback(async (enabled: boolean) => {
+    setSettingsWorktreeSiblingsEnabled(enabled);
+    try {
+      await updateDesktopSettings({
+        worktreeSiblingsEnabled: enabled,
+      });
+    } catch (error) {
+      console.warn('Failed to save worktree siblings setting:', error);
+    }
+  }, [setSettingsWorktreeSiblingsEnabled]);
 
   const handleGitChangesViewModeChange = React.useCallback((mode: 'flat' | 'tree') => {
     if (mode === gitChangesViewMode) {
@@ -179,6 +199,36 @@ export const GitSettings: React.FC = () => {
             ariaLabel={t('settings.openchamber.git.enableGitmojiAria')}
           />
           <span className="typography-ui-label text-foreground">{t('settings.openchamber.git.enableGitmoji')}</span>
+        </div>
+
+        <div className="py-1.5">
+          <div
+            className="group flex cursor-pointer items-center gap-2"
+            role="button"
+            tabIndex={0}
+            aria-pressed={settingsWorktreeSiblingsEnabled}
+            onClick={() => {
+              void handleWorktreeSiblingsChange(!settingsWorktreeSiblingsEnabled);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === ' ' || event.key === 'Enter') {
+                event.preventDefault();
+                void handleWorktreeSiblingsChange(!settingsWorktreeSiblingsEnabled);
+              }
+            }}
+          >
+            <Checkbox
+              checked={settingsWorktreeSiblingsEnabled}
+              onChange={(checked) => {
+                void handleWorktreeSiblingsChange(checked);
+              }}
+              ariaLabel={t('settings.openchamber.git.worktreeSiblingsAria')}
+            />
+            <span className="typography-ui-label text-foreground">{t('settings.openchamber.git.worktreeSiblings')}</span>
+          </div>
+          <span className="typography-ui-caption text-muted-foreground ml-7 block">
+            {t('settings.openchamber.git.worktreeSiblingsDescription')}
+          </span>
         </div>
 
         <div
