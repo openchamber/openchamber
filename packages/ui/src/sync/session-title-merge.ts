@@ -23,7 +23,7 @@ export function mergeSessionPreservingResolvedTitle<T extends SessionWithTitle>(
   }
 
   const existingTitle = normalizedTitle(existing.title)
-  if (existingTitle.length === 0 || isDefaultSessionTitle(existingTitle) || !isDefaultSessionTitle(incoming.title)) {
+  if (isDefaultSessionTitle(existingTitle) || !isDefaultSessionTitle(incoming.title)) {
     return incoming
   }
 
