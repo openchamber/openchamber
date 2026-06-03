@@ -1139,6 +1139,7 @@ export const dict = {
   'contextSidebar.tokens.reasoning': 'Reasoning',
   'contextSidebar.tokens.cacheRead': 'Cache Read',
   'contextSidebar.tokens.cacheWrite': 'Cache Write',
+  'contextSidebar.tokens.cacheHit': 'Cache Hit',
   'contextSidebar.tokens.cacheHitRate': '{percent}% cache hit',
   'contextSidebar.tokens.cacheHitRateTooltip': 'Share of input tokens served from the provider prefix cache',
   'contextSidebar.actions.copyJson': 'Copy JSON',

@@ -486,13 +486,17 @@ export const ContextPanelContent: React.FC = () => {
               { label: t('contextSidebar.tokens.cacheRead'), value: viewModel.tokenBreakdown.cacheRead },
               { label: t('contextSidebar.tokens.cacheWrite'), value: viewModel.tokenBreakdown.cacheWrite },
               {
-                label: 'Cache Hit',
-                value: viewModel.cacheHitRate.hasInput ? `${viewModel.cacheHitRate.percent.toFixed(1)}%` : '—',
+                label: t('contextSidebar.tokens.cacheHit'),
+                value: viewModel.cacheHitRate.hasInput ? viewModel.cacheHitRate.percent : null,
               },
             ] as const).map((item) => (
               <div key={item.label}>
                 <div className="typography-micro text-muted-foreground/70">{item.label}</div>
-                <div className="mt-0.5 typography-ui-label tabular-nums text-foreground">{formatNumber(item.value)}</div>
+                <div className="mt-0.5 typography-ui-label tabular-nums text-foreground">
+                  {item.value !== null && item.value !== undefined
+                    ? `${formatNumber(item.value)}%`
+                    : '—'}
+                </div>
               </div>
             ))}
           </div>
