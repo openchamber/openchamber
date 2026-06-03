@@ -198,6 +198,7 @@ export const registerNotificationRoutes = (app, dependencies) => {
     };
 
     req.on('close', cleanup);
+    res.on('error', cleanup);
 
     const flushSse = () => {
       res.flush?.();
