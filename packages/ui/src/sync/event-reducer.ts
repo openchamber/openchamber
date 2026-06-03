@@ -17,24 +17,90 @@ import { syncDebug } from "./debug"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 const DELTA_OVERLAP_FIELDS = ["text", "output"] as const
-const FINAL_TOOL_STATUSES = new Set(["completed", "error", "aborted", "failed", "timeout", "cancelled"])
+const chunksByPartField: Map<string, string[]> = new Map()
 
 type DedupeMetadata = {
   __dedupeNextDeltaFields?: string[]
 }
 
-function appendNonOverlappingDelta(existingValue: string | undefined, delta: string) {
-  if (!existingValue || delta.length === 0) return (existingValue ?? "") + delta
-  if (existingValue.endsWith(delta)) return existingValue
+function chunkKey(messageID: string, partID: string, field: string): string {
+  return `${messageID}:${partID}:${field}`
+}
 
-  const maxOverlap = Math.min(existingValue.length, delta.length)
-  for (let overlap = maxOverlap; overlap > 0; overlap--) {
-    if (existingValue.endsWith(delta.slice(0, overlap))) {
-      return existingValue + delta.slice(overlap)
-    }
+function appendToChunkedField(
+  messageID: string,
+  partID: string,
+  field: string,
+  existingValue: string | undefined,
+  delta: string,
+  shouldDedupe: boolean,
+): string {
+  const key = chunkKey(messageID, partID, field)
+  if (delta.length === 0 && existingValue !== undefined) return existingValue
+
+  let chunks = chunksByPartField.get(key)
+  if (!chunks) {
+    chunks = [existingValue ?? ""]
+    chunksByPartField.set(key, chunks)
   }
 
-  return existingValue + delta
+  let slice: string
+  if (shouldDedupe) {
+    const lastChunk = chunks[chunks.length - 1]
+    const maxOverlap = Math.min(lastChunk.length, delta.length)
+    let overlap = 0
+    for (let i = maxOverlap; i > 0; i--) {
+      if (lastChunk.endsWith(delta.slice(0, i))) {
+        overlap = i
+        break
+      }
+    }
+    slice = delta.slice(overlap)
+  } else {
+    slice = delta
+  }
+
+  if (slice.length > 0) {
+    chunks.push(slice)
+  }
+
+  return chunks.join("")
+}
+
+function resetDeltaFieldChunks(messageID: string, part: Part): void {
+  for (const field of DELTA_OVERLAP_FIELDS) {
+    const key = chunkKey(messageID, part.id, field)
+    if (chunksByPartField.has(key)) {
+      chunksByPartField.set(key, [(part as Record<string, unknown>)[field] as string ?? ""])
+    }
+  }
+}
+
+export function clearMessageChunks(messageID: string): void {
+  const prefix = `${messageID}:`
+  for (const key of chunksByPartField.keys()) {
+    if (key.startsWith(prefix)) {
+      chunksByPartField.delete(key)
+    }
+  }
+}
+
+export function clearPartChunks(messageID: string, partID: string): void {
+  const prefix = `${messageID}:${partID}:`
+  for (const key of chunksByPartField.keys()) {
+    if (key.startsWith(prefix)) {
+      chunksByPartField.delete(key)
+    }
+  }
+}
+
+export function clearAllChunks(): void {
+  chunksByPartField.clear()
+}
+
+// Test-only: expose internal chunks map for assertions
+export function _getChunksByPartFieldForTest(): Map<string, string[]> {
+  return chunksByPartField
 }
 
 function getUpdatedDeltaFields(previous: Part, next: Part) {
@@ -299,6 +365,7 @@ export function applyDirectoryEvent(
         }
       }
       delete draft.part[props.messageID]
+      clearMessageChunks(props.messageID)
       return true
     }
 
@@ -348,6 +415,7 @@ export function applyDirectoryEvent(
         const insertResult = Binary.search(next, part.id, (p) => p.id)
         next.splice(insertResult.index, 0, part)
       }
+      resetDeltaFieldChunks(messageID, part)
       draft.part[messageID] = next
       return missingOwningMessage
         ? {
@@ -370,6 +438,7 @@ export function applyDirectoryEvent(
         } else {
           draft.part[props.messageID] = next
         }
+        clearPartChunks(props.messageID, props.partID)
         return true
       }
       return false
@@ -406,7 +475,7 @@ export function applyDirectoryEvent(
       const next = [...parts]
       next[result.index] = {
         ...existing,
-        [props.field]: shouldDedupe ? appendNonOverlappingDelta(existingValue, props.delta) : (existingValue ?? "") + props.delta,
+        [props.field]: appendToChunkedField(props.messageID, props.partID, props.field, existingValue, props.delta, shouldDedupe),
         __dedupeNextDeltaFields: dedupeFields.filter((field) => field !== props.field),
       } as unknown as Part
       draft.part[props.messageID] = next

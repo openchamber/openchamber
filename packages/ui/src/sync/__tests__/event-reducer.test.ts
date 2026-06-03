@@ -1,6 +1,6 @@
-import { describe, expect, test } from "bun:test"
+import { beforeEach, describe, expect, test } from "bun:test"
 import type { Event, Part, PermissionRequest, QuestionRequest, SessionStatus } from "@opencode-ai/sdk/v2/client"
-import { applyDirectoryEvent } from "../event-reducer"
+import { applyDirectoryEvent, clearAllChunks, _getChunksByPartFieldForTest } from "../event-reducer"
 import { INITIAL_STATE, type State } from "../types"
 
 function state(overrides: Partial<State> = {}): State {
@@ -205,5 +205,150 @@ describe("applyDirectoryEvent", () => {
 
     expect(draft.question.ses_1).not.toBe(afterReply)
     expect(draft.question.ses_1).toEqual([])
+  })
+})
+
+describe("chunked text accumulator", () => {
+  beforeEach(() => {
+    _getChunksByPartFieldForTest().clear()
+  })
+
+  test("long stream accumulation is correct", () => {
+    const draft = state({ part: { msg_1: [{ id: "prt_1", messageID: "msg_1", type: "text", text: "" } as Part] } })
+    const evt = deltaEvent()
+    evt.properties.delta = "a"
+    for (let i = 0; i < 500; i++) {
+      applyDirectoryEvent(draft, evt)
+    }
+    expect(draft.part.msg_1[0].text).toBe("a".repeat(500))
+  })
+
+  test("dedup against last chunk tail works", () => {
+    const draft = state({ part: { msg_1: [{ id: "prt_1", messageID: "msg_1", type: "text", text: "" } as Part] } })
+    // First: part.updated to set text "hello" with dedup metadata
+    const initial: Event = {
+      type: "message.part.updated",
+      properties: {
+        part: { id: "prt_1", messageID: "msg_1", sessionID: "ses_1", type: "text", text: "hello", __dedupeNextDeltaFields: ["text"] },
+      },
+    } as unknown as Event
+    applyDirectoryEvent(draft, initial)
+
+    // Now delta "lo world" — "lo" overlaps with "hello" tail
+    const evt = deltaEvent()
+    evt.properties.delta = "lo world"
+    applyDirectoryEvent(draft, evt)
+
+    expect(draft.part.msg_1[0].text).toBe("hello world")
+  })
+
+  test("no-overlap dedup falls through to full append", () => {
+    const draft = state({ part: { msg_1: [{ id: "prt_1", messageID: "msg_1", type: "text", text: "" } as Part] } })
+    const initial: Event = {
+      type: "message.part.updated",
+      properties: {
+        part: { id: "prt_1", messageID: "msg_1", sessionID: "ses_1", type: "text", text: "foo", __dedupeNextDeltaFields: ["text"] },
+      },
+    } as unknown as Event
+    applyDirectoryEvent(draft, initial)
+
+    const evt = deltaEvent()
+    evt.properties.delta = "bar"
+    applyDirectoryEvent(draft, evt)
+
+    expect(draft.part.msg_1[0].text).toBe("foobar")
+  })
+
+  test("non-dedup append works", () => {
+    const draft = state({ part: { msg_1: [{ id: "prt_1", messageID: "msg_1", type: "text", text: "" } as Part] } })
+    const evt = deltaEvent()
+    evt.properties.delta = "foo"
+    applyDirectoryEvent(draft, evt)
+    evt.properties.delta = "bar"
+    applyDirectoryEvent(draft, evt)
+
+    expect(draft.part.msg_1[0].text).toBe("foobar")
+  })
+
+  test("message.part.updated resets chunks", () => {
+    const draft = state({ part: { msg_1: [{ id: "prt_1", messageID: "msg_1", type: "text", text: "" } as Part] } })
+    // Accumulate some deltas
+    const evt = deltaEvent()
+    evt.properties.delta = "hello "
+    applyDirectoryEvent(draft, evt)
+    evt.properties.delta = "world"
+    applyDirectoryEvent(draft, evt)
+    expect(draft.part.msg_1[0].text).toBe("hello world")
+
+    // part.updated replaces full text
+    const updated: Event = {
+      type: "message.part.updated",
+      properties: {
+        part: { id: "prt_1", messageID: "msg_1", sessionID: "ses_1", type: "text", text: "fresh" },
+      },
+    } as Event
+    applyDirectoryEvent(draft, updated)
+
+    // Subsequent delta should append to "fresh" not old chunks
+    evt.properties.delta = "ly"
+    applyDirectoryEvent(draft, evt)
+    expect(draft.part.msg_1[0].text).toBe("freshly")
+  })
+
+  test("message.part.removed clears chunks for that part", () => {
+    const draft = state({ part: { msg_1: [{ id: "prt_1", messageID: "msg_1", type: "text", text: "" } as Part] } })
+    // Accumulate deltas to create chunk entries
+    const evt = deltaEvent()
+    evt.properties.delta = "a"
+    applyDirectoryEvent(draft, evt)
+    evt.properties.delta = "b"
+    applyDirectoryEvent(draft, evt)
+
+    expect(_getChunksByPartFieldForTest().size).toBeGreaterThan(0)
+
+    // Remove the part
+    const removeEvt: Event = {
+      type: "message.part.removed",
+      properties: { messageID: "msg_1", partID: "prt_1" },
+    } as Event
+    applyDirectoryEvent(draft, removeEvt)
+
+    // Assert no chunks remain for that part
+    const remaining = [..._getChunksByPartFieldForTest().keys()].filter((k) => k.startsWith("msg_1:prt_1:"))
+    expect(remaining).toEqual([])
+  })
+
+  test("message.removed clears all chunks for that message", () => {
+    const draft = state({ part: { msg_1: [{ id: "prt_1", messageID: "msg_1", type: "text", text: "" } as Part] } })
+    // Accumulate deltas to create chunk entries
+    const evt = deltaEvent()
+    evt.properties.delta = "a"
+    applyDirectoryEvent(draft, evt)
+
+    expect(_getChunksByPartFieldForTest().size).toBeGreaterThan(0)
+
+    // Remove the message
+    const removeMsg: Event = {
+      type: "message.removed",
+      properties: { sessionID: "ses_1", messageID: "msg_1" },
+    } as Event
+    applyDirectoryEvent(draft, removeMsg)
+
+    // Assert no chunks remain for that messageID
+    const remaining = [..._getChunksByPartFieldForTest().keys()].filter((k) => k.startsWith("msg_1:"))
+    expect(remaining).toEqual([])
+  })
+
+  test("clearAllChunks is callable and empties the map", () => {
+    const draft = state({ part: { msg_1: [{ id: "prt_1", messageID: "msg_1", type: "text", text: "" } as Part] } })
+    const evt = deltaEvent()
+    evt.properties.delta = "a"
+    applyDirectoryEvent(draft, evt)
+
+    expect(_getChunksByPartFieldForTest().size).toBeGreaterThan(0)
+
+    clearAllChunks()
+
+    expect(_getChunksByPartFieldForTest().size).toBe(0)
   })
 })
