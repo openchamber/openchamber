@@ -25,7 +25,7 @@ import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
 import { Icon } from "@/components/icon/Icon";
 import type { PermissionRequest } from '@/types/permission';
 import type { QuestionRequest } from '@/types/question';
-import { cn, formatDirectoryName } from '@/lib/utils';
+import { cn, getProjectDisplayLabel, renderDraftTitle } from '@/lib/utils';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import {
     collectVisibleSessionIdsForBlockingRequests,
@@ -324,25 +324,6 @@ const ReadOnlyPromptBanner: React.FC = () => {
                 {t('chat.container.readOnlySubagentPromptBanner')}
             </div>
         </div>
-    );
-};
-
-const getProjectDisplayLabel = (project: { label?: string; path: string }): string => {
-    const label = project.label?.trim();
-    return label || formatDirectoryName(project.path);
-};
-
-const renderDraftTitle = (title: string, projectLabel: string | null): React.ReactNode => {
-    if (!projectLabel) return title;
-    const projectIndex = title.indexOf(projectLabel);
-    if (projectIndex === -1) return title;
-
-    return (
-        <>
-            {title.slice(0, projectIndex)}
-            <span className="font-medium">{projectLabel}</span>
-            {title.slice(projectIndex + projectLabel.length)}
-        </>
     );
 };
 

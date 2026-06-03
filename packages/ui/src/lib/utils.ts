@@ -3,6 +3,7 @@ import { twMerge } from "tailwind-merge";
 import { isDesktopShell } from "@/lib/desktop";
 import { matchesFuzzyQuery } from "@/lib/search/fuzzySearch";
 import type { I18nKey } from "@/lib/i18n";
+import React from "react";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -148,4 +149,21 @@ export function formatDirectoryName(path: string | null | undefined, homeDirecto
  */
 export function fuzzyMatch(target: string, query: string): boolean {
   return matchesFuzzyQuery(target, query);
+}
+
+export function getProjectDisplayLabel(project: { label?: string; path: string }): string {
+  const label = project.label?.trim();
+  return label || formatDirectoryName(project.path);
+}
+
+export function renderDraftTitle(title: string, projectLabel: string | null): React.ReactNode {
+  if (!projectLabel) return title;
+  const projectIndex = title.indexOf(projectLabel);
+  if (projectIndex === -1) return title;
+
+  return React.createElement(React.Fragment, null,
+    title.slice(0, projectIndex),
+    React.createElement('span', { className: 'font-medium' }, projectLabel),
+    title.slice(projectIndex + projectLabel.length),
+  );
 }

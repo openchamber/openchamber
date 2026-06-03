@@ -1,5 +1,6 @@
 import type { Theme } from '@/types/theme';
 import { withPrColors } from './prColors';
+import { withThemeDefaults } from './defaults';
 
 // import amoled_dark_Raw from './amoled-dark.json';
 // import amoled_light_Raw from './amoled-light.json';
@@ -119,4 +120,4 @@ export const presetThemes: Theme[] = [
   mono_light_Raw as Theme,
   vitesse_dark_dark_Raw as Theme,
   vitesse_light_light_Raw as Theme,
-].map((theme) => withPrColors(theme));
+].map((theme) => withThemeDefaults(withPrColors(theme)));
