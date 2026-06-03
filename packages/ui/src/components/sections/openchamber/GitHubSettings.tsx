@@ -397,7 +397,7 @@ export const GitHubSettings: React.FC = () => {
 
       </div>
 
-      {connected && !ghCli?.active && (
+      {connected && (
         <div className="mt-2 px-2 pb-2">
           <Button size="sm"
             variant="outline"
