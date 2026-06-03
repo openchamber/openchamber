@@ -1,10 +1,91 @@
-export function registerGitRoutes(app) {
+export function registerGitRoutes(app, options = {}) {
+  const broadcastEvent = typeof options.broadcastEvent === 'function' ? options.broadcastEvent : null;
+  const MAX_WORKTREE_WATCHERS = 50;
+  const worktreeWatchers = new Map();
   let gitLibraries = null;
   const getGitLibraries = async () => {
     if (!gitLibraries) {
       gitLibraries = await import('./index.js');
     }
     return gitLibraries;
+  };
+
+  const normalizeWatcherKey = (directory) => {
+    const normalized = directory.trim().replace(/\\/g, '/');
+    if (normalized === '/') return '/';
+    return normalized.length > 1 ? normalized.replace(/\/+$/, '') : normalized;
+  };
+
+  const disposeWorktreeWatcher = (key) => {
+    const entry = worktreeWatchers.get(key);
+    if (!entry) {
+      return;
+    }
+    worktreeWatchers.delete(key);
+    if (typeof entry.unsubscribe === 'function') {
+      entry.unsubscribe();
+    }
+  };
+
+  const touchWorktreeWatcher = (key, entry) => {
+    if (worktreeWatchers.get(key) !== entry) {
+      return;
+    }
+    worktreeWatchers.delete(key);
+    worktreeWatchers.set(key, entry);
+  };
+
+  const trimWorktreeWatchers = () => {
+    while (worktreeWatchers.size > MAX_WORKTREE_WATCHERS) {
+      const oldestKey = worktreeWatchers.keys().next().value;
+      if (oldestKey === undefined) break;
+      disposeWorktreeWatcher(oldestKey);
+    }
+  };
+
+  const ensureWorktreeWatcher = async (directory) => {
+    if (!broadcastEvent || typeof directory !== 'string' || directory.trim().length === 0) {
+      return;
+    }
+
+    const key = normalizeWatcherKey(directory);
+    const existing = worktreeWatchers.get(key);
+    if (existing) {
+      touchWorktreeWatcher(key, existing);
+      return;
+    }
+
+    const entry = { unsubscribe: null };
+    worktreeWatchers.set(key, entry);
+    trimWorktreeWatchers();
+
+    try {
+      const { watchWorktreeChanges } = await getGitLibraries();
+      if (typeof watchWorktreeChanges !== 'function') {
+        disposeWorktreeWatcher(key);
+        return;
+      }
+
+      const unsubscribe = await watchWorktreeChanges(key, (event) => {
+        broadcastEvent({
+          type: 'worktree.changed',
+          properties: {
+            directory: key,
+            reason: event?.reason || 'changed',
+            at: typeof event?.at === 'number' ? event.at : Date.now(),
+          },
+        }, { directory: key });
+      });
+      if (worktreeWatchers.get(key) !== entry) {
+        unsubscribe();
+        return;
+      }
+      entry.unsubscribe = unsubscribe;
+      touchWorktreeWatcher(key, entry);
+    } catch (error) {
+      disposeWorktreeWatcher(key);
+      console.warn('Failed to watch worktree metadata:', error?.message || error);
+    }
   };
 
   app.get('/api/git/identities', async (req, res) => {
@@ -854,6 +935,7 @@ export function registerGitRoutes(app) {
       }
 
       const worktrees = await getWorktrees(directory);
+      void ensureWorktreeWatcher(directory);
       res.json(worktrees);
     } catch (error) {
       // Worktrees are an optional feature. Avoid repeated 500s (and repeated client retries)

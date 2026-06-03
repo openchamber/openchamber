@@ -44,6 +44,7 @@ import { getRuntimeLiveStatusSeed, LIVE_STATUS_TTL_MS } from "./runtime-live-mem
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry"
 import { setSessionPrefetch } from "./session-prefetch-cache"
+import { WORKTREE_CHANGED_EVENT, type WorktreeChangedEventDetail } from "@/lib/worktrees/useWorktreeDiscoveryEvents"
 
 // ---------------------------------------------------------------------------
 // Context
@@ -1486,6 +1487,23 @@ const dispatchOpenCodeUpdateAvailable = (payload: { version: string }) => {
   window.dispatchEvent(new CustomEvent("openchamber:opencode-update-available", { detail: payload }))
 }
 
+const dispatchWorktreeChanged = (payload: unknown) => {
+  const record = payload as { type?: unknown; properties?: unknown }
+  if (typeof window === "undefined" || record.type !== "worktree.changed") return
+  const properties = record.properties as { directory?: unknown; reason?: unknown; at?: unknown } | undefined
+  const directory = typeof properties?.directory === "string" && properties.directory.trim().length > 0
+    ? properties.directory.trim()
+    : ""
+  if (!directory) return
+
+  const detail: WorktreeChangedEventDetail = {
+    directory,
+    reason: typeof properties?.reason === "string" ? properties.reason : undefined,
+    at: typeof properties?.at === "number" ? properties.at : undefined,
+  }
+  window.dispatchEvent(new CustomEvent(WORKTREE_CHANGED_EVENT, { detail }))
+}
+
 export function SyncProvider(props: {
   sdk: OpencodeClient
   directory: string
@@ -1667,6 +1685,7 @@ export function SyncProvider(props: {
           lastActiveEventAtByDirectoryRef.current.set(directory, Date.now())
         }
         dispatchVSCodeRuntimeNotificationEvent(directory, payload)
+        dispatchWorktreeChanged(payload)
         if (payload.type === "installation.update-available") {
           const version = typeof (payload.properties as { version?: unknown })?.version === "string"
             ? (payload.properties as { version: string }).version

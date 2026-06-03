@@ -11,6 +11,7 @@ import {
 import { invalidateResolvedProjectRootCache, resolveProjectRoot } from '@/lib/worktrees/worktreeStatus';
 import type {
   CreateGitWorktreePayload,
+  GitWorktreeInfo,
   GitWorktreeValidationResult,
 } from '@/lib/api/types';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -152,8 +153,28 @@ const _worktreeListCache = new Map<string, { value: WorktreeMetadata[]; at: numb
 const _worktreeListInflight = new Map<string, Promise<WorktreeMetadata[]>>();
 const WORKTREE_LIST_CACHE_TTL = 30_000; // 30 seconds
 
-export async function listProjectWorktrees(project: ProjectRef): Promise<WorktreeMetadata[]> {
+type ListProjectWorktreesOptions = {
+  forceRefresh?: boolean;
+  throwOnError?: boolean;
+};
+
+export const invalidateProjectWorktreeCache = (project?: ProjectRef | string | null): void => {
+  if (!project) {
+    _worktreeListCache.clear();
+    return;
+  }
+
+  const projectDirectory = normalizePath(typeof project === 'string' ? project : project.path);
+  _worktreeListCache.delete(projectDirectory);
+};
+
+export async function listProjectWorktrees(project: ProjectRef, options: ListProjectWorktreesOptions = {}): Promise<WorktreeMetadata[]> {
   const projectDirectory = normalizePath(project.path);
+  const inflightKey = `${projectDirectory}:${options.throwOnError ? 'throw' : 'safe'}`;
+
+  if (options.forceRefresh) {
+    _worktreeListCache.delete(projectDirectory);
+  }
 
   // Return cached if fresh
   const cached = _worktreeListCache.get(projectDirectory);
@@ -162,14 +183,23 @@ export async function listProjectWorktrees(project: ProjectRef): Promise<Worktre
   }
 
   // Dedup in-flight requests
-  const inflight = _worktreeListInflight.get(projectDirectory);
+  const inflight = _worktreeListInflight.get(inflightKey);
   if (inflight) return inflight;
 
   const promise = (async (): Promise<WorktreeMetadata[]> => {
     const metadataProjectDirectory = await resolveProjectRoot(projectDirectory).catch(() => projectDirectory);
     const normalizedProjectDirectory = normalizePath(projectDirectory);
 
-    const worktrees = await git.worktree.list(projectDirectory).catch(() => []);
+    let worktrees: GitWorktreeInfo[];
+    try {
+      worktrees = await git.worktree.list(projectDirectory);
+    } catch (error) {
+      if (options.throwOnError) {
+        throw error;
+      }
+      console.warn('Failed to list project worktrees:', error);
+      return [];
+    }
     const results: WorktreeMetadata[] = worktrees
       .filter((entry) => typeof entry.path === 'string' && entry.path.trim().length > 0)
       .map((entry) => {
@@ -204,11 +234,62 @@ export async function listProjectWorktrees(project: ProjectRef): Promise<Worktre
     _worktreeListCache.set(projectDirectory, { value: sorted, at: Date.now() });
     return sorted;
   })().finally(() => {
-    _worktreeListInflight.delete(projectDirectory);
+    _worktreeListInflight.delete(inflightKey);
   });
 
-  _worktreeListInflight.set(projectDirectory, promise);
+  _worktreeListInflight.set(inflightKey, promise);
   return promise;
+}
+
+const mergeAvailableWorktrees = (
+  current: WorktreeMetadata[],
+  projectDirectory: string,
+  nextForProject: WorktreeMetadata[],
+): WorktreeMetadata[] => {
+  const normalizedProjectDirectory = normalizePath(projectDirectory);
+  const byPath = new Map<string, WorktreeMetadata>();
+
+  for (const entry of current) {
+    if (normalizePath(entry.projectDirectory) !== normalizedProjectDirectory) {
+      byPath.set(normalizePath(entry.path), entry);
+    }
+  }
+
+  for (const entry of nextForProject) {
+    byPath.set(normalizePath(entry.path), entry);
+  }
+
+  return Array.from(byPath.values());
+};
+
+export async function refreshProjectWorktrees(project: ProjectRef): Promise<WorktreeMetadata[]> {
+  const projectDirectory = normalizePath(project.path);
+
+  let worktrees: WorktreeMetadata[];
+  try {
+    worktrees = await listProjectWorktrees(project, { forceRefresh: true, throwOnError: true });
+  } catch (error) {
+    // Distinguish fetch failure from empty success: a transient git error
+    // (lock file, slow remote, etc.) must not wipe the project's worktrees
+    // from the shared store. Leave the existing entries untouched.
+    console.warn('Skipping worktree store update after refresh failure:', error);
+    return useSessionUIStore.getState().availableWorktreesByProject.get(projectDirectory) ?? [];
+  }
+
+  const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
+  const updatedByProject = new Map(currentByProject);
+  updatedByProject.set(projectDirectory, worktrees);
+
+  useSessionUIStore.setState({
+    availableWorktreesByProject: updatedByProject,
+    availableWorktrees: mergeAvailableWorktrees(
+      useSessionUIStore.getState().availableWorktrees,
+      projectDirectory,
+      worktrees,
+    ),
+  });
+
+  return worktrees;
 }
 
 export type CreateWorktreeArgs = {

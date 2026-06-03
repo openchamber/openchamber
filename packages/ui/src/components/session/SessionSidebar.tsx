@@ -44,6 +44,7 @@ import { SessionNodeItem } from './sidebar/SessionNodeItem';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useShallow } from 'zustand/react/shallow';
 import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
+import { useWorktreeDiscoveryEvents } from '@/lib/worktrees/useWorktreeDiscoveryEvents';
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { SortableDragHandleProps } from './sidebar/sortableItems';
 import {
@@ -295,6 +296,9 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   });
 
   const gitBranches = useGitAllBranches();
+  const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
+
+  useWorktreeDiscoveryEvents(projects, { enabled: !isVSCode });
 
   const sync = useSync();
   const liveSessions = useAllLiveSessions();
@@ -443,7 +447,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   const isDesktopShellRuntime = React.useMemo(() => isDesktopShell(), []);
 
-  const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
   const { isTablet } = useDeviceInfo();
   const alwaysShowSidebarActions = mobileVariant || isTablet;
 

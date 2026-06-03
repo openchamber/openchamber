@@ -61,6 +61,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       scheduledTasksRuntime,
       getOpenChamberEventClients,
       writeSseEvent,
+      broadcastEvent,
     } = routeDependencies;
 
     const { getProviderSources, removeProviderConfig } = await import('./index.js');
@@ -262,7 +263,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
 
     registerQuotaRoutes(app, { getQuotaProviders });
     registerGitHubRoutes(app);
-    registerGitRoutes(app);
+    registerGitRoutes(app, { broadcastEvent });
     registerMagicPromptRoutes(app, {
       fsPromises,
       path,

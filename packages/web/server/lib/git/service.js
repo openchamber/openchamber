@@ -2789,6 +2789,164 @@ export async function resetToCommit(directory, hash, mode, force = false) {
   }
 }
 
+const resolveGitCommonDirectory = async (directory) => {
+  const directoryPath = normalizeDirectoryPath(directory);
+  if (!directoryPath || !fs.existsSync(directoryPath)) {
+    throw new Error('Directory does not exist');
+  }
+
+  const directoryGit = await createGit(directoryPath);
+  const repoRoot = await resolveGitRepositoryRoot(directoryPath, directoryGit);
+  const repoGit = path.resolve(directoryPath) === repoRoot ? directoryGit : await createGit(repoRoot);
+  const commonDirRaw = await repoGit.raw(['rev-parse', '--git-common-dir']);
+  const commonDir = commonDirRaw.trim();
+  if (!commonDir) {
+    throw new Error('Failed to resolve git common directory');
+  }
+
+  return path.isAbsolute(commonDir)
+    ? path.resolve(commonDir)
+    : path.resolve(repoRoot, commonDir);
+};
+
+export async function watchWorktreeChanges(directory, onChange) {
+  if (typeof onChange !== 'function') {
+    throw new Error('Worktree change callback is required');
+  }
+
+  const commonGitDir = await resolveGitCommonDirectory(directory);
+  const worktreesDir = path.join(commonGitDir, 'worktrees');
+  const watchers = [];
+  let closed = false;
+  let debounceTimer = null;
+  let worktreesWatcher = null;
+  // Inode the worktrees watcher is bound to. git removes `.git/worktrees` when
+  // the last worktree is deleted and recreates it (with a fresh inode) on the
+  // next add, silently invalidating the fs.watch handle; tracking the inode
+  // lets us notice the swap and re-attach even if the two events coalesce.
+  let worktreesWatchIno = null;
+
+  const notify = (reason) => {
+    if (closed) return;
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+    }
+    debounceTimer = setTimeout(() => {
+      debounceTimer = null;
+      if (closed) return;
+      onChange({ reason, commonGitDir, worktreesDir, at: Date.now() });
+    }, 200);
+  };
+
+  const closeWatcher = (watcher) => {
+    try {
+      watcher.close();
+    } catch {
+      // ignored
+    }
+  };
+
+  const removeWatcher = (watcher) => {
+    const index = watchers.indexOf(watcher);
+    if (index !== -1) {
+      watchers.splice(index, 1);
+    }
+    closeWatcher(watcher);
+  };
+
+  const attachWatcher = (targetPath, handleEvent) => {
+    let stat;
+    try {
+      stat = fs.statSync(targetPath);
+    } catch {
+      return null;
+    }
+    if (!stat.isDirectory()) {
+      return null;
+    }
+
+    const watcher = fs.watch(targetPath, { persistent: false }, (eventType, filename) => {
+      handleEvent(eventType, typeof filename === 'string' ? filename : null);
+    });
+    watcher.on('error', (error) => {
+      console.warn('Git worktree watcher error:', error?.message || error);
+    });
+    watchers.push(watcher);
+    return watcher;
+  };
+
+  // Keep the `.git/worktrees` watcher in sync with the directory's current
+  // existence and identity. Runs synchronously from watcher callbacks, so
+  // events are processed one at a time — there is no await window for a
+  // concurrent invocation to attach a duplicate watcher, and a deleted dir is
+  // re-watched as soon as git recreates it (otherwise granular add/remove
+  // events stop arriving after the last worktree is removed and a new one
+  // added).
+  const syncWorktreesWatcher = () => {
+    if (closed) {
+      return false;
+    }
+    let stat;
+    try {
+      stat = fs.statSync(worktreesDir);
+    } catch {
+      stat = null;
+    }
+    if (!stat?.isDirectory()) {
+      if (worktreesWatcher) {
+        removeWatcher(worktreesWatcher);
+        worktreesWatcher = null;
+        worktreesWatchIno = null;
+        return true;
+      }
+      return false;
+    }
+    if (worktreesWatcher && worktreesWatchIno === stat.ino) {
+      return false;
+    }
+    let changed = false;
+    if (worktreesWatcher) {
+      removeWatcher(worktreesWatcher);
+      worktreesWatcher = null;
+      worktreesWatchIno = null;
+      changed = true;
+    }
+    const watcher = attachWatcher(worktreesDir, () => notify('worktrees-directory-changed'));
+    if (watcher) {
+      worktreesWatcher = watcher;
+      worktreesWatchIno = stat.ino;
+      changed = true;
+    }
+    return changed;
+  };
+
+  attachWatcher(commonGitDir, (_eventType, filename) => {
+    if (filename === 'worktrees') {
+      syncWorktreesWatcher();
+      notify('common-git-directory-changed');
+      return;
+    }
+    if (!filename && syncWorktreesWatcher()) {
+      notify('common-git-directory-changed');
+    }
+  });
+
+  syncWorktreesWatcher();
+
+  if (watchers.length === 0) {
+    throw new Error('Failed to watch git worktree metadata');
+  }
+
+  return () => {
+    closed = true;
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+    }
+    watchers.splice(0).forEach(closeWatcher);
+  };
+}
+
 export async function getWorktrees(directory) {
   const directoryPath = normalizeDirectoryPath(directory);
   if (!directoryPath || !fs.existsSync(directoryPath)) {
