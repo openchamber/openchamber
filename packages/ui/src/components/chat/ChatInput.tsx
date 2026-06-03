@@ -31,6 +31,7 @@ import { PendingChangesBar } from './PendingChangesBar';
 import { useChatSurfaceMode } from './useChatSurfaceMode';
 import { MobileAgentButton } from './MobileAgentButton';
 import { MobileModelButton } from './MobileModelButton';
+import { MobileSendModeButton } from './MobileSendModeButton';
 import { MobileSessionStatusBar, MobileSessionPanelTrigger } from './MobileSessionStatusBar';
 import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
 import { toast } from '@/components/ui';
@@ -955,6 +956,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const [snippetQuery, setSnippetQuery] = React.useState('');
     const [textareaSize, setTextareaSize] = React.useState<{ height: number; maxHeight: number } | null>(null);
     const [mobileControlsPanel, setMobileControlsPanel] = React.useState<MobileControlsPanel>(null);
+    const [oneTimeQueueModeEnabled, setOneTimeQueueModeEnabled] = React.useState<boolean | null>(null);
     // Message history navigation state (up/down arrow to recall previous messages)
     const [historyIndex, setHistoryIndex] = React.useState(-1); // -1 = not browsing, 0+ = index from most recent
     const [draftMessage, setDraftMessage] = React.useState(''); // Preserves input when entering history mode
@@ -1638,6 +1640,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         // Note: confirmedMentionsRef is NOT cleared here because queued messages
         // are processed later in handleSubmit which reads the ref via extractInlineFileMentions.
         // The ref is cleared in handleSubmit after all queued messages are sent.
+        setOneTimeQueueModeEnabled(null);
         setMessage('');
         if (attachmentsToQueue.length > 0) {
             clearAttachedFiles();
@@ -1834,6 +1837,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             clearQueue(currentSessionId);
         }
         if (!queuedOnly) {
+            setOneTimeQueueModeEnabled(null);
             setMessage('');
             confirmedMentionsRef.current.clear();
             // Clear per-session draft on submit
@@ -2159,16 +2163,24 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     // Update ref with latest handleSubmit on every render
     handleSubmitRef.current = handleSubmit;
 
-    // Primary action for send button - respects queue mode setting
+    const handleOneTimeQueueModeToggle = () => {
+        setOneTimeQueueModeEnabled((currentValue) => !(currentValue ?? queueModeEnabled));
+    };
+
+    // Primary action for send button - respects the default setting plus any one-message mobile override.
     const handlePrimaryAction = React.useCallback(() => {
         const inputSnapshot = getCurrentInputSnapshot();
         const canQueue = inputMode === 'normal' && inputSnapshot.hasContent && currentSessionId && sessionPhase !== 'idle';
-        if (queueModeEnabled && canQueue) {
+        const effectiveQueueModeEnabled = oneTimeQueueModeEnabled ?? queueModeEnabled;
+        if (oneTimeQueueModeEnabled !== null) {
+            setOneTimeQueueModeEnabled(null);
+        }
+        if (effectiveQueueModeEnabled && canQueue) {
             handleQueueMessage();
         } else {
             void handleSubmitRef.current();
         }
-    }, [inputMode, getCurrentInputSnapshot, currentSessionId, sessionPhase, queueModeEnabled, handleQueueMessage]);
+    }, [oneTimeQueueModeEnabled, queueModeEnabled, inputMode, getCurrentInputSnapshot, currentSessionId, sessionPhase, handleQueueMessage]);
 
     // Draft welcome presets: populate the composer and submit immediately.
     // getCurrentInputSnapshot reads textareaRef.current.value first, so setting it
@@ -3787,6 +3799,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
         return state.isSessionAutoAccepting(permissionScopeSessionId);
     });
+    // Mobile-only: queue mode only works for an existing normal chat session.
+    // New-session drafts always send immediately, so hiding this avoids implying
+    // the default setting was changed or that draft messages can be queued.
+    const showMobileSendModeToggle = isMobile && inputMode === 'normal' && Boolean(currentSessionId);
 
     const handlePermissionAutoAcceptToggle = React.useCallback(() => {
         if (!permissionScopeSessionId) {
@@ -4363,6 +4379,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                             permissionAutoAcceptEnabled={permissionAutoAcceptEnabled}
                                             handlePermissionAutoAcceptToggle={handlePermissionAutoAcceptToggle}
                                         />
+                                        {showMobileSendModeToggle ? (
+                                            <MobileSendModeButton
+                                                footerIconButtonClass={footerIconButtonClass}
+                                                iconSizeClass={iconSizeClass}
+                                                sendMode={(oneTimeQueueModeEnabled ?? queueModeEnabled) ? 'queue' : 'steer'}
+                                                onToggle={handleOneTimeQueueModeToggle}
+                                            />
+                                        ) : null}
                                     </div>
                                     <div className="flex items-center min-w-0 gap-x-1 justify-end">
                                         <div className="flex items-center gap-x-1 min-w-0 max-w-[60vw] flex-shrink">
