@@ -1105,6 +1105,8 @@ export const dict: Record<I18nKey, string> = {
   "contextSidebar.tokens.reasoning": "Міркування",
   "contextSidebar.tokens.cacheRead": "Читання кешу",
   "contextSidebar.tokens.cacheWrite": "Запис кешу",
+  "contextSidebar.tokens.cacheHitRate": "Влучання в кеш: {percent}%",
+  "contextSidebar.tokens.cacheHitRateTooltip": "Частка вхідних токенів, оброблених з кешу префіксів постачальника",
   "contextSidebar.actions.copyJson": "Скопіювати JSON",
   "contextSidebar.actions.copy": "Копіювати",
   "contextSidebar.actions.copied": "Скопійовано",

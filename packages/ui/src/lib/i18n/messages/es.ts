@@ -1105,6 +1105,8 @@ export const dict: Record<I18nKey, string> = {
   "contextSidebar.tokens.reasoning": "Razonamiento",
   "contextSidebar.tokens.cacheRead": "Lectura de caché",
   "contextSidebar.tokens.cacheWrite": "Escritura de caché",
+  "contextSidebar.tokens.cacheHitRate": "Cache hit {percent}%",
+  "contextSidebar.tokens.cacheHitRateTooltip": "Proporción de tokens de entrada servidos desde la caché de prefijo del proveedor",
   "contextSidebar.actions.copyJson": "Copiar JSON",
   "contextSidebar.actions.copy": "Copiar",
   "contextSidebar.actions.copied": "Copiado",

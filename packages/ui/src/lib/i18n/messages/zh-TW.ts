@@ -1115,6 +1115,8 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.tokens.reasoning': '推理',
   'contextSidebar.tokens.cacheRead': '快取讀取',
   'contextSidebar.tokens.cacheWrite': '快取寫入',
+  'contextSidebar.tokens.cacheHitRate': '快取命中 {percent}%',
+  'contextSidebar.tokens.cacheHitRateTooltip': '從提供者字首快取提供之輸入權杖的比例',
   'contextSidebar.actions.copyJson': '複製 JSON',
   'contextSidebar.actions.copy': '複製',
   'contextSidebar.actions.copied': '已複製',

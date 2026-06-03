@@ -1105,6 +1105,8 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.tokens.reasoning': '推理',
   'contextSidebar.tokens.cacheRead': '缓存读取',
   'contextSidebar.tokens.cacheWrite': '缓存写入',
+  'contextSidebar.tokens.cacheHitRate': '缓存命中 {percent}%',
+  'contextSidebar.tokens.cacheHitRateTooltip': '从提供商前缀缓存提供的输入令牌的比例',
   'contextSidebar.actions.copyJson': '复制 JSON',
   'contextSidebar.actions.copy': '复制',
   'contextSidebar.actions.copied': '已复制',

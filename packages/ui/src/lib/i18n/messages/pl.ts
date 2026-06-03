@@ -1305,6 +1305,8 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.stats.user': 'Użytkownik',
   'contextSidebar.tokens.cacheRead': 'Odczyt cache',
   'contextSidebar.tokens.cacheWrite': 'Zapis cache',
+  'contextSidebar.tokens.cacheHitRate': 'Trafienie cache: {percent}%',
+  'contextSidebar.tokens.cacheHitRateTooltip': 'Odsetek tokenów wejściowych obsłużonych z cache prefiksu dostawcy',
   'contextSidebar.tokens.input': 'Wejście',
   'contextSidebar.tokens.output': 'Wyjście',
   'contextSidebar.tokens.reasoning': 'Rozumowanie',

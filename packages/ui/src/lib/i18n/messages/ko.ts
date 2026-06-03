@@ -1142,6 +1142,8 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.tokens.reasoning': '추론',
   'contextSidebar.tokens.cacheRead': '캐시 읽기',
   'contextSidebar.tokens.cacheWrite': '캐시 쓰기',
+  'contextSidebar.tokens.cacheHitRate': '캐시 적중 {percent}%',
+  'contextSidebar.tokens.cacheHitRateTooltip': '공급자 접두사 캐시에서 제공된 입력 토큰의 비율',
   'contextSidebar.actions.copyJson': 'JSON 복사',
   'contextSidebar.actions.copy': '복사',
   'contextSidebar.actions.copied': '복사됨',
