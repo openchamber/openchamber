@@ -44,6 +44,7 @@ import { getRuntimeLiveStatusSeed, LIVE_STATUS_TTL_MS } from "./runtime-live-mem
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry"
 import { setSessionPrefetch } from "./session-prefetch-cache"
+import { mergeSessionPreservingResolvedTitle } from "./session-title-merge"
 
 // ---------------------------------------------------------------------------
 // Context
@@ -1149,9 +1150,10 @@ async function resyncDirectoryAfterReconnect(
       let sessionTotal = state.sessionTotal
 
       if (sessionIndex >= 0) {
-        if (!haveEquivalentSyncSnapshots(sessions[sessionIndex], nextSession)) {
+        const mergedSession = mergeSessionPreservingResolvedTitle(sessions[sessionIndex], nextSession)
+        if (!haveEquivalentSyncSnapshots(sessions[sessionIndex], mergedSession)) {
           sessions = [...state.session]
-          sessions[sessionIndex] = nextSession
+          sessions[sessionIndex] = mergedSession
           sessionChanged = true
         }
       } else {
@@ -1595,7 +1597,11 @@ export function SyncProvider(props: {
                 )
                 return
               }
-              store.setState({ session: sessions, sessionTotal: sessions.length, limit: Math.max(sessions.length, 50) })
+              const currentSessionsById = new Map(currentSessions.map((session) => [session.id, session]))
+              const mergedSessions = sessions.map((session) => (
+                mergeSessionPreservingResolvedTitle(currentSessionsById.get(session.id), session)
+              ))
+              store.setState({ session: mergedSessions, sessionTotal: mergedSessions.length, limit: Math.max(mergedSessions.length, 50) })
               ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
             }),
           })

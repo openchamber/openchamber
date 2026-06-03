@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { opencodeClient } from '@/lib/opencode/client';
 import { listGlobalSessionPages } from '@/stores/globalSessions';
+import { mergeSessionPreservingResolvedTitle } from '@/sync/session-title-merge';
 
 type GlobalSessionsStatus = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -101,12 +102,39 @@ const upsertSessionIntoList = (sessions: Session[], session: Session): Session[]
   if (index === -1) {
     return [session, ...sessions];
   }
-  if (getSessionSignature(sessions[index]) === getSessionSignature(session)) {
+  const nextSession = mergeSessionPreservingResolvedTitle(sessions[index], session);
+  if (getSessionSignature(sessions[index]) === getSessionSignature(nextSession)) {
     return sessions;
   }
   const next = [...sessions];
-  next[index] = session;
+  next[index] = nextSession;
   return next;
+};
+
+const preserveResolvedTitlesInIncoming = (existing: Session[], incoming: Session[]): Session[] => {
+  if (existing.length === 0 || incoming.length === 0) {
+    return incoming;
+  }
+
+  const existingById = new Map(existing.map((session) => [session.id, session]));
+  let changed = false;
+  const next = incoming.map((session) => {
+    const merged = mergeSessionPreservingResolvedTitle(existingById.get(session.id), session);
+    if (merged !== session) {
+      changed = true;
+    }
+    return merged;
+  });
+
+  return changed ? next : incoming;
+};
+
+const findSessionById = (sessions: Session[], id: string): Session | undefined => {
+  return sessions.find((session) => session.id === id);
+};
+
+const getKnownSessions = (state: Pick<GlobalSessionsState, 'activeSessions' | 'archivedSessions'>): Session[] => {
+  return [...state.activeSessions, ...state.archivedSessions];
 };
 
 const mergeSessionLists = (existing: Session[], incoming?: Session[]): Session[] => {
@@ -120,7 +148,7 @@ const mergeSessionLists = (existing: Session[], incoming?: Session[]): Session[]
 
   const byId = new Map(existing.map((session) => [session.id, session]));
   incoming.forEach((session) => {
-    byId.set(session.id, session);
+    byId.set(session.id, mergeSessionPreservingResolvedTitle(byId.get(session.id), session));
   });
 
   const ordered: Session[] = [];
@@ -155,12 +183,15 @@ const applySnapshot = (
   archivedSessions: Session[],
   status: GlobalSessionsStatus,
 ): Partial<GlobalSessionsState> | GlobalSessionsState => {
-  const nextActiveSessions = sameSessionList(state.activeSessions, activeSessions)
+  const knownSessions = getKnownSessions(state);
+  const mergedActiveSessions = preserveResolvedTitlesInIncoming(knownSessions, activeSessions);
+  const mergedArchivedSessions = preserveResolvedTitlesInIncoming(knownSessions, archivedSessions);
+  const nextActiveSessions = sameSessionList(state.activeSessions, mergedActiveSessions)
     ? state.activeSessions
-    : activeSessions;
-  const nextArchivedSessions = sameSessionList(state.archivedSessions, archivedSessions)
+    : mergedActiveSessions;
+  const nextArchivedSessions = sameSessionList(state.archivedSessions, mergedArchivedSessions)
     ? state.archivedSessions
-    : archivedSessions;
+    : mergedArchivedSessions;
   const nextSessionsByDirectory = nextActiveSessions === state.activeSessions
     ? state.sessionsByDirectory
     : buildSessionsByDirectory(nextActiveSessions);
@@ -214,7 +245,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
 
         const fallbackSnapshot = mergeSessionLists(current.activeSessions, fallbackActive);
         const nextActiveSessions = activeResult.status === 'fulfilled'
-          ? activeResult.value
+          ? mergeSessionLists(fallbackSnapshot, activeResult.value)
           : fallbackSnapshot;
         const nextArchivedSessions = archivedResult.status === 'fulfilled'
           ? archivedResult.value
@@ -246,11 +277,14 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
   upsertSession: (session) => {
     set((state) => {
       const isArchived = Boolean(session.time?.archived);
+      const existingSession = findSessionById(state.activeSessions, session.id)
+        ?? findSessionById(state.archivedSessions, session.id);
+      const nextSession = mergeSessionPreservingResolvedTitle(existingSession, session);
       const nextActiveSessions = isArchived
         ? state.activeSessions.filter((candidate) => candidate.id !== session.id)
-        : upsertSessionIntoList(state.activeSessions, session);
+        : upsertSessionIntoList(state.activeSessions, nextSession);
       const nextArchivedSessions = isArchived
-        ? upsertSessionIntoList(state.archivedSessions, session)
+        ? upsertSessionIntoList(state.archivedSessions, nextSession)
         : state.archivedSessions.filter((candidate) => candidate.id !== session.id);
 
       if (

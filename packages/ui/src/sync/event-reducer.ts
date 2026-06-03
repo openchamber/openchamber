@@ -14,6 +14,7 @@ import type { FileDiff, GlobalState, State } from "./types"
 import { dropSessionCaches } from "./session-cache"
 import { stripSessionDiffSnapshots } from "./sanitize"
 import { syncDebug } from "./debug"
+import { mergeSessionPreservingResolvedTitle } from "./session-title-merge"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 const DELTA_OVERLAP_FIELDS = ["text", "output"] as const
@@ -176,7 +177,7 @@ export function applyDirectoryEvent(
       const sessions = draft.session
       const result = Binary.search(sessions, info.id, (s) => s.id)
       if (result.found) {
-        sessions[result.index] = info
+        sessions[result.index] = mergeSessionPreservingResolvedTitle(sessions[result.index], info)
       } else {
         sessions.splice(result.index, 0, info)
         trimSessions(draft)
@@ -198,7 +199,7 @@ export function applyDirectoryEvent(
       }
 
       if (result.found) {
-        sessions[result.index] = info
+        sessions[result.index] = mergeSessionPreservingResolvedTitle(sessions[result.index], info)
       } else {
         sessions.splice(result.index, 0, info)
         trimSessions(draft)
