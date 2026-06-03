@@ -21,6 +21,12 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install
+
       - name: Install opencode
         run: curl -fsSL https://opencode.ai/install | bash
 
