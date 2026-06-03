@@ -504,15 +504,10 @@ export function DesktopHostSwitcherDialog({
       }
 
       const existingUrl = normalizeHostUrl(existingStatus?.localUrl || host.url || '');
-      const electronic = isElectronShell();
       if (existingStatus?.phase === 'ready' && existingUrl) {
-        const target = toNavigationUrl(existingUrl);
         onHostSwitched?.();
-        if (electronic) {
-          switchRuntimeEndpoint({ apiBaseUrl: existingUrl, clientToken: host.clientToken || null, runtimeKey: runtimeKeyForHost(host) });
-        } else {
-          window.location.assign(target);
-        }
+        switchRuntimeEndpoint({ apiBaseUrl: existingUrl, clientToken: host.clientToken || null, runtimeKey: runtimeKeyForHost(host) });
+        window.location.assign(toNavigationUrl(existingUrl));
         return;
       }
 
@@ -559,13 +554,9 @@ export function DesktopHostSwitcherDialog({
           error: null,
         }));
         const targetOrigin = normalizeHostUrl(readyStatus.localUrl || '') || origin;
-        const target = toNavigationUrl(targetOrigin);
         onHostSwitched?.();
-        if (isElectronShell()) {
-          switchRuntimeEndpoint({ apiBaseUrl: targetOrigin, clientToken: host.clientToken || null, runtimeKey: runtimeKeyForHost(host) });
-        } else {
-          window.location.assign(target);
-        }
+        switchRuntimeEndpoint({ apiBaseUrl: targetOrigin, clientToken: host.clientToken || null, runtimeKey: runtimeKeyForHost(host) });
+        window.location.assign(toNavigationUrl(targetOrigin));
         return;
       } catch (err) {
         if (switchToken !== sshSwitchTokenRef.current) {
