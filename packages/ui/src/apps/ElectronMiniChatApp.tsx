@@ -79,10 +79,11 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
     const id = window.setInterval(() => {
       if (!active) return;
       retryCount += 1;
-      if (retryCount > 10) {
-        window.clearInterval(id);
-        return;
-      }
+      // Use exponential backoff: poll every 1s for the first 10 attempts, then
+      // every 5s thereafter. Never stop retrying — SSH connections can take
+      // much longer than 10s to establish, and the monitor auto-reconnects.
+      const pollEveryN = retryCount > 10 ? 5 : 1;
+      if (retryCount % pollEveryN !== 0) return;
       if (!useConfigStore.getState().isInitialized) {
         void useConfigStore.getState().initializeApp();
       }

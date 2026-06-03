@@ -372,6 +372,27 @@ export function MobileApp({ apis }: MobileAppProps) {
   }, [initializeApp]);
 
   React.useEffect(() => {
+    if (isInitialized) return;
+    let active = true;
+    let retryCount = 0;
+    const id = window.setInterval(() => {
+      if (!active) return;
+      retryCount += 1;
+      // Slow down after the first 10 fast retries; never stop — SSH can take
+      // much longer than 10s to come up, and the monitor auto-reconnects.
+      const pollEveryN = retryCount > 10 ? 5 : 1;
+      if (retryCount % pollEveryN !== 0) return;
+      if (!useConfigStore.getState().isInitialized) {
+        void useConfigStore.getState().initializeApp();
+      }
+    }, 1000);
+    return () => {
+      active = false;
+      window.clearInterval(id);
+    };
+  }, [isInitialized]);
+
+  React.useEffect(() => {
     if (!isConnected) return;
     if (providersCount === 0) void loadProviders();
     if (agentsCount === 0) void loadAgents();

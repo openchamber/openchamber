@@ -12,6 +12,7 @@ import {
   type DesktopSshInstance,
   type DesktopSshInstanceStatus,
 } from '@/lib/desktopSsh';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 
 type DesktopSshState = {
   instances: DesktopSshInstance[];
@@ -70,6 +71,24 @@ export const useDesktopSshStore = create<DesktopSshState>((set, get) => ({
               [status.id]: status,
             },
           }));
+
+          // When the SSH monitor auto-reconnects an instance that is the
+          // currently active runtime endpoint, kick off app reinitialization.
+          // Without this, the app stays stuck in "reconnecting" indefinitely
+          // even after the tunnel is restored — because switchRuntimeEndpoint
+          // (which normally triggers initializeApp) is never called again.
+          if (status.phase === 'ready' && status.localUrl) {
+            const runtimeKey = getRuntimeKey();
+            if (runtimeKey === `ssh:${status.id}`) {
+              // Lazy import to avoid circular dependencies at module load time.
+              import('@/stores/useConfigStore').then(({ useConfigStore }) => {
+                const configState = useConfigStore.getState();
+                if (!configState.isConnected || !configState.isInitialized) {
+                  void configState.initializeApp();
+                }
+              }).catch(() => {});
+            }
+          }
         });
       }
 

@@ -1827,6 +1827,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         if (!primaryText && primaryAttachments.length === 0 && additionalParts.length === 0) return;
 
+        // Capture the raw input text before clearing, so we can restore it on connection errors.
+        const inputTextBeforeSend = !queuedOnly ? inputSnapshot.message : '';
+
         // Clear queue and input
         if (currentSessionId && queuedMessageId) {
             removeFromQueue(currentSessionId, queuedMessageId);
@@ -2129,6 +2132,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 normalized.includes('gateway timeout') ||
                 normalized === 'failed to send message';
 
+            const isConnectionError =
+                normalized.includes('connection lost') ||
+                normalized.includes('not connected') ||
+                normalized.includes('never connected') ||
+                normalized.includes('please wait for reconnection');
+
             if (normalized.includes('payload too large') || normalized.includes('413') || normalized.includes('entity too large')) {
                 toast.error(t('chat.chatInput.toast.attachmentsTooLarge'));
                 if (allAttachments.length > 0) {
@@ -2143,6 +2152,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     toast.error(t('chat.chatInput.toast.sendAttachmentsFailed'));
                 }
                 return;
+            }
+
+            // Restore input text so the user doesn't lose their message when
+            // the connection is still pending (e.g. SSH remote instance connecting).
+            if (isConnectionError && inputTextBeforeSend) {
+                setMessage(inputTextBeforeSend);
+                saveStoredDraft(currentSessionId, inputTextBeforeSend);
             }
 
             if (allAttachments.length > 0) {
