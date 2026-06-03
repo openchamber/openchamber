@@ -488,28 +488,6 @@ export function DesktopHostSwitcherDialog({
     const apiOrigin = host.id === LOCAL_HOST_ID ? localOrigin : (normalizeHostUrl(getDesktopHostApiUrl(host)) || '');
     if (!origin) return;
 
-    if (isElectronShell()) {
-      if (!apiOrigin) return;
-      setSwitchingHostId(host.id);
-      const clientToken = host.id === LOCAL_HOST_ID ? await getLocalClientToken() : (host.clientToken || '');
-      const probe = await desktopHostProbe(apiOrigin, { clientToken: clientToken || null }).catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
-      setStatusById((prev) => ({
-        ...prev,
-        [host.id]: { status: probe.status, latencyMs: probe.latencyMs },
-      }));
-
-      if (isBlockedHostStatus(probe.status)) {
-        toast.error(t('desktopHostSwitcher.toast.instanceUnreachable', { host: redactSensitiveUrl(host.label) }));
-        setSwitchingHostId(null);
-        return;
-      }
-
-      switchRuntimeEndpoint({ apiBaseUrl: apiOrigin, clientToken: clientToken || null, runtimeKey: runtimeKeyForHost(host) });
-      onHostSwitched?.();
-      setSwitchingHostId(null);
-      return;
-    }
-
     const isSshHost = Boolean(sshHostIds[host.id]);
 
     if (host.id !== LOCAL_HOST_ID && isSshHost && isDesktopShell()) {
@@ -526,10 +504,15 @@ export function DesktopHostSwitcherDialog({
       }
 
       const existingUrl = normalizeHostUrl(existingStatus?.localUrl || host.url || '');
+      const electronic = isElectronShell();
       if (existingStatus?.phase === 'ready' && existingUrl) {
         const target = toNavigationUrl(existingUrl);
         onHostSwitched?.();
-        window.location.assign(target);
+        if (electronic) {
+          switchRuntimeEndpoint({ apiBaseUrl: existingUrl, clientToken: host.clientToken || null, runtimeKey: runtimeKeyForHost(host) });
+        } else {
+          window.location.assign(target);
+        }
         return;
       }
 
@@ -569,7 +552,11 @@ export function DesktopHostSwitcherDialog({
         const targetOrigin = normalizeHostUrl(readyStatus.localUrl || '') || origin;
         const target = toNavigationUrl(targetOrigin);
         onHostSwitched?.();
-        window.location.assign(target);
+        if (isElectronShell()) {
+          switchRuntimeEndpoint({ apiBaseUrl: targetOrigin, clientToken: host.clientToken || null, runtimeKey: runtimeKeyForHost(host) });
+        } else {
+          window.location.assign(target);
+        }
         return;
       } catch (err) {
         if (switchToken !== sshSwitchTokenRef.current) {
@@ -594,6 +581,28 @@ export function DesktopHostSwitcherDialog({
           setSwitchingHostId(null);
         }
       }
+    }
+
+    if (isElectronShell()) {
+      if (!apiOrigin) return;
+      setSwitchingHostId(host.id);
+      const clientToken = host.id === LOCAL_HOST_ID ? await getLocalClientToken() : (host.clientToken || '');
+      const probe = await desktopHostProbe(apiOrigin, { clientToken: clientToken || null }).catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
+      setStatusById((prev) => ({
+        ...prev,
+        [host.id]: { status: probe.status, latencyMs: probe.latencyMs },
+      }));
+
+      if (isBlockedHostStatus(probe.status)) {
+        toast.error(t('desktopHostSwitcher.toast.instanceUnreachable', { host: redactSensitiveUrl(host.label) }));
+        setSwitchingHostId(null);
+        return;
+      }
+
+      switchRuntimeEndpoint({ apiBaseUrl: apiOrigin, clientToken: clientToken || null, runtimeKey: runtimeKeyForHost(host) });
+      onHostSwitched?.();
+      setSwitchingHostId(null);
+      return;
     }
 
     if (host.id !== LOCAL_HOST_ID && isDesktopShell()) {
