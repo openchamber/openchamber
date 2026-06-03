@@ -2229,6 +2229,38 @@ const resolveInitialUrl = async () => {
 
   if (apiBaseUrl && apiBaseUrl !== localUrl) {
     remoteProbe = await probeHostWithTimeout(apiBaseUrl, 2_000);
+
+    // If the remote is unreachable and it's an SSH instance we manage,
+    // try to connect the tunnel before giving up.
+    if (remoteProbe.status === 'unreachable' && config.defaultHostId && config.defaultHostId !== LOCAL_HOST_ID) {
+      const sshInstances = sshManager.readInstances().instances;
+      const sshInstance = sshInstances.find((inst) => inst.id === config.defaultHostId);
+      if (sshInstance) {
+        log.info('[electron] default host is an SSH instance and unreachable — auto-connecting tunnel', { id: sshInstance.id });
+        try {
+          await sshManager.connect(sshInstance.id);
+          // Wait up to 60s for the tunnel to become ready
+          const SSH_STARTUP_TIMEOUT_MS = 60_000;
+          const deadline = Date.now() + SSH_STARTUP_TIMEOUT_MS;
+          while (Date.now() < deadline) {
+            const status = sshManager.statuses.get(sshInstance.id);
+            if (status?.phase === 'ready' && status.localUrl) {
+              // Tunnel is up — re-probe using the forwarded URL
+              remoteProbe = await probeHostWithTimeout(apiBaseUrl, 2_000);
+              break;
+            }
+            if (status?.phase === 'error') {
+              log.warn('[electron] SSH auto-connect failed:', status.detail);
+              break;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 500));
+          }
+        } catch (sshError) {
+          log.warn('[electron] SSH auto-connect threw:', sshError);
+        }
+      }
+    }
+
     if (remoteProbe.status === 'unreachable') {
       remoteProbe = await probeHostWithTimeout(apiBaseUrl, 10_000);
     }
