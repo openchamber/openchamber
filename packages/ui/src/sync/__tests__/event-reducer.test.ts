@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { Event, Part, PermissionRequest, QuestionRequest, SessionStatus } from "@opencode-ai/sdk/v2/client"
+import type { Event, Part, PermissionRequest, QuestionRequest, Session, SessionStatus } from "@opencode-ai/sdk/v2/client"
 import { applyDirectoryEvent } from "../event-reducer"
 import { INITIAL_STATE, type State } from "../types"
 
@@ -40,7 +40,31 @@ function partUpdatedEvent(): Event {
   } as Event
 }
 
+function session(id: string, title: string, updated: number): Session {
+  return {
+    id,
+    title,
+    time: { created: 1, updated },
+  } as Session
+}
+
 describe("applyDirectoryEvent", () => {
+  test("preserves a resolved title when a passive session update carries a default title", () => {
+    const draft = state({
+      session: [session("ses_1", "Investigate startup failure", 2)],
+    })
+
+    applyDirectoryEvent(draft, {
+      type: "session.updated",
+      properties: {
+        info: session("ses_1", "New session - 2026-06-02", 3),
+      },
+    } as Event)
+
+    expect(draft.session[0]?.title).toBe("Investigate startup failure")
+    expect(draft.session[0]?.time.updated).toBe(3)
+  })
+
   test("returns typed materialization when delta arrives before parts", () => {
     const result = applyDirectoryEvent(state(), deltaEvent())
 
