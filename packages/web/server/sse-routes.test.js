@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, vi } from 'bun:test';
 
-import { registerNotificationRoutes } from './lib/notifications/routes.js';
+import { NOTIFICATION_SSE_HEARTBEAT_INTERVAL_MS, registerNotificationRoutes } from './lib/notifications/routes.js';
 import { registerScheduledTaskRoutes } from './lib/scheduled-tasks/routes.js';
 
 const createRouteRegistry = () => {
@@ -50,6 +50,7 @@ const createMockResponse = () => {
   let statusCode = 200;
   let body = '';
   let flushed = false;
+  let bodyFlushCount = 0;
 
   return {
     setHeader(name, value) {
@@ -60,6 +61,9 @@ const createMockResponse = () => {
     },
     flushHeaders() {
       flushed = true;
+    },
+    flush() {
+      bodyFlushCount += 1;
     },
     write(chunk) {
       body += String(chunk);
@@ -82,42 +86,61 @@ const createMockResponse = () => {
     get flushed() {
       return flushed;
     },
+    get bodyFlushCount() {
+      return bodyFlushCount;
+    },
   };
 };
 
 describe('local SSE routes', () => {
   it('serves notification SSE with nginx-safe headers', async () => {
+    vi.useFakeTimers();
     const { app, getRoute } = createRouteRegistry();
     const clients = new Set();
 
-    registerNotificationRoutes(app, {
-      uiAuthController: {
-        ensureSessionToken: async () => 'ui-token',
-      },
-      getUiSessionTokenFromRequest: () => 'ui-token',
-      getUiNotificationClients: () => clients,
-      writeSseEvent(res, payload) {
-        res.write(`data: ${JSON.stringify(payload)}\n\n`);
-      },
-    });
+    try {
+      registerNotificationRoutes(app, {
+        uiAuthController: {
+          ensureSessionToken: async () => 'ui-token',
+        },
+        getUiSessionTokenFromRequest: () => 'ui-token',
+        getUiNotificationClients: () => clients,
+        writeSseEvent(res, payload) {
+          res.write(`data: ${JSON.stringify(payload)}\n\n`);
+        },
+      });
 
-    const handler = getRoute('GET', '/api/notifications/stream');
-    const req = createMockRequest();
-    const res = createMockResponse();
+      const handler = getRoute('GET', '/api/notifications/stream');
+      const req = createMockRequest();
+      const res = createMockResponse();
 
-    await handler(req, res);
+      await handler(req, res);
 
-    expect(res.statusCode).toBe(200);
-    expect(res.getHeader('content-type')).toContain('text/event-stream');
-    expect(res.getHeader('cache-control')).toBe('no-cache, no-transform');
-    expect(res.getHeader('connection')).toBe('keep-alive');
-    expect(res.getHeader('x-accel-buffering')).toBe('no');
-    expect(res.flushed).toBe(true);
-    expect(res.body).toContain('openchamber:notification-stream-ready');
-    expect(clients.has(res)).toBe(true);
+      expect(res.statusCode).toBe(200);
+      expect(res.getHeader('content-type')).toContain('text/event-stream');
+      expect(res.getHeader('cache-control')).toBe('no-cache, no-transform');
+      expect(res.getHeader('connection')).toBe('keep-alive');
+      expect(res.getHeader('x-accel-buffering')).toBe('no');
+      expect(res.flushed).toBe(true);
+      expect(res.body).toContain('openchamber:notification-stream-ready');
+      expect(clients.has(res)).toBe(true);
+      expect(vi.getTimerCount()).toBe(1);
+      expect(res.bodyFlushCount).toBe(1);
 
-    req.emit('close');
-    expect(clients.has(res)).toBe(false);
+      vi.advanceTimersByTime(NOTIFICATION_SSE_HEARTBEAT_INTERVAL_MS);
+      expect(res.body).toContain(':heartbeat\n\n');
+      expect(res.bodyFlushCount).toBe(2);
+
+      req.emit('close');
+      expect(clients.has(res)).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
+
+      const bodyAfterClose = res.body;
+      vi.advanceTimersByTime(NOTIFICATION_SSE_HEARTBEAT_INTERVAL_MS);
+      expect(res.body).toBe(bodyAfterClose);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('serves OpenChamber SSE with nginx-safe headers', () => {
