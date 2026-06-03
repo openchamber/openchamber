@@ -5,6 +5,8 @@ model: opencode-go/deepseek-v4-flash
 color: "#c0392b"
 permission:
   edit: allow
+  external_directory:
+    "/tmp/**": allow
   bash:
     "gh *": allow
     "git *": allow
