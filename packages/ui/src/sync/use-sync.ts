@@ -10,7 +10,7 @@ import {
 } from "./optimistic"
 import { dropCachedSessionMessageRecordsSnapshots, useDirectoryStore, useSyncSDK, useSyncDirectory, useChildStoreManager } from "./sync-context"
 import { dropSessionCaches, getProtectedSessionCacheIds } from "./session-cache"
-import { stripMessageDiffSnapshots } from "./sanitize"
+import { stripMessageDiffSnapshots, stripSessionDiffSnapshots } from "./sanitize"
 import { isVSCodeRuntime } from "@/lib/desktop"
 import { isMobileSurfaceRuntime } from "@/lib/runtimeSurface"
 import {
@@ -119,6 +119,14 @@ function isUserMessage(message: Message): boolean {
 
 function hasUserMessage(messages: Message[] | undefined): boolean {
   return Boolean(messages?.some(isUserMessage))
+}
+
+export function shouldFetchSessionForRenderableSync(input: {
+  hasSession: boolean
+  shouldLoadMessages: boolean
+  force?: boolean
+}): boolean {
+  return Boolean(input.force) || !input.hasSession || input.shouldLoadMessages
 }
 
 // ---------------------------------------------------------------------------
@@ -429,8 +437,8 @@ export function useSync() {
         })) return
       }
 
-      const shouldFetchSession = !hasSession || force
-      const shouldLoadMessages = !cachedReady || force
+      const shouldLoadMessages = Boolean(!cachedReady || force)
+      const shouldFetchSession = shouldFetchSessionForRenderableSync({ hasSession, shouldLoadMessages, force: Boolean(force) })
       const promise = (async () => {
         await Promise.all([
           shouldFetchSession
@@ -442,13 +450,14 @@ export function useSync() {
                     return response
                   })
                   if (result.data) {
+                    const nextSession = stripSessionDiffSnapshots(result.data)
                     const s = store.getState()
                     const sessions = [...s.session]
                     const idx = Binary.search(sessions, sessionID, (s) => s.id)
                     if (idx.found) {
-                      sessions[idx.index] = result.data
+                      sessions[idx.index] = nextSession
                     } else {
-                      sessions.splice(idx.index, 0, result.data)
+                      sessions.splice(idx.index, 0, nextSession)
                     }
                     store.setState({ session: sessions })
                   }
