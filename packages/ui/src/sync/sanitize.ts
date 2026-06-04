@@ -9,6 +9,8 @@
 // Applied at two points:
 // 1. Event reducer — session.created/session.updated events
 // 2. Message loading — fetchMessages response
+// 3. Session list loading — list responses should not populate stores with
+//    detail-only revert/diff blobs
 // ---------------------------------------------------------------------------
 
 import type { Session, Message } from "@opencode-ai/sdk/v2/client"
@@ -92,6 +94,46 @@ export function stripSessionDiffSnapshots(session: Session): Session {
 
   if (!changed) return nextSession
   return { ...nextSession, summary: { ...summary, diffs: stripped } } as Session
+}
+
+/** Strip detail-only fields from session list records before storing them. */
+export function stripSessionListDetails(session: Session): Session {
+  const record = session as Session & {
+    summary?: SessionSummary
+    revert?: unknown
+    metadata?: unknown
+    permission?: unknown
+  }
+
+  const shouldStrip = Boolean(record.revert)
+    || Array.isArray(record.summary?.diffs)
+    || "metadata" in record
+    || "permission" in record
+
+  if (!shouldStrip) {
+    return session
+  }
+
+  const stripped = stripSessionDiffSnapshots(session) as typeof record
+  const next: Record<string, unknown> = { ...stripped }
+  delete next.revert
+  delete next.metadata
+  delete next.permission
+
+  const summary = stripped.summary
+  if (summary && typeof summary === "object" && !Array.isArray(summary)) {
+    const summaryCounts: SessionSummary = {}
+    if ("additions" in summary) summaryCounts.additions = summary.additions
+    if ("deletions" in summary) summaryCounts.deletions = summary.deletions
+    if ("files" in summary) summaryCounts.files = summary.files
+    if (Object.keys(summaryCounts).length > 0) {
+      next.summary = summaryCounts
+    } else {
+      delete next.summary
+    }
+  }
+
+  return next as unknown as Session
 }
 
 /** Strip oversized snapshot fields from summary.diffs on a message object */

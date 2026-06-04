@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import type { Session } from '@opencode-ai/sdk/v2'
 
-import { stripSessionDiffSnapshots } from './sanitize'
+import { stripSessionDiffSnapshots, stripSessionListDetails } from './sanitize'
 
 describe('stripSessionDiffSnapshots', () => {
   test('removes oversized revert and summary diff payloads', () => {
@@ -51,5 +51,45 @@ describe('stripSessionDiffSnapshots', () => {
     } as unknown as Session
 
     expect(stripSessionDiffSnapshots(session)).toBe(session)
+  })
+})
+
+describe('stripSessionListDetails', () => {
+  test('removes detail-only fields from session list records', () => {
+    const session = {
+      id: 'ses_1',
+      slug: 'session-one',
+      projectID: 'proj_1',
+      directory: '/repo/app',
+      title: 'Session',
+      time: { created: 1, updated: 2 },
+      metadata: { huge: true },
+      permission: [{ permission: 'todowrite' }],
+      revert: {
+        messageID: 'msg_2',
+        partID: 'part_3',
+        snapshot: 'gitsha',
+        diff: 'diff --git a/file b/file',
+      },
+      summary: {
+        additions: 2,
+        deletions: 1,
+        files: 1,
+        diffs: [{ additions: 2, deletions: 1, patch: '@@ -1 +1 @@' }],
+      },
+    } as unknown as Session
+
+    const next = stripSessionListDetails(session) as Session & {
+      metadata?: unknown
+      permission?: unknown
+      revert?: unknown
+      summary?: { additions?: number; deletions?: number; files?: number; diffs?: unknown[] }
+    }
+
+    expect(next).not.toBe(session)
+    expect(next.metadata).toBe(undefined)
+    expect(next.permission).toBe(undefined)
+    expect(next.revert).toBe(undefined)
+    expect(next.summary).toEqual({ additions: 2, deletions: 1, files: 1 })
   })
 })
