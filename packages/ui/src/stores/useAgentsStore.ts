@@ -140,9 +140,9 @@ export const isAgentHidden = (agent: Agent): boolean => {
   return extended.hidden === true || extended.options?.hidden === true;
 };
 
-// Helper to filter only visible (non-hidden) agents
+// Helper to filter agents that can be selected directly as the primary agent.
 export const filterVisibleAgents = (agents: Agent[]): Agent[] =>
-  agents.filter((agent) => !isAgentHidden(agent));
+  agents.filter((agent) => !isAgentHidden(agent) && agent.mode !== 'subagent');
 
 const CONFIG_EVENT_SOURCE = "useAgentsStore";
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
