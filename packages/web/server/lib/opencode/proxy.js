@@ -93,6 +93,64 @@ export const createSseBoundaryTracker = () => {
   };
 };
 
+const SESSION_LIST_ALLOWED_FIELDS = [
+  'id',
+  'slug',
+  'projectID',
+  'workspaceID',
+  'directory',
+  'path',
+  'parentID',
+  'title',
+  'agent',
+  'model',
+  'version',
+  'time',
+  'cost',
+  'tokens',
+  'share',
+  'project',
+];
+
+export const sanitizeSessionListItem = (session) => {
+  if (!session || typeof session !== 'object' || Array.isArray(session)) {
+    return session;
+  }
+
+  const sanitized = {};
+  for (const key of SESSION_LIST_ALLOWED_FIELDS) {
+    if (key in session) {
+      sanitized[key] = session[key];
+    }
+  }
+
+  const summary = session.summary;
+  if (summary && typeof summary === 'object' && !Array.isArray(summary)) {
+    const summaryCounts = {};
+    if ('additions' in summary) {
+      summaryCounts.additions = summary.additions;
+    }
+    if ('deletions' in summary) {
+      summaryCounts.deletions = summary.deletions;
+    }
+    if ('files' in summary) {
+      summaryCounts.files = summary.files;
+    }
+    if (Object.keys(summaryCounts).length > 0) {
+      sanitized.summary = summaryCounts;
+    }
+  }
+
+  return sanitized;
+};
+
+export const sanitizeSessionListPayload = (payload) => {
+  if (!Array.isArray(payload)) {
+    return payload;
+  }
+  return payload.map((session) => sanitizeSessionListItem(session));
+};
+
 export const registerOpenCodeProxy = (app, deps) => {
   const {
     fs,
@@ -463,6 +521,57 @@ export const registerOpenCodeProxy = (app, deps) => {
 
   app.get('/api/global/event', forwardSseRequest);
   app.get('/api/event', forwardSseRequest);
+
+  app.get('/api/experimental/session', async (req, res, next) => {
+    try {
+      const requestUrl = typeof req.originalUrl === 'string' && req.originalUrl.length > 0
+        ? req.originalUrl
+        : (typeof req.url === 'string' ? req.url : '');
+      const upstreamPathRaw = requestUrl.startsWith('/api') ? requestUrl.slice(4) || '/' : requestUrl;
+      const upstreamPath = await canonicalizeDirectoryQuery(upstreamPathRaw);
+      const upstream = await fetch(buildOpenCodeUrl(upstreamPath, ''), {
+        method: 'GET',
+        headers: {
+          ...collectForwardProxyHeaders(req.headers, getOpenCodeAuthHeaders()),
+          accept: 'application/json',
+          'accept-encoding': 'identity',
+        },
+      });
+
+      res.status(upstream.status);
+      applyForwardProxyResponseHeaders(upstream.headers, res);
+
+      const contentType = upstream.headers.get('content-type') || 'application/json; charset=utf-8';
+      const bodyText = await upstream.text();
+      if (!contentType.toLowerCase().includes('application/json')) {
+        res.setHeader('content-type', contentType);
+        res.end(bodyText);
+        return;
+      }
+
+      let payload;
+      try {
+        payload = JSON.parse(bodyText);
+      } catch {
+        res.setHeader('content-type', contentType);
+        res.end(bodyText);
+        return;
+      }
+
+      res.setHeader('content-type', contentType);
+      res.json(sanitizeSessionListPayload(payload));
+    } catch (error) {
+      if (isAbortError(error)) {
+        return;
+      }
+      console.error('[proxy] OpenCode experimental.session proxy error:', error?.message ?? error);
+      if (!res.headersSent) {
+        res.status(503).json({ error: 'OpenCode service unavailable' });
+        return;
+      }
+      next(error);
+    }
+  });
 
   // Generic proxy for non-SSE OpenCode API routes.
   const apiProxy = createProxyMiddleware({
