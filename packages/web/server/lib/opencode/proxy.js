@@ -406,6 +406,57 @@ export const registerOpenCodeProxy = (app, deps) => {
     }
   };
 
+  const forwardSanitizedSessionListRequest = async (req, res, next, logLabel) => {
+    try {
+      const requestUrl = typeof req.originalUrl === 'string' && req.originalUrl.length > 0
+        ? req.originalUrl
+        : (typeof req.url === 'string' ? req.url : '');
+      const upstreamPathRaw = requestUrl.startsWith('/api') ? requestUrl.slice(4) || '/' : requestUrl;
+      const upstreamPath = await canonicalizeDirectoryQuery(upstreamPathRaw);
+      const upstream = await fetch(buildOpenCodeUrl(upstreamPath, ''), {
+        method: 'GET',
+        headers: {
+          ...collectForwardProxyHeaders(req.headers, getOpenCodeAuthHeaders()),
+          accept: 'application/json',
+          'accept-encoding': 'identity',
+        },
+      });
+
+      res.status(upstream.status);
+      applyForwardProxyResponseHeaders(upstream.headers, res);
+
+      const contentType = upstream.headers.get('content-type') || 'application/json; charset=utf-8';
+      const bodyText = await upstream.text();
+      if (!contentType.toLowerCase().includes('application/json')) {
+        res.setHeader('content-type', contentType);
+        res.end(bodyText);
+        return;
+      }
+
+      let payload;
+      try {
+        payload = JSON.parse(bodyText);
+      } catch {
+        res.setHeader('content-type', contentType);
+        res.end(bodyText);
+        return;
+      }
+
+      res.setHeader('content-type', contentType);
+      res.json(sanitizeSessionListPayload(payload));
+    } catch (error) {
+      if (isAbortError(error)) {
+        return;
+      }
+      console.error(`[proxy] OpenCode ${logLabel} proxy error:`, error?.message ?? error);
+      if (!res.headersSent) {
+        res.status(503).json({ error: 'OpenCode service unavailable' });
+        return;
+      }
+      next(error);
+    }
+  };
+
   // Ensure API prefix is detected before proxying
   app.use('/api', (_req, _res, next) => {
     ensureOpenCodeApiPrefix();
@@ -511,7 +562,7 @@ export const registerOpenCodeProxy = (app, deps) => {
           return bTime - aTime;
         });
         console.log(`[SessionMerge] ${globalSessions.length} global + ${extraSessions.length} extra = ${merged.length} total`);
-        return res.json(merged);
+        return res.json(sanitizeSessionListPayload(merged));
       } catch (error) {
         console.log(`[SessionMerge] Error: ${error.message}, falling through`);
         next();
@@ -519,58 +570,15 @@ export const registerOpenCodeProxy = (app, deps) => {
     });
   }
 
+  app.get('/api/session', (req, res, next) => {
+    return forwardSanitizedSessionListRequest(req, res, next, 'session.list');
+  });
+
   app.get('/api/global/event', forwardSseRequest);
   app.get('/api/event', forwardSseRequest);
 
-  app.get('/api/experimental/session', async (req, res, next) => {
-    try {
-      const requestUrl = typeof req.originalUrl === 'string' && req.originalUrl.length > 0
-        ? req.originalUrl
-        : (typeof req.url === 'string' ? req.url : '');
-      const upstreamPathRaw = requestUrl.startsWith('/api') ? requestUrl.slice(4) || '/' : requestUrl;
-      const upstreamPath = await canonicalizeDirectoryQuery(upstreamPathRaw);
-      const upstream = await fetch(buildOpenCodeUrl(upstreamPath, ''), {
-        method: 'GET',
-        headers: {
-          ...collectForwardProxyHeaders(req.headers, getOpenCodeAuthHeaders()),
-          accept: 'application/json',
-          'accept-encoding': 'identity',
-        },
-      });
-
-      res.status(upstream.status);
-      applyForwardProxyResponseHeaders(upstream.headers, res);
-
-      const contentType = upstream.headers.get('content-type') || 'application/json; charset=utf-8';
-      const bodyText = await upstream.text();
-      if (!contentType.toLowerCase().includes('application/json')) {
-        res.setHeader('content-type', contentType);
-        res.end(bodyText);
-        return;
-      }
-
-      let payload;
-      try {
-        payload = JSON.parse(bodyText);
-      } catch {
-        res.setHeader('content-type', contentType);
-        res.end(bodyText);
-        return;
-      }
-
-      res.setHeader('content-type', contentType);
-      res.json(sanitizeSessionListPayload(payload));
-    } catch (error) {
-      if (isAbortError(error)) {
-        return;
-      }
-      console.error('[proxy] OpenCode experimental.session proxy error:', error?.message ?? error);
-      if (!res.headersSent) {
-        res.status(503).json({ error: 'OpenCode service unavailable' });
-        return;
-      }
-      next(error);
-    }
+  app.get('/api/experimental/session', (req, res, next) => {
+    return forwardSanitizedSessionListRequest(req, res, next, 'experimental.session');
   });
 
   // Generic proxy for non-SSE OpenCode API routes.

@@ -340,6 +340,92 @@ describe('OpenCode proxy SSE forwarding', () => {
     ]);
   });
 
+  it('sanitizes session list responses without sanitizing session detail responses', async () => {
+    let seenListQuery = null;
+
+    const upstream = express();
+    upstream.get('/session', (req, res) => {
+      seenListQuery = req.query;
+      res.json([
+        {
+          id: 'ses_1',
+          directory: '/repo/app',
+          title: 'Alpha',
+          time: { created: 1, updated: 2 },
+          summary: {
+            additions: 5,
+            deletions: 3,
+            files: 2,
+            diffs: [{ patch: '@@ -1 +1 @@', additions: 5, deletions: 3 }],
+          },
+          metadata: { huge: true },
+          revert: { messageID: 'msg_1', snapshot: 'abc123', diff: 'diff --git a/x b/x' },
+        },
+      ]);
+    });
+    upstream.get('/session/abc', (_req, res) => {
+      res.json({
+        id: 'abc',
+        directory: '/repo/app',
+        title: 'Detail',
+        summary: { diffs: [{ patch: '@@ -1 +1 @@' }] },
+        revert: { messageID: 'msg_1', snapshot: 'abc123', diff: 'diff --git a/x b/x' },
+      });
+    });
+    upstreamServer = await listen(upstream);
+    const upstreamPort = upstreamServer.address().port;
+    const externalBaseUrl = `http://127.0.0.1:${upstreamPort}`;
+
+    const app = express();
+    registerOpenCodeProxy(app, {
+      fs: {
+        promises: {
+          realpath: async (value) => value === '/link/repo' ? '/real/repo' : value,
+        },
+      },
+      os: {},
+      path,
+      OPEN_CODE_READY_GRACE_MS: 0,
+      getRuntime: () => ({
+        openCodePort: upstreamPort,
+        openCodeBaseUrl: externalBaseUrl,
+        isOpenCodeReady: true,
+        openCodeNotReadySince: 0,
+        isRestartingOpenCode: false,
+      }),
+      getOpenCodeAuthHeaders: () => ({}),
+      buildOpenCodeUrl: (requestPath) => `${externalBaseUrl}${requestPath}`,
+      ensureOpenCodeApiPrefix: () => {},
+    });
+    proxyServer = await listen(app);
+    const proxyPort = proxyServer.address().port;
+
+    const listResponse = await fetch(`http://127.0.0.1:${proxyPort}/api/session?directory=%2Flink%2Frepo`);
+
+    expect(listResponse.status).toBe(200);
+    expect(seenListQuery).toMatchObject({ directory: '/real/repo' });
+    await expect(listResponse.json()).resolves.toEqual([
+      {
+        id: 'ses_1',
+        directory: '/repo/app',
+        title: 'Alpha',
+        time: { created: 1, updated: 2 },
+        summary: { additions: 5, deletions: 3, files: 2 },
+      },
+    ]);
+
+    const detailResponse = await fetch(`http://127.0.0.1:${proxyPort}/api/session/abc`);
+
+    expect(detailResponse.status).toBe(200);
+    await expect(detailResponse.json()).resolves.toEqual({
+      id: 'abc',
+      directory: '/repo/app',
+      title: 'Detail',
+      summary: { diffs: [{ patch: '@@ -1 +1 @@' }] },
+      revert: { messageID: 'msg_1', snapshot: 'abc123', diff: 'diff --git a/x b/x' },
+    });
+  });
+
   it('forwards unparsed SDK JSON bodies to generic API proxy requests', async () => {
     const upstream = express();
     upstream.post('/session/abc/revert', express.json(), (req, res) => {
