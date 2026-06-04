@@ -82,14 +82,27 @@ describe('stripSessionListDetails', () => {
     const next = stripSessionListDetails(session) as Session & {
       metadata?: unknown
       permission?: unknown
-      revert?: unknown
+      revert?: { messageID?: string; partID?: string; snapshot?: string; diff?: string }
       summary?: { additions?: number; deletions?: number; files?: number; diffs?: unknown[] }
     }
 
     expect(next).not.toBe(session)
     expect(next.metadata).toBe(undefined)
     expect(next.permission).toBe(undefined)
-    expect(next.revert).toBe(undefined)
+    expect(next.revert).toEqual({ messageID: 'msg_2', partID: 'part_3' })
     expect(next.summary).toEqual({ additions: 2, deletions: 1, files: 1 })
+  })
+
+  test('preserves object identity for already lightweight records with revert markers', () => {
+    const session = {
+      id: 'ses_1',
+      directory: '/repo/app',
+      title: 'Session',
+      time: { created: 1, updated: 2 },
+      revert: { messageID: 'msg_2', partID: 'part_3' },
+      summary: { additions: 2, deletions: 1, files: 1 },
+    } as unknown as Session
+
+    expect(stripSessionListDetails(session)).toBe(session)
   })
 })

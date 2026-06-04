@@ -39,6 +39,34 @@ type SessionRevert = {
   [key: string]: unknown
 }
 
+const getSessionListRevertMarker = (revert: unknown): Pick<SessionRevert, "messageID" | "partID"> | undefined => {
+  if (!revert || typeof revert !== "object" || Array.isArray(revert)) {
+    return undefined
+  }
+
+  const marker: Pick<SessionRevert, "messageID" | "partID"> = {}
+  const record = revert as SessionRevert
+  if (typeof record.messageID === "string") {
+    marker.messageID = record.messageID
+  }
+  if (typeof record.partID === "string") {
+    marker.partID = record.partID
+  }
+
+  return Object.keys(marker).length > 0 ? marker : undefined
+}
+
+const hasSessionListRevertDetails = (revert: unknown): boolean => {
+  if (revert === undefined) {
+    return false
+  }
+  if (!revert || typeof revert !== "object" || Array.isArray(revert)) {
+    return true
+  }
+
+  return Object.keys(revert).some((key) => key !== "messageID" && key !== "partID")
+}
+
 const stripDiffSnapshotFields = <T extends DiffEntry>(diff: T, includePatch: boolean): T => {
   if (!diff || typeof diff !== "object") {
     return diff
@@ -105,7 +133,7 @@ export function stripSessionListDetails(session: Session): Session {
     permission?: unknown
   }
 
-  const shouldStrip = Boolean(record.revert)
+  const shouldStrip = hasSessionListRevertDetails(record.revert)
     || Array.isArray(record.summary?.diffs)
     || "metadata" in record
     || "permission" in record
@@ -116,9 +144,15 @@ export function stripSessionListDetails(session: Session): Session {
 
   const stripped = stripSessionDiffSnapshots(session) as typeof record
   const next: Record<string, unknown> = { ...stripped }
-  delete next.revert
   delete next.metadata
   delete next.permission
+
+  const revertMarker = getSessionListRevertMarker(stripped.revert)
+  if (revertMarker) {
+    next.revert = revertMarker
+  } else {
+    delete next.revert
+  }
 
   const summary = stripped.summary
   if (summary && typeof summary === "object" && !Array.isArray(summary)) {

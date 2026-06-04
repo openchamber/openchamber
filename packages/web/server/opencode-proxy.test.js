@@ -272,7 +272,7 @@ describe('OpenCode proxy SSE forwarding', () => {
           },
           metadata: { huge: true },
           permission: [{ permission: 'todowrite', action: 'deny', pattern: '*' }],
-          revert: { messageID: 'msg_1', snapshot: 'abc123', diff: 'diff --git a/x b/x' },
+          revert: { messageID: 'msg_1', partID: 'part_1', snapshot: 'abc123', diff: 'diff --git a/x b/x' },
         },
       ]);
     });
@@ -336,6 +336,7 @@ describe('OpenCode proxy SSE forwarding', () => {
         share: { url: 'https://share.example/ses_1' },
         project: { id: 'proj_1', worktree: '/repo/app' },
         summary: { additions: 5, deletions: 3, files: 2 },
+        revert: { messageID: 'msg_1', partID: 'part_1' },
       },
     ]);
   });
@@ -359,7 +360,7 @@ describe('OpenCode proxy SSE forwarding', () => {
             diffs: [{ patch: '@@ -1 +1 @@', additions: 5, deletions: 3 }],
           },
           metadata: { huge: true },
-          revert: { messageID: 'msg_1', snapshot: 'abc123', diff: 'diff --git a/x b/x' },
+          revert: { messageID: 'msg_1', partID: 'part_1', snapshot: 'abc123', diff: 'diff --git a/x b/x' },
         },
       ]);
     });
@@ -411,6 +412,7 @@ describe('OpenCode proxy SSE forwarding', () => {
         title: 'Alpha',
         time: { created: 1, updated: 2 },
         summary: { additions: 5, deletions: 3, files: 2 },
+        revert: { messageID: 'msg_1', partID: 'part_1' },
       },
     ]);
 

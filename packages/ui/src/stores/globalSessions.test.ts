@@ -36,13 +36,13 @@ describe('listGlobalSessionPages', () => {
     const session = sessions[0] as typeof sessions[number] & {
       metadata?: unknown
       permission?: unknown
-      revert?: unknown
+      revert?: { messageID?: string; snapshot?: string; diff?: string }
       summary?: { additions?: number; deletions?: number; files?: number; diffs?: unknown[] }
     }
 
     expect(session.metadata).toBe(undefined)
     expect(session.permission).toBe(undefined)
-    expect(session.revert).toBe(undefined)
+    expect(session.revert).toEqual({ messageID: 'msg_1' })
     expect(session.summary).toEqual({ additions: 5, deletions: 3, files: 2 })
   })
 })

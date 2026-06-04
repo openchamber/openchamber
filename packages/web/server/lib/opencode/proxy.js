@@ -141,6 +141,20 @@ export const sanitizeSessionListItem = (session) => {
     }
   }
 
+  const revert = session.revert;
+  if (revert && typeof revert === 'object' && !Array.isArray(revert)) {
+    const revertMarker = {};
+    if (typeof revert.messageID === 'string') {
+      revertMarker.messageID = revert.messageID;
+    }
+    if (typeof revert.partID === 'string') {
+      revertMarker.partID = revert.partID;
+    }
+    if (Object.keys(revertMarker).length > 0) {
+      sanitized.revert = revertMarker;
+    }
+  }
+
   return sanitized;
 };
 
