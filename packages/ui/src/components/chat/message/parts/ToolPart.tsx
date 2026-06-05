@@ -39,6 +39,7 @@ import {
 } from '../toolRenderers';
 import { JsonTreeViewer } from '@/components/ui/JsonTreeViewer';
 import { Icon } from "@/components/icon/Icon";
+import { shouldShowToolParamSummary } from './toolRenderUtils';
 import { DiffViewToggle, type DiffViewMode } from '../DiffViewToggle';
 import { MinDurationShineText } from './MinDurationShineText';
 import { ToolRevealOnMount } from './ToolRevealOnMount';
@@ -1933,7 +1934,8 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
 
     const normalizedPartTool = normalizeToolName(part.tool);
     const isTaskTool = normalizedPartTool === 'task';
-
+    const shouldShowParamSummary = shouldShowToolParamSummary(part.tool);
+    
     const status = state?.status as string | undefined;
     const isFinalized = status === 'completed' || status === 'error' || status === 'aborted' || status === 'failed' || status === 'timeout' || status === 'cancelled';
     const isError = status === 'error' || status === 'failed';
@@ -2015,6 +2017,29 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     const partMetadata = (part as unknown as { metadata?: unknown }).metadata;
     const input = stateWithData.input;
     const time = stateWithData.time;
+
+    const mcpParamSummary = React.useMemo(() => {
+        if (!shouldShowParamSummary || !input || typeof input !== 'object') return '';
+        
+        const keys = Object.keys(input);
+        if (keys.length === 0) return '';
+        
+        const displayKeys = keys.slice(0, 2);
+        const parts = displayKeys.map(key => {
+            const value = input[key];
+            let displayValue = '';
+            if (typeof value === 'string') {
+                displayValue = value.length > 30 ? value.substring(0, 30) + '...' : value;
+            } else if (typeof value === 'number') {
+                displayValue = String(value);
+            } else {
+                displayValue = String(value);
+            }
+            return `${key}: ${displayValue}`;
+        });
+        
+        return parts.join(', ');
+    }, [shouldShowParamSummary, input]);
 
     const [pinnedTime, setPinnedTime] = React.useState<{ start?: number; end?: number }>({});
     const [localStartAt, setLocalStartAt] = React.useState<number | undefined>(undefined);
@@ -2664,7 +2689,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     const titleStyle = !isTaskTool && isError ? TOOL_ERROR_TITLE_STYLE : TOOL_NORMAL_TITLE_STYLE;
     const shouldRenderExpandedContent = useAnimatedExpandedContent(isExpanded);
 
-    if (!shouldTreatAsFinalized && !isActive && !isTaskTool) {
+    if (!shouldTreatAsFinalized && !isActive && !isTaskTool && !shouldShowParamSummary) {
         return null;
     }
 
@@ -2734,6 +2759,11 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                                 >
                                     {displayName}
                                 </MinDurationShineText>
+                                {mcpParamSummary && (
+                                    <span className="typography-meta text-muted-foreground/70 truncate" title={mcpParamSummary}>
+                                        ({mcpParamSummary})
+                                    </span>
+                                )}
                             </div>
                             {normalizedPartTool === 'bash' && typeof effectiveTimeStart === 'number' ? (
                                 <span className={cn('flex-shrink-0 tabular-nums text-muted-foreground/80', TOOL_ROW_DESCRIPTION_CLASS)}>
