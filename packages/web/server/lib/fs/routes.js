@@ -724,6 +724,7 @@ export const registerFsRoutes = (app, dependencies) => {
         '.ico': 'image/x-icon',
         '.bmp': 'image/bmp',
         '.avif': 'image/avif',
+        '.pdf': 'application/pdf',
       };
       const mimeType = mimeMap[ext] || 'application/octet-stream';
 

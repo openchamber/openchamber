@@ -35,7 +35,7 @@ import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { useDeviceInfo } from '@/lib/device';
 import { cn, getModifierLabel, getRevealLabelKey, hasModifier } from '@/lib/utils';
-import { getLanguageFromExtension, getImageMimeType, isImageFile } from '@/lib/toolHelpers';
+import { getLanguageFromExtension, getImageMimeType, isImageFile, isPdfFile } from '@/lib/toolHelpers';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
@@ -1623,6 +1623,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
     const selectedIsImage = isImageFile(node.path);
     const isSvg = node.path.toLowerCase().endsWith('.svg');
+    const selectedIsPdf = isPdfFile(node.path);
 
     if (isMobile) {
       setShowMobilePageContent(true);
@@ -1642,6 +1643,30 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       setDraftContent('');
       setLoadedFilePath(node.path);
       setFileLoading(false);
+      return;
+    }
+
+    // PDFs: open in a new tab on web, load binary on desktop.
+    if (selectedIsPdf) {
+      setFileContent('');
+      setDraftContent('');
+      setLoadedFilePath(node.path);
+
+      if (runtime.isDesktop) {
+        setFileLoading(true);
+        return;
+      }
+
+      setFileLoading(true);
+      void refreshRuntimeUrlAuthToken(getRuntimeApiBaseUrl()).then(() => {
+        const url = getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', {
+          path: node.path,
+          allowOutsideWorkspace: mode === 'editor-only' && Boolean(root) && !isPathWithinRoot(node.path, root) ? 'true' : undefined,
+        });
+        window.open(url, '_blank');
+      }).finally(() => {
+        setFileLoading(false);
+      });
       return;
     }
 
@@ -2100,6 +2125,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
   const isSelectedImage = Boolean(selectedFile?.path && isImageFile(selectedFile.path));
   const isSelectedSvg = Boolean(selectedFile?.path && selectedFile.path.toLowerCase().endsWith('.svg'));
+  const isSelectedPdf = Boolean(selectedFile?.path && isPdfFile(selectedFile.path));
   const pendingNavigationTargetPath = React.useMemo(
     () => normalizePath(pendingFileNavigation?.path ?? ''),
     [pendingFileNavigation?.path],
@@ -2111,20 +2137,21 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       && selectedFilePath === pendingNavigationTargetPath
       && !fileLoading
       && !fileError
-      && !isSelectedImage,
+      && !isSelectedImage
+      && !isSelectedPdf,
   );
 
   const displaySelectedPath = React.useMemo(() => {
     return getDisplayPath(root, selectedFilePath);
   }, [selectedFilePath, root]);
 
-  const canCopy = Boolean(selectedFile && (!isSelectedImage || isSelectedSvg) && fileContent.length > 0);
+  const canCopy = Boolean(selectedFile && (!isSelectedImage || isSelectedSvg) && !isSelectedPdf && fileContent.length > 0);
   const canCopyPath = Boolean(selectedFile && displaySelectedPath.length > 0);
-  const canEdit = Boolean(selectedFile && !selectedFileIsOutsideWorkspace && !isSelectedImage && files.writeFile && fileContent.length <= MAX_VIEW_CHARS);
+  const canEdit = Boolean(selectedFile && !selectedFileIsOutsideWorkspace && !isSelectedImage && !isSelectedPdf && files.writeFile && fileContent.length <= MAX_VIEW_CHARS);
   const isMarkdown = Boolean(selectedFile?.path && isMarkdownFile(selectedFile.path));
   const isJson = Boolean(selectedFile?.path && isJsonFile(selectedFile.path));
   const isHtml = Boolean(selectedFile?.path && isHtmlFile(selectedFile.path));
-  const isTextFile = Boolean(selectedFile && !isSelectedImage);
+  const isTextFile = Boolean(selectedFile && !isSelectedImage && !isSelectedPdf);
   const canUseShikiFileView = isTextFile && !isMarkdown && !(isHtml && htmlViewMode === 'preview');
   const staticLanguageExtension = React.useMemo(
     () => (selectedFilePath ? languageByExtension(selectedFilePath) : null),
