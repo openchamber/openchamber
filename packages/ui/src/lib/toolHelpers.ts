@@ -2,6 +2,9 @@ export interface ToolMetadata {
   displayName: string;
   icon?: string;
   outputLanguage?: string;
+  renderMode?: 'expandable' | 'static' | 'standalone';
+  staticGroupName?: string;
+  hasCustomRendering?: boolean;
   inputFields?: {
     key: string;
     label: string;
@@ -17,6 +20,8 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
     displayName: 'Read File',
     category: 'file',
     outputLanguage: 'auto',
+    renderMode: 'static',
+    hasCustomRendering: true,
     inputFields: [
       { key: 'filePath', label: 'File Path', type: 'file' },
       { key: 'offset', label: 'Start Line', type: 'text' },
@@ -27,6 +32,8 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
     displayName: 'Write File',
     category: 'file',
     outputLanguage: 'auto',
+    renderMode: 'expandable',
+    hasCustomRendering: true,
     inputFields: [
       { key: 'filePath', label: 'File Path', type: 'file' },
       { key: 'content', label: 'Content', type: 'code' }
@@ -36,6 +43,8 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
     displayName: 'Edit File',
     category: 'file',
     outputLanguage: 'diff',
+    renderMode: 'expandable',
+    hasCustomRendering: true,
     inputFields: [
       { key: 'filePath', label: 'File Path', type: 'file' },
       { key: 'oldString', label: 'Find', type: 'code' },
@@ -47,6 +56,8 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
     displayName: 'Multi-Edit',
     category: 'file',
     outputLanguage: 'diff',
+    renderMode: 'expandable',
+    hasCustomRendering: true,
     inputFields: [
       { key: 'filePath', label: 'File Path', type: 'file' },
       { key: 'edits', label: 'Edits', type: 'code', language: 'json' }
@@ -56,6 +67,8 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
     displayName: 'Apply Patch',
     category: 'file',
     outputLanguage: 'diff',
+    renderMode: 'expandable',
+    hasCustomRendering: true,
     inputFields: [
       { key: 'patchText', label: 'Patch', type: 'code', language: 'diff' }
     ]
@@ -65,6 +78,8 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
     displayName: 'Shell Command',
     category: 'system',
     outputLanguage: 'text',
+    renderMode: 'expandable',
+    hasCustomRendering: true,
     inputFields: [
       { key: 'command', label: 'Command', type: 'command', language: 'bash' },
       { key: 'description', label: 'Description', type: 'text' },
@@ -76,6 +91,9 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
     displayName: 'Search Files',
     category: 'search',
     outputLanguage: 'text',
+    renderMode: 'static',
+    staticGroupName: 'grep',
+    hasCustomRendering: true,
     inputFields: [
       { key: 'pattern', label: 'Pattern', type: 'pattern' },
       { key: 'path', label: 'Directory', type: 'file' },
@@ -86,10 +104,39 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
     displayName: 'Find Files',
     category: 'search',
     outputLanguage: 'text',
+    renderMode: 'static',
+    hasCustomRendering: true,
     inputFields: [
       { key: 'pattern', label: 'Pattern', type: 'pattern' },
       { key: 'path', label: 'Directory', type: 'file' }
     ]
+  },
+  search: {
+    displayName: 'Search Files',
+    category: 'search',
+    outputLanguage: 'text',
+    renderMode: 'static',
+    staticGroupName: 'grep',
+    hasCustomRendering: true,
+    inputFields: []
+  },
+  find: {
+    displayName: 'Find Files',
+    category: 'search',
+    outputLanguage: 'text',
+    renderMode: 'static',
+    staticGroupName: 'grep',
+    hasCustomRendering: true,
+    inputFields: []
+  },
+  ripgrep: {
+    displayName: 'Search Files',
+    category: 'search',
+    outputLanguage: 'text',
+    renderMode: 'static',
+    staticGroupName: 'grep',
+    hasCustomRendering: true,
+    inputFields: []
   },
   list: {
     displayName: 'List Directory',
@@ -105,6 +152,8 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
     displayName: 'Agent Task',
     category: 'ai',
     outputLanguage: 'markdown',
+    renderMode: 'standalone',
+    hasCustomRendering: true,
     inputFields: [
       { key: 'description', label: 'Task', type: 'text' },
       { key: 'prompt', label: 'Instructions', type: 'text' },
@@ -147,6 +196,8 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
      displayName: 'Update Todo List',
      category: 'system',
      outputLanguage: 'json',
+     renderMode: 'static',
+     hasCustomRendering: true,
      inputFields: [
        { key: 'todos', label: 'Todo Items', type: 'code', language: 'json' }
      ]
@@ -155,6 +206,8 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
      displayName: 'Read Todo List',
      category: 'system',
      outputLanguage: 'json',
+     renderMode: 'static',
+     hasCustomRendering: true,
      inputFields: []
    },
    skill: {
@@ -169,6 +222,8 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
        displayName: 'Question',
        category: 'ai',
        outputLanguage: 'text',
+       renderMode: 'expandable',
+       hasCustomRendering: true,
        inputFields: [
          { key: 'questions', label: 'Questions', type: 'code', language: 'json' }
        ]
@@ -219,16 +274,43 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
 function formatUnknownToolDisplayName(toolName: string): string {
   return toolName
     .trim()
-    .replace(/[_-]+/g, ' ')
+    .replace(/[_.-]+/g, ' ')
     .replace(/\s+/g, ' ')
     .replace(/^./, (char) => char.toUpperCase());
 }
 
+export function getCanonicalToolName(toolName: unknown): string {
+  if (typeof toolName !== 'string') return '';
+  const trimmed = toolName.trim().toLowerCase();
+  if (!trimmed) return '';
+  return trimmed.replace(/:\d+$/, '');
+}
+
+export function getToolRenderMode(toolName: unknown): 'expandable' | 'static' | 'standalone' {
+  const canonicalName = getCanonicalToolName(toolName);
+  if (!canonicalName) return 'static';
+  return TOOL_METADATA[canonicalName]?.renderMode ?? 'expandable';
+}
+
+export function shouldShowToolParamSummary(toolName: unknown): boolean {
+  const canonicalName = getCanonicalToolName(toolName);
+  if (!canonicalName) return false;
+  return TOOL_METADATA[canonicalName]?.hasCustomRendering !== true;
+}
+
+export function getStaticToolGroupName(toolName: string): string {
+  const canonicalName = getCanonicalToolName(toolName);
+  return TOOL_METADATA[canonicalName]?.staticGroupName ?? canonicalName;
+}
+
 export function getToolMetadata(toolName: string): ToolMetadata {
-  return TOOL_METADATA[toolName] || {
-    displayName: formatUnknownToolDisplayName(toolName),
+  const canonicalName = getCanonicalToolName(toolName);
+  return TOOL_METADATA[canonicalName] || {
+    displayName: formatUnknownToolDisplayName(canonicalName || toolName),
     category: 'system',
     outputLanguage: 'text',
+    renderMode: 'expandable',
+    hasCustomRendering: false,
     inputFields: []
   };
 }

@@ -5,7 +5,7 @@ import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { PatchDiff } from '@pierre/diffs/react';
 import { cn } from '@/lib/utils';
 import { SimpleMarkdownRenderer } from '../../MarkdownRenderer';
-import { getToolMetadata } from '@/lib/toolHelpers';
+import { getCanonicalToolName, getToolMetadata } from '@/lib/toolHelpers';
 import type { ToolPart as ToolPartType, ToolState as ToolStateUnion } from '@opencode-ai/sdk/v2';
 import { toolDisplayStyles } from '@/lib/typography';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -145,25 +145,6 @@ const getMultiFileDescription = (
             })}
         </>
     );
-};
-
-const normalizeToolName = (toolName: string | undefined | null): string => {
-    if (typeof toolName !== 'string') {
-        return '';
-    }
-
-    const trimmed = toolName.trim().toLowerCase();
-    if (!trimmed) {
-        return '';
-    }
-
-    if (trimmed.includes('.')) {
-        const dotParts = trimmed.split('.').filter(Boolean);
-        const last = dotParts[dotParts.length - 1];
-        if (last) return last;
-    }
-
-    return trimmed;
 };
 
 const MAX_DURATION_MS = 5 * 60 * 1000; // 5 minutes cap
@@ -983,7 +964,7 @@ const buildTaskSummaryEntriesFromSession = (messages: SessionMessageWithParts[])
             if (part?.type !== 'tool') {
                 continue;
             }
-            const toolName = normalizeToolName(part.tool);
+            const toolName = getCanonicalToolName(part.tool);
             if (!toolName || toolName === 'task' || toolName === 'todowrite' || toolName === 'todoread') {
                 continue;
             }
@@ -1271,7 +1252,7 @@ const TaskToolSummary: React.FC<{
                         ) : null}
 
                         {visibleEntries.map((entry, idx) => {
-                            const normalizedToolName = normalizeToolName(entry.tool);
+                            const normalizedToolName = getCanonicalToolName(entry.tool);
                             const toolName = normalizedToolName.length > 0 ? normalizedToolName : 'tool';
                             const label = getTaskSummaryLabel(entry);
                             const hasLabel = label.trim().length > 0;
@@ -1932,7 +1913,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
 
-    const normalizedPartTool = normalizeToolName(part.tool);
+    const normalizedPartTool = getCanonicalToolName(part.tool);
     const isTaskTool = normalizedPartTool === 'task';
     const shouldShowParamSummary = shouldShowToolParamSummary(part.tool);
     
@@ -2928,7 +2909,7 @@ class ToolPartErrorBoundary extends React.Component<{
 
 const ToolPart: React.FC<ToolPartProps> = (props) => {
     const { t } = useI18n();
-    const toolName = normalizeToolName(props.part.tool) || 'tool';
+    const toolName = getCanonicalToolName(props.part.tool) || 'tool';
     const displayName = getToolMetadata(toolName).displayName;
 
     return (
