@@ -289,7 +289,9 @@ export function getCanonicalToolName(toolName: unknown): string {
 export function getToolRenderMode(toolName: unknown): 'expandable' | 'static' | 'standalone' {
   const canonicalName = getCanonicalToolName(toolName);
   if (!canonicalName) return 'static';
-  return TOOL_METADATA[canonicalName]?.renderMode ?? 'expandable';
+  const metadata = TOOL_METADATA[canonicalName];
+  if (!metadata) return 'expandable';
+  return metadata.renderMode ?? 'static';
 }
 
 export function shouldShowToolParamSummary(toolName: unknown): boolean {

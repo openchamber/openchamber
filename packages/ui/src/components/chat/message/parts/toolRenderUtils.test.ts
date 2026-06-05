@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { getToolMetadata } from '@/lib/toolHelpers';
-import { isExpandableTool, isStaticTool, shouldShowToolParamSummary } from './toolRenderUtils';
+import { isExpandableTool, isStandaloneTool, isStaticTool, shouldShowToolParamSummary } from './toolRenderUtils';
 
 describe('toolRenderUtils', () => {
     test('keeps custom namespaced tools expandable with parameter summaries', () => {
@@ -28,5 +28,30 @@ describe('toolRenderUtils', () => {
     test('keeps todo tools static without parameter summaries', () => {
         expect(isStaticTool('todowrite')).toBe(true);
         expect(shouldShowToolParamSummary('todowrite')).toBe(false);
+    });
+
+    test('keeps known built-in metadata tools static unless explicitly marked otherwise', () => {
+        const staticTools = [
+            'list',
+            'webfetch',
+            'websearch',
+            'codesearch',
+            'skill',
+            'plan_enter',
+            'plan_exit',
+            'StructuredOutput',
+            'structuredoutput',
+        ];
+
+        for (const toolName of staticTools) {
+            expect([toolName, isStaticTool(toolName)]).toEqual([toolName, true]);
+            expect([toolName, isExpandableTool(toolName)]).toEqual([toolName, false]);
+            expect([toolName, isStandaloneTool(toolName)]).toEqual([toolName, false]);
+        }
+    });
+
+    test('keeps unknown tools expandable', () => {
+        expect(isExpandableTool('unknown_custom_tool')).toBe(true);
+        expect(isStaticTool('unknown_custom_tool')).toBe(false);
     });
 });
