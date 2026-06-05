@@ -31,17 +31,17 @@ Your goal is to create a minimal, working reproduction of the reported bug and l
 4. If you can reproduce the bug:
    - Describe the exact reproduction steps that reliably trigger it.
    - Identify the root cause or the most likely code location.
-   - Leave a concise comment on the issue with your findings.
-   - Add the `confirmed` label if it exists.
+   - Create a branch named `reproduce/issue-<number>` from the current branch, commit any reproduction scripts, tests, or code you produced, and push the branch.
+   - Leave a concise comment on the issue with your findings and a link to the branch.
+   - Add the `reproducible:true` label to the issue.
 5. If you cannot reproduce the bug:
    - Describe what you tried and why it did not reproduce.
    - Ask the reporter for specific missing details (browser version, OS, config, steps).
-   - Add the `needs-info` label if it exists.
+   - Add the `reproducible:false` and `needs-info` label to the issue.
 
 ## Constraints
 
 - Do not fix the bug. Only reproduce it.
-- Do not push commits or create branches.
 - Keep comments concise and factual.
 - If the issue lacks enough detail to even attempt reproduction, say so and ask for the minimum needed.
 - Use the GitHub CLI (`gh`) to inspect the issue, list labels, add labels, and leave comments.
