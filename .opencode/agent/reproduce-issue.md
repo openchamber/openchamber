@@ -31,7 +31,7 @@ Your goal is to create a minimal, working reproduction of the reported bug and l
 4. If you can reproduce the bug:
    - Describe the exact reproduction steps that reliably trigger it.
    - Identify the root cause or the most likely code location.
-   - Create a branch named `reproduce/issue-<number>` from the current branch, commit any reproduction scripts, tests, or code you produced, and push the branch.
+   - Create a branch named `reproduce/issue-<number>` from the current branch, commit any reproduction scripts, tests, or code you produced, and push the branch. If the branch already exists, force-push with `git push --force`.
    - Leave a concise comment on the issue with your findings and a link to the branch.
    - Add the `reproducible:true` label to the issue.
 5. If you cannot reproduce the bug:
