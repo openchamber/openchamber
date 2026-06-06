@@ -93,6 +93,10 @@ export const waitForWorktreeBootstrap = async (directory: string, timeoutMs = DE
   }
 
   const current = state.get(key);
+  if (!current) {
+    return;
+  }
+
   if (current?.status === 'ready') {
     return;
   }

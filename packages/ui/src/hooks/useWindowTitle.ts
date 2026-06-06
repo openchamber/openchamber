@@ -1,6 +1,6 @@
 import React from 'react';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { isDesktopLocalOriginActive, isDesktopShell, isTauriShell } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isDesktopShell } from '@/lib/desktop';
 import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { setDesktopWindowTitle } from '@/lib/desktopNative';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
@@ -110,7 +110,7 @@ export const useWindowTitle = () => {
       document.title = title;
     }
 
-    if (!isTauriShell()) {
+    if (!isDesktopShell()) {
       return;
     }
 

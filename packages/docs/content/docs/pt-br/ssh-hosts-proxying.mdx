@@ -1,0 +1,48 @@
+---
+title: Hosts SSH e proxy
+description: Importe hosts SSH salvos e adicione encaminhamentos de porta SSH extras no app desktop.
+---
+
+# Hosts SSH e proxy
+
+Use **Settings → Remote Instances** no app desktop para importar hosts SSH salvos, conectar a uma máquina remota e disponibilizar portas extras pela mesma conexão SSH.
+
+> Hosts SSH e proxy por SSH são recursos **apenas do desktop**. Eles usam o cliente SSH do seu computador.
+
+## Importe um host SSH
+
+O OpenChamber pode ler hosts do seu SSH config local, o mesmo lugar usado por comandos como `ssh work-server`.
+
+1. Abra **Settings → Remote Instances**.
+2. Escolha um host em **Saved SSH hosts**.
+3. Se o host for um pattern, informe o destino real, como `deploy@app.example.com`.
+4. Salve e conecte.
+
+O OpenChamber cria uma remote instance com esse comando SSH. Quando ela chega em **ready**, a UI remota do OpenChamber abre no app desktop.
+
+## Adicione encaminhamentos de porta extras
+
+Cada remote instance tem uma seção **Port Forwards**. Use quando algo de um lado da conexão SSH precisa acessar uma porta do outro lado.
+
+O OpenChamber suporta três tipos de encaminhamento:
+
+- **Local (-L)** — abre uma porta no seu computador que conecta a algo na máquina remota.
+- **Remote (-R)** — abre uma porta na máquina remota que conecta de volta ao seu computador.
+- **Dynamic (-D)** — abre um SOCKS proxy local pela conexão SSH.
+
+Para a maioria dos previews de apps e dashboards rodando na máquina remota, use **Local (-L)**.
+
+## Use o SOCKS proxy
+
+Escolha **Dynamic (-D)** quando quiser que outras ferramentas no seu computador naveguem pela máquina remota. O OpenChamber abre uma porta local de SOCKS proxy para essa conexão SSH.
+
+Quando a conexão estiver ready, copie ou use o endereço proxy local na linha do encaminhamento. Configure seu navegador ou ferramenta para usá-lo como SOCKS5 proxy.
+
+## Mantenha privado
+
+Use `127.0.0.1` ou `localhost` como local bind host, a menos que você queira que outros dispositivos na sua rede acessem a porta encaminhada.
+
+## Relacionado
+
+- [Instâncias remotas](/pt-br/remote-instances/) — conecte o app desktop ao OpenChamber em outra máquina
+- [Acesso remoto](/pt-br/troubleshooting/remote-access/) — quando SSH ou acesso remoto não conectam

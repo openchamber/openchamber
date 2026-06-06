@@ -1,15 +1,13 @@
 import React from 'react';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSelectionStore } from '@/sync/selection-store';
 import { useAllSessionStatuses, useAllLiveSessions } from '@/sync/sync-context';
-import { useGlobalSessionsStore, ensureGlobalSessionsLoaded, refreshGlobalSessions } from '@/stores/useGlobalSessionsStore';
+import { mergeSessionDirectoryMetadata, useGlobalSessionsStore, ensureGlobalSessionsLoaded, refreshGlobalSessions } from '@/stores/useGlobalSessionsStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import type { Session } from '@opencode-ai/sdk/v2';
 import type { ProjectEntry } from '@/lib/api/types';
 import { cn, formatDirectoryName } from '@/lib/utils';
-import { getAgentColor } from '@/lib/agentColors';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
 import { PROJECT_ICON_MAP, PROJECT_COLOR_MAP, ProjectIconImage } from '@/lib/projectMeta';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -39,7 +37,10 @@ function useAllProjectSessions(): Session[] {
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
   return React.useMemo(() => {
     const liveById = new Map(liveSessions.map((session) => [session.id, session]));
-    const merged = globalActiveSessions.map((session) => liveById.get(session.id) ?? session);
+    const merged = globalActiveSessions.map((session) => {
+      const liveSession = liveById.get(session.id);
+      return liveSession ? mergeSessionDirectoryMetadata(liveSession, session) : session;
+    });
     const seen = new Set(merged.map((session) => session.id));
     for (const session of liveSessions) {
       if (!seen.has(session.id)) merged.push(session);
@@ -172,17 +173,7 @@ function useSessionGrouping(
   return { sessions: processedSessions, totalRunning, totalUnread, totalCount: processedSessions.length };
 }
 
-function useSessionHelpers(agents: Array<{ name: string }>) {
-  const getSessionAgentName = React.useCallback((session: Session): string => {
-    const agent = (session as { agent?: string }).agent;
-    if (agent) return agent;
-
-    const sessionAgentSelection = useSelectionStore.getState().getSessionAgentSelection(session.id);
-    if (sessionAgentSelection) return sessionAgentSelection;
-
-    return agents[0]?.name ?? 'agent';
-  }, [agents]);
-
+function useSessionHelpers() {
   const getSessionTitle = React.useCallback((session: Session): string => {
     const title = session.title;
     if (title && title.trim()) return title;
@@ -194,7 +185,7 @@ function useSessionHelpers(agents: Array<{ name: string }>) {
     return (unseenCounts[sessionId] ?? 0) > 0;
   }, [unseenCounts]);
 
-  return { getSessionAgentName, getSessionTitle, needsAttention };
+  return { getSessionTitle, needsAttention };
 }
 
 // Per-project status indicators (running / unread) for the filter chips.
@@ -300,14 +291,29 @@ function UnreadIndicator({ count }: { count: number }) {
 function TokenUsageIndicator({ contextUsage }: { contextUsage: SessionContextUsage | null }) {
   if (!contextUsage || contextUsage.totalTokens === 0) return null;
 
-  const percentage = Math.min(contextUsage.percentage, 999);
+  // Recompute with a fraction: contextUsage.percentage is rounded to an integer
+  // in the store, which would always render as "X.0%".
+  const percentage = contextUsage.contextLimit > 0
+    ? Math.min((contextUsage.totalTokens / contextUsage.contextLimit) * 100, 999)
+    : 0;
   const colorClass =
     percentage >= 90 ? 'text-[var(--status-error)]' :
     percentage >= 75 ? 'text-[var(--status-warning)]' : 'text-[var(--status-success)]';
 
+  const formatTokens = (value: number): string => {
+    if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+    if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+    return String(value);
+  };
+
+  const tokens = contextUsage.contextLimit > 0
+    ? `${formatTokens(contextUsage.totalTokens)}/${formatTokens(contextUsage.contextLimit)}`
+    : formatTokens(contextUsage.totalTokens);
+
   return (
-    <span className={cn("text-[12px] tabular-nums font-medium", colorClass)}>
-      {percentage.toFixed(1)}%
+    <span className="flex items-baseline gap-1.5 text-[15px] tabular-nums">
+      <span className={cn("font-medium", colorClass)}>{percentage.toFixed(1)}%</span>
+      <span className="text-[var(--surface-mutedForeground)]">{tokens}</span>
     </span>
   );
 }
@@ -316,20 +322,16 @@ function TokenUsageIndicator({ contextUsage }: { contextUsage: SessionContextUsa
 function SessionItem({
   session,
   isCurrent,
-  getSessionAgentName,
   getSessionTitle,
   onClick,
   needsAttention,
 }: {
   session: SessionWithStatus;
   isCurrent: boolean;
-  getSessionAgentName: (s: Session) => string;
   getSessionTitle: (s: Session) => string;
   onClick: () => void;
   needsAttention: (sessionId: string) => boolean;
 }) {
-  const agentName = getSessionAgentName(session);
-  const agentColor = getAgentColor(agentName);
   const attention = needsAttention(session.id);
 
   return (
@@ -345,11 +347,6 @@ function SessionItem({
       <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center">
         <StatusIndicator isRunning={session._statusType !== 'idle'} needsAttention={attention} />
       </span>
-
-      <span
-        className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
-        style={{ backgroundColor: `var(${agentColor.var})` }}
-      />
 
       <span className={cn(
         "flex-1 truncate text-[15px] leading-tight",
@@ -500,8 +497,8 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const sessionStatus = useAllSessionStatuses();
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
+  const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
   const getContextUsage = useSessionUIStore((state) => state.getContextUsage);
-  const agents = useConfigStore((state) => state.agents);
   const getCurrentModel = useConfigStore((state) => state.getCurrentModel);
   const isMobile = useUIStore((state) => state.isMobile);
   const showMobileSessionStatusBar = useUIStore((state) => state.showMobileSessionStatusBar);
@@ -512,7 +509,7 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
 
   const { sessions: sortedSessions, totalRunning, totalUnread } = useSessionGrouping(sessions, sessionStatus);
-  const { getSessionAgentName, getSessionTitle, needsAttention } = useSessionHelpers(agents);
+  const { getSessionTitle, needsAttention } = useSessionHelpers();
   const getProjectStatus = useProjectStatus(sessions, sessionStatus, currentSessionId);
   const resolveProjectRoots = useProjectRootsResolver();
 
@@ -572,7 +569,28 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
     setOpen(false);
   };
 
-  const renderHeader = React.useCallback((closeButton: React.ReactNode) => (
+  // "+" — start a new session draft. Target the project selected in the filter;
+  // for "All", use the most recently active session's directory, falling back to
+  // the store's own default target when there are no sessions.
+  const handleNewChat = React.useCallback(() => {
+    setOpen(false);
+    if (filterProjectId) {
+      const project = projects.find((p) => p.id === filterProjectId);
+      if (project) {
+        openNewSessionDraft({ selectedProjectId: project.id, directoryOverride: project.path });
+        return;
+      }
+    }
+    const mostRecent = [...sessions].sort((a, b) => {
+      const aTime = (a as { time?: { updated?: number } }).time?.updated ?? 0;
+      const bTime = (b as { time?: { updated?: number } }).time?.updated ?? 0;
+      return bTime - aTime;
+    })[0];
+    const directory = mostRecent ? sessionDirectory(mostRecent) : '';
+    openNewSessionDraft(directory ? { directoryOverride: directory } : undefined);
+  }, [filterProjectId, projects, sessions, openNewSessionDraft, setOpen]);
+
+  const renderHeader = React.useCallback(() => (
     <div className="shrink-0">
       <div className="flex justify-center pt-2.5 pb-1">
         <div className="h-1 w-9 rounded-full bg-[color-mix(in_srgb,var(--surface-mutedForeground)_40%,transparent)]" />
@@ -586,7 +604,23 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
           <RunningIndicator count={totalRunning} />
           <UnreadIndicator count={totalUnread} />
           <TokenUsageIndicator contextUsage={contextUsage} />
-          {closeButton}
+          <button
+            type="button"
+            onClick={handleNewChat}
+            aria-label={t('mobile.sessions.newChat')}
+            className="flex size-8 items-center justify-center rounded-full text-[var(--surface-mutedForeground)] transition-colors hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]"
+            style={{ touchAction: 'manipulation' }}
+          >
+            <Icon name="add" className="h-5 w-5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            className="flex size-8 items-center justify-center rounded-full text-[var(--surface-mutedForeground)] transition-colors hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]"
+            style={{ touchAction: 'manipulation' }}
+          >
+            <Icon name="close" className="h-5 w-5" />
+          </button>
         </div>
       </div>
 
@@ -620,7 +654,7 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
         </div>
       )}
     </div>
-  ), [t, totalRunning, totalUnread, contextUsage, projects, filterProjectId, setFilterProjectId, formatProjectLabel, currentTheme, getProjectStatus]);
+  ), [t, totalRunning, totalUnread, contextUsage, projects, filterProjectId, setFilterProjectId, formatProjectLabel, currentTheme, getProjectStatus, handleNewChat, setOpen]);
 
   if (!isMobile || !showMobileSessionStatusBar) {
     return null;
@@ -646,7 +680,6 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
               key={session.id}
               session={session}
               isCurrent={session.id === currentSessionId}
-              getSessionAgentName={getSessionAgentName}
               getSessionTitle={getSessionTitle}
               onClick={() => handleSessionClick(session)}
               needsAttention={needsAttention}

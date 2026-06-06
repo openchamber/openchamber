@@ -150,7 +150,66 @@ const toCreatePayload = (args: {
 // Cache worktree listings to avoid repeated git worktree list + rev-parse calls
 const _worktreeListCache = new Map<string, { value: WorktreeMetadata[]; at: number }>();
 const _worktreeListInflight = new Map<string, Promise<WorktreeMetadata[]>>();
+const _worktreeListGeneration = new Map<string, number>();
 const WORKTREE_LIST_CACHE_TTL = 30_000; // 30 seconds
+
+const getWorktreeListGeneration = (projectDirectory: string): number => {
+  return _worktreeListGeneration.get(projectDirectory) ?? 0;
+};
+
+const invalidateWorktreeList = (projectDirectory: string): void => {
+  _worktreeListGeneration.set(projectDirectory, getWorktreeListGeneration(projectDirectory) + 1);
+  _worktreeListCache.delete(projectDirectory);
+};
+
+const readProjectWorktrees = async (projectDirectory: string): Promise<WorktreeMetadata[]> => {
+  const metadataProjectDirectory = await resolveProjectRoot(projectDirectory).catch(() => projectDirectory);
+  const normalizedProjectDirectory = normalizePath(projectDirectory);
+
+  const worktrees = await git.worktree.list(projectDirectory).catch(() => []);
+  const results: WorktreeMetadata[] = worktrees
+    .filter((entry) => typeof entry.path === 'string' && entry.path.trim().length > 0)
+    .map((entry) => {
+      const worktreePath = normalizePath(entry.path);
+      const branch = (entry.branch || '').replace(/^refs\/heads\//, '').trim();
+      const name = (entry.name || '').trim();
+
+      // Derive canonical worktree metadata from worktree list entry
+      const canonical = deriveCanonicalWorktreeFields(entry, worktreePath);
+
+      return {
+        source: 'sdk' as const,
+        name: name || deriveSdkWorktreeNameFromDirectory(worktreePath),
+        path: worktreePath,
+        projectDirectory: metadataProjectDirectory,
+        branch: branch,
+        label: branch || name || deriveSdkWorktreeNameFromDirectory(worktreePath),
+        worktreeRoot: canonical.worktreeRoot,
+        worktreeStatus: canonical.worktreeStatus,
+        headState: canonical.headState,
+        worktreeSource: canonical.worktreeSource,
+      };
+    })
+    .filter((entry) => normalizePath(entry.path) !== normalizedProjectDirectory);
+
+  return results.sort((a, b) => {
+    const aLabel = (a.label || a.branch || a.path).toLowerCase();
+    const bLabel = (b.label || b.branch || b.path).toLowerCase();
+    return aLabel.localeCompare(bLabel);
+  });
+};
+
+const readStableProjectWorktrees = async (projectDirectory: string): Promise<WorktreeMetadata[]> => {
+  while (true) {
+    const generation = getWorktreeListGeneration(projectDirectory);
+    const worktrees = await readProjectWorktrees(projectDirectory);
+
+    if (generation === getWorktreeListGeneration(projectDirectory)) {
+      _worktreeListCache.set(projectDirectory, { value: worktrees, at: Date.now() });
+      return worktrees;
+    }
+  }
+};
 
 export async function listProjectWorktrees(project: ProjectRef): Promise<WorktreeMetadata[]> {
   const projectDirectory = normalizePath(project.path);
@@ -165,46 +224,10 @@ export async function listProjectWorktrees(project: ProjectRef): Promise<Worktre
   const inflight = _worktreeListInflight.get(projectDirectory);
   if (inflight) return inflight;
 
-  const promise = (async (): Promise<WorktreeMetadata[]> => {
-    const metadataProjectDirectory = await resolveProjectRoot(projectDirectory).catch(() => projectDirectory);
-    const normalizedProjectDirectory = normalizePath(projectDirectory);
-
-    const worktrees = await git.worktree.list(projectDirectory).catch(() => []);
-    const results: WorktreeMetadata[] = worktrees
-      .filter((entry) => typeof entry.path === 'string' && entry.path.trim().length > 0)
-      .map((entry) => {
-        const worktreePath = normalizePath(entry.path);
-        const branch = (entry.branch || '').replace(/^refs\/heads\//, '').trim();
-        const name = (entry.name || '').trim();
-
-        // Derive canonical worktree metadata from worktree list entry
-        const canonical = deriveCanonicalWorktreeFields(entry, worktreePath);
-
-        return {
-          source: 'sdk' as const,
-          name: name || deriveSdkWorktreeNameFromDirectory(worktreePath),
-          path: worktreePath,
-          projectDirectory: metadataProjectDirectory,
-          branch: branch,
-          label: branch || name || deriveSdkWorktreeNameFromDirectory(worktreePath),
-          worktreeRoot: canonical.worktreeRoot,
-          worktreeStatus: canonical.worktreeStatus,
-          headState: canonical.headState,
-          worktreeSource: canonical.worktreeSource,
-        };
-      })
-      .filter((entry) => normalizePath(entry.path) !== normalizedProjectDirectory);
-
-    const sorted = results.sort((a, b) => {
-      const aLabel = (a.label || a.branch || a.path).toLowerCase();
-      const bLabel = (b.label || b.branch || b.path).toLowerCase();
-      return aLabel.localeCompare(bLabel);
-    });
-
-    _worktreeListCache.set(projectDirectory, { value: sorted, at: Date.now() });
-    return sorted;
-  })().finally(() => {
-    _worktreeListInflight.delete(projectDirectory);
+  const promise = readStableProjectWorktrees(projectDirectory).finally(() => {
+    if (_worktreeListInflight.get(projectDirectory) === promise) {
+      _worktreeListInflight.delete(projectDirectory);
+    }
   });
 
   _worktreeListInflight.set(projectDirectory, promise);
@@ -255,7 +278,7 @@ export async function createWorktree(project: ProjectRef, args: CreateWorktreeAr
 
   markWorktreeBootstrapPending(metadata.path);
 
-  _worktreeListCache.delete(projectDirectory);
+  invalidateWorktreeList(projectDirectory);
   // The new worktree changes the repo's worktree topology; drop cached root
   // resolutions so root-branch lookups re-resolve against the new layout.
   invalidateResolvedProjectRootCache();
@@ -300,7 +323,7 @@ export async function removeProjectWorktree(project: ProjectRef, worktree: Workt
 
   clearWorktreeBootstrapState(worktree.path);
 
-  _worktreeListCache.delete(normalizePath(project.path));
+  invalidateWorktreeList(normalizePath(project.path));
   // Removing a worktree changes the repo's worktree topology; drop cached root
   // resolutions so root-branch lookups re-resolve against the new layout.
   invalidateResolvedProjectRootCache();

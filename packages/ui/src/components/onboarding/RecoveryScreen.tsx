@@ -1,5 +1,5 @@
 import React from 'react';
-import { isTauriShell, restartDesktopApp } from '@/lib/desktop';
+import { isDesktopShell, restartDesktopApp } from '@/lib/desktop';
 import { DesktopConnectionRecovery, type RecoveryVariant } from './DesktopConnectionRecovery';
 import { RemoteConnectionForm } from './RemoteConnectionForm';
 import { resolveRecoveryNextStep } from './desktopRecoveryRouting';
@@ -43,7 +43,7 @@ export function RecoveryScreen({
 }: RecoveryScreenProps) {
   // Persist the user's first choice (local or remote)
   const persistFirstChoice = React.useCallback(async (choice: 'local' | 'remote') => {
-    if (!isTauriShell()) return;
+    if (!isDesktopShell()) return;
 
     const config = await desktopHostsGet();
     await desktopHostsSet({
@@ -56,9 +56,9 @@ export function RecoveryScreen({
   }, []);
 
   const handleRecoveryRetry = React.useCallback(async () => {
-    // In desktop boot flow, always restart the entire Tauri app so Rust
-    // can re-evaluate the boot outcome.
-    if (isTauriShell()) {
+    // In desktop boot flow, restart the app so the native host can
+    // re-evaluate the boot outcome.
+    if (isDesktopShell()) {
       await restartDesktopApp();
       return;
     }
@@ -77,7 +77,7 @@ export function RecoveryScreen({
     // switch-default-to-local → persist local choice and restart
     await persistFirstChoice('local');
 
-    if (isTauriShell()) {
+    if (isDesktopShell()) {
       await restartDesktopApp();
       return;
     }
@@ -105,7 +105,7 @@ export function RecoveryScreen({
         isRecoveryMode={true}
         onSwitchToLocal={onSwitchToLocalFromRemote || (() => {
           persistFirstChoice('local').then(() => {
-            if (isTauriShell()) {
+            if (isDesktopShell()) {
               restartDesktopApp();
             } else {
               onEnterLocalSetup?.();

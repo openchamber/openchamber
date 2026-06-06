@@ -171,7 +171,7 @@ For any shared UI call to `/api/*`, decide the VS Code behavior explicitly:
 Electron exposes API base and shell identity broadly, but privileged local capabilities stay local-only.
 
 - `__OPENCHAMBER_API_BASE_URL__` and `__OPENCHAMBER_LOCAL_ORIGIN__` route requests.
-- `__OPENCHAMBER_CLIENT_TOKEN__`, `__OPENCHAMBER_HOME__`, and `__TAURI__`-style IPC are local-page gated.
+- `__OPENCHAMBER_CLIENT_TOKEN__`, `__OPENCHAMBER_HOME__`, and privileged desktop IPC are local-page gated.
 - Do not expose filesystem, shell, or host secrets to remote pages for UI convenience.
 - Do not trust arbitrary loopback, `file://`, or `about:blank` origins as local UI. Gate privileged preload/IPC/token access to the packaged UI origin and exact runtime origins.
 - Deep-links that add or switch remote runtimes are trust-boundary changes. Confirm before storing tokens or switching hosts.
@@ -274,9 +274,9 @@ If an OpenChamber route is consumed directly by the browser with `oc_url_token`,
 
 `packages/electron/main.mjs` starts the web server in-process, resolves local/remote runtime target, tracks `apiBaseUrl` and `clientToken`, injects init scripts, confirms remote connect deep-links before storing tokens, and handles host switching.
 
-`packages/electron/preload.mjs` exposes runtime globals. API base and local origin are broadly available for routing. Client token, home directory, and `__TAURI__` IPC stay local-page gated so remote pages cannot access local host capabilities.
+`packages/electron/preload.mjs` exposes runtime globals. API base and local origin are broadly available for routing. Client token, home directory, and privileged desktop IPC stay local-page gated so remote pages cannot access local host capabilities.
 
-Shared UI should not branch on Electron for backend behavior. Prefer web runtime APIs and the preload-provided `__TAURI__` compatibility shim only for shell capabilities that already exist in the shared runtime contract.
+Shared UI should not branch on Electron for backend behavior. Prefer web runtime APIs and the `__OPENCHAMBER_DESKTOP__` bridge only for shell capabilities that already exist in the shared runtime contract.
 
 ### Runtime Switch Flow
 

@@ -5,6 +5,7 @@ import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { updateDesktopSettings } from '@/lib/persistence';
 import { getSafeStorage } from '@/stores/utils/safeStorage';
 import {
   resolveOpenCodeUpdateVersion,
@@ -119,6 +120,7 @@ export const OpenCodeUpdateToast: React.FC = () => {
           label: t('opencodeUpdate.toast.actions.dismiss'),
           onClick: () => {
             getSafeStorage().setItem(UPDATE_TOAST_DISMISSED_VERSION_KEY, version);
+            void updateDesktopSettings({ openCodeUpdateToastDismissedVersion: version });
             toast.dismiss(UPDATE_TOAST_ID);
           },
         },

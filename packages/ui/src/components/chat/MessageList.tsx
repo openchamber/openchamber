@@ -685,10 +685,11 @@ const TurnBlock = React.memo(({
             hasTools: turn.hasTools,
             hasReasoning: turn.hasReasoning,
             diffStats: turn.diffStats,
+            changedFiles: turn.changedFiles,
             userMessageCreatedAt: typeof userCreatedAt === 'number' ? userCreatedAt : undefined,
             userMessageVariant,
         };
-    }, [turn.diffStats, turn.hasReasoning, turn.hasTools, turn.headerMessageId, turn.summaryText, turn.turnId, turn.userMessage.info, visibleActivityParts, visibleActivitySegments]);
+    }, [turn.changedFiles, turn.diffStats, turn.hasReasoning, turn.hasTools, turn.headerMessageId, turn.summaryText, turn.turnId, turn.userMessage.info, visibleActivityParts, visibleActivitySegments]);
 
     const renderMessage = React.useCallback(
         (message: ChatMessageEntry) => {
@@ -736,6 +737,7 @@ const TurnBlock = React.memo(({
                         activityGroupSegments: turnGroupingContextBase.activityGroupSegments,
                         headerMessageId: turnGroupingContextBase.headerMessageId,
                         diffStats: turnGroupingContextBase.diffStats,
+                        changedFiles: turnGroupingContextBase.changedFiles,
                         userMessageCreatedAt: turnGroupingContextBase.userMessageCreatedAt,
                         userMessageVariant: turnGroupingContextBase.userMessageVariant,
                         isGroupExpanded: turnUiState.isExpanded,
@@ -1114,6 +1116,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     const stickyUserHeader = useUIStore(state => state.stickyUserHeader);
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
     const activityRenderMode = useUIStore((state) => state.activityRenderMode);
+    const showTurnChangedFiles = useUIStore((state) => state.showTurnChangedFiles);
     const defaultActivityExpanded = activityRenderMode === 'summary';
     const [turnUiStates, setTurnUiStates] = React.useState<Map<string, TurnUiState>>(() => new Map());
     const userAnimationRef = React.useRef<{
@@ -1212,6 +1215,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     const { projection, staticTurns, streamingTurn } = useTurnRecords(displayMessages, {
         sessionKey,
         showTextJustificationActivity: chatRenderMode === 'sorted',
+        showTurnChangedFiles,
     });
     const hasUngroupedStaticEntries = projection.ungroupedMessageIds.size > 0;
     const staticEntryMessages = hasUngroupedStaticEntries ? displayMessages : EMPTY_STATIC_ENTRY_MESSAGES;

@@ -222,14 +222,14 @@ export type InitialLoadingState = {
 };
 
 export type DesktopBootFlowRestartInput = {
-  isTauriShell: boolean;
+  isDesktopShell: boolean;
   isDesktopLocalOriginActive: boolean;
 };
 
 /**
  * Whether the initial loading screen can be dismissed.
  *
- * Desktop shells must wait until a valid boot outcome is injected by Rust.
+ * Desktop shells must wait until a valid boot outcome is injected by the native host.
  * For non-main views (chooser, recovery), the splash can dismiss as soon as
  * the outcome is known — `isInitialized` is not required because OpenCode
  * may not be available in those flows.
@@ -254,16 +254,16 @@ export function canDismissInitialLoading(state: InitialLoadingState): boolean {
 }
 
 /**
- * Boot/recovery UI can render in the Tauri startup window before the local
+ * Boot/recovery UI can render in the desktop startup window before the local
  * desktop HTTP origin is active. In that state, same-origin reloads and
- * `/api/*` requests cannot recover the app, so callers must restart Tauri.
+ * `/api/*` requests cannot recover the app, so callers must restart desktop.
  */
 export function shouldRestartDesktopBootFlow(input: DesktopBootFlowRestartInput): boolean {
-  return input.isTauriShell && !input.isDesktopLocalOriginActive;
+  return input.isDesktopShell && !input.isDesktopLocalOriginActive;
 }
 
 /**
- * Read the boot outcome injected by the Rust backend.
+ * Read the boot outcome injected by the native desktop host.
  * Returns `null` when not in desktop, when the outcome has not been set yet,
  * or when the injected payload is malformed.
  */

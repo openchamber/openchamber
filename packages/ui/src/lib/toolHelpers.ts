@@ -165,12 +165,25 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
        { key: 'name', label: 'Skill Name', type: 'text' }
      ]
    },
-   question: {
-      displayName: 'Question',
-      category: 'ai',
-      outputLanguage: 'text',
+    question: {
+       displayName: 'Question',
+       category: 'ai',
+       outputLanguage: 'text',
+       inputFields: [
+         { key: 'questions', label: 'Questions', type: 'code', language: 'json' }
+       ]
+     },
+
+    lsp: {
+      displayName: 'LSP',
+      category: 'code',
+      outputLanguage: 'json',
       inputFields: [
-        { key: 'questions', label: 'Questions', type: 'code', language: 'json' }
+        { key: 'operation', label: 'Operation', type: 'text' },
+        { key: 'filePath', label: 'File Path', type: 'file' },
+        { key: 'line', label: 'Line', type: 'text' },
+        { key: 'character', label: 'Character', type: 'text' },
+        { key: 'query', label: 'Query', type: 'text' }
       ]
     },
 
@@ -700,6 +713,26 @@ export function formatToolInput(input: Record<string, unknown>, toolName: string
   if (toolName === 'bash') {
     const cmd = getString('command');
     if (cmd) return cmd;
+  }
+
+  if (toolName === 'lsp') {
+    const operation = getString('operation') || 'lsp';
+    const filePath = getString('filePath') || getString('file_path') || getString('path');
+    const line = getString('line');
+    const character = getString('character');
+    const query = getString('query');
+    const position = line && character ? ` (Line: ${line}; Character: ${character})` : '';
+
+    if (operation === 'workspaceSymbol') {
+      return query ? `Operation: ${operation} (Query: "${query}")` : `Operation: ${operation}`;
+    }
+
+    const summary = `Operation: ${operation}${position}`;
+    if (filePath) {
+      return `${summary}\n${filePath}`;
+    }
+
+    return summary;
   }
 
   if (toolName === 'task') {

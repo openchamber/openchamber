@@ -18,6 +18,12 @@ const createGitReadCacheTtlMs = () => {
   return 30 * 1000;
 };
 
+const createGitCheckIgnoreTimeoutMs = () => {
+  const raw = Number(process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS);
+  if (Number.isFinite(raw) && raw >= 0) return raw;
+  return 2500;
+};
+
 // Only deterministic, side-effect-free git plumbing path queries are cacheable.
 // Anything outside this allowlist (including any non-git command) runs normally
 // — we never cache arbitrary exec.
@@ -279,6 +285,7 @@ export const registerFsRoutes = (app, dependencies) => {
   const execJobs = new Map();
   const commandTimeoutMs = createCommandTimeoutMs();
   const gitReadCacheTtlMs = createGitReadCacheTtlMs();
+  const gitCheckIgnoreTimeoutMs = createGitCheckIgnoreTimeoutMs();
   const gitReadCache = new Map();
   const inFlightGitReadCache = new Map();
 
@@ -1065,9 +1072,28 @@ export const registerFsRoutes = (app, dependencies) => {
                 });
 
                 let stdout = '';
+                let settled = false;
+                let timeout = null;
+                const finish = (value) => {
+                  if (settled) return;
+                  settled = true;
+                  if (timeout) clearTimeout(timeout);
+                  resolve(value);
+                };
+
+                if (gitCheckIgnoreTimeoutMs > 0) {
+                  timeout = setTimeout(() => {
+                    try {
+                      child.kill('SIGKILL');
+                    } catch {
+                    }
+                    finish('');
+                  }, gitCheckIgnoreTimeoutMs);
+                }
+
                 child.stdout.on('data', (data) => { stdout += data.toString(); });
-                child.on('close', () => resolve(stdout));
-                child.on('error', () => resolve(''));
+                child.on('close', () => finish(stdout));
+                child.on('error', () => finish(''));
               });
 
               result.split('\n').filter(Boolean).forEach((name) => {

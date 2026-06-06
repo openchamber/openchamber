@@ -257,6 +257,10 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
       const props = payload.properties as { sessionID: string }
       return `session.status:${props.sessionID}`
     }
+    if (payload.type === "session.updated") {
+      const props = payload.properties as { info?: { id?: string } }
+      return props.info?.id ? `session.updated:${props.info.id}` : undefined
+    }
     if (payload.type === "lsp.updated") {
       return "lsp.updated"
     }

@@ -1,5 +1,6 @@
 import { snapdom } from '@zumer/snapdom';
 import { getFontEmbedCSS, toJpeg } from 'html-to-image';
+import { invokeDesktop } from '@/lib/desktop';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
 export type PreviewElementMetadata = {
@@ -97,18 +98,16 @@ export const renderPreviewScreenshot = async (
   iframe: HTMLIFrameElement,
   target: PreviewElementMetadata,
 ): Promise<File | null> => {
-  const tauri = typeof window !== 'undefined'
-    ? (window as unknown as { __TAURI__?: { core?: { invoke?: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T> } } }).__TAURI__
-    : undefined;
-  if (typeof tauri?.core?.invoke === 'function') {
+  if (typeof window !== 'undefined') {
     try {
       const rect = iframe.getBoundingClientRect();
-      const capture = await tauri.core.invoke<{ mime: string; base64: string; width: number; height: number }>('desktop_capture_page_rect', {
+      const capture = await invokeDesktop<{ mime: string; base64: string; width: number; height: number }>('desktop_capture_page_rect', {
         x: rect.left,
         y: rect.top,
         width: rect.width,
         height: rect.height,
       });
+      if (!capture) throw new Error('Desktop screenshot capture is not available');
       const image = new Image();
       await new Promise<void>((resolve, reject) => {
         image.onload = () => resolve();

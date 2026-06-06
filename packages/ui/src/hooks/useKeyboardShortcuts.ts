@@ -69,6 +69,29 @@ export const useKeyboardShortcuts = () => {
         target.getAttribute('data-terminal-hidden-input') === 'true'
       );
     };
+
+    const dropdownTargetSelector = [
+      '[data-slot="dropdown-menu-content"]',
+      '[data-slot="select-content"]',
+      '[role="combobox"]',
+      '[role="listbox"]',
+      '[role="menu"]',
+      '[role="menuitem"]',
+      '[role="option"]',
+      '[data-radix-popper-content-wrapper]',
+    ].join(',');
+
+    const isDropdownEventTarget = (target: EventTarget | null) => {
+      return target instanceof Element && Boolean(target.closest(dropdownTargetSelector));
+    };
+
+    const hasOpenDropdown = () => {
+      const openDropdowns = document.querySelectorAll<HTMLElement>(
+        '[data-slot="dropdown-menu-content"], [data-slot="select-content"], [role="listbox"], [role="menu"], [data-radix-popper-content-wrapper]'
+      );
+      return Array.from(openDropdowns).some((element) => element.getClientRects().length > 0);
+    };
+
     const handleTerminalShortcutCapture = (e: KeyboardEvent) => {
       if (!isTerminalEventTarget(e.target)) {
         return;
@@ -454,6 +477,7 @@ export const useKeyboardShortcuts = () => {
           target?.closest('.terminal-viewport-container') ||
           target?.getAttribute('data-terminal-hidden-input') === 'true'
         );
+        const hasDropdownInteraction = isDropdownEventTarget(target) || hasOpenDropdown();
 
         const {
           isSettingsDialogOpen,
@@ -466,7 +490,7 @@ export const useKeyboardShortcuts = () => {
           activeMainTab,
         } = useUIStore.getState();
 
-        if (isInsideDialog || isInsideTerminal) {
+        if (isInsideDialog || isInsideTerminal || hasDropdownInteraction) {
           resetAbortPriming();
           return;
         }

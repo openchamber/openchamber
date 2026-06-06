@@ -648,7 +648,10 @@ export interface SettingsPayload {
   queueModeEnabled?: boolean;
   gitmojiEnabled?: boolean;
   inputSpellcheckEnabled?: boolean;
+  showOpenCodeUpdateNotifications?: boolean;
+  openCodeUpdateToastDismissedVersion?: string;
   showToolFileIcons?: boolean;
+  showTurnChangedFiles?: boolean;
   showExpandedBashTools?: boolean;
   showExpandedEditTools?: boolean;
   chatRenderMode?: 'sorted' | 'live';
@@ -663,6 +666,7 @@ export interface SettingsPayload {
   padding?: number;
   cornerRadius?: number;
   inputBarOffset?: number;
+  shortcutOverrides?: Record<string, string>;
   diffLayoutPreference?: 'dynamic' | 'inline' | 'side-by-side';
   diffViewMode?: 'single' | 'stacked';
   gitChangesViewMode?: 'flat' | 'tree';

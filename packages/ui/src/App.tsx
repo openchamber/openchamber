@@ -17,7 +17,7 @@ import { usePwaInstallPrompt } from '@/hooks/usePwaInstallPrompt';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { hasModifier } from '@/lib/utils';
-import { isDesktopLocalOriginActive, isDesktopShell, isTauriShell, restartDesktopApp } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isDesktopShell, restartDesktopApp } from '@/lib/desktop';
 import {
   getInjectedBootOutcome,
   getBootInjectionStatus,
@@ -56,6 +56,7 @@ import { SyncAppEffects } from '@/apps/AppEffects';
 import { useAppFontEffects } from '@/apps/useAppFontEffects';
 import { resetStreamingState } from '@/sync/streaming';
 import { OpenCodeUpdateToast } from '@/components/update/OpenCodeUpdateToast';
+import { markStartupTrace, startupTraceEnabled } from '@/lib/startupTrace';
 
 // Lazy-loaded heavy views — loaded on demand to reduce initial bundle size.
 const OnboardingScreen = lazyWithChunkRecovery(() =>
@@ -201,6 +202,13 @@ const EmbeddedSessionChatContent: React.FC<{
 };
 
 function App({ apis }: AppProps) {
+  React.useEffect(() => {
+    markStartupTrace('App:mounted');
+    if (startupTraceEnabled()) {
+      console.info('[startup-trace] enabled. Run console.table(window.__OPENCHAMBER_STARTUP_TRACE__) after startup.');
+    }
+  }, []);
+
   const initializeApp = useConfigStore((s) => s.initializeApp);
   const isInitialized = useConfigStore((s) => s.isInitialized);
   const isConnected = useConfigStore((s) => s.isConnected);
@@ -470,8 +478,8 @@ function App({ apis }: AppProps) {
       const state = useConfigStore.getState();
       if (state.providers.length > 0 && state.agents.length > 0) return;
       try {
-        if (state.providers.length === 0) await loadProviders();
-        if (useConfigStore.getState().agents.length === 0) await loadAgents();
+        if (state.providers.length === 0) await loadProviders({ source: 'startupRecovery' });
+        if (useConfigStore.getState().agents.length === 0) await loadAgents({ source: 'startupRecovery' });
       } catch { /* retry next interval */ }
     };
 
@@ -758,7 +766,7 @@ function App({ apis }: AppProps) {
 
   const handleDesktopBootDismiss = React.useCallback(async () => {
     if (shouldRestartDesktopBootFlow({
-      isTauriShell: isTauriShell(),
+      isDesktopShell: isDesktopShell(),
       isDesktopLocalOriginActive: isDesktopLocalOriginActive(),
     })) {
       await restartDesktopApp();

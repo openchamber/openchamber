@@ -1,9 +1,9 @@
 import React from 'react';
 import {
   RiAddLine,
-  RiArrowDownLine,
+  RiArchiveLine,
   RiArrowDownSLine,
-  RiArrowUpLine,
+  RiArrowUpSLine,
   RiCheckLine,
   RiCloseLine,
   RiDeleteBinLine,
@@ -45,12 +45,16 @@ import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/pro
 import { cn } from '@/lib/utils';
 import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { refreshGlobalSessions, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { mergeSessionDirectoryMetadata, refreshGlobalSessions, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { useMobileSessionExpansionStore } from '@/stores/useMobileSessionExpansionStore';
+import { useMobileSessionTreeStore } from '@/stores/useMobileSessionTreeStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { orderWorktrees, useWorktreeOrderStore } from '@/stores/useWorktreeOrderStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useAllLiveSessions } from '@/sync/sync-context';
 import type { WorktreeMetadata } from '@/types/worktree';
 
+import { MobileProjectEditSurface } from './MobileProjectEditSurface';
 import { MobileSurfaceShell } from './MobileSurfaceShell';
 
 type MobileSessionsSheetProps = {
@@ -91,6 +95,17 @@ type ProjectNode = {
 };
 
 const SESSIONS_PER_BUCKET = 7;
+
+// Left padding for session rows so the title's first letter aligns with its
+// parent label. Root/project-level sessions align with the project label;
+// worktree sessions sit one level deeper. SessionRow adds 16px (dot + gap) on top.
+const PROJECT_SESSION_INDENT = 36;
+const WORKTREE_SESSION_INDENT = 52;
+// Extra left padding applied to each nested subsession level.
+const CHILD_INDENT_STEP = 18;
+
+const getParentId = (session: Session): string | null =>
+  (session as Session & { parentID?: string | null }).parentID ?? null;
 
 const normalizePath = (value?: string | null): string =>
   (value || '').replace(/\\/g, '/').replace(/\/+$/g, '');
@@ -237,33 +252,75 @@ const SessionRow: React.FC<{
   indent: number;
   /** When provided, shown as a small second-line subtitle below the title (e.g. "Project · branch"). */
   contextLabel?: string;
+  /** When true, the row shows the two-step archive confirmation. */
+  confirmingArchive?: boolean;
+  /** When true, a chevron is shown in the left gutter to toggle nested subsessions. */
+  hasChildren?: boolean;
+  expanded?: boolean;
+  onToggleChildren?: () => void;
   onSelect: () => void;
-}> = ({ session, active, indent, contextLabel, onSelect }) => {
+  /** When provided, an archive affordance is shown; first tap arms confirm, X cancels. */
+  onRequestArchive?: () => void;
+  onConfirmArchive?: () => void;
+}> = ({
+  session,
+  active,
+  indent,
+  contextLabel,
+  confirmingArchive = false,
+  hasChildren = false,
+  expanded = false,
+  onToggleChildren,
+  onSelect,
+  onRequestArchive,
+  onConfirmArchive,
+}) => {
   const { t } = useI18n();
   const time = formatRelativeShort(getSessionTimestamp(session));
   const title = session.title?.trim() || t('mobile.sessions.untitled');
   return (
     <div
       className={cn(
-        'flex items-center gap-1 transition-colors',
-        active && 'bg-[color-mix(in_srgb,var(--primary)_10%,transparent)]',
+        'relative flex items-center gap-1 transition-colors',
+        active && !confirmingArchive && 'bg-[color-mix(in_srgb,var(--primary)_10%,transparent)]',
+        confirmingArchive && 'bg-[color-mix(in_srgb,var(--destructive)_8%,transparent)]',
       )}
     >
+      {hasChildren && onToggleChildren ? (
+        <button
+          type="button"
+          className="absolute z-10 flex w-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          style={{ left: Math.max(indent - 32, 2), top: 0, bottom: 0, touchAction: 'manipulation' }}
+          aria-label={expanded
+            ? t('sessions.sidebar.session.subsessions.collapse')
+            : t('sessions.sidebar.session.subsessions.expand')}
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleChildren();
+          }}
+        >
+          <RiArrowDownSLine className={cn('size-[18px] transition-transform duration-150', expanded ? 'rotate-0' : '-rotate-90')} />
+        </button>
+      ) : null}
       <button
         type="button"
-        className="flex min-h-12 min-w-0 flex-1 items-start gap-2.5 py-2 pr-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"
+        className={cn(
+          'flex min-h-12 min-w-0 flex-1 items-center gap-2.5 py-2 pr-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset',
+          confirmingArchive && 'opacity-50',
+        )}
         style={{ paddingLeft: indent, touchAction: 'manipulation' }}
         onClick={onSelect}
+        disabled={confirmingArchive}
       >
-        <span
-          className={cn(
-            'mt-1.5 size-1.5 shrink-0 rounded-full',
-            active ? 'bg-primary' : 'bg-muted-foreground/30',
-          )}
-          aria-hidden
-        />
         <span className="flex min-w-0 flex-1 flex-col">
-          <span className="flex items-center gap-2">
+          <span className="flex items-center gap-2.5">
+            <span
+              className={cn(
+                'size-1.5 shrink-0 rounded-full',
+                active ? 'bg-primary' : 'bg-muted-foreground/30',
+              )}
+              aria-hidden
+            />
             <span
               className={cn(
                 'block min-w-0 flex-1 truncate typography-ui-label',
@@ -277,19 +334,47 @@ const SessionRow: React.FC<{
             ) : null}
           </span>
           {contextLabel ? (
-            <span className="block truncate typography-micro text-muted-foreground">{contextLabel}</span>
+            <span className="block truncate typography-micro text-muted-foreground pl-4">{contextLabel}</span>
           ) : null}
         </span>
       </button>
+      {onRequestArchive ? (
+        <>
+          {confirmingArchive ? (
+            <button
+              type="button"
+              className="flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-destructive px-3 text-destructive-foreground transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
+              aria-label={t('mobile.sessions.archiveSessionAria', { title })}
+              onClick={onConfirmArchive}
+              style={{ touchAction: 'manipulation' }}
+            >
+              <RiArchiveLine className="size-4" />
+              <span className="typography-ui-label">{t('sessions.sidebar.bulkActions.archive')}</span>
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="mr-1.5 flex size-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground/70 transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            aria-label={
+              confirmingArchive
+                ? t('mobile.sessions.cancelArchiveAria', { title })
+                : t('mobile.sessions.archiveSessionAria', { title })
+            }
+            onClick={onRequestArchive}
+            style={{ touchAction: 'manipulation' }}
+          >
+            {confirmingArchive ? <RiCloseLine className="size-4" /> : <RiArchiveLine className="size-4" />}
+          </button>
+        </>
+      ) : null}
     </div>
   );
 };
 
 const ShowMoreRow: React.FC<{
-  remaining: number;
   indent: number;
   onClick: () => void;
-}> = ({ remaining, indent, onClick }) => {
+}> = ({ indent, onClick }) => {
   const { t } = useI18n();
   return (
     <button
@@ -299,7 +384,25 @@ const ShowMoreRow: React.FC<{
       onClick={onClick}
     >
       <RiArrowDownSLine className="size-4" />
-      <span className="typography-micro">{t('mobile.sessions.showMore', { count: remaining })}</span>
+      <span className="typography-micro">{t('sessions.sidebar.group.showMore')}</span>
+    </button>
+  );
+};
+
+const ShowFewerRow: React.FC<{
+  indent: number;
+  onClick: () => void;
+}> = ({ indent, onClick }) => {
+  const { t } = useI18n();
+  return (
+    <button
+      type="button"
+      className="flex min-h-10 w-full items-center gap-2 py-1.5 pr-3 text-left text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"
+      style={{ paddingLeft: indent, touchAction: 'manipulation' }}
+      onClick={onClick}
+    >
+      <RiArrowUpSLine className="size-4" />
+      <span className="typography-micro">{t('sessions.sidebar.group.showFewer')}</span>
     </button>
   );
 };
@@ -307,21 +410,15 @@ const ShowMoreRow: React.FC<{
 const SortableProjectRow: React.FC<{
   project: ProjectMeta;
   totalSessions: number;
-  isFirst: boolean;
-  isLast: boolean;
   confirmingDelete: boolean;
-  onMoveUp: () => void;
-  onMoveDown: () => void;
+  onEdit: () => void;
   onRequestRemove: () => void;
   onConfirmRemove: () => void;
 }> = ({
   project,
   totalSessions,
-  isFirst,
-  isLast,
   confirmingDelete,
-  onMoveUp,
-  onMoveDown,
+  onEdit,
   onRequestRemove,
   onConfirmRemove,
 }) => {
@@ -369,23 +466,12 @@ const SortableProjectRow: React.FC<{
           <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">{totalSessions}</span>
           <button
             type="button"
-            className="flex size-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-30"
-            aria-label={t('mobile.sessions.moveUpAria', { label: project.label })}
-            onClick={onMoveUp}
-            disabled={isFirst}
+            className="flex size-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            aria-label={t('mobile.sessions.editProjectAria', { label: project.label })}
+            onClick={onEdit}
             style={{ touchAction: 'manipulation' }}
           >
-            <RiArrowUpLine className="size-4" />
-          </button>
-          <button
-            type="button"
-            className="flex size-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-30"
-            aria-label={t('mobile.sessions.moveDownAria', { label: project.label })}
-            onClick={onMoveDown}
-            disabled={isLast}
-            style={{ touchAction: 'manipulation' }}
-          >
-            <RiArrowDownLine className="size-4" />
+            <RiEdit2Line className="size-4" />
           </button>
         </>
       )}
@@ -421,12 +507,24 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
+  const archiveSession = useSessionUIStore((state) => state.archiveSession);
   const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
   const setActiveProject = useProjectsStore((state) => state.setActiveProject);
   const setActiveProjectIdOnly = useProjectsStore((state) => state.setActiveProjectIdOnly);
   const reorderProjects = useProjectsStore((state) => state.reorderProjects);
   const removeProject = useProjectsStore((state) => state.removeProject);
+  const projectExpandedMap = useMobileSessionTreeStore((state) => state.projectExpanded);
+  const worktreeExpandedMap = useMobileSessionTreeStore((state) => state.worktreeExpanded);
+  const setProjectExpanded = useMobileSessionTreeStore((state) => state.setProjectExpanded);
+  const setWorktreeExpanded = useMobileSessionTreeStore((state) => state.setWorktreeExpanded);
+  const worktreeOrderByProject = useWorktreeOrderStore((state) => state.orderByProject);
+  const expandedParents = useMobileSessionExpansionStore((state) => state.expandedParents);
+  const toggleParent = useMobileSessionExpansionStore((state) => state.toggleParent);
   const [query, setQuery] = React.useState('');
+  const [editingProjectId, setEditingProjectId] = React.useState<string | null>(null);
+  const [confirmingArchiveSessionId, setConfirmingArchiveSessionId] = React.useState<string | null>(null);
+  // Bumped to force a re-list of worktrees (e.g. after one is deleted in the editor).
+  const [worktreeRefreshKey, setWorktreeRefreshKey] = React.useState(0);
   const [directoryDialogOpen, setDirectoryDialogOpen] = React.useState(false);
   const [newWorktreeDialogOpen, setNewWorktreeDialogOpen] = React.useState(false);
   const [worktreeDialogProjectId, setWorktreeDialogProjectId] = React.useState<string | null>(null);
@@ -434,21 +532,20 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const [gitProjectPaths, setGitProjectPaths] = React.useState<Set<string>>(new Set());
   const [editingOrder, setEditingOrder] = React.useState(false);
   const [confirmingDeleteId, setConfirmingDeleteId] = React.useState<string | null>(null);
-  // Buckets the user explicitly expanded past the SESSIONS_PER_BUCKET cap. Key: `${projectId}::${bucketKey}`.
-  const [expandedBucketsAll, setExpandedBucketsAll] = React.useState<Set<string>>(new Set());
-  // User overrides: true = user explicitly expanded, false = user explicitly collapsed,
-  // missing key = use the default rule (active project/worktree expanded).
-  const [projectOverrides, setProjectOverrides] = React.useState<Map<string, boolean>>(new Map());
-  const [worktreeOverrides, setWorktreeOverrides] = React.useState<Map<string, boolean>>(new Map());
+  // Per-bucket count of sessions revealed past the default page. Ephemeral —
+  // resets when the sheet closes or when a group/project is toggled. Expand
+  // state itself lives in useMobileSessionTreeStore (persisted).
+  // Key: `${projectId}::${bucketKey}`.
+  const [visibleCountByBucket, setVisibleCountByBucket] = React.useState<Map<string, number>>(new Map());
 
   React.useEffect(() => {
     if (!open) {
       setQuery('');
-      setProjectOverrides(new Map());
-      setWorktreeOverrides(new Map());
       setEditingOrder(false);
       setConfirmingDeleteId(null);
-      setExpandedBucketsAll(new Set());
+      setVisibleCountByBucket(new Map());
+      setEditingProjectId(null);
+      setConfirmingArchiveSessionId(null);
       return;
     }
     void refreshGlobalSessions(liveSessions);
@@ -491,7 +588,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     return () => {
       cancelled = true;
     };
-  }, [git, open, projects]);
+  }, [git, open, projects, worktreeRefreshKey]);
 
   const projectsMeta = React.useMemo<ProjectMeta[]>(
     () =>
@@ -504,9 +601,12 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
         iconImage: project.iconImage,
         iconBackground: project.iconBackground,
         isGitRepo: gitProjectPaths.has(normalizePath(project.path)),
-        worktrees: worktreesByProject.get(normalizePath(project.path)) ?? [],
+        worktrees: orderWorktrees(
+          worktreeOrderByProject[project.id],
+          worktreesByProject.get(normalizePath(project.path)) ?? [],
+        ),
       })),
-    [gitProjectPaths, projects, worktreesByProject],
+    [gitProjectPaths, projects, worktreeOrderByProject, worktreesByProject],
   );
 
   /**
@@ -516,7 +616,10 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
    */
   const sessions = React.useMemo(() => {
     const liveById = new Map(liveSessions.map((session) => [session.id, session]));
-    const merged = globalActiveSessions.map((session) => liveById.get(session.id) ?? session);
+    const merged = globalActiveSessions.map((session) => {
+      const liveSession = liveById.get(session.id);
+      return liveSession ? mergeSessionDirectoryMetadata(liveSession, session) : session;
+    });
     const seenIds = new Set(merged.map((session) => session.id));
     for (const session of liveSessions) {
       if (!seenIds.has(session.id)) merged.push(session);
@@ -590,51 +693,149 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     return matched?.path ?? node.project.path;
   };
 
-  // Default rule for a project: active project expanded; non-empty query expands any node
-  // that contains a matching session. User override (true/false) wins over defaults.
-  const isProjectExpanded = (node: ProjectNode): boolean => {
-    const override = projectOverrides.get(node.project.id);
-    if (override !== undefined) return override;
-    if (normalizedQuery) {
-      return node.buckets.some((bucket) =>
-        bucket.sessions.some((session) => sessionMatchesQuery(session, node.project.label, normalizedQuery)),
-      );
-    }
-    return node.isActive;
-  };
+  // Expansion is the user's own choice (persisted), independent of the active
+  // directory: projects default to expanded, worktree groups to collapsed.
+  const isProjectExpanded = (node: ProjectNode): boolean =>
+    projectExpandedMap[node.project.id] ?? true;
 
-  const isWorktreeExpanded = (node: ProjectNode, bucket: WorktreeBucket): boolean => {
-    const key = `${node.project.id}::${bucket.key}`;
-    const override = worktreeOverrides.get(key);
-    if (override !== undefined) return override;
-    if (normalizedQuery) {
-      return bucket.sessions.some((session) =>
-        sessionMatchesQuery(session, node.project.label, normalizedQuery),
-      );
-    }
-    return findActiveWorktreePath(node) === bucket.path;
-  };
+  const isWorktreeExpanded = (node: ProjectNode, bucket: WorktreeBucket): boolean =>
+    worktreeExpandedMap[`${node.project.id}::${bucket.key}`] ?? false;
 
-  const toggleProject = (projectId: string, currentlyExpanded: boolean) => {
-    setProjectOverrides((previous) => {
+  const resetBucketVisibleCount = (bucketKey: string) => {
+    setVisibleCountByBucket((previous) => {
+      if (!previous.has(bucketKey)) return previous;
       const next = new Map(previous);
-      next.set(projectId, !currentlyExpanded);
+      next.delete(bucketKey);
       return next;
     });
+  };
+
+  const resetProjectVisibleCounts = (projectId: string) => {
+    setVisibleCountByBucket((previous) => {
+      let changed = false;
+      const next = new Map(previous);
+      const prefix = `${projectId}::`;
+      for (const key of next.keys()) {
+        if (key.startsWith(prefix)) {
+          next.delete(key);
+          changed = true;
+        }
+      }
+      return changed ? next : previous;
+    });
+  };
+
+  const showMoreBucketSessions = (bucketKey: string, currentVisibleCount: number) => {
+    setVisibleCountByBucket((previous) => {
+      const next = new Map(previous);
+      next.set(bucketKey, currentVisibleCount + SESSIONS_PER_BUCKET);
+      return next;
+    });
+  };
+
+  // Paginated, tree-aware list of a bucket's sessions: top-level sessions paginate,
+  // and a parent with subsessions can be expanded to reveal its children (nested,
+  // recursively). Pagination counts only top-level sessions.
+  const renderBucketSessions = (node: ProjectNode, bucket: WorktreeBucket, indent: number) => {
+    const bucketKey = `${node.project.id}::${bucket.key}`;
+
+    // Group children by parent within this bucket, and treat sessions whose parent
+    // is not in this bucket as top-level so nothing is hidden.
+    const idsInBucket = new Set(bucket.sessions.map((entry) => entry.id));
+    const childrenByParent = new Map<string, Session[]>();
+    for (const candidate of bucket.sessions) {
+      const parentId = getParentId(candidate);
+      if (parentId && idsInBucket.has(parentId)) {
+        const list = childrenByParent.get(parentId) ?? [];
+        list.push(candidate);
+        childrenByParent.set(parentId, list);
+      }
+    }
+    const roots = bucket.sessions.filter((entry) => {
+      const parentId = getParentId(entry);
+      return !parentId || !idsInBucket.has(parentId);
+    });
+
+    const visibleCount = visibleCountByBucket.get(bucketKey) ?? SESSIONS_PER_BUCKET;
+    const visibleRoots = roots.slice(0, visibleCount);
+    const remaining = roots.length - visibleRoots.length;
+    const canShowFewer = roots.length > SESSIONS_PER_BUCKET && remaining === 0;
+
+    const renderNode = (session: Session, rowIndent: number): React.ReactNode => {
+      const children = childrenByParent.get(session.id) ?? [];
+      const hasChildren = children.length > 0;
+      const expanded = Boolean(expandedParents[session.id]);
+      return (
+        <React.Fragment key={session.id}>
+          <SessionRow
+            session={session}
+            active={currentSessionId === session.id}
+            indent={rowIndent}
+            hasChildren={hasChildren}
+            expanded={expanded}
+            onToggleChildren={hasChildren ? () => toggleParent(session.id) : undefined}
+            confirmingArchive={confirmingArchiveSessionId === session.id}
+            onSelect={() => handleSelectSession(session)}
+            onRequestArchive={() => handleRequestArchive(session.id)}
+            onConfirmArchive={() => void handleConfirmArchive(session)}
+          />
+          {hasChildren && expanded
+            ? children.map((child) => renderNode(child, rowIndent + CHILD_INDENT_STEP))
+            : null}
+        </React.Fragment>
+      );
+    };
+
+    return (
+      <div>
+        {visibleRoots.map((session) => renderNode(session, indent))}
+        {remaining > 0 ? (
+          <ShowMoreRow indent={indent} onClick={() => showMoreBucketSessions(bucketKey, visibleRoots.length)} />
+        ) : null}
+        {canShowFewer ? (
+          <ShowFewerRow indent={indent} onClick={() => resetBucketVisibleCount(bucketKey)} />
+        ) : null}
+      </div>
+    );
+  };
+
+  // Toggling resets the visible-session count for the affected buckets so a
+  // re-expanded group starts from the default page again.
+  const toggleProject = (projectId: string, currentlyExpanded: boolean) => {
+    setProjectExpanded(projectId, !currentlyExpanded);
+    resetProjectVisibleCounts(projectId);
   };
 
   const toggleWorktree = (projectId: string, bucketKey: string, currentlyExpanded: boolean) => {
-    const key = `${projectId}::${bucketKey}`;
-    setWorktreeOverrides((previous) => {
-      const next = new Map(previous);
-      next.set(key, !currentlyExpanded);
-      return next;
-    });
+    setWorktreeExpanded(`${projectId}::${bucketKey}`, !currentlyExpanded);
+    resetBucketVisibleCount(`${projectId}::${bucketKey}`);
   };
 
   const handleSelectSession = (session: Session) => {
-    void setCurrentSession(session.id, getSessionDirectory(session) || null);
+    const directory = getSessionDirectory(session) || null;
+    // Switching session switches the working directory (handled by
+    // setCurrentSession) — also move the active project so the rest of the app
+    // and the active highlight follow the selected session, not just the draft.
+    const project = projectsMeta.find((entry) => {
+      if (pathBelongsToRoot(directory ?? '', entry.path)) return true;
+      return entry.worktrees.some((worktree) => pathBelongsToRoot(directory ?? '', worktree.path));
+    });
+    if (project) setActiveProjectIdOnly(project.id);
+    void setCurrentSession(session.id, directory);
     onOpenChange(false);
+  };
+
+  // Two-step archive: first tap arms the confirm on that row, second confirms.
+  // Only one row can be in the confirming state at a time.
+  const handleRequestArchive = (sessionId: string) => {
+    setConfirmingArchiveSessionId((current) => (current === sessionId ? null : sessionId));
+  };
+
+  const handleConfirmArchive = async (session: Session) => {
+    setConfirmingArchiveSessionId(null);
+    const ok = await archiveSession(session.id);
+    if (ok) toast.success(t('sessions.sidebar.session.archive.success'));
+    else toast.error(t('sessions.sidebar.session.archive.error'));
   };
 
   const handleStartNewChat = () => {
@@ -927,18 +1128,15 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                   strategy={verticalListSortingStrategy}
                 >
                   <div className="flex flex-col gap-1.5">
-                    {projectsMeta.map((project, index) => {
+                    {projectsMeta.map((project) => {
                       const node = projectNodes.find((n) => n.project.id === project.id);
                       return (
                         <SortableProjectRow
                           key={project.id}
                           project={project}
                           totalSessions={node?.totalSessions ?? 0}
-                          isFirst={index === 0}
-                          isLast={index === projectsMeta.length - 1}
                           confirmingDelete={confirmingDeleteId === project.id}
-                          onMoveUp={() => reorderProjects(index, index - 1)}
-                          onMoveDown={() => reorderProjects(index, index + 1)}
+                          onEdit={() => setEditingProjectId(project.id)}
                           onRequestRemove={() => handleRequestRemoveProject(project.id)}
                           onConfirmRemove={() => handleConfirmRemoveProject(project)}
                         />
@@ -959,10 +1157,6 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                       ),
                     )
                   : node.buckets;
-                const showWorktreeLevel = node.buckets.length > 1;
-                // Align session title left edge with the parent label's letters.
-                // Project label sits at ≈52px; worktree label at ≈68px. SessionRow adds 16px (dot + gap) on top of indent.
-                const sessionsIndent = showWorktreeLevel ? 52 : 36;
                 const activeWorktreePath = findActiveWorktreePath(node);
                 return (
                   <section
@@ -983,7 +1177,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                         style={{ touchAction: 'manipulation' }}
                       >
                         <MobileProjectIcon project={node.project} />
-                        <span className="block min-w-0 flex-1 truncate typography-ui-label text-foreground">
+                        <span className="block min-w-0 flex-1 truncate typography-ui-label font-semibold text-foreground">
                           {node.project.label}
                         </span>
                         {node.isActive ? <ActiveDot ariaLabel={t('mobile.sessions.activeProjectAria')} /> : null}
@@ -1001,122 +1195,66 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
 
                     {projectExpanded ? (
                       <div className="pb-2">
-                        {showWorktreeLevel
-                          ? buckets.map((bucket) => {
-                              const worktreeExpanded = isWorktreeExpanded(node, bucket);
-                              const isActiveWt = activeWorktreePath === bucket.path;
-                              return (
-                                <div key={bucket.key}>
-                                  <button
-                                    type="button"
-                                    className="flex min-h-11 w-full items-center gap-2 py-1.5 pl-4 pr-3 text-left transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"
-                                    onClick={() => toggleWorktree(node.project.id, bucket.key, worktreeExpanded)}
-                                    aria-expanded={worktreeExpanded}
-                                    aria-label={
-                                      worktreeExpanded
-                                        ? t('sessions.sidebar.group.collapseAria', { label: bucket.label })
-                                        : t('sessions.sidebar.group.expandAria', { label: bucket.label })
-                                    }
-                                    style={{ touchAction: 'manipulation' }}
-                                  >
-                                    <ChevronToggle expanded={worktreeExpanded} />
-                                    <Icon
-                                      name="node-tree"
-                                      className={cn(
-                                        'size-4 shrink-0',
-                                        isActiveWt ? 'text-primary' : 'text-muted-foreground',
-                                      )}
-                                    />
-                                    <span
-                                      className={cn(
-                                        'block min-w-0 flex-1 truncate typography-ui-label',
-                                        isActiveWt ? 'text-foreground' : 'text-foreground/90',
-                                      )}
-                                    >
-                                      {bucket.label}
-                                    </span>
-                                    {isActiveWt ? (
-                                      <ActiveDot ariaLabel={t('mobile.sessions.activeWorktreeAria')} />
-                                    ) : null}
-                                    <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">
-                                      {bucket.sessions.length}
-                                    </span>
-                                  </button>
-                                  {worktreeExpanded ? (
-                                    (() => {
-                                      const bucketKey = `${node.project.id}::${bucket.key}`;
-                                      const showAll = Boolean(normalizedQuery) || expandedBucketsAll.has(bucketKey);
-                                      const visibleSessions = showAll
-                                        ? bucket.sessions
-                                        : bucket.sessions.slice(0, SESSIONS_PER_BUCKET);
-                                      const remaining = bucket.sessions.length - visibleSessions.length;
-                                      return (
-                                        <div>
-                                          {visibleSessions.map((session) => (
-                                            <SessionRow
-                                              key={session.id}
-                                              session={session}
-                                              active={currentSessionId === session.id}
-                                              indent={sessionsIndent}
-                                              onSelect={() => handleSelectSession(session)}
-                                            />
-                                          ))}
-                                          {remaining > 0 ? (
-                                            <ShowMoreRow
-                                              remaining={remaining}
-                                              indent={sessionsIndent}
-                                              onClick={() =>
-                                                setExpandedBucketsAll((previous) => {
-                                                  const next = new Set(previous);
-                                                  next.add(bucketKey);
-                                                  return next;
-                                                })
-                                              }
-                                            />
-                                          ) : null}
-                                        </div>
-                                      );
-                                    })()
-                                  ) : null}
-                                </div>
-                              );
-                            })
-                          : (() => {
-                              const bucket = buckets[0];
-                              if (!bucket) return null;
-                              const bucketKey = `${node.project.id}::${bucket.key}`;
-                              const showAll = Boolean(normalizedQuery) || expandedBucketsAll.has(bucketKey);
-                              const visibleSessions = showAll
-                                ? bucket.sessions
-                                : bucket.sessions.slice(0, SESSIONS_PER_BUCKET);
-                              const remaining = bucket.sessions.length - visibleSessions.length;
-                              return (
-                                <div>
-                                  {visibleSessions.map((session) => (
-                                    <SessionRow
-                                      key={session.id}
-                                      session={session}
-                                      active={currentSessionId === session.id}
-                                      indent={sessionsIndent}
-                                      onSelect={() => handleSelectSession(session)}
-                                    />
-                                  ))}
-                                  {remaining > 0 ? (
-                                    <ShowMoreRow
-                                      remaining={remaining}
-                                      indent={sessionsIndent}
-                                      onClick={() =>
-                                        setExpandedBucketsAll((previous) => {
-                                          const next = new Set(previous);
-                                          next.add(bucketKey);
-                                          return next;
-                                        })
+                        {(() => {
+                          // Root (project-level) sessions always render as a flat list
+                          // at the top — same as a project without worktrees — never
+                          // hidden behind a worktree-style group.
+                          const rootBucket = buckets.find((bucket) => bucket.worktree === null);
+                          const worktreeBuckets = buckets.filter((bucket) => bucket.worktree !== null);
+                          return (
+                            <>
+                              {rootBucket && rootBucket.sessions.length > 0
+                                ? renderBucketSessions(node, rootBucket, PROJECT_SESSION_INDENT)
+                                : null}
+                              {worktreeBuckets.map((bucket) => {
+                                const worktreeExpanded = isWorktreeExpanded(node, bucket);
+                                const isActiveWt = activeWorktreePath === bucket.path;
+                                return (
+                                  <div key={bucket.key}>
+                                    <button
+                                      type="button"
+                                      className="flex min-h-11 w-full items-center gap-2 py-1.5 pl-4 pr-3 text-left transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"
+                                      onClick={() => toggleWorktree(node.project.id, bucket.key, worktreeExpanded)}
+                                      aria-expanded={worktreeExpanded}
+                                      aria-label={
+                                        worktreeExpanded
+                                          ? t('sessions.sidebar.group.collapseAria', { label: bucket.label })
+                                          : t('sessions.sidebar.group.expandAria', { label: bucket.label })
                                       }
-                                    />
-                                  ) : null}
-                                </div>
-                              );
-                            })()}
+                                      style={{ touchAction: 'manipulation' }}
+                                    >
+                                      <ChevronToggle expanded={worktreeExpanded} />
+                                      <Icon
+                                        name="node-tree"
+                                        className={cn(
+                                          'size-4 shrink-0',
+                                          isActiveWt ? 'text-primary' : 'text-muted-foreground',
+                                        )}
+                                      />
+                                      <span
+                                        className={cn(
+                                          'block min-w-0 flex-1 truncate typography-ui-label font-semibold',
+                                          isActiveWt ? 'text-foreground' : 'text-foreground/90',
+                                        )}
+                                      >
+                                        {bucket.label}
+                                      </span>
+                                      {isActiveWt ? (
+                                        <ActiveDot ariaLabel={t('mobile.sessions.activeWorktreeAria')} />
+                                      ) : null}
+                                      <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">
+                                        {bucket.sessions.length}
+                                      </span>
+                                    </button>
+                                    {worktreeExpanded
+                                      ? renderBucketSessions(node, bucket, WORKTREE_SESSION_INDENT)
+                                      : null}
+                                  </div>
+                                );
+                              })}
+                            </>
+                          );
+                        })()}
                       </div>
                     ) : null}
                   </section>
@@ -1143,6 +1281,12 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
               });
             onOpenChange(false);
           }}
+        />
+        <MobileProjectEditSurface
+          open={editingProjectId !== null}
+          project={projectsMeta.find((entry) => entry.id === editingProjectId) ?? null}
+          onClose={() => setEditingProjectId(null)}
+          onWorktreesChanged={() => setWorktreeRefreshKey((value) => value + 1)}
         />
       </div>
     </MobileSurfaceShell>

@@ -194,7 +194,7 @@ describe('shouldRestartDesktopBootFlow', () => {
   test('restarts the desktop app when boot UI is running in the startup window', () => {
     expect(
       shouldRestartDesktopBootFlow({
-        isTauriShell: true,
+        isDesktopShell: true,
         isDesktopLocalOriginActive: false,
       }),
     ).toBe(true);
@@ -203,16 +203,16 @@ describe('shouldRestartDesktopBootFlow', () => {
   test('does not restart when the local desktop origin is already active', () => {
     expect(
       shouldRestartDesktopBootFlow({
-        isTauriShell: true,
+        isDesktopShell: true,
         isDesktopLocalOriginActive: true,
       }),
     ).toBe(false);
   });
 
-  test('does not restart outside the tauri shell', () => {
+  test('does not restart outside the desktop shell', () => {
     expect(
       shouldRestartDesktopBootFlow({
-        isTauriShell: false,
+        isDesktopShell: false,
         isDesktopLocalOriginActive: false,
       }),
     ).toBe(false);

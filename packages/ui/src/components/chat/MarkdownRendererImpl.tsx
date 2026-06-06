@@ -29,6 +29,7 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { EditorAPI } from '@/lib/api/types';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { getDirectoryForFilePath, isAbsoluteFilePath, normalizeFilePath, toAbsoluteFilePath } from '@/lib/path-utils';
 
 const useCurrentMermaidTheme = () => {
   const themeSystem = useOptionalThemeSystem();
@@ -1067,8 +1068,6 @@ type ParsedFileReference = {
   column?: number;
 };
 
-const WINDOWS_DRIVE_PATH_PATTERN = /^[A-Za-z]:[\\/]/;
-const WINDOWS_UNC_PATH_PATTERN = /^\\\\[^\\]+\\[^\\]+/;
 const KNOWN_FILE_BASENAMES = new Set([
   'dockerfile',
   'makefile',
@@ -1083,74 +1082,15 @@ const KNOWN_BASENAME_PATTERN = Array.from(KNOWN_FILE_BASENAMES)
   .join('|');
 
 const normalizePath = (value: string): string => {
-  const source = (value || '').trim();
-  if (!source) {
-    return '';
-  }
-
-  const withSlashes = source.replace(/\\/g, '/');
-  const hadUncPrefix = withSlashes.startsWith('//');
-
-  let normalized = withSlashes.replace(/\/+/g, '/');
-  if (hadUncPrefix && !normalized.startsWith('//')) {
-    normalized = `/${normalized}`;
-  }
-
-  const isUnixRoot = normalized === '/';
-  const isWindowsDriveRoot = /^[A-Za-z]:\/$/.test(normalized);
-  if (!isUnixRoot && !isWindowsDriveRoot) {
-    normalized = normalized.replace(/\/+$/, '');
-  }
-
-  return normalized;
+  return normalizeFilePath(value);
 };
 
 const isAbsolutePath = (value: string): boolean => {
-  return value.startsWith('/')
-    || WINDOWS_DRIVE_PATH_PATTERN.test(value)
-    || WINDOWS_UNC_PATH_PATTERN.test(value)
-    || value.startsWith('//');
+  return isAbsoluteFilePath(value);
 };
 
 const toAbsolutePath = (basePath: string, targetPath: string): string => {
-  const normalizedTarget = normalizePath(targetPath);
-  if (!normalizedTarget) {
-    return normalizePath(basePath);
-  }
-
-  if (isAbsolutePath(normalizedTarget)) {
-    return normalizedTarget;
-  }
-
-  const normalizedBase = normalizePath(basePath);
-  if (!normalizedBase) {
-    return normalizedTarget;
-  }
-
-  const isWindowsDriveBase = /^[A-Za-z]:/.test(normalizedBase);
-  const prefix = isWindowsDriveBase ? normalizedBase.slice(0, 2) : '';
-  const baseRemainder = isWindowsDriveBase ? normalizedBase.slice(2) : normalizedBase;
-
-  const stack = baseRemainder.split('/').filter(Boolean);
-  const parts = normalizedTarget.split('/').filter(Boolean);
-  for (const part of parts) {
-    if (part === '.') {
-      continue;
-    }
-    if (part === '..') {
-      if (stack.length > 0) {
-        stack.pop();
-      }
-      continue;
-    }
-    stack.push(part);
-  }
-
-  if (isWindowsDriveBase) {
-    return `${prefix}/${stack.join('/')}`;
-  }
-
-  return `/${stack.join('/')}`;
+  return toAbsoluteFilePath(basePath, targetPath);
 };
 
 const trimPathCandidate = (value: string): string => {
@@ -1375,14 +1315,7 @@ const fileReferenceExists = (resolvedPath: string): Promise<boolean> => {
 };
 
 const getContextDirectory = (effectiveDirectory: string, resolvedPath: string): string => {
-  const normalizedDirectory = normalizePath(effectiveDirectory);
-  if (normalizedDirectory) {
-    return normalizedDirectory;
-  }
-
-  const normalizedPath = normalizePath(resolvedPath);
-  const parent = normalizedPath.replace(/\/[^/]*$/, '');
-  return parent || normalizedPath;
+  return getDirectoryForFilePath(effectiveDirectory, resolvedPath);
 };
 
 const useFileReferenceInteractions = ({

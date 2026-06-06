@@ -18,6 +18,7 @@ import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap";
 import { getRuntimeUrlResolver } from "@/lib/runtime-url";
 import { runtimeFetch } from "@/lib/runtime-fetch";
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry";
+import { markStartupTrace } from "@/lib/startupTrace";
 import {
   assertProviderCircuitClosed,
   recordProviderSuccess,
@@ -57,7 +58,9 @@ type SdkResult<T> = {
 function unwrapSdkData<T>(result: SdkResult<T>, operation: string): T {
   if (result.error) {
     const status = result.response?.status;
-    throw new Error(`${operation} failed${status ? ` (${status})` : ""}: ${formatSdkError(result.error)}`);
+    const error = new Error(`${operation} failed${status ? ` (${status})` : ""}: ${formatSdkError(result.error)}`) as Error & { status?: number };
+    if (status !== undefined) error.status = status;
+    throw error;
   }
   if (result.data === undefined || result.data === null) {
     throw new Error(`${operation} failed: empty response`);
@@ -68,7 +71,9 @@ function unwrapSdkData<T>(result: SdkResult<T>, operation: string): T {
 function unwrapSdkOptional<T>(result: SdkResult<T>, operation: string): T | undefined {
   if (result.error) {
     const status = result.response?.status;
-    throw new Error(`${operation} failed${status ? ` (${status})` : ""}: ${formatSdkError(result.error)}`);
+    const error = new Error(`${operation} failed${status ? ` (${status})` : ""}: ${formatSdkError(result.error)}`) as Error & { status?: number };
+    if (status !== undefined) error.status = status;
+    throw error;
   }
   return result.data;
 }
@@ -342,7 +347,14 @@ class OpencodeService {
 
   // Set the current working directory for all API calls
   setDirectory(directory: string | undefined) {
-    this.currentDirectory = this.normalizeCandidatePath(directory) ?? directory;
+    const normalized = this.normalizeCandidatePath(directory) ?? directory;
+    if (this.currentDirectory !== normalized) {
+      markStartupTrace('opencodeClient:setDirectory', {
+        previous: this.currentDirectory ?? null,
+        next: normalized ?? null,
+      });
+    }
+    this.currentDirectory = normalized;
   }
 
   getDirectory(): string | undefined {
@@ -1410,33 +1422,24 @@ class OpencodeService {
     }
   }
 
-  // Health Check - using /health endpoint for detailed status
+  // Lightweight readiness check. Full diagnostics still live at /health.
   async checkHealth(): Promise<boolean> {
     try {
-      // Health endpoint is at root, not under /api
-      let healthUrl: string;
       const normalizedBase = this.baseUrl.endsWith('/') ? this.baseUrl.replace(/\/+$/, '') : this.baseUrl;
-      if (normalizedBase === '/api') {
-        healthUrl = '/health';
-      } else if (normalizedBase.endsWith('/api')) {
-        // Desktop: http://127.0.0.1:PORT/api -> http://127.0.0.1:PORT/health
-        healthUrl = `${normalizedBase.slice(0, -4)}/health`;
-      } else {
-        healthUrl = `${normalizedBase}/health`;
-      }
+      const healthUrl = normalizedBase === '/api' || normalizedBase.endsWith('/api')
+        ? '/api/opencode/health'
+        : `${normalizedBase}/opencode/health`;
+      markStartupTrace('opencodeClient.checkHealth:url', { baseUrl: this.baseUrl, healthUrl });
       const response = await runtimeFetch(healthUrl);
+      markStartupTrace('opencodeClient.checkHealth:response', { status: response.status });
       if (!response.ok) {
         return false;
       }
 
       const healthData = await response.json();
+      markStartupTrace('opencodeClient.checkHealth:result', { healthy: healthData?.healthy });
 
-      // Check if the upstream API is ready (not just OpenChamber server)
-      if (healthData.isOpenCodeReady === false) {
-        return false;
-      }
-
-      return true;
+      return healthData?.healthy === true;
     } catch {
       return false;
     }

@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui';
-import { isElectronShell, isTauriShell, isDesktopShell } from '@/lib/desktop';
+import { isElectronShell, isDesktopShell } from '@/lib/desktop';
 import { Icon } from "@/components/icon/Icon";
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
@@ -354,7 +354,7 @@ export function DesktopHostSwitcherDialog({
   }, [allHosts, defaultHostId, t]);
 
   const persist = React.useCallback(async (nextHosts: DesktopHost[], nextDefaultHostId: string | null) => {
-    if (!isTauriShell()) return;
+    if (!isDesktopShell()) return;
     setIsSaving(true);
     setError('');
     try {
@@ -376,7 +376,7 @@ export function DesktopHostSwitcherDialog({
   }, [onOpenChange, setSettingsDialogOpen, setSettingsPage]);
 
   const refresh = React.useCallback(async () => {
-    if (!isTauriShell()) return;
+    if (!isDesktopShell()) return;
     setIsLoading(true);
     setError('');
     try {
@@ -408,7 +408,7 @@ export function DesktopHostSwitcherDialog({
   }, [t]);
 
   const probeAll = React.useCallback(async (hosts: DesktopHost[]) => {
-    if (!isTauriShell()) return;
+    if (!isDesktopShell()) return;
     setIsProbing(true);
     const nextProbingHostIds: Record<string, true> = {};
     for (const host of hosts) {
@@ -458,7 +458,7 @@ export function DesktopHostSwitcherDialog({
   }, [open, allHosts, probeAll]);
 
   React.useEffect(() => {
-    if (!open || !isTauriShell()) {
+    if (!open || !isDesktopShell()) {
       return;
     }
     let cancelled = false;
@@ -512,7 +512,7 @@ export function DesktopHostSwitcherDialog({
 
     const isSshHost = Boolean(sshHostIds[host.id]);
 
-    if (host.id !== LOCAL_HOST_ID && isSshHost && isTauriShell()) {
+    if (host.id !== LOCAL_HOST_ID && isSshHost && isDesktopShell()) {
       let existingStatus = sshStatusesById[host.id];
       const latestStatus = await desktopSshStatus(host.id)
         .then((items) => items.find((item) => item.id === host.id) || null)
@@ -596,7 +596,7 @@ export function DesktopHostSwitcherDialog({
       }
     }
 
-    if (host.id !== LOCAL_HOST_ID && isTauriShell()) {
+    if (host.id !== LOCAL_HOST_ID && isDesktopShell()) {
       setSwitchingHostId(host.id);
       const probe = await desktopHostProbe(origin, { clientToken: host.clientToken || null }).catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
       setStatusById((prev) => ({
@@ -705,7 +705,7 @@ export function DesktopHostSwitcherDialog({
       error: null,
     });
 
-    if (!hostId || hostId === LOCAL_HOST_ID || !isTauriShell()) {
+    if (!hostId || hostId === LOCAL_HOST_ID || !isDesktopShell()) {
       return;
     }
 
@@ -721,7 +721,7 @@ export function DesktopHostSwitcherDialog({
   }, [allHosts, handleSwitch, sshSwitchModal.hostId]);
 
   const connectSshHostInPlace = React.useCallback(async (host: DesktopHost) => {
-    if (!isTauriShell()) return;
+    if (!isDesktopShell()) return;
     setSwitchingHostId(host.id);
     try {
       await desktopSshConnect(host.id);
@@ -750,7 +750,7 @@ export function DesktopHostSwitcherDialog({
     return null;
   }
 
-  const tauriAvailable = isTauriShell();
+  const desktopAvailable = isDesktopShell();
 
   const content = (
     <>
@@ -772,7 +772,7 @@ export function DesktopHostSwitcherDialog({
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
               )}
               onClick={() => void probeAll(allHosts)}
-              disabled={!tauriAvailable || isLoading || isProbing}
+              disabled={!desktopAvailable || isLoading || isProbing}
               aria-label={t('desktopHostSwitcher.actions.refreshInstancesAria')}
             >
               <Icon name="refresh" className={cn('h-4 w-4', isProbing && 'animate-spin')} />
@@ -805,7 +805,7 @@ export function DesktopHostSwitcherDialog({
               size="sm"
               variant="ghost"
               onClick={() => void probeAll(allHosts)}
-              disabled={!tauriAvailable || isLoading || isProbing}
+              disabled={!desktopAvailable || isLoading || isProbing}
             >
               <Icon name="refresh" className={cn('h-4 w-4', isProbing && 'animate-spin')} />
               {t('desktopHostSwitcher.actions.refresh')}
@@ -814,7 +814,7 @@ export function DesktopHostSwitcherDialog({
         </div>
       )}
 
-        {!tauriAvailable && (
+        {!desktopAvailable && (
           <div className="flex-shrink-0 rounded-lg border border-border/50 bg-muted/20 p-3">
             <div className="typography-meta text-muted-foreground">
               {t('desktopHostSwitcher.state.limitedOnPage')}
@@ -974,7 +974,7 @@ export function DesktopHostSwitcherDialog({
           </div>
         </div>
 
-        {tauriAvailable && editingId && editingId !== LOCAL_HOST_ID && (
+        {desktopAvailable && editingId && editingId !== LOCAL_HOST_ID && (
           <div className="flex-shrink-0 rounded-lg border border-border/50 bg-muted/20 p-3">
             <div className="flex items-center justify-between gap-2">
               <div className="typography-ui-label font-medium text-foreground">{t('desktopHostSwitcher.edit.title')}</div>
@@ -1202,7 +1202,7 @@ export function DesktopHostSwitcherButton({ headerIconButtonClass }: DesktopHost
   }, [connectDefaultSshInstance, startupSshModal.hostId, startupSshModal.hostLabel]);
 
   React.useEffect(() => {
-    if (!isTauriShell()) return;
+    if (!isDesktopShell()) return;
 
     let cancelled = false;
     const run = async () => {

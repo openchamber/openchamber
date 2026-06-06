@@ -126,14 +126,12 @@ export const runtimeFetch = async (input: string | URL | Request, init: RuntimeF
   const inputHeaders = resolvedInput instanceof Request ? resolvedInput.headers : undefined;
   const headers = await mergeHeaders(inputHeaders, requestInit.headers, shouldAttachRuntimeAuth(resolvedInput));
 
-  if (resolvedInput instanceof Request) {
-    return fetch(new Request(resolvedInput, { ...requestInit, headers }));
-  }
-
-  return fetch(resolvedInput, {
-    ...requestInit,
-    headers,
-  });
+  return resolvedInput instanceof Request
+    ? fetch(new Request(resolvedInput, { ...requestInit, headers }))
+    : fetch(resolvedInput, {
+      ...requestInit,
+      headers,
+    });
 };
 
 let runtimeFetchBridgeInstalled = false;

@@ -42,7 +42,6 @@ import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { EditorView } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
-import { convertFileSrc } from '@tauri-apps/api/core';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useUIStore } from '@/stores/useUIStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
@@ -776,6 +775,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   }, [openFiles.length]);
 
   const [childrenByDir, setChildrenByDir] = React.useState<Record<string, FileNode[]>>({});
+  const [loadErrorsByDir, setLoadErrorsByDir] = React.useState<Record<string, string>>({});
   const loadedDirsRef = React.useRef<Set<string>>(new Set());
   const inFlightDirsRef = React.useRef<Set<string>>(new Set());
   const activeDirectoryLoadIdsRef = React.useRef<Map<string, number>>(new Map());
@@ -1038,14 +1038,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
     const isCurrentRequest = () => activeDirectoryLoadIdsRef.current.get(normalizedDir) === requestId;
 
-    const respectGitignore = !showGitignored;
     const listPromise = files.listDirectory
-      ? files.listDirectory(normalizedDir, { respectGitignore }).then((result) => result.entries.map((entry) => ({
+      ? files.listDirectory(normalizedDir).then((result) => result.entries.map((entry) => ({
         name: entry.name,
         path: entry.path,
         isDirectory: entry.isDirectory,
       })))
-      : opencodeClient.listLocalDirectory(normalizedDir, { respectGitignore }).then((result) => result.map((entry) => ({
+      : opencodeClient.listLocalDirectory(normalizedDir).then((result) => result.map((entry) => ({
         name: entry.name,
         path: entry.path,
         isDirectory: entry.isDirectory,
@@ -1061,16 +1060,24 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
         loadedDirsRef.current = new Set(loadedDirsRef.current);
         loadedDirsRef.current.add(normalizedDir);
+        setLoadErrorsByDir((prev) => {
+          if (!prev[normalizedDir]) return prev;
+          const next = { ...prev };
+          delete next[normalizedDir];
+          return next;
+        });
         setChildrenByDir((prev) => ({ ...prev, [normalizedDir]: mapped }));
       })
-      .catch(() => {
+      .catch((error) => {
         if (!isCurrentRequest()) {
           return;
         }
 
-        setChildrenByDir((prev) => ({
+        const message = error instanceof Error ? error.message : String(error ?? '');
+        console.error('Failed to load files directory:', error);
+        setLoadErrorsByDir((prev) => ({
           ...prev,
-          [normalizedDir]: prev[normalizedDir] ?? [],
+          [normalizedDir]: message,
         }));
       })
       .finally(() => {
@@ -1083,7 +1090,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         inFlightDirsRef.current = new Set(inFlightDirsRef.current);
         inFlightDirsRef.current.delete(normalizedDir);
       });
-  }, [files, mapDirectoryEntries, showGitignored]);
+  }, [files, mapDirectoryEntries]);
 
   const refreshRoot = React.useCallback(async () => {
     if (!root) {
@@ -1093,6 +1100,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     loadedDirsRef.current = new Set();
     inFlightDirsRef.current = new Set();
     activeDirectoryLoadIdsRef.current = new Map();
+    setLoadErrorsByDir({});
     setChildrenByDir((prev) => (Object.keys(prev).length === 0 ? prev : {}));
 
     await loadDirectory(root);
@@ -1149,6 +1157,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       loadedDirsRef.current = new Set();
       inFlightDirsRef.current = new Set();
       activeDirectoryLoadIdsRef.current = new Map();
+      setLoadErrorsByDir({});
       setChildrenByDir((prev) => (Object.keys(prev).length === 0 ? prev : {}));
       void loadDirectory(root);
     }
@@ -2091,6 +2100,15 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           />
           {isDir && isExpanded && (
             <ul className="flex flex-col gap-1 ml-3 pl-3 border-l border-border/40 relative">
+              {loadErrorsByDir[node.path] ? (
+                <li className="flex items-center gap-2 px-2 py-1 typography-meta text-muted-foreground">
+                  <span className="min-w-0 flex-1 truncate text-[var(--status-error)]" title={loadErrorsByDir[node.path]}>{loadErrorsByDir[node.path]}</span>
+                  <Button variant="ghost" size="xs" className="h-6 gap-1" onClick={() => void refreshDirectory(node.path)}>
+                    <Icon name="refresh" className="size-3.5" />
+                    {t('filesView.tree.actions.refreshTitle')}
+                  </Button>
+                </li>
+              ) : null}
               {renderTree(node.path, depth + 1)}
             </ul>
           )}
@@ -2259,6 +2277,48 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const getHtmlViewMode = React.useCallback((): PreviewViewMode => {
     return htmlViewMode;
   }, [htmlViewMode]);
+
+  React.useEffect(() => {
+    const applyDefaultFileViewerMode = (enabled: boolean) => {
+      const textMode: TextViewMode = enabled ? 'view' : 'edit';
+      const previewMode: PreviewViewMode = enabled ? 'preview' : 'edit';
+      const nextJsonMode: 'tree' | 'text' = enabled ? 'tree' : 'text';
+
+      for (const path of openPaths) {
+        textViewModeByPathRef.current[path] = textMode;
+        if (isMarkdownFile(path)) {
+          mdViewModeByPathRef.current[path] = previewMode;
+        }
+        if (isHtmlFile(path)) {
+          htmlViewModeByPathRef.current[path] = previewMode;
+        }
+      }
+
+      setTextViewMode(textMode);
+      setMdViewMode(previewMode);
+      setHtmlViewMode(previewMode);
+      setJsonViewMode(nextJsonMode);
+
+      try {
+        localStorage.setItem(MD_VIEWER_MODE_KEY, previewMode);
+        localStorage.setItem(HTML_VIEWER_MODE_KEY, previewMode);
+        localStorage.setItem(JSON_VIEWER_MODE_KEY, nextJsonMode);
+      } catch {
+        // Ignore localStorage errors
+      }
+    };
+
+    const handleFileViewerModeChanged = (event: Event) => {
+      const enabled = Boolean((event as CustomEvent<{ enabled?: boolean }>).detail?.enabled);
+      applyDefaultFileViewerMode(enabled);
+    };
+
+    window.addEventListener('openchamber:file-viewer-preview-mode-changed', handleFileViewerModeChanged);
+    return () => {
+      window.removeEventListener('openchamber:file-viewer-preview-mode-changed', handleFileViewerModeChanged);
+    };
+  }, [openPaths]);
+
   React.useEffect(() => {
     if (!pendingFileNavigation || !root) {
       return;
@@ -2629,7 +2689,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
       const srcPromise = files.readFileBinary
         ? files.readFileBinary(selectedFile.path, selectedFileReadOptions).then((result) => result.dataUrl)
-        : Promise.resolve(convertFileSrc(selectedFile.path, 'asset'));
+        : Promise.resolve(getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', {
+          path: selectedFile.path,
+          allowOutsideWorkspace: selectedFileReadOptions.allowOutsideWorkspace ? 'true' : undefined,
+        }));
 
       await srcPromise
         .then((src) => {
@@ -3431,6 +3494,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   );
 
   const hasTree = Boolean(root && childrenByDir[root]);
+  const rootLoadError = root ? loadErrorsByDir[root] : null;
 
   const treePanel = (
     <section className={cn(
@@ -3541,6 +3605,14 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                 </li>
               );
             })
+          ) : rootLoadError ? (
+            <li className="flex flex-col gap-2 px-2 py-1 typography-meta text-muted-foreground">
+              <span className="text-[var(--status-error)]">{rootLoadError}</span>
+              <Button variant="outline" size="xs" className="w-fit gap-1.5" onClick={() => void refreshRoot()}>
+                <Icon name="refresh" className="size-3.5" />
+                {t('filesView.tree.actions.refreshTitle')}
+              </Button>
+            </li>
           ) : hasTree ? (
             renderTree(root, 0)
           ) : (

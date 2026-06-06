@@ -14,6 +14,8 @@ import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import type { IconName } from "@/components/icon/icons";
 import { useUIStore } from '@/stores/useUIStore';
+import { formatTimeForPreference } from '@/lib/timeFormat';
+import type { TimeFormatPreference } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { refreshGlobalSessions } from '@/stores/useGlobalSessionsStore';
@@ -21,7 +23,7 @@ import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/projectMeta';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { cn, formatDirectoryName } from '@/lib/utils';
-import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
+import { useI18n } from '@/lib/i18n';
 import type { ProjectEntry } from '@/lib/api/types';
 import {
   deleteScheduledTask,
@@ -100,11 +102,11 @@ const formatSchedule = (task: ScheduledTask, t: ReturnType<typeof useI18n>['t'])
   return t('sessions.scheduledTasks.dialog.schedule.cron', { cron: task.schedule.cron || '' });
 };
 
-const formatClockTime = (value?: number): string => {
+const formatClockTime = (value: number | undefined, timeFormatPreference: TimeFormatPreference): string => {
   if (!value || !Number.isFinite(value)) {
     return '';
   }
-  return new Date(value).toLocaleTimeString(getCurrentIntlLocale(), { hour: 'numeric', minute: '2-digit' });
+  return formatTimeForPreference(value, timeFormatPreference);
 };
 
 const formatRelativeTime = (value: number | undefined, t: ReturnType<typeof useI18n>['t']): string => {
@@ -174,6 +176,7 @@ export function ScheduledTasksDialog() {
   const open = useUIStore((state) => state.isScheduledTasksDialogOpen);
   const setOpen = useUIStore((state) => state.setScheduledTasksDialogOpen);
   const isMobile = useUIStore((state) => state.isMobile);
+  const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const projects = useProjectsStore((state) => state.projects);
   const activeProject = useProjectsStore((state) => state.getActiveProject());
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
@@ -471,7 +474,7 @@ export function ScheduledTasksDialog() {
                       <>
                         <span className="text-foreground">{formatRelativeTime(nextAt, t)}</span>
                         <span className="text-muted-foreground/50">·</span>
-                        <span>{formatClockTime(nextAt)}</span>
+                        <span>{formatClockTime(nextAt, timeFormatPreference)}</span>
                       </>
                     ) : (
                       <span>—</span>

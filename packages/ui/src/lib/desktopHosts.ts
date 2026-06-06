@@ -1,12 +1,6 @@
-import { isTauriShell } from '@/lib/desktop';
+import { hasDesktopInvoke, invokeDesktop } from '@/lib/desktop';
 
-type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
-
-type TauriGlobal = {
-  core?: {
-    invoke?: TauriInvoke;
-  };
-};
+type DesktopInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 
 export type DesktopHost = {
   id: string;
@@ -176,10 +170,9 @@ export const getDesktopHostApiUrl = (host: DesktopHost): string => {
   return normalizeHostUrl(host.apiUrl || host.url) || host.apiUrl || host.url;
 };
 
-const getInvoke = (): TauriInvoke | null => {
-  if (!isTauriShell()) return null;
-  const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
-  return typeof tauri?.core?.invoke === 'function' ? tauri.core.invoke : null;
+const getInvoke = (): DesktopInvoke | null => {
+  if (!hasDesktopInvoke()) return null;
+  return (command, args) => invokeDesktop(command, args) as Promise<unknown>;
 };
 
 export const desktopHostsGet = async (): Promise<DesktopHostsConfig> => {

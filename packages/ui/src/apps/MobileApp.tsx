@@ -99,7 +99,7 @@ const MobileOverflowMenu: React.FC<{
     <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label={t('mobile.menu.titleAria')}>
       <button
         type="button"
-        className="absolute inset-0 cursor-default bg-[rgb(0_0_0_/_0.25)]"
+        className="absolute inset-0 cursor-default"
         aria-label={t('mobile.surface.closeAria')}
         onClick={onClose}
       />
@@ -286,47 +286,57 @@ const MobileShell: React.FC = () => {
           <MobileSessionsSheet open={sessionsSheetOpen} onOpenChange={setSessionsSheetOpen} />
         ) : null}
 
-        <MobileSurfaceShell
-          open={filesOpen}
-          onClose={() => setFilesOpen(false)}
-          ariaLabel={t('mobile.menu.files')}
-          headerless
-        >
-          <ErrorBoundary>
-            <MobileFilesSurface onClose={() => setFilesOpen(false)} />
-          </ErrorBoundary>
-        </MobileSurfaceShell>
+        {/* Mounted only while open (like the sessions sheet) so each surface
+            computes its safe-area / fixed-position layout fresh on open. Keeping
+            them always-mounted left a stale startup layout, which made the
+            top-inset dimming appear only intermittently on iOS. */}
+        {filesOpen ? (
+          <MobileSurfaceShell
+            open
+            onClose={() => setFilesOpen(false)}
+            ariaLabel={t('mobile.menu.files')}
+            headerless
+          >
+            <ErrorBoundary>
+              <MobileFilesSurface onClose={() => setFilesOpen(false)} />
+            </ErrorBoundary>
+          </MobileSurfaceShell>
+        ) : null}
 
-        <MobileSurfaceShell
-          open={changesOpen}
-          onClose={closeChanges}
-          ariaLabel={t('mobile.menu.changes')}
-          headerless
-        >
-          <ErrorBoundary>
-            <MobileChangesSurface
-              onClose={closeChanges}
-              initialDiffPath={pendingChangesDiff?.path ?? null}
-              initialDiffStaged={pendingChangesDiff?.staged === true}
-            />
-          </ErrorBoundary>
-        </MobileSurfaceShell>
+        {changesOpen ? (
+          <MobileSurfaceShell
+            open
+            onClose={closeChanges}
+            ariaLabel={t('mobile.menu.changes')}
+            headerless
+          >
+            <ErrorBoundary>
+              <MobileChangesSurface
+                onClose={closeChanges}
+                initialDiffPath={pendingChangesDiff?.path ?? null}
+                initialDiffStaged={pendingChangesDiff?.staged === true}
+              />
+            </ErrorBoundary>
+          </MobileSurfaceShell>
+        ) : null}
 
-        <MobileSurfaceShell
-          open={settingsOpen}
-          onClose={() => setSettingsOpen(false)}
-          ariaLabel={t('mobile.menu.settings')}
-          headerless
-        >
-          <ErrorBoundary>
-            <SettingsView
-              forceMobile
-              isWindowed
-              visiblePageSlugs={[...MOBILE_SETTINGS_PAGES]}
-              onClose={() => setSettingsOpen(false)}
-            />
-          </ErrorBoundary>
-        </MobileSurfaceShell>
+        {settingsOpen ? (
+          <MobileSurfaceShell
+            open
+            onClose={() => setSettingsOpen(false)}
+            ariaLabel={t('mobile.menu.settings')}
+            headerless
+          >
+            <ErrorBoundary>
+              <SettingsView
+                forceMobile
+                isWindowed
+                visiblePageSlugs={[...MOBILE_SETTINGS_PAGES]}
+                onClose={() => setSettingsOpen(false)}
+              />
+            </ErrorBoundary>
+          </MobileSurfaceShell>
+        ) : null}
       </div>
     </DedicatedMobileAppProvider>
   );
@@ -363,8 +373,8 @@ export function MobileApp({ apis }: MobileAppProps) {
 
   React.useEffect(() => {
     if (!isConnected) return;
-    if (providersCount === 0) void loadProviders();
-    if (agentsCount === 0) void loadAgents();
+    if (providersCount === 0) void loadProviders({ source: 'mobileApp:recovery' });
+    if (agentsCount === 0) void loadAgents({ source: 'mobileApp:recovery' });
   }, [agentsCount, isConnected, loadAgents, loadProviders, providersCount]);
 
   React.useEffect(() => {

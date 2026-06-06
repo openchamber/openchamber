@@ -9,12 +9,13 @@ import { MessageFilesDisplay } from '../FileAttachment';
 import { TurnChangedFilesDropdown } from '../TurnChangedFilesDropdown';
 import type { ToolPart as ToolPartType } from '@opencode-ai/sdk/v2';
 import type { StreamPhase, ToolPopupContent, AgentMentionInfo } from './types';
-import type { TurnGroupingContext } from '../lib/turns/types';
+import type { TurnChangedFile, TurnGroupingContext } from '../lib/turns/types';
 import { cn } from '@/lib/utils';
 import { isEmptyTextPart, extractTextContent } from './partUtils';
 import { FadeInOnReveal } from './FadeInOnReveal';
 import { Button } from '@/components/ui/button';
 import { SaveProjectPlanDialog } from '@/components/session/SaveProjectPlanDialog';
+import { ForkSessionDialog, type ForkSessionExecution } from '@/components/session/ForkSessionDialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import type { ContentChangeReason } from '@/hooks/useChatAutoFollow';
@@ -46,11 +47,49 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useI18n } from '@/lib/i18n';
 import { extractLoopbackUrls } from '@/lib/url';
 import { useDeviceInfo } from '@/lib/device';
+import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 
 
 const CONTAIN_LAYOUT_STYLE = { contain: 'layout' as const, transform: 'translateZ(0)' };
 const MESSAGE_FOOTER_CONTAINER_STYLE = { containerType: 'inline-size' as const, containerName: 'message-footer' };
 const INLINE_MESSAGE_ACTIONS_CLASS_NAME = 'mt-2 mb-1 flex items-center justify-start gap-1.5';
+
+const getDisplayFileName = (file: string): string => {
+    const normalized = file.replace(/\\/g, '/');
+    const segments = normalized.split('/').filter(Boolean);
+    return segments.at(-1) ?? file;
+};
+
+const TurnChangedFilePills = React.memo(({ files }: { files?: TurnChangedFile[] }) => {
+    if (!files || files.length === 0) {
+        return null;
+    }
+
+    return (
+        <>
+            {files.map((file) => {
+                return (
+                    <Tooltip key={file.file}>
+                        <TooltipTrigger asChild>
+                            <span className="inline-flex h-8 max-w-full items-center">
+                                <span className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-border/30 bg-muted/30 px-2 py-1 text-xs leading-[1.35] text-muted-foreground">
+                                    <FileTypeIcon filePath={file.file} className="h-3.5 w-3.5 flex-shrink-0" />
+                                    <span className="max-w-52 truncate text-foreground/80" title={file.file}>{getDisplayFileName(file.file)}</span>
+                                    <span className="flex-shrink-0 inline-flex items-center gap-0 typography-meta" style={{ fontSize: '0.8rem', lineHeight: '1' }}>
+                                        <span style={{ color: 'var(--status-success)' }}>+{file.additions}</span>
+                                        <span className="text-muted-foreground/70">/</span>
+                                        <span style={{ color: 'var(--status-error)' }}>-{file.deletions}</span>
+                                    </span>
+                                </span>
+                            </span>
+                        </TooltipTrigger>
+                        <TooltipContent>{file.file}</TooltipContent>
+                    </Tooltip>
+                );
+            })}
+        </>
+    );
+});
 
 type SubtaskPartLike = Part & {
     type: 'subtask';
@@ -1031,10 +1070,13 @@ const AssistantMessageBody = React.memo(({
     const effectiveDirectory = useEffectiveDirectory();
     const [isPlanDialogOpen, setIsPlanDialogOpen] = React.useState(false);
     const [isSavingPlan, setIsSavingPlan] = React.useState(false);
+    const [isForkDialogOpen, setIsForkDialogOpen] = React.useState(false);
+    const [isForkSubmitting, setIsForkSubmitting] = React.useState(false);
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
     const collapsibleThinkingBlocks = useUIStore((state) => state.collapsibleThinkingBlocks);
     const groupReasoningBlocks = useUIStore((state) => state.groupReasoningBlocks);
     const showSplitAssistantMessageActions = useUIStore((state) => state.showSplitAssistantMessageActions);
+    const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
     const vscodeApi = useRuntimeAPIs().vscode;
     const isSortedRenderMode = chatRenderMode === 'sorted';
     const collapsedPreviewCount = 7;
@@ -1179,10 +1221,26 @@ const AssistantMessageBody = React.memo(({
         (event: React.MouseEvent<HTMLButtonElement>) => {
             event.stopPropagation();
             event.preventDefault();
+            if (!createSessionFromAssistantMessage || !assistantPlanText.trim()) {
+                return;
+            }
+            setIsForkDialogOpen(true);
+        },
+        [createSessionFromAssistantMessage, assistantPlanText]
+    );
+
+    const handleConfirmFork = React.useCallback(
+        async (execution: ForkSessionExecution) => {
             if (!createSessionFromAssistantMessage) {
                 return;
             }
-            void createSessionFromAssistantMessage(messageId);
+            setIsForkSubmitting(true);
+            try {
+                await createSessionFromAssistantMessage(messageId, execution);
+                setIsForkDialogOpen(false);
+            } finally {
+                setIsForkSubmitting(false);
+            }
         },
         [createSessionFromAssistantMessage, messageId]
     );
@@ -1738,9 +1796,9 @@ const AssistantMessageBody = React.memo(({
             : (typeof messageCreatedAt === 'number' && messageCreatedAt > 0 ? messageCreatedAt : null);
         if (timestamp === null) return null;
 
-        const formatted = formatTimestampForDisplay(timestamp);
+        const formatted = formatTimestampForDisplay(timestamp, timeFormatPreference);
         return formatted.length > 0 ? formatted : null;
-    }, [messageCompletedAt, messageCreatedAt]);
+    }, [messageCompletedAt, messageCreatedAt, timeFormatPreference]);
 
     const footerTimestampClassName = 'text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1';
     const canOpenMessagePreview = !isMiniChatSurface && !isMobile && !isVSCode;
@@ -1849,6 +1907,15 @@ const AssistantMessageBody = React.memo(({
                      onSave={handleConfirmSaveAsPlan}
                  />
              ) : null}
+             {isForkDialogOpen ? (
+                 <ForkSessionDialog
+                     open={isForkDialogOpen}
+                     onOpenChange={setIsForkDialogOpen}
+                     projectDirectory={effectiveDirectory ?? null}
+                     submitting={isForkSubmitting}
+                     onConfirm={handleConfirmFork}
+                 />
+             ) : null}
               <div>
                  <div
                      className="message-content-text leading-relaxed overflow-hidden text-foreground/90 [&_p:last-child]:mb-0 [&_ul:last-child]:mb-0 [&_ol:last-child]:mb-0"
@@ -1889,43 +1956,44 @@ const AssistantMessageBody = React.memo(({
                 )}
                 {shouldShowTurnFooter && (
                     <div
-                        className="mt-2 mb-1 flex items-center justify-start gap-1.5"
+                        className="mt-2 mb-1 flex flex-wrap items-center justify-start gap-1.5"
                         style={MESSAGE_FOOTER_CONTAINER_STYLE}
                     >
                         <div className="flex items-center gap-1.5" data-message-action-group="true">
                             {messageActionButtons}
                             {finalTurnActionButtons}
                         </div>
-                        <div className="flex items-center gap-1.5">
-                            {turnDurationText ? (
-                                <Tooltip>
-                                    <TooltipTrigger asChild>
-                                        <span className="text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1">
-                                            <Icon name="hourglass" className="h-3.5 w-3.5" />
-                                            <span className="message-footer__label">{turnDurationText}</span>
-                                        </span>
-                                    </TooltipTrigger>
-                                    <TooltipContent>{turnDurationText}</TooltipContent>
-                                </Tooltip>
-                            ) : null}
-                            {footerTimestamp ? (
-                                <Tooltip>
-                                    <TooltipTrigger asChild>
-                                        <span
-                                            className={footerTimestampClassName}
-                                            aria-label={`Message time: ${footerTimestamp}`}
-                                        >
-                                            <Icon name="time" className="h-3.5 w-3.5" />
-                                            <span className="message-footer__label">{footerTimestamp}</span>
-                                        </span>
-                                    </TooltipTrigger>
-                                    <TooltipContent>{footerTimestamp}</TooltipContent>
-                                </Tooltip>
-                            ) : null}
-                            {!isMiniChatSurface && isLastAssistantInTurn && hasStopFinish ? (
-                                <TurnChangedFilesDropdown activityParts={turnGroupingContext?.activityParts} />
-                            ) : null}
-                        </div>
+                        {turnDurationText ? (
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <span className="text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1">
+                                        <Icon name="hourglass" className="h-3.5 w-3.5" />
+                                        <span className="message-footer__label">{turnDurationText}</span>
+                                    </span>
+                                </TooltipTrigger>
+                                <TooltipContent>{turnDurationText}</TooltipContent>
+                            </Tooltip>
+                        ) : null}
+                        {footerTimestamp ? (
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <span
+                                        className={footerTimestampClassName}
+                                        aria-label={`Message time: ${footerTimestamp}`}
+                                    >
+                                        <Icon name="time" className="h-3.5 w-3.5" />
+                                        <span className="message-footer__label">{footerTimestamp}</span>
+                                    </span>
+                                </TooltipTrigger>
+                                <TooltipContent>{footerTimestamp}</TooltipContent>
+                            </Tooltip>
+                        ) : null}
+                        {!isMiniChatSurface && isLastAssistantInTurn && hasStopFinish ? (
+                            <TurnChangedFilesDropdown activityParts={turnGroupingContext?.activityParts} />
+                        ) : null}
+                        {!isMiniChatSurface && isLastAssistantInTurn && hasStopFinish ? (
+                            <TurnChangedFilePills files={turnGroupingContext?.changedFiles} />
+                        ) : null}
                     </div>
                 )}
 

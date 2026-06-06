@@ -27,7 +27,7 @@ import { useCommandsStore } from "@/stores/useCommandsStore"
 import { getSafeStorage } from "@/stores/utils/safeStorage"
 import { markPendingUserSendAnimation } from "@/lib/userSendAnimation"
 import { flattenAssistantTextParts } from "@/lib/messages/messageText"
-import { EXECUTION_FORK_META_TEXT } from "@/lib/messages/executionMeta"
+import { composeForkSessionMessage } from "@/lib/messages/executionMeta"
 import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap"
 import { waitForPendingDraftWorktreeRequest } from "@/lib/worktrees/pendingDraftWorktree"
 import { resolveProjectForSessionDirectory } from "@/lib/projectResolution"
@@ -111,6 +111,7 @@ export function routeMessage(params: {
         providerID: params.providerID,
         modelID: params.modelID,
         agent: params.agent,
+        directory: requestDirectory,
         files: params.files,
         send: (messageID) => opencodeClient.sendCommand({
           id: params.sessionId,
@@ -135,6 +136,7 @@ export function routeMessage(params: {
     providerID: params.providerID,
     modelID: params.modelID,
     agent: params.agent,
+    directory: requestDirectory,
     files: params.files,
     send: (messageID) => opencodeClient.sendMessage({
       id: params.sessionId,
@@ -199,6 +201,7 @@ export type SessionHistoryMeta = {
 
 export type SessionUIState = {
   currentSessionId: string | null
+  currentSessionDirectory: string | null
   newSessionDraft: NewSessionDraftState
   abortPromptSessionId: string | null
   abortPromptExpiresAt: number | null
@@ -269,7 +272,7 @@ export type SessionUIState = {
   forkFromMessage: (sessionId: string, messageId: string) => Promise<void>
   handleSlashUndo: (sessionId: string) => Promise<void>
   handleSlashRedo: (sessionId: string, options?: { fullUnrevert?: boolean }) => Promise<void>
-  createSessionFromAssistantMessage: (sourceMessageId: string) => Promise<void>
+  createSessionFromAssistantMessage: (sourceMessageId: string, execution: { providerID: string; modelID: string; variant: string; agent: string; instructions: string }) => Promise<void>
 
   // Data access helpers (read from sync)
   getSessionsByDirectory: (directory: string) => Session[]
@@ -344,6 +347,10 @@ const resolveSessionDirectory = (
   if (attachmentDirectory) return attachmentDirectory
   const metaPath = getWtMeta(sessionId)?.path
   if (typeof metaPath === "string" && metaPath.trim().length > 0) return normalizePath(metaPath)
+  const runtimeMemory = runtimeSessionMemory.get(runtimeMemoryKey())
+  if (runtimeMemory?.sessionId === sessionId && runtimeMemory.directory) {
+    return normalizePath(runtimeMemory.directory)
+  }
   const sessions = getAllSyncSessions()
   const target = sessions.find((s) => s.id === sessionId)
   if (!target) return null
@@ -391,6 +398,7 @@ const writeRuntimeSessionMemory = (key: string, patch: Partial<RuntimeSessionMem
 
 export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   currentSessionId: null,
+  currentSessionDirectory: null,
   newSessionDraft: { ...DEFAULT_DRAFT },
   abortPromptSessionId: null,
   abortPromptExpiresAt: null,
@@ -418,10 +426,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     activeSessionByRuntime.set(key, id)
 
     const previousSessionId = get().currentSessionId
-
-    // Set currentSessionId immediately so the skeleton renders without delay.
-    set({ currentSessionId: id })
-
     const directoryState = useDirectoryStore.getState()
 
     const sessionDir = resolveSessionDirectory(
@@ -430,6 +434,10 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     )
     const fallbackDir = opencodeClient.getDirectory() ?? directoryState.currentDirectory ?? null
     const resolvedDir = (directoryHint ? normalizePath(directoryHint) : null) ?? sessionDir ?? fallbackDir
+
+    // Set the directory together with the session id so chat hooks read the
+    // same child store that send/SSE events will update during startup races.
+    set({ currentSessionId: id, currentSessionDirectory: id ? resolvedDir ?? null : null })
     writeRuntimeSessionMemory(key, { sessionId: id, directory: resolvedDir ?? null })
 
     try {
@@ -493,6 +501,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     }
     set({
       currentSessionId: restoredSessionId,
+      currentSessionDirectory: restoredSessionId ? restoredDirectory : null,
       newSessionDraft: restoredSessionId ? { ...DEFAULT_DRAFT } : restoredDraft,
       abortPromptSessionId: null,
       abortPromptExpiresAt: null,
@@ -501,7 +510,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       pendingChangesBarDismissed: new Map(),
     })
     if (restoredSessionId) {
-      setActiveSession(opencodeClient.getDirectory() ?? "", restoredSessionId)
+      setActiveSession(restoredDirectory ?? opencodeClient.getDirectory() ?? "", restoredSessionId)
     } else {
       setActiveSession("", "")
     }
@@ -575,6 +584,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         ...nextDraft,
       },
       currentSessionId: null,
+      currentSessionDirectory: null,
       error: null,
     })
 
@@ -832,27 +842,23 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       })
 
       const draftSyntheticParts = draft.syntheticParts
-      await activateConfigForDirectory(draftDirectoryOverride ?? created.directory ?? null)
-
+      const createdDirectory = normalizePath(draftDirectoryOverride ?? created.directory ?? null)
       const configState = useConfigStore.getState()
-      const draftAgentName = configState.currentAgentName
-      const effectiveDraftAgent = trimmedAgent ?? draftAgentName
+      void activateConfigForDirectory(createdDirectory).catch((error) => {
+        console.warn("Failed to activate directory after creating session:", error)
+      })
 
-      if (configState.currentProviderId && configState.currentModelId) {
-        useSelectionStore.getState().saveSessionModelSelection(created.id, configState.currentProviderId, configState.currentModelId)
-      }
+      const effectiveDraftAgent = trimmedAgent ?? configState.currentAgentName
+
+      useSelectionStore.getState().saveSessionModelSelection(created.id, providerID, modelID)
 
       if (effectiveDraftAgent) {
         useSelectionStore.getState().saveSessionAgentSelection(created.id, effectiveDraftAgent)
-        if (configState.currentProviderId && configState.currentModelId) {
-          useSelectionStore.getState().saveAgentModelForSession(created.id, effectiveDraftAgent, configState.currentProviderId, configState.currentModelId)
-          useSelectionStore.getState().saveAgentModelVariantForSession(created.id, effectiveDraftAgent, configState.currentProviderId, configState.currentModelId, variant)
-        }
+        useSelectionStore.getState().saveAgentModelForSession(created.id, effectiveDraftAgent, providerID, modelID)
+        useSelectionStore.getState().saveAgentModelVariantForSession(created.id, effectiveDraftAgent, providerID, modelID, variant)
       }
 
       get().initializeNewOpenChamberSession(created.id, configState.agents ?? [])
-
-      const createdDirectory = normalizePath(draftDirectoryOverride ?? created.directory ?? null)
 
       get().closeNewSessionDraft()
       get().setCurrentSession(created.id, createdDirectory)
@@ -1167,8 +1173,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // ---------------------------------------------------------------------------
   // createSessionFromAssistantMessage — reads from sync
   // ---------------------------------------------------------------------------
-  createSessionFromAssistantMessage: async (sourceMessageId) => {
+  createSessionFromAssistantMessage: async (sourceMessageId, execution) => {
     if (!sourceMessageId) return
+    if (!execution?.instructions?.trim()) return
 
     // Find which session this message belongs to by scanning sync state
     const state = getDirectoryState()
@@ -1200,9 +1207,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const session = await get().createSession(undefined, directory ?? null, null)
     if (!session) return
 
-    const { currentProviderId, currentModelId, currentAgentName } = useConfigStore.getState()
-    const pID = currentProviderId || useSelectionStore.getState().lastUsedProvider?.providerID
-    const mID = currentModelId || useSelectionStore.getState().lastUsedProvider?.modelID
+    const pID = execution.providerID || useSelectionStore.getState().lastUsedProvider?.providerID
+    const mID = execution.modelID || useSelectionStore.getState().lastUsedProvider?.modelID
 
     if (!pID || !mID) return
 
@@ -1211,9 +1217,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       id: session.id,
       providerID: pID,
       modelID: mID,
-      text: assistantPlanText,
-      prefaceText: EXECUTION_FORK_META_TEXT,
-      agent: currentAgentName ?? undefined,
+      variant: execution.variant || undefined,
+      text: composeForkSessionMessage(execution.instructions, assistantPlanText),
+      agent: execution.agent || undefined,
       directory: sessionDirectory,
     })
   },
@@ -1229,6 +1235,11 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   },
 
   getDirectoryForSession: (sessionId) => {
+    if (sessionId === get().currentSessionId && get().currentSessionDirectory) {
+      return get().currentSessionDirectory
+    }
+    const resolved = resolveSessionDirectory(sessionId, (sid) => get().worktreeMetadata.get(sid))
+    if (resolved) return resolved
     const attachmentDirectory = getAttachedSessionDirectory(getAttachmentForSession(sessionId))
     if (attachmentDirectory) return attachmentDirectory
     const sessions = getAllSyncSessions()
@@ -1296,9 +1307,12 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     // Handled by sync system's SSE stream
   },
 
-  setSessionDirectory: () => {
-    // Session directory is owned by sync child stores via SSE events.
-    // This is now a no-op — kept for interface compatibility during migration.
+  setSessionDirectory: (sessionId, directory) => {
+    const normalized = normalizePath(directory)
+    if (sessionId === get().currentSessionId) {
+      set({ currentSessionDirectory: normalized })
+      writeRuntimeSessionMemory(runtimeMemoryKey(), { sessionId, directory: normalized })
+    }
   },
 
   // ---------------------------------------------------------------------------

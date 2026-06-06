@@ -11,6 +11,7 @@ import {
 } from '../utils';
 import { formatDirectoryName, formatPathForDisplay } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
+import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 
 type Args = {
   homeDirectory: string | null;
@@ -124,10 +125,7 @@ export const useSessionGrouping = (args: Args) => {
       const getGroupKey = (session: Session) => {
         if (session.time?.archived) return archivedKey;
         const metadataPath = normalizePath(args.worktreeMetadata.get(session.id)?.path ?? null);
-        const sessionDirectory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
-        if (!metadataPath && !sessionDirectory) return archivedKey;
-        const fallbackDirectory = normalizePath((session as Session & { project?: { worktree?: string | null } | null }).project?.worktree ?? null);
-        const normalizedDir = metadataPath ?? sessionDirectory ?? fallbackDirectory;
+        const normalizedDir = metadataPath ?? resolveGlobalSessionDirectory(session);
         if (!normalizedDir) return archivedKey;
         if (normalizedDir !== normalizedProjectRoot && worktreeByPath.has(normalizedDir)) return normalizedDir;
         if (normalizedDir === normalizedProjectRoot) return normalizedProjectRoot ?? '__project_root__';

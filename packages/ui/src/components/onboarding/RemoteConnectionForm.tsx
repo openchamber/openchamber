@@ -8,7 +8,7 @@ import {
 } from '@/lib/desktopHosts';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { isTauriShell } from '@/lib/desktop';
+import { isDesktopShell, restartDesktopApp } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 
 type ConnectionState = 'idle' | 'testing' | 'success' | 'error';
@@ -153,9 +153,8 @@ export function RemoteConnectionForm({
         return;
       }
 
-      if (isTauriShell()) {
-        const tauri = (window as unknown as { __TAURI__?: { core?: { invoke?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> } } }).__TAURI__;
-        await tauri?.core?.invoke?.('desktop_restart');
+      if (isDesktopShell()) {
+        await restartDesktopApp();
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : t('onboarding.remoteConnection.errors.failedToSaveConnection'));

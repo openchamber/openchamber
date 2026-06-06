@@ -44,6 +44,8 @@ import { getRuntimeLiveStatusSeed, LIVE_STATUS_TTL_MS } from "./runtime-live-mem
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry"
 import { setSessionPrefetch } from "./session-prefetch-cache"
+import { listGlobalSessionPages } from "@/stores/globalSessions"
+import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 
 // ---------------------------------------------------------------------------
 // Context
@@ -569,11 +571,21 @@ const getSessionIdFromPayload = (event: Event): string | null => {
   }
 
   if (event.type === "message.part.updated") {
+    const sessionID = props.sessionID
+    if (typeof sessionID === "string" && sessionID.length > 0) {
+      return sessionID
+    }
+
     const part = props.part
     if (!part || typeof part !== "object") {
       return null
     }
-    const sessionID = (part as { sessionID?: unknown }).sessionID
+    const partSessionID = (part as { sessionID?: unknown }).sessionID
+    return typeof partSessionID === "string" && partSessionID.length > 0 ? partSessionID : null
+  }
+
+  if (event.type === "message.part.delta" || event.type === "message.part.removed") {
+    const sessionID = props.sessionID
     return typeof sessionID === "string" && sessionID.length > 0 ? sessionID : null
   }
 
@@ -587,6 +599,46 @@ const getSessionIdFromPayload = (event: Event): string | null => {
   }
 
   return null
+}
+
+const getSessionInfoFromPayload = (event: Event): Session | null => {
+  if (event.type !== "session.created" && event.type !== "session.updated" && event.type !== "session.deleted") {
+    return null
+  }
+
+  const properties = (event as { properties?: unknown }).properties
+  if (!properties || typeof properties !== "object") {
+    return null
+  }
+
+  const info = (properties as { info?: unknown }).info
+  if (!info || typeof info !== "object") {
+    return null
+  }
+
+  const session = info as Partial<Session>
+  if (typeof session.id !== "string" || !session.time) {
+    return null
+  }
+
+  return stripSessionDiffSnapshots(session as Session)
+}
+
+const applySessionEventToGlobalSessions = (payload: Event) => {
+  if (payload.type === "session.created" || payload.type === "session.updated") {
+    const session = getSessionInfoFromPayload(payload)
+    if (session) {
+      useGlobalSessionsStore.getState().upsertSession(session)
+    }
+    return
+  }
+
+  if (payload.type === "session.deleted") {
+    const sessionID = getSessionIdFromPayload(payload) ?? getSessionInfoFromPayload(payload)?.id
+    if (sessionID) {
+      useGlobalSessionsStore.getState().removeSessions([sessionID])
+    }
+  }
 }
 
 const getMessageIdFromPayload = (event: Event): string | null => {
@@ -616,8 +668,8 @@ const getMessageIdFromPayload = (event: Event): string | null => {
     if (!part || typeof part !== "object") {
       return null
     }
-    const messageID = (part as { messageID?: unknown }).messageID
-    return typeof messageID === "string" && messageID.length > 0 ? messageID : null
+    const partMessageID = (part as { messageID?: unknown }).messageID
+    return typeof partMessageID === "string" && partMessageID.length > 0 ? partMessageID : null
   }
 
   return null
@@ -915,9 +967,12 @@ const updateRoutingIndexFromEvent = (
     }
 
     case "message.part.updated": {
-      const part = (payload.properties as { part?: Part }).part as (Part & { sessionID?: string; messageID?: string }) | undefined
-      if (part?.messageID && part.sessionID) {
-        setIndexedMessage(routingIndex, part.sessionID, part.messageID, directory)
+      const props = payload.properties as { sessionID?: string; part?: Part }
+      const part = props.part as (Part & { sessionID?: string; messageID?: string }) | undefined
+      const sessionID = part?.sessionID ?? props.sessionID
+      const messageID = part?.messageID
+      if (messageID && sessionID) {
+        setIndexedMessage(routingIndex, sessionID, messageID, directory)
       }
       return
     }
@@ -1205,6 +1260,8 @@ function handleEvent(
     return
   }
 
+  applySessionEventToGlobalSessions(payload)
+
   // Global events
   if (directory === "global" || !directory) {
     const recent = isRecentBoot()
@@ -1278,6 +1335,7 @@ function handleEvent(
     if (permissionStore.isSessionAutoAccepting(permission.sessionID)) {
       updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload)
       void sessionActions.respondToPermission(permission.sessionID, permission.id, "once").catch(() => undefined)
+      return
     }
 
     const toastKey = getPermissionToastKey(permission.sessionID, permission.id)
@@ -1561,27 +1619,12 @@ export function SyncProvider(props: {
               providers: globalState.providers,
             },
             loadSessions: (dir) => retry(async () => {
-              const result = await props.sdk.session.list({
+              const sessions = (await listGlobalSessionPages(props.sdk, {
                 directory: dir,
+                archived: false,
                 roots: true,
-                limit: 50,
-              })
-              // SDK returns { error } instead of { data } on non-ok responses (503).
-              // Preserve HTTP status so retry()'s transient detection works.
-              const rawError = (result as { error?: unknown }).error
-              if (rawError) {
-                const response = (result as { response?: { status?: number } }).response
-                const status = response?.status
-                const message = typeof rawError === "object" && rawError !== null && "message" in rawError
-                  ? String((rawError as { message?: unknown }).message)
-                  : String(rawError)
-                const wrapped = new Error(`session.list failed${status ? ` (${status})` : ""}: ${message}`)
-                if (status !== undefined) {
-                  ;(wrapped as Error & { status?: number }).status = status
-                }
-                throw wrapped
-              }
-              const sessions = (result.data ?? [])
+                pageSize: 500,
+              }))
                 .filter((s) => !!s?.id)
                 .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
               // Race guard: if the list came back empty but event pipeline
@@ -1591,7 +1634,7 @@ export function SyncProvider(props: {
               const currentSessions = store.getState().session
               if (sessions.length === 0 && currentSessions.length > 0) {
                 console.warn(
-                  `[bootstrap] session.list returned empty for ${dir}; preserving ${currentSessions.length} existing sessions`,
+                  `[bootstrap] experimental.session.list returned empty for ${dir}; preserving ${currentSessions.length} existing sessions`,
                 )
                 return
               }

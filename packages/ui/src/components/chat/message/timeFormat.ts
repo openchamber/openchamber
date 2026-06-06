@@ -1,5 +1,7 @@
 import { getCurrentIntlLocale } from '@/lib/i18n';
 import { formatMessage, useI18nStore } from '@/lib/i18n/store';
+import { formatTimeForPreference } from '@/lib/timeFormat';
+import type { TimeFormatPreference } from '@/stores/useUIStore';
 
 const isSameDay = (left: Date, right: Date): boolean => {
     return (
@@ -19,19 +21,16 @@ const isValidTimestamp = (timestamp: number): boolean => {
     return Number.isFinite(timestamp) && !Number.isNaN(new Date(timestamp).getTime());
 };
 
-export const formatTimestampForDisplay = (timestamp: number): string => {
+export const formatTimestampForDisplay = (timestamp: number, timeFormatPreference: TimeFormatPreference): string => {
     if (!isValidTimestamp(timestamp)) {
         return '';
     }
 
     const date = new Date(timestamp);
     const now = new Date();
+    const timePart = formatTimeForPreference(date, timeFormatPreference);
     const locale = getCurrentIntlLocale();
     const dictionary = useI18nStore.getState().dictionary;
-    const timePart = new Intl.DateTimeFormat(locale, {
-        hour: '2-digit',
-        minute: '2-digit',
-    }).format(date);
 
     if (isSameDay(date, now)) {
         return timePart;

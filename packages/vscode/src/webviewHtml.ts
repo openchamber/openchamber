@@ -164,7 +164,6 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
         <path class="logo-fill-dim" d="M-8 -4 L8 -4 L8 12 L-8 12 Z"/>
       </g>
     </svg>
-<<<<<<< HEAD
     <!-- Status text stays empty while things are fine; populated only on error. -->
     <div class="status-text" id="loading-status"></div>
     ${!cliAvailable ? `<div class="error-text" id="cli-missing-text">OpenCode CLI not found. Please install it first.</div>` : ''}

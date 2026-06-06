@@ -50,8 +50,8 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
 
   // Load agents on mount
   React.useEffect(() => {
-    loadAgents();
-  }, [loadAgents]);
+    if (agents.length === 0) void loadAgents();
+  }, [agents.length, loadAgents]);
 
   // Ensure we always have a valid selection (defaults to current default agent, then first selectable agent).
   React.useEffect(() => {

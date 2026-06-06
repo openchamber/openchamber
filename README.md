@@ -6,8 +6,6 @@
 [![Discord](https://img.shields.io/badge/Discord-join.svg?style=flat&labelColor=100F0F&color=8B7EC8&logo=discord&logoColor=FFFCF0)](https://discord.gg/ZYRSdnwwKA)
 [![Support the project](https://img.shields.io/badge/Support-Project-black?style=flat&labelColor=100F0F&color=EC8B49&logo=ko-fi&logoColor=FFFCF0)](https://ko-fi.com/G2G41SAWNS)
 
-> [!IMPORTANT]
-> 🏖️ I’m on vacation from 28 May to 02 Jun. All issues and PRs will continue being reviewed after that. Thanks for the patience.
 
 ## **OpenCode, everywhere.** Desktop. Browser. Phone.
 
@@ -60,13 +58,16 @@
 - Background notifications plus reliable cross-tab session activity tracking
 - Built-in self-update + restart flow that keeps your server settings intact
 
-### Desktop (macOS)
+### Desktop (macOS + Windows)
 
-- Native macOS menu integration with polished app actions and deep-link handling
-- Multi-window support for parallel project/session workflows
-- "Open In" shortcuts for Finder, Terminal, and your preferred editor
-- Fast switching between local and remote instances
-- Workspace-first startup flow with directory picker and steadier window restore behavior
+- Floating Mini Chat: keep a small always-on-top assistant beside your editor, browser, or terminal
+- Multiple native windows for separate projects or sessions
+- Native notifications for task alerts while OpenChamber is hidden
+- One-click open in VS Code, Cursor, Terminal, Finder, Explorer, and more
+- Desktop host switcher for local and remote OpenChamber instances
+- Convenient tunnel management without manual setup
+- Deep-link connections for joining remote OpenChamber from a link
+- SSH remote access with host import, connection management, and port forwarding
 
 ### VS Code Extension
 
@@ -88,7 +89,7 @@
 
 > **Prerequisite:** [OpenCode CLI](https://opencode.ai) installed.
 
-### **Desktop (macOS)**
+### **Desktop (macOS + Windows)**
 Download from [Releases](https://github.com/btriapitsyn/openchamber/releases).
 
 ### **VS Code**
@@ -352,14 +353,16 @@ chown -R 1000:1000 data/
 </details>
 
 <details>
-<summary><strong>Desktop (macOS)</strong></summary>
+<summary><strong>Desktop (macOS + Windows)</strong></summary>
 
-- Connect to remote OpenChamber instances over SSH with dedicated lifecycle flows
-- Project Actions: run dev servers, SSH port forwarding, open remote URLs locally
-- Multi-window support for parallel project workflows
-- "Open In" shortcuts for Finder, Terminal, and your preferred editor
-- Fast switching between local and remote instances
-- Native macOS menu, deep-link handling, and polished startup
+- Floating Mini Chat: keep a small always-on-top assistant beside your editor, browser, or terminal
+- Multiple native windows for separate projects or sessions
+- Native notifications for task alerts while OpenChamber is hidden
+- One-click open in VS Code, Cursor, Terminal, Finder, Explorer, and more
+- Desktop host switcher for local and remote OpenChamber instances
+- Convenient tunnel management without manual setup
+- Deep-link connections for joining remote OpenChamber from a link
+- SSH remote access with host import, connection management, and port forwarding
 
 </details>
 
@@ -404,7 +407,7 @@ chown -R 1000:1000 data/
 
 Active development. Here's what's being worked on or planned:
 
-- Windows and Linux desktop apps
+- Linux desktop app
 - Mobile app with remote instance and laptop connectivity
 - More built-in tunneling options
 - Kanban board for multi-agent management - keeping the human in the loop and in control
@@ -421,7 +424,6 @@ Independent project, not affiliated with the OpenCode team.
 - [OpenCode](https://opencode.ai) - For the excellent API and extensible architecture.
 - [Flexoki](https://github.com/kepano/flexoki) - Beautiful color scheme by [Steph Ango](https://stephango.com/flexoki).
 - [Pierre](https://pierrejs-docs.vercel.app/) - Fast, beautiful diff viewer with syntax highlighting.
-- [Tauri](https://github.com/tauri-apps/tauri) - Desktop application framework.
 - [Ghostty-web](https://github.com/coder/ghostty-web) - Great implementation of a Ghostty web renderer.
 - [David Hill](https://x.com/iamdavidhill) - Who inspired me to release this without [overthinking](https://x.com/iamdavidhill/status/1993648326450020746).
 - [My wife](https://github.com/yulia-ivashko), who - with zero AI background - sat down with the app for the first time and built the firework celebration that plays on every successful push.

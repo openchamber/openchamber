@@ -24,8 +24,8 @@ const macosMajor = Number.parseInt(macosMajorRaw, 10);
 //    Remote UIs still need it so isDesktopShell() returns true and the
 //    window renders with desktop affordances (DesktopHostSwitcher,
 //    title bar offsets, etc.). Expose unconditionally.
-//  - __TAURI__ is the IPC channel to the main process. The compatibility
-//    shim is exposed broadly, but privileged commands are gated in main.mjs.
+//  - __OPENCHAMBER_DESKTOP__ is the IPC channel to the main process. It is
+//    exposed broadly, but privileged commands are gated in main.mjs.
 //    Local-only globals below stay limited to packaged UI / exact localOrigin.
 // Everything driven by localOrigin (home dir, macOS hints) also stays
 // local-only since it leaks info about the Electron host machine.
@@ -136,21 +136,13 @@ ipcRenderer.on('openchamber:emit', (_evt, payload) => {
   dispatchNativeEvent(event, payload.detail);
 });
 
-// __TAURI__ is exposed on all pages; the main-process gate in
+// The desktop bridge is exposed on all pages; the main-process gate in
 // ipcMain.handle('openchamber:invoke') decides per-command what is safe
 // for non-local callers (window/host-switcher ops yes, file/shell ops
 // no). See COMMANDS_SAFE_FOR_REMOTE in main.mjs.
-contextBridge.exposeInMainWorld('__TAURI__', {
-  core: {
-    invoke: (cmd, args) => ipcRenderer.invoke('openchamber:invoke', cmd, args || {}),
-  },
-  dialog: {
-    open: (options) => ipcRenderer.invoke('openchamber:dialog:open', options || {}),
-  },
-  shell: {
-    open: (url) => ipcRenderer.invoke('openchamber:invoke', 'desktop_open_external_url', { url }),
-  },
-  event: {
-    listen: async (event, handler) => addListener(event, handler),
-  },
+contextBridge.exposeInMainWorld('__OPENCHAMBER_DESKTOP__', {
+  invoke: (cmd, args) => ipcRenderer.invoke('openchamber:invoke', cmd, args || {}),
+  openDialog: (options) => ipcRenderer.invoke('openchamber:dialog:open', options || {}),
+  openExternal: (url) => ipcRenderer.invoke('openchamber:invoke', 'desktop_open_external_url', { url }),
+  listen: async (event, handler) => addListener(event, handler),
 });

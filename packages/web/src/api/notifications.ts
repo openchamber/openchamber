@@ -184,13 +184,13 @@ const notifyWithDesktop = async (payload?: NotificationPayload): Promise<boolean
     return false;
   }
 
-  const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
-  if (!tauri?.core?.invoke) {
+  const desktop = (window as unknown as { __OPENCHAMBER_DESKTOP__?: DesktopBridgeGlobal }).__OPENCHAMBER_DESKTOP__;
+  if (!desktop?.invoke) {
     return false;
   }
 
   try {
-    await tauri.core.invoke('desktop_notify', {
+    await desktop.invoke('desktop_notify', {
       payload: {
         title: payload?.title,
         body: payload?.body,
@@ -214,16 +214,14 @@ export const createWebNotificationsAPI = (): NotificationsAPI => ({
   },
   canNotify: () => {
     if (typeof window !== 'undefined') {
-      const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
-      if (tauri?.core?.invoke) {
+      const desktop = (window as unknown as { __OPENCHAMBER_DESKTOP__?: DesktopBridgeGlobal }).__OPENCHAMBER_DESKTOP__;
+      if (desktop?.invoke) {
         return true;
       }
     }
     return typeof Notification !== 'undefined' ? Notification.permission === 'granted' : false;
   },
 });
-type TauriGlobal = {
-  core?: {
-    invoke?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
-  };
+type DesktopBridgeGlobal = {
+  invoke?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 };

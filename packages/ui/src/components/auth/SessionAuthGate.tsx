@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
-import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
+import { invokeDesktop, isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { syncDesktopSettings, initializeAppearancePreferences } from '@/lib/persistence';
 import { applyPersistedDirectoryPreferences } from '@/lib/directoryPersistence';
 import { DesktopHostSwitcherInline } from '@/components/desktop/DesktopHostSwitcher';
@@ -125,15 +125,15 @@ const issueDesktopClientToken = async (): Promise<string> => {
   return typeof payload?.token === 'string' ? payload.token.trim() : '';
 };
 
+const shouldUseDesktopShellPasswordLogin = (): boolean => {
+  return isDesktopShell() && !isLocalDesktopRuntime();
+};
+
 const issueDesktopClientTokenViaShell = async (password: string, trustDevice: boolean): Promise<string> => {
   if (!isDesktopShell() || typeof window === 'undefined') {
     return '';
   }
-  const invoke = (window as unknown as { __TAURI__?: { core?: { invoke?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> } } }).__TAURI__?.core?.invoke;
-  if (typeof invoke !== 'function') {
-    return '';
-  }
-  const response = await invoke('desktop_remote_password_login', {
+  const response = await invokeDesktop('desktop_remote_password_login', {
     url: getRuntimeApiBaseUrl(),
     password,
     trustDevice,
@@ -224,7 +224,7 @@ const LoadingScreen: React.FC = () => (
   </div>
 );
 
-const ErrorScreen: React.FC<ErrorScreenProps> = ({ onRetry, errorType = 'network', retryAfter }) => {
+const ErrorScreen: React.FC<ErrorScreenProps> = ({ onRetry, errorType = 'network', retryAfter, children }) => {
   const { t } = useI18n();
   const isRateLimit = errorType === 'rate-limit';
   const minutes = retryAfter ? Math.ceil(retryAfter / 60) : 1;
@@ -247,6 +247,7 @@ const ErrorScreen: React.FC<ErrorScreenProps> = ({ onRetry, errorType = 'network
         <Button type="button" onClick={onRetry} className="w-full max-w-xs">
           {t('sessionAuth.error.retry')}
         </Button>
+        {children}
       </div>
     </AuthShell>
   );
@@ -262,6 +263,7 @@ interface ErrorScreenProps {
   onRetry: () => void;
   errorType?: 'network' | 'rate-limit';
   retryAfter?: number;
+  children?: React.ReactNode;
 }
 
 export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) => {
@@ -385,6 +387,12 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
       setIsTunnelLocked(false);
     } catch (error) {
       console.warn('Failed to check session status:', error);
+      if (shouldUseDesktopShellPasswordLogin()) {
+        setState('locked');
+        setRetryAfter(undefined);
+        setIsTunnelLocked(false);
+        return;
+      }
       setState('error');
       setIsTunnelLocked(false);
     }
@@ -533,6 +541,16 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
       setState('error');
     } catch (error) {
       console.warn('Failed to submit UI password:', error);
+      const clientToken = shouldUseDesktopShellPasswordLogin()
+        ? await issueDesktopClientTokenViaShell(password, trustDevice)
+        : '';
+      if (clientToken) {
+        setPassword('');
+        setIsTunnelLocked(false);
+        await applyDesktopClientToken(clientToken);
+        setState('authenticated');
+        return;
+      }
       setErrorMessage(t('sessionAuth.error.networkRetry'));
       setIsTunnelLocked(false);
       setState('error');
@@ -624,7 +642,18 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
   }
 
   if (state === 'error') {
-    return <ErrorScreen onRetry={() => void checkStatus()} errorType="network" />;
+    return (
+      <ErrorScreen onRetry={() => void checkStatus()} errorType="network">
+        {showHostSwitcher && (
+          <div className="w-full max-w-xs">
+            <DesktopHostSwitcherInline />
+            <p className="mt-1 text-center typography-micro text-muted-foreground">
+              {t('sessionAuth.locked.hostSwitcherHint')}
+            </p>
+          </div>
+        )}
+      </ErrorScreen>
+    );
   }
 
   if (state === 'rate-limited') {

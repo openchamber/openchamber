@@ -662,8 +662,8 @@ export function ScheduledTaskEditorDialog(props: {
     if (!open) {
       return;
     }
-    void loadProviders();
-    void loadAgents();
+    void loadProviders({ source: 'scheduledTaskEditor' });
+    void loadAgents({ source: 'scheduledTaskEditor' });
   }, [open, loadProviders, loadAgents]);
 
   React.useEffect(() => {

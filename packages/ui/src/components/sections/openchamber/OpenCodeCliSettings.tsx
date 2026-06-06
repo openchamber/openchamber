@@ -4,7 +4,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
-import { isDesktopShell, isTauriShell } from '@/lib/desktop';
+import { isDesktopShell, requestFileAccess } from '@/lib/desktop';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -54,28 +54,19 @@ export const OpenCodeCliSettings: React.FC = () => {
       return;
     }
 
-    if (!isDesktopShell() || !isTauriShell()) {
-      return;
-    }
-
-    const tauri = (window as unknown as { __TAURI__?: { dialog?: { open?: (opts: Record<string, unknown>) => Promise<unknown> } } }).__TAURI__;
-    if (!tauri?.dialog?.open) {
+    if (!isDesktopShell()) {
       return;
     }
 
     try {
-      const selected = await tauri.dialog.open({
-        title: t('settings.openchamber.opencodeCli.dialog.selectBinaryTitle'),
-        multiple: false,
-        directory: false,
-      });
-      if (typeof selected === 'string' && selected.trim().length > 0) {
-        setValue(selected.trim());
+      const selected = await requestFileAccess();
+      if (selected.success && selected.path && selected.path.trim().length > 0) {
+        setValue(selected.path.trim());
       }
     } catch {
       // ignore
     }
-  }, [t]);
+  }, []);
 
   const handleSaveAndReload = React.useCallback(async () => {
     setIsSaving(true);
@@ -90,6 +81,11 @@ export const OpenCodeCliSettings: React.FC = () => {
       setIsSaving(false);
     }
   }, [t, value]);
+
+  const handleShowUpdateNotificationsChange = React.useCallback((enabled: boolean) => {
+    setShowOpenCodeUpdateNotifications(enabled);
+    void updateDesktopSettings({ showOpenCodeUpdateNotifications: enabled });
+  }, [setShowOpenCodeUpdateNotifications]);
 
   return (
     <div className="mb-8">
@@ -130,7 +126,7 @@ export const OpenCodeCliSettings: React.FC = () => {
               variant="outline"
               size="xs"
               onClick={handleBrowse}
-              disabled={isLoading || isSaving || !isDesktopShell() || !isTauriShell()}
+              disabled={isLoading || isSaving || !isDesktopShell()}
               className="h-7 w-7 p-0"
               aria-label={t('settings.openchamber.opencodeCli.actions.browseAria')}
               title={t('settings.openchamber.opencodeCli.actions.browse')}
@@ -156,7 +152,7 @@ export const OpenCodeCliSettings: React.FC = () => {
         <label className="flex cursor-pointer items-center gap-2 py-1.5">
           <Checkbox
             checked={showOpenCodeUpdateNotifications}
-            onChange={setShowOpenCodeUpdateNotifications}
+            onChange={handleShowUpdateNotificationsChange}
             ariaLabel={t('settings.openchamber.opencodeCli.field.showUpdateNotificationsAria')}
           />
           <span className="typography-ui-label text-foreground">

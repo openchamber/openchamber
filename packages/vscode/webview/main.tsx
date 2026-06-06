@@ -972,6 +972,24 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     }
   }
 
+  if (pathname === '/api/opencode/version' && method === 'GET') {
+    try {
+      const data = await sendBridgeMessage('api:opencode/version');
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ version: null, error: message }), { status: 502, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  if (pathname === '/api/opencode/health' && method === 'GET') {
+    const connectionStatus = window.__OPENCHAMBER_CONNECTION__?.status;
+    return new Response(JSON.stringify({ healthy: connectionStatus === 'connected' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
   if (pathname === '/api/zen/models' && method === 'GET') {
     try {
       const data = await sendBridgeMessage('api:zen:models');

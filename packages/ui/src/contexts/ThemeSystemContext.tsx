@@ -7,7 +7,7 @@ import React, {
 import { flushSync } from 'react-dom';
 import type { Theme, ThemeMode } from '@/types/theme';
 import type { DesktopSettings } from '@/lib/desktop';
-import { isDesktopLocalOriginActive, isTauriShell, isVSCodeRuntime } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isDesktopShell as detectDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { setDesktopWindowTheme } from '@/lib/desktopNative';
 import { CSSVariableGenerator } from '@/lib/theme/cssGenerator';
 import { updateDesktopSettings } from '@/lib/persistence';
@@ -220,7 +220,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
   });
   const isVSCode = useMemo(() => isVSCodeRuntime(), []);
   const isLocalDesktopOrigin = useMemo(() => isDesktopLocalOriginActive(), []);
-  const isDesktopShell = useMemo(() => isTauriShell(), []);
+  const isDesktopShell = useMemo(() => detectDesktopShell(), []);
 
   const availableThemes = useMemo(() => {
     const merged: Theme[] = [];

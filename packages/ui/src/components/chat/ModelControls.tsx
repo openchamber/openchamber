@@ -38,6 +38,7 @@ import { formatEffortLabel, getCycledPrimaryAgentName, type MobileControlsPanel 
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { useOpenCodeReadiness } from '@/hooks/useOpenCodeReadiness';
 import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
+import { markStartupTrace } from '@/lib/startupTrace';
 
 type IconComponent = IconName;
 
@@ -312,6 +313,19 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     // Use visible agents (excludes hidden internal agents)
     const agents = getVisibleAgents();
     const primaryAgents = React.useMemo(() => agents.filter((agent) => agent.mode === 'primary'), [agents]);
+    const tracedReadyRef = React.useRef(false);
+
+    React.useEffect(() => {
+        if (tracedReadyRef.current || !isReady) return;
+        tracedReadyRef.current = true;
+        markStartupTrace('ModelControls:ready', {
+            providers: providers.length,
+            agents: agents.length,
+            currentProviderId,
+            currentModelId,
+            currentAgentName,
+        });
+    }, [agents.length, currentAgentName, currentModelId, currentProviderId, isReady, providers.length]);
 
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
     const getDirectoryForSession = useSessionUIStore((s) => s.getDirectoryForSession);

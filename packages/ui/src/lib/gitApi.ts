@@ -348,6 +348,7 @@ type SessionGenerationContext = {
   providerID: string;
   modelID: string;
   agent?: string;
+  variant?: string;
 };
 
 const resolveSessionGenerationContext = (): SessionGenerationContext | null => {
@@ -370,11 +371,17 @@ const resolveSessionGenerationContext = (): SessionGenerationContext | null => {
     return null;
   }
 
+  const agentVariant = agent
+    ? context.getAgentModelVariantForSession(sessionId, agent, selectedModel.providerId, selectedModel.modelId)
+    : undefined;
+  const variant = agentVariant || config.currentVariant || undefined;
+
   return {
     sessionId,
     providerID: selectedModel.providerId,
     modelID: selectedModel.modelId,
     agent,
+    variant,
   };
 };
 
@@ -399,6 +406,7 @@ const runStructuredGenerationInActiveSession = async ({
     providerID: generationSession.providerID,
     modelID: generationSession.modelID,
     agent: generationSession.agent,
+    variant: generationSession.variant,
   });
   const trimmedDirectory = typeof directory === 'string' ? directory.trim() : '';
   const visiblePromptText = typeof visiblePrompt === 'string' ? visiblePrompt.trim() : '';
@@ -429,6 +437,7 @@ const runStructuredGenerationInActiveSession = async ({
         modelID: generationSession.modelID,
       },
       ...(generationSession.agent ? { agent: generationSession.agent } : {}),
+      ...(generationSession.variant ? { variant: generationSession.variant } : {}),
       parts: promptParts,
     });
   });

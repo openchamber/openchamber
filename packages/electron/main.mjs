@@ -152,12 +152,12 @@ const LOCAL_DESKTOP_CLIENT_KIND = 'desktop-local';
 const LOCAL_DESKTOP_CLIENT_DEDUPE_KEY = 'desktop-local';
 const ENV_OVERRIDE_HOST_ID = '__env';
 const CHANGELOG_URL = 'https://raw.githubusercontent.com/openchamber/openchamber/main/CHANGELOG.md';
-const UPDATE_METADATA_URL = 'https://github.com/openchamber/openchamber/releases/latest/download/latest.json';
 const GITHUB_BUG_REPORT_URL = 'https://github.com/openchamber/openchamber/issues/new?template=bug_report.yml';
 const GITHUB_FEATURE_REQUEST_URL = 'https://github.com/openchamber/openchamber/issues/new?template=feature_request.yml';
 const DISCORD_INVITE_URL = 'https://discord.gg/ZYRSdnwwKA';
 const INSTALLED_APPS_CACHE_TTL_SECS = 60 * 60 * 24;
 const INSTALLED_APPS_CACHE_FILE = 'discovered-apps.json';
+const OPENCODE_SHUTDOWN_GRACE_MS = 100;
 
 const { autoUpdater } = updaterPkg;
 
@@ -172,13 +172,17 @@ const state = {
   mainWindow: null,
   quitRequested: false,
   quitConfirmed: false,
+  quitInProgress: false,
   quitConfirmationPending: false,
+  backgroundShutdownComplete: false,
+  sshShutdownPromise: null,
   installingUpdate: false,
   pendingUpdate: null,
   unreachableHosts: new Set(),
   windowCounter: 1,
   focusedWindowIds: new Set(),
   windowGeometryRevisions: new Map(),
+  windowGeometryTimers: new Map(),
   miniChatWindowsBySession: new Map(),
   sshStatuses: new Map(),
   sshLogs: new Map(),
@@ -214,6 +218,31 @@ const quitConfirmationMessage = () => {
   return `OpenChamber detected ${reasons.join(', ')}. Quitting now will stop sidecar/background processes and may interrupt pending work.`;
 };
 
+const shutdownBackgroundServices = () => {
+  if (state.backgroundShutdownComplete) return;
+  state.backgroundShutdownComplete = true;
+  if (state.installingUpdate) return;
+  killSidecar();
+  setImmediate(() => {
+    void shutdownSshSessions();
+  });
+};
+
+const shutdownSshSessions = async () => {
+  if (state.sshShutdownPromise) {
+    await state.sshShutdownPromise;
+    return;
+  }
+
+  state.sshShutdownPromise = sshManager.shutdownAll().catch((error) => {
+    log.warn('[electron] failed to stop SSH sessions:', error);
+  }).finally(() => {
+    state.sshShutdownPromise = null;
+  });
+
+  await state.sshShutdownPromise;
+};
+
 const prepareForQuit = ({ installingUpdate = false } = {}) => {
   state.quitRequested = true;
   state.quitConfirmed = true;
@@ -227,27 +256,20 @@ const prepareForQuit = ({ installingUpdate = false } = {}) => {
     }
   }
 
-  if (!installingUpdate) {
-    try {
-      killSidecar();
-    } catch {
-    }
-    void sshManager.shutdownAll().catch(() => {});
+  if (installingUpdate) {
+    state.backgroundShutdownComplete = true;
+    return;
   }
+
+  shutdownBackgroundServices();
 };
 
 const performConfirmedQuit = () => {
-  if (state.quitConfirmed) return;
+  if (state.quitInProgress) return;
+  state.quitInProgress = true;
+
   prepareForQuit();
-
-  // Safety net: force-exit if normal quit sequence stalls (e.g. background
-  // handles in electron-updater / fetch refs) after a short grace period.
-  const safety = setTimeout(() => {
-    app.exit(0);
-  }, 1500);
-  if (typeof safety?.unref === 'function') safety.unref();
-
-  app.quit();
+  app.exit(0);
 };
 
 const requestQuitWithConfirmation = async () => {
@@ -560,8 +582,15 @@ const debounceWindowStatePersist = (browserWindow, immediate = false) => {
   const revision = (state.windowGeometryRevisions.get(key) || 0) + 1;
   state.windowGeometryRevisions.set(key, revision);
 
+  const existingTimer = state.windowGeometryTimers.get(key);
+  if (existingTimer) {
+    clearTimeout(existingTimer);
+    state.windowGeometryTimers.delete(key);
+  }
+
   const persist = async () => {
     if (state.windowGeometryRevisions.get(key) !== revision) return;
+    state.windowGeometryTimers.delete(key);
     await writeWindowState(browserWindow);
   };
 
@@ -570,9 +599,10 @@ const debounceWindowStatePersist = (browserWindow, immediate = false) => {
     return;
   }
 
-  setTimeout(() => {
+  const timer = setTimeout(() => {
     void persist();
   }, 300);
+  state.windowGeometryTimers.set(key, timer);
 };
 
 const buildHealthUrl = (url) => {
@@ -1066,7 +1096,7 @@ const spawnLocalServer = async () => {
     uiPassword: desktopUiPassword || null,
     attachSignals: false,
     exitOnShutdown: false,
-    apiOnly: shouldUsePackagedUi() && !lanAccessEnabled,
+    apiOnly: false,
     onDesktopNotification: (payload) => maybeShowNativeNotification(payload),
     getIsWindowFocused: isAnyWindowFocused,
   });
@@ -1084,18 +1114,98 @@ const spawnLocalServer = async () => {
   return url;
 };
 
-const killSidecar = () => {
-  if (state.serverHandle) {
+const launchDetachedOpenCodeKiller = (processInfo) => {
+  if (!processInfo?.managed) return;
+  const pid = Number(processInfo.pid);
+  const port = Number(processInfo.port);
+  const hasPid = Number.isFinite(pid) && pid > 0;
+  const hasPort = Number.isFinite(port) && port > 0;
+  if (!hasPid && !hasPort) return;
+  const normalizedPid = hasPid ? String(Math.trunc(pid)) : '0';
+  const normalizedPort = Number.isFinite(port) && port > 0 ? String(Math.trunc(port)) : '0';
+
+  if (process.platform === 'win32') {
+    if (!hasPid) return;
+    const script = `
+$ErrorActionPreference = 'SilentlyContinue'
+$targetPid = ${normalizedPid}
+$graceMs = ${Math.max(0, Math.trunc(OPENCODE_SHUTDOWN_GRACE_MS))}
+function Stop-ProcessTree([int]$processId, [bool]$force) {
+  if ($processId -le 0) { return }
+  $children = Get-CimInstance Win32_Process -Filter "ParentProcessId=$processId"
+  foreach ($child in $children) {
+    Stop-ProcessTree ([int]$child.ProcessId) $force
+  }
+  if ($force) {
+    Stop-Process -Id $processId -Force
+  } else {
+    Stop-Process -Id $processId
+  }
+}
+Stop-ProcessTree $targetPid $false
+Start-Sleep -Milliseconds $graceMs
+Stop-ProcessTree $targetPid $true
+`;
+    const encodedScript = Buffer.from(script, 'utf16le').toString('base64');
+    const powershell = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+    const child = spawn(powershell, [
+      '-NoLogo',
+      '-NoProfile',
+      '-NonInteractive',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-WindowStyle',
+      'Hidden',
+      '-EncodedCommand',
+      encodedScript,
+    ], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    child.unref();
+    return;
+  }
+
+  if (hasPid) {
     try {
-      const result = state.serverHandle.stop({ exitProcess: false });
-      if (result && typeof result.then === 'function') {
-        result.catch(() => {});
-      }
+      process.kill(-pid, 'SIGTERM');
     } catch {
     }
-    state.serverHandle = null;
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch {
+    }
   }
+
+  const script = [
+    'pid="$1"',
+    'port="$2"',
+    'grace="$3"',
+    'if [ "$pid" -gt 0 ] 2>/dev/null; then kill -TERM "$pid" 2>/dev/null; kill -TERM "-$pid" 2>/dev/null; fi',
+    'sleep "$grace"',
+    'if [ "$pid" -gt 0 ] 2>/dev/null; then kill -KILL "-$pid" 2>/dev/null; kill -KILL "$pid" 2>/dev/null; fi',
+    'if [ "$port" -gt 0 ] 2>/dev/null && command -v lsof >/dev/null 2>&1; then for target in $(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null; lsof -ti ":$port" 2>/dev/null); do [ "$target" = "$$" ] || kill -KILL "$target" 2>/dev/null; done; fi',
+  ].join('; ');
+  const child = spawn('/bin/sh', ['-c', script, 'openchamber-opencode-killer', normalizedPid, normalizedPort, String(OPENCODE_SHUTDOWN_GRACE_MS / 1000)], {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
+  });
+  child.unref();
+};
+
+const killSidecar = () => {
+  const handle = state.serverHandle;
+  state.serverHandle = null;
   state.sidecarUrl = null;
+  if (!handle) return;
+
+  try {
+    launchDetachedOpenCodeKiller(handle.getOpenCodeProcessInfo?.());
+  } catch (error) {
+    log.warn('[electron] failed to launch OpenCode killer:', error);
+  }
 };
 
 const macosMajorVersion = () => {
@@ -1613,10 +1723,8 @@ const reloadMenuTargetWindow = () => {
 
 const relaunchFromMenu = () => {
   prepareForQuit();
-  setImmediate(() => {
-    app.relaunch();
-    app.exit(0);
-  });
+  app.relaunch();
+  app.exit(0);
 };
 
 const nextWindowLabel = () => {
@@ -1681,7 +1789,6 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
     backgroundColor: '#151313',
     frame: process.platform === 'win32' ? false : undefined,
     autoHideMenuBar: autoHidesNativeMenuBar,
-    // Tauri used an overlay title bar with explicit traffic-light placement.
     // Electron's hiddenInset adds its own extra inset, which leaves the controls
     // visibly lower than the app header. Use a plain hidden title bar instead.
     titleBarStyle: usesCustomTitleBar ? 'hidden' : 'default',
@@ -1704,7 +1811,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
       // sandbox must stay off: the preload uses contextBridge + ipcRenderer
       // from Electron's Node layer. contextIsolation + nodeIntegration:false
       // keep the renderer world walled off from Node. Do NOT flip to true —
-      // the preload would fail to load and __TAURI__ would go undefined.
+      // the preload would fail to load and the desktop bridge would be unavailable.
       sandbox: false,
     },
   };
@@ -1750,7 +1857,9 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
   }
 
   browserWindow.on('resize', () => {
-    emitToWindow(browserWindow, 'openchamber:window-resized');
+    if (process.platform === 'darwin') {
+      emitToWindow(browserWindow, 'openchamber:window-resized');
+    }
     debounceWindowStatePersist(browserWindow, false);
   });
   browserWindow.on('maximize', () => {
@@ -1786,11 +1895,12 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
       state.mainWindow = null;
     }
     if (BrowserWindow.getAllWindows().length === 0) {
-      if (!state.installingUpdate) {
-        killSidecar();
-      }
       if (process.platform !== 'darwin') {
-        app.quit();
+        if (state.installingUpdate) {
+          app.quit();
+        } else {
+          performConfirmedQuit();
+        }
       }
     }
   });
@@ -2002,7 +2112,9 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
     icon: getWindowIconPath(),
     show: false,
     backgroundColor: '#151313',
-    titleBarStyle: process.platform === 'darwin' ? 'hidden' : 'default',
+    frame: process.platform === 'win32' ? false : undefined,
+    autoHideMenuBar: process.platform !== 'darwin',
+    titleBarStyle: process.platform === 'darwin' || process.platform === 'win32' ? 'hidden' : 'default',
     trafficLightPosition: process.platform === 'darwin' ? { x: 16, y: 17 } : undefined,
     webPreferences: {
       additionalArguments: [
@@ -2413,11 +2525,11 @@ const WINDOWS_CLI_BY_APP_ID = {
 
 const WINDOWS_APP_EXECUTABLES = {
   terminal: ['wt.exe', 'WindowsTerminal.exe'],
-  vscode: ['code.cmd', 'code.exe'],
-  cursor: ['cursor.cmd', 'cursor.exe'],
-  vscodium: ['codium.cmd', 'codium.exe'],
-  windsurf: ['windsurf.cmd', 'windsurf.exe'],
-  zed: ['zed.exe'],
+  vscode: ['code.exe', 'code.cmd'],
+  cursor: ['cursor.exe', 'cursor.cmd'],
+  vscodium: ['codium.exe', 'codium.cmd'],
+  windsurf: ['windsurf.exe', 'windsurf.cmd'],
+  zed: ['zed.exe', 'zed.cmd'],
   'visual-studio': ['devenv.exe'],
   'sublime-text': ['subl.exe', 'sublime_text.exe'],
 };
@@ -2453,6 +2565,134 @@ const findWindowsExecutable = (appId) => {
   return null;
 };
 
+const resolveWindowsScriptIconExecutable = (scriptPath) => {
+  if (!scriptPath || !/\.(?:cmd|bat)$/i.test(scriptPath)) return null;
+  let source = '';
+  try {
+    source = fs.readFileSync(scriptPath, 'utf8');
+  } catch {
+    return null;
+  }
+  const scriptDir = path.dirname(scriptPath);
+  const matches = [...source.matchAll(/(?:(?:%~dp0|%~dp0\\|%~dp0\/|\.\.\\|\.\.\/|[A-Za-z]:\\|[A-Za-z]:\/)[^"'\r\n]*?\.exe)/gi)];
+  for (const match of matches) {
+    const raw = String(match[0] || '').replace(/^%~dp0[\\/]?/i, '').trim();
+    const candidate = path.isAbsolute(raw) ? raw : path.resolve(scriptDir, raw);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+};
+
+let windowsTerminalPackagePathCache;
+
+const resolveWindowsTerminalPackagePath = () => {
+  if (windowsTerminalPackagePathCache !== undefined) return windowsTerminalPackagePathCache;
+
+  const powershell = runWhere('powershell.exe') || runWhere('pwsh.exe');
+  if (powershell) {
+    const command = '$packages = @(' +
+      'Get-AppxPackage -Name Microsoft.WindowsTerminal -ErrorAction SilentlyContinue;' +
+      'Get-AppxPackage -Name Microsoft.WindowsTerminalPreview -ErrorAction SilentlyContinue' +
+      ') | Where-Object { $_.InstallLocation } | Sort-Object Version -Descending; ' +
+      'if ($packages) { $packages[0].InstallLocation }';
+    const result = spawnSync(powershell, ['-NoProfile', '-NonInteractive', '-Command', command], {
+      encoding: 'utf8',
+      windowsHide: true,
+    });
+    if (!result.error && result.status === 0) {
+      const packagePath = String(result.stdout || '').split(/\r?\n/).map((line) => line.trim()).find(Boolean);
+      if (packagePath && fs.existsSync(packagePath)) {
+        windowsTerminalPackagePathCache = packagePath;
+        return windowsTerminalPackagePathCache;
+      }
+    }
+  }
+
+  const programFilesRoots = [process.env.ProgramW6432, process.env.ProgramFiles, 'C:\\Program Files']
+    .filter((value, index, values) => typeof value === 'string' && value && values.indexOf(value) === index);
+  for (const root of programFilesRoots) {
+    const windowsAppsPath = path.join(root, 'WindowsApps');
+    let entries = [];
+    try {
+      entries = fs.readdirSync(windowsAppsPath, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    const packageNames = entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .filter((name) => /^Microsoft\.WindowsTerminal(?:Preview)?_.*__8wekyb3d8bbwe$/i.test(name))
+      .sort()
+      .reverse();
+    const stable = packageNames.find((name) => /^Microsoft\.WindowsTerminal_/i.test(name));
+    const selected = stable || packageNames[0];
+    if (selected) {
+      windowsTerminalPackagePathCache = path.join(windowsAppsPath, selected);
+      return windowsTerminalPackagePathCache;
+    }
+  }
+
+  windowsTerminalPackagePathCache = null;
+  return windowsTerminalPackagePathCache;
+};
+
+const resolveWindowsTerminalIconPath = () => {
+  const packagePath = resolveWindowsTerminalPackagePath();
+  if (!packagePath) return null;
+  const candidates = [
+    path.join(packagePath, 'Images', 'Square44x44Logo.targetsize-96_altform-unplated.png'),
+    path.join(packagePath, 'Images', 'Square44x44Logo.targetsize-96.png'),
+    path.join(packagePath, 'Images', 'StoreLogo.scale-200.png'),
+    path.join(packagePath, 'Images', 'StoreLogo.scale-100.png'),
+  ];
+  return candidates.find((candidate) => fs.existsSync(candidate)) || null;
+};
+
+const resolveWindowsTerminalExecutable = () => {
+  const packagePath = resolveWindowsTerminalPackagePath();
+  if (packagePath) {
+    const executable = path.join(packagePath, 'WindowsTerminal.exe');
+    if (fs.existsSync(executable)) return executable;
+  }
+  return findWindowsExecutable('terminal');
+};
+
+const imageFileToDataUrl = (filePath) => {
+  if (!filePath) return null;
+  try {
+    return `data:image/png;base64,${fs.readFileSync(filePath).toString('base64')}`;
+  } catch {
+    return null;
+  }
+};
+
+const resolveWindowsAppIconExecutable = ({ appId, appName }) => {
+  if (appId === 'finder') {
+    const explorerPath = path.join(process.env.SystemRoot || 'C:\\Windows', 'explorer.exe');
+    return fs.existsSync(explorerPath) ? explorerPath : 'explorer.exe';
+  }
+  if (appId === 'terminal') {
+    return resolveWindowsTerminalExecutable();
+  }
+
+  const executable = findWindowsExecutable(appId) || findWindowsAppNameExecutable(appName);
+  if (!executable) return null;
+  if (/\.exe$/i.test(executable)) return executable;
+  return resolveWindowsScriptIconExecutable(executable) || executable;
+};
+
+const windowsIconToDataUrl = async (executablePath) => {
+  if (!executablePath) return null;
+  try {
+    const image = await app.getFileIcon(executablePath, { size: 'normal' });
+    if (image.isEmpty()) return null;
+    return image.toDataURL();
+  } catch {
+    return null;
+  }
+};
+
 const findWindowsAppNameExecutable = (appName) => {
   const program = `${String(appName || '').trim()}.exe`.replace(/\s+/g, '');
   return program === '.exe' ? null : runWhere(program);
@@ -2465,13 +2705,22 @@ const isWindowsAppInstalled = ({ appId, appName }) => {
   return Boolean(findWindowsAppNameExecutable(appName));
 };
 
-const buildWindowsInstalledApps = (apps) => {
+const buildWindowsInstalledApps = async (apps) => {
   const seen = new Set();
-  return (Array.isArray(apps) ? apps : [])
+  const names = (Array.isArray(apps) ? apps : [])
     .map((appName) => String(appName || '').trim())
     .filter((appName) => appName && !seen.has(appName) && seen.add(appName))
-    .filter((appName) => isWindowsAppInstalled({ appId: getWindowsAppIdForName(appName), appName }))
-    .map((name) => ({ name, iconDataUrl: null }));
+    .filter((appName) => isWindowsAppInstalled({ appId: getWindowsAppIdForName(appName), appName }));
+  const results = [];
+  for (const name of names) {
+    const appId = getWindowsAppIdForName(name);
+    const executablePath = resolveWindowsAppIconExecutable({ appId, appName: name });
+    const iconDataUrl = appId === 'terminal'
+      ? imageFileToDataUrl(resolveWindowsTerminalIconPath()) || await windowsIconToDataUrl(executablePath)
+      : await windowsIconToDataUrl(executablePath);
+    results.push({ name, iconDataUrl });
+  }
+  return results;
 };
 
 const buildWindowsOpenProjectSpecs = ({ projectPath, appId, appName }) => {
@@ -2486,7 +2735,11 @@ const buildWindowsOpenProjectSpecs = ({ projectPath, appId, appName }) => {
     }
     const shell = runWhere('pwsh.exe') || runWhere('powershell.exe');
     if (shell) {
-      specs.push({ program: shell, args: ['-NoExit', '-Command', `Set-Location -LiteralPath ${JSON.stringify(projectPath)}`] });
+      specs.push({ program: shell, args: ['-NoExit', '-Command', `Set-Location -LiteralPath ${JSON.stringify(projectPath)}`], shellStart: true });
+    }
+    const commandPrompt = process.env.ComSpec || runWhere('cmd.exe');
+    if (commandPrompt) {
+      specs.push({ program: commandPrompt, args: ['/k', 'cd', '/d', projectPath], shellStart: true });
     }
     return specs;
   }
@@ -2604,6 +2857,18 @@ const launchWindowsSpec = (spec) => {
   const program = resolveWindowsLaunchProgram(spec.program);
   if (!program) {
     throw new Error('program not found');
+  }
+
+  if (spec.shellStart) {
+    const commandLine = ['start', '""', quoteWindowsCommandArg(program), ...spec.args.map(quoteWindowsCommandArg)].join(' ');
+    const child = spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', commandLine], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: false,
+      windowsVerbatimArguments: true,
+    });
+    child.unref();
+    return;
   }
 
   if (/\.(cmd|bat)$/i.test(program)) {
@@ -2869,6 +3134,11 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         throw new Error('Project path, app id, and app name are required');
       }
       if (process.platform === 'win32') {
+        if (appId === 'finder') {
+          const error = await shell.openPath(projectPath);
+          if (error) throw new Error(error);
+          return null;
+        }
         runSpecChain(buildWindowsOpenProjectSpecs({ projectPath, appId, appName }), appName);
         return null;
       }
@@ -2899,7 +3169,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
 
     case 'desktop_filter_installed_apps': {
       if (process.platform === 'win32') {
-        return buildWindowsInstalledApps(args.apps).map((app) => app.name);
+        return (await buildWindowsInstalledApps(args.apps)).map((app) => app.name);
       }
       if (process.platform !== 'darwin') {
         throw new Error('desktop_filter_installed_apps is only supported on macOS');
@@ -2913,7 +3183,18 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
 
     case 'desktop_fetch_app_icons': {
       if (process.platform === 'win32') {
-        return [];
+        const names = Array.isArray(args.apps) ? args.apps : [];
+        const results = [];
+        for (const name of names) {
+          const appName = String(name || '').trim();
+          if (!appName) continue;
+          const appId = getWindowsAppIdForName(appName);
+          const dataUrl = appId === 'terminal'
+            ? imageFileToDataUrl(resolveWindowsTerminalIconPath()) || await windowsIconToDataUrl(resolveWindowsAppIconExecutable({ appId, appName }))
+            : await windowsIconToDataUrl(resolveWindowsAppIconExecutable({ appId, appName }));
+          if (dataUrl) results.push({ app: appName, data_url: dataUrl });
+        }
+        return results;
       }
       if (process.platform !== 'darwin') {
         throw new Error('desktop_fetch_app_icons is only supported on macOS');
@@ -2942,7 +3223,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       const isCacheStale = !cache || (now - Number(cache.updatedAt || 0)) > INSTALLED_APPS_CACHE_TTL_SECS;
       const refresh = async () => {
         const apps = process.platform === 'win32'
-          ? buildWindowsInstalledApps(args.apps)
+          ? await buildWindowsInstalledApps(args.apps)
           : await buildInstalledApps(Array.isArray(args.apps) ? args.apps : []);
         await fsp.mkdir(path.dirname(cachePath), { recursive: true });
         await fsp.writeFile(cachePath, JSON.stringify({ updatedAt: now, apps }, null, 2));
@@ -3028,9 +3309,8 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     }
 
     case 'desktop_set_vibrancy': {
-      // Vibrancy (macOS blur) is not supported in the Electron shell — the
-      // Tauri build used NSVisualEffectView via Tauri plugin, Electron has
-      // no equivalent for our titleBarStyle:'hidden' setup. Persist the
+      // Vibrancy (macOS blur) is not supported in the Electron shell for our
+      // titleBarStyle:'hidden' setup. Persist the
       // disabled state so settings UI reflects it; args.enabled is ignored.
       await mutateSettingsRoot((root) => {
         root.desktopVibrancy = false;
@@ -3040,13 +3320,6 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
 
     case 'desktop_check_for_updates': {
       const currentVersion = APP_VERSION;
-      let payload = null;
-      try {
-        const response = await fetch(UPDATE_METADATA_URL, { signal: AbortSignal.timeout(10_000) });
-        payload = await response.json();
-      } catch {
-      }
-
       let updateResult = null;
       try {
         updateResult = await autoUpdater.checkForUpdates();
@@ -3056,14 +3329,12 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       const updateInfo = updateResult?.updateInfo;
       const nextVersion =
         (typeof updateInfo?.version === 'string' && updateInfo.version) ||
-        (typeof payload?.version === 'string' && payload.version) ||
         currentVersion;
       const available = compareSemver(nextVersion, currentVersion) > 0;
       const body =
-        (typeof payload?.notes === 'string' && payload.notes.trim() ? payload.notes : null) ||
         (typeof updateInfo?.releaseNotes === 'string' && updateInfo.releaseNotes.trim() ? updateInfo.releaseNotes : null) ||
         await parseRelevantChangelogNotes(currentVersion, nextVersion);
-      state.pendingUpdate = available ? { version: nextVersion, metadata: payload, electronUpdate: updateResult } : null;
+      state.pendingUpdate = available ? { version: nextVersion, electronUpdate: updateResult } : null;
       return {
         available,
         currentVersion,
@@ -3071,7 +3342,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         body: body || null,
         date:
           (typeof updateInfo?.releaseDate === 'string' && updateInfo.releaseDate) ||
-          (typeof payload?.pub_date === 'string' ? payload.pub_date : null),
+          null,
       };
     }
 
@@ -3152,8 +3423,10 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       setImmediate(() => {
         try {
           if (applyUpdate) {
+            killSidecar();
             autoUpdater.quitAndInstall();
           } else {
+            prepareForQuit();
             app.relaunch();
             app.exit(0);
           }
@@ -3671,22 +3944,32 @@ app.on('window-all-closed', () => {
     return;
   }
 
-  if (!state.installingUpdate) {
-    killSidecar();
-    void sshManager.shutdownAll();
-  }
   if (process.platform !== 'darwin') {
-    app.quit();
+    if (state.installingUpdate) {
+      app.quit();
+    } else {
+      performConfirmedQuit();
+    }
   }
 });
 
 app.on('before-quit', (event) => {
-  if (state.quitConfirmed || state.installingUpdate || process.platform !== 'darwin') {
-    state.quitRequested = true;
+  state.quitRequested = true;
+
+  if (state.installingUpdate) {
     return;
   }
-  event.preventDefault();
-  void requestQuitWithConfirmation();
+
+  if (process.platform === 'darwin' && !state.quitConfirmed) {
+    event.preventDefault();
+    void requestQuitWithConfirmation();
+    return;
+  }
+
+  if (!state.backgroundShutdownComplete) {
+    event.preventDefault();
+    performConfirmedQuit();
+  }
 });
 
 app.on('second-instance', (_event, argv) => {

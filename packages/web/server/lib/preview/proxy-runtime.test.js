@@ -97,6 +97,21 @@ describe('preview body URL rewriting', () => {
     expect(output).toContain('const url = "/api/data";');
   });
 
+  it('rewrites inline module imports in HTML responses', () => {
+    const input = [
+      '<script type="module">',
+      'import RefreshRuntime from "/@react-refresh";',
+      'window.__vite_plugin_react_preamble_installed__ = true;',
+      '</script>',
+      '<script>const refreshUrl = "/@react-refresh";</script>',
+    ].join('');
+    const output = rewrite(input, 'html');
+
+    expect(output).toContain('from "/api/preview/proxy/abc123/@react-refresh"');
+    expect(output).toContain('window.__vite_plugin_react_preamble_installed__ = true;');
+    expect(output).toContain('const refreshUrl = "/@react-refresh";');
+  });
+
   it('removes CSP meta tags that block the preview bridge', () => {
     const input = '<meta http-equiv="Content-Security-Policy" content="script-src \'self\'"><div>Preview</div>';
     const output = rewrite(input, 'html');
@@ -107,7 +122,7 @@ describe('preview body URL rewriting', () => {
 
   it('adds preview and URL auth tokens to rewritten proxy resources when provided', () => {
     const output = rewritePreviewBody({
-      bodyText: '<script src="/entry.js"></script><a href="http://localhost:3000/docs?x=1&oc_client_token=legacy">Docs</a>',
+      bodyText: '<script src="/entry.js"></script><script type="module">import RefreshRuntime from "/@react-refresh";</script><a href="http://localhost:3000/docs?x=1&oc_client_token=legacy">Docs</a>',
       kind: 'html',
       proxyBasePath: '/api/preview/proxy/abc123',
       targetOrigin: 'http://127.0.0.1:3000',
@@ -116,6 +131,7 @@ describe('preview body URL rewriting', () => {
     });
 
     expect(output).toContain('src="/api/preview/proxy/abc123/entry.js?oc_preview_token=preview-secret&oc_url_token=url-secret"');
+    expect(output).toContain('from "/api/preview/proxy/abc123/@react-refresh?oc_preview_token=preview-secret&oc_url_token=url-secret"');
     expect(output).toContain('href="/api/preview/proxy/abc123/docs?x=1&oc_preview_token=preview-secret&oc_url_token=url-secret"');
     expect(output).not.toContain('oc_client_token');
   });
