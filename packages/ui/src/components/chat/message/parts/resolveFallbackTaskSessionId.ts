@@ -74,13 +74,16 @@ export function resolveFallbackTaskSessionId(params: ResolveFallbackParams): str
 
   // When the task is still running, apply no time window — late-appearing
   // child sessions should still match. Once finalized, restrict to sessions
-  // created shortly after the task started to avoid binding to stale siblings.
+  // created within a window around the task start to avoid binding to stale
+  // siblings. The lower bound is generously early to accommodate timing jitter
+  // (child session creation timestamps can precede the tool's recorded start
+  // by a few ms due to server ordering).
   if (isTaskFinalized) {
     const windowMs = hasRetried ? TASK_SESSION_MATCH_WINDOW_WIDE_MS : TASK_SESSION_MATCH_WINDOW_MS;
     const latestAllowed = taskStartTime + windowMs;
     candidates = candidates.filter((session) => {
       const created = session.time?.created;
-      return typeof created === 'number' && created >= taskStartTime && created <= latestAllowed;
+      return typeof created === 'number' && created >= taskStartTime - 2_000 && created <= latestAllowed;
     });
   }
 
