@@ -10,7 +10,7 @@ import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { cn } from '@/lib/utils';
-import { isOpenInAppAvailable, subscribeRemoteSshActive, getRemoteSshSnapshot, openDesktopPath, openDesktopProjectInApp, openDesktopRemoteProjectInApp } from '@/lib/desktop';
+import { isElectronShell, isDesktopLocalOriginActive, subscribeRemoteSshActive, getRemoteSshSnapshot, openDesktopPath, openDesktopProjectInApp, openDesktopRemoteProjectInApp } from '@/lib/desktop';
 import { DEFAULT_OPEN_IN_APP_ID, OPEN_IN_APPS } from '@/lib/openInApps';
 import { useOpenInAppsStore, type OpenInAppOption } from '@/stores/useOpenInAppsStore';
 import { useI18n } from '@/lib/i18n';
@@ -89,6 +89,8 @@ export const OpenInAppButton = ({ directory, className }: OpenInAppButtonProps) 
 
   const isRemote = React.useSyncExternalStore(subscribeRemoteSshActive, getRemoteSshSnapshot);
 
+  const isAvailable = isElectronShell() && (isDesktopLocalOriginActive() || isRemote);
+
   const displayableApps = React.useMemo(() => {
     if (!isRemote) return availableApps;
     return availableApps.filter((app) => {
@@ -109,7 +111,7 @@ export const OpenInAppButton = ({ directory, className }: OpenInAppButtonProps) 
     return withFallbackIcon(OPEN_IN_APPS[0]);
   }, [displayableApps, availableApps, selectedAppId]);
 
-  if (!isOpenInAppAvailable() || !directory) {
+  if (!isAvailable || !directory) {
     return null;
   }
 

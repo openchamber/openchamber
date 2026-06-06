@@ -4245,15 +4245,14 @@ const isActualLocalOrigin = (webContents) => {
         const allowed = new URL(state.localOrigin);
         if (allowed.origin === url.origin) return true;
       } catch {}
-      if (state.sidecarUrl) {
-        try {
-          const allowed = new URL(state.sidecarUrl);
-          if (allowed.origin === url.origin) return true;
-        } catch {}
-      }
-      return false;
     }
-    // No explicit local origin configured — fall back to loopback check
+    if (state.sidecarUrl) {
+      try {
+        const allowed = new URL(state.sidecarUrl);
+        if (allowed.origin === url.origin) return true;
+      } catch {}
+    }
+    if (state.localOrigin) return false;
     return isLoopback;
   } catch {
     return false;
@@ -4292,10 +4291,6 @@ const isSshTunnelOrigin = (webContents) => {
   } catch {
     return false;
   }
-};
-
-const isLocalSender = (webContents) => {
-  return isActualLocalOrigin(webContents) || isSshTunnelOrigin(webContents);
 };
 
 // desktop_open_remote_in_app, desktop_open_remote_file_in_app, and

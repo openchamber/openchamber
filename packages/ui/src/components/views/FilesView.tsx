@@ -70,7 +70,7 @@ import { getDefaultTheme } from '@/lib/theme/themes';
 import { openDesktopFileInApp, openDesktopPath, subscribeRemoteSshActive, getRemoteSshSnapshot, openDesktopRemoteFileInApp, isOpenInAppAvailable } from '@/lib/desktop';
 import { useOpenInAppsStore } from '@/stores/useOpenInAppsStore';
 import { OPEN_IN_APPS } from '@/lib/openInApps';
-import { useI18n } from '@/lib/i18n';
+import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 
 type FileNode = {
   name: string;
