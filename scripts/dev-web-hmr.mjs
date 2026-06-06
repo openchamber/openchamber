@@ -146,6 +146,16 @@ async function shutdown(exitCode = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
   await Promise.all([stopChildTree(api), stopChildTree(vite)]);
+  // Clean up orphaned OpenCode processes that weren't killed by
+  // the Express server's shutdown (e.g. when nodemon is killed first).
+  // Scope to the auto-started port by only killing processes bound to 127.0.0.1
+  // that aren't on port 4096 (the user's external server).
+  try {
+    const { spawnSync } = await import('child_process');
+    spawnSync('pkill', ['-f', 'opencode serve.*--hostname 127.0.0.1'], { stdio: 'ignore' });
+  } catch {
+    // best-effort
+  }
   process.exit(exitCode);
 }
 
