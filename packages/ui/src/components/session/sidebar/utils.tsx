@@ -67,15 +67,15 @@ export const formatSessionCompactDateLabel = (updatedMs: number): string => {
     return `${Math.floor(diff / hour)}h`;
   }
   if (diff < week) {
-    return t('common.relative.daysAgoShort', { count: Math.floor(diff / day) }).replace(/^il y a /, '');
+    return t('common.relative.daysAgoCompact', { count: Math.floor(diff / day) });
   }
   if (diff < 5 * week) {
-    return t('common.relative.weeksAgoShort', { count: Math.floor(diff / week) }).replace(/^il y a /, '');
+    return t('common.relative.weeksAgoCompact', { count: Math.floor(diff / week) });
   }
   if (diff < year) {
     return `${Math.floor(diff / month)}mo`;
   }
-  return t('common.relative.yearsAgoShort', { count: Math.floor(diff / year) }).replace(/^il y a /, '');
+  return t('common.relative.yearsAgoCompact', { count: Math.floor(diff / year) });
 };
 
 export const normalizePath = (value?: string | null) => {
