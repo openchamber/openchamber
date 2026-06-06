@@ -1335,6 +1335,8 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         scrollEl.scrollTop += prependedHeight;
     });
 
+    const [virtualVersion, bumpVirtualVersion] = React.useReducer((v: number) => v + 1, 0);
+
     const historyVirtualizer = useVirtualizer({
         count: historyEntries.length,
         getScrollElement: resolveScrollContainer,
@@ -1344,6 +1346,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         useAnimationFrameWithResizeObserver: true,
         overscan: MESSAGE_LIST_OVERSCAN,
         enabled: shouldVirtualizeHistory,
+        onChange: bumpVirtualVersion,
     });
 
     React.useLayoutEffect(() => {
@@ -1400,7 +1403,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
 
     const historyVirtualRows = React.useMemo(
         () => (shouldVirtualizeHistory ? historyVirtualizer.getVirtualItems() : EMPTY_VIRTUAL_ROWS),
-        [historyVirtualizer, shouldVirtualizeHistory],
+        [historyVirtualizer, shouldVirtualizeHistory, virtualVersion],
     );
 
     const allEntries = React.useMemo(() => {
