@@ -196,6 +196,7 @@ const ACTIVE_SESSION_WATCHDOG_INTERVAL_MS = 5_000
 const ACTIVE_SESSION_STATUS_POLL_INTERVAL_MS = 5_000
 const ACTIVE_SESSION_STALE_EVENT_MS = 20_000
 const ACTIVE_SESSION_FULL_RESYNC_COOLDOWN_MS = 15_000
+const CHILD_SESSION_DISCOVERY_INTERVAL_MS = 15_000
 const requestSignature = (items: Array<{ id: string }> | undefined): string => {
   if (!items || items.length === 0) return ""
   return items
@@ -1559,6 +1560,7 @@ export function SyncProvider(props: {
   const lastActiveEventAtByDirectoryRef = useRef(new Map<string, number>())
   const lastStatusPollAtByDirectoryRef = useRef(new Map<string, number>())
   const lastFullResyncAtByDirectoryRef = useRef(new Map<string, number>())
+  const lastChildDiscoveryAtByDirectoryRef = useRef(new Map<string, number>())
   const resyncingDirectoriesRef = useRef(new Set<string>())
   const statusPollingDirectoriesRef = useRef(new Set<string>())
   const pipelineReconnectRef = useRef<((reason?: string) => void) | null>(null)
@@ -1791,6 +1793,53 @@ export function SyncProvider(props: {
     let stopped = false
     let running = false
 
+    const discoverChildSessions = async (
+      directory: string,
+      store: StoreApi<DirectoryStore>,
+      parentSessionIds: string[],
+    ) => {
+      if (parentSessionIds.length === 0) return
+      try {
+        const scopedClient = opencodeClient.getScopedSdkClient(directory)
+        const result = await scopedClient.session.list({ directory, limit: 200 })
+        const allSessions = ((result as { data?: unknown }).data ?? []) as Session[]
+        const state = store.getState()
+        const existingIds = new Set(state.session.map((s) => s.id))
+        const parentIdSet = new Set(parentSessionIds)
+        const newChildSessions: Session[] = []
+        for (const session of allSessions) {
+          if (
+            session?.id
+            && !existingIds.has(session.id)
+            && (session as { parentID?: string | null }).parentID
+            && parentIdSet.has((session as { parentID: string }).parentID)
+          ) {
+            newChildSessions.push(session)
+          }
+        }
+        if (newChildSessions.length === 0) return
+        // Collect unique parent IDs for materialization
+        const parentIdsForMaterialization = new Set<string>()
+        for (const session of newChildSessions) {
+          const pid = (session as { parentID?: string | null }).parentID
+          if (pid) parentIdsForMaterialization.add(pid)
+        }
+        store.setState((state: DirectoryStore) => {
+          const sessions = [...state.session, ...newChildSessions].sort((a, b) =>
+            a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+          )
+          return { session: sessions, limit: Math.max(sessions.length, 50) }
+        })
+        // Trigger parent session materialization so the task tool part
+        // state (metadata, sessionId, output) is refreshed.
+        for (const pid of parentIdsForMaterialization) {
+          enqueueSessionMaterialization(directory, pid, childStores)
+        }
+      } catch {
+        // Best-effort — next tick will retry.
+      }
+    }
+
     const pollDirectoryStatuses = async (
       directory: string,
       store: StoreApi<DirectoryStore>,
@@ -1849,6 +1898,14 @@ export function SyncProvider(props: {
             ) {
               pipelineReconnectRef.current?.("active_stream_stale")
               triggerDirectoryResync(directory)
+            }
+
+            // Discover child sessions created by other OpenCode instances
+            // that didn't broadcast a session.created event on this stream.
+            const lastChildDiscoveryAt = lastChildDiscoveryAtByDirectoryRef.current.get(directory) ?? 0
+            if (now - lastChildDiscoveryAt >= CHILD_SESSION_DISCOVERY_INTERVAL_MS) {
+              lastChildDiscoveryAtByDirectoryRef.current.set(directory, now)
+              void discoverChildSessions(directory, store, candidateSessionIds)
             }
           }
         })

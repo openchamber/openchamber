@@ -45,6 +45,7 @@
         "@radix-ui/react-tooltip": "^1.2.8",
         "@types/react-syntax-highlighter": "^15.5.13",
         "@xenova/transformers": "^2.17.2",
+        "@zumer/snapdom": "^2.12.8",
         "bun-pty": "^0.4.5",
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",
@@ -98,7 +99,7 @@
     },
     "packages/electron": {
       "name": "@openchamber/electron",
-      "version": "1.12.1",
+      "version": "1.12.3",
       "dependencies": {
         "@openchamber/web": "workspace:*",
         "electron-context-menu": "^4.1.2",
@@ -113,7 +114,7 @@
     },
     "packages/ui": {
       "name": "@openchamber/ui",
-      "version": "1.12.1",
+      "version": "1.12.3",
       "dependencies": {
         "@base-ui/react": "^1.4.0",
         "@codemirror/autocomplete": "^6.20.0",
@@ -214,7 +215,7 @@
     },
     "packages/vscode": {
       "name": "openchamber",
-      "version": "1.12.1",
+      "version": "1.12.3",
       "dependencies": {
         "@openchamber/ui": "workspace:*",
         "@opencode-ai/sdk": "^1.16.0",
@@ -237,7 +238,7 @@
     },
     "packages/web": {
       "name": "@openchamber/web",
-      "version": "1.12.1",
+      "version": "1.12.3",
       "bin": {
         "openchamber": "./bin/cli.js",
       },
@@ -1409,7 +1410,7 @@
 
     "@yarnpkg/lockfile": ["@yarnpkg/lockfile@1.1.0", "", {}, "sha512-GpSwvyXOcOOlV70vbnzjj4fW5xW/FdUF6nQEt1ENy7m4ZCczi1+/buVUPAqmGfqznsORNFzUMjctTIp8a9tuCQ=="],
 
-    "@zumer/snapdom": ["@zumer/snapdom@2.12.0", "", {}, "sha512-TdLGu+1RkKI3JKfMFvn1gRPD/rl8hrAeN6aFjjd0w7S39nulbd94ChxSlfH7nSCm8kzuQkeWFxIsij4+Mk1RDg=="],
+    "@zumer/snapdom": ["@zumer/snapdom@2.12.8", "", {}, "sha512-dLX6ZMNjLveasn9yhcruOOfd8GBZBDp59F7iJoLlGf7BnGp0vfVsjxIZDIjN2UTZJN1KoJR/BXsxEnAyY7LuXA=="],
 
     "abbrev": ["abbrev@1.1.1", "", {}, "sha512-nne9/IiQ/hzIhY6pdDnbBtz7DjPTKrY00P/zvPSm5pOFkl6xuGrGnXn/VtTNNfNtAfZ9/1RtehkszU9qcTii0Q=="],
 
@@ -3378,6 +3379,8 @@
     "@npmcli/agent/lru-cache": ["lru-cache@10.4.3", "", {}, "sha512-JNAzZcXrCt42VGLuYz0zfAzDfAvJWW6AfYlDBQyDV5DClI2m5sAmK+OIO7s59XfsRsWHp02jAJrRadPRGTt6SQ=="],
 
     "@npmcli/agent/socks-proxy-agent": ["socks-proxy-agent@8.0.5", "", { "dependencies": { "agent-base": "^7.1.2", "debug": "^4.3.4", "socks": "^2.8.3" } }, "sha512-HehCEsotFqbPW9sJ8WVYB6UbmIMv7kUUORIF2Nncq4VQvBfNBLibW9YZR5dlYCSUhwcD628pRllm7n+E+YTzJw=="],
+
+    "@openchamber/ui/@zumer/snapdom": ["@zumer/snapdom@2.12.0", "", {}, "sha512-TdLGu+1RkKI3JKfMFvn1gRPD/rl8hrAeN6aFjjd0w7S39nulbd94ChxSlfH7nSCm8kzuQkeWFxIsij4+Mk1RDg=="],
 
     "@openchamber/ui/ghostty-web": ["ghostty-web@0.4.0", "", {}, "sha512-0puDBik2qapbD/QQBW9o5ZHfXnZBqZWx/ctBiVtKZ6ZLds4NYb+wZuw1cRLXZk9zYovIQ908z3rvFhexAvc5Hg=="],
 

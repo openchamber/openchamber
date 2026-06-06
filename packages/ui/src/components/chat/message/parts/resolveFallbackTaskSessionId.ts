@@ -60,7 +60,7 @@ export function resolveFallbackTaskSessionId(params: ResolveFallbackParams): str
     hasRetried = false,
   } = params;
 
-  if (!isTaskTool || !parentSessionId || typeof taskStartTime !== 'number') {
+  if (!isTaskTool || !parentSessionId) {
     return undefined;
   }
 
@@ -74,11 +74,10 @@ export function resolveFallbackTaskSessionId(params: ResolveFallbackParams): str
 
   // When the task is still running, apply no time window — late-appearing
   // child sessions should still match. Once finalized, restrict to sessions
-  // created within a window around the task start to avoid binding to stale
-  // siblings. The lower bound is generously early to accommodate timing jitter
-  // (child session creation timestamps can precede the tool's recorded start
-  // by a few ms due to server ordering).
-  if (isTaskFinalized) {
+  // created within a generous window around the task start to avoid binding
+  // to stale siblings. If taskStartTime is unavailable (cross-OpenCode
+  // sessions), skip the time filter entirely.
+  if (typeof taskStartTime === 'number' && isTaskFinalized) {
     const windowMs = hasRetried ? TASK_SESSION_MATCH_WINDOW_WIDE_MS : TASK_SESSION_MATCH_WINDOW_MS;
     const latestAllowed = taskStartTime + windowMs;
     candidates = candidates.filter((session) => {
@@ -104,6 +103,18 @@ export function resolveFallbackTaskSessionId(params: ResolveFallbackParams): str
 
   if (liveCandidates.length === 1) {
     return liveCandidates[0].id;
+  }
+
+  // All idle: pick the most recently created child session.
+  // This handles the common case where a delegation completed and the
+  // user is viewing the task tool result inline.
+  if (liveCandidates.length === 0 && candidates.length > 1) {
+    const sorted = [...candidates].sort((a, b) => {
+      const aCreated = typeof a.time?.created === 'number' ? a.time.created : 0;
+      const bCreated = typeof b.time?.created === 'number' ? b.time.created : 0;
+      return bCreated - aCreated;
+    });
+    return sorted[0].id;
   }
 
   // Ambiguous — do not guess

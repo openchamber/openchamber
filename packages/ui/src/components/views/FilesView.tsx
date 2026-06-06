@@ -1490,9 +1490,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
     if (draftContent === '' && fileContent !== '') {
       console.warn(
-        `[saveDraft] saving empty content for "${selectedFile.path}" (${fileContent.length} bytes were expected). ` +
-        'If this is unintentional, the server-side atomic write or read retry may have missed a race.',
-      )
+        `[saveDraft] refusing to save empty draft for "${selectedFile.path}" (${fileContent.length} bytes were expected). ` +
+        'The file may have been read during a concurrent write (O_TRUNC race). ' +
+        'Use Ctrl+S after content loads if the save was intentional.',
+      );
+      return false;
     }
 
     setIsSaving(true);
