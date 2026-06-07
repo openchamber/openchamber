@@ -1,6 +1,7 @@
 import {
     getStaticToolGroupName,
     getToolRenderMode,
+    isToolActivityGroupBoundary,
     shouldShowToolParamSummary as shouldShowToolParamSummaryFromMetadata,
 } from '@/lib/toolHelpers';
 
@@ -17,7 +18,7 @@ export const isExpandableTool = (toolName: unknown): boolean => {
 };
 
 export const isStandaloneTool = (toolName: unknown): boolean => {
-    return getToolRenderMode(toolName) === 'standalone';
+    return isToolActivityGroupBoundary(toolName) || getToolRenderMode(toolName) === 'standalone';
 };
 
 export const isStaticTool = (toolName: unknown): boolean => {

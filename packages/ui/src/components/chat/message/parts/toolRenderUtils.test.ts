@@ -20,6 +20,13 @@ describe('toolRenderUtils', () => {
         expect(shouldShowToolParamSummary('bash')).toBe(false);
     });
 
+    test('keeps task as both an expandable tool and an activity group boundary', () => {
+        expect(isExpandableTool('task')).toBe(true);
+        expect(isStandaloneTool('task')).toBe(true);
+        expect(isStaticTool('task')).toBe(false);
+        expect(shouldShowToolParamSummary('task')).toBe(false);
+    });
+
     test('keeps static built-in tools static without parameter summaries', () => {
         expect(isStaticTool('read')).toBe(true);
         expect(shouldShowToolParamSummary('read')).toBe(false);

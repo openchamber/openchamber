@@ -3,6 +3,7 @@ export interface ToolMetadata {
   icon?: string;
   outputLanguage?: string;
   renderMode?: 'expandable' | 'static' | 'standalone';
+  activityGroupBoundary?: boolean;
   staticGroupName?: string;
   hasCustomRendering?: boolean;
   inputFields?: {
@@ -152,7 +153,8 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
     displayName: 'Agent Task',
     category: 'ai',
     outputLanguage: 'markdown',
-    renderMode: 'standalone',
+    renderMode: 'expandable',
+    activityGroupBoundary: true,
     hasCustomRendering: true,
     inputFields: [
       { key: 'description', label: 'Task', type: 'text' },
@@ -298,6 +300,12 @@ export function shouldShowToolParamSummary(toolName: unknown): boolean {
   const canonicalName = getCanonicalToolName(toolName);
   if (!canonicalName) return false;
   return TOOL_METADATA[canonicalName]?.hasCustomRendering !== true;
+}
+
+export function isToolActivityGroupBoundary(toolName: unknown): boolean {
+  const canonicalName = getCanonicalToolName(toolName);
+  if (!canonicalName) return false;
+  return TOOL_METADATA[canonicalName]?.activityGroupBoundary === true;
 }
 
 export function getStaticToolGroupName(toolName: string): string {
