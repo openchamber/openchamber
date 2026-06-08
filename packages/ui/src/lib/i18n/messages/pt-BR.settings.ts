@@ -1593,6 +1593,8 @@ export const settingsDict = {
   "settings.openchamber.visual.field.collapsibleThinkingBlocks": "Habilitar Blocos de Raciocínio Recolhíveis",
   "settings.openchamber.visual.field.stickyUserHeaderAria": "Cabeçalho do usuário fixo",
   "settings.openchamber.visual.field.stickyUserHeader": "Cabeçalho do usuário fixo",
+  "settings.openchamber.visual.field.expandedEditorToolbarAria": "Mostrar sempre a barra de ferramentas do editor",
+  "settings.openchamber.visual.field.expandedEditorToolbar": "Mostrar sempre a barra de ferramentas do editor (ancorada sob as abas)",
   "settings.openchamber.visual.field.wideChatLayoutAria": "Layout de chat amplo",
   "settings.openchamber.visual.field.wideChatLayout": "Layout de chat amplo",
   "settings.openchamber.visual.field.showSplitAssistantMessageActionsAria": "Ações inline do assistente",

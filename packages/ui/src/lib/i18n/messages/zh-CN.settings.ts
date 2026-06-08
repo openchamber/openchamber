@@ -1593,6 +1593,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.collapsibleThinkingBlocks': '启用可折叠推理块',
   'settings.openchamber.visual.field.stickyUserHeaderAria': '固定用户消息头',
   'settings.openchamber.visual.field.stickyUserHeader': '固定用户消息头',
+  'settings.openchamber.visual.field.expandedEditorToolbarAria': 'Always show editor toolbar',
+  'settings.openchamber.visual.field.expandedEditorToolbar': 'Always show editor toolbar (docked under the file tabs)',
   'settings.openchamber.visual.field.wideChatLayoutAria': '宽聊天布局',
   'settings.openchamber.visual.field.wideChatLayout': '宽聊天布局',
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsAria': '内联助手操作',

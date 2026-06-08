@@ -945,6 +945,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.spacingDensity': 'Gęstość odstępów',
   'settings.openchamber.visual.field.stickyUserHeader': 'Przyklejony nagłówek użytkownika',
   'settings.openchamber.visual.field.stickyUserHeaderAria': 'Przyklejony nagłówek użytkownika',
+  'settings.openchamber.visual.field.expandedEditorToolbarAria': 'Always show editor toolbar',
+  'settings.openchamber.visual.field.expandedEditorToolbar': 'Always show editor toolbar (docked under the file tabs)',
   'settings.openchamber.visual.field.terminalFontSize': 'Rozmiar czcionki terminala',
   'settings.openchamber.visual.field.terminalQuickKeys': 'Szybkie klawisze terminala',
   'settings.openchamber.visual.field.terminalQuickKeysAria': 'Szybkie klawisze terminala',
