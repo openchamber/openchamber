@@ -140,6 +140,7 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
   const currentProviderId = useConfigStore((state) => state.currentProviderId);
   const currentModelId = useConfigStore((state) => state.currentModelId);
   const currentAgentName = useConfigStore((state) => state.currentAgentName);
+  const currentVariant = useConfigStore((state) => state.currentVariant);
   const voiceModeEnabled = useConfigStore((state) => state.voiceModeEnabled);
   const voiceProvider = useConfigStore((state) => state.voiceProvider);
   const speechRate = useConfigStore((state) => state.speechRate);
@@ -151,6 +152,7 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
   const openaiCompatibleVoice = useConfigStore((state) => state.openaiCompatibleVoice);
   const openaiCompatibleUrl = useConfigStore((state) => state.openaiCompatibleUrl);
   const openaiCompatibleTtsModel = useConfigStore((state) => state.openaiCompatibleTtsModel);
+  const sttApiKey = useConfigStore((state) => state.sttApiKey);
 
   const shouldCheckOpenAIAvailability = voiceModeEnabled && (voiceProvider === 'openai' || voiceProvider === 'openai-compatible');
   const shouldCheckSayAvailability = voiceModeEnabled && voiceProvider === 'say';
@@ -342,7 +344,7 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
       normalizedError.includes('network') ||
       normalizedError.includes('connection') ||
       normalizedError.includes('check connection');
-    
+
     if (isNetworkError) {
       console.error('[useBrowserVoice] Network error — staying in error state:', errorMsg);
       setError(errorMsg);
@@ -354,7 +356,7 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
       }
       return;
     }
-    
+
     console.error('[useBrowserVoice] Recognition error:', errorMsg);
     setError(errorMsg);
     setStatus('error');
@@ -373,7 +375,7 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
     if (nextRetry <= MAX_RECOVERY_RETRIES) {
       const delay = Math.min(1000 * Math.pow(2, nextRetry - 1), 8000);
       console.log(`[useBrowserVoice] Scheduling recovery retry ${nextRetry}/${MAX_RECOVERY_RETRIES} in ${delay}ms`);
-      
+
       if (recoveryTimerRef.current !== null) {
         clearTimeout(recoveryTimerRef.current);
       }
@@ -445,7 +447,11 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
         finalText.trim(),
         currentProviderId,
         currentModelId,
-        currentAgentName ?? undefined
+        currentAgentName ?? undefined,
+        undefined,
+        undefined,
+        undefined,
+        currentVariant ?? undefined,
       );
       
       // Wait for AI response and speak it
@@ -601,7 +607,7 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
       setStatus('error');
       processingMessageRef.current = false;
     }
-  }, [currentSessionId, currentProviderId, currentModelId, currentAgentName, language, sendMessage, setPendingInputText, createSession, speechRate, speechPitch, speechVolume, isServerTTSAvailable, speakServerTTS, isSayTTSAvailable, speakSayTTS, voiceProvider, sayVoice, browserVoice, openaiVoice, openaiCompatibleVoice, openaiCompatibleUrl, openaiCompatibleTtsModel, conversationMode, startCurrentSTT]);
+  }, [currentSessionId, currentProviderId, currentModelId, currentAgentName, currentVariant, language, sendMessage, setPendingInputText, createSession, speechRate, speechPitch, speechVolume, isServerTTSAvailable, speakServerTTS, isSayTTSAvailable, speakSayTTS, voiceProvider, sayVoice, browserVoice, openaiVoice, openaiCompatibleVoice, openaiCompatibleUrl, openaiCompatibleTtsModel, conversationMode, startCurrentSTT]);
 
   // Handle speech recognition result
   const handleSpeechResult = useCallback(async (text: string, isFinal: boolean) => {
@@ -773,6 +779,7 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
         language: sttLanguage || undefined,
         silenceThresholdDb: sttSilenceThresholdDb,
         silenceHoldMs: sttSilenceHoldMs,
+        apiKey: sttApiKey || undefined,
       });
       try {
         await audioStreamService.startListening(language, handleSpeechResult, handleSpeechError);
@@ -858,7 +865,7 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
         isActiveRef.current = false;
       }
     }
-  }, [isSupported, currentSessionId, language, handleSpeechResult, handleSpeechError, isMobile, unlockServerTTSAudio, unlockSayTTSAudio, sttProvider, sttServerUrl, sttModel, wasmSttModel, sttLanguage, sttSilenceThresholdDb, sttSilenceHoldMs]);
+  }, [isSupported, currentSessionId, language, handleSpeechResult, handleSpeechError, isMobile, unlockServerTTSAudio, unlockSayTTSAudio, sttProvider, sttServerUrl, sttModel, sttApiKey, wasmSttModel, sttLanguage, sttSilenceThresholdDb, sttSilenceHoldMs]);
 
   // Stop voice mode
   const stopVoice = useCallback(() => {

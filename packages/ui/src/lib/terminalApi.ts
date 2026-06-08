@@ -1,3 +1,6 @@
+import { getRuntimeUrlResolver } from './runtime-url';
+import { runtimeFetch } from './runtime-fetch';
+
 export interface TerminalWebSocketDescriptor {
   path: string;
   v?: number;
@@ -48,7 +51,10 @@ type TerminalControlMessage = {
   t: string;
   s?: string;
   c?: string;
+  d?: string;
   f?: boolean;
+  i?: number;
+  r?: number;
   v?: number;
   exitCode?: number;
   signal?: number | null;
@@ -84,23 +90,7 @@ const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
 const normalizeWebSocketPath = (pathValue: string): string => {
-  if (/^wss?:\/\//i.test(pathValue)) {
-    return pathValue;
-  }
-
-  if (/^https?:\/\//i.test(pathValue)) {
-    const url = new URL(pathValue);
-    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-    return url.toString();
-  }
-
-  if (typeof window === 'undefined') {
-    return '';
-  }
-
-  const normalizedPath = pathValue.startsWith('/') ? pathValue : `/${pathValue}`;
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${protocol}//${window.location.host}${normalizedPath}`;
+  return getRuntimeUrlResolver().websocket(pathValue);
 };
 
 const encodeControlFrame = (payload: TerminalControlMessage): Uint8Array => {
@@ -152,6 +142,7 @@ class TerminalTransportManager {
   private closed = false;
   private subscriptions = new Map<symbol, StreamSubscription>();
   private activeSubscriptionToken: symbol | null = null;
+  private replayCursorBySession = new Map<string, number>();
 
   configure(socketUrl: string): void {
     if (!socketUrl) {
@@ -233,7 +224,7 @@ class TerminalTransportManager {
     try {
       if (this.boundSessionId !== sessionId) {
         this.requestedSessionId = sessionId;
-        socket.send(encodeControlFrame({ t: 'b', s: sessionId, v: 2 }));
+        socket.send(encodeControlFrame({ t: 'b', s: sessionId, r: this.replayCursorBySession.get(sessionId) ?? 0, v: 2 }));
       }
       socket.send(data);
       return true;
@@ -265,6 +256,7 @@ class TerminalTransportManager {
     this.socketUrl = '';
     this.subscriptions.clear();
     this.activeSubscriptionToken = null;
+    this.replayCursorBySession.clear();
   }
 
   prime(): void {
@@ -438,7 +430,7 @@ class TerminalTransportManager {
     this.requestedSessionId = activeSubscription.sessionId;
 
     try {
-      this.socket.send(encodeControlFrame({ t: 'b', s: activeSubscription.sessionId, v: 2 }));
+      this.socket.send(encodeControlFrame({ t: 'b', s: activeSubscription.sessionId, r: this.replayCursorBySession.get(activeSubscription.sessionId) ?? 0, v: 2 }));
     } catch {
       this.handleSocketFailure(new Error('Terminal websocket bind failed'));
     }
@@ -569,6 +561,21 @@ class TerminalTransportManager {
         return;
       case 'po':
         return;
+      case 'd': {
+        const sessionId = payload.s ?? this.boundSessionId ?? this.requestedSessionId;
+        if (!activeSubscription || !sessionId || sessionId !== activeSubscription.sessionId) {
+          return;
+        }
+
+        if (typeof payload.i === 'number' && Number.isFinite(payload.i)) {
+          this.replayCursorBySession.set(sessionId, Math.max(this.replayCursorBySession.get(sessionId) ?? 0, Math.trunc(payload.i)));
+        }
+
+        if (typeof payload.d === 'string' && payload.d.length > 0) {
+          activeSubscription.onEvent({ type: 'data', data: payload.d });
+        }
+        return;
+      }
       case 'bok': {
         this.boundSessionId = payload.s ?? this.requestedSessionId;
         if (!activeSubscription) {
@@ -598,6 +605,7 @@ class TerminalTransportManager {
         this.clearConnectionTimeout(activeSubscription);
         this.boundSessionId = null;
         this.requestedSessionId = null;
+        this.replayCursorBySession.delete(activeSubscription.sessionId);
         activeSubscription.onEvent({
           type: 'exit',
           exitCode: payload.exitCode,
@@ -737,7 +745,7 @@ const applyTerminalTransportCapabilities = (capabilities: TerminalSession['capab
 };
 
 const sendTerminalInputHttp = async (sessionId: string, data: string): Promise<void> => {
-  const response = await fetch(`/api/terminal/${sessionId}/input`, {
+  const response = await runtimeFetch(`/api/terminal/${sessionId}/input`, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain' },
     body: data,
@@ -750,7 +758,7 @@ const sendTerminalInputHttp = async (sessionId: string, data: string): Promise<v
 };
 
 export async function createTerminalSession(options: CreateTerminalOptions): Promise<TerminalSession> {
-  const response = await fetch('/api/terminal/create', {
+  const response = await runtimeFetch('/api/terminal/create', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -848,7 +856,7 @@ const connectTerminalStreamViaSse = (
       return;
     }
 
-    eventSource = new EventSource(`/api/terminal/${sessionId}/stream`);
+    eventSource = new EventSource(getRuntimeUrlResolver().sse(`/api/terminal/${sessionId}/stream`));
     let opened = false;
 
     connectionTimeoutId = setTimeout(() => {
@@ -939,7 +947,7 @@ export async function resizeTerminal(
   cols: number,
   rows: number
 ): Promise<void> {
-  const response = await fetch(`/api/terminal/${sessionId}/resize`, {
+  const response = await runtimeFetch(`/api/terminal/${sessionId}/resize`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ cols, rows }),
@@ -954,7 +962,7 @@ export async function resizeTerminal(
 export async function closeTerminal(sessionId: string): Promise<void> {
   getTerminalTransportGlobalState().manager?.unbindSession(sessionId);
 
-  const response = await fetch(`/api/terminal/${sessionId}`, {
+  const response = await runtimeFetch(`/api/terminal/${sessionId}`, {
     method: 'DELETE',
   });
 
@@ -970,7 +978,7 @@ export async function restartTerminalSession(
 ): Promise<TerminalSession> {
   getTerminalTransportGlobalState().manager?.unbindSession(currentSessionId);
 
-  const response = await fetch(`/api/terminal/${currentSessionId}/restart`, {
+  const response = await runtimeFetch(`/api/terminal/${currentSessionId}/restart`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -994,7 +1002,7 @@ export async function forceKillTerminal(options: {
   sessionId?: string;
   cwd?: string;
 }): Promise<void> {
-  const response = await fetch('/api/terminal/force-kill', {
+  const response = await runtimeFetch('/api/terminal/force-kill', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(options),

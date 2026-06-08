@@ -12,8 +12,9 @@
  * Abort controller created once at init, cleaned up via returned cleanup fn.
  */
 
-import type { Event, OpencodeClient } from "@opencode-ai/sdk/v2/client"
+import type { Event, OpencodeClient, SessionStatus } from "@opencode-ai/sdk/v2/client"
 import { opencodeClient } from "@/lib/opencode/client"
+import { getRuntimeUrlResolver } from "@/lib/runtime-url"
 import { syncDebug } from "./debug"
 
 export type QueuedEvent = {
@@ -41,8 +42,6 @@ const RETRY_BACKOFF_BASE_MS = 250
 const RETRY_BACKOFF_CAP_VISIBLE_MS = 5_000
 const RETRY_BACKOFF_CAP_HIDDEN_OR_OFFLINE_MS = 60_000
 const RETRY_BACKOFF_MAX_EXPONENT = 8
-const ABSOLUTE_URL_PATTERN = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//
-
 export type EventPipelineInput = {
   sdk: OpencodeClient
   onEvent: (directory: string, payload: Event) => void
@@ -59,6 +58,11 @@ export type EventPipelineInput = {
   wsReadyTimeoutMs?: number
 }
 
+export type EventPipeline = {
+  cleanup: () => void
+  reconnect: (reason?: string) => void
+}
+
 type MessageStreamWsFrame = {
   type: "ready" | "event" | "error" | "backpressure"
   payload?: unknown
@@ -68,7 +72,70 @@ type MessageStreamWsFrame = {
   scope?: "global" | "directory"
 }
 
+const normalizeOpenChamberSessionStatus = (payload: Event): Event | null => {
+  const record = payload as unknown as {
+    id?: unknown
+    type?: unknown
+    properties?: {
+      sessionID?: unknown
+      sessionId?: unknown
+      status?: unknown
+      metadata?: {
+        attempt?: unknown
+        message?: unknown
+        next?: unknown
+      }
+    }
+  }
+
+  if (record.type !== "openchamber:session-status") return null
+
+  const sessionID = typeof record.properties?.sessionID === "string" && record.properties.sessionID.length > 0
+    ? record.properties.sessionID
+    : typeof record.properties?.sessionId === "string" && record.properties.sessionId.length > 0
+      ? record.properties.sessionId
+      : ""
+  const rawStatus = typeof record.properties?.status === "string" ? record.properties.status : ""
+  if (!sessionID || !rawStatus) return null
+
+  let status: SessionStatus | null = null
+  if (rawStatus === "idle" || rawStatus === "busy") {
+    status = { type: rawStatus }
+  } else if (rawStatus === "retry") {
+    const metadata = record.properties?.metadata
+    if (
+      typeof metadata?.attempt === "number"
+      && typeof metadata.message === "string"
+      && typeof metadata.next === "number"
+    ) {
+      status = {
+        type: "retry",
+        attempt: metadata.attempt,
+        message: metadata.message,
+        next: metadata.next,
+      }
+    }
+  }
+  if (!status) return null
+
+  return {
+    id: typeof record.id === "string" && record.id.length > 0
+      ? record.id
+      : `openchamber-status-${sessionID}-${Date.now()}`,
+    type: "session.status",
+    properties: {
+      sessionID,
+      status,
+    },
+  } as Event
+}
+
 const normalizeEventType = (payload: Event): Event => {
+  const normalizedOpenChamberStatus = normalizeOpenChamberSessionStatus(payload)
+  if (normalizedOpenChamberStatus) {
+    return normalizedOpenChamberStatus
+  }
+
   const type = (payload as { type?: unknown }).type
   if (typeof type !== "string") {
     return payload
@@ -121,30 +188,6 @@ function resolveEventPayload(payload: unknown): Event | null {
   return null
 }
 
-function resolveAbsoluteUrl(candidate: string): string {
-  const normalized = typeof candidate === "string" && candidate.trim().length > 0 ? candidate.trim() : "/api"
-  if (ABSOLUTE_URL_PATTERN.test(normalized)) {
-    return normalized
-  }
-
-  if (typeof window === "undefined") {
-    return normalized
-  }
-
-  const baseReference = window.location?.href || window.location?.origin
-  if (!baseReference) {
-    return normalized
-  }
-
-  return new URL(normalized, baseReference).toString()
-}
-
-function toWebSocketUrl(candidate: string): string {
-  const url = new URL(resolveAbsoluteUrl(candidate))
-  url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
-  return url.toString()
-}
-
 function buildGlobalEventWsUrl(lastEventId?: string): string {
   let baseUrl = "/api"
   try {
@@ -156,11 +199,10 @@ function buildGlobalEventWsUrl(lastEventId?: string): string {
     baseUrl = "/api"
   }
   const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`
-  const httpUrl = new URL("global/event/ws", resolveAbsoluteUrl(normalizedBase))
-  if (lastEventId && lastEventId.length > 0) {
-    httpUrl.searchParams.set("lastEventId", lastEventId)
-  }
-  return toWebSocketUrl(httpUrl.toString())
+  return getRuntimeUrlResolver().websocket(
+    `${normalizedBase}global/event/ws`,
+    lastEventId && lastEventId.length > 0 ? { lastEventId } : undefined,
+  )
 }
 
 type DirectoryQueue = {
@@ -173,13 +215,10 @@ type DirectoryQueue = {
 
 type AttemptAbortReason =
   | "pipeline_stopped"
-  | "ws_heartbeat_timeout"
-  | "sse_heartbeat_timeout"
-  | "ws_system_resume"
-  | "sse_system_resume"
+  | `${"ws" | "sse"}_${string}`
   | null
 
-export function createEventPipeline(input: EventPipelineInput) {
+export function createEventPipeline(input: EventPipelineInput): EventPipeline {
   const {
     sdk,
     onEvent,
@@ -217,6 +256,10 @@ export function createEventPipeline(input: EventPipelineInput) {
     if (payload.type === "session.status") {
       const props = payload.properties as { sessionID: string }
       return `session.status:${props.sessionID}`
+    }
+    if (payload.type === "session.updated") {
+      const props = payload.properties as { info?: { id?: string } }
+      return props.info?.id ? `session.updated:${props.info.id}` : undefined
     }
     if (payload.type === "lsp.updated") {
       return "lsp.updated"
@@ -669,10 +712,8 @@ export function createEventPipeline(input: EventPipelineInput) {
         if (currentTransport === "ws" && code === "WS_FALLBACK") {
           retryDelayMs = 0
           // Transport switch (WS → SSE fallback), not a real disconnection.
-          // No events were lost — the next attempt will use SSE and carry
-          // lastEventId for gapless replay. Notify consumer so it can set
-          // isConnected, but do NOT treat this as a disconnection requiring
-          // a full directory resync.
+          // The consumer still gets a hook so it can resync authoritative
+          // state; real networks can lose/buffer events around transport flips.
           onTransportSwitch?.()
         } else if (!isAbortError(error)) {
           consecutiveFailures += 1
@@ -772,6 +813,11 @@ export function createEventPipeline(input: EventPipelineInput) {
     attempt?.abort()
   }
 
+  const reconnect = (reason = "manual") => {
+    attemptAbortReason = `${activeTransport}_${reason}`
+    attempt?.abort()
+  }
+
   if (typeof document !== "undefined") {
     document.addEventListener("visibilitychange", onVisibility)
     window.addEventListener("pageshow", onPageShow)
@@ -799,5 +845,5 @@ export function createEventPipeline(input: EventPipelineInput) {
     flushAll()
   }
 
-  return { cleanup }
+  return { cleanup, reconnect }
 }

@@ -373,6 +373,25 @@ export const SessionDialogs: React.FC = () => {
         }
     }, [canRemoveRemoteBranches, currentDirectory, deleteDialogShouldRemoveRemote, getProjectRefForWorktree, newSessionDraft?.directoryOverride, newSessionDraft?.open, setDraftBootstrapPendingDirectory, setNewSessionDraftTarget, t]);
 
+    const removeSelectedWorktreeInBackground = React.useCallback((
+        worktree: WorktreeMetadata,
+        deleteLocalBranch: boolean
+    ): void => {
+        const shouldRemoveRemote = deleteDialogShouldRemoveRemote && canRemoveRemoteBranches;
+        void (async () => {
+            const removed = await removeSelectedWorktree(worktree, deleteLocalBranch);
+            if (!removed) {
+                return;
+            }
+            const archiveNote = shouldRemoveRemote
+                ? t('sessions.sidebar.sessionDialogs.worktree.removedWithRemote')
+                : t('sessions.sidebar.sessionDialogs.worktree.removed');
+            toast.success(t('sessions.sidebar.sessionDialogs.worktree.removedTitle'), {
+                description: renderToastDescription(archiveNote),
+            });
+        })();
+    }, [canRemoveRemoteBranches, deleteDialogShouldRemoveRemote, removeSelectedWorktree, t]);
+
     const handleConfirmDelete = React.useCallback(async () => {
         if (!deleteDialog) {
             return;
@@ -385,18 +404,7 @@ export const SessionDialogs: React.FC = () => {
             const deleteLocalBranch = shouldArchive && deleteDialogShouldDeleteLocalBranch;
 
             if (deleteDialog.sessions.length === 0 && isWorktreeDelete && deleteDialog.worktree) {
-                const removed = await removeSelectedWorktree(deleteDialog.worktree, deleteLocalBranch);
-                if (!removed) {
-                    closeDeleteDialog();
-                    return;
-                }
-                const shouldRemoveRemote = deleteDialogShouldRemoveRemote && canRemoveRemoteBranches;
-                const archiveNote = shouldRemoveRemote
-                    ? t('sessions.sidebar.sessionDialogs.worktree.removedWithRemote')
-                    : t('sessions.sidebar.sessionDialogs.worktree.removed');
-                toast.success(t('sessions.sidebar.sessionDialogs.worktree.removedTitle'), {
-                    description: renderToastDescription(archiveNote),
-                });
+                removeSelectedWorktreeInBackground(deleteDialog.worktree, deleteLocalBranch);
                 closeDeleteDialog();
                 return;
             }
@@ -450,7 +458,7 @@ export const SessionDialogs: React.FC = () => {
                 if (isWorktreeDelete && deleteDialog.worktree && failedIds.length === 0) {
                     // Remove selected worktree even if per-session metadata is missing.
                     // Use same projectRef logic as the no-sessions path.
-                    await removeSelectedWorktree(deleteDialog.worktree, deleteLocalBranch);
+                    removeSelectedWorktreeInBackground(deleteDialog.worktree, deleteLocalBranch);
                     // sync handles session refresh automatically
                 }
 
@@ -506,7 +514,7 @@ export const SessionDialogs: React.FC = () => {
             }
 
             if (isWorktreeDelete && deleteDialog.sessions.length === 1 && deleteDialog.worktree) {
-                await removeSelectedWorktree(deleteDialog.worktree, deleteLocalBranch);
+                removeSelectedWorktreeInBackground(deleteDialog.worktree, deleteLocalBranch);
                 // sync bootstrap refreshes sessions automatically
             }
 
@@ -525,8 +533,7 @@ export const SessionDialogs: React.FC = () => {
         closeDeleteDialog,
         shouldArchiveWorktree,
         isWorktreeDelete,
-        canRemoveRemoteBranches,
-        removeSelectedWorktree,
+        removeSelectedWorktreeInBackground,
         t,
     ]);
 

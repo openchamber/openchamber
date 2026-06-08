@@ -5,6 +5,7 @@ import { UsageProgressBar } from './UsageProgressBar';
 import { PaceIndicator } from './PaceIndicator';
 import { useQuotaStore } from '@/stores/useQuotaStore';
 import { Checkbox } from '@/components/ui/checkbox';
+import { useUIStore } from '@/stores/useUIStore';
 
 interface UsageCardProps {
   title: string;
@@ -24,10 +25,12 @@ export const UsageCard: React.FC<UsageCardProps> = ({
   onToggle,
 }) => {
   const displayMode = useQuotaStore((state) => state.displayMode);
+  const showPredValues = useQuotaStore((state) => state.showPredValues);
+  const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const displayPercent = displayMode === 'remaining' ? window.remainingPercent : window.usedPercent;
   const barLabel = displayMode === 'remaining' ? 'remaining' : 'used';
   const percentLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
-  const resetLabel = formatQuotaResetLabel(window.resetAt, window.resetAfterFormatted ?? window.resetAtFormatted);
+  const resetLabel = formatQuotaResetLabel(window.resetAt, window.resetAfterFormatted ?? window.resetAtFormatted, timeFormatPreference);
   const windowLabel = formatWindowLabel(title);
 
   const paceInfo = React.useMemo(() => {
@@ -82,7 +85,7 @@ export const UsageCard: React.FC<UsageCardProps> = ({
         </div>
       </div>
 
-      {paceInfo && (
+      {paceInfo && showPredValues && (
         <div className="mt-1.5">
           <PaceIndicator paceInfo={paceInfo} />
         </div>

@@ -22,10 +22,11 @@ import { GitHubSettings } from '@/components/sections/openchamber/GitHubSettings
 import { GitIdentityEditorDialog } from './GitIdentityEditorDialog';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from "@/components/icon/Icon";
+import type { IconName } from "@/components/icon/icons";
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 
-const ICON_MAP: Record<string, string> = {
+const ICON_MAP: Record<string, IconName> = {
   branch: 'git-branch',
   briefcase: 'briefcase',
   house: 'home',
@@ -249,6 +250,14 @@ const IdentityRow: React.FC<IdentityRowProps> = ({
   const iconColor = COLOR_MAP[profile.color || ''];
   const authType = profile.authType || 'ssh';
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.currentTarget !== e.target) return;
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+
+    e.preventDefault();
+    onEdit();
+  };
+
   return (
     <div
       className={cn(
@@ -258,7 +267,7 @@ const IdentityRow: React.FC<IdentityRowProps> = ({
       onClick={onEdit}
       role="button"
       tabIndex={0}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onEdit(); }}
+      onKeyDown={handleKeyDown}
     >
       <div className="flex items-center gap-3 min-w-0">
         <Icon name={iconName} className="w-4 h-4 shrink-0" style={{ color: iconColor }} />

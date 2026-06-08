@@ -33,7 +33,7 @@ export const realtimeClientTools = {
         }
 
         // Get current provider and model from config store
-        const { currentProviderId, currentModelId, currentAgentName } = useConfigStore.getState();
+        const { currentProviderId, currentModelId, currentAgentName, currentVariant } = useConfigStore.getState();
         if (!currentProviderId || !currentModelId) {
             console.error("[Voice] No provider/model selected");
             return "error (no provider or model selected)";
@@ -43,7 +43,16 @@ export const realtimeClientTools = {
             console.log("[Voice] Sending message to session:", sessionId);
             await useSessionUIStore
                 .getState()
-                .sendMessage(parsed.data.message, currentProviderId, currentModelId, currentAgentName ?? undefined);
+                .sendMessage(
+                    parsed.data.message,
+                    currentProviderId,
+                    currentModelId,
+                    currentAgentName ?? undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    currentVariant ?? undefined,
+                );
             return "sent";
         } catch (error) {
             console.error("[Voice] Failed to send message:", error);

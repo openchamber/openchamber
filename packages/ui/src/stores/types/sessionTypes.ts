@@ -7,7 +7,7 @@ export type SessionWorktreeAttachment = {
   cwd: string | null;
   branch: string | null;
   headState: 'branch' | 'detached' | 'unborn';
-  worktreeStatus: 'ready' | 'missing' | 'invalid' | 'not-a-repo';
+  worktreeStatus: 'pending' | 'ready' | 'missing' | 'invalid' | 'not-a-repo';
   worktreeSource: 'existing' | 'created-for-session' | null;
   legacy: boolean;
   degraded: boolean;
@@ -235,7 +235,7 @@ export interface SessionStore {
     closeNewSessionDraft: () => void;
 
     createSession: (title?: string, directoryOverride?: string | null, parentID?: string | null) => Promise<Session | null>;
-    createSessionFromAssistantMessage: (sourceMessageId: string) => Promise<void>;
+    createSessionFromAssistantMessage: (sourceMessageId: string, execution: { providerID: string; modelID: string; variant: string; agent: string; instructions: string; createWorktree?: boolean }) => Promise<void>;
 
     deleteSession: (id: string, options?: { archiveWorktree?: boolean; deleteRemoteBranch?: boolean; deleteLocalBranch?: boolean; remoteName?: string }) => Promise<boolean>;
     deleteSessions: (ids: string[], options?: { archiveWorktree?: boolean; deleteRemoteBranch?: boolean; deleteLocalBranch?: boolean; remoteName?: string; silent?: boolean }) => Promise<{ deletedIds: string[]; failedIds: string[] }>;
@@ -246,7 +246,7 @@ export interface SessionStore {
     unshareSession: (id: string) => Promise<Session | null>;
     setCurrentSession: (id: string | null) => void;
     loadMessages: (sessionId: string, limit?: number) => Promise<void>;
-    sendMessage: (content: string, providerID: string, modelID: string, agent?: string, attachments?: AttachedFile[], agentMentionName?: string, additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }>, variant?: string, inputMode?: 'normal' | 'shell') => Promise<void>;
+    sendMessage: (content: string, providerID: string, modelID: string, agent?: string, attachments?: AttachedFile[], agentMentionName?: string, additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }>, variant?: string, inputMode?: 'normal' | 'shell', options?: { sessionId?: string }) => Promise<void>;
     abortCurrentOperation: (sessionIdOverride?: string) => Promise<void>;
     acknowledgeSessionAbort: (sessionId: string) => void;
     armAbortPrompt: (durationMs?: number) => number | null;

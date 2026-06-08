@@ -19,6 +19,7 @@ import {
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
@@ -230,16 +231,25 @@ const FileRow: React.FC<FileRowProps> = ({
             open={contextMenuPath === node.path}
             onOpenChange={(open) => setContextMenuPath(open ? node.path : null)}
           >
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6"
-                onClick={handleMenuButtonClick}
-              >
-                <Icon name="more-2-fill" className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex">
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      onClick={handleMenuButtonClick}
+                      title={t('sidebarFilesTree.actions.fileMenuTitle')}
+                      aria-label={t('sidebarFilesTree.actions.fileMenuTitle')}
+                    >
+                      <Icon name="more-2-fill" className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" sideOffset={6}>{t('sidebarFilesTree.actions.fileMenuTitle')}</TooltipContent>
+            </Tooltip>
             <DropdownMenuContent align="end" side="bottom" onCloseAutoFocus={() => setContextMenuPath(null)}>
               {canRename && (
                 <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onOpenDialog('rename', node); }}>
@@ -309,7 +319,7 @@ const FileRow: React.FC<FileRowProps> = ({
 
 export const SidebarFilesTree: React.FC = () => {
   const { t } = useI18n();
-  const { files, runtime } = useRuntimeAPIs();
+  const { files } = useRuntimeAPIs();
   const currentDirectory = useEffectiveDirectory() ?? '';
   const root = normalizePath(currentDirectory.trim());
   const showHidden = useDirectoryShowHidden();
@@ -325,6 +335,7 @@ export const SidebarFilesTree: React.FC = () => {
   const [searching, setSearching] = React.useState(false);
 
   const [childrenByDir, setChildrenByDir] = React.useState<Record<string, FileNode[]>>({});
+  const [loadErrorsByDir, setLoadErrorsByDir] = React.useState<Record<string, string>>({});
   const loadedDirsRef = React.useRef<Set<string>>(new Set());
   const inFlightDirsRef = React.useRef<Set<string>>(new Set());
 
@@ -408,14 +419,13 @@ export const SidebarFilesTree: React.FC = () => {
     inFlightDirsRef.current = new Set(inFlightDirsRef.current);
     inFlightDirsRef.current.add(normalizedDir);
 
-    const respectGitignore = !showGitignored;
-    const listPromise = runtime.isDesktop
-      ? files.listDirectory(normalizedDir, { respectGitignore }).then((result) => result.entries.map((entry) => ({
+    const listPromise = files.listDirectory
+      ? files.listDirectory(normalizedDir).then((result) => result.entries.map((entry) => ({
         name: entry.name,
         path: entry.path,
         isDirectory: entry.isDirectory,
       })))
-      : opencodeClient.listLocalDirectory(normalizedDir, { respectGitignore }).then((result) => result.map((entry) => ({
+      : opencodeClient.listLocalDirectory(normalizedDir).then((result) => result.map((entry) => ({
         name: entry.name,
         path: entry.path,
         isDirectory: entry.isDirectory,
@@ -427,25 +437,34 @@ export const SidebarFilesTree: React.FC = () => {
 
         loadedDirsRef.current = new Set(loadedDirsRef.current);
         loadedDirsRef.current.add(normalizedDir);
+        setLoadErrorsByDir((prev) => {
+          if (!prev[normalizedDir]) return prev;
+          const next = { ...prev };
+          delete next[normalizedDir];
+          return next;
+        });
         setChildrenByDir((prev) => ({ ...prev, [normalizedDir]: mapped }));
       })
-      .catch(() => {
-        setChildrenByDir((prev) => ({
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : String(error ?? '');
+        console.error('Failed to load sidebar directory:', error);
+        setLoadErrorsByDir((prev) => ({
           ...prev,
-          [normalizedDir]: prev[normalizedDir] ?? [],
+          [normalizedDir]: message,
         }));
       })
       .finally(() => {
         inFlightDirsRef.current = new Set(inFlightDirsRef.current);
         inFlightDirsRef.current.delete(normalizedDir);
       });
-  }, [files, mapDirectoryEntries, runtime.isDesktop, showGitignored]);
+  }, [files, mapDirectoryEntries]);
 
   const refreshRoot = React.useCallback(async () => {
     if (!root) return;
 
     loadedDirsRef.current = new Set();
     inFlightDirsRef.current = new Set();
+    setLoadErrorsByDir({});
     setChildrenByDir((prev) => (Object.keys(prev).length === 0 ? prev : {}));
 
     await loadDirectory(root);
@@ -474,6 +493,7 @@ export const SidebarFilesTree: React.FC = () => {
 
     loadedDirsRef.current = new Set();
     inFlightDirsRef.current = new Set();
+    setLoadErrorsByDir({});
     setChildrenByDir((prev) => (Object.keys(prev).length === 0 ? prev : {}));
     void loadDirectory(root);
   }, [loadDirectory, root, showHidden, showGitignored]);
@@ -788,6 +808,15 @@ export const SidebarFilesTree: React.FC = () => {
           />
           {isDir && isExpanded && (
             <ul className="flex flex-col gap-1 ml-3 pl-3 border-l border-border/40 relative">
+              {loadErrorsByDir[node.path] ? (
+                <li className="flex items-center gap-2 px-2 py-1 typography-meta text-muted-foreground">
+                  <span className="min-w-0 flex-1 truncate text-[var(--status-error)]" title={loadErrorsByDir[node.path]}>{loadErrorsByDir[node.path]}</span>
+                  <Button variant="ghost" size="xs" className="h-6 gap-1" onClick={() => void refreshDirectory(node.path)}>
+                    <Icon name="refresh" className="h-3.5 w-3.5" />
+                    {t('sidebarFilesTree.actions.refreshTitle')}
+                  </Button>
+                </li>
+              ) : null}
               {renderTree(node.path, depth + 1)}
             </ul>
           )}
@@ -797,6 +826,7 @@ export const SidebarFilesTree: React.FC = () => {
   }
 
   const hasTree = Boolean(root && childrenByDir[root]);
+  const rootLoadError = root ? loadErrorsByDir[root] : null;
 
   return (
     <section className="flex h-full min-h-0 flex-col overflow-hidden bg-sidebar">
@@ -825,30 +855,53 @@ export const SidebarFilesTree: React.FC = () => {
           ) : null}
         </div>
         {canCreateFile && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => handleOpenDialog('createFile', { path: currentDirectory, type: 'directory' })}
-            className="h-8 w-8 p-0 flex-shrink-0"
-            title={t('sidebarFilesTree.actions.newFileTitle')}
-          >
-            <Icon name="file-add" className="h-4 w-4" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex flex-shrink-0">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleOpenDialog('createFile', { path: currentDirectory, type: 'directory' })}
+                  className="h-8 w-8 p-0 flex-shrink-0"
+                  title={t('sidebarFilesTree.actions.newFileTitle')}
+                  aria-label={t('sidebarFilesTree.actions.newFileTitle')}
+                >
+                  <Icon name="file-add" className="h-4 w-4" />
+                </Button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6}>{t('sidebarFilesTree.actions.newFileTitle')}</TooltipContent>
+          </Tooltip>
         )}
         {canCreateFolder && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => handleOpenDialog('createFolder', { path: currentDirectory, type: 'directory' })}
-            className="h-8 w-8 p-0 flex-shrink-0"
-            title={t('sidebarFilesTree.actions.newFolderTitle')}
-          >
-            <Icon name="folder-add" className="h-4 w-4" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex flex-shrink-0">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleOpenDialog('createFolder', { path: currentDirectory, type: 'directory' })}
+                  className="h-8 w-8 p-0 flex-shrink-0"
+                  title={t('sidebarFilesTree.actions.newFolderTitle')}
+                  aria-label={t('sidebarFilesTree.actions.newFolderTitle')}
+                >
+                  <Icon name="folder-add" className="h-4 w-4" />
+                </Button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6}>{t('sidebarFilesTree.actions.newFolderTitle')}</TooltipContent>
+          </Tooltip>
         )}
-        <Button variant="ghost" size="sm" onClick={() => void refreshRoot()} className="h-8 w-8 p-0 flex-shrink-0" title={t('sidebarFilesTree.actions.refreshTitle')}>
-          <Icon name="refresh" className="h-4 w-4" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex flex-shrink-0">
+              <Button variant="ghost" size="sm" onClick={() => void refreshRoot()} className="h-8 w-8 p-0 flex-shrink-0" title={t('sidebarFilesTree.actions.refreshTitle')} aria-label={t('sidebarFilesTree.actions.refreshTitle')}>
+                <Icon name="refresh" className="h-4 w-4" />
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={6}>{t('sidebarFilesTree.actions.refreshTitle')}</TooltipContent>
+        </Tooltip>
       </div>
 
       <ScrollableOverlay outerClassName="flex-1 min-h-0" className="p-2">
@@ -890,6 +943,14 @@ export const SidebarFilesTree: React.FC = () => {
                 </li>
               );
             })
+          ) : rootLoadError ? (
+            <li className="flex flex-col gap-2 px-2 py-1 typography-meta text-muted-foreground">
+              <span>{rootLoadError}</span>
+              <Button variant="outline" size="xs" className="w-fit gap-1.5" onClick={() => void refreshRoot()}>
+                <Icon name="refresh" className="h-3.5 w-3.5" />
+                {t('sidebarFilesTree.actions.refreshTitle')}
+              </Button>
+            </li>
           ) : hasTree && root ? (
             renderTree(root, 0)
           ) : (

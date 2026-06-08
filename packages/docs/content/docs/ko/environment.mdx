@@ -1,0 +1,138 @@
+---
+title: 환경 변수
+description: 환경 변수로 OpenChamber와 OpenCode 연동을 설정합니다.
+---
+
+# 환경 변수
+
+OpenChamber는 시작할 때 이 변수들을 읽습니다. 시작 서비스는 `openchamber startup enable` 실행 시 기본적으로 현재 환경의 snapshot을 저장하므로, 서비스에 적용할 변수를 바꾼 뒤에는 다시 실행하세요.
+
+## OpenChamber 서버
+
+### `OPENCHAMBER_HOST`
+
+OpenChamber 웹 서버가 바인딩할 주소입니다. 다른 컴퓨터에서 접속해야 하면 `0.0.0.0`을 사용하세요.
+
+### `OPENCHAMBER_UI_PASSWORD`
+
+브라우저 UI 비밀번호입니다. localhost 밖으로 바인딩하거나 터널, 리버스 프록시를 사용할 때 설정하세요.
+
+### `OPENCHAMBER_API_ONLY`
+
+`true` 또는 `1`이면 OpenChamber를 headless 모드로 시작합니다. 데스크톱과 모바일 클라이언트용 API route는 계속 사용할 수 있지만 브라우저 UI는 제공하지 않습니다.
+
+### `OPENCHAMBER_DATA_DIR`
+
+OpenChamber 데이터 디렉터리를 바꿉니다. 기본값은 `~/.config/openchamber`입니다.
+
+### `OPENCHAMBER_COMPRESS_API`
+
+API 응답 압축을 제어합니다. `true` 또는 `1`은 켜고, `false` 또는 `0`은 끕니다.
+
+### `OPENCHAMBER_SKIP_API_COMPRESSION`
+
+`true` 또는 `1`이면 API 응답 압축을 끕니다. `OPENCHAMBER_COMPRESS_API`보다 우선합니다.
+
+### `OPENCHAMBER_VERBOSE_REQUEST_LOGS`
+
+`true` 또는 `1`이면 자세한 HTTP request logs를 켭니다.
+
+### `OPENCHAMBER_UPDATE_API_URL`
+
+업데이트 확인 API endpoint를 바꿉니다. 대부분의 사용자는 설정하지 않아도 됩니다.
+
+### `OPENCHAMBER_PACKAGE_MANAGER`
+
+자동 감지가 틀렸을 때 업데이트에 사용할 package manager를 강제로 지정합니다.
+
+## OpenCode 서버
+
+### `OPENCODE_HOST`
+
+OpenChamber를 이미 실행 중인 OpenCode server에 연결합니다. 값은 명시적 포트가 있고 path, query, hash가 없는 `http` 또는 `https` origin이어야 합니다. `OPENCODE_HOST`는 `OPENCODE_PORT`보다 우선합니다.
+
+### `OPENCODE_PORT`
+
+OpenCode server 포트를 설정합니다. managed OpenCode에서는 이 포트를 요청하고, `OPENCODE_SKIP_START=true`와 함께 쓰면 해당 포트의 외부 서버에 연결합니다.
+
+### `OPENCODE_SKIP_START`
+
+`true`이면 OpenChamber가 자체 OpenCode server를 시작하지 않습니다.
+
+### `OPENCHAMBER_OPENCODE_HOSTNAME`
+
+OpenChamber가 관리하는 OpenCode server의 bind hostname입니다. 기본값은 `127.0.0.1`입니다.
+
+### `OPENCODE_BINARY`
+
+OpenChamber가 실행할 `opencode` executable 경로입니다.
+
+### `OPENCODE_CONFIG`
+
+특정 OpenCode config 파일 경로입니다.
+
+### `OPENCODE_CONFIG_DIR`
+
+agents, skills, snippets, config discovery에 사용할 OpenCode config 디렉터리입니다.
+
+### `OPENCODE_DATA_DIR`
+
+managed OpenCode server의 사용자 지정 데이터 디렉터리입니다.
+
+### `OPENCODE_WSL_DISTRO`
+
+Windows에서 OpenCode 연동에 사용할 WSL distro를 선택합니다.
+
+### `OPENCHAMBER_OPENCODE_WSL_DISTRO`
+
+WSL distro를 선택하는 OpenChamber 전용 alias입니다. 둘 다 설정하면 `OPENCODE_WSL_DISTRO`가 우선합니다.
+
+### `OPENCODE_JWT_SECRET`
+
+UI auth tokens 서명에 사용하는 secret입니다. 지속 실행 서비스에서는 긴 무작위 값을 사용하세요.
+
+## Terminal 및 Git
+
+### `OPENCHAMBER_TERMINAL_SHELL`
+
+OpenChamber terminal sessions에서 사용할 shell executable입니다.
+
+### `OPENCHAMBER_GIT_BINARY`
+
+OpenChamber Git 기능에서 사용할 Git executable입니다.
+
+### `GIT_BINARY`
+
+Git executable의 대체 override입니다. OpenChamber 전용 설정에는 `OPENCHAMBER_GIT_BINARY`를 권장합니다.
+
+### `OPENCHAMBER_GIT_READ_CACHE_TTL_MS`
+
+Git-backed file reads cache의 TTL이며 단위는 밀리초입니다. 디버깅 중 cache를 끄려면 `0`으로 설정하세요.
+
+## 음성 및 터널
+
+### `OPENAI_API_KEY`
+
+OpenAI-compatible services를 호출하는 OpenChamber 음성 기능에 사용하는 API key입니다.
+
+### `OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS`
+
+`true` 또는 `1`이면 음성 기능에서 원격 OpenAI-compatible base URLs를 허용합니다.
+
+### `NGROK_AUTHTOKEN`
+
+OpenChamber tunnel commands에서 사용하는 ngrok auth token입니다. `ngrok config add-authtoken <token>`으로도 설정할 수 있습니다.
+
+## Runtime helpers
+
+### `BUN_BINARY`
+
+OpenChamber가 daemon processes를 시작할 때 사용할 Bun executable입니다.
+
+### `BUN_INSTALL`
+
+Bun 설치 루트입니다. OpenChamber는 daemon 시작과 업데이트를 위해 여기서 `bin/bun`을 찾습니다.
+
+### `VITE_OPENCODE_URL`
+
+Vite-built web app의 build-time API base URL입니다. 일반 CLI 또는 desktop 사용에서는 대부분 설정할 필요가 없습니다.

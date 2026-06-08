@@ -1,0 +1,42 @@
+---
+title: Zdalne instancje
+description: Połącz aplikację na komputerze z OpenChamber na innej maszynie przez SSH.
+---
+
+# Zdalne instancje
+
+Aplikacja na komputerze może połączyć się z OpenChamber działającym na innej maszynie przez SSH — serwer służbowy, maszyna w chmurze, homelab — i przenieść jego UI na Twój ekran, jakby był lokalny. Skonfiguruj to w **Settings → Remote Instances**.
+
+> Zdalne instancje to funkcja **tylko na komputerze**. W wersji webowej lub w VS Code połącz się ze zdalnym serwerem za pomocą zmiennych środowiskowych z [OpenCode Server](/pl/opencode-server/).
+
+## Dodaj zdalną instancję
+
+1. Otwórz **Settings → Remote Instances** i dodaj jedną.
+2. Podaj polecenie SSH, którego normalnie używasz, by dotrzeć do maszyny, oraz przydomek.
+3. Wybierz, jak OpenChamber tam działa:
+   - **managed** — OpenChamber instaluje i uruchamia się sam na zdalnej maszynie
+   - **external** — połącz się z tym, który już działa
+4. Połącz.
+
+OpenChamber przeprowadza przez kolejne kroki — sprawdzenie połączenia, skonfigurowanie zdalnej maszyny, uruchomienie serwera i przekazanie portu — i pokazuje, na jakim etapie się znajduje. Gdy osiągnie stan **ready**, zdalne UI ładuje się lokalnie.
+
+## Poświadczenia
+
+Sam decydujesz, czy zapisać hasła SSH i UI, czy wpisywać je za każdym razem. Jeśli połączenie zostanie zerwane, OpenChamber zgłasza, który krok zawiódł, byś mógł to naprawić — zobacz [Dostęp zdalny](/pl/troubleshooting/remote-access/).
+
+## Bezpośrednie linki połączenia
+
+Jeśli zdalna maszyna już uruchamia OpenChamber, utwórz tam link połączenia i zaimportuj go w **Settings → Remote Instances → Server links**:
+
+```bash
+openchamber connect-url --port 3000 --server http://your-host:3000 --qr
+```
+
+`connect-url` najpierw uruchamia serwer, jeśli nic nie działa na tym porcie. Dodaj `--api-only` dla serwera headless, `--lan` aby nasłuchiwać w LAN przy starcie, `--ui-password` aby chronić dostęp z przeglądarki oraz `--name` aby nazwać zapisane połączenie.
+
+Wygenerowany link zawiera token klienta dla aplikacji OpenChamber. Ten token jest osobny od hasła UI w przeglądarce i przetrwa restarty, dopóki go nie unieważnisz lub usuniesz.
+
+## Powiązane
+
+- [OpenCode Server](/pl/opencode-server/) — połącz się ze zdalnym serwerem w wersji webowej lub VS Code
+- [Dostęp zdalny](/pl/troubleshooting/remote-access/) — gdy połączenie nie chce się nawiązać

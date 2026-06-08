@@ -141,17 +141,10 @@ export async function saveAsMarkdownDesktop(content: string, filename: string): 
   }
 
   try {
-    const response = await fetch('/api/vscode/save-markdown', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fileName: filename, content }),
-    });
-
-    if (!response.ok) {
+    const payload = await getRegisteredRuntimeAPIs()?.vscode?.saveMarkdown?.({ fileName: filename, content }) as { saved?: boolean; path?: string } | undefined;
+    if (!payload) {
       return null;
     }
-
-    const payload = await response.json() as { saved?: boolean; path?: string };
     if (payload.saved !== true) {
       return null;
     }

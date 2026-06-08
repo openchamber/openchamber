@@ -1,4 +1,5 @@
 import React from 'react';
+import QRCode from 'qrcode';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { NumberInput } from '@/components/ui/number-input';
@@ -27,6 +28,9 @@ import { Icon } from "@/components/icon/Icon";
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { openExternalUrl } from '@/lib/url';
 import { useI18n, type I18nKey } from '@/lib/i18n';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import type { RemoteClientRecord } from '@/lib/api/types';
+import { buildClientConnectionPayload, encodeClientConnectionPayload, parseClientConnectionPayload } from '@/lib/connectionPayload';
 import {
   desktopSshLogsClear,
   desktopSshLogs,
@@ -34,6 +38,16 @@ import {
   type DesktopSshPortForward,
   type DesktopSshPortForwardType,
 } from '@/lib/desktopSsh';
+import {
+  desktopHostsGet,
+  desktopHostsSet,
+  normalizeHostUrl,
+  redactSensitiveUrl,
+  resolveDesktopHostUrl,
+  type DesktopHost,
+} from '@/lib/desktopHosts';
+import { isDesktopShell } from '@/lib/desktop';
+import { getRuntimeApiBaseUrl, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 
 const randomPort = (): number => {
   return Math.floor(20000 + Math.random() * 30000);
@@ -241,9 +255,12 @@ const normalizeForSave = (instance: DesktopSshInstance): DesktopSshInstance => {
 
 export const RemoteInstancesPage: React.FC = () => {
   const { t } = useI18n();
+  const { clientAuth } = useRuntimeAPIs();
+  const showInstanceManagement = isDesktopShell();
   const instances = useDesktopSshStore((state) => state.instances);
   const statusesById = useDesktopSshStore((state) => state.statusesById);
   const importCandidates = useDesktopSshStore((state) => state.importCandidates);
+  const isLoading = useDesktopSshStore((state) => state.isLoading);
   const isImportsLoading = useDesktopSshStore((state) => state.isImportsLoading);
   const isSaving = useDesktopSshStore((state) => state.isSaving);
   const error = useDesktopSshStore((state) => state.error);
@@ -277,11 +294,275 @@ export const RemoteInstancesPage: React.FC = () => {
   const [isPrimaryActionPending, setIsPrimaryActionPending] = React.useState(false);
   const [isRetryPending, setIsRetryPending] = React.useState(false);
   const [clockMs, setClockMs] = React.useState(() => Date.now());
+  const [directHosts, setDirectHosts] = React.useState<DesktopHost[]>([]);
+  const [directDefaultHostId, setDirectDefaultHostId] = React.useState<string | null>('local');
+  const [directLoading, setDirectLoading] = React.useState(false);
+  const [directSaving, setDirectSaving] = React.useState(false);
+  const [directLabel, setDirectLabel] = React.useState('');
+  const [directUrl, setDirectUrl] = React.useState('');
+  const [directToken, setDirectToken] = React.useState('');
+  const [directConnectLink, setDirectConnectLink] = React.useState('');
+  const [directError, setDirectError] = React.useState<string | null>(null);
+  const [directAddDialogOpen, setDirectAddDialogOpen] = React.useState(false);
+  const [directImportDialogOpen, setDirectImportDialogOpen] = React.useState(false);
+  const [directEditingId, setDirectEditingId] = React.useState<string | null>(null);
+  const [directEditLabel, setDirectEditLabel] = React.useState('');
+  const [directEditUrl, setDirectEditUrl] = React.useState('');
+  const [directEditToken, setDirectEditToken] = React.useState('');
+  const [remoteClients, setRemoteClients] = React.useState<RemoteClientRecord[]>([]);
+  const [remoteClientsLoading, setRemoteClientsLoading] = React.useState(false);
+  const [remoteClientLabel, setRemoteClientLabel] = React.useState('');
+  const [createdRemoteClientToken, setCreatedRemoteClientToken] = React.useState<string | null>(null);
+  const [remoteClientError, setRemoteClientError] = React.useState<string | null>(null);
+  const [pairingUrl, setPairingUrl] = React.useState<string | null>(null);
+  const [pairingQrDataUrl, setPairingQrDataUrl] = React.useState<string | null>(null);
+  const revokedClientCount = React.useMemo(() => remoteClients.filter((client) => Boolean(client.revokedAt)).length, [remoteClients]);
+  const [sshAddDialogOpen, setSshAddDialogOpen] = React.useState(false);
+  const [sshCommandDraft, setSshCommandDraft] = React.useState('ssh user@example.com');
+  const [sshNameDraft, setSshNameDraft] = React.useState('');
 
   React.useEffect(() => {
     void load();
     void loadImports();
   }, [load, loadImports]);
+
+  const loadDirectHosts = React.useCallback(async () => {
+    setDirectLoading(true);
+    setDirectError(null);
+    try {
+      const config = await desktopHostsGet();
+      setDirectHosts(config.hosts || []);
+      setDirectDefaultHostId(config.defaultHostId || 'local');
+    } catch (err) {
+      setDirectError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDirectLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    void loadDirectHosts();
+  }, [loadDirectHosts]);
+
+  const persistDirectHosts = React.useCallback(async (hosts: DesktopHost[], defaultHostId: string | null = directDefaultHostId) => {
+    setDirectSaving(true);
+    setDirectError(null);
+    try {
+      await desktopHostsSet({ hosts, defaultHostId, initialHostChoiceCompleted: true });
+      setDirectHosts(hosts);
+      setDirectDefaultHostId(defaultHostId);
+    } catch (err) {
+      setDirectError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDirectSaving(false);
+    }
+  }, [directDefaultHostId]);
+
+  const handleAddDirectHost = React.useCallback(async () => {
+    const resolved = resolveDesktopHostUrl(directUrl);
+    if (!resolved) {
+      setDirectError(t('desktopHostSwitcher.error.invalidUrl'));
+      return;
+    }
+    const url = resolved.persistedUrl;
+    const id = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `host-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const host: DesktopHost = {
+      id,
+      label: directLabel.trim() || redactSensitiveUrl(url),
+      url,
+      apiUrl: url,
+      ...(directToken.trim() ? { clientToken: directToken.trim() } : {}),
+    };
+    await persistDirectHosts([host, ...directHosts], directDefaultHostId);
+    setDirectLabel('');
+    setDirectUrl('');
+    setDirectToken('');
+    setDirectAddDialogOpen(false);
+    if (resolved.redeemUrl) {
+      navigateToUrl(resolved.redeemUrl);
+    }
+  }, [directDefaultHostId, directHosts, directLabel, directToken, directUrl, persistDirectHosts, t]);
+
+  const importDirectConnectLink = React.useCallback(async () => {
+    const payload = parseClientConnectionPayload(directConnectLink);
+    if (!payload) {
+      setDirectError(t('settings.remoteInstances.direct.error.invalidConnectLink'));
+      return;
+    }
+    const url = normalizeHostUrl(payload.serverUrl);
+    if (!url) {
+      setDirectError(t('desktopHostSwitcher.error.invalidUrl'));
+      return;
+    }
+    const existing = directHosts.find((host) => normalizeHostUrl(host.apiUrl || host.url) === url);
+    if (existing) {
+      const nextHosts = directHosts.map((host) => host.id === existing.id
+        ? { ...host, label: payload.label || host.label, url, apiUrl: url, clientToken: payload.token }
+        : host);
+      await persistDirectHosts(nextHosts, directDefaultHostId);
+    } else {
+      const id = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `host-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      await persistDirectHosts([{ id, label: payload.label || redactSensitiveUrl(url), url, apiUrl: url, clientToken: payload.token }, ...directHosts], directDefaultHostId);
+    }
+    setDirectConnectLink('');
+    setDirectError(null);
+    setDirectImportDialogOpen(false);
+  }, [directConnectLink, directDefaultHostId, directHosts, persistDirectHosts, t]);
+
+  const handleRemoveDirectHost = React.useCallback(async (id: string) => {
+    const nextHosts = directHosts.filter((host) => host.id !== id);
+    const nextDefault = directDefaultHostId === id ? 'local' : directDefaultHostId;
+    await persistDirectHosts(nextHosts, nextDefault);
+    if (directEditingId === id) {
+      setDirectEditingId(null);
+    }
+  }, [directDefaultHostId, directEditingId, directHosts, persistDirectHosts]);
+
+  const beginEditDirectHost = React.useCallback((host: DesktopHost) => {
+    setDirectEditingId(host.id);
+    setDirectEditLabel(host.label);
+    setDirectEditUrl(host.apiUrl || host.url);
+    setDirectEditToken(host.clientToken || '');
+    setDirectError(null);
+  }, []);
+
+  const saveDirectHostEdit = React.useCallback(async () => {
+    if (!directEditingId) return;
+    const resolved = resolveDesktopHostUrl(directEditUrl);
+    if (!resolved) {
+      setDirectError(t('desktopHostSwitcher.error.invalidUrl'));
+      return;
+    }
+    const url = resolved.persistedUrl;
+    const nextHosts = directHosts.map((host) => host.id === directEditingId
+      ? {
+        ...host,
+        label: directEditLabel.trim() || redactSensitiveUrl(url),
+        url,
+        apiUrl: url,
+        clientToken: directEditToken.trim() || undefined,
+      }
+      : host);
+    await persistDirectHosts(nextHosts, directDefaultHostId);
+    setDirectEditingId(null);
+    if (resolved.redeemUrl) {
+      navigateToUrl(resolved.redeemUrl);
+    }
+  }, [directDefaultHostId, directEditLabel, directEditToken, directEditUrl, directEditingId, directHosts, persistDirectHosts, t]);
+
+  const createSshInstanceFromDialog = React.useCallback(async () => {
+    const command = sshCommandDraft.trim();
+    if (!command) {
+      toast.error(t('settings.remoteInstances.page.toast.sshCommandRequired'));
+      return;
+    }
+    const id = `ssh-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    try {
+      await createFromCommand(id, command, sshNameDraft.trim() || t('settings.remoteInstances.sidebar.newSshInstanceName'));
+      setSelectedId(id);
+      setSshAddDialogOpen(false);
+      setSshCommandDraft('ssh user@example.com');
+      setSshNameDraft('');
+      toast.success(t('settings.remoteInstances.page.toast.instanceCreated'));
+    } catch (error) {
+      toast.error(t('settings.remoteInstances.sidebar.toast.createFailed'), {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }, [createFromCommand, setSelectedId, sshCommandDraft, sshNameDraft, t]);
+
+  const setDefaultDirectHost = React.useCallback(async (id: string) => {
+    await persistDirectHosts(directHosts, id);
+  }, [directHosts, persistDirectHosts]);
+
+  const loadRemoteClients = React.useCallback(async () => {
+    if (!clientAuth) return;
+    setRemoteClientsLoading(true);
+    setRemoteClientError(null);
+    try {
+      setRemoteClients(await clientAuth.listClients());
+    } catch (err) {
+      setRemoteClientError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRemoteClientsLoading(false);
+    }
+  }, [clientAuth]);
+
+  React.useEffect(() => {
+    void loadRemoteClients();
+  }, [loadRemoteClients]);
+
+  const createRemoteClient = React.useCallback(async () => {
+    if (!clientAuth) return;
+    setRemoteClientError(null);
+    try {
+      const result = await clientAuth.createClient({ label: remoteClientLabel.trim() || undefined });
+      setCreatedRemoteClientToken(result.token);
+      setRemoteClientLabel('');
+      await loadRemoteClients();
+    } catch (err) {
+      setRemoteClientError(err instanceof Error ? err.message : String(err));
+    }
+  }, [clientAuth, loadRemoteClients, remoteClientLabel]);
+
+  const createPairingLink = React.useCallback(async () => {
+    if (!clientAuth) return;
+    setRemoteClientError(null);
+    try {
+      const serverUrl = normalizeHostUrl(getRuntimeApiBaseUrl()) || window.location.origin;
+      const result = await clientAuth.createClient({ label: remoteClientLabel.trim() || 'Paired client' });
+      const payload = buildClientConnectionPayload({ serverUrl, token: result.token, label: remoteClientLabel || 'OpenChamber' });
+      const encoded = encodeClientConnectionPayload(payload);
+      setCreatedRemoteClientToken(result.token);
+      setPairingUrl(encoded);
+      setPairingQrDataUrl(await QRCode.toDataURL(encoded, { width: 192, margin: 1 }));
+      setRemoteClientLabel('');
+      await loadRemoteClients();
+    } catch (err) {
+      setRemoteClientError(err instanceof Error ? err.message : String(err));
+    }
+  }, [clientAuth, loadRemoteClients, remoteClientLabel]);
+
+  const revokeRemoteClient = React.useCallback(async (client: RemoteClientRecord) => {
+    if (!clientAuth) return;
+    const isLocalDesktopClient = client.clientKind === 'desktop-local';
+    setRemoteClientError(null);
+    try {
+      await clientAuth.revokeClient(client.id);
+      if (isLocalDesktopClient && isDesktopShell()) {
+        const config = await desktopHostsGet();
+        await desktopHostsSet({
+          hosts: config.hosts,
+          defaultHostId: config.defaultHostId,
+          initialHostChoiceCompleted: config.initialHostChoiceCompleted,
+          localClientToken: null,
+        });
+        setRemoteClients((clients) => clients.map((entry) => entry.id === client.id
+          ? { ...entry, revokedAt: new Date().toISOString() }
+          : entry));
+        switchRuntimeEndpoint({ apiBaseUrl: getRuntimeApiBaseUrl(), clientToken: null, runtimeKey: 'local' });
+        return;
+      }
+      await loadRemoteClients();
+    } catch (err) {
+      setRemoteClientError(err instanceof Error ? err.message : String(err));
+    }
+  }, [clientAuth, loadRemoteClients]);
+
+  const purgeRevokedRemoteClients = React.useCallback(async () => {
+    if (!clientAuth) return;
+    setRemoteClientError(null);
+    try {
+      await clientAuth.purgeRevokedClients();
+      await loadRemoteClients();
+    } catch (err) {
+      setRemoteClientError(err instanceof Error ? err.message : String(err));
+    }
+  }, [clientAuth, loadRemoteClients]);
 
   React.useEffect(() => {
     setDraft(selectedInstance);
@@ -674,17 +955,271 @@ export const RemoteInstancesPage: React.FC = () => {
   if (!draft) {
     return (
       <SettingsPageLayout>
-        <div className="mb-8">
-          <div className="mb-1 px-1 space-y-0.5">
-            <h3 className="typography-ui-header font-medium text-foreground">{t('settings.remoteInstances.page.title')}</h3>
-            <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.page.description')}</p>
+        {clientAuth ? (
+          <div className="mb-8">
+            <div className="mb-1 px-1 space-y-0.5">
+              <h3 className="typography-ui-header font-medium text-foreground">{t('settings.remoteInstances.clientAuth.title')}</h3>
+              <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.clientAuth.description')}</p>
+            </div>
+            <section className="px-2 pb-2 pt-0 space-y-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <Input className="h-8" value={remoteClientLabel} onChange={(event) => setRemoteClientLabel(event.target.value)} placeholder={t('settings.remoteInstances.clientAuth.field.labelPlaceholder')} />
+                <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={() => void createRemoteClient()}>
+                  {t('settings.remoteInstances.clientAuth.actions.create')}
+                </Button>
+                <Button type="button" size="xs" className="!font-normal" onClick={() => void createPairingLink()}>
+                  {t('settings.remoteInstances.clientAuth.actions.pair')}
+                </Button>
+              </div>
+              {pairingUrl ? (
+                <div className="flex flex-col gap-3 rounded-md border border-[var(--interactive-border)] p-2 sm:flex-row">
+                  {pairingQrDataUrl ? <img src={pairingQrDataUrl} alt={t('settings.remoteInstances.clientAuth.qrAlt')} className="size-48 self-start" /> : null}
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.clientAuth.pairingUrl')}</p>
+                    <code className="block select-all break-all typography-code text-foreground">{pairingUrl}</code>
+                    <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={() => void copyTextToClipboard(pairingUrl)}>
+                      <Icon name="file-copy" className="h-3.5 w-3.5" />
+                      {t('settings.common.actions.copyAll')}
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+              {createdRemoteClientToken ? (
+                <div className="space-y-1 rounded-md border border-[var(--interactive-border)] p-2">
+                  <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.clientAuth.createdToken')}</p>
+                  <code className="block select-all break-all typography-code text-foreground">{createdRemoteClientToken}</code>
+                </div>
+              ) : null}
+              <div className="space-y-1">
+                {revokedClientCount > 0 ? (
+                  <div className="flex justify-end">
+                    <Button type="button" variant="ghost" size="xs" className="!font-normal" onClick={() => void purgeRevokedRemoteClients()}>
+                      {t('settings.remoteInstances.clientAuth.actions.clearRevoked')}
+                    </Button>
+                  </div>
+                ) : null}
+                {remoteClientsLoading ? (
+                  <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.clientAuth.state.loading')}</p>
+                ) : remoteClients.length === 0 ? (
+                  <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.clientAuth.state.empty')}</p>
+                ) : remoteClients.map((client) => {
+                  const isLocalDesktopClient = client.clientKind === 'desktop-local';
+                  return (
+                    <div key={client.id} className="flex items-center justify-between gap-3 py-1.5">
+                      <div className="min-w-0">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <p className="typography-ui-label text-foreground truncate">{client.label}</p>
+                          {isLocalDesktopClient ? (
+                            <span className="typography-micro text-muted-foreground bg-muted px-1 rounded flex-shrink-0 leading-none pb-px border border-border/50">
+                              {t('settings.remoteInstances.clientAuth.state.thisDevice')}
+                            </span>
+                          ) : null}
+                        </div>
+                        <p className="typography-micro text-muted-foreground truncate">{client.revokedAt ? t('settings.remoteInstances.clientAuth.state.revoked') : client.lastUsedAt ? t('settings.remoteInstances.clientAuth.lastUsed', { date: client.lastUsedAt }) : t('settings.remoteInstances.clientAuth.neverUsed')}</p>
+                      </div>
+                      <Button type="button" variant="ghost" size="xs" className="!font-normal" onClick={() => void revokeRemoteClient(client)} disabled={Boolean(client.revokedAt)}>
+                        {t('settings.remoteInstances.clientAuth.actions.revoke')}
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+              {remoteClientError ? <p className="typography-meta text-[var(--status-error)]">{remoteClientError}</p> : null}
+            </section>
           </div>
-          <section className="px-2 pb-2 pt-0 space-y-3">
-            <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.page.empty.selectInstance')}</p>
-          </section>
-        </div>
+        ) : null}
 
-        <div className="mb-8 border-t border-[var(--surface-subtle)] pt-8">
+        {showInstanceManagement ? <div className="mb-8 border-t border-[var(--surface-subtle)] pt-8">
+          <div className="mb-1 px-1 space-y-0.5">
+            <h3 className="typography-ui-header font-medium text-foreground">{t('settings.remoteInstances.direct.title')}</h3>
+            <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.direct.description')}</p>
+          </div>
+          <section className="px-2 pb-2 pt-0 space-y-4">
+            <div className="flex items-center justify-between gap-2">
+              <p className="typography-meta text-muted-foreground/70">{t('settings.remoteInstances.direct.note')}</p>
+              <div className="flex shrink-0 items-center gap-2">
+                <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={() => setDirectImportDialogOpen(true)} disabled={directSaving}>
+                  {t('settings.remoteInstances.direct.import.action')}
+                </Button>
+                <Button type="button" size="xs" className="!font-normal" onClick={() => setDirectAddDialogOpen(true)} disabled={directSaving}>
+                  <Icon name="add" className="h-3.5 w-3.5" />
+                  {t('settings.remoteInstances.direct.actions.add')}
+                </Button>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              {directLoading ? (
+                <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.direct.state.loading')}</p>
+              ) : directHosts.length === 0 ? (
+                <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.direct.state.empty')}</p>
+              ) : directHosts.map((host) => (
+                <div key={host.id} className="py-1.5">
+                  <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <p className="typography-ui-label text-foreground truncate">{redactSensitiveUrl(host.label)}</p>
+                          {directDefaultHostId === host.id ? <span className="typography-micro text-muted-foreground">{t('desktopHostSwitcher.header.default')}</span> : null}
+                        </div>
+                        <p className="typography-micro text-muted-foreground font-mono truncate">{redactSensitiveUrl(host.apiUrl || host.url)}</p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <Button type="button" variant="ghost" size="xs" className="!font-normal" onClick={() => void setDefaultDirectHost(host.id)} disabled={directSaving || directDefaultHostId === host.id} aria-label={t('desktopHostSwitcher.actions.setAsDefaultAria')}>
+                          {directDefaultHostId === host.id ? <Icon name="star-fill" className="h-3.5 w-3.5" /> : <Icon name="star" className="h-3.5 w-3.5" />}
+                        </Button>
+                        <Button type="button" variant="ghost" size="xs" className="!font-normal" onClick={() => beginEditDirectHost(host)} disabled={directSaving}>
+                          <Icon name="pencil" className="h-3.5 w-3.5" />
+                          {t('desktopHostSwitcher.actions.edit')}
+                        </Button>
+                        <Button type="button" variant="ghost" size="xs" className="!font-normal" onClick={() => void handleRemoveDirectHost(host.id)} disabled={directSaving}>
+                          <Icon name="delete-bin" className="h-3.5 w-3.5" />
+                          {t('settings.common.actions.delete')}
+                        </Button>
+                      </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {directError ? <p className="typography-meta text-[var(--status-error)]">{directError}</p> : null}
+          </section>
+        </div> : null}
+
+        {showInstanceManagement ? <Dialog open={directAddDialogOpen} onOpenChange={setDirectAddDialogOpen}>
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>{t('settings.remoteInstances.direct.actions.add')}</DialogTitle>
+              <DialogDescription>{t('settings.remoteInstances.direct.description')}</DialogDescription>
+            </DialogHeader>
+            <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void handleAddDirectHost(); }}>
+              <Input className="h-8" value={directLabel} onChange={(event) => setDirectLabel(event.target.value)} placeholder={t('settings.remoteInstances.direct.field.labelPlaceholder')} disabled={directSaving} />
+              <Input className="h-8" value={directUrl} onChange={(event) => setDirectUrl(event.target.value)} placeholder={t('settings.remoteInstances.direct.field.urlPlaceholder')} disabled={directSaving} autoFocus />
+              <Input className="h-8" value={directToken} onChange={(event) => setDirectToken(event.target.value)} placeholder={t('settings.remoteInstances.direct.field.tokenPlaceholder')} type="password" disabled={directSaving} />
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={() => setDirectAddDialogOpen(false)} disabled={directSaving}>{t('settings.common.actions.cancel')}</Button>
+                <Button type="submit" size="xs" className="!font-normal" disabled={directSaving || !directUrl.trim()}>{t('settings.remoteInstances.direct.actions.add')}</Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog> : null}
+
+        {showInstanceManagement ? <Dialog open={Boolean(directEditingId)} onOpenChange={(open) => { if (!open) setDirectEditingId(null); }}>
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>{t('desktopHostSwitcher.actions.edit')}</DialogTitle>
+              <DialogDescription>{t('settings.remoteInstances.direct.description')}</DialogDescription>
+            </DialogHeader>
+            <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void saveDirectHostEdit(); }}>
+              <Input className="h-8" value={directEditLabel} onChange={(event) => setDirectEditLabel(event.target.value)} placeholder={t('settings.remoteInstances.direct.field.labelPlaceholder')} disabled={directSaving} />
+              <Input className="h-8" value={directEditUrl} onChange={(event) => setDirectEditUrl(event.target.value)} placeholder={t('settings.remoteInstances.direct.field.urlPlaceholder')} disabled={directSaving} autoFocus />
+              <Input className="h-8" value={directEditToken} onChange={(event) => setDirectEditToken(event.target.value)} placeholder={t('settings.remoteInstances.direct.field.tokenPlaceholder')} type="password" disabled={directSaving} />
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={() => setDirectEditingId(null)} disabled={directSaving}>{t('settings.common.actions.cancel')}</Button>
+                <Button type="submit" size="xs" className="!font-normal" disabled={directSaving}>{t('settings.common.actions.saveChanges')}</Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog> : null}
+
+        {showInstanceManagement ? <Dialog open={directImportDialogOpen} onOpenChange={setDirectImportDialogOpen}>
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>{t('settings.remoteInstances.direct.import.action')}</DialogTitle>
+              <DialogDescription>{t('settings.remoteInstances.direct.import.description')}</DialogDescription>
+            </DialogHeader>
+            <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void importDirectConnectLink(); }}>
+              <Input className="h-8" value={directConnectLink} onChange={(event) => setDirectConnectLink(event.target.value)} placeholder={t('settings.remoteInstances.direct.import.placeholder')} disabled={directSaving} autoFocus />
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={() => setDirectImportDialogOpen(false)} disabled={directSaving}>{t('settings.common.actions.cancel')}</Button>
+                <Button type="submit" size="xs" className="!font-normal" disabled={directSaving || !directConnectLink.trim()}>{t('settings.remoteInstances.direct.import.action')}</Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog> : null}
+
+        {showInstanceManagement ? <div className="mb-8 border-t border-[var(--surface-subtle)] pt-8">
+          <div className="mb-1 px-1 space-y-0.5">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="typography-ui-header font-medium text-foreground">{t('settings.remoteInstances.sidebar.title')}</h3>
+                <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.sidebar.total', { count: instances.length })}</p>
+              </div>
+              <Button type="button" size="xs" className="!font-normal" onClick={() => setSshAddDialogOpen(true)}>
+                <Icon name="add" className="h-3.5 w-3.5" />
+                {t('settings.remoteInstances.sidebar.actions.addSshInstance')}
+              </Button>
+            </div>
+          </div>
+          <section className="px-2 pb-2 pt-0 space-y-1">
+            {isLoading ? (
+              <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.page.import.loading')}</p>
+            ) : instances.length === 0 ? (
+              <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.page.import.noneFound')}</p>
+            ) : instances.map((instance) => {
+              const instanceStatus = statusesById[instance.id];
+              const title = instance.nickname?.trim() || instance.sshParsed?.destination || instance.id;
+              const phase = instanceStatus?.phase;
+              const ready = phase === 'ready';
+              return (
+                <div key={instance.id} className="flex items-center justify-between gap-3 py-1.5">
+                  <div className="min-w-0">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className={`h-2 w-2 rounded-full ${phaseDotClass(phase)}`} />
+                      <p className="typography-ui-label text-foreground truncate">{title}</p>
+                    </div>
+                    <p className="typography-micro text-muted-foreground truncate">
+                      {t(phaseLabelKey(phase))}{instanceStatus?.localUrl ? ` · ${instanceStatus.localUrl}` : ''}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Button type="button" variant="ghost" size="xs" className="!font-normal" onClick={() => {
+                      const op = ready ? disconnect(instance.id) : connect(instance.id);
+                      void op.catch((err) => toast.error(ready ? t('settings.remoteInstances.sidebar.toast.disconnectFailed') : t('settings.remoteInstances.sidebar.toast.connectFailed'), {
+                        description: err instanceof Error ? err.message : String(err),
+                      }));
+                    }}>
+                      {ready ? <Icon name="stop" className="h-3.5 w-3.5" /> : <Icon name="plug-2" className="h-3.5 w-3.5" />}
+                      {ready ? t('settings.remoteInstances.sidebar.actions.disconnect') : t('settings.remoteInstances.sidebar.actions.connect')}
+                    </Button>
+                    <Button type="button" variant="ghost" size="xs" className="!font-normal" onClick={() => setSelectedId(instance.id)}>
+                      <Icon name="pencil" className="h-3.5 w-3.5" />
+                      {t('desktopHostSwitcher.actions.edit')}
+                    </Button>
+                    <Button type="button" variant="ghost" size="xs" className="!font-normal" onClick={() => {
+                      const ok = window.confirm(t('settings.remoteInstances.page.confirm.removeInstance'));
+                      if (!ok) return;
+                      void removeInstance(instance.id).catch((err) => toast.error(t('settings.remoteInstances.page.toast.removeInstanceFailed'), {
+                        description: err instanceof Error ? err.message : String(err),
+                      }));
+                    }}>
+                      <Icon name="delete-bin" className="h-3.5 w-3.5" />
+                      {t('settings.common.actions.delete')}
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </section>
+        </div> : null}
+
+        {showInstanceManagement ? <Dialog open={sshAddDialogOpen} onOpenChange={setSshAddDialogOpen}>
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>{t('settings.remoteInstances.sidebar.actions.addSshInstance')}</DialogTitle>
+              <DialogDescription>{t('settings.remoteInstances.page.section.instanceDescription')}</DialogDescription>
+            </DialogHeader>
+            <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void createSshInstanceFromDialog(); }}>
+              <Input className="h-8" value={sshNameDraft} onChange={(event) => setSshNameDraft(event.target.value)} placeholder={t('settings.remoteInstances.page.field.nicknamePlaceholder')} disabled={isSaving} />
+              <Input className="h-8" value={sshCommandDraft} onChange={(event) => setSshCommandDraft(event.target.value)} placeholder={t('settings.remoteInstances.page.field.sshCommandPlaceholder')} disabled={isSaving} autoFocus />
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={() => setSshAddDialogOpen(false)} disabled={isSaving}>{t('settings.common.actions.cancel')}</Button>
+                <Button type="submit" size="xs" className="!font-normal" disabled={isSaving || !sshCommandDraft.trim()}>{t('settings.common.actions.create')}</Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog> : null}
+
+        {showInstanceManagement ? <div className="mb-8 border-t border-[var(--surface-subtle)] pt-8">
           <div className="mb-1 px-1 space-y-0.5">
             <h3 className="typography-ui-header font-medium text-foreground">{t('settings.remoteInstances.page.import.sectionTitle')}</h3>
           </div>
@@ -694,15 +1229,15 @@ export const RemoteInstancesPage: React.FC = () => {
           ) : importCandidates.length === 0 ? (
             <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.page.import.noneFound')}</p>
           ) : (
-            <div className="space-y-2">
+            <div>
               {importCandidates.map((candidate) => (
-                <div key={`${candidate.source}:${candidate.host}`} className="flex items-center justify-between gap-3 rounded-md border border-[var(--interactive-border)] px-3 py-2">
+                <div key={`${candidate.source}:${candidate.host}`} className="flex items-center justify-between gap-3 border-b border-[var(--surface-subtle)] py-3 last:border-b-0">
                   <div className="min-w-0">
-                    <div className="typography-ui-label text-foreground truncate">
+                    <div className="typography-ui-label font-medium text-foreground truncate">
                       {candidate.host}
                       {candidate.pattern ? ` ${t('settings.remoteInstances.page.import.patternSuffix')}` : ''}
                     </div>
-                    <div className="typography-micro text-muted-foreground">{candidate.source} config</div>
+                    <div className="typography-meta text-muted-foreground truncate">{candidate.sshCommand}</div>
                   </div>
                   <Button
                     type="button"
@@ -711,14 +1246,14 @@ export const RemoteInstancesPage: React.FC = () => {
                     className="!font-normal"
                     onClick={() => void handleImportCandidate(candidate.host, candidate.pattern)}
                   >
-                    {t('settings.remoteInstances.page.actions.create')}
+                    {t('settings.common.actions.import')}
                   </Button>
                 </div>
               ))}
             </div>
           )}
         </section>
-        </div>
+        </div> : null}
 
         <Dialog
           open={Boolean(patternHost)}
@@ -767,7 +1302,8 @@ export const RemoteInstancesPage: React.FC = () => {
   const instanceTitle = draft.nickname?.trim() || draft.sshParsed?.destination || draft.id;
 
   return (
-    <SettingsPageLayout>
+    <Dialog open={Boolean(draft)} onOpenChange={(open) => { if (!open) setSelectedId(null); }}>
+      <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-auto">
       <div className="mb-6 px-1">
         <h2 className="typography-ui-header font-semibold text-foreground truncate">{instanceTitle}</h2>
         <div className="mt-1 flex flex-wrap items-center gap-2 typography-meta text-muted-foreground">
@@ -1466,46 +2002,7 @@ export const RemoteInstancesPage: React.FC = () => {
         </section>
       </div>
 
-      <div className="mb-8 border-t border-[var(--surface-subtle)] pt-8">
-        <div className="mb-1 px-1 space-y-0.5">
-          <h3 className="typography-ui-header font-medium text-foreground">{t('settings.remoteInstances.page.import.sectionTitle')}</h3>
-        </div>
-        <section className="px-2 pb-2 pt-0">
-        {isImportsLoading ? (
-          <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.page.import.loading')}</p>
-        ) : importCandidates.length === 0 ? (
-          <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.page.import.noneAvailable')}</p>
-        ) : (
-          <div>
-            {importCandidates.slice(0, 8).map((candidate, index) => (
-              <div
-                key={`${candidate.source}:${candidate.host}`}
-                className={`flex items-center justify-between gap-2 px-1 py-2 ${index > 0 ? 'border-t border-[var(--surface-subtle)]' : ''}`}
-              >
-                <div className="min-w-0">
-                  <div className="typography-ui-label text-foreground truncate">
-                    {candidate.host}
-                    {candidate.pattern ? ' (pattern)' : ''}
-                  </div>
-                  <div className="typography-micro text-muted-foreground truncate">{candidate.sshCommand}</div>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="xs"
-                  className="!font-normal"
-                  onClick={() => void handleImportCandidate(candidate.host, candidate.pattern)}
-                >
-                  {t('settings.common.actions.import')}
-                </Button>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-      </div>
-
-      <div className="sticky bottom-0 z-10 -mx-3 sm:-mx-6 bg-[var(--surface-background)] border-t border-[var(--interactive-border)] px-3 sm:px-6 py-3">
+      <div className="mt-8 border-t border-[var(--interactive-border)] pt-3">
         <div className="flex items-center gap-2">
           <Button type="button" size="xs" className="!font-normal" onClick={() => void handleSave()} disabled={!hasChanges || isSaving}>
             {t('settings.common.actions.saveChanges')}
@@ -1617,6 +2114,7 @@ export const RemoteInstancesPage: React.FC = () => {
           </form>
         </DialogContent>
       </Dialog>
-    </SettingsPageLayout>
+      </DialogContent>
+    </Dialog>
   );
 };

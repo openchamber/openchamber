@@ -135,7 +135,10 @@ export function GitHubPrPickerDialog({
     if (!open || !projectDirectory) return;
     if (githubAuthChecked && githubAuthStatus?.connected === false) return;
     if (!github?.prsList) return;
-    if (!debouncedQuery.trim()) return;
+    if (!debouncedQuery.trim() || directNumber) {
+      void refresh();
+      return;
+    }
 
     const controller = new AbortController();
     setIsLoading(true);
@@ -158,7 +161,7 @@ export function GitHubPrPickerDialog({
       });
 
     return () => controller.abort();
-  }, [open, projectDirectory, github, githubAuthChecked, githubAuthStatus, debouncedQuery, directNumber, t]);
+  }, [open, projectDirectory, github, githubAuthChecked, githubAuthStatus, debouncedQuery, directNumber, refresh, t]);
 
   const loadMore = React.useCallback(async () => {
     if (!projectDirectory) return;

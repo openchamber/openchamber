@@ -14,6 +14,7 @@ import { AgentSelector } from '@/components/sections/commands/AgentSelector';
 import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
 import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo } from '@/components/chat/CommandAutocomplete';
 import { FileMentionAutocomplete, type FileMentionHandle } from '@/components/chat/FileMentionAutocomplete';
+import { SnippetAutocomplete, type SnippetAutocompleteHandle } from '@/components/chat/SnippetAutocomplete';
 import { Icon } from "@/components/icon/Icon";
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -618,6 +619,8 @@ export function ScheduledTaskEditorDialog(props: {
   const [mentionQuery, setMentionQuery] = React.useState('');
   const [showCommandAutocomplete, setShowCommandAutocomplete] = React.useState(false);
   const [commandQuery, setCommandQuery] = React.useState('');
+  const [showSnippetAutocomplete, setShowSnippetAutocomplete] = React.useState(false);
+  const [snippetQuery, setSnippetQuery] = React.useState('');
   const [calendarMonth, setCalendarMonth] = React.useState<Date>(() => {
     const initialDate = parseISODateToLocal(task?.schedule?.date || '') || new Date();
     return new Date(initialDate.getFullYear(), initialDate.getMonth(), 1);
@@ -626,6 +629,7 @@ export function ScheduledTaskEditorDialog(props: {
   const promptTextareaRef = React.useRef<HTMLTextAreaElement>(null);
   const mentionRef = React.useRef<FileMentionHandle>(null);
   const commandRef = React.useRef<CommandAutocompleteHandle>(null);
+  const snippetRef = React.useRef<SnippetAutocompleteHandle>(null);
   const localeUse24Hour = React.useMemo(() => getUses24Hour(locale), [locale]);
   const localeWeekStartsOn = React.useMemo(() => getWeekStartsOn(locale), [locale]);
   const use24Hour = React.useMemo(() => {
@@ -658,8 +662,8 @@ export function ScheduledTaskEditorDialog(props: {
     if (!open) {
       return;
     }
-    void loadProviders();
-    void loadAgents();
+    void loadProviders({ source: 'scheduledTaskEditor' });
+    void loadAgents({ source: 'scheduledTaskEditor' });
   }, [open, loadProviders, loadAgents]);
 
   React.useEffect(() => {
@@ -828,6 +832,7 @@ export function ScheduledTaskEditorDialog(props: {
         setCommandQuery(value.substring(1, commandEnd));
         setShowCommandAutocomplete(true);
         setShowFileMention(false);
+        setShowSnippetAutocomplete(false);
         return;
       }
     }
@@ -835,6 +840,21 @@ export function ScheduledTaskEditorDialog(props: {
     setShowCommandAutocomplete(false);
 
     const textBeforeCursor = value.substring(0, cursorPosition);
+    const lastHashSymbol = textBeforeCursor.lastIndexOf('#');
+    if (lastHashSymbol !== -1) {
+      const charBefore = lastHashSymbol > 0 ? textBeforeCursor[lastHashSymbol - 1] : null;
+      const textAfterHash = textBeforeCursor.substring(lastHashSymbol + 1);
+      const isWordBoundary = !charBefore || /\s/.test(charBefore);
+      if (isWordBoundary && !textAfterHash.includes(' ') && !textAfterHash.includes('\n')) {
+        setSnippetQuery(textAfterHash);
+        setShowSnippetAutocomplete(true);
+        setShowFileMention(false);
+        return;
+      }
+    }
+
+    setShowSnippetAutocomplete(false);
+
     const lastAtSymbol = textBeforeCursor.lastIndexOf('@');
     if (lastAtSymbol !== -1) {
       const charBefore = lastAtSymbol > 0 ? textBeforeCursor[lastAtSymbol - 1] : null;
@@ -921,6 +941,7 @@ export function ScheduledTaskEditorDialog(props: {
     setPromptValue(nextPrompt);
     setShowCommandAutocomplete(false);
     setCommandQuery('');
+    setShowSnippetAutocomplete(false);
 
     requestAnimationFrame(() => {
       const currentTextarea = promptTextareaRef.current;
@@ -932,6 +953,31 @@ export function ScheduledTaskEditorDialog(props: {
       updateAutocompleteState(nextPrompt, nextPrompt.length);
     });
   }, [setPromptValue, updateAutocompleteState]);
+
+  const handleSnippetSelect = React.useCallback((_snippet: unknown, trigger: string) => {
+    const promptValue = draft.execution.prompt;
+    const textarea = promptTextareaRef.current;
+    const cursorPosition = textarea?.selectionStart ?? promptValue.length;
+    const textBeforeCursor = promptValue.substring(0, cursorPosition);
+    const lastHashSymbol = textBeforeCursor.lastIndexOf('#');
+    const startIndex = lastHashSymbol !== -1 ? lastHashSymbol : cursorPosition;
+    const nextPrompt = `${promptValue.substring(0, startIndex)}#${trigger} ${promptValue.substring(cursorPosition)}`;
+    const nextCursor = startIndex + trigger.length + 2;
+
+    setPromptValue(nextPrompt);
+    setShowSnippetAutocomplete(false);
+    setSnippetQuery('');
+
+    requestAnimationFrame(() => {
+      const currentTextarea = promptTextareaRef.current;
+      if (currentTextarea) {
+        currentTextarea.selectionStart = nextCursor;
+        currentTextarea.selectionEnd = nextCursor;
+        currentTextarea.focus();
+      }
+      updateAutocompleteState(nextPrompt, nextCursor);
+    });
+  }, [draft.execution.prompt, setPromptValue, updateAutocompleteState]);
 
   const handlePromptKeyDown = React.useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (showCommandAutocomplete && commandRef.current) {
@@ -948,7 +994,14 @@ export function ScheduledTaskEditorDialog(props: {
         mentionRef.current.handleKeyDown(event.key);
       }
     }
-  }, [showCommandAutocomplete, showFileMention]);
+
+    if (showSnippetAutocomplete && snippetRef.current) {
+      if (event.key === 'Enter' || event.key === 'ArrowUp' || event.key === 'ArrowDown' || event.key === 'Escape' || event.key === 'Tab') {
+        event.preventDefault();
+        snippetRef.current.handleKeyDown(event.key);
+      }
+    }
+  }, [showCommandAutocomplete, showFileMention, showSnippetAutocomplete]);
 
   const handleSubmit = React.useCallback(async () => {
     const validationError = validateDraft(draft, t);
@@ -1398,6 +1451,22 @@ export function ScheduledTaskEditorDialog(props: {
                   onFileSelect={handleFileSelect}
                   onAgentSelect={handleAgentSelect}
                   onClose={() => setShowFileMention(false)}
+                  style={{
+                    left: 0,
+                    top: 'auto',
+                    bottom: 'calc(100% + 6px)',
+                    marginBottom: 0,
+                    maxWidth: '100%',
+                  }}
+                />
+              ) : null}
+
+              {showSnippetAutocomplete ? (
+                <SnippetAutocomplete
+                  ref={snippetRef}
+                  searchQuery={snippetQuery}
+                  onSnippetSelect={handleSnippetSelect}
+                  onClose={() => setShowSnippetAutocomplete(false)}
                   style={{
                     left: 0,
                     top: 'auto',

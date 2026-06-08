@@ -15,11 +15,11 @@ Style rules:
 - Avoid internal implementation details, but do not replace them with vague benefits. If a technical change has no clear user-visible effect, omit it or group it under a plain reliability bullet.
 - Avoid internal component names unless users see them (ex: "VS Code extension", "Desktop app", "Web app").
 - For @packages/vscode/CHANGELOG.md: Craft entries specifically for behavior that is present in the VS Code extension. Exclude Desktop app, Web app, Mobile/PWA, and main-app-only UI. Do not copy shared/main changelog bullets into this file unless changed files or code paths show the feature exists in the extension. Focus on core UI improvements and VS Code integration. Do NOT use "VSCode:" or "VS Code:" prefixes in this file.
-- Prefer 5-9 bullets; group by platform only if it reads better.
+- Prefer grouping by platform only if it reads better.
 - No new release header; only update the `[Unreleased]` bullets.
 - Don't include implementation notes, commit hashes, or file paths in the changelog text.
 - Use area prefixes when helpful for grouping in the main @CHANGELOG.md (e.g., "Chat:", "VSCode:", "Settings:", "Git:", "Terminal:", "Mobile:", "UI:").
-- Credit contributors inline using "(thanks to @username)" at the end of the bullet. Find contributor usernames from commit authors or PR metadata when available. Skip if contributor is btriapitsyn, since this is a repo owner.
+- Credit contributors inline using "(thanks to @username)" at the end of the bullet. Find contributor usernames from commit authors (not email, but a github username) or PR metadata when available. Skip if contributor is btriapitsyn, since this is a repo owner.
 
 Quality checks before editing:
 - For every bullet, ask: "Could a user point to this in the UI or behavior?" If not, rewrite it or drop it.

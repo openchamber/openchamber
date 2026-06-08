@@ -52,6 +52,17 @@ describe('settings helpers', () => {
     });
   });
 
+  it('accepts desktopUiPassword as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ desktopUiPassword: ' secret ' })).toEqual({
+      desktopUiPassword: 'secret',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ desktopUiPassword: '' })).toEqual({
+      desktopUiPassword: '',
+    });
+  });
+
   it('accepts mobileKeyboardMode as a persisted shared setting', () => {
     const helpers = createTestHelpers();
 
@@ -80,6 +91,54 @@ describe('settings helpers', () => {
     });
     expect(helpers.sanitizeSettingsUpdate({ collapsibleThinkingBlocks: false })).toEqual({
       collapsibleThinkingBlocks: false,
+    });
+  });
+
+  it('accepts shortcut overrides as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({
+      shortcutOverrides: {
+        open_settings: 'mod+comma',
+        new_chat: '__unassigned__',
+        invalid: 123,
+        empty: '',
+      },
+    })).toEqual({
+      shortcutOverrides: {
+        open_settings: 'mod+comma',
+        new_chat: '__unassigned__',
+      },
+    });
+  });
+
+  it('preserves empty shortcut overrides when resetting all shortcuts', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ shortcutOverrides: {} })).toEqual({
+      shortcutOverrides: {},
+    });
+  });
+
+  it('accepts OpenCode update notification preference as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ showOpenCodeUpdateNotifications: false })).toEqual({
+      showOpenCodeUpdateNotifications: false,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ showOpenCodeUpdateNotifications: true })).toEqual({
+      showOpenCodeUpdateNotifications: true,
+    });
+  });
+
+  it('accepts dismissed OpenCode update toast version as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ openCodeUpdateToastDismissedVersion: ' 1.16.0 ' })).toEqual({
+      openCodeUpdateToastDismissedVersion: '1.16.0',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ openCodeUpdateToastDismissedVersion: '' })).toEqual({
+      openCodeUpdateToastDismissedVersion: '',
     });
   });
 

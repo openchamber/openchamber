@@ -31,6 +31,7 @@ interface DirectoryGitState {
   log: GitLogResponse | null;
   identity: GitIdentitySummary | null;
   diffCache: Map<string, { original: string; modified: string; fetchedAt: number; isBinary?: boolean }>;
+  indexRevision: number;
   lastRepoCheckAt: number;
   lastStatusFetch: number;
   lastStatusChange: number;
@@ -61,6 +62,9 @@ interface GitStore {
 
   ensureStatus: (directory: string, git: GitAPI) => Promise<void>;
   ensureAll: (directory: string, git: GitAPI) => Promise<void>;
+  moveStatusPathsOptimistically: (directory: string, paths: string[], direction: 'stage' | 'unstage') => GitStatus | null;
+  restoreStatus: (directory: string, status: GitStatus | null) => void;
+  bumpIndexRevision: (directory: string) => void;
 
   getDiff: (directory: string, filePath: string) => { original: string; modified: string; fetchedAt: number; isBinary?: boolean } | null;
   setDiff: (directory: string, filePath: string, diff: { original: string; modified: string; isBinary?: boolean }) => void;
@@ -122,6 +126,7 @@ const createEmptyDirectoryState = (): DirectoryGitState => ({
   log: null,
   identity: null,
   diffCache: new Map(),
+  indexRevision: 0,
   lastRepoCheckAt: 0,
   lastStatusFetch: 0,
   lastStatusChange: 0,
@@ -199,6 +204,21 @@ const haveDiffStatsChanged = (
   return false;
 };
 
+const haveRemoteComparisonChanged = (
+  previous?: GitStatus['upstreamComparison'],
+  next?: GitStatus['upstreamComparison']
+): boolean => {
+  if (!previous && !next) return false;
+  if (!previous || !next) return true;
+
+  return (
+    previous.remote !== next.remote
+    || previous.branch !== next.branch
+    || previous.ahead !== next.ahead
+    || previous.behind !== next.behind
+  );
+};
+
 const hasStatusChanged = (oldStatus: GitStatus | null, newStatus: GitStatus | null): boolean => {
   if (!oldStatus && !newStatus) return false;
   if (!oldStatus || !newStatus) return true;
@@ -212,6 +232,12 @@ const hasStatusChanged = (oldStatus: GitStatus | null, newStatus: GitStatus | nu
   if (oldStatus.current !== newStatus.current) return true;
   if (oldStatus.tracking !== newStatus.tracking) return true;
   if (oldStatus.isClean !== newStatus.isClean) return true;
+  if (
+    newStatus.upstreamComparison !== undefined
+    && haveRemoteComparisonChanged(oldStatus.upstreamComparison, newStatus.upstreamComparison)
+  ) {
+    return true;
+  }
 
   const oldPaths = new Set(oldFiles.map(f => `${f.path}:${f.index}:${f.working_dir}`));
   for (const file of newFiles) {
@@ -277,6 +303,72 @@ const getChangedFilePaths = (oldStatus: GitStatus | null, newStatus: GitStatus |
 
   return changed;
 };
+
+const hasIndexStatusChanged = (oldStatus: GitStatus | null, newStatus: GitStatus | null): boolean => {
+  if (!oldStatus && !newStatus) return false;
+  if (!oldStatus || !newStatus) return true;
+
+  const oldFiles = oldStatus.files ?? [];
+  const newFiles = newStatus.files ?? [];
+  const normalizeIndexStatus = (value?: string | null): string => {
+    const trimmed = value?.trim() ?? '';
+    return trimmed === '?' ? '' : trimmed;
+  };
+
+  const oldIndexByPath = new Map(oldFiles.map((file) => [file.path, normalizeIndexStatus(file.index)] as const));
+  const newIndexByPath = new Map(newFiles.map((file) => [file.path, normalizeIndexStatus(file.index)] as const));
+  const paths = new Set<string>([...oldIndexByPath.keys(), ...newIndexByPath.keys()]);
+
+  for (const path of paths) {
+    if ((oldIndexByPath.get(path) ?? '') !== (newIndexByPath.get(path) ?? '')) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+const isBlankStatusCode = (value?: string | null): boolean => !value || value.trim().length === 0;
+const isConflictStatusCode = (value?: string | null): boolean => (value || '').trim() === 'U';
+
+const toStagedStatusFile = (file: GitStatus['files'][number]): GitStatus['files'][number] => {
+  const index = (file.index || '').trim();
+  const workingDir = (file.working_dir || '').trim();
+
+  if (isConflictStatusCode(index) || isConflictStatusCode(workingDir)) {
+    return file;
+  }
+
+  const nextIndex = index === '?' || workingDir === '?'
+    ? 'A'
+    : index || workingDir || ' ';
+
+  return {
+    ...file,
+    index: nextIndex,
+    working_dir: ' ',
+  };
+};
+
+const toUnstagedStatusFile = (file: GitStatus['files'][number]): GitStatus['files'][number] => {
+  const index = (file.index || '').trim();
+  const workingDir = (file.working_dir || '').trim();
+
+  if (isConflictStatusCode(index) || isConflictStatusCode(workingDir)) {
+    return file;
+  }
+
+  const nextWorkingDir = workingDir || (index === 'A' || index === '?' ? '?' : index) || ' ';
+
+  return {
+    ...file,
+    index: ' ',
+    working_dir: nextWorkingDir,
+  };
+};
+
+const isCleanStatusFile = (file: GitStatus['files'][number]): boolean =>
+  isBlankStatusCode(file.index) && isBlankStatusCode(file.working_dir);
 
 export const useGitStore = create<GitStore>()(
   devtools(
@@ -369,6 +461,7 @@ export const useGitStore = create<GitStore>()(
               const currentDirState = newDirectories.get(directory) ?? createEmptyDirectoryState();
 
               const changedPaths = getChangedFilePaths(currentDirState.status, newStatus);
+              const indexStatusChanged = hasIndexStatusChanged(currentDirState.status, newStatus);
 
               const oldPaths = new Set((currentDirState.status?.files ?? []).map((f) => f.path));
               const newPaths = new Set((newStatus.files ?? []).map((f) => f.path));
@@ -393,15 +486,24 @@ export const useGitStore = create<GitStore>()(
               }
 
               // Preserve diffStats from previous status when light mode returns none
-              const mergedStatus = newStatus.diffStats === undefined && currentDirState.status?.diffStats
-                ? { ...newStatus, diffStats: currentDirState.status.diffStats }
-                : newStatus;
+              const mergedStatus = {
+                ...newStatus,
+                diffStats:
+                  newStatus.diffStats === undefined && currentDirState.status?.diffStats !== undefined
+                    ? currentDirState.status.diffStats
+                    : newStatus.diffStats,
+                upstreamComparison:
+                  newStatus.upstreamComparison === undefined
+                    ? currentDirState.status?.upstreamComparison
+                    : newStatus.upstreamComparison,
+              };
 
               newDirectories.set(directory, {
                 ...currentDirState,
                 isGitRepo: true,
                 status: mergedStatus,
                 diffCache: nextDiffCache,
+                indexRevision: indexStatusChanged ? currentDirState.indexRevision + 1 : currentDirState.indexRevision,
                 lastRepoCheckAt: shouldProbeRepository ? now : currentDirState.lastRepoCheckAt,
                 lastStatusFetch: Date.now(),
                 lastStatusChange: hasFileContentChange ? Date.now() : currentDirState.lastStatusChange,
@@ -443,6 +545,95 @@ export const useGitStore = create<GitStore>()(
             inFlightStatusFetches.delete(statusFetchKey);
           }
         }
+      },
+
+      moveStatusPathsOptimistically: (directory, paths, direction) => {
+        const normalizedPaths = new Set(paths.map((path) => path.trim()).filter(Boolean));
+        if (normalizedPaths.size === 0) {
+          return null;
+        }
+
+        const { directories } = get();
+        const dirState = directories.get(directory);
+        const previousStatus = dirState?.status ?? null;
+        if (!dirState || !previousStatus) {
+          return previousStatus;
+        }
+
+        let didChange = false;
+        const nextFiles: GitStatus['files'] = [];
+
+        for (const file of previousStatus.files) {
+          if (!normalizedPaths.has(file.path)) {
+            nextFiles.push(file);
+            continue;
+          }
+
+          const nextFile = direction === 'stage'
+            ? toStagedStatusFile(file)
+            : toUnstagedStatusFile(file);
+
+          if (nextFile !== file) {
+            didChange = true;
+          }
+
+          if (!isCleanStatusFile(nextFile)) {
+            nextFiles.push(nextFile);
+          } else {
+            didChange = true;
+          }
+        }
+
+        if (!didChange) {
+          return previousStatus;
+        }
+
+        const nextDirectories = new Map(directories);
+        nextDirectories.set(directory, {
+          ...dirState,
+          status: {
+            ...previousStatus,
+            files: nextFiles,
+            isClean: nextFiles.length === 0,
+          },
+          indexRevision: dirState.indexRevision + 1,
+          lastStatusChange: Date.now(),
+        });
+        set({ directories: nextDirectories });
+
+        return previousStatus;
+      },
+
+      restoreStatus: (directory, status) => {
+        const { directories } = get();
+        const dirState = directories.get(directory);
+        if (!dirState) {
+          return;
+        }
+
+        const nextDirectories = new Map(directories);
+        nextDirectories.set(directory, {
+          ...dirState,
+          status,
+          indexRevision: dirState.indexRevision + 1,
+          lastStatusChange: Date.now(),
+        });
+        set({ directories: nextDirectories });
+      },
+
+      bumpIndexRevision: (directory) => {
+        const { directories } = get();
+        const dirState = directories.get(directory);
+        if (!dirState) {
+          return;
+        }
+
+        const nextDirectories = new Map(directories);
+        nextDirectories.set(directory, {
+          ...dirState,
+          indexRevision: dirState.indexRevision + 1,
+        });
+        set({ directories: nextDirectories });
       },
 
       fetchBranches: async (directory, git) => {

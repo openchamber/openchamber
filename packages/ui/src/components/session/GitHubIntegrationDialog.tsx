@@ -125,7 +125,10 @@ export function GitHubIntegrationDialog({
     if (!open || !projectDirectory) return;
     if (githubAuthChecked && githubAuthStatus?.connected === false) return;
     if (!github) return;
-    if (!debouncedSearchQuery.trim()) return;
+    if (!debouncedSearchQuery.trim()) {
+      void loadData();
+      return;
+    }
 
     const controller = new AbortController();
     setLoading(true);
@@ -176,7 +179,7 @@ export function GitHubIntegrationDialog({
       });
 
     return () => controller.abort();
-  }, [open, projectDirectory, github, githubAuthChecked, githubAuthStatus, activeTab, debouncedSearchQuery, t]);
+  }, [open, projectDirectory, github, githubAuthChecked, githubAuthStatus, activeTab, debouncedSearchQuery, loadData, t]);
 
   const loadMore = React.useCallback(async () => {
     if (!projectDirectory || !github) return;

@@ -1,6 +1,7 @@
 import React from 'react';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { isDesktopShell, isWebRuntime } from '@/lib/desktop';
+import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { useUIStore } from '@/stores/useUIStore';
 import type { NotificationPayload } from '@/lib/api/types';
 
@@ -33,7 +34,7 @@ export const useWebNotificationStream = (options?: { enabled?: boolean }) => {
       return;
     }
 
-    const source = new EventSource(NOTIFICATION_STREAM_PATH);
+    const source = new EventSource(getRuntimeUrlResolver().sse(NOTIFICATION_STREAM_PATH));
     source.onmessage = (event) => {
       let data: unknown;
       try {

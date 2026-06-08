@@ -12,12 +12,15 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
+import type { IconName } from "@/components/icon/icons";
 import { useUIStore } from '@/stores/useUIStore';
+import { formatTimeForPreference } from '@/lib/timeFormat';
+import type { TimeFormatPreference } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { refreshGlobalSessions } from '@/stores/useGlobalSessionsStore';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
-import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
+import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/projectMeta';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
@@ -99,11 +102,11 @@ const formatSchedule = (task: ScheduledTask, t: ReturnType<typeof useI18n>['t'])
   return t('sessions.scheduledTasks.dialog.schedule.cron', { cron: task.schedule.cron || '' });
 };
 
-const formatClockTime = (value?: number): string => {
+const formatClockTime = (value: number | undefined, timeFormatPreference: TimeFormatPreference): string => {
   if (!value || !Number.isFinite(value)) {
     return '';
   }
-  return new Date(value).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  return formatTimeForPreference(value, timeFormatPreference);
 };
 
 const formatRelativeTime = (value: number | undefined, t: ReturnType<typeof useI18n>['t']): string => {
@@ -147,7 +150,7 @@ const STATUS_META: Record<
   ScheduledTaskStatus,
   {
     tone: StatusTone;
-    Icon: string;
+    Icon: IconName;
     spin?: boolean;
   }
 > = {
@@ -173,6 +176,7 @@ export function ScheduledTasksDialog() {
   const open = useUIStore((state) => state.isScheduledTasksDialogOpen);
   const setOpen = useUIStore((state) => state.setScheduledTasksDialogOpen);
   const isMobile = useUIStore((state) => state.isMobile);
+  const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const projects = useProjectsStore((state) => state.projects);
   const activeProject = useProjectsStore((state) => state.getActiveProject());
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
@@ -194,30 +198,32 @@ export function ScheduledTasksDialog() {
 
   const renderProjectLabel = React.useCallback((project: ProjectEntry) => {
     const displayLabel = project.label?.trim() || formatDirectoryName(project.path, homeDirectory || undefined);
-    const imageUrl = getProjectIconImageUrl(
-      { id: project.id, iconImage: project.iconImage ?? null },
-      {
-        themeVariant: currentTheme.metadata.variant,
-        iconColor: currentTheme.colors.surface.foreground,
-      },
-    );
     const projectIconName = project.icon ? PROJECT_ICON_MAP[project.icon] : null;
     const iconColor = project.color ? PROJECT_COLOR_MAP[project.color] : undefined;
+    const fallbackIcon = projectIconName ? (
+      <Icon name={projectIconName} className="h-3.5 w-3.5 shrink-0" style={iconColor ? { color: iconColor } : undefined} />
+    ) : (
+      <Icon name="folder" className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80"  style={iconColor ? { color: iconColor } : undefined}/>
+    );
 
     return (
       <span className="inline-flex min-w-0 items-center gap-1.5">
-        {imageUrl ? (
+        {project.iconImage ? (
           <span
             className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center overflow-hidden rounded-[3px]"
             style={project.iconBackground ? { backgroundColor: project.iconBackground } : undefined}
           >
-            <img src={imageUrl} alt="" className="h-full w-full object-contain" draggable={false} />
+            <ProjectIconImage
+              project={{ id: project.id, iconImage: project.iconImage ?? null }}
+              options={{
+                themeVariant: currentTheme.metadata.variant,
+                iconColor: currentTheme.colors.surface.foreground,
+              }}
+              className="h-full w-full object-contain"
+              fallback={fallbackIcon}
+            />
           </span>
-        ) : projectIconName ? (
-          <Icon name={projectIconName} className="h-3.5 w-3.5 shrink-0" style={iconColor ? { color: iconColor } : undefined} />
-        ) : (
-          <Icon name="folder" className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80"  style={iconColor ? { color: iconColor } : undefined}/>
-        )}
+        ) : fallbackIcon}
         <span className="truncate">{displayLabel}</span>
       </span>
     );
@@ -468,7 +474,7 @@ export function ScheduledTasksDialog() {
                       <>
                         <span className="text-foreground">{formatRelativeTime(nextAt, t)}</span>
                         <span className="text-muted-foreground/50">·</span>
-                        <span>{formatClockTime(nextAt)}</span>
+                        <span>{formatClockTime(nextAt, timeFormatPreference)}</span>
                       </>
                     ) : (
                       <span>—</span>

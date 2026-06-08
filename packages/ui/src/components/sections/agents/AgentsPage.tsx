@@ -122,6 +122,10 @@ const filterRulesAgainstGlobal = (ruleset: PermissionRule[], globalAction: Permi
 );
 
 const permissionConfigToRuleset = (value: unknown): PermissionRule[] => {
+  if (Array.isArray(value)) {
+    return normalizeRuleset(value as PermissionRule[]);
+  }
+
   if (isPermissionAction(value)) {
     return [{ permission: '*', pattern: '*', action: value }];
   }
@@ -162,9 +166,7 @@ const buildPermissionConfigWithGlobal = (
     (grouped[rule.permission] ||= {})[rule.pattern] = rule.action;
   }
 
-  const result: Record<string, PermissionConfigValue> = {
-    '*': globalAction,
-  };
+  const result: Record<string, PermissionConfigValue> = {};
 
   for (const [permissionName, patterns] of Object.entries(grouped)) {
     if (permissionName === '*') {
@@ -177,6 +179,14 @@ const buildPermissionConfigWithGlobal = (
     }
 
     result[permissionName] = patterns;
+  }
+
+  if (Object.keys(result).length === 0) {
+    return globalAction;
+  }
+
+  if (globalAction !== 'allow') {
+    result['*'] = globalAction;
   }
 
   return result as AgentConfig['permission'];
@@ -273,7 +283,7 @@ export const AgentsPage: React.FC = () => {
     const names = new Set<string>();
 
     for (const agent of agents) {
-      const rules = normalizeRuleset(Array.isArray(agent.permission) ? agent.permission as PermissionRule[] : []);
+      const rules = normalizeRuleset(permissionConfigToRuleset(agent.permission));
       for (const rule of rules) {
         if (rule.permission && rule.permission !== '*' && rule.permission !== 'invalid') {
           names.add(rule.permission);
@@ -509,7 +519,7 @@ export const AgentsPage: React.FC = () => {
       setPrompt(promptValue);
 
       const permissionState = applyPermissionState(
-        Array.isArray(selectedAgent.permission) ? selectedAgent.permission as PermissionRule[] : [],
+        permissionConfigToRuleset(selectedAgent.permission),
       );
 
       initialStateRef.current = {
@@ -568,6 +578,7 @@ export const AgentsPage: React.FC = () => {
 
     try {
       const trimmedModel = model.trim();
+      const trimmedPrompt = prompt.trim();
       const permissionConfig = buildPermissionConfigWithGlobal(globalPermission, permissionRules);
       const config: AgentConfig = {
         name: agentName,
@@ -576,7 +587,7 @@ export const AgentsPage: React.FC = () => {
         model: trimmedModel === '' ? null : trimmedModel,
         temperature,
         top_p: topP,
-        prompt: prompt.trim() || undefined,
+        prompt: trimmedPrompt || (isNewAgent ? undefined : null),
         permission: permissionConfig,
         scope: isNewAgent ? draftScope : undefined,
       };

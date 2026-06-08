@@ -36,6 +36,72 @@ type DirectoryEntry = {
   isDirectory: boolean;
 };
 
+type FsExecCommandResult = {
+  command: string;
+  success: boolean;
+  exitCode?: number;
+  stdout?: string;
+  stderr?: string;
+  error?: string;
+};
+
+const createGitReadCacheTtlMs = () => {
+  const raw = Number(process.env.OPENCHAMBER_GIT_READ_CACHE_TTL_MS);
+  if (Number.isFinite(raw) && raw >= 0) return raw;
+  return 30 * 1000;
+};
+
+const createGitCheckIgnoreTimeoutMs = () => {
+  const raw = Number(process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS);
+  if (Number.isFinite(raw) && raw >= 0) return raw;
+  return 2500;
+};
+
+const normalizeCommand = (command: unknown): string =>
+  typeof command === 'string' ? command.trim().replace(/\s+/g, ' ') : '';
+
+const isCacheableGitReadCommand = (command: string): boolean => {
+  const normalized = normalizeCommand(command);
+  return /^git rev-parse(?: --(?:absolute-git-dir|git-common-dir|show-toplevel)){1,3}$/.test(normalized);
+};
+
+const GIT_READ_CACHE_TTL_MS = createGitReadCacheTtlMs();
+const GIT_CHECK_IGNORE_TIMEOUT_MS = createGitCheckIgnoreTimeoutMs();
+const GIT_READ_CACHE_MAX_ENTRIES = 500;
+const GIT_READ_CACHE_MAX_BYTES = 1024 * 1024;
+const gitReadCache = new Map<string, { result: FsExecCommandResult; at: number }>();
+const inFlightGitReadCache = new Map<string, Promise<FsExecCommandResult>>();
+
+const gitReadEntryBytes = (key: string, result: FsExecCommandResult): number =>
+  key.length + (result.stdout?.length ?? 0) + (result.stderr?.length ?? 0);
+
+const setGitReadCacheEntry = (key: string, result: FsExecCommandResult): void => {
+  gitReadCache.delete(key);
+  gitReadCache.set(key, { result, at: Date.now() });
+
+  let totalBytes = 0;
+  for (const [entryKey, entry] of gitReadCache) {
+    totalBytes += gitReadEntryBytes(entryKey, entry.result);
+  }
+
+  while (
+    gitReadCache.size > GIT_READ_CACHE_MAX_ENTRIES ||
+    (totalBytes > GIT_READ_CACHE_MAX_BYTES && gitReadCache.size > 1)
+  ) {
+    const oldest = gitReadCache.entries().next().value;
+    if (!oldest) {
+      break;
+    }
+    totalBytes -= gitReadEntryBytes(oldest[0], oldest[1].result);
+    gitReadCache.delete(oldest[0]);
+  }
+};
+
+export const clearGitReadCacheForTests = (): void => {
+  gitReadCache.clear();
+  inFlightGitReadCache.clear();
+};
+
 type FsDeps = {
   resolveUserPath: (value: string, baseDirectory: string) => string;
   listDirectoryEntries: (directoryPath: string) => Promise<DirectoryEntry[]>;
@@ -54,6 +120,30 @@ type FsDeps = {
   >;
   parseDroppedFileReference: (rawReference: string) => DroppedReferenceParse;
   readUriAsAttachment: (uri: vscode.Uri, name: string) => Promise<ReadUriAsAttachmentResult>;
+};
+
+const runGitCheckIgnore = async (
+  execGit: FsDeps['execGit'],
+  args: string[],
+  cwd: string,
+): Promise<{ stdout: string; stderr: string; exitCode: number } | null> => {
+  if (GIT_CHECK_IGNORE_TIMEOUT_MS <= 0) {
+    return execGit(args, cwd);
+  }
+
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      execGit(args, cwd),
+      new Promise<null>((resolve) => {
+        timeout = setTimeout(() => resolve(null), GIT_CHECK_IGNORE_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
 };
 
 export async function handleFsBridgeMessage(
@@ -118,7 +208,10 @@ export async function handleFsBridgeMessage(
       }
 
       try {
-        const result = await deps.execGit(['check-ignore', '--', ...pathsToCheck], normalized);
+        const result = await runGitCheckIgnore(deps.execGit, ['check-ignore', '--', ...pathsToCheck], normalized);
+        if (!result) {
+          return { id, type, success: true, data: { entries, directory: normalized, path: normalized } };
+        }
         const ignoredNames = new Set(
           result.stdout
             .split('\n')
@@ -301,44 +394,81 @@ export async function handleFsBridgeMessage(
           PATH: process.env.PATH,
         };
 
-        const results: Array<{
-          command: string;
-          success: boolean;
-          exitCode?: number;
-          stdout?: string;
-          stderr?: string;
-          error?: string;
-        }> = [];
-
-        for (const cmd of commands) {
-          if (typeof cmd !== 'string' || !cmd.trim()) {
-            results.push({ command: cmd, success: false, error: 'Invalid command' });
-            continue;
-          }
+        const runCommand = async (cmd: string): Promise<FsExecCommandResult> => {
           try {
             const { stdout, stderr } = await execAsync(`${shell} ${shellFlag} "${cmd.replace(/"/g, '\\"')}"`, {
               cwd: resolvedCwd,
               env: augmentedEnv,
               timeout: 300000,
             });
-            results.push({
+            return {
               command: cmd,
               success: true,
               exitCode: 0,
               stdout: (stdout || '').trim(),
               stderr: (stderr || '').trim(),
-            });
+            };
           } catch (execError) {
             const err = execError as { code?: number; stdout?: string; stderr?: string; message?: string };
-            results.push({
+            return {
               command: cmd,
               success: false,
               exitCode: typeof err.code === 'number' ? err.code : 1,
               stdout: (err.stdout || '').trim(),
               stderr: (err.stderr || '').trim(),
               error: err.message,
-            });
+            };
           }
+        };
+
+        const runCommandWithGitReadCache = async (cmd: string): Promise<FsExecCommandResult> => {
+          const cacheable = GIT_READ_CACHE_TTL_MS > 0 && isCacheableGitReadCommand(cmd);
+          const cacheKey = cacheable ? `${resolvedCwd}\0${normalizeCommand(cmd)}` : null;
+
+          if (cacheKey) {
+            const cached = gitReadCache.get(cacheKey);
+            if (cached && Date.now() - cached.at < GIT_READ_CACHE_TTL_MS) {
+              gitReadCache.delete(cacheKey);
+              gitReadCache.set(cacheKey, cached);
+              return { ...cached.result, command: cmd };
+            }
+            if (cached) {
+              gitReadCache.delete(cacheKey);
+            }
+
+            const inFlight = inFlightGitReadCache.get(cacheKey);
+            if (inFlight) {
+              const result = await inFlight;
+              return { ...result, command: cmd };
+            }
+          }
+
+          const runPromise = runCommand(cmd).then((result) => {
+            if (cacheKey && result.success) {
+              setGitReadCacheEntry(cacheKey, result);
+            }
+            return result;
+          }).finally(() => {
+            if (cacheKey && inFlightGitReadCache.get(cacheKey) === runPromise) {
+              inFlightGitReadCache.delete(cacheKey);
+            }
+          });
+
+          if (cacheKey) {
+            inFlightGitReadCache.set(cacheKey, runPromise);
+          }
+
+          return runPromise;
+        };
+
+        const results: FsExecCommandResult[] = [];
+
+        for (const cmd of commands) {
+          if (typeof cmd !== 'string' || !cmd.trim()) {
+            results.push({ command: cmd, success: false, error: 'Invalid command' });
+            continue;
+          }
+          results.push(await runCommandWithGitReadCache(cmd));
         }
 
         const allSucceeded = results.every((r) => r.success);

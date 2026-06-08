@@ -1227,39 +1227,32 @@ export function registerGitHubRoutes(app) {
           });
           const totalCount = searchResult.data.total_count;
           const items = Array.isArray(searchResult.data.items) ? searchResult.data.items : [];
-          const prNumbers = items.map((item) => item.number);
+          const findRepoForSearchItem = (item) => {
+            const repositoryUrl = typeof item?.repository_url === 'string' ? item.repository_url : '';
+            const match = repositoryUrl.match(/\/repos\/([^/]+)\/([^/]+)$/);
+            if (!match) return reposToQuery[0];
+            return reposToQuery.find((repoRef) => repoRef.owner === match[1] && repoRef.repo === match[2]) || reposToQuery[0];
+          };
+          const prRefs = items
+            .map((item) => ({ number: item.number, repoRef: findRepoForSearchItem(item) }))
+            .filter((ref) => Number.isFinite(ref.number) && ref.number > 0 && ref.repoRef);
           let prs;
-          if (prNumbers.length === 0) {
+          if (prRefs.length === 0) {
             prs = [];
-          } else if (reposToQuery.length === 1) {
-            const list = await octokit.rest.pulls.list({
-              owner: reposToQuery[0].owner,
-              repo: reposToQuery[0].repo,
-              state: 'open',
-              per_page: 50,
-              page: 1,
-            });
-            const allPrs = Array.isArray(list?.data) ? list.data : [];
-            const numberSet = new Set(prNumbers);
-            prs = allPrs.filter((pr) => numberSet.has(pr.number)).map((pr) => mapPrSummary(pr, reposToQuery[0]));
           } else {
-            const results = await Promise.all(reposToQuery.map(async (repoRef) => {
+            const results = await Promise.all(prRefs.map(async ({ number, repoRef }) => {
               try {
-                const list = await octokit.rest.pulls.list({
+                const pr = await octokit.rest.pulls.get({
                   owner: repoRef.owner,
                   repo: repoRef.repo,
-                  state: 'open',
-                  per_page: 50,
-                  page: 1,
+                  pull_number: number,
                 });
-                return (Array.isArray(list?.data) ? list.data : []).map((pr) => mapPrSummary(pr, repoRef));
+                return mapPrSummary(pr.data, repoRef);
               } catch {
-                return [];
+                return null;
               }
             }));
-            const allPrs = results.flat();
-            const numberSet = new Set(prNumbers);
-            prs = allPrs.filter((pr) => numberSet.has(pr.number));
+            prs = results.filter(Boolean);
           }
           const fetchedCount = (effectivePage - 1) * 50 + items.length;
           const hasMore = fetchedCount < totalCount;

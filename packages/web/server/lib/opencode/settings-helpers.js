@@ -21,8 +21,25 @@ export const createSettingsHelpers = (dependencies) => {
   const STT_SERVER_URL_MAX_LENGTH = 2048;
   const STT_MODEL_MAX_LENGTH = 256;
   const STT_LANGUAGE_MAX_LENGTH = 64;
+  const VERSION_STRING_MAX_LENGTH = 128;
+  const SHORTCUT_OVERRIDE_KEY_MAX_LENGTH = 128;
+  const SHORTCUT_OVERRIDE_VALUE_MAX_LENGTH = 128;
   const PWA_ORIENTATION_VALUES = new Set(['system', 'portrait', 'landscape']);
   const MOBILE_KEYBOARD_MODE_VALUES = new Set(['native', 'resize-content']);
+
+  const sanitizeShortcutOverrides = (value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return null;
+    }
+    const result = {};
+    for (const [rawKey, rawValue] of Object.entries(value)) {
+      const key = typeof rawKey === 'string' ? rawKey.trim() : '';
+      const combo = typeof rawValue === 'string' ? rawValue.trim() : '';
+      if (!key || !combo) continue;
+      result[key.slice(0, SHORTCUT_OVERRIDE_KEY_MAX_LENGTH)] = combo.slice(0, SHORTCUT_OVERRIDE_VALUE_MAX_LENGTH);
+    }
+    return result;
+  };
 
   const normalizePwaAppName = (value, fallback = '') => {
     if (typeof value !== 'string') {
@@ -115,6 +132,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.desktopLanAccessEnabled === 'boolean') {
       result.desktopLanAccessEnabled = candidate.desktopLanAccessEnabled;
     }
+    if (typeof candidate.desktopUiPassword === 'string') {
+      result.desktopUiPassword = candidate.desktopUiPassword.trim();
+    }
     if (Array.isArray(candidate.projects)) {
       const projects = sanitizeProjects(candidate.projects);
       if (projects) {
@@ -141,6 +161,21 @@ export const createSettingsHelpers = (dependencies) => {
           .map((entry) => (typeof entry === 'string' ? normalizePathForPersistence(entry) : entry))
           .filter((entry) => typeof entry === 'string' && entry.length > 0)
       );
+    }
+    if (Array.isArray(candidate.draftStarters)) {
+      const seenStarters = new Set();
+      const starters = [];
+      for (const entry of candidate.draftStarters) {
+        if (!entry || typeof entry !== 'object') continue;
+        const type = entry.type === 'command' || entry.type === 'skill' ? entry.type : null;
+        const name = typeof entry.name === 'string' ? entry.name.trim() : '';
+        if (!type || !name) continue;
+        const key = `${type}:${name}`;
+        if (seenStarters.has(key)) continue;
+        seenStarters.add(key);
+        starters.push({ type, name });
+      }
+      result.draftStarters = starters;
     }
 
 
@@ -221,6 +256,9 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (candidate.usageDisplayMode === 'usage' || candidate.usageDisplayMode === 'remaining') {
       result.usageDisplayMode = candidate.usageDisplayMode;
+    }
+    if (typeof candidate.usageShowPredValues === 'boolean') {
+      result.usageShowPredValues = candidate.usageShowPredValues;
     }
     if (Array.isArray(candidate.usageDropdownProviders)) {
       result.usageDropdownProviders = normalizeStringArray(candidate.usageDropdownProviders);
@@ -329,7 +367,7 @@ export const createSettingsHelpers = (dependencies) => {
       result.pwaOrientation = normalizePwaOrientation(candidate.pwaOrientation, undefined);
     }
     if (typeof candidate.mobileKeyboardMode === 'string') {
-      const mode = normalizeMobileKeyboardMode(candidate.mobileKeyboardMode, undefined);
+      const mode = normalizeMobileKeyboardMode(candidate.mobileKeyboardMode, null);
       if (mode) {
         result.mobileKeyboardMode = mode;
       }
@@ -343,8 +381,18 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.inputSpellcheckEnabled === 'boolean') {
       result.inputSpellcheckEnabled = candidate.inputSpellcheckEnabled;
     }
+    if (typeof candidate.showOpenCodeUpdateNotifications === 'boolean') {
+      result.showOpenCodeUpdateNotifications = candidate.showOpenCodeUpdateNotifications;
+    }
+    if (typeof candidate.openCodeUpdateToastDismissedVersion === 'string') {
+      const version = candidate.openCodeUpdateToastDismissedVersion.trim();
+      result.openCodeUpdateToastDismissedVersion = version.slice(0, VERSION_STRING_MAX_LENGTH);
+    }
     if (typeof candidate.showToolFileIcons === 'boolean') {
       result.showToolFileIcons = candidate.showToolFileIcons;
+    }
+    if (typeof candidate.showTurnChangedFiles === 'boolean') {
+      result.showTurnChangedFiles = candidate.showTurnChangedFiles;
     }
     if (typeof candidate.showExpandedBashTools === 'boolean') {
       result.showExpandedBashTools = candidate.showExpandedBashTools;
@@ -414,6 +462,11 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.inputBarOffset === 'number' && Number.isFinite(candidate.inputBarOffset)) {
       result.inputBarOffset = Math.max(0, Math.min(100, Math.round(candidate.inputBarOffset)));
+    }
+
+    const shortcutOverrides = sanitizeShortcutOverrides(candidate.shortcutOverrides);
+    if (shortcutOverrides) {
+      result.shortcutOverrides = shortcutOverrides;
     }
 
     const favoriteModels = sanitizeModelRefs(candidate.favoriteModels, 64);

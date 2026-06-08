@@ -15,6 +15,7 @@ import { Icon } from "@/components/icon/Icon";
 import { isIMECompositionEvent } from '@/lib/ime';
 import { getWorktreeSetupCommands } from '@/lib/openchamberConfig';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { ProjectRef } from '@/lib/openchamberConfig';
 import type { CreateMultiRunParams, MultiRunFileAttachment } from '@/types/multirun';
 import { useI18n } from '@/lib/i18n';
@@ -68,6 +69,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
   const commandRef = React.useRef<CommandAutocompleteHandle>(null);
   
   const { currentTheme } = useThemeSystem();
+  const { runtime } = useRuntimeAPIs();
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory ?? null);
   const { isGitRepository, isLoading: isLoadingBranches } = useBranchOptions(currentDirectory);
   
@@ -79,13 +81,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
     return typeof folder === 'string' && folder.trim().length > 0 ? folder.trim() : null;
   }, []);
 
-  const isVSCodeRuntime = React.useMemo(() => {
-    if (typeof window === 'undefined') {
-      return false;
-    }
-    const apis = (window as unknown as { __OPENCHAMBER_RUNTIME_APIS__?: { runtime?: { isVSCode?: boolean } } }).__OPENCHAMBER_RUNTIME_APIS__;
-    return Boolean(apis?.runtime?.isVSCode);
-  }, []);
+  const isVSCodeRuntime = runtime.isVSCode;
 
   // Get project directory for setup commands
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
@@ -347,8 +343,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
 
       await onCreateGroup?.({
         name: groupName.trim(),
-        prompt: prompt.trim(),
-        models,
+        groups: [{ prompt: prompt.trim(), models }],
         agent: selectedAgent || undefined,
         worktreeBaseBranch: baseBranch,
         files,

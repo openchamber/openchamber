@@ -4,10 +4,13 @@
  * Migrates from legacy <project>/.openchamber/openchamber.json.
  */
 
-import type { FilesAPI, RuntimeAPIs } from './api/types';
+import type { FilesAPI } from './api/types';
+import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { getDesktopHomeDirectory } from './desktop';
 import { isVSCodeRuntime } from './desktop';
+import { sanitizeStarterRefs, type DraftStarterRef } from './draftStarters';
 import { createProjectIdFromPath } from './projectId';
+import { runtimeFetch } from './runtime-fetch';
 
 type ProjectRef = { id: string; path: string };
 
@@ -20,8 +23,7 @@ const USER_PROJECTS_DIR_SEGMENTS = ['.config', 'openchamber', 'projects'];
  * Get the runtime Files API if available (Desktop/VSCode).
  */
 function getRuntimeFilesAPI(): FilesAPI | null {
-  if (typeof window === 'undefined') return null;
-  const apis = (window as typeof window & { __OPENCHAMBER_RUNTIME_APIS__?: RuntimeAPIs }).__OPENCHAMBER_RUNTIME_APIS__;
+  const apis = getRegisteredRuntimeAPIs();
   if (apis?.files) {
     return apis.files;
   }
@@ -36,6 +38,7 @@ export interface OpenChamberConfig {
   projectPlanFiles?: OpenChamberProjectPlanFileLink[];
   projectActions?: OpenChamberProjectAction[];
   projectActionsPrimaryId?: string;
+  draftStarters?: DraftStarterRef[];
 }
 
 export type OpenChamberProjectActionPlatform = 'macos' | 'linux' | 'windows';
@@ -124,7 +127,7 @@ const getBaseUrl = (): string => {
 
 const postJson = async <T>(url: string, body: unknown): Promise<{ ok: boolean; data: T | null }> => {
   try {
-    const response = await fetch(url, {
+    const response = await runtimeFetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -169,7 +172,7 @@ const readTextFile = async (path: string): Promise<string | null> => {
   }
 
   try {
-    const response = await fetch(`${getBaseUrl()}/fs/read?path=${encodeURIComponent(path)}`,
+    const response = await runtimeFetch(`${getBaseUrl()}/fs/read?path=${encodeURIComponent(path)}`,
       {
         // Avoid conditional requests (304 + empty body).
         cache: 'no-store',
@@ -206,7 +209,7 @@ const resolveHomeDirectory = async (): Promise<string | null> => {
   // In some runtimes, window.__OPENCHAMBER_HOME__ can be workspace/project-root
   // scoped, which would incorrectly route writes into the project directory.
   try {
-    const response = await fetch(`${getBaseUrl()}/fs/home`, {
+    const response = await runtimeFetch(`${getBaseUrl()}/fs/home`, {
       // Avoid conditional requests (304 + empty body).
       cache: 'no-store',
     });
@@ -694,6 +697,18 @@ export async function getWorktreeSetupCommands(project: ProjectRef): Promise<str
 export async function saveWorktreeSetupCommands(project: ProjectRef, commands: string[]): Promise<boolean> {
   const filtered = commands.filter((cmd) => cmd.trim().length > 0);
   return updateOpenChamberConfig(project, { 'setup-worktree': filtered });
+}
+
+/**
+ * Get this project's pinned draft welcome starters.
+ */
+export async function getProjectDraftStarters(project: ProjectRef): Promise<DraftStarterRef[]> {
+  const config = await readOpenChamberConfig(project);
+  return sanitizeStarterRefs(config?.draftStarters);
+}
+
+export async function saveProjectDraftStarters(project: ProjectRef, starters: DraftStarterRef[]): Promise<boolean> {
+  return updateOpenChamberConfig(project, { draftStarters: sanitizeStarterRefs(starters) });
 }
 
 export async function getProjectNotesAndTodos(project: ProjectRef): Promise<OpenChamberProjectNotesTodos> {

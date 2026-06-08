@@ -17,6 +17,7 @@ import { useFileSystemAccess } from '@/hooks/useFileSystemAccess';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 interface DirectoryItem {
   name: string;
@@ -41,6 +42,18 @@ interface DirectoryTreeProps {
   alwaysShowActions?: boolean;
   disabledPaths?: Iterable<string>;
 }
+
+const areStringSetsEqual = (left: Set<string>, right: Set<string>) => {
+  if (left.size !== right.size) {
+    return false;
+  }
+  for (const value of left) {
+    if (!right.has(value)) {
+      return false;
+    }
+  }
+  return true;
+};
 
 export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
   currentPath,
@@ -244,7 +257,10 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
           const normalizedPath = path.replace(/\\/g, '/');
           return (stripTrailingSlashes(normalizedPath) as string) ?? normalizedPath;
         });
-      setPinnedPaths(new Set(normalized));
+      setPinnedPaths((prev) => {
+        const next = new Set(normalized);
+        return areStringSetsEqual(prev, next) ? prev : next;
+      });
     };
 
     const loadFromLocalStorage = () => {
@@ -266,7 +282,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
           try {
             let pinned: string[] = [];
 
-        const response = await fetch('/api/config/settings', {
+        const response = await runtimeFetch('/api/config/settings', {
           method: 'GET',
           headers: { Accept: 'application/json' },
         });
@@ -326,7 +342,8 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
       const filtered = Array.from(prev)
         .map((path) => (stripTrailingSlashes(path.replace(/\\/g, '/')) as string) ?? path)
         .filter((path) => isPathWithinHome(path));
-      return new Set(filtered);
+      const next = new Set(filtered);
+      return areStringSetsEqual(prev, next) ? prev : next;
     });
   }, [effectiveRoot, isPathWithinHome, stripTrailingSlashes]);
 

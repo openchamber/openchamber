@@ -14,12 +14,15 @@ import {
 import { toast } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
+import type { IconName } from "@/components/icon/icons";
 import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
 import { cn } from '@/lib/utils';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { openExternalUrl } from '@/lib/url';
 import type { ModelMetadata } from '@/types';
 import { useI18n } from '@/lib/i18n';
+import { runtimeFetch } from '@/lib/runtime-fetch';
+import { opencodeClient } from '@/lib/opencode/client';
 
 const COMPACT_NUMBER_FORMATTER = new Intl.NumberFormat('en-US', {
   notation: 'compact',
@@ -179,18 +182,12 @@ export const ProvidersPage: React.FC = () => {
     const loadAuthMethods = async () => {
       setAuthLoading(true);
       try {
-        const response = await fetch('/api/provider/auth', {
-          method: 'GET',
-          headers: { Accept: 'application/json' },
-        });
-
-        if (!response.ok) {
-          throw new Error(`Auth methods request failed (${response.status})`);
+        const result = await opencodeClient.getSdkClient().provider.auth();
+        if (result.error) {
+          throw new Error(`provider.auth failed: ${String(result.error)}`);
         }
-
-        const payload = await response.json().catch(() => ({}));
         if (!isMounted) return;
-        setAuthMethodsByProvider(parseAuthPayload(payload));
+        setAuthMethodsByProvider(parseAuthPayload(result.data));
       } catch (error) {
         if (!isMounted) return;
         console.error('Failed to load provider auth methods:', error);
@@ -216,18 +213,12 @@ export const ProvidersPage: React.FC = () => {
       setAvailableLoading(true);
       setAvailableError(null);
       try {
-        const response = await fetch('/api/provider', {
-          method: 'GET',
-          headers: { Accept: 'application/json' },
-        });
-
-        if (!response.ok) {
-          throw new Error(`Provider list request failed (${response.status})`);
+        const result = await opencodeClient.getSdkClient().provider.list();
+        if (result.error) {
+          throw new Error(`provider.list failed: ${String(result.error)}`);
         }
-
-        const payload = await response.json().catch(() => ({}));
         if (!isMounted) return;
-        setAvailableProviders(parseProvidersPayload(payload));
+        setAvailableProviders(parseProvidersPayload(result.data));
       } catch (error) {
         if (!isMounted) return;
         console.error('Failed to load available providers:', error);
@@ -291,7 +282,9 @@ export const ProvidersPage: React.FC = () => {
 
     const loadSources = async () => {
       try {
-        const response = await fetch(`/api/provider/${encodeURIComponent(selectedProviderId)}/source`, {
+        // OpenChamber-only metadata endpoint: the SDK exposes provider data but
+        // not local auth/source-file provenance used by this settings UI.
+        const response = await runtimeFetch(`/api/provider/${encodeURIComponent(selectedProviderId)}/source`, {
           method: 'GET',
           headers: { Accept: 'application/json' },
         });
@@ -336,16 +329,12 @@ export const ProvidersPage: React.FC = () => {
     setAuthBusyKey(busyKey);
 
     try {
-      const response = await fetch(`/api/auth/${encodeURIComponent(providerId)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'api', key: apiKey }),
+      const result = await opencodeClient.getSdkClient().auth.set({
+        providerID: providerId,
+        auth: { type: 'api', key: apiKey },
       });
-
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) {
-        const message = payload?.error || t('settings.providers.page.toast.apiKeySaveFailed');
-        throw new Error(message);
+      if (result.error) {
+        throw new Error(t('settings.providers.page.toast.apiKeySaveFailed'));
       }
 
       toast.success(t('settings.providers.page.toast.apiKeySaved'));
@@ -365,20 +354,17 @@ export const ProvidersPage: React.FC = () => {
     setAuthBusyKey(busyKey);
 
     try {
-      const response = await fetch(`/api/provider/${encodeURIComponent(providerId)}/oauth/authorize`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ method: methodIndex }),
+      const result = await opencodeClient.getSdkClient().provider.oauth.authorize({
+        providerID: providerId,
+        method: methodIndex,
       });
-
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) {
-        const message = payload?.error || t('settings.providers.page.toast.oauthStartFailed');
-        throw new Error(message);
+      if (result.error) {
+        throw new Error(t('settings.providers.page.toast.oauthStartFailed'));
       }
 
-      const payloadRecord = isRecord(payload) ? payload : {};
-      const dataRecord = isRecord(payloadRecord.data) ? payloadRecord.data : payloadRecord;
+      const payloadRecord: Record<string, unknown> = isRecord(result.data) ? result.data : {};
+      const nestedData = payloadRecord.data;
+      const dataRecord: Record<string, unknown> = isRecord(nestedData) ? nestedData : payloadRecord;
       const urlCandidate =
         (typeof dataRecord.url === 'string' && dataRecord.url) ||
         (typeof dataRecord.verification_uri_complete === 'string' && dataRecord.verification_uri_complete) ||
@@ -434,16 +420,13 @@ export const ProvidersPage: React.FC = () => {
         requestBody.code = code;
       }
 
-      const response = await fetch(`/api/provider/${encodeURIComponent(providerId)}/oauth/callback`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody),
+      const result = await opencodeClient.getSdkClient().provider.oauth.callback({
+        providerID: providerId,
+        method: requestBody.method,
+        code: requestBody.code,
       });
-
-      const responsePayload = await response.json().catch(() => null);
-      if (!response.ok) {
-        const message = responsePayload?.error || t('settings.providers.page.toast.oauthCompleteFailed');
-        throw new Error(message);
+      if (result.error) {
+        throw new Error(t('settings.providers.page.toast.oauthCompleteFailed'));
       }
 
       toast.success(t('settings.providers.page.toast.oauthCompleted'));
@@ -484,15 +467,9 @@ export const ProvidersPage: React.FC = () => {
     setAuthBusyKey(busyKey);
 
     try {
-      const response = await fetch(`/api/provider/${encodeURIComponent(providerId)}/auth?scope=all`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-      });
-
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) {
-        const message = payload?.error || t('settings.providers.page.toast.providerDisconnectFailed');
-        throw new Error(message);
+      const result = await opencodeClient.getSdkClient().auth.remove({ providerID: providerId });
+      if (result.error) {
+        throw new Error(t('settings.providers.page.toast.providerDisconnectFailed'));
       }
 
       toast.success(t('settings.providers.page.toast.providerDisconnected'));
@@ -1055,7 +1032,7 @@ export const ProvidersPage: React.FC = () => {
                   const contextTokens = formatTokens(metadata?.limit?.context);
                   const outputTokens = formatTokens(metadata?.limit?.output);
 
-                  const capabilityIcons: Array<{ key: string; icon: string; label: string }> = [];
+                  const capabilityIcons: Array<{ key: string; icon: IconName; label: string }> = [];
                   if (metadata?.tool_call) capabilityIcons.push({ key: 'tools', icon: "tools", label: t('settings.providers.page.models.capability.toolCalling') });
                   if (metadata?.reasoning) capabilityIcons.push({ key: 'reasoning', icon: "brain-ai-3", label: t('settings.providers.page.models.capability.reasoning') });
                   if (metadata?.attachment) capabilityIcons.push({ key: 'image', icon: "file-image", label: t('settings.providers.page.models.capability.imageInput') });

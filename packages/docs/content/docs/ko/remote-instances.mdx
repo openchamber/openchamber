@@ -1,0 +1,42 @@
+---
+title: 원격 인스턴스
+description: 데스크톱 앱을 SSH로 다른 컴퓨터의 OpenChamber에 연결하세요.
+---
+
+# 원격 인스턴스
+
+데스크톱 앱은 SSH를 통해 업무 서버, 클라우드 인스턴스, 홈랩 등 다른 컴퓨터에서 실행 중인 OpenChamber에 연결하여, 마치 로컬인 것처럼 그 UI를 화면에 가져올 수 있습니다. **Settings → Remote Instances**에서 설정합니다.
+
+> 원격 인스턴스는 **데스크톱 전용** 기능입니다. 웹이나 VS Code에서는 대신 [OpenCode Server](/ko/opencode-server/)의 환경 변수로 원격 서버에 연결하세요.
+
+## 원격 인스턴스 추가하기
+
+1. **Settings → Remote Instances**를 열고 하나를 추가합니다.
+2. 평소에 그 컴퓨터에 접근할 때 사용하는 SSH 명령과 별칭을 지정합니다.
+3. OpenChamber가 거기서 실행되는 방식을 선택합니다.
+   - **managed** — OpenChamber가 원격 컴퓨터에 직접 설치하고 시작합니다
+   - **external** — 이미 실행 중인 것에 연결합니다
+4. 연결합니다.
+
+OpenChamber가 연결 확인, 원격 설정, 서버 시작, 포트 포워딩 단계를 안내하며 각 단계의 진행 상황을 보여줍니다. **ready**에 도달하면 원격 UI가 로컬에 로드됩니다.
+
+## 자격 증명
+
+SSH 및 UI 비밀번호를 저장할지, 매번 입력할지 결정합니다. 연결이 끊기면 OpenChamber가 어느 단계가 실패했는지 알려주므로 고칠 수 있습니다. [Remote access](/ko/troubleshooting/remote-access/)를 참고하세요.
+
+## 직접 연결 링크
+
+원격 머신에서 OpenChamber가 이미 실행 중이면 그 머신에서 연결 링크를 만들고 **Settings → Remote Instances → Server links**에서 가져오세요:
+
+```bash
+openchamber connect-url --port 3000 --server http://your-host:3000 --qr
+```
+
+해당 포트에 서버가 없으면 `connect-url`이 먼저 서버를 시작합니다. Headless 서버에는 `--api-only`, 시작 시 LAN에 바인딩하려면 `--lan`, 브라우저 접근 보호에는 `--ui-password`, 저장된 연결 이름에는 `--name`을 사용하세요.
+
+생성된 링크에는 OpenChamber 앱용 client token이 들어 있습니다. 이 token은 브라우저 UI 비밀번호와 별개이며, 취소하거나 삭제하기 전까지 서버 재시작 후에도 유지됩니다.
+
+## 관련 항목
+
+- [OpenCode Server](/ko/opencode-server/) — 웹이나 VS Code에서 원격 서버에 연결하세요
+- [Remote access](/ko/troubleshooting/remote-access/) — 연결이 완료되지 않을 때

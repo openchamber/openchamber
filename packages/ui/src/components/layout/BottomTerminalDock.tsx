@@ -121,10 +121,10 @@ export const BottomTerminalDock: React.FC<BottomTerminalDockProps> = ({ isOpen, 
         'flex overflow-hidden border-t border-border bg-sidebar',
         shouldApplyFullscreenLayout ? 'absolute inset-x-0 bottom-0 z-40' : 'relative',
         isResizing ? 'transition-none' : 'transition-[height] duration-300 ease-in-out',
-        !isOpen && 'border-t-0'
+        (!isOpen || shouldApplyFullscreenLayout) && 'border-t-0'
       )}
       style={shouldApplyFullscreenLayout ? {
-        top: 'var(--oc-header-height, 48px)',
+        top: 0,
       } : {
         height: `${appliedHeight}px`,
         minHeight: `${appliedHeight}px`,

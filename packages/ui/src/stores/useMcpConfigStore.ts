@@ -8,6 +8,7 @@ import {
 import { refreshAfterOpenCodeRestart } from '@/stores/useAgentsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { opencodeClient } from '@/lib/opencode/client';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 export type McpScope = 'user' | 'project';
 
@@ -165,7 +166,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
             set({ isLoading: true });
             try {
               const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
-              const response = await fetch(`/api/config/mcp${queryParams}`, {
+              const response = await runtimeFetch(`/api/config/mcp${queryParams}`, {
                 headers: configDirectory ? { 'x-opencode-directory': configDirectory } : undefined,
               });
               if (!response.ok) {
@@ -197,7 +198,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
             const body = buildMcpBody(config);
             const configDirectory = getConfigDirectory();
             const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
-            const response = await fetch(`/api/config/mcp/${encodeURIComponent(config.name)}${queryParams}`, {
+            const response = await runtimeFetch(`/api/config/mcp/${encodeURIComponent(config.name)}${queryParams}`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -251,7 +252,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
             const body = buildMcpBody(config);
             const configDirectory = getConfigDirectory();
             const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
-            const response = await fetch(`/api/config/mcp/${encodeURIComponent(name)}${queryParams}`, {
+            const response = await runtimeFetch(`/api/config/mcp/${encodeURIComponent(name)}${queryParams}`, {
               method: 'PATCH',
               headers: {
                 'Content-Type': 'application/json',
@@ -304,7 +305,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
           try {
             const configDirectory = getConfigDirectory();
             const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
-            const response = await fetch(`/api/config/mcp/${encodeURIComponent(name)}${queryParams}`, {
+            const response = await runtimeFetch(`/api/config/mcp/${encodeURIComponent(name)}${queryParams}`, {
               method: 'DELETE',
               headers: configDirectory ? { 'x-opencode-directory': configDirectory } : undefined,
             });

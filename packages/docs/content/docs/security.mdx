@@ -1,0 +1,37 @@
+---
+title: Security
+description: Protect the UI with a password and passkeys before exposing it.
+---
+
+# Security
+
+OpenChamber gives access to your machine and your code, so lock it down before anyone but you can reach it. This page covers the UI password, passkeys, and what to know before exposing OpenChamber to a network.
+
+## Set a UI password
+
+Start OpenChamber with a password and the browser UI asks for it:
+
+```bash
+openchamber --ui-password be-creative-here
+```
+
+You can also set it with the `OPENCHAMBER_UI_PASSWORD` environment variable instead of putting it on the command line. After signing in, OpenChamber remembers the device for a while so you're not asked every time.
+
+Always set a password if the instance is reachable by anyone else — especially over a [tunnel](/tunnels/) or the public internet.
+
+## Passkeys
+
+Once a password is set, you can add passkeys (Face ID, Touch ID, a security key) for quicker sign-in. Add them at **Settings → OpenChamber → Passkeys**.
+
+Passkeys are tied to the current password. If you change or remove the password, saved passkeys are cleared and you'll add them again.
+
+## Before you expose it
+
+- By default OpenChamber only listens on your own machine (`127.0.0.1`). It takes a deliberate change to listen more widely, and you should set a password first.
+- Prefer a [tunnel](/tunnels/) or a private network (like a VPN) over opening a port to the internet.
+- If you put OpenChamber behind your own HTTPS server, see [Reverse Proxy](/reverse-proxy/).
+
+## Related
+
+- [Tunnels](/tunnels/) — the recommended way to reach an instance remotely
+- [Reverse Proxy](/reverse-proxy/) — run OpenChamber behind your own server

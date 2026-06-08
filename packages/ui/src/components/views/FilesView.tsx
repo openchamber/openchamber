@@ -1,4 +1,5 @@
 import React from 'react';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
@@ -13,6 +14,7 @@ import {
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { CodeMirrorEditor } from '@/components/ui/CodeMirrorEditor';
 import { GoToLineDialog } from './GoToLineDialog';
 import { PreviewToggleButton } from './PreviewToggleButton';
@@ -34,10 +36,12 @@ import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { useDeviceInfo } from '@/lib/device';
 import { cn, getModifierLabel, getRevealLabelKey, hasModifier } from '@/lib/utils';
 import { getLanguageFromExtension, getImageMimeType, isImageFile } from '@/lib/toolHelpers';
+import { getRuntimeUrlResolver } from '@/lib/runtime-url';
+import { refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
+import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { EditorView } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
-import { convertFileSrc } from '@tauri-apps/api/core';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useUIStore } from '@/stores/useUIStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
@@ -224,6 +228,47 @@ const FileStatusDot: React.FC<{ status: FileStatus }> = ({ status }) => {
   return <span className="size-2 rounded-full" style={{ backgroundColor: color }} />;
 };
 
+const ScrollingFileName: React.FC<{ name: string }> = ({ name }) => {
+  const containerRef = React.useRef<HTMLSpanElement | null>(null);
+  const textRef = React.useRef<HTMLSpanElement | null>(null);
+  const [overflowing, setOverflowing] = React.useState(false);
+
+  React.useLayoutEffect(() => {
+    const container = containerRef.current;
+    const text = textRef.current;
+    if (!container || !text) {
+      return;
+    }
+
+    const updateOverflow = () => {
+      setOverflowing(text.scrollWidth > container.clientWidth + 1);
+    };
+
+    updateOverflow();
+    const resizeObserver = new ResizeObserver(updateOverflow);
+    resizeObserver.observe(container);
+    resizeObserver.observe(text);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [name]);
+
+  return (
+    <span ref={containerRef} className="relative block min-w-0 flex-1 overflow-hidden whitespace-nowrap">
+      <span ref={textRef} aria-hidden="true" className="invisible absolute whitespace-nowrap">{name}</span>
+      {overflowing ? (
+        <span className="open-file-name-marquee-track">
+          <span className="open-file-name-marquee-item">{name}</span>
+          <span className="open-file-name-marquee-item" aria-hidden="true">{name}</span>
+        </span>
+      ) : (
+        <span className="block min-w-0 truncate">{name}</span>
+      )}
+    </span>
+  );
+};
+
 const shouldIgnoreEntryName = (name: string): boolean => DEFAULT_IGNORED_DIR_NAMES.has(name);
 
 const shouldIgnorePath = (path: string): boolean => {
@@ -237,8 +282,43 @@ const isDirectoryReadError = (error: unknown): boolean => {
   return normalized.includes('is a directory') || normalized.includes('eisdir');
 };
 
+const isFileMissingError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  const normalized = message.toLowerCase();
+  return normalized.includes('file not found')
+    || normalized.includes('enoent')
+    || normalized.includes('no such file')
+    || normalized.includes('does not exist');
+};
+
 const MAX_VIEW_CHARS = 200_000;
 const FILE_EDITOR_AUTO_SAVE_KEY = 'openchamber:files:auto-save-enabled';
+type FileLineEnding = '\n' | '\r\n';
+
+const detectFileLineEnding = (content: string): FileLineEnding => {
+  let crlf = 0;
+  let lf = 0;
+
+  for (let index = 0; index < content.length; index += 1) {
+    if (content.charCodeAt(index) !== 10) {
+      continue;
+    }
+    if (index > 0 && content.charCodeAt(index - 1) === 13) {
+      crlf += 1;
+    } else {
+      lf += 1;
+    }
+  }
+
+  return crlf > lf ? '\r\n' : '\n';
+};
+
+const normalizeEditorLineEndings = (content: string): string => content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+const serializeEditorContent = (content: string, lineEnding: FileLineEnding): string => {
+  const normalized = normalizeEditorLineEndings(content);
+  return lineEnding === '\r\n' ? normalized.replace(/\n/g, '\r\n') : normalized;
+};
 
 const getInitialAutoSaveEnabled = (): boolean => {
   if (typeof window === 'undefined') {
@@ -695,6 +775,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   }, [openFiles.length]);
 
   const [childrenByDir, setChildrenByDir] = React.useState<Record<string, FileNode[]>>({});
+  const [loadErrorsByDir, setLoadErrorsByDir] = React.useState<Record<string, string>>({});
   const loadedDirsRef = React.useRef<Set<string>>(new Set());
   const inFlightDirsRef = React.useRef<Set<string>>(new Set());
   const activeDirectoryLoadIdsRef = React.useRef<Map<string, number>>(new Map());
@@ -707,11 +788,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const [fileLoading, setFileLoading] = React.useState(false);
   const [fileError, setFileError] = React.useState<string | null>(null);
   const [desktopImageSrc, setDesktopImageSrc] = React.useState<string>('');
+  const [imageAssetAuthReadyKey, setImageAssetAuthReadyKey] = React.useState('');
 
   const [loadedFilePath, setLoadedFilePath] = React.useState<string | null>(null);
 
   const [draftContent, setDraftContent] = React.useState('');
   const [isSaving, setIsSaving] = React.useState(false);
+  const [loadedFileLineEnding, setLoadedFileLineEnding] = React.useState<FileLineEnding>('\n');
   const dialogInputRef = React.useRef<HTMLInputElement>(null);
   const autoSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastLoadedFileStatRef = React.useRef<FileStatSnapshot | null>(null);
@@ -955,14 +1038,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
     const isCurrentRequest = () => activeDirectoryLoadIdsRef.current.get(normalizedDir) === requestId;
 
-    const respectGitignore = !showGitignored;
-    const listPromise = runtime.isDesktop
-      ? files.listDirectory(normalizedDir, { respectGitignore }).then((result) => result.entries.map((entry) => ({
+    const listPromise = files.listDirectory
+      ? files.listDirectory(normalizedDir).then((result) => result.entries.map((entry) => ({
         name: entry.name,
         path: entry.path,
         isDirectory: entry.isDirectory,
       })))
-      : opencodeClient.listLocalDirectory(normalizedDir, { respectGitignore }).then((result) => result.map((entry) => ({
+      : opencodeClient.listLocalDirectory(normalizedDir).then((result) => result.map((entry) => ({
         name: entry.name,
         path: entry.path,
         isDirectory: entry.isDirectory,
@@ -978,16 +1060,24 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
         loadedDirsRef.current = new Set(loadedDirsRef.current);
         loadedDirsRef.current.add(normalizedDir);
+        setLoadErrorsByDir((prev) => {
+          if (!prev[normalizedDir]) return prev;
+          const next = { ...prev };
+          delete next[normalizedDir];
+          return next;
+        });
         setChildrenByDir((prev) => ({ ...prev, [normalizedDir]: mapped }));
       })
-      .catch(() => {
+      .catch((error) => {
         if (!isCurrentRequest()) {
           return;
         }
 
-        setChildrenByDir((prev) => ({
+        const message = error instanceof Error ? error.message : String(error ?? '');
+        console.error('Failed to load files directory:', error);
+        setLoadErrorsByDir((prev) => ({
           ...prev,
-          [normalizedDir]: prev[normalizedDir] ?? [],
+          [normalizedDir]: message,
         }));
       })
       .finally(() => {
@@ -1000,7 +1090,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         inFlightDirsRef.current = new Set(inFlightDirsRef.current);
         inFlightDirsRef.current.delete(normalizedDir);
       });
-  }, [files, mapDirectoryEntries, runtime.isDesktop, showGitignored]);
+  }, [files, mapDirectoryEntries]);
 
   const refreshRoot = React.useCallback(async () => {
     if (!root) {
@@ -1010,6 +1100,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     loadedDirsRef.current = new Set();
     inFlightDirsRef.current = new Set();
     activeDirectoryLoadIdsRef.current = new Map();
+    setLoadErrorsByDir({});
     setChildrenByDir((prev) => (Object.keys(prev).length === 0 ? prev : {}));
 
     await loadDirectory(root);
@@ -1066,6 +1157,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       loadedDirsRef.current = new Set();
       inFlightDirsRef.current = new Set();
       activeDirectoryLoadIdsRef.current = new Map();
+      setLoadErrorsByDir({});
       setChildrenByDir((prev) => (Object.keys(prev).length === 0 ? prev : {}));
       void loadDirectory(root);
     }
@@ -1324,7 +1416,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     if (options?.optional) {
       params.set('optional', 'true');
     }
-    const response = await fetch(`/api/fs/read?${params.toString()}`, {
+    const response = await runtimeFetch(`/api/fs/read?${params.toString()}`, {
       // Avoid conditional requests (304 + empty body).
       cache: options?.optional ? 'no-store' : 'default',
     });
@@ -1346,6 +1438,32 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     }
     return null;
   }, [files]);
+
+  React.useEffect(() => {
+    if (!root || !files.statFile || openPaths.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+    const paths = [...openPaths];
+
+    void Promise.all(paths.map(async (path) => {
+      try {
+        const stat = await files.statFile?.(path);
+        if (!cancelled && stat && !stat.isFile) {
+          removeOpenPathsByPrefix(root, path);
+        }
+      } catch (error) {
+        if (!cancelled && isFileMissingError(error)) {
+          removeOpenPathsByPrefix(root, path);
+        }
+      }
+    }));
+
+    return () => {
+      cancelled = true;
+    };
+  }, [files, openPaths, removeOpenPathsByPrefix, root]);
 
   const displayedContent = React.useMemo(() =>
     fileContent.length > MAX_VIEW_CHARS
@@ -1369,7 +1487,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     setIsSaving(true);
 
     try {
-      const result = await files.writeFile(selectedFile.path, draftContent);
+      const contentToWrite = serializeEditorContent(draftContent, loadedFileLineEnding);
+      const result = await files.writeFile(selectedFile.path, contentToWrite);
       if (!result?.success) {
         toast.error(t('filesView.toast.writeFileFailed'));
         return false;
@@ -1390,7 +1509,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     } finally {
       setIsSaving(false);
     }
-  }, [draftContent, files, isDirty, readFileStat, selectedFile, t]);
+  }, [draftContent, files, isDirty, loadedFileLineEnding, readFileStat, selectedFile, t]);
 
   React.useEffect(() => {
     if (!isDirty) {
@@ -1545,10 +1664,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         if (!isCurrentLoad()) {
           return;
         }
-        setFileContent(content);
-        setDraftContent(content.length > MAX_VIEW_CHARS
-          ? `${content.slice(0, MAX_VIEW_CHARS)}\n\n… truncated …`
-          : content);
+        const editorContent = normalizeEditorLineEndings(content);
+        setLoadedFileLineEnding(detectFileLineEnding(content));
+        setFileContent(editorContent);
+        setDraftContent(editorContent.length > MAX_VIEW_CHARS
+          ? `${editorContent.slice(0, MAX_VIEW_CHARS)}\n\n… truncated …`
+          : editorContent);
         setLoadedFilePath(node.path);
         void readFileStat(node.path, readOptions)
           .then((stat) => {
@@ -1592,6 +1713,19 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           }
           return;
         }
+        if (isFileMissingError(error)) {
+          if (root) {
+            removeOpenPathsByPrefix(root, node.path);
+          }
+          setFileContent('');
+          setDraftContent('');
+          setFileError(null);
+          lastLoadedFileStatRef.current = null;
+          if (isMobile) {
+            setShowMobilePageContent(false);
+          }
+          return;
+        }
         setFileContent('');
         setDraftContent('');
         setFileError(error instanceof Error ? error.message : t('filesView.error.readFileFailed'));
@@ -1602,7 +1736,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           setFileLoading(false);
         }
       });
-  }, [expandPaths, isMobile, loadDirectory, mode, readFile, readFileStat, root, runtime.isDesktop, searchQuery, setSelectedPath, t]);
+  }, [expandPaths, isMobile, loadDirectory, mode, readFile, readFileStat, removeOpenPathsByPrefix, root, runtime.isDesktop, searchQuery, setSelectedPath, t]);
 
   const ensurePathVisible = React.useCallback(async (targetPath: string, includeTarget: boolean) => {
     if (!root) {
@@ -1966,6 +2100,15 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           />
           {isDir && isExpanded && (
             <ul className="flex flex-col gap-1 ml-3 pl-3 border-l border-border/40 relative">
+              {loadErrorsByDir[node.path] ? (
+                <li className="flex items-center gap-2 px-2 py-1 typography-meta text-muted-foreground">
+                  <span className="min-w-0 flex-1 truncate text-[var(--status-error)]" title={loadErrorsByDir[node.path]}>{loadErrorsByDir[node.path]}</span>
+                  <Button variant="ghost" size="xs" className="h-6 gap-1" onClick={() => void refreshDirectory(node.path)}>
+                    <Icon name="refresh" className="size-3.5" />
+                    {t('filesView.tree.actions.refreshTitle')}
+                  </Button>
+                </li>
+              ) : null}
               {renderTree(node.path, depth + 1)}
             </ul>
           )}
@@ -2134,6 +2277,48 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const getHtmlViewMode = React.useCallback((): PreviewViewMode => {
     return htmlViewMode;
   }, [htmlViewMode]);
+
+  React.useEffect(() => {
+    const applyDefaultFileViewerMode = (enabled: boolean) => {
+      const textMode: TextViewMode = enabled ? 'view' : 'edit';
+      const previewMode: PreviewViewMode = enabled ? 'preview' : 'edit';
+      const nextJsonMode: 'tree' | 'text' = enabled ? 'tree' : 'text';
+
+      for (const path of openPaths) {
+        textViewModeByPathRef.current[path] = textMode;
+        if (isMarkdownFile(path)) {
+          mdViewModeByPathRef.current[path] = previewMode;
+        }
+        if (isHtmlFile(path)) {
+          htmlViewModeByPathRef.current[path] = previewMode;
+        }
+      }
+
+      setTextViewMode(textMode);
+      setMdViewMode(previewMode);
+      setHtmlViewMode(previewMode);
+      setJsonViewMode(nextJsonMode);
+
+      try {
+        localStorage.setItem(MD_VIEWER_MODE_KEY, previewMode);
+        localStorage.setItem(HTML_VIEWER_MODE_KEY, previewMode);
+        localStorage.setItem(JSON_VIEWER_MODE_KEY, nextJsonMode);
+      } catch {
+        // Ignore localStorage errors
+      }
+    };
+
+    const handleFileViewerModeChanged = (event: Event) => {
+      const enabled = Boolean((event as CustomEvent<{ enabled?: boolean }>).detail?.enabled);
+      applyDefaultFileViewerMode(enabled);
+    };
+
+    window.addEventListener('openchamber:file-viewer-preview-mode-changed', handleFileViewerModeChanged);
+    return () => {
+      window.removeEventListener('openchamber:file-viewer-preview-mode-changed', handleFileViewerModeChanged);
+    };
+  }, [openPaths]);
+
   React.useEffect(() => {
     if (!pendingFileNavigation || !root) {
       return;
@@ -2453,6 +2638,31 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     [lightTheme.metadata.id, darkTheme.metadata.id],
   );
 
+  const imageAssetAuthKey = selectedFile?.path && isSelectedImage && !runtime.isDesktop && !isSelectedSvg
+    ? `${selectedFile.path}|${selectedFileReadOptions.allowOutsideWorkspace ? 'outside' : 'workspace'}`
+    : '';
+
+  React.useEffect(() => {
+    if (!imageAssetAuthKey) {
+      setImageAssetAuthReadyKey('');
+      return;
+    }
+
+    let cancelled = false;
+    setImageAssetAuthReadyKey('');
+    void refreshRuntimeUrlAuthToken(getRuntimeApiBaseUrl())
+      .then((token) => {
+        if (!cancelled && token) setImageAssetAuthReadyKey(imageAssetAuthKey);
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [imageAssetAuthKey]);
+
+  const isImageAssetAuthLoading = Boolean(imageAssetAuthKey && imageAssetAuthReadyKey !== imageAssetAuthKey);
+
   const imageSrc = selectedFile?.path && isSelectedImage
     ? (runtime.isDesktop
       ? (isSelectedSvg
@@ -2460,10 +2670,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         : desktopImageSrc)
       : (isSelectedSvg
         ? `data:${getImageMimeType(selectedFile.path)};utf8,${encodeURIComponent(fileContent)}`
-        : `/api/fs/raw?${new URLSearchParams({
+        : imageAssetAuthReadyKey === imageAssetAuthKey ? getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', {
           path: selectedFile.path,
-          ...(selectedFileReadOptions.allowOutsideWorkspace ? { allowOutsideWorkspace: 'true' } : {}),
-        }).toString()}`))
+          allowOutsideWorkspace: selectedFileReadOptions.allowOutsideWorkspace ? 'true' : undefined,
+        }) : ''))
     : '';
 
   React.useEffect(() => {
@@ -2479,7 +2689,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
       const srcPromise = files.readFileBinary
         ? files.readFileBinary(selectedFile.path, selectedFileReadOptions).then((result) => result.dataUrl)
-        : Promise.resolve(convertFileSrc(selectedFile.path, 'asset'));
+        : Promise.resolve(getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', {
+          path: selectedFile.path,
+          allowOutsideWorkspace: selectedFileReadOptions.allowOutsideWorkspace ? 'true' : undefined,
+        }));
 
       await srcPromise
         .then((src) => {
@@ -2561,6 +2774,17 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       return null;
     }
 
+    const withTooltip = (label: React.ReactNode, trigger: React.ReactElement) => (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex">
+            {trigger}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" sideOffset={6}>{label}</TooltipContent>
+      </Tooltip>
+    );
+
     return (
       <div className="pointer-events-auto flex items-center gap-1 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-1 shadow-sm">
         {canEdit && textViewMode === 'edit' && (
@@ -2575,7 +2799,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                 <Icon name="check" className="size-3.5" />
                 {t('filesView.editor.saved')}
               </span>
-            ) : isDirty ? (
+            ) : isDirty ? withTooltip(t(autoSaveEnabled ? 'filesView.editor.saveNowTitle' : 'filesView.editor.saveNowManualTitle', { shortcut: `${getModifierLabel()}+S` }),
               <Button
                 variant="ghost"
                 size="sm"
@@ -2587,34 +2811,43 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                 <Icon name="save-3" className="size-4" />
               </Button>
             ) : null}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setAutoSaveEnabled((enabled) => !enabled)}
-              className={cn(
-                'size-6 p-0 transition-opacity hover:bg-transparent focus-visible:bg-transparent active:bg-transparent',
-                autoSaveEnabled ? 'text-foreground opacity-100' : 'text-muted-foreground opacity-65 hover:opacity-100'
-              )}
-              title={autoSaveEnabled ? t('filesView.editor.autoSaveOn') : t('filesView.editor.manualSave')}
-              aria-label={autoSaveEnabled ? t('filesView.editor.autoSaveOn') : t('filesView.editor.manualSave')}
-            >
-              {autoSaveEnabled ? <Icon name="file-check-fill" className="size-4" /> : <Icon name="file-check" className="size-4" />}
-            </Button>
+            {withTooltip(autoSaveEnabled ? t('filesView.editor.autoSaveOn') : t('filesView.editor.manualSave'),
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setAutoSaveEnabled((enabled) => !enabled)}
+                className={cn(
+                  'size-6 p-0 transition-opacity hover:bg-transparent focus-visible:bg-transparent active:bg-transparent',
+                  autoSaveEnabled ? 'text-foreground opacity-100' : 'text-muted-foreground opacity-65 hover:opacity-100'
+                )}
+                title={autoSaveEnabled ? t('filesView.editor.autoSaveOn') : t('filesView.editor.manualSave')}
+                aria-label={autoSaveEnabled ? t('filesView.editor.autoSaveOn') : t('filesView.editor.manualSave')}
+              >
+                {autoSaveEnabled ? <Icon name="file-check-fill" className="size-4" /> : <Icon name="file-check" className="size-4" />}
+              </Button>
+            )}
           </>
         )}
 
         <DropdownMenu onOpenChange={handleToolbarDropdownOpenChange}>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="size-6 p-0 text-foreground opacity-100 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
-              title={t('filesView.editor.openInDesktopApp')}
-              aria-label={t('filesView.editor.openInDesktopApp')}
-            >
-              <Icon name="file-transfer" className="size-4" />
-            </Button>
-          </DropdownMenuTrigger>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex">
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="size-6 p-0 text-foreground opacity-100 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
+                    title={t('filesView.editor.openInDesktopApp')}
+                    aria-label={t('filesView.editor.openInDesktopApp')}
+                  >
+                    <Icon name="file-transfer" className="size-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6}>{t('filesView.editor.openInDesktopApp')}</TooltipContent>
+          </Tooltip>
           <DropdownMenuContent align="end" className="w-56 max-h-[70vh] overflow-y-auto">
             {openInApps.map((app) => (
               <DropdownMenuItem
@@ -2640,44 +2873,50 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
         {!isSelectedImage && (
           <>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setWrapLines(!wrapLines)}
-              className={cn(
-                'size-6 p-0 transition-opacity hover:bg-transparent focus-visible:bg-transparent active:bg-transparent',
-                wrapLines ? 'text-foreground opacity-100' : 'text-muted-foreground opacity-65 hover:opacity-100'
-              )}
-              title={wrapLines ? t('filesView.editor.disableLineWrap') : t('filesView.editor.enableLineWrap')}
-            >
-              <Icon name="text-wrap" className="size-4" />
-            </Button>
+            {withTooltip(wrapLines ? t('filesView.editor.disableLineWrap') : t('filesView.editor.enableLineWrap'),
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setWrapLines(!wrapLines)}
+                className={cn(
+                  'size-6 p-0 transition-opacity hover:bg-transparent focus-visible:bg-transparent active:bg-transparent',
+                  wrapLines ? 'text-foreground opacity-100' : 'text-muted-foreground opacity-65 hover:opacity-100'
+                )}
+                title={wrapLines ? t('filesView.editor.disableLineWrap') : t('filesView.editor.enableLineWrap')}
+              >
+                <Icon name="text-wrap" className="size-4" />
+              </Button>
+            )}
             {textViewMode === 'edit' && (
               <>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={(event) => {
-                    setIsSearchOpen(!isSearchOpen);
-                    event.currentTarget.blur();
-                  }}
-                  className="size-6 p-0 text-foreground opacity-100 transition-opacity hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
-                  title={t('filesView.editor.findInFile')}
-                >
-                  <Icon name="search" className="size-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={(event) => {
-                    setIsGoToLineOpen((open) => !open);
-                    event.currentTarget.blur();
-                  }}
-                  className="size-6 p-0 text-foreground opacity-100 transition-opacity hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
-                  title={t('filesView.editor.goToLine')}
-                >
-                  <Icon name="menu-fold-2" className="size-4" />
-                </Button>
+                {withTooltip(t('filesView.editor.findInFile'),
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={(event) => {
+                      setIsSearchOpen(!isSearchOpen);
+                      event.currentTarget.blur();
+                    }}
+                    className="size-6 p-0 text-foreground opacity-100 transition-opacity hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
+                    title={t('filesView.editor.findInFile')}
+                  >
+                    <Icon name="search" className="size-4" />
+                  </Button>
+                )}
+                {withTooltip(t('filesView.editor.goToLine'),
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={(event) => {
+                      setIsGoToLineOpen((open) => !open);
+                      event.currentTarget.blur();
+                    }}
+                    className="size-6 p-0 text-foreground opacity-100 transition-opacity hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
+                    title={t('filesView.editor.goToLine')}
+                  >
+                    <Icon name="menu-fold-2" className="size-4" />
+                  </Button>
+                )}
                 <GoToLineDialog
                   open={isGoToLineOpen}
                   onOpenChange={setIsGoToLineOpen}
@@ -2712,123 +2951,135 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         )}
 
         {isJson && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => saveJsonViewMode(jsonViewMode === 'tree' ? 'text' : 'tree')}
-            className="size-6 p-0 text-muted-foreground opacity-65 hover:bg-transparent hover:opacity-100 focus-visible:bg-transparent active:bg-transparent"
-            title={jsonViewMode === 'tree' ? t('filesView.editor.switchToTextView') : t('filesView.editor.switchToTreeView')}
-          >
-            {jsonViewMode === 'tree' ? (
-              <Icon name="code-sslash" className="size-4" />
-            ) : (
-              <Icon name="node-tree" className="size-4" />
-            )}
-          </Button>
+          withTooltip(jsonViewMode === 'tree' ? t('filesView.editor.switchToTextView') : t('filesView.editor.switchToTreeView'),
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => saveJsonViewMode(jsonViewMode === 'tree' ? 'text' : 'tree')}
+              className="size-6 p-0 text-muted-foreground opacity-65 hover:bg-transparent hover:opacity-100 focus-visible:bg-transparent active:bg-transparent"
+              title={jsonViewMode === 'tree' ? t('filesView.editor.switchToTextView') : t('filesView.editor.switchToTreeView')}
+            >
+              {jsonViewMode === 'tree' ? (
+                <Icon name="code-sslash" className="size-4" />
+              ) : (
+                <Icon name="node-tree" className="size-4" />
+              )}
+            </Button>
+          )
         )}
 
         {canCopy && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={async () => {
-              const result = await copyTextToClipboard(fileContent);
-              if (result.ok) {
-                setCopiedContent(true);
-                if (copiedContentTimeoutRef.current !== null) {
-                  window.clearTimeout(copiedContentTimeoutRef.current);
+          withTooltip(t('filesView.editor.copyFileContents'),
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={async () => {
+                const result = await copyTextToClipboard(fileContent);
+                if (result.ok) {
+                  setCopiedContent(true);
+                  if (copiedContentTimeoutRef.current !== null) {
+                    window.clearTimeout(copiedContentTimeoutRef.current);
+                  }
+                  copiedContentTimeoutRef.current = window.setTimeout(() => {
+                    setCopiedContent(false);
+                  }, 1200);
+                } else {
+                  toast.error(t('filesView.toast.copyFailed'));
                 }
-                copiedContentTimeoutRef.current = window.setTimeout(() => {
-                  setCopiedContent(false);
-                }, 1200);
-              } else {
-                toast.error(t('filesView.toast.copyFailed'));
-              }
-            }}
-            className="size-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
-            title={t('filesView.editor.copyFileContents')}
-            aria-label={t('filesView.editor.copyFileContents')}
-          >
-            {copiedContent ? (
-              <Icon name="check" className="size-4 text-[color:var(--status-success)]" />
-            ) : (
-              <Icon name="clipboard" className="size-4" />
-            )}
-          </Button>
+              }}
+              className="size-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
+              title={t('filesView.editor.copyFileContents')}
+              aria-label={t('filesView.editor.copyFileContents')}
+            >
+              {copiedContent ? (
+                <Icon name="check" className="size-4 text-[color:var(--status-success)]" />
+              ) : (
+                <Icon name="clipboard" className="size-4" />
+              )}
+            </Button>
+          )
         )}
 
         {canCopyPath && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={async () => {
-              const result = await copyTextToClipboard(displaySelectedPath);
-              if (result.ok) {
-                setCopiedPath(true);
-                if (copiedPathTimeoutRef.current !== null) {
-                  window.clearTimeout(copiedPathTimeoutRef.current);
+          withTooltip(t('filesView.editor.copyFilePathTitle', { path: displaySelectedPath }),
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={async () => {
+                const result = await copyTextToClipboard(displaySelectedPath);
+                if (result.ok) {
+                  setCopiedPath(true);
+                  if (copiedPathTimeoutRef.current !== null) {
+                    window.clearTimeout(copiedPathTimeoutRef.current);
+                  }
+                  copiedPathTimeoutRef.current = window.setTimeout(() => {
+                    setCopiedPath(false);
+                  }, 1200);
+                } else {
+                  toast.error(t('filesView.toast.copyFailed'));
                 }
-                copiedPathTimeoutRef.current = window.setTimeout(() => {
-                  setCopiedPath(false);
-                }, 1200);
-              } else {
-                toast.error(t('filesView.toast.copyFailed'));
-              }
-            }}
-            className="size-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
-            title={t('filesView.editor.copyFilePathTitle', { path: displaySelectedPath })}
-            aria-label={t('filesView.editor.copyFilePathTitle', { path: displaySelectedPath })}
-          >
-            {copiedPath ? (
-              <Icon name="check" className="size-4 text-[color:var(--status-success)]" />
-            ) : (
-              <Icon name="file-copy-2" className="size-4" />
-            )}
-          </Button>
+              }}
+              className="size-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
+              title={t('filesView.editor.copyFilePathTitle', { path: displaySelectedPath })}
+              aria-label={t('filesView.editor.copyFilePathTitle', { path: displaySelectedPath })}
+            >
+              {copiedPath ? (
+                <Icon name="check" className="size-4 text-[color:var(--status-success)]" />
+              ) : (
+                <Icon name="file-copy-2" className="size-4" />
+              )}
+            </Button>
+          )
         )}
 
         {files.downloadFile && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              const fn = files.downloadFile;
-              if (fn) void fn(selectedFile.path);
-            }}
-            className="size-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
-            title={t('filesView.editor.saveFile')}
-            aria-label={t('filesView.editor.saveFile')}
-          >
-            <Icon name="download" className="size-4" />
-          </Button>
+          withTooltip(t('filesView.editor.saveFile'),
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                const fn = files.downloadFile;
+                if (fn) void fn(selectedFile.path);
+              }}
+              className="size-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
+              title={t('filesView.editor.saveFile')}
+              aria-label={t('filesView.editor.saveFile')}
+            >
+              <Icon name="download" className="size-4" />
+            </Button>
+          )
         )}
 
         {exitFullscreenOnly ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setIsFullscreen(false)}
-            className="size-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
-            title={t('filesView.editor.exitFullscreen')}
-            aria-label={t('filesView.editor.exitFullscreen')}
-          >
-            <Icon name="fullscreen-exit" className="size-4" />
-          </Button>
-        ) : (!isMobile && mode === 'full' && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setIsFullscreen(!isFullscreen)}
-            className="size-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
-            title={isFullscreen ? t('filesView.editor.exitFullscreen') : t('filesView.editor.fullscreen')}
-            aria-label={isFullscreen ? t('filesView.editor.exitFullscreen') : t('filesView.editor.fullscreen')}
-          >
-            {isFullscreen ? (
+          withTooltip(t('filesView.editor.exitFullscreen'),
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsFullscreen(false)}
+              className="size-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
+              title={t('filesView.editor.exitFullscreen')}
+              aria-label={t('filesView.editor.exitFullscreen')}
+            >
               <Icon name="fullscreen-exit" className="size-4" />
-            ) : (
-              <Icon name="fullscreen" className="size-4" />
-            )}
-          </Button>
+            </Button>
+          )
+        ) : (!isMobile && mode === 'full' && (
+          withTooltip(isFullscreen ? t('filesView.editor.exitFullscreen') : t('filesView.editor.fullscreen'),
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsFullscreen(!isFullscreen)}
+              className="size-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
+              title={isFullscreen ? t('filesView.editor.exitFullscreen') : t('filesView.editor.fullscreen')}
+              aria-label={isFullscreen ? t('filesView.editor.exitFullscreen') : t('filesView.editor.fullscreen')}
+            >
+              {isFullscreen ? (
+                <Icon name="fullscreen-exit" className="size-4" />
+              ) : (
+                <Icon name="fullscreen" className="size-4" />
+              )}
+            </Button>
+          )
         ))}
       </div>
     );
@@ -2889,11 +3140,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                     aria-label={t('filesView.editor.openFilesAria')}
                   >
                     <FileTypeIcon filePath={selectedFile.path} extension={selectedFile.extension} className="size-3.5 flex-shrink-0" />
-                    <span className="min-w-0 flex-1 truncate">{selectedFile.name}</span>
+                    <ScrollingFileName name={selectedFile.name} />
                     <Icon name="arrow-down-s" className="size-4 flex-shrink-0 text-muted-foreground" />
                   </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="min-w-[16rem]">
+                <DropdownMenuContent align="start" className="w-[min(24rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)]">
                   {openFiles.map((file) => {
                     const isActive = selectedFile?.path === file.path;
                     return (
@@ -2910,13 +3161,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                           }
                         }}
                         className={cn(
-                          'flex items-center justify-between gap-2',
+                          'flex min-w-0 items-center justify-between gap-2 overflow-hidden',
                           isActive && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]'
                         )}
                       >
-                        <span className="flex min-w-0 flex-1 items-center gap-2 truncate">
+                        <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
                           <FileTypeIcon filePath={file.path} extension={file.extension} className="size-3.5 flex-shrink-0" />
-                          <span className="min-w-0 flex-1 truncate">{file.name}</span>
+                          <ScrollingFileName name={file.name} />
                         </span>
                         <button
                           type="button"
@@ -2930,7 +3181,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                             event.stopPropagation();
                             handleCloseFile(file.path);
                           }}
-                          className="inline-flex size-6 items-center justify-center rounded-md text-[var(--surface-muted-foreground)] hover:text-[var(--surface-foreground)]"
+                          className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-[var(--surface-muted-foreground)] hover:text-[var(--surface-foreground)]"
                           aria-label={t('filesView.editor.closeFileAria', { name: file.name })}
                         >
                           <Icon name="close" className="size-3.5" />
@@ -3024,23 +3275,30 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             {isFloatingToolbarOpen ? (
               renderFloatingFileControls()
             ) : (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setIsFloatingToolbarOpen(true)}
-                className="size-8 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-0 text-muted-foreground shadow-sm hover:text-foreground"
-                aria-label={t('filesView.editor.showControlsAria')}
-                title={t('filesView.editor.controlsTitle')}
-              >
-                <Icon name="more-2-fill" className="size-4" />
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setIsFloatingToolbarOpen(true)}
+                      className="size-8 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-0 text-muted-foreground shadow-sm hover:text-foreground"
+                      aria-label={t('filesView.editor.showControlsAria')}
+                      title={t('filesView.editor.controlsTitle')}
+                    >
+                      <Icon name="more-2-fill" className="size-4" />
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" sideOffset={6}>{t('filesView.editor.controlsTitle')}</TooltipContent>
+              </Tooltip>
             )}
           </div>
         )}
         <ScrollableOverlay outerClassName="h-full min-w-0" className="h-full min-w-0">
           {!selectedFile ? (
             <div className="p-3 typography-ui text-muted-foreground">{t('filesView.editor.pickFileFromTree')}</div>
-          ) : fileLoading ? (
+          ) : (fileLoading || isImageAssetAuthLoading) ? (
             suppressFileLoadingIndicator
               ? <div className="p-3" />
               : (
@@ -3236,6 +3494,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   );
 
   const hasTree = Boolean(root && childrenByDir[root]);
+  const rootLoadError = root ? loadErrorsByDir[root] : null;
 
   const treePanel = (
     <section className={cn(
@@ -3267,27 +3526,50 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
               </button>
             )}
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => handleOpenDialog('createFile', { path: currentDirectory, type: 'directory' })}
-            className="size-8 p-0 flex-shrink-0"
-            title={t('filesView.tree.actions.newFileTitle')}
-          >
-            <Icon name="file-add" className="size-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => handleOpenDialog('createFolder', { path: currentDirectory, type: 'directory' })}
-            className="size-8 p-0 flex-shrink-0"
-            title={t('filesView.tree.actions.newFolderTitle')}
-          >
-            <Icon name="folder-add" className="size-4" />
-          </Button>
-          <Button variant="ghost" size="sm" onClick={() => void refreshRoot()} className="size-8 p-0 flex-shrink-0">
-            <Icon name="refresh" className="size-4" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex flex-shrink-0">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleOpenDialog('createFile', { path: currentDirectory, type: 'directory' })}
+                  className="size-8 p-0 flex-shrink-0"
+                  title={t('filesView.tree.actions.newFileTitle')}
+                  aria-label={t('filesView.tree.actions.newFileTitle')}
+                >
+                  <Icon name="file-add" className="size-4" />
+                </Button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6}>{t('filesView.tree.actions.newFileTitle')}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex flex-shrink-0">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleOpenDialog('createFolder', { path: currentDirectory, type: 'directory' })}
+                  className="size-8 p-0 flex-shrink-0"
+                  title={t('filesView.tree.actions.newFolderTitle')}
+                  aria-label={t('filesView.tree.actions.newFolderTitle')}
+                >
+                  <Icon name="folder-add" className="size-4" />
+                </Button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6}>{t('filesView.tree.actions.newFolderTitle')}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex flex-shrink-0">
+                <Button variant="ghost" size="sm" onClick={() => void refreshRoot()} className="size-8 p-0 flex-shrink-0" title={t('filesView.tree.actions.refreshTitle')} aria-label={t('filesView.tree.actions.refreshTitle')}>
+                  <Icon name="refresh" className="size-4" />
+                </Button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6}>{t('filesView.tree.actions.refreshTitle')}</TooltipContent>
+          </Tooltip>
         </div>
       </div>
 
@@ -3323,6 +3605,14 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                 </li>
               );
             })
+          ) : rootLoadError ? (
+            <li className="flex flex-col gap-2 px-2 py-1 typography-meta text-muted-foreground">
+              <span className="text-[var(--status-error)]">{rootLoadError}</span>
+              <Button variant="outline" size="xs" className="w-fit gap-1.5" onClick={() => void refreshRoot()}>
+                <Icon name="refresh" className="size-3.5" />
+                {t('filesView.tree.actions.refreshTitle')}
+              </Button>
+            </li>
           ) : hasTree ? (
             renderTree(root, 0)
           ) : (
@@ -3342,7 +3632,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           {renderFloatingFileControls({ exitFullscreenOnly: true })}
         </div>
         <ScrollableOverlay outerClassName="h-full min-w-0" className="h-full min-w-0">
-          {fileLoading ? (
+          {(fileLoading || isImageAssetAuthLoading) ? (
             suppressFileLoadingIndicator
               ? <div className="p-4" />
               : (

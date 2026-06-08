@@ -4,6 +4,99 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Chat: added `/handoff-review` to open a linked review session for the current workspace changes, with actions to send review feedback and implementation replies between the sessions.
+- Worktrees: creating a single new worktree session now opens the session immediately while worktree setup continues in the background.
+- Multi-Run: creating isolated runs now opens sessions immediately while worktree setup continues in the background.
+- Sessions: chat folder assignments now stay in place after reloads.
+
+## [1.12.3] - 2026-06-05
+
+- Windows/Startup: WSL OpenCode installs are no longer detected or launched; install OpenCode natively on Windows and configure `opencode.cmd` or `opencode.exe` instead.
+- Startup: OpenCode health checks now work with OpenCode 1.15.x.
+- Files: file trees now show directory loading errors with a retry action instead of leaving the folder empty, and slow Git ignore checks no longer block directory listings indefinitely.
+
+## [1.12.2] - 2026-06-05
+
+- **Desktop/Windows: the Windows app is now available publicly, with full functionality parity across the app.**
+- Tunnels: switching between Cloudflare and ngrok quick tunnels now replaces the active quick tunnel instead of reusing the previous provider.
+- Tunnels: ngrok startup failures now show the ngrok or authtoken error returned during startup.
+- Projects: the Add Project directory picker now starts with hidden files off each time it opens.
+- Chat: prompts sent while creating or switching target sessions now stay attached to the intended project directory.
+- VSCode: the extension now detects more Windows OpenCode installs from PATH, npm, Scoop, and Chocolatey.
+
+## [1.12.1] - 2026-06-03
+
+- Chat: completed turns can now show changed-file chips with per-file additions and deletions, controlled by a new Chat setting.
+- Chat: LSP tool calls now show the operation, file, and cursor position more clearly, and JSON tool output can be toggled between formatted and raw views or copied.
+- Chat: streaming messages now appear correctly after startup, and activity/status rows show for the active session.
+- Chat: completed responses no longer lose late-arriving summaries, token counts, errors, structured output, or changed-file details.
+- Chat: question cards now show an error or no-longer-pending message when submit or dismiss fails instead of silently doing nothing.
+- Chat: the first prompt in a new session no longer gets stuck before sending.
+- Chat/UI: sticky user-message headers are now off by default.
+- Sessions: session titles update from live session events, and the app now consistently loads all existing OpenCode sessions.
+- Sessions: recent sessions now stay visible inside project groups, and new or worktree sessions stay in the correct project/worktree group on desktop, mobile, and VS Code.
+- Settings/OpenCode: OpenCode CLI path, update-notification preference, keyboard shortcuts, and protected-session settings now stay saved after changes.
+- UI/Time: the 12-hour/24-hour time preference now applies to chat timestamps, usage reset times, scheduled tasks, tunnels, passkeys, Git history, and pull-request dates.
+- Settings/Files: the default file preview setting now lives with the Chat appearance settings and applies immediately to open file tabs.
+- Preview: embedded previews now rewrite inline module imports, fixing Vite React preview pages that load root-relative modules.
+- Desktop: Desktop tunnels now serve the full app UI instead of the headless page.
+- Desktop: quitting the Desktop app now stops managed OpenCode processes more reliably, reducing leftover OpenCode processes after exit.
+- Desktop: removed the legacy Tauri desktop path; Electron is now the only desktop runtime.
+
+## [1.12.0] - 2026-06-03
+
+- Mobile: added a new mobile UI as the default, with an option in Settings to switch back to the previous layout; this is the foundation for the upcoming mobile app and is available to try now.
+- Chat: added customizable draft welcome starters from commands and skills, including guided commands for planning, catch-up, debugging, and exploration.
+- Chat: assistant answers now have a dialog for starting a new session from that answer.
+- Chat/Input: queued messages no longer auto-send before the active session is ready, and thinking-variant choices are preserved for generated messages.
+- Chat/UI: markdown-rendered user messages now preserve line breaks.
+- Web/Browser: added a Browser feature for opening websites in the web app and sharing annotations with screenshots to agents.
+- Web/Remote Instances: added a headless web app mode, and remote instance switching now changes the OpenChamber API endpoint without loading the full remote UI.
+- UI/Themes: added JetBrains Light and JetBrains Dark themes, and VS Code chat colors now map more closely to the active editor theme.
+
+## [1.11.7] - 2026-05-27
+
+- Git: commit history now includes a branch graph and commit-row actions in the history modal (thanks to @ermanhavuc).
+- Desktop: added a launch-at-startup setting, and collapsed browser windows now keep their webview state.
+- UI/Localization: added Traditional Chinese interface translations (thanks to @Jia35).
+- Chat/Input: selecting an agent now switches to that agent's configured model, and malformed tool diffs no longer break chat rendering (thanks to @Adrian-Eckardt).
+- Sessions: inline session renaming no longer exits immediately after focus changes (thanks to @youfch).
+- Notes/Todos: completed todos stay at the end of the list, and the send-to-session dialog has a cleaner model picker (thanks to @kostazol, @rghamilton3).
+- Usage: added a setting to hide prediction rows on usage cards (thanks to @ermanhavuc).
+- VSCode: restored live streaming in the extension.
+
+## [1.11.6] - 2026-05-25
+
+- Settings/Plugins: added a Plugins page for managing opencode plugins, with npm update checks and user/project scopes (thanks to @Quat3rnion).
+- Tunnels: added Ngrok as a quick tunnel provider in the CLI and Desktop tunnel settings, with readiness checks (requires Ngrok cli and auth).
+- Desktop: added optional password setting in OpenChamber sessions settings for the local Desktop server.
+- Multi-Run: new multi-run sessions now appear in the session list immediately, and slash-command prompts are sent to the created run sessions correctly.
+- Mobile: restored the new-session action in the session sidebar header.
+
+## [1.11.5] - 2026-05-25
+
+- Chat/Input: pending image attachments now show previews, sent image attachments can be cited from assistant messages, and markdown source mode highlights formatting while you type.
+- Chat: queued messages now send to the session they were queued from, even if you switch sessions before they are sent.
+- Chat/UI: chats keep following the latest response after final task summaries, activity reasoning no longer flashes before settling, and assistant timestamps stay visible on narrow layouts.
+- Sessions: session titles can now be renamed inline with a double-click (thanks to @robertoberto).
+- Git: changed files are split into staged and unstaged sections, and Git operations work correctly from repository subdirectories (thanks to @ShogunPanda, @kostazol).
+- Files: file search now shows the number of matches in the editor panel, and directory rows include a quick-add button (thanks to @attackonryan, @tomzx).
+- Settings/Skills: installed skills are discovered more accurately, skill files opened from tool messages now load correctly, and snippet names keep their canonical casing (thanks to @jkker, @isanchez404).
+- Mobile/PWA: long-press tooltips work on touch screens, fullscreen panels keep the right header state, deleted or long-named files behave better in file lists, and Android PWA dialogs stay visible (thanks to @kostazol, @lilyzhaun).
+- Voice: OpenAI-compatible custom speech providers can now use API keys (thanks to @yangyaofei).
+
+## [1.11.4] - 2026-05-22
+
+- Desktop: Electron is now the desktop release target, with updated macOS menu actions for the right sidebar and terminal dock.
+- Chat: added reusable snippets with `#` autocomplete in the composer and a Snippets settings page for global and project snippets with [opencode-snippets](https://github.com/JosXa/opencode-snippets) plugin compatibility.
+- Multi-Run: runs can now be split into separate prompt/model groups, and Multi-Run prompts support command, file, agent, and snippet autocomplete (thanks to @tomzx).
+- UI: refreshed the desktop workspace shell with a full-width header, framed chat area, and smooth left/right sidebar open and close states.
+- Chat: completed reasoning blocks stay collapsed without replaying the collapse animation when you reopen a session.
+- Files: file search and mention results avoid mixing entries from similar query/cache keys (thanks to @isanchez404).
+- VSCode: switching between chat sessions is less likely to stall on very large conversations.
+- Voice: preview audio now stops and cleans up correctly when you stop playback or leave Voice settings (thanks to @isanchez404).
+- UI/Localization: refreshed Simplified Chinese terminology across the interface (thanks to @luojiyin).
+
 ## [1.11.3] - 2026-05-19
 
 - Chat: question cards now include copy buttons for Markdown and JSON (thanks to @robertoberto).
@@ -176,7 +269,7 @@ All notable changes to this project will be documented in this file.
 - Chat/Requests: restored blocking request visibility in sub-sessions, scoped auto-approve to the active session tree, and reduced noisy auto-approved notifications during multi-session work.
 - Desktop: added quick open and a LAN access toggle, plus safer quit behavior around scheduled tasks (thanks to @An-jinu).
 - Chat/Markdown: added LaTeX rendering support for clearer math and technical notation in messages (thanks to @ricautomation).
-- Settings/Skills: skills are now sorted within groups (thanks to @roctom).
+- Settings/Skills: skills are now sorted within groups (thanks to @tomzx).
 
 ## [1.9.5] - 2026-04-14
 
@@ -898,7 +991,7 @@ All notable changes to this project will be documented in this file.
 ## [1.1.4] - 2025-12-15
 
 - Flexoki themes for Shiki syntax highlighting for consistency with the app color schema.
-- Enchanced VSCode extension theming with editor themes.
+- Enhanced VSCode extension theming with editor themes.
 - Fixed mobile view model/agent selection.
 
 ## [1.1.3] - 2025-12-14

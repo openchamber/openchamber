@@ -4,8 +4,7 @@ import type { Session } from '@opencode-ai/sdk/v2';
 import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
-import { useGitAllBranches, useGitStore } from '@/stores/useGitStore';
-import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useGitAllBranches } from '@/stores/useGitStore';
 import type { SessionNode } from '../types';
 import { compareSessionsByPinnedAndTime, isPathWithinProject } from '../utils';
 
@@ -46,8 +45,6 @@ export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions
   const projects = useProjectsStore((state) => state.projects);
   const pinnedSessionIds = useSessionPinnedStore((state) => state.ids);
   const branchesByDirectory = useGitAllBranches();
-  const ensureGitStatus = useGitStore((state) => state.ensureStatus);
-  const { git: gitApi } = useRuntimeAPIs();
 
   const normalizedProjects = React.useMemo(
     () => projects
@@ -122,17 +119,6 @@ export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions
       };
     });
   }, [activeSessions, branchesByDirectory, enabled, findProjectForDirectory, pinnedSessionIds, scopeProjectId]);
-
-  React.useEffect(() => {
-    if (!enabled || !gitApi) return;
-    const seen = new Set<string>();
-    for (const item of items) {
-      const dir = item.groupDirectory;
-      if (!dir || seen.has(dir)) continue;
-      seen.add(dir);
-      void ensureGitStatus(dir, gitApi).catch(() => {});
-    }
-  }, [enabled, ensureGitStatus, gitApi, items]);
 
   return items;
 };

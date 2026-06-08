@@ -1,0 +1,41 @@
+---
+title: Desktop Tunnels
+description: Create Cloudflare or Ngrok tunnels from the desktop app.
+---
+
+# Desktop Tunnels
+
+The desktop app can create a public tunnel from **Settings → OpenChamber → Tunnel**. You do not need to start OpenChamber from the CLI for this path.
+
+## Install a provider
+
+OpenChamber starts the provider CLI on your machine. Install the provider you want to use first:
+
+```bash
+brew install cloudflared
+brew install ngrok
+```
+
+Cloudflare uses `cloudflared`. Ngrok requires an ngrok account and an authtoken from the ngrok dashboard:
+
+```bash
+ngrok config add-authtoken <your-ngrok-token>
+```
+
+## Start from the app
+
+1. Open **Settings → OpenChamber → Tunnel**.
+2. Choose **Cloudflare** or **Ngrok**.
+3. Start a quick tunnel.
+4. Scan the generated QR code from your phone.
+
+Ngrok currently supports quick tunnels. Cloudflare supports quick tunnels and managed Cloudflare modes.
+
+## Access protection
+
+Even when the provider URL itself is public, OpenChamber still protects access with its own connect token. The generated connect link contains a one-time token, has a TTL, and old unused links are revoked when you generate a new one or stop/restart the tunnel.
+
+## Related
+
+- [Tunnels](/tunnels/) — CLI tunnel usage and managed Cloudflare modes
+- [PWA & Mobile](/mobile/) — reach OpenChamber from your phone

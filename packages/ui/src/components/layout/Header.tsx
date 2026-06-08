@@ -1,5 +1,4 @@
 import React, { useEffect } from 'react';
-import { createPortal } from 'react-dom';
 import {
   Tooltip,
   TooltipContent,
@@ -33,16 +32,19 @@ import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
+import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControls';
+import { UpdateDialog } from '@/components/ui/UpdateDialog';
 import { useDeviceInfo, useTabletStandalonePwaRuntime } from '@/lib/device';
 import { cn, hasModifier } from '@/lib/utils';
 import { McpDropdownContent } from '@/components/mcp/McpDropdown';
-import { McpIcon } from '@/components/icons/McpIcon';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { formatQuotaValueLabel, formatQuotaResetLabel, formatWindowLabel, QUOTA_PROVIDERS, calculatePace, calculateExpectedUsagePercent } from '@/lib/quota';
 import { UsageProgressBar } from '@/components/sections/usage/UsageProgressBar';
 import { PaceIndicator } from '@/components/sections/usage/PaceIndicator';
 import { updateDesktopSettings } from '@/lib/persistence';
+import { formatTimeForPreference } from '@/lib/timeFormat';
 import { eventMatchesShortcut, formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
+import type { TimeFormatPreference } from '@/stores/useUIStore';
 import {
   getAllModelFamilies,
   getDisplayModelName,
@@ -64,11 +66,14 @@ import { forceKillTerminal } from '@/lib/terminalApi';
 import { useTerminalStore } from '@/stores/useTerminalStore';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
-import { canUseElectronDesktopIPC, invokeDesktop, isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag } from '@/lib/desktop';
-import { desktopHostsGet, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
+import { canUseElectronDesktopIPC, invokeDesktop, isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag, type UpdateInfo } from '@/lib/desktop';
+import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { resolveSessionDiffStats } from '@/components/session/sidebar/utils';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
+import { runtimeFetch } from '@/lib/runtime-fetch';
+import { getRuntimeBearerTokenSync } from '@/lib/runtime-auth';
+import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import type { Session } from '@opencode-ai/sdk/v2/client';
 import type { IconName } from "@/components/icon/icons";
 
@@ -79,10 +84,11 @@ type HeaderIconActionButtonProps = {
   visible?: boolean;
   title: string;
   ariaLabel: string;
-  onClick: () => void;
+  onClick: React.MouseEventHandler<HTMLButtonElement>;
   className?: string;
   Icon: IconName;
   iconClassName?: string;
+  pressed?: boolean;
 };
 
 const HeaderIconActionButton = React.memo(function HeaderIconActionButton({
@@ -93,6 +99,7 @@ const HeaderIconActionButton = React.memo(function HeaderIconActionButton({
   className,
   Icon: iconName,
   iconClassName,
+  pressed = false,
 }: HeaderIconActionButtonProps) {
   if (!visible) {
     return null;
@@ -105,7 +112,11 @@ const HeaderIconActionButton = React.memo(function HeaderIconActionButton({
           type="button"
           onClick={onClick}
           aria-label={ariaLabel}
-          className={className ?? DESKTOP_HEADER_ICON_BUTTON_CLASS}
+          aria-pressed={pressed}
+          className={cn(
+            className ?? DESKTOP_HEADER_ICON_BUTTON_CLASS,
+            pressed && 'bg-interactive-selection text-interactive-selection-foreground'
+          )}
         >
           <Icon name={iconName} className={iconClassName ?? 'h-[18px] w-[18px]'} />
         </button>
@@ -242,6 +253,7 @@ type DesktopServicesMenuProps = {
   isDesktopApp: boolean;
   currentInstanceLabel: string;
   compactCurrentInstanceLabel: string;
+  currentInstanceIsLocal: boolean;
   isDesktopServicesOpen: boolean;
   setIsDesktopServicesOpen: React.Dispatch<React.SetStateAction<boolean>>;
   refreshCurrentInstanceLabel: () => Promise<void>;
@@ -265,12 +277,19 @@ type DesktopServicesMenuProps = {
   showDevShutdown: boolean;
   isDevShutdownInFlight: boolean;
   onDevShutdown: () => Promise<void>;
+  remoteUpdateInfo: UpdateInfo | null;
+  remoteUpdateChecking: boolean;
+  remoteUpdateError: string | null;
+  onOpenRemoteUpdate: () => void;
+  showPredValues: boolean;
+  timeFormatPreference: TimeFormatPreference;
 };
 
 const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
   isDesktopApp,
   currentInstanceLabel,
   compactCurrentInstanceLabel,
+  currentInstanceIsLocal,
   isDesktopServicesOpen,
   setIsDesktopServicesOpen,
   refreshCurrentInstanceLabel,
@@ -294,6 +313,12 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
   showDevShutdown,
   isDevShutdownInFlight,
   onDevShutdown,
+  remoteUpdateInfo,
+  remoteUpdateChecking,
+  remoteUpdateError,
+  onOpenRemoteUpdate,
+  showPredValues,
+  timeFormatPreference,
 }: DesktopServicesMenuProps) {
   const { t } = useI18n();
   return (
@@ -370,12 +395,39 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
         </div>
 
         {isDesktopApp && desktopServicesTab === 'instance' ? (
-          <DesktopHostSwitcherDialog
-            embedded
-            open={isDesktopServicesOpen && desktopServicesTab === 'instance'}
-            onOpenChange={() => {}}
-            onHostSwitched={() => setIsDesktopServicesOpen(false)}
-          />
+          <div>
+            {!currentInstanceIsLocal ? (
+              <div className="border-b border-[var(--interactive-border)] px-4 py-2.5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="typography-ui-label font-medium text-foreground">{t('header.services.remoteUpdate.title')}</div>
+                    <div className="typography-micro text-muted-foreground">
+                      {remoteUpdateInfo?.available
+                        ? t('header.services.remoteUpdate.available', { version: remoteUpdateInfo.version || '' })
+                        : remoteUpdateChecking
+                          ? t('header.services.remoteUpdate.checking')
+                          : remoteUpdateError || t('header.services.remoteUpdate.upToDate')}
+                    </div>
+                  </div>
+                  {remoteUpdateInfo?.available ? (
+                    <button
+                      type="button"
+                      className="shrink-0 rounded-md bg-[var(--primary-base)] px-3 py-1.5 typography-ui-label font-medium text-[var(--primary-foreground)] hover:opacity-90"
+                      onClick={onOpenRemoteUpdate}
+                    >
+                      {t('header.services.remoteUpdate.actions.open')}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+            <DesktopHostSwitcherDialog
+              embedded
+              open={isDesktopServicesOpen && desktopServicesTab === 'instance'}
+              onOpenChange={() => {}}
+              onHostSwitched={() => setIsDesktopServicesOpen(false)}
+            />
+          </div>
         ) : null}
 
         {desktopServicesTab === 'mcp' ? (
@@ -387,7 +439,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
             <div className="flex items-center justify-between gap-3 border-b border-[var(--interactive-border)] px-4 py-2.5">
               <div className="flex min-w-0 items-baseline gap-2">
                 <span className="typography-ui-header font-semibold text-foreground">{t('header.services.rateLimits')}</span>
-                <span className="truncate typography-micro text-muted-foreground">{formatTime(quotaLastUpdated)}</span>
+                <span className="truncate typography-micro text-muted-foreground">{formatTime(quotaLastUpdated, timeFormatPreference)}</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <div className="h-7 w-[10.5rem]">
@@ -448,7 +500,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
                                 : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
                             : null;
                           const metricLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
-                          const resetLabel = formatQuotaResetLabel(window.resetAt, window.resetAfterFormatted ?? window.resetAtFormatted);
+                          const resetLabel = formatQuotaResetLabel(window.resetAt, window.resetAfterFormatted ?? window.resetAtFormatted, timeFormatPreference);
                           return (
                             <div key={`${group.providerId}-${label}`} className="flex flex-col gap-1.5">
                               <div className="flex min-w-0 items-center justify-between gap-3">
@@ -470,7 +522,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
                                 className="h-1.5"
                                 expectedMarkerPercent={expectedMarker}
                               />
-                              {paceInfo ? <PaceIndicator paceInfo={paceInfo} compact /> : null}
+                              {paceInfo && showPredValues ? <PaceIndicator paceInfo={paceInfo} compact /> : null}
                             </div>
                           );
                         })}
@@ -514,7 +566,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
                                               className="h-1.5"
                                               expectedMarkerPercent={expectedMarker}
                                             />
-                                            {paceInfo ? <PaceIndicator paceInfo={paceInfo} compact /> : null}
+                                            {paceInfo && showPredValues ? <PaceIndicator paceInfo={paceInfo} compact /> : null}
                                           </div>
                                         );
                                       })}
@@ -590,13 +642,10 @@ const formatCompactHeaderLabel = (value: string): string => {
   return trimmed.length > 12 ? `${trimmed.slice(0, 9).trimEnd()}...` : trimmed;
 };
 
-const formatTime = (timestamp: number | null) => {
+const formatTime = (timestamp: number | null, timeFormatPreference: 'auto' | '12h' | '24h') => {
   if (!timestamp) return '-';
   try {
-    return new Date(timestamp).toLocaleTimeString(undefined, {
-      hour: 'numeric',
-      minute: '2-digit',
-    });
+    return formatTimeForPreference(timestamp, timeFormatPreference, { fallback: '-' });
   } catch {
     return '-';
   }
@@ -646,7 +695,6 @@ interface HeaderProps {
   onToggleRightDrawer?: () => void;
   leftDrawerOpen?: boolean;
   rightDrawerOpen?: boolean;
-  desktopRightSidebarActionsHost?: HTMLElement | null;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -654,13 +702,10 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleRightDrawer,
   leftDrawerOpen,
   rightDrawerOpen,
-  desktopRightSidebarActionsHost = null,
 }) => {
   const { t } = useI18n();
   const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
   const toggleSidebar = useUIStore((state) => state.toggleSidebar);
-  const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
-  const isRightSidebarOpen = useUIStore((state) => state.isRightSidebarOpen);
   const toggleBottomTerminal = useUIStore((state) => state.toggleBottomTerminal);
   const toggleRightSidebar = useUIStore((state) => state.toggleRightSidebar);
   const openContextOverview = useUIStore((state) => state.openContextOverview);
@@ -671,13 +716,13 @@ export const Header: React.FC<HeaderProps> = ({
   const activeMainTab = useUIStore((state) => state.activeMainTab);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
+  const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
 
   const getCurrentModel = useConfigStore((state) => state.getCurrentModel);
   const runtimeApis = useRuntimeAPIs();
   const [isDevShutdownInFlight, setIsDevShutdownInFlight] = React.useState(false);
 
   const getContextUsage = useSessionUIStore((state) => state.getContextUsage);
-  const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
   const isNewSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const currentSessionMessagesResolved = useSessionMessagesResolved(currentSessionId ?? '');
@@ -708,6 +753,7 @@ export const Header: React.FC<HeaderProps> = ({
   const isQuotaLoading = useQuotaStore((state) => state.isLoading);
   const quotaLastUpdated = useQuotaStore((state) => state.lastUpdated);
   const quotaDisplayMode = useQuotaStore((state) => state.displayMode);
+  const showPredValues = useQuotaStore((state) => state.showPredValues);
   const dropdownProviderIds = useQuotaStore((state) => state.dropdownProviderIds);
   const loadQuotaSettings = useQuotaStore((state) => state.loadSettings);
   const setQuotaDisplayMode = useQuotaStore((state) => state.setDisplayMode);
@@ -733,6 +779,13 @@ export const Header: React.FC<HeaderProps> = ({
       return false;
     }
     return /Macintosh|Mac OS X/.test(navigator.userAgent || '');
+  }, []);
+
+  const isWindowsElectronDesktop = React.useMemo(() => {
+    if (typeof window === 'undefined') {
+      return false;
+    }
+    return Boolean(window.__OPENCHAMBER_ELECTRON__) && window.__OPENCHAMBER_PLATFORM__ === 'win32';
   }, []);
 
   const macosMajorVersion = React.useMemo(() => {
@@ -803,6 +856,11 @@ export const Header: React.FC<HeaderProps> = ({
   const [isDesktopServicesOpen, setIsDesktopServicesOpen] = React.useState(false);
   const [isUsageRefreshSpinning, setIsUsageRefreshSpinning] = React.useState(false);
   const [currentInstanceLabel, setCurrentInstanceLabel] = React.useState('Local');
+  const [currentInstanceIsLocal, setCurrentInstanceIsLocal] = React.useState(true);
+  const [remoteUpdateDialogOpen, setRemoteUpdateDialogOpen] = React.useState(false);
+  const [remoteUpdateInfo, setRemoteUpdateInfo] = React.useState<UpdateInfo | null>(null);
+  const [remoteUpdateChecking, setRemoteUpdateChecking] = React.useState(false);
+  const [remoteUpdateError, setRemoteUpdateError] = React.useState<string | null>(null);
   const compactCurrentInstanceLabel = React.useMemo(() => formatCompactHeaderLabel(currentInstanceLabel), [currentInstanceLabel]);
   const [desktopServicesTab, setDesktopServicesTab] = React.useState<'instance' | 'usage' | 'mcp'>(
     isDesktopApp ? 'instance' : 'usage'
@@ -815,15 +873,6 @@ export const Header: React.FC<HeaderProps> = ({
   }, [desktopServicesTab, isDesktopApp]);
 
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
-  const isLeftSidebarOpen = React.useMemo(() => {
-    if (!isMobile) {
-      return isSidebarOpen;
-    }
-    if (typeof onToggleLeftDrawer === 'function') {
-      return Boolean(leftDrawerOpen);
-    }
-    return isSessionSwitcherOpen;
-  }, [isMobile, isSessionSwitcherOpen, isSidebarOpen, leftDrawerOpen, onToggleLeftDrawer]);
   const showDesktopHeaderContextUsage = !isVSCode && activeMainTab === 'chat' && !!stableDesktopContextUsage && stableDesktopContextUsage.totalTokens > 0;
   const desktopHeaderDisplayPercentage = stableDesktopContextUsage && stableDesktopContextUsage.contextLimit > 0
     ? Math.min(999, (stableDesktopContextUsage.totalTokens / stableDesktopContextUsage.contextLimit) * 100)
@@ -835,17 +884,25 @@ export const Header: React.FC<HeaderProps> = ({
     }
 
     try {
-      const cfg = await desktopHostsGet();
-      const currentHref = window.location.href;
-      const localOrigin = window.__OPENCHAMBER_LOCAL_ORIGIN__ || window.location.origin;
-
-      if (locationMatchesHost(currentHref, localOrigin)) {
+      if (isDesktopLocalOriginActive()) {
         setCurrentInstanceLabel('Local');
+        setCurrentInstanceIsLocal(true);
+        return;
+      }
+      setCurrentInstanceIsLocal(false);
+
+      const cfg = await desktopHostsGet();
+      const localOrigin = window.__OPENCHAMBER_LOCAL_ORIGIN__ || window.location.origin;
+      const runtimeApiBaseUrl = getRuntimeApiBaseUrl();
+
+      if (runtimeApiBaseUrl && locationMatchesHost(runtimeApiBaseUrl, localOrigin)) {
+        setCurrentInstanceLabel('Local');
+        setCurrentInstanceIsLocal(true);
         return;
       }
 
       const match = cfg.hosts.find((host) => {
-        return locationMatchesHost(currentHref, host.url);
+        return runtimeApiBaseUrl ? locationMatchesHost(runtimeApiBaseUrl, getDesktopHostApiUrl(host)) : false;
       });
 
       if (match?.label?.trim()) {
@@ -856,12 +913,98 @@ export const Header: React.FC<HeaderProps> = ({
       setCurrentInstanceLabel('Instance');
     } catch {
       setCurrentInstanceLabel('Local');
+      setCurrentInstanceIsLocal(true);
     }
   }, [isDesktopApp]);
 
   useEffect(() => {
     void refreshCurrentInstanceLabel();
   }, [refreshCurrentInstanceLabel]);
+
+  const checkRemoteInstanceUpdate = React.useCallback(async () => {
+    if (currentInstanceIsLocal) {
+      setRemoteUpdateInfo(null);
+      setRemoteUpdateError(null);
+      return;
+    }
+
+    setRemoteUpdateChecking(true);
+    setRemoteUpdateError(null);
+    try {
+      const params = new URLSearchParams({ appType: 'web', instanceMode: 'remote' });
+      const response = await runtimeFetch(`/api/openchamber/update-check?${params.toString()}`, {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) {
+        throw new Error(`Server responded with ${response.status}`);
+      }
+      const data = await response.json();
+      setRemoteUpdateInfo({
+        available: data.available ?? false,
+        version: data.version,
+        currentVersion: data.currentVersion ?? 'unknown',
+        body: data.body,
+        nextSuggestedCheckInSec: typeof data.nextSuggestedCheckInSec === 'number' ? data.nextSuggestedCheckInSec : undefined,
+        packageManager: data.packageManager,
+        updateCommand: data.updateCommand,
+      });
+    } catch (error) {
+      setRemoteUpdateInfo(null);
+      setRemoteUpdateError(error instanceof Error ? error.message : t('header.services.remoteUpdate.error'));
+    } finally {
+      setRemoteUpdateChecking(false);
+    }
+  }, [currentInstanceIsLocal, t]);
+
+  React.useEffect(() => {
+    setRemoteUpdateInfo(null);
+    setRemoteUpdateError(null);
+    setRemoteUpdateDialogOpen(false);
+  }, [currentInstanceIsLocal, currentInstanceLabel]);
+
+  React.useEffect(() => {
+    if (!isDesktopApp || currentInstanceIsLocal) {
+      return;
+    }
+
+    const initialDelayMs = 3000;
+    const intervalMs = 60 * 60 * 1000;
+    let disposed = false;
+    let timer: number | null = null;
+
+    const schedule = (delayMs: number) => {
+      timer = window.setTimeout(() => {
+        if (disposed || (typeof document !== 'undefined' && document.visibilityState !== 'visible')) {
+          schedule(intervalMs);
+          return;
+        }
+        void checkRemoteInstanceUpdate().finally(() => {
+          if (!disposed) {
+            schedule(intervalMs);
+          }
+        });
+      }, delayMs);
+    };
+
+    schedule(initialDelayMs);
+
+    return () => {
+      disposed = true;
+      if (timer !== null) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [checkRemoteInstanceUpdate, currentInstanceIsLocal, currentInstanceLabel, isDesktopApp]);
+
+  const openRemoteInstanceUpdate = React.useCallback(() => {
+    if (remoteUpdateInfo?.available) {
+      setRemoteUpdateDialogOpen(true);
+      return;
+    }
+    void checkRemoteInstanceUpdate();
+  }, [checkRemoteInstanceUpdate, remoteUpdateInfo?.available]);
+
   useQuotaAutoRefresh();
   const selectedModels = useQuotaStore((state) => state.selectedModels);
   const expandedFamilies = useQuotaStore((state) => state.expandedFamilies);
@@ -1076,13 +1219,16 @@ export const Header: React.FC<HeaderProps> = ({
 
   const worktreeBadge = React.useMemo(() => {
     if (!worktreeAttachment) return null;
-    return formatSessionWorktreeBadge(worktreeAttachment);
-  }, [worktreeAttachment]);
+    return formatSessionWorktreeBadge(worktreeAttachment, {
+      pending: t('gitView.empty.worktreeSetupInProgress'),
+    });
+  }, [t, worktreeAttachment]);
 
   const worktreeBadgeKind = React.useMemo(() => {
     if (!worktreeAttachment) return null;
     if (worktreeAttachment.legacy) return 'legacy';
     if (worktreeAttachment.degraded) return 'degraded';
+    if (worktreeAttachment.worktreeStatus === 'pending') return 'pending';
     if (worktreeAttachment.worktreeStatus === 'missing') return 'missing';
     if (worktreeAttachment.worktreeStatus === 'invalid') return 'invalid';
     if (worktreeAttachment.attentionReason) return 'attention';
@@ -1223,7 +1369,7 @@ export const Header: React.FC<HeaderProps> = ({
       const payload = runtimeApis.github
         ? await runtimeApis.github.authActivate(accountId)
         : await (async () => {
-          const response = await fetch('/api/github/auth/activate', {
+          const response = await runtimeFetch('/api/github/auth/activate', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -1275,16 +1421,22 @@ export const Header: React.FC<HeaderProps> = ({
     toggleSidebar();
   }, [blurActiveElement, isMobile, isSessionSwitcherOpen, setSessionSwitcherOpen, toggleSidebar]);
 
-  const handleHeaderNewSession = React.useCallback(() => {
-    setActiveMainTab('chat');
-    setSessionSwitcherOpen(false);
-    openNewSessionDraft();
-  }, [openNewSessionDraft, setActiveMainTab, setSessionSwitcherOpen]);
+  const handleOpenWindowsAppMenu = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    void invokeDesktop('desktop_show_app_menu', {
+      x: rect.left,
+      y: rect.bottom,
+    }).catch((error) => {
+      console.warn('[header] failed to open app menu', error);
+    });
+  }, []);
 
   const handleOpenDraftMiniChat = React.useCallback(() => {
     void invokeDesktop('desktop_open_draft_mini_chat_window', {
       directory: normalize(openDirectory || activeProject?.path || ''),
       projectId: activeProject?.id ?? null,
+      apiBaseUrl: getRuntimeApiBaseUrl(),
+      clientToken: getRuntimeBearerTokenSync(),
     }).catch((error) => {
       console.warn('[header] failed to open draft mini chat window', error);
     });
@@ -1302,6 +1454,8 @@ export const Header: React.FC<HeaderProps> = ({
     void invokeDesktop('desktop_open_session_mini_chat_window', {
       sessionId: currentSessionId,
       directory: normalize(openDirectory || activeProject?.path || ''),
+      apiBaseUrl: getRuntimeApiBaseUrl(),
+      clientToken: getRuntimeBearerTokenSync(),
     }).catch((error) => {
       console.warn('[header] failed to open session mini chat window', error);
     });
@@ -1351,8 +1505,15 @@ export const Header: React.FC<HeaderProps> = ({
     if (!directory) {
       return;
     }
+
+    const panelState = contextPanelByDirectory[directory];
+    if (getActiveContextMode(panelState) === 'browser') {
+      closeContextPanel(directory);
+      return;
+    }
+
     openContextBrowser(directory);
-  }, [openContextBrowser, openDirectory]);
+  }, [closeContextPanel, contextPanelByDirectory, openContextBrowser, openDirectory]);
 
   const isContextPlanActive = React.useMemo(() => {
     const directory = normalize(openDirectory || '');
@@ -1363,15 +1524,63 @@ export const Header: React.FC<HeaderProps> = ({
     return getActiveContextMode(panelState) === 'plan';
   }, [contextPanelByDirectory, openDirectory]);
 
+  const isContextBrowserActive = React.useMemo(() => {
+    const directory = normalize(openDirectory || '');
+    if (!directory) {
+      return false;
+    }
+    const panelState = contextPanelByDirectory[directory];
+    return getActiveContextMode(panelState) === 'browser';
+  }, [contextPanelByDirectory, openDirectory]);
+
   const desktopHeaderIconButtonClass = DESKTOP_HEADER_ICON_BUTTON_CLASS;
   const mobileHeaderIconButtonClass = MOBILE_HEADER_ICON_BUTTON_CLASS;
+  const mobileActiveHeaderItem = React.useMemo(() => {
+    if (isMobileRateLimitsOpen) {
+      return 'services';
+    }
+    if (leftDrawerOpen) {
+      return 'sessions';
+    }
+    if (rightDrawerOpen) {
+      return 'git';
+    }
+    return activeMainTab;
+  }, [activeMainTab, isMobileRateLimitsOpen, leftDrawerOpen, rightDrawerOpen]);
+
+  const closeMobileHeaderPanels = React.useCallback(() => {
+    setIsMobileRateLimitsOpen(false);
+    if (leftDrawerOpen && onToggleLeftDrawer) {
+      onToggleLeftDrawer();
+    }
+    if (rightDrawerOpen && onToggleRightDrawer) {
+      onToggleRightDrawer();
+    }
+    if (!onToggleLeftDrawer && isSessionSwitcherOpen) {
+      setSessionSwitcherOpen(false);
+    }
+  }, [isSessionSwitcherOpen, leftDrawerOpen, onToggleLeftDrawer, onToggleRightDrawer, rightDrawerOpen, setSessionSwitcherOpen]);
+
+  const handleMobileLeftDrawerToggle = React.useCallback(() => {
+    if (!leftDrawerOpen) {
+      setIsMobileRateLimitsOpen(false);
+    }
+    onToggleLeftDrawer?.();
+  }, [leftDrawerOpen, onToggleLeftDrawer]);
+
+  const handleMobileRightDrawerToggle = React.useCallback(() => {
+    if (!rightDrawerOpen) {
+      setIsMobileRateLimitsOpen(false);
+    }
+    onToggleRightDrawer?.();
+  }, [onToggleRightDrawer, rightDrawerOpen]);
 
   const desktopPaddingClass = React.useMemo(() => {
-    if (!isSidebarOpen && ((isDesktopApp && isMacPlatform && !isDesktopWindowFullscreen) || isTabletStandalonePwa)) {
+    if ((isDesktopApp && isMacPlatform && !isDesktopWindowFullscreen) || isTabletStandalonePwa) {
       return 'pl-[5.5rem]';
     }
     return 'pl-3';
-  }, [isDesktopApp, isDesktopWindowFullscreen, isMacPlatform, isSidebarOpen, isTabletStandalonePwa]);
+  }, [isDesktopApp, isDesktopWindowFullscreen, isMacPlatform, isTabletStandalonePwa]);
 
   useEffect(() => {
     if (!isDesktopApp || !isMacPlatform) {
@@ -1380,15 +1589,12 @@ export const Header: React.FC<HeaderProps> = ({
     }
 
     let disposed = false;
-    let unlistenResize: (() => void) | null = null;
 
     const syncFullscreenState = async () => {
       try {
-        const { getCurrentWindow } = await import('@tauri-apps/api/window');
-        const currentWindow = getCurrentWindow();
-        const fullscreen = await currentWindow.isFullscreen();
+        const fullscreen = await invokeDesktop<boolean>('desktop_is_window_fullscreen');
         if (!disposed) {
-          setIsDesktopWindowFullscreen(fullscreen);
+          setIsDesktopWindowFullscreen(fullscreen === true);
         }
       } catch {
         if (!disposed) {
@@ -1397,26 +1603,16 @@ export const Header: React.FC<HeaderProps> = ({
       }
     };
 
-    const attach = async () => {
-      try {
-        const { getCurrentWindow } = await import('@tauri-apps/api/window');
-        const currentWindow = getCurrentWindow();
-        unlistenResize = await currentWindow.onResized(() => {
-          void syncFullscreenState();
-        });
-      } catch {
-        // Ignore listener setup failures; fallback state remains false.
-      }
+    const onResize = () => {
+      void syncFullscreenState();
     };
 
     void syncFullscreenState();
-    void attach();
+    window.addEventListener('openchamber:window-resized', onResize);
 
     return () => {
       disposed = true;
-      if (unlistenResize) {
-        unlistenResize();
-      }
+      window.removeEventListener('openchamber:window-resized', onResize);
     };
   }, [isDesktopApp, isMacPlatform]);
 
@@ -1434,19 +1630,19 @@ export const Header: React.FC<HeaderProps> = ({
   }, [isDesktopApp, isMacPlatform, macosMajorVersion]);
 
   const webWindowControlsOverlayStyle = React.useMemo<React.CSSProperties | undefined>(() => {
-    if (isDesktopApp || isVSCode) {
+    if ((isDesktopApp && !isWindowsElectronDesktop) || isVSCode) {
       return undefined;
     }
 
     return {
-      paddingLeft: isTabletStandalonePwa && !isSidebarOpen
+      paddingLeft: isTabletStandalonePwa
         ? 'max(calc(0.75rem + var(--oc-wco-left-inset, 0px)), 5.5rem)'
         : 'calc(0.75rem + var(--oc-wco-left-inset, 0px))',
       paddingRight: 'calc(0.75rem + var(--oc-wco-right-inset, 0px))',
       minHeight: 'max(3rem, var(--oc-wco-titlebar-height, 0px))',
       height: 'max(3rem, var(--oc-wco-titlebar-height, 0px))',
     };
-  }, [isDesktopApp, isSidebarOpen, isTabletStandalonePwa, isVSCode]);
+  }, [isDesktopApp, isTabletStandalonePwa, isVSCode, isWindowsElectronDesktop]);
 
   const updateHeaderHeight = React.useCallback(() => {
     if (typeof document === 'undefined') {
@@ -1528,6 +1724,7 @@ export const Header: React.FC<HeaderProps> = ({
         { id: 'diff', label: t('layout.mainTab.diff'), icon: 'diff' },
         { id: 'files', label: t('layout.mainTab.files'), icon: "folder-6" },
         { id: 'terminal', label: t('layout.mainTab.terminal'), icon: "terminal-box" },
+        { id: 'context', label: t('layout.mainTab.context'), icon: "file-list-2" },
       );
 
       return base;
@@ -1542,7 +1739,7 @@ export const Header: React.FC<HeaderProps> = ({
   }, [shortcutOverrides]);
 
   useEffect(() => {
-    if (!isMobile && (activeMainTab === 'git' || activeMainTab === 'terminal' || activeMainTab === 'diff' || activeMainTab === 'files')) {
+    if (!isMobile && (activeMainTab === 'git' || activeMainTab === 'terminal' || activeMainTab === 'diff' || activeMainTab === 'files' || activeMainTab === 'context')) {
       setActiveMainTab('chat');
     }
   }, [activeMainTab, isMobile, setActiveMainTab]);
@@ -1554,7 +1751,7 @@ export const Header: React.FC<HeaderProps> = ({
     }
     base.push(
       { value: 'usage', label: t('layout.services.usage'), icon: "timer" },
-      { value: 'mcp', label: 'MCP', icon: McpIcon as unknown as IconName }
+      { value: 'mcp', label: 'MCP', icon: "plug-2" }
     );
     return base;
   }, [isDesktopApp, t]);
@@ -1603,7 +1800,7 @@ export const Header: React.FC<HeaderProps> = ({
       }
 
       try {
-        const devRes = await fetch('/api/system/dev-shutdown', {
+        const devRes = await runtimeFetch('/api/system/dev-shutdown', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ previewUrls }),
@@ -1611,7 +1808,7 @@ export const Header: React.FC<HeaderProps> = ({
         if (devRes.ok) {
           shutdownRequested = true;
         } else {
-          const shutdownRes = await fetch('/api/system/shutdown', { method: 'POST' });
+          const shutdownRes = await runtimeFetch('/api/system/shutdown', { method: 'POST' });
           shutdownRequested = shutdownRes.ok;
         }
       } catch {
@@ -1648,13 +1845,17 @@ export const Header: React.FC<HeaderProps> = ({
         const num = parseInt(e.key, 10);
         if (num >= 1 && num <= tabs.length) {
           e.preventDefault();
+          if (isMobile) {
+            blurActiveElement();
+            closeMobileHeaderPanels();
+          }
           setActiveMainTab(tabs[num - 1].id);
         }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [tabs, setActiveMainTab]);
+  }, [blurActiveElement, closeMobileHeaderPanels, isMobile, setActiveMainTab, tabs]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1788,6 +1989,7 @@ export const Header: React.FC<HeaderProps> = ({
         isDesktopApp={isDesktopApp}
         currentInstanceLabel={currentInstanceLabel}
         compactCurrentInstanceLabel={compactCurrentInstanceLabel}
+        currentInstanceIsLocal={currentInstanceIsLocal}
         isDesktopServicesOpen={isDesktopServicesOpen}
         setIsDesktopServicesOpen={setIsDesktopServicesOpen}
         refreshCurrentInstanceLabel={refreshCurrentInstanceLabel}
@@ -1798,6 +2000,7 @@ export const Header: React.FC<HeaderProps> = ({
         servicesTabItems={servicesTabItems}
         quotaLastUpdated={quotaLastUpdated}
         quotaDisplayMode={quotaDisplayMode}
+        showPredValues={showPredValues}
         quotaDisplayTabItems={quotaDisplayTabItems}
         handleDisplayModeChange={handleDisplayModeChange}
         handleUsageRefresh={handleUsageRefresh}
@@ -1811,6 +2014,11 @@ export const Header: React.FC<HeaderProps> = ({
         showDevShutdown={showDevShutdown}
         isDevShutdownInFlight={isDevShutdownInFlight}
         onDevShutdown={handleDevShutdown}
+        remoteUpdateInfo={remoteUpdateInfo}
+        remoteUpdateChecking={remoteUpdateChecking}
+        remoteUpdateError={remoteUpdateError}
+        onOpenRemoteUpdate={openRemoteInstanceUpdate}
+        timeFormatPreference={timeFormatPreference}
       />
       <HeaderIconActionButton
         title={t('header.actions.terminalPanelWithShortcut', { shortcut: shortcutLabel('toggle_terminal') })}
@@ -1818,11 +2026,12 @@ export const Header: React.FC<HeaderProps> = ({
         onClick={toggleBottomTerminal}
         Icon={'terminal-box'}
       />
-      {hasElectronDesktopIPC ? (
+      {!isMobile ? (
         <HeaderIconActionButton
           title={t('contextPanel.browser.open')}
           ariaLabel={t('contextPanel.browser.open')}
           onClick={handleOpenContextBrowser}
+          pressed={isContextBrowserActive}
           Icon={'global'}
         />
       ) : null}
@@ -1844,7 +2053,6 @@ export const Header: React.FC<HeaderProps> = ({
     </>
   );
 
-  const desktopSidebarActionsInline = !isRightSidebarOpen || !desktopRightSidebarActionsHost;
   const showMiniChatHeaderAction = hasElectronDesktopIPC && (isNewSessionDraftOpen || Boolean(currentSessionId));
 
   const renderDesktop = () => (
@@ -1859,8 +2067,16 @@ export const Header: React.FC<HeaderProps> = ({
       role="tablist"
       aria-label={t('header.navigation.mainAria')}
     >
+      {isWindowsElectronDesktop ? (
+        <HeaderIconActionButton
+          title={t('header.actions.openAppMenu')}
+          ariaLabel={t('header.actions.openAppMenuAria')}
+          onClick={handleOpenWindowsAppMenu}
+          className={`${desktopHeaderIconButtonClass} shrink-0`}
+          Icon={'menu-2'}
+        />
+      ) : null}
       <HeaderIconActionButton
-        visible={!isSidebarOpen}
         title={t('header.actions.openSessionsWithShortcut', { shortcut: shortcutLabel('toggle_sidebar') })}
         ariaLabel={t('header.actions.openSessionsAria')}
         onClick={handleOpenSessionSwitcher}
@@ -1868,24 +2084,7 @@ export const Header: React.FC<HeaderProps> = ({
         Icon={'layout-left'}
       />
 
-      <div className={cn('flex min-w-0 flex-1 items-center', !isSidebarOpen && 'pl-3')}>
-        {!isLeftSidebarOpen ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                aria-label={t('header.actions.newSessionAria')}
-                onClick={handleHeaderNewSession}
-                className={cn(desktopHeaderIconButtonClass, 'mr-6 shrink-0')}
-              >
-                <Icon name="chat-new" className="h-[18px] w-[18px]" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>{t('header.actions.newSessionWithShortcut', { shortcut: shortcutLabel('new_chat') })}</p>
-            </TooltipContent>
-          </Tooltip>
-        ) : null}
+      <div className="flex min-w-0 flex-1 items-center pl-3">
         {projectActionsContext && (
           <ProjectActionsButton
             projectRef={projectActionsContext.projectRef}
@@ -1953,7 +2152,7 @@ export const Header: React.FC<HeaderProps> = ({
               showPercentIcon
               onClick={handleOpenContextPanel}
               pressed={isContextPanelActive}
-              className={desktopSidebarActionsInline && !showMiniChatHeaderAction ? 'mr-3.5' : ''}
+              className={!showMiniChatHeaderAction ? 'mr-3.5' : ''}
               valueClassName="typography-ui-label font-medium leading-none text-foreground"
               percentIconClassName="h-5 w-5"
             />
@@ -1963,13 +2162,11 @@ export const Header: React.FC<HeaderProps> = ({
             title={isNewSessionDraftOpen ? t('header.actions.newMiniChat') : t('header.actions.openSessionMiniChat')}
             ariaLabel={isNewSessionDraftOpen ? t('header.actions.newMiniChatAria') : t('header.actions.openSessionMiniChatAria')}
             onClick={handleOpenCurrentMiniChat}
-            className={cn(desktopHeaderIconButtonClass, desktopSidebarActionsInline && showDesktopHeaderContextUsage ? 'mr-3.5' : 'mr-1')}
+            className={cn(desktopHeaderIconButtonClass, showDesktopHeaderContextUsage ? 'mr-3.5' : 'mr-1')}
             Icon={'picture-in-picture-2'}
           />
-          {desktopSidebarActionsInline ? desktopSidebarActions : null}
-          {!desktopSidebarActionsInline && desktopRightSidebarActionsHost
-            ? createPortal(desktopSidebarActions, desktopRightSidebarActionsHost)
-            : null}
+          {desktopSidebarActions}
+          <WindowsWindowControls visible={isWindowsElectronDesktop} />
         </div>
       </div>
     </div>
@@ -1982,10 +2179,10 @@ export const Header: React.FC<HeaderProps> = ({
         {onToggleLeftDrawer ? (
           <button
             type="button"
-            onClick={onToggleLeftDrawer}
+            onClick={handleMobileLeftDrawerToggle}
             className={cn(
               mobileHeaderIconButtonClass,
-              leftDrawerOpen && 'bg-interactive-selection text-interactive-selection-foreground'
+              mobileActiveHeaderItem === 'sessions' && 'bg-interactive-selection text-interactive-selection-foreground'
             )}
             aria-label={leftDrawerOpen ? t('header.actions.closeSessionsAria') : t('header.actions.openSessionsAria')}
           >
@@ -2011,13 +2208,12 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
         )}
 
-        {isSessionSwitcherOpen && (
+        {!onToggleLeftDrawer && isSessionSwitcherOpen && (
           <span className="typography-ui-label font-semibold text-foreground">{t('header.sessions.title')}</span>
         )}
       </div>
 
-      {/* Hide tabs and right-side buttons when sessions sidebar is open */}
-      {!isSessionSwitcherOpen && (
+      {(!isSessionSwitcherOpen || Boolean(onToggleLeftDrawer)) && (
         <>
           <div className="app-region-no-drag flex min-w-0 flex-1 items-center">
             <div className="flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden scrollbar-hidden touch-pan-x overscroll-x-contain">
@@ -2039,6 +2235,7 @@ export const Header: React.FC<HeaderProps> = ({
                             onClick={() => {
                               if (isMobile) {
                                 blurActiveElement();
+                                closeMobileHeaderPanels();
                               }
                               setActiveMainTab(tab.id);
                             }}
@@ -2048,7 +2245,7 @@ export const Header: React.FC<HeaderProps> = ({
                             className={cn(
                               mobileHeaderIconButtonClass,
                               'relative rounded-lg',
-                              isActive && 'bg-interactive-selection text-interactive-selection-foreground'
+                              mobileActiveHeaderItem === tab.id && 'bg-interactive-selection text-interactive-selection-foreground'
                             )}
                           >
                             {isDiffTab ? (
@@ -2095,6 +2292,14 @@ export const Header: React.FC<HeaderProps> = ({
             <DropdownMenu
               open={isMobileRateLimitsOpen}
               onOpenChange={(open) => {
+                if (open) {
+                  if (leftDrawerOpen && onToggleLeftDrawer) {
+                    onToggleLeftDrawer();
+                  }
+                  if (rightDrawerOpen && onToggleRightDrawer) {
+                    onToggleRightDrawer();
+                  }
+                }
                 setIsMobileRateLimitsOpen(open);
                 if (open && quotaResults.length === 0) {
                   fetchAllQuotas();
@@ -2107,7 +2312,10 @@ export const Header: React.FC<HeaderProps> = ({
                     <button
                       type="button"
                       aria-label={t('header.services.viewAria')}
-                      className={mobileHeaderIconButtonClass}
+                      className={cn(
+                        mobileHeaderIconButtonClass,
+                        mobileActiveHeaderItem === 'services' && 'bg-interactive-selection text-interactive-selection-foreground'
+                      )}
                     >
                       <Icon name="stack" className="h-5 w-5" />
                     </button>
@@ -2120,10 +2328,11 @@ export const Header: React.FC<HeaderProps> = ({
               <DropdownMenuContent
                 align="end"
                 sideOffset={0}
-                className="h-dvh w-[100vw] max-h-none rounded-none border-0 p-0 overflow-hidden"
+                positionerClassName="!fixed !bottom-0 !left-0 !right-0 !top-[var(--oc-header-height,56px)] !transform-none"
+                className="h-full w-screen max-h-none rounded-none border-0 p-0 pt-1 overflow-hidden"
               >
                 <div className="flex h-full flex-col bg-[var(--surface-elevated)]">
-          <div className="sticky top-0 z-20 bg-[var(--surface-elevated)] px-2 py-px">
+                  <div className="sticky top-0 z-20 bg-[var(--surface-elevated)] px-2 py-px">
                     <div className="flex items-center justify-between gap-2 px-3 py-0">
                       <div className="h-10 min-w-0 flex-1">
                         <SortableTabsStrip
@@ -2166,7 +2375,7 @@ export const Header: React.FC<HeaderProps> = ({
                           <div className="flex flex-col min-w-0 gap-0.5">
                             <span className="typography-ui-header font-semibold text-foreground">{t('header.services.rateLimits')}</span>
                             <span className="truncate typography-micro text-muted-foreground">
-                              {formatTime(quotaLastUpdated)}
+                              {formatTime(quotaLastUpdated, timeFormatPreference)}
                             </span>
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
@@ -2254,7 +2463,7 @@ export const Header: React.FC<HeaderProps> = ({
                                         : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
                                     : null;
                                   const metricLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
-                                  const resetLabel = formatQuotaResetLabel(window.resetAt, window.resetAfterFormatted ?? window.resetAtFormatted);
+                                  const resetLabel = formatQuotaResetLabel(window.resetAt, window.resetAfterFormatted ?? window.resetAtFormatted, timeFormatPreference);
                                   return (
                                     <div key={`${group.providerId}-${label}`} className="flex flex-col gap-1.5">
                                       <div className="flex min-w-0 items-center justify-between gap-3">
@@ -2276,7 +2485,7 @@ export const Header: React.FC<HeaderProps> = ({
                                         className="h-1.5"
                                         expectedMarkerPercent={expectedMarker}
                                       />
-                                      {paceInfo ? (
+                                      {paceInfo && showPredValues ? (
                                         <PaceIndicator paceInfo={paceInfo} compact />
                                       ) : null}
                                     </div>
@@ -2333,7 +2542,7 @@ export const Header: React.FC<HeaderProps> = ({
                                                       className="h-1.5"
                                                       expectedMarkerPercent={expectedMarker}
                                                     />
-                                                    {paceInfo ? (
+                                                    {paceInfo && showPredValues ? (
                                                       <PaceIndicator paceInfo={paceInfo} compact />
                                                     ) : null}
                                                   </div>
@@ -2362,11 +2571,11 @@ export const Header: React.FC<HeaderProps> = ({
                 <TooltipTrigger asChild>
                   <button
                     type="button"
-                    onClick={onToggleRightDrawer}
+                    onClick={handleMobileRightDrawerToggle}
                     className={cn(
                       mobileHeaderIconButtonClass,
                       'relative',
-                      rightDrawerOpen && 'bg-interactive-selection text-interactive-selection-foreground'
+                      mobileActiveHeaderItem === 'git' && 'bg-interactive-selection text-interactive-selection-foreground'
                     )}
                     aria-label={rightDrawerOpen ? 'Close git sidebar' : 'Open git sidebar'}
                   >
@@ -2386,17 +2595,30 @@ export const Header: React.FC<HeaderProps> = ({
 
   const headerClassName = cn(
     'header-safe-area relative z-10',
-    isMobile && 'border-b border-border/50',
-    'bg-background'
+    isMobile ? 'border-b border-border/50 bg-background' : 'bg-sidebar'
   );
 
   return (
-    <header
-      ref={headerRef}
-      className={headerClassName}
-      style={{ ['--padding-scale' as string]: '1' } as React.CSSProperties}
-    >
-      {isMobile ? renderMobile() : renderDesktop()}
-    </header>
+    <>
+      <header
+        ref={headerRef}
+        className={headerClassName}
+        style={{ ['--padding-scale' as string]: '1' } as React.CSSProperties}
+      >
+        {isMobile ? renderMobile() : renderDesktop()}
+      </header>
+      <UpdateDialog
+        open={remoteUpdateDialogOpen}
+        onOpenChange={setRemoteUpdateDialogOpen}
+        info={remoteUpdateInfo}
+        downloading={false}
+        downloaded={false}
+        progress={null}
+        error={remoteUpdateError}
+        onDownload={() => {}}
+        onRestart={() => {}}
+        runtimeType="web"
+      />
+    </>
   );
 };

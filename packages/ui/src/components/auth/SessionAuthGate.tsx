@@ -4,13 +4,16 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
-import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
+import { invokeDesktop, isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { syncDesktopSettings, initializeAppearancePreferences } from '@/lib/persistence';
 import { applyPersistedDirectoryPreferences } from '@/lib/directoryPersistence';
 import { DesktopHostSwitcherInline } from '@/components/desktop/DesktopHostSwitcher';
 import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
+import { runtimeFetch } from '@/lib/runtime-fetch';
+import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { desktopHostsGet, desktopHostsSet, getDesktopHostApiUrl, normalizeHostUrl } from '@/lib/desktopHosts';
 import {
   authenticateWithPasskey,
   cancelPasskeyCeremony,
@@ -23,9 +26,47 @@ import {
 
 const STATUS_CHECK_ENDPOINT = '/auth/session';
 const TRUST_DEVICE_STORAGE_KEY = 'openchamber.uiAuth.trustDevice';
+const LOCAL_DESKTOP_CLIENT_KIND = 'desktop-local';
+const LOCAL_DESKTOP_CLIENT_DEDUPE_KEY = 'desktop-local';
+
+const readLocalOrigin = (): string => {
+  if (typeof window === 'undefined') return '';
+  const injected = (window as typeof window & { __OPENCHAMBER_LOCAL_ORIGIN__?: string }).__OPENCHAMBER_LOCAL_ORIGIN__;
+  return typeof injected === 'string' ? injected.trim() : '';
+};
+
+const sameOrigin = (left: string, right: string): boolean => {
+  const normalizedLeft = normalizeHostUrl(left);
+  const normalizedRight = normalizeHostUrl(right);
+  if (!normalizedLeft || !normalizedRight) return false;
+  try {
+    return new URL(normalizedLeft).origin === new URL(normalizedRight).origin;
+  } catch {
+    return false;
+  }
+};
+
+const shouldIssueDesktopClientToken = (): boolean => {
+  return isDesktopShell();
+};
+
+const isLocalDesktopRuntime = (): boolean => {
+  if (!isDesktopShell()) return false;
+  const apiBaseUrl = getRuntimeApiBaseUrl();
+  const localOrigin = readLocalOrigin();
+  return Boolean(localOrigin && sameOrigin(localOrigin, apiBaseUrl));
+};
+
+const desktopClientAuthMetadata = (): { clientKind?: string; dedupeKey?: string } => {
+  if (!isLocalDesktopRuntime()) return {};
+  return {
+    clientKind: LOCAL_DESKTOP_CLIENT_KIND,
+    dedupeKey: LOCAL_DESKTOP_CLIENT_DEDUPE_KEY,
+  };
+};
 
 const fetchSessionStatus = async (): Promise<Response> => {
-  const response = await fetch(STATUS_CHECK_ENDPOINT, {
+  const response = await runtimeFetch(STATUS_CHECK_ENDPOINT, {
     method: 'GET',
     credentials: 'include',
     headers: {
@@ -43,41 +84,139 @@ const readStoredTrustDevice = (): boolean => {
 };
 
 const submitPassword = async (password: string, trustDevice: boolean): Promise<Response> => {
-  const response = await fetch(STATUS_CHECK_ENDPOINT, {
+  const issueClientToken = shouldIssueDesktopClientToken();
+  const response = await runtimeFetch(STATUS_CHECK_ENDPOINT, {
     method: 'POST',
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json',
     },
-    body: JSON.stringify({ password, trustDevice }),
+    body: JSON.stringify({
+      password,
+      trustDevice,
+      issueClientToken,
+      clientLabel: 'OpenChamber Desktop',
+      ...desktopClientAuthMetadata(),
+    }),
   });
   return response;
 };
 
-const AuthShell: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <div
-    className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background text-foreground"
-    style={{ fontFamily: '"Inter", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", sans-serif' }}
-  >
+const issueDesktopClientToken = async (): Promise<string> => {
+  if (!isDesktopShell()) {
+    return '';
+  }
+
+  const response = await runtimeFetch('/api/client-auth/clients', {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({ label: 'OpenChamber Desktop', ...desktopClientAuthMetadata() }),
+  }).catch(() => null);
+  if (!response?.ok) {
+    return '';
+  }
+
+  const payload = await response.json().catch(() => null) as { token?: unknown } | null;
+  return typeof payload?.token === 'string' ? payload.token.trim() : '';
+};
+
+const shouldUseDesktopShellPasswordLogin = (): boolean => {
+  return isDesktopShell() && !isLocalDesktopRuntime();
+};
+
+const issueDesktopClientTokenViaShell = async (password: string, trustDevice: boolean): Promise<string> => {
+  if (!isDesktopShell() || typeof window === 'undefined') {
+    return '';
+  }
+  const response = await invokeDesktop('desktop_remote_password_login', {
+    url: getRuntimeApiBaseUrl(),
+    password,
+    trustDevice,
+  }).catch(() => null);
+  if (!response || typeof response !== 'object') {
+    return '';
+  }
+  const token = (response as { token?: unknown }).token;
+  return typeof token === 'string' ? token.trim() : '';
+};
+
+const persistDesktopClientToken = async (apiBaseUrl: string, clientToken: string): Promise<void> => {
+  if (!isDesktopShell() || !clientToken) return;
+  const cfg = await desktopHostsGet().catch(() => null);
+  if (!cfg) return;
+  if (cfg.localOrigin && sameOrigin(cfg.localOrigin, apiBaseUrl)) {
+    await desktopHostsSet({
+      hosts: cfg.hosts,
+      defaultHostId: cfg.defaultHostId,
+      initialHostChoiceCompleted: cfg.initialHostChoiceCompleted,
+      localClientToken: clientToken,
+    }).catch(() => undefined);
+    return;
+  }
+  let changed = false;
+  const hosts = cfg.hosts.map((host) => {
+    if (!sameOrigin(getDesktopHostApiUrl(host), apiBaseUrl)) {
+      return host;
+    }
+    if (host.clientToken === clientToken) {
+      return host;
+    }
+    changed = true;
+    return { ...host, clientToken };
+  });
+  if (!changed) return;
+  await desktopHostsSet({
+    hosts,
+    defaultHostId: cfg.defaultHostId,
+    initialHostChoiceCompleted: cfg.initialHostChoiceCompleted,
+  }).catch(() => undefined);
+};
+
+const applyDesktopClientToken = async (clientToken: string): Promise<void> => {
+  if (!clientToken) return;
+  const apiBaseUrl = getRuntimeApiBaseUrl();
+  await persistDesktopClientToken(apiBaseUrl, clientToken);
+  switchRuntimeEndpoint({ apiBaseUrl, clientToken, runtimeKey: getRuntimeKey() });
+};
+
+const AuthShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const titlebarDragStyle = React.useMemo<React.CSSProperties>(() => {
+    return {
+      height: 'var(--oc-wco-titlebar-height, 0px)',
+      right: 'var(--oc-wco-right-inset, 0px)',
+    };
+  }, []);
+
+  return (
     <div
-      className="pointer-events-none absolute inset-0 opacity-55"
-      style={{
-        background: 'radial-gradient(120% 140% at 50% -20%, var(--surface-overlay) 0%, transparent 68%)',
-      }}
-    />
-    <div
-      className="pointer-events-none absolute inset-0"
-      style={{
-        backgroundColor: 'var(--surface-subtle)',
-        opacity: 0.22,
-      }}
-    />
-    <div className="relative z-10 flex w-full justify-center px-4 py-12 sm:px-6">
-      {children}
+      className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background text-foreground"
+      style={{ fontFamily: '"Inter", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", sans-serif' }}
+    >
+      <div className="app-region-drag fixed left-0 top-0 z-20" style={titlebarDragStyle} aria-hidden />
+      <div
+        className="pointer-events-none absolute inset-0 opacity-55"
+        style={{
+          background: 'radial-gradient(120% 140% at 50% -20%, var(--surface-overlay) 0%, transparent 68%)',
+        }}
+      />
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{
+          backgroundColor: 'var(--surface-subtle)',
+          opacity: 0.22,
+        }}
+      />
+      <div className="app-region-no-drag relative z-10 flex w-full justify-center px-4 py-12 sm:px-6">
+        {children}
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 const LoadingScreen: React.FC = () => (
   <div className="flex min-h-screen items-center justify-center bg-background text-foreground">
@@ -85,7 +224,7 @@ const LoadingScreen: React.FC = () => (
   </div>
 );
 
-const ErrorScreen: React.FC<ErrorScreenProps> = ({ onRetry, errorType = 'network', retryAfter }) => {
+const ErrorScreen: React.FC<ErrorScreenProps> = ({ onRetry, errorType = 'network', retryAfter, children }) => {
   const { t } = useI18n();
   const isRateLimit = errorType === 'rate-limit';
   const minutes = retryAfter ? Math.ceil(retryAfter / 60) : 1;
@@ -108,6 +247,7 @@ const ErrorScreen: React.FC<ErrorScreenProps> = ({ onRetry, errorType = 'network
         <Button type="button" onClick={onRetry} className="w-full max-w-xs">
           {t('sessionAuth.error.retry')}
         </Button>
+        {children}
       </div>
     </AuthShell>
   );
@@ -123,6 +263,7 @@ interface ErrorScreenProps {
   onRetry: () => void;
   errorType?: 'network' | 'rate-limit';
   retryAfter?: number;
+  children?: React.ReactNode;
 }
 
 export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) => {
@@ -246,6 +387,12 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
       setIsTunnelLocked(false);
     } catch (error) {
       console.warn('Failed to check session status:', error);
+      if (shouldUseDesktopShellPasswordLogin()) {
+        setState('locked');
+        setRetryAfter(undefined);
+        setIsTunnelLocked(false);
+        return;
+      }
       setState('error');
       setIsTunnelLocked(false);
     }
@@ -256,6 +403,21 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
       return;
     }
     void checkStatus();
+  }, [checkStatus, skipAuth]);
+
+  React.useEffect(() => {
+    if (skipAuth) {
+      return;
+    }
+
+    return subscribeRuntimeEndpointChanged(() => {
+      setPassword('');
+      setErrorMessage('');
+      setRetryAfter(undefined);
+      setIsTunnelLocked(false);
+      setState('pending');
+      void checkStatus();
+    });
   }, [checkStatus, skipAuth]);
 
   React.useEffect(() => {
@@ -326,8 +488,18 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
     try {
       const response = await submitPassword(password, trustDevice);
       if (response.ok) {
+        const payload = await response.json().catch(() => null) as { clientToken?: unknown } | null;
+        const shouldUseClientToken = shouldIssueDesktopClientToken();
+        const clientToken = shouldUseClientToken
+          ? (typeof payload?.clientToken === 'string' && payload.clientToken.trim()
+            ? payload.clientToken.trim()
+            : await issueDesktopClientTokenViaShell(password, trustDevice) || await issueDesktopClientToken())
+          : '';
         setPassword('');
         setIsTunnelLocked(false);
+        if (clientToken) {
+          await applyDesktopClientToken(clientToken);
+        }
         if (enrollPasskey && supportsPasskeys) {
           try {
             await registerPasskeyForCurrentSession();
@@ -369,6 +541,16 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
       setState('error');
     } catch (error) {
       console.warn('Failed to submit UI password:', error);
+      const clientToken = shouldUseDesktopShellPasswordLogin()
+        ? await issueDesktopClientTokenViaShell(password, trustDevice)
+        : '';
+      if (clientToken) {
+        setPassword('');
+        setIsTunnelLocked(false);
+        await applyDesktopClientToken(clientToken);
+        setState('authenticated');
+        return;
+      }
       setErrorMessage(t('sessionAuth.error.networkRetry'));
       setIsTunnelLocked(false);
       setState('error');
@@ -392,7 +574,17 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
     setErrorMessage('');
 
     try {
-      await authenticateWithPasskey(trustDevice);
+      const payload = await authenticateWithPasskey(trustDevice, {
+        issueClientToken: shouldIssueDesktopClientToken(),
+        clientLabel: 'OpenChamber Desktop',
+        ...desktopClientAuthMetadata(),
+      }) as { clientToken?: unknown } | null;
+      const clientToken = shouldIssueDesktopClientToken() && typeof payload?.clientToken === 'string' && payload.clientToken.trim()
+        ? payload.clientToken.trim()
+        : '';
+      if (clientToken) {
+        await applyDesktopClientToken(clientToken);
+      }
 
       setPassword('');
       setState('authenticated');
@@ -450,7 +642,18 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
   }
 
   if (state === 'error') {
-    return <ErrorScreen onRetry={() => void checkStatus()} errorType="network" />;
+    return (
+      <ErrorScreen onRetry={() => void checkStatus()} errorType="network">
+        {showHostSwitcher && (
+          <div className="w-full max-w-xs">
+            <DesktopHostSwitcherInline />
+            <p className="mt-1 text-center typography-micro text-muted-foreground">
+              {t('sessionAuth.locked.hostSwitcherHint')}
+            </p>
+          </div>
+        )}
+      </ErrorScreen>
+    );
   }
 
   if (state === 'rate-limited') {

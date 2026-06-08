@@ -40,6 +40,21 @@ function partUpdatedEvent(): Event {
   } as Event
 }
 
+function topLevelSessionOnlyPartUpdatedEvent(): Event {
+  return {
+    type: "message.part.updated",
+    properties: {
+      sessionID: "ses_1",
+      part: {
+        id: "prt_1",
+        messageID: "msg_1",
+        type: "text",
+        text: "hello",
+      },
+    },
+  } as Event
+}
+
 describe("applyDirectoryEvent", () => {
   test("returns typed materialization when delta arrives before parts", () => {
     const result = applyDirectoryEvent(state(), deltaEvent())
@@ -75,6 +90,40 @@ describe("applyDirectoryEvent", () => {
         messageID: "msg_1",
         partID: "prt_1",
       },
+    })
+  })
+
+  test("uses top-level session id and part message id for part update materialization", () => {
+    const draft = state()
+    const result = applyDirectoryEvent(draft, topLevelSessionOnlyPartUpdatedEvent())
+
+    expect(draft.part.msg_1.map((item) => item.id)).toEqual(["prt_1"])
+    expect(result).toEqual({
+      changed: true,
+      materialization: {
+        type: "incomplete-session-snapshot",
+        sessionID: "ses_1",
+        messageID: "msg_1",
+        partID: "prt_1",
+      },
+    })
+  })
+
+  test("uses top-level session id for delta materialization", () => {
+    const result = applyDirectoryEvent(state(), {
+      type: "message.part.delta",
+      properties: {
+        sessionID: "ses_1",
+        messageID: "msg_1",
+        partID: "prt_1",
+        field: "text",
+        delta: "hello",
+      },
+    } as Event)
+
+    expect(result).toEqual({
+      changed: false,
+      materialization: { type: "incomplete-session-snapshot", sessionID: "ses_1", messageID: "msg_1", partID: "prt_1" },
     })
   })
 

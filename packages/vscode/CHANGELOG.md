@@ -1,3 +1,68 @@
+## [Unreleased]
+
+- Agent Manager: creating isolated runs now opens sessions immediately while worktree setup continues in the background.
+- Sessions: chat folder assignments now stay in place after reloads.
+
+## [1.12.3] - 2026-06-05
+
+- Startup: OpenCode health checks now work with OpenCode 1.15.x.
+
+## [1.12.2] - 2026-06-05
+
+- Startup/Windows: the extension now detects more OpenCode installs from PATH, npm, Scoop, and Chocolatey.
+- Chat: prompts sent while creating or switching target sessions now stay attached to the intended workspace directory.
+- Files: chat and tool links now handle Windows drive-letter and backslash paths.
+
+## [1.12.1] - 2026-06-03
+
+- Chat: completed turns can now show changed-file chips with per-file additions and deletions, controlled by a new Chat setting.
+- Chat: LSP tool calls now show the operation, file, and cursor position more clearly, and JSON tool output can be toggled between formatted and raw views or copied.
+- Chat: streaming messages now appear correctly after startup, and activity/status rows show for the active session.
+- Chat: completed responses no longer lose late-arriving summaries, token counts, errors, structured output, or changed-file details.
+- Chat: question cards now show an error or no-longer-pending message when submit or dismiss fails instead of silently doing nothing.
+- Chat: the first prompt in a new session no longer gets stuck before sending.
+- Sessions: session titles update from live session events, and the extension now consistently loads all existing OpenCode sessions.
+- Sessions: recent sessions now stay visible inside project groups, and new or worktree sessions stay in the correct project/worktree group.
+- Settings/OpenCode: OpenCode CLI path, update-notification preference, keyboard shortcuts, and protected-session settings now stay saved after changes.
+- UI/Time: the time-format preference now applies to chat timestamps, usage reset times, scheduled tasks, passkeys, and usage last-updated times.
+
+## [1.12.0] - 2026-06-03
+
+- Chat: added customizable draft welcome starters from commands and skills, including guided commands for catch-up, debugging, exploration, and approach comparison.
+- Chat: assistant answers now have a dialog for starting a new session from that answer.
+- Chat/Input: queued messages no longer auto-send before the active session is ready, and thinking-variant choices are preserved for generated messages.
+- Chat/UI: markdown-rendered user messages now preserve line breaks.
+- UI/Theming: chat colors now map more closely to the active editor theme, and the session UI has been refined.
+- Reliability/Startup: Restart API Connection now uses the same loading and reload flow as startup.
+
+## [1.11.7] - 2026-05-27
+
+- Chat/Input: selecting an agent now switches to that agent's configured model, and malformed tool diffs no longer break chat rendering (thanks to @Adrian-Eckardt).
+- Usage: added a setting to hide prediction rows on usage cards (thanks to @ermanhavuc).
+- Reliability/Streaming: restored live streaming in the extension.
+
+## [1.11.6] - 2026-05-25
+
+- Settings/Plugins: added a Plugins page for managing opencode plugins, with npm update checks and user/project scopes (thanks to @Quat3rnion).
+- Perf: Git repository lookups in the extension now avoid repeating the same Git read commands during refreshes.
+
+## [1.11.5] - 2026-05-25
+
+- Chat/Input: pending image attachments now show previews, sent image attachments can be cited from assistant messages, and markdown source mode highlights formatting while you type.
+- Chat: queued messages now send to the session they were queued from, even if you switch sessions before they are sent.
+- Chat/UI: chats keep following the latest response after final task summaries, activity reasoning no longer flashes before settling, and assistant timestamps stay visible on narrow layouts.
+- Settings/Skills: installed skills are discovered more accurately, skill files opened from tool messages now load correctly, and snippet names keep their canonical casing (thanks to @jkker, @isanchez404).
+- Voice: OpenAI-compatible custom speech providers can now use API keys (thanks to @yangyaofei).
+
+## [1.11.4] - 2026-05-22
+
+- Sessions: switching between chat sessions now keeps less inactive message history in the webview, especially after opening large conversations.
+- Sessions: opening a session now fetches a smaller initial message page, while still expanding enough to show the latest user turn when needed.
+- Chat: task tool results use final task summaries when available instead of repeatedly loading child-session messages.
+- Chat: task tool polling in the extension now uses smaller message fetches while subtasks are active or idle.
+- Chat: markdown file links now cap path checks in the extension, reducing stalls in messages with many inline paths.
+- Chat: the extension header reads only the active session title and latest usage data instead of reacting to the full session list.
+
 ## [1.11.3] - 2026-05-19
 
 - Editor Integration: Add to Context now attaches the selected code as context instead of pasting a formatted block into the input.
@@ -375,7 +440,7 @@
 ## [1.5.9] - 2026-01-28
 
 - Agent Manager: migrated to the OpenCode SDK worktree implementation; sessions in worktrees are now completely isolated.
-- Agent Manager: worktree setup commands are now persistant per project and automatically saved/restored.
+- Agent Manager: worktree setup commands are now persistent per project and automatically saved/restored.
 
 
 ## [1.5.8] - 2026-01-26

@@ -44,6 +44,7 @@ import { createWorktreeSessionForNewBranch } from '@/lib/worktreeSessionCreator'
 import { cn } from '@/lib/utils';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { useI18n } from '@/lib/i18n';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 import { TodoSendDialog, type TodoSendExecution } from './TodoSendDialog';
 
 const TODO_PANEL_MIN_ITEMS = 5;
@@ -99,6 +100,19 @@ const createTodoId = (): string => {
     return crypto.randomUUID();
   }
   return `todo_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+};
+
+const sortTodosWithCompletedLast = (items: OpenChamberProjectTodoItem[]): OpenChamberProjectTodoItem[] => [
+  ...items.filter((todo) => !todo.completed),
+  ...items.filter((todo) => todo.completed),
+];
+
+const insertTodoBeforeCompleted = (items: OpenChamberProjectTodoItem[], item: OpenChamberProjectTodoItem): OpenChamberProjectTodoItem[] => {
+  const firstCompletedIndex = items.findIndex((todo) => todo.completed);
+  if (firstCompletedIndex === -1) {
+    return [...items, item];
+  }
+  return [...items.slice(0, firstCompletedIndex), item, ...items.slice(firstCompletedIndex)];
 };
 
 type SortableTodoHandleProps = {
@@ -216,7 +230,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
           return;
         }
         setNotes(data.notes);
-        setTodos(data.todos);
+        setTodos(sortTodosWithCompletedLast(data.todos));
         setPlans(nextPlans);
         lastSavedNotesRef.current = data.notes;
         notesHydratedRef.current = true;
@@ -341,15 +355,12 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
       return;
     }
 
-    const nextTodos = [
-      ...todos,
-      {
-        id: createTodoId(),
-        text: trimmed.slice(0, OPENCHAMBER_PROJECT_TODO_TEXT_MAX_LENGTH),
-        completed: false,
-        createdAt: Date.now(),
-      },
-    ];
+    const nextTodos = insertTodoBeforeCompleted(todos, {
+      id: createTodoId(),
+      text: trimmed.slice(0, OPENCHAMBER_PROJECT_TODO_TEXT_MAX_LENGTH),
+      completed: false,
+      createdAt: Date.now(),
+    });
     setTodos(nextTodos);
     setNewTodoText('');
     void persistProjectData(notes, nextTodos);
@@ -369,7 +380,15 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
 
   const handleToggleTodo = React.useCallback(
     (id: string, completed: boolean) => {
-      const nextTodos = todos.map((todo) => (todo.id === id ? { ...todo, completed } : todo));
+      const todo = todos.find((item) => item.id === id);
+      if (!todo || todo.completed === completed) {
+        return;
+      }
+      const remainingTodos = todos.filter((item) => item.id !== id);
+      const updatedTodo = { ...todo, completed };
+      const nextTodos = completed
+        ? [...remainingTodos, updatedTodo]
+        : insertTodoBeforeCompleted(remainingTodos, updatedTodo);
       setTodos(nextTodos);
       void persistProjectData(notes, nextTodos);
     },
@@ -405,7 +424,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
       if (oldIndex === -1 || newIndex === -1) {
         return;
       }
-      const nextTodos = arrayMove(todos, oldIndex, newIndex);
+      const nextTodos = sortTodosWithCompletedLast(arrayMove(todos, oldIndex, newIndex));
       setTodos(nextTodos);
       void persistProjectData(notes, nextTodos);
     },
@@ -496,7 +515,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
             return;
           }
           sessionId = created.id;
-          directoryHint = null;
+          directoryHint = created.path;
         } else {
           const session = await createSession(undefined, projectRef.path, null);
           if (!session?.id) {
@@ -601,7 +620,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
           path: result.path,
           allowOutsideWorkspace: 'true',
         });
-        const response = await fetch(`/api/fs/read?${params.toString()}`, { cache: 'no-store' });
+        const response = await runtimeFetch(`/api/fs/read?${params.toString()}`, { cache: 'no-store' });
         if (!response.ok) {
           toast.error(t('rightSidebar.contextNotesTodo.toast.readPlanFileFailed'));
           return;
@@ -799,7 +818,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
                     return (
                       <SortableTodoItem key={todo.id} id={todo.id}>
                         {(dragHandleProps) => (
-                          <div className="flex items-start gap-1.5 px-2.5 py-1.5">
+                          <div className={cn('flex gap-1.5 px-2.5 py-1.5', isExpandedTodo ? 'items-start' : 'items-center')}>
                             <button
                               type="button"
                               ref={dragHandleProps.setActivatorNodeRef}
@@ -826,7 +845,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
                               type="button"
                               onClick={() => handleToggleTodoExpanded(todo.id)}
                               className={cn(
-                                'block min-h-6 min-w-0 flex-1 bg-transparent p-0 text-left typography-ui-label leading-6 text-foreground',
+                                'block min-h-6 min-w-0 flex-1 bg-transparent p-0 text-left typography-ui-label leading-normal text-foreground',
                                 isExpandedTodo ? 'whitespace-normal break-words' : 'overflow-hidden text-ellipsis whitespace-nowrap',
                                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
                                 todo.completed && 'text-muted-foreground line-through'

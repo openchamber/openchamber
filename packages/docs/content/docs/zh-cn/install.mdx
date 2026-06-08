@@ -1,0 +1,33 @@
+---
+title: 安装
+description: 为桌面、Web 或 VS Code 安装 OpenChamber。
+---
+
+# 安装
+
+运行 OpenChamber 有三种方式：
+
+- 面向 macOS 的桌面应用
+- 由 CLI 托管的 Web 应用，可以像手机应用一样安装（即 PWA）
+- VS Code 扩展
+
+## 前提条件
+
+请先安装 [OpenCode](https://opencode.ai)——OpenChamber 在它之上运行。
+
+## Web + PWA
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/openchamber/openchamber/main/scripts/install.sh | bash
+openchamber --ui-password be-creative-here
+```
+
+打开 CLI 输出的 URL（通常是 `http://localhost:3000`）。你应该会看到 OpenChamber 会话列表。想随手取用，可以使用浏览器地址栏中的“安装”选项，把它添加为一个应用。
+
+## 桌面
+
+从 GitHub 发布页或 OpenChamber 下载页下载最新的桌面版本。打开它，并登录你常用的 OpenCode 工作流。
+
+## VS Code
+
+从 VS Code Marketplace 安装，并登录你常用的 OpenCode 工作流。随后 OpenChamber 视图会在侧边栏中打开。
