@@ -65,7 +65,9 @@ export function useMessageTTS(): UseMessageTTSReturn {
         setIsPlaying(true);
         
         try {
-            const textToSpeak = (ttsInputMode === 'raw' && isServerProvider) ? text : sanitizeForTTS(text);
+            const shouldUseRaw = ttsInputMode === 'raw' && isServerProvider;
+            const textToSpeak = shouldUseRaw ? text : sanitizeForTTS(text);
+            const sanitizedText = sanitizeForTTS(text);
             
             if (isServerProvider && isServerTTSAvailable) {
                 const voice = voiceProvider === 'openai-compatible' ? openaiCompatibleVoice : openaiVoice;
@@ -84,7 +86,7 @@ export function useMessageTTS(): UseMessageTTSReturn {
                 });
             } else if (voiceProvider === 'say' && isSayTTSAvailable) {
                 const wordsPerMinute = Math.round(100 + (speechRate - 0.5) * 200);
-                await speakSayTTS(textToSpeak, {
+                await speakSayTTS(sanitizedText, {
                     voice: sayVoice,
                     rate: wordsPerMinute,
                     onEnd: () => setIsPlaying(false),
@@ -95,7 +97,7 @@ export function useMessageTTS(): UseMessageTTSReturn {
                 await browserVoiceService.waitForVoices();
                 await browserVoiceService.resumeAudioContext();
                 await browserVoiceService.speakText(
-                    textToSpeak,
+                    sanitizedText,
                     navigator.language || 'en-US',
                     () => setIsPlaying(false),
                     {
