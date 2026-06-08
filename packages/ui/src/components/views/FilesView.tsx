@@ -697,6 +697,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const [jsonViewMode, setJsonViewMode] = React.useState<'tree' | 'text'>('tree');
   const [htmlViewMode, setHtmlViewMode] = React.useState<PreviewViewMode>('edit');
   const [drawioViewMode, setDrawioViewMode] = React.useState<PreviewViewMode>('preview');
+  const [drawioRemountNonce, setDrawioRemountNonce] = React.useState(0);
   const textViewModeByPathRef = React.useRef<Record<string, TextViewMode>>({});
   const mdViewModeByPathRef = React.useRef<Record<string, PreviewViewMode>>({});
   const htmlViewModeByPathRef = React.useRef<Record<string, PreviewViewMode>>({});
@@ -803,6 +804,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const diagramAutoSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const diagramXmlRef = React.useRef('');
   const diagramSavedXmlRef = React.useRef('');
+  const pendingDrawioPreviewFrameRef = React.useRef<number | null>(null);
   const diagramEditorRef = React.useRef<React.ComponentRef<typeof DiagramEditor>>(null);
   const lastLoadedFileStatRef = React.useRef<FileStatSnapshot | null>(null);
   const activeFileLoadIdRef = React.useRef(0);
@@ -2306,11 +2308,34 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     if (selectedPath) {
       drawioViewModeByPathRef.current[selectedPath] = mode;
     }
+    if (diagramAutoSaveTimerRef.current) {
+      clearTimeout(diagramAutoSaveTimerRef.current);
+      diagramAutoSaveTimerRef.current = null;
+    }
+    if (pendingDrawioPreviewFrameRef.current !== null) {
+      cancelAnimationFrame(pendingDrawioPreviewFrameRef.current);
+      pendingDrawioPreviewFrameRef.current = null;
+    }
     if (mode === 'edit') {
       setDraftContent(diagramXmlRef.current || fileContent);
+      setDrawioViewMode(mode);
+    } else {
+      diagramXmlRef.current = draftContent;
+      const pathAtToggle = selectedPath;
+      setDrawioViewMode('edit');
+      pendingDrawioPreviewFrameRef.current = requestAnimationFrame(() => {
+        pendingDrawioPreviewFrameRef.current = requestAnimationFrame(() => {
+          pendingDrawioPreviewFrameRef.current = null;
+          if (root && pathAtToggle && useFilesViewTabsStore.getState().byRoot[root]?.selectedPath !== pathAtToggle) {
+            return;
+          }
+          setDrawioRemountNonce((value) => value + 1);
+          setDrawioViewMode('preview');
+        });
+      });
+      return;
     }
-    setDrawioViewMode(mode);
-  }, [fileContent, selectedFile?.path]);
+  }, [draftContent, fileContent, root, selectedFile?.path]);
 
   const saveDiagramXml = React.useCallback(async (path: string, xml: string) => {
     if (!files.writeFile || xml === diagramSavedXmlRef.current) {
@@ -2339,6 +2364,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         clearTimeout(diagramAutoSaveTimerRef.current);
         diagramAutoSaveTimerRef.current = null;
       }
+      if (pendingDrawioPreviewFrameRef.current !== null) {
+        cancelAnimationFrame(pendingDrawioPreviewFrameRef.current);
+        pendingDrawioPreviewFrameRef.current = null;
+      }
     };
   }, [drawioViewMode, selectedFile?.path]);
 
@@ -2364,6 +2393,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       });
     }, AUTO_SAVE_DELAY);
   }, [drawioViewMode, files.writeFile, saveDiagramXml, selectedFile?.path, t]);
+
+  const diagramEditorXml = React.useMemo(() => {
+    if (!isDrawio) {
+      return fileContent;
+    }
+    return diagramXmlRef.current || draftContent || fileContent;
+  }, [draftContent, fileContent, isDrawio]);
 
   const getHtmlViewMode = React.useCallback((): PreviewViewMode => {
     return htmlViewMode;
@@ -3446,8 +3482,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           ) : selectedFile && isDrawio && drawioViewMode === 'preview' ? (
             <div className="h-full overflow-hidden" style={{ minHeight: '400px' }}>
               <DiagramEditor
+                key={`${selectedFile.path}:${drawioRemountNonce}`}
                 ref={diagramEditorRef}
-                xml={fileContent}
+                xml={diagramEditorXml}
                 onChange={handleDiagramChange}
               />
             </div>
