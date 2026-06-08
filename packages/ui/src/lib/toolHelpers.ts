@@ -374,8 +374,6 @@ export function getLanguageFromExtension(filePath: string): string | null {
     'yml': 'yaml',
     'toml': 'toml',
     'xml': 'xml',
-    'drawio': 'html',
-    'dio': 'html',
     'xsl': 'xml',
     'xslt': 'xml',
     'xsd': 'xml',
