@@ -749,7 +749,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                       'text-sm font-semibold text-sidebar-foreground/90',
                       'hover:text-sidebar-foreground hover:bg-interactive-hover',
                     )}
-                    onClick={() => void reloadOpenCodeConfiguration({ message: 'Restarting OpenCode…', mode: 'projects', scopes: ['all'] })}
+                    onClick={() => void reloadOpenCodeConfiguration({ message: 'Restarting OpenCode…', mode: 'projects', scopes: ['all'] }).catch(() => undefined)}
                   >
                     <Icon name="restart" className="h-4 w-4 shrink-0" />
                     <span>{t('settings.view.actions.reloadOpenCode')}</span>

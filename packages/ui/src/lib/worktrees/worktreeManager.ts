@@ -7,10 +7,13 @@ import {
 import {
   clearWorktreeBootstrapState,
   markWorktreeBootstrapPending,
+  setWorktreeBootstrapState,
+  startWorktreeBootstrapWatcher,
 } from '@/lib/worktrees/worktreeBootstrap';
 import { invalidateResolvedProjectRootCache, resolveProjectRoot } from '@/lib/worktrees/worktreeStatus';
 import type {
   CreateGitWorktreePayload,
+  GitWorktreeBootstrapStatus,
   GitWorktreeValidationResult,
 } from '@/lib/api/types';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -77,6 +80,83 @@ const normalizeBranchName = (value: string): string => {
     .replace(/^\/+|\/+$/g, '');
 };
 
+const setStoredWorktreeStatus = (directory: string, status: NonNullable<WorktreeMetadata['worktreeStatus']>): void => {
+  const target = normalizePath(directory);
+  if (!target) {
+    return;
+  }
+
+  useSessionUIStore.setState((state) => {
+    let changed = false;
+
+    const applyStatus = (metadata: WorktreeMetadata): WorktreeMetadata => {
+      if (normalizePath(metadata.path) !== target || metadata.worktreeStatus === status) {
+        return metadata;
+      }
+      changed = true;
+      return { ...metadata, worktreeStatus: status };
+    };
+
+    let availableWorktrees = state.availableWorktrees;
+    let availableWorktreesChanged = false;
+    const nextAvailableWorktrees = state.availableWorktrees.map((metadata) => {
+      const next = applyStatus(metadata);
+      if (next !== metadata) {
+        availableWorktreesChanged = true;
+      }
+      return next;
+    });
+    if (availableWorktreesChanged) {
+      availableWorktrees = nextAvailableWorktrees;
+    }
+    let availableWorktreesByProject = state.availableWorktreesByProject;
+    for (const [projectKey, entries] of state.availableWorktreesByProject) {
+      let projectChanged = false;
+      const nextEntries = entries.map((metadata) => {
+        const next = applyStatus(metadata);
+        if (next !== metadata) {
+          projectChanged = true;
+        }
+        return next;
+      });
+      if (projectChanged) {
+        if (availableWorktreesByProject === state.availableWorktreesByProject) {
+          availableWorktreesByProject = new Map(state.availableWorktreesByProject);
+        }
+        availableWorktreesByProject.set(projectKey, nextEntries);
+      }
+    }
+
+    let worktreeMetadata = state.worktreeMetadata;
+    for (const [sessionId, metadata] of state.worktreeMetadata) {
+      const next = applyStatus(metadata);
+      if (next !== metadata) {
+        if (worktreeMetadata === state.worktreeMetadata) {
+          worktreeMetadata = new Map(state.worktreeMetadata);
+        }
+        worktreeMetadata.set(sessionId, next);
+      }
+    }
+
+    if (!changed) {
+      return {};
+    }
+
+    return {
+      availableWorktrees,
+      availableWorktreesByProject,
+      worktreeMetadata,
+    };
+  });
+};
+
+const getWorktreeStatusFromBootstrap = (status?: GitWorktreeBootstrapStatus): WorktreeMetadata['worktreeStatus'] => {
+  if (status?.status === 'pending') {
+    return 'pending';
+  }
+  return status?.status === 'failed' ? 'invalid' : 'ready';
+};
+
 const deriveSdkWorktreeNameFromDirectory = (directory: string): string => {
   const normalized = normalizePath(directory);
   const parts = normalized.split('/').filter(Boolean);
@@ -101,7 +181,7 @@ export const buildSdkStartCommand = (args: {
   return joined.trim().length > 0 ? joined : undefined;
 };
 
-const toCreatePayload = (args: {
+export const toCreatePayload = (args: {
   preferredName?: string;
   setupCommands?: string[];
   mode?: 'new' | 'existing';
@@ -114,6 +194,7 @@ const toCreatePayload = (args: {
   upstreamBranch?: string;
   ensureRemoteName?: string;
   ensureRemoteUrl?: string;
+  returnAfterDirectoryCreated?: boolean;
 }, projectDirectory: string): CreateGitWorktreePayload => {
   const mode = args.mode === 'existing' ? 'existing' : 'new';
 
@@ -144,6 +225,7 @@ const toCreatePayload = (args: {
     ...(args.upstreamBranch ? { upstreamBranch: args.upstreamBranch } : {}),
     ...(args.ensureRemoteName ? { ensureRemoteName: args.ensureRemoteName } : {}),
     ...(args.ensureRemoteUrl ? { ensureRemoteUrl: args.ensureRemoteUrl } : {}),
+    ...(args.returnAfterDirectoryCreated ? { returnAfterDirectoryCreated: true } : {}),
   };
 };
 
@@ -247,6 +329,7 @@ export type CreateWorktreeArgs = {
   upstreamBranch?: string;
   ensureRemoteName?: string;
   ensureRemoteUrl?: string;
+  returnAfterDirectoryCreated?: boolean;
 };
 
 export async function createWorktree(project: ProjectRef, args: CreateWorktreeArgs): Promise<WorktreeMetadata> {
@@ -271,12 +354,20 @@ export async function createWorktree(project: ProjectRef, args: CreateWorktreeAr
     branch: returnedBranch,
     label: returnedBranch || returnedName,
     worktreeRoot: normalizePath(returnedPath),
-    worktreeStatus: 'ready',
+    worktreeStatus: getWorktreeStatusFromBootstrap(created?.bootstrapStatus),
     headState: returnedBranch ? 'branch' : 'unborn',
     worktreeSource: 'created-for-session',
   };
 
-  markWorktreeBootstrapPending(metadata.path);
+  if (created?.bootstrapStatus) {
+    setWorktreeBootstrapState(metadata.path, created.bootstrapStatus);
+  } else {
+    markWorktreeBootstrapPending(metadata.path);
+  }
+  startWorktreeBootstrapWatcher(metadata.path, {
+    onFailed: () => setStoredWorktreeStatus(metadata.path, 'invalid'),
+    onReady: () => setStoredWorktreeStatus(metadata.path, 'ready'),
+  });
 
   invalidateWorktreeList(projectDirectory);
   // The new worktree changes the repo's worktree topology; drop cached root

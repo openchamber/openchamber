@@ -45,6 +45,7 @@ import { ToolRevealOnMount } from './ToolRevealOnMount';
 import { getToolIcon } from './toolPresentation';
 import { useDurationTickerNow } from './useDurationTicker';
 import { resolveFallbackTaskSessionId } from './resolveFallbackTaskSessionId';
+import { readTaskTagSessionIdFromOutput } from './taskSessionIdParser';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
 import { useI18n } from '@/lib/i18n';
 import { getDiffPatchEntries, getPatchText } from './toolDiffUtils';
@@ -962,9 +963,9 @@ const readTaskSessionIdFromOutput = (output: string | undefined): string | undef
     }
 
     // OpenCode tool output may wrap child session id in <task id="ses_xxx">
-    const taskTagMatch = output.match(/<task\s+id="([^"]+)"\s+state="[^"]*"/i);
-    if (taskTagMatch?.[1]) {
-        return normalizeSessionIdCandidate(taskTagMatch[1]);
+    const taskTagSessionId = readTaskTagSessionIdFromOutput(output);
+    if (taskTagSessionId) {
+        return normalizeSessionIdCandidate(taskTagSessionId);
     }
     return undefined;
 };

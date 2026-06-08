@@ -13,14 +13,7 @@ export function DiagramView() {
   const [xml, setXml] = React.useState('');
   const [loading, setLoading] = React.useState(true);
   const editorRef = React.useRef<DiagramEditorHandle>(null);
-  const loadFileRef = React.useRef<((path: string) => Promise<void>) | null>(null);
-
-  React.useEffect(() => {
-    const pending = useUIStore.getState().consumePendingDiagramFile();
-    if (pending && loadFileRef.current) {
-      loadFileRef.current(pending);
-    }
-  }, []);
+  const pendingDiagramFile = useUIStore((state) => state.pendingDiagramFile);
 
   const loadFile = React.useCallback(async (path: string) => {
     setLoading(true);
@@ -37,7 +30,15 @@ export function DiagramView() {
     }
   }, [files]);
 
-  loadFileRef.current = loadFile;
+  React.useEffect(() => {
+    if (!pendingDiagramFile) {
+      return;
+    }
+    const pending = useUIStore.getState().consumePendingDiagramFile();
+    if (pending) {
+      void loadFile(pending);
+    }
+  }, [loadFile, pendingDiagramFile]);
 
   const saveDiagram = React.useCallback(async () => {
     const newXml = editorRef.current?.getXml();
@@ -76,7 +77,7 @@ export function DiagramView() {
           type="button"
           onClick={() => void saveDiagram()}
           className="size-6 flex items-center justify-center rounded-md text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          title="Save diagram"
+          title={t('filesView.diagram.saveDiagram')}
         >
           <Icon name="save-3" className="size-4" />
         </button>

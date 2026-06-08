@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Chat: added `/handoff-review` to open a linked review session for the current workspace changes, with actions to send review feedback and implementation replies between the sessions.
+- Worktrees: creating a single new worktree session now opens the session immediately while worktree setup continues in the background.
+- Multi-Run: creating isolated runs now opens sessions immediately while worktree setup continues in the background.
+- Sessions: chat folder assignments now stay in place after reloads.
+
 ## [1.12.3] - 2026-06-05
 
 - Windows/Startup: WSL OpenCode installs are no longer detected or launched; install OpenCode natively on Windows and configure `opencode.cmd` or `opencode.exe` instead.

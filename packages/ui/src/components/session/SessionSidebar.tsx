@@ -1719,7 +1719,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
             setCurrentSession(options.sessionId, worktreePath);
             return;
           }
-          openNewSessionDraft({ directoryOverride: worktreePath });
+          openNewSessionDraft({ directoryOverride: worktreePath, preserveDirectoryOverride: true });
         }}
       />
 

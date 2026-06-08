@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  applyPreviewPassthroughRequestHeaders,
+  applyPreviewPassthroughResponseHeaders,
   classifyPreviewNavigation,
   classifyPreviewResourceError,
   normalizeProxyTargetUrl,
@@ -14,6 +16,47 @@ const rewrite = (bodyText, kind) => rewritePreviewBody({
   kind,
   proxyBasePath: '/api/preview/proxy/abc123',
   targetOrigin: 'http://127.0.0.1:3000',
+});
+
+describe('preview Inertia header passthrough', () => {
+  it('forwards Inertia request headers to the preview target', () => {
+    const forwarded = new Map();
+    const proxyReq = {
+      setHeader: (name, value) => forwarded.set(name, value),
+    };
+
+    applyPreviewPassthroughRequestHeaders({
+      headers: {
+        'x-inertia': 'true',
+        'x-inertia-version': 'asset-hash',
+        'x-unrelated': 'ignored',
+      },
+    }, proxyReq);
+
+    expect(forwarded.get('x-inertia')).toBe('true');
+    expect(forwarded.get('x-inertia-version')).toBe('asset-hash');
+    expect(forwarded.has('x-unrelated')).toBe(false);
+  });
+
+  it('forwards Inertia response headers back to the preview client', () => {
+    const forwarded = new Map();
+    const res = {
+      headersSent: false,
+      setHeader: (name, value) => forwarded.set(name, value),
+    };
+
+    applyPreviewPassthroughResponseHeaders({
+      headers: {
+        'x-inertia': 'true',
+        'x-inertia-location': 'http://127.0.0.1:8000/login',
+        'x-unrelated': 'ignored',
+      },
+    }, res);
+
+    expect(forwarded.get('x-inertia')).toBe('true');
+    expect(forwarded.get('x-inertia-location')).toBe('http://127.0.0.1:8000/login');
+    expect(forwarded.has('x-unrelated')).toBe(false);
+  });
 });
 
 describe('preview resource error classification', () => {

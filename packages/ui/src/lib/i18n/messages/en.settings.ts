@@ -1525,7 +1525,7 @@ export const settingsDict = {
   'settings.voice.page.field.transcribeOnStop': 'Transcribe on Stop',
   'settings.voice.page.field.millisecondsUnit': 'ms',
   'settings.voice.page.field.messageReadAloudButtonAria': 'Message read aloud button',
-  'settings.voice.page.field.messageReadAloudButton': 'Message Read Aloud Button',
+  'settings.voice.page.field.messageReadAloudButton': 'Read message aloud button',
   'settings.voice.page.field.summarizeBeforePlaybackAria': 'Summarize before playback',
   'settings.voice.page.field.summarizeBeforePlayback': 'Summarize Before Playback',
   'settings.voice.page.field.summarizeVoiceModeResponsesAria': 'Summarize voice mode responses',

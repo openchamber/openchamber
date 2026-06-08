@@ -191,10 +191,17 @@ export const createWebGitHubAPI = ({ urls }: WebGitHubAPIOptions): GitHubAPI => 
     return body.branches ?? [];
   },
 
-  async prsList(directory: string, options?: { page?: number }): Promise<GitHubPullRequestsListResult> {
+  async prsList(directory: string, options?: { page?: number; query?: string }): Promise<GitHubPullRequestsListResult> {
     const page = options?.page ?? 1;
+    const params = new URLSearchParams({
+      directory,
+      page: String(page),
+    });
+    if (options?.query) {
+      params.set('query', options.query);
+    }
     const response = await runtimeFetch(
-      `/api/github/pulls/list?directory=${encodeURIComponent(directory)}&page=${encodeURIComponent(String(page))}`,
+      `/api/github/pulls/list?${params.toString()}`,
       { method: 'GET', headers: { Accept: 'application/json' } }
     );
     const body = await jsonOrNull<GitHubPullRequestsListResult & { error?: string }>(response);
@@ -228,10 +235,17 @@ export const createWebGitHubAPI = ({ urls }: WebGitHubAPIOptions): GitHubAPI => 
     return body;
   },
 
-  async issuesList(directory: string, options?: { page?: number }): Promise<GitHubIssuesListResult> {
+  async issuesList(directory: string, options?: { page?: number; query?: string }): Promise<GitHubIssuesListResult> {
     const page = options?.page ?? 1;
+    const params = new URLSearchParams({
+      directory,
+      page: String(page),
+    });
+    if (options?.query) {
+      params.set('query', options.query);
+    }
     const response = await runtimeFetch(
-      `/api/github/issues/list?directory=${encodeURIComponent(directory)}&page=${encodeURIComponent(String(page))}`,
+      `/api/github/issues/list?${params.toString()}`,
       { method: 'GET', headers: { Accept: 'application/json' } }
     );
     const payload = await jsonOrNull<GitHubIssuesListResult & { error?: string }>(response);

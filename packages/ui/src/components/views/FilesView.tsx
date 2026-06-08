@@ -700,6 +700,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const textViewModeByPathRef = React.useRef<Record<string, TextViewMode>>({});
   const mdViewModeByPathRef = React.useRef<Record<string, PreviewViewMode>>({});
   const htmlViewModeByPathRef = React.useRef<Record<string, PreviewViewMode>>({});
+  const drawioViewModeByPathRef = React.useRef<Record<string, PreviewViewMode>>({});
 
   const lightTheme = React.useMemo(
     () => availableThemes.find((theme) => theme.metadata.id === lightThemeId) ?? getDefaultTheme(false),
@@ -1488,11 +1489,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       return true;
     }
 
-    if (draftContent === '' && fileContent !== '') {
+    if (draftContent === '' && fileContent !== '' && loadedFilePath !== selectedFile.path) {
       console.warn(
         `[saveDraft] refusing to save empty draft for "${selectedFile.path}" (${fileContent.length} bytes were expected). ` +
         'The file may have been read during a concurrent write (O_TRUNC race). ' +
-        'Use Ctrl+S after content loads if the save was intentional.',
+        'Try again after content finishes loading if the save was intentional.',
       );
       return false;
     }
@@ -1522,7 +1523,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     } finally {
       setIsSaving(false);
     }
-  }, [draftContent, fileContent, files, isDirty, loadedFileLineEnding, readFileStat, selectedFile, t]);
+  }, [draftContent, fileContent, files, isDirty, loadedFileLineEnding, loadedFilePath, readFileStat, selectedFile, t]);
 
   React.useEffect(() => {
     if (!isDirty) {
@@ -2228,6 +2229,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       // Ignore localStorage errors
     }
     setHtmlViewMode(htmlViewModeByPathRef.current[selectedPath] ?? htmlDefault);
+    setDrawioViewMode(drawioViewModeByPathRef.current[selectedPath] ?? 'preview');
 
     let jsonDefault: 'tree' | 'text' = settingsDefaultFileViewerPreview ? 'tree' : 'text';
     try {
@@ -2286,6 +2288,14 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     } catch {
       // Ignore localStorage errors
     }
+  }, [selectedFile?.path]);
+
+  const saveDrawioViewMode = React.useCallback((mode: PreviewViewMode) => {
+    const selectedPath = selectedFile?.path;
+    if (selectedPath) {
+      drawioViewModeByPathRef.current[selectedPath] = mode;
+    }
+    setDrawioViewMode(mode);
   }, [selectedFile?.path]);
 
   const getHtmlViewMode = React.useCallback((): PreviewViewMode => {
@@ -2967,7 +2977,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           <>
             <PreviewToggleButton
               currentMode={drawioViewMode}
-              onToggle={() => setDrawioViewMode(drawioViewMode === 'preview' ? 'edit' : 'preview')}
+              onToggle={() => saveDrawioViewMode(drawioViewMode === 'preview' ? 'edit' : 'preview')}
             />
             {drawioViewMode === 'preview' && (
               <Button
@@ -2982,7 +2992,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                   }
                 }}
                 className="size-6 p-0 text-foreground hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
-                title="Save diagram"
+                title={t('filesView.diagram.saveDiagram')}
               >
                 {diagramSaved ? (
                   <Icon name="check" className="size-4 text-[color:var(--status-success)]" />

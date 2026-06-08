@@ -1,3 +1,8 @@
+## [Unreleased]
+
+- Agent Manager: creating isolated runs now opens sessions immediately while worktree setup continues in the background.
+- Sessions: chat folder assignments now stay in place after reloads.
+
 ## [1.12.3] - 2026-06-05
 
 - Startup: OpenCode health checks now work with OpenCode 1.15.x.
