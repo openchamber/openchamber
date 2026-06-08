@@ -20,6 +20,7 @@ import { audioStreamService } from '@/lib/voice/audioStreamService';
 import { wasmSttService, WASM_MODELS } from '@/lib/voice/wasmSttService';
 import type { WasmModelStatus } from '@/lib/voice/wasmSttService';
 import { cn } from '@/lib/utils';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useI18n } from '@/lib/i18n';
 import { disposePreviewAudio } from './voicePreviewAudio';
 const LANGUAGE_OPTIONS = [
@@ -278,7 +279,7 @@ export const VoiceSettings: React.FC = () => {
 
         const checkOpenAIAvailability = async () => {
             try {
-                const response = await fetch('/api/tts/status');
+                const response = await runtimeFetch('/api/tts/status');
                 const data = await response.json();
                 const hasServerKey = data.available;
                 const hasSettingsKey = openaiApiKey.trim().length > 0;
@@ -298,7 +299,7 @@ export const VoiceSettings: React.FC = () => {
             return;
         }
 
-        fetch('/api/tts/say/status')
+        runtimeFetch('/api/tts/say/status')
             .then(res => res.json())
             .then(data => {
                 setIsSayAvailable(data.available);
@@ -327,7 +328,7 @@ export const VoiceSettings: React.FC = () => {
         setIsPreviewPlaying(true);
         let audio: HTMLAudioElement | null = null;
         try {
-            const response = await fetch('/api/tts/say/speak', {
+            const response = await runtimeFetch('/api/tts/say/speak', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -381,7 +382,7 @@ export const VoiceSettings: React.FC = () => {
         setIsOpenAIPreviewPlaying(true);
         let audio: HTMLAudioElement | null = null;
         try {
-            const response = await fetch('/api/tts/speak', {
+            const response = await runtimeFetch('/api/tts/speak', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -441,7 +442,7 @@ export const VoiceSettings: React.FC = () => {
         setIsCompatiblePreviewPlaying(true);
         let audio: HTMLAudioElement | null = null;
         try {
-            const response = await fetch('/api/tts/speak', {
+            const response = await runtimeFetch('/api/tts/speak', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({

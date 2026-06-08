@@ -1,5 +1,6 @@
 import React from 'react';
 import { toast } from '@/components/ui';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 import {
   Dialog,
@@ -60,7 +61,7 @@ const loadSettings = async (): Promise<DesktopSettings | null> => {
       return (result?.settings || {}) as DesktopSettings;
     }
 
-    const response = await fetch('/api/config/settings', {
+    const response = await runtimeFetch('/api/config/settings', {
       method: 'GET',
       headers: { Accept: 'application/json' },
     });

@@ -170,7 +170,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                     ) : (
                         <>
                             {providerId ? <ProviderLogo providerId={providerId} className="h-3.5 w-3.5 flex-shrink-0" /> : <Icon name="pencil-ai" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />}
-                            <span className="typography-ui-label min-w-0 truncate font-normal text-foreground">{triggerLabel}</span>
+                            <span className="typography-ui-label min-w-0 flex-1 truncate text-left font-normal text-foreground">{triggerLabel}</span>
                         </>
                     )}
                     <Icon name="arrow-down-s" className="h-4 w-4 flex-shrink-0 text-muted-foreground/50" />

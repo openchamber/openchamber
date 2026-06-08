@@ -19,10 +19,8 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import * as sessionActions from '@/sync/session-actions';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { useContextStore } from '@/stores/contextStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
-import { opencodeClient } from '@/lib/opencode/client';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { useDeviceInfo } from '@/lib/device';
@@ -248,9 +246,9 @@ export function GitHubIssuePickerDialog({
   const resolveDefaultVariant = React.useCallback((providerID: string, modelID: string): string | undefined => {
     const configState = useConfigStore.getState();
     const settingsDefaultVariant = configState.settingsDefaultVariant;
-    if (!settingsDefaultVariant) {
-      return undefined;
-    }
+    const currentVariant = configState.currentProviderId === providerID && configState.currentModelId === modelID
+      ? configState.currentVariant
+      : undefined;
 
     const provider = configState.providers.find((p) => p.id === providerID);
     const model = provider?.models.find((m: Record<string, unknown>) => (m as { id?: string }).id === modelID) as
@@ -258,12 +256,15 @@ export function GitHubIssuePickerDialog({
       | undefined;
     const variants = model?.variants;
     if (!variants) {
-      return undefined;
+      return settingsDefaultVariant || currentVariant || undefined;
     }
-    if (!Object.prototype.hasOwnProperty.call(variants, settingsDefaultVariant)) {
-      return undefined;
+    if (settingsDefaultVariant && Object.prototype.hasOwnProperty.call(variants, settingsDefaultVariant)) {
+      return settingsDefaultVariant;
     }
-    return settingsDefaultVariant;
+    if (currentVariant && Object.prototype.hasOwnProperty.call(variants, currentVariant)) {
+      return currentVariant;
+    }
+    return undefined;
   }, []);
 
   const startSession = React.useCallback(async (issueNumber: number, sourceRepo?: GitHubRepoSelector | null) => {
@@ -366,24 +367,26 @@ export function GitHubIssuePickerDialog({
 
       const sessionTitle = `#${issue.number} ${issue.title}`.trim();
 
-      const sessionId = await (async () => {
+      const { sessionId } = await (async () => {
         if (createInWorktree) {
           const preferred = `issue-${issue.number}-${generateBranchSlug()}`;
           const created = await createWorktreeSessionForNewBranch(
             projectDirectory,
-            preferred
+            preferred,
+            undefined,
+            { returnAfterDirectoryCreated: true }
           );
           if (!created?.id) {
             throw new Error('Failed to create worktree session');
           }
-          return created.id;
+          return { sessionId: created.id, sessionDirectory: created.path };
         }
 
         const session = await sessionActions.createSession(sessionTitle, projectDirectory, null);
         if (!session?.id) {
           throw new Error('Failed to create session');
         }
-        return session.id;
+        return { sessionId: session.id, sessionDirectory: session.directory ?? projectDirectory };
       })();
 
       // Ensure worktree-based sessions also get the issue title.
@@ -412,63 +415,27 @@ export function GitHubIssuePickerDialog({
 
       const variant = resolveDefaultVariant(providerID, modelID);
 
-      try {
-        useContextStore.getState().saveSessionModelSelection(sessionId, providerID, modelID);
-      } catch {
-        // ignore
-      }
-
-      if (agentName) {
-        try {
-          configState.setAgent(agentName);
-        } catch {
-          // ignore
-        }
-
-        try {
-          useContextStore.getState().saveSessionAgentSelection(sessionId, agentName);
-        } catch {
-          // ignore
-        }
-
-        try {
-          useContextStore.getState().saveAgentModelForSession(sessionId, agentName, providerID, modelID);
-        } catch {
-          // ignore
-        }
-
-        if (variant !== undefined) {
-          try {
-            configState.setCurrentVariant(variant);
-          } catch {
-            // ignore
-          }
-          try {
-            useContextStore.getState().saveAgentModelVariantForSession(sessionId, agentName, providerID, modelID, variant);
-          } catch {
-            // ignore
-          }
-        }
-      }
-
       const visiblePromptText = await renderMagicPrompt('github.issue.review.visible', {
         issue_number: String(issue.number),
       });
       const instructionsText = await renderMagicPrompt('github.issue.review.instructions');
       const contextText = buildIssueContextText({ repo: issueRes.repo, issue, comments });
 
-      void opencodeClient.sendMessage({
-        id: sessionId,
+      void useSessionUIStore.getState().sendMessage(
+        visiblePromptText,
         providerID,
         modelID,
-        agent: agentName,
-        variant,
-        text: visiblePromptText,
-        additionalParts: [
+        agentName,
+        undefined,
+        undefined,
+        [
           { text: instructionsText, synthetic: true },
           { text: contextText, synthetic: true },
         ],
-      }).catch((e) => {
+        variant,
+        undefined,
+        { sessionId },
+      ).catch((e) => {
         const message = e instanceof Error ? e.message : String(e);
         toast.error(t('session.githubIssuePicker.toast.sendContextFailed'), {
           description: message,

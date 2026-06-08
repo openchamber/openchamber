@@ -20,6 +20,8 @@ const makeId = (): string => {
   return `ssh-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 };
 
+const DIRECT_INSTANCES_ID = '__direct_instances__';
+
 const randomPort = (): number => {
   return Math.floor(20000 + Math.random() * 30000);
 };
@@ -76,6 +78,9 @@ export const RemoteInstancesSidebar: React.FC<RemoteInstancesSidebarProps> = ({ 
 
   React.useEffect(() => {
     if (isLoading) return;
+    if (selectedId === DIRECT_INSTANCES_ID) {
+      return;
+    }
     if (instances.length === 0) {
       if (selectedId !== null) {
         setSelectedId(null);
@@ -130,7 +135,7 @@ export const RemoteInstancesSidebar: React.FC<RemoteInstancesSidebarProps> = ({ 
   }, [connect, t, upsertInstance]);
 
   return (
-    <SettingsSidebarLayout
+      <SettingsSidebarLayout
       variant="background"
       header={
         <div className="border-b px-3 pt-4 pb-3">
@@ -151,6 +156,16 @@ export const RemoteInstancesSidebar: React.FC<RemoteInstancesSidebarProps> = ({ 
         </div>
       }
     >
+      <SettingsSidebarItem
+        title={t('settings.remoteInstances.direct.sidebarTitle')}
+        metadata={t('settings.remoteInstances.direct.sidebarDescription')}
+        selected={selectedId === DIRECT_INSTANCES_ID || (!selectedId && instances.length === 0)}
+        onSelect={() => {
+          setSelectedId(DIRECT_INSTANCES_ID);
+          onItemSelect?.();
+        }}
+        icon={<Icon name="global" className="h-4 w-4 text-muted-foreground" />}
+      />
       {instances.map((instance) => {
         const status = statusesById[instance.id];
         const selected = instance.id === selectedId;

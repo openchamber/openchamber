@@ -8,6 +8,7 @@ import { useAgentGroupsStore } from '@/stores/useAgentGroupsStore';
 import { useMultiRunStore } from '@/stores/useMultiRunStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { CreateMultiRunParams } from '@/types/multirun';
 
 interface AgentManagerViewProps {
@@ -15,12 +16,8 @@ interface AgentManagerViewProps {
 }
 
 export const AgentManagerView: React.FC<AgentManagerViewProps> = ({ className }) => {
-  const isVSCodeRuntime = Boolean(
-    (typeof window !== 'undefined'
-      ? (window as unknown as { __OPENCHAMBER_RUNTIME_APIS__?: { runtime?: { isVSCode?: boolean } } })
-          .__OPENCHAMBER_RUNTIME_APIS__?.runtime?.isVSCode
-      : false)
-  );
+  const { runtime } = useRuntimeAPIs();
+  const isVSCodeRuntime = runtime.isVSCode;
   const [connectionStatus, setConnectionStatus] = React.useState<'connecting' | 'connected' | 'error' | 'disconnected'>(
     () =>
       (typeof window !== 'undefined'

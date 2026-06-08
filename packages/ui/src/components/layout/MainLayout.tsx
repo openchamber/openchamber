@@ -24,13 +24,13 @@ import { cn } from '@/lib/utils';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 
 import { ChatView } from '@/components/views/ChatView';
+import { DiffView } from '@/components/views/DiffView';
+import { FilesView } from '@/components/views/FilesView';
+import { GitView } from '@/components/views/GitView';
+import { PlanView } from '@/components/views/PlanView';
 
 // Heavy views loaded on-demand to reduce initial bundle parse time.
-const PlanView = lazyWithChunkRecovery(() => import('@/components/views/PlanView').then(m => ({ default: m.PlanView })));
-const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView').then(m => ({ default: m.GitView })));
-const DiffView = lazyWithChunkRecovery(() => import('@/components/views/DiffView').then(m => ({ default: m.DiffView })));
 const TerminalView = lazyWithChunkRecovery(() => import('@/components/views/TerminalView').then(m => ({ default: m.TerminalView })));
-const FilesView = lazyWithChunkRecovery(() => import('@/components/views/FilesView').then(m => ({ default: m.FilesView })));
 const SettingsView = lazyWithChunkRecovery(() => import('@/components/views/SettingsView').then(m => ({ default: m.SettingsView })));
 const SettingsWindow = lazyWithChunkRecovery(() => import('@/components/views/SettingsWindow').then(m => ({ default: m.SettingsWindow })));
 const MultiRunWindow = lazyWithChunkRecovery(() => import('@/components/views/MultiRunWindow').then(m => ({ default: m.MultiRunWindow })));
@@ -271,24 +271,24 @@ export const MainLayout: React.FC = () => {
             return;
         }
 
-        let timeoutId: number | undefined;
+        let frameId: number | undefined;
 
         const handleResize = () => {
-            if (timeoutId !== undefined) {
-                window.clearTimeout(timeoutId);
+            if (frameId !== undefined) {
+                return;
             }
-
-            timeoutId = window.setTimeout(() => {
+            frameId = window.requestAnimationFrame(() => {
+                frameId = undefined;
                 useUIStore.getState().updateProportionalSidebarWidths();
-            }, 150);
+            });
         };
 
         window.addEventListener('resize', handleResize);
 
         return () => {
             window.removeEventListener('resize', handleResize);
-            if (timeoutId !== undefined) {
-                window.clearTimeout(timeoutId);
+            if (frameId !== undefined) {
+                window.cancelAnimationFrame(frameId);
             }
         };
     }, []);
@@ -298,7 +298,7 @@ export const MainLayout: React.FC = () => {
             return;
         }
 
-        let timeoutId: number | undefined;
+        let frameId: number | undefined;
 
         const handleResponsivePanels = () => {
             const state = useUIStore.getState();
@@ -340,13 +340,13 @@ export const MainLayout: React.FC = () => {
         };
 
         const handleResize = () => {
-            if (timeoutId !== undefined) {
-                window.clearTimeout(timeoutId);
+            if (frameId !== undefined) {
+                return;
             }
-
-            timeoutId = window.setTimeout(() => {
+            frameId = window.requestAnimationFrame(() => {
+                frameId = undefined;
                 handleResponsivePanels();
-            }, 100);
+            });
         };
 
         handleResponsivePanels();
@@ -354,8 +354,8 @@ export const MainLayout: React.FC = () => {
 
         return () => {
             window.removeEventListener('resize', handleResize);
-            if (timeoutId !== undefined) {
-                window.clearTimeout(timeoutId);
+            if (frameId !== undefined) {
+                window.cancelAnimationFrame(frameId);
             }
         };
     }, [isMobile, isTablet, setBottomTerminalOpen, setRightSidebarOpen]);

@@ -1,0 +1,48 @@
+---
+title: SSH 호스트 및 프록시
+description: 데스크톱 앱에서 저장된 SSH 호스트를 가져오고 추가 SSH 포트 포워딩을 설정하세요.
+---
+
+# SSH 호스트 및 프록시
+
+데스크톱 앱의 **Settings → Remote Instances**에서 저장된 SSH 호스트를 가져오고, 원격 컴퓨터에 연결하고, 같은 SSH 연결을 통해 추가 포트를 사용할 수 있습니다.
+
+> SSH 호스트와 SSH 프록시는 **데스크톱 전용** 기능입니다. 사용자의 컴퓨터에 있는 SSH 클라이언트를 사용합니다.
+
+## SSH 호스트 가져오기
+
+OpenChamber는 로컬 SSH config의 호스트를 읽을 수 있습니다. `ssh work-server` 같은 명령이 사용하는 같은 위치입니다.
+
+1. **Settings → Remote Instances**를 엽니다.
+2. **Saved SSH hosts**에서 호스트를 선택합니다.
+3. 호스트가 패턴이면 `deploy@app.example.com` 같은 실제 대상을 입력합니다.
+4. 저장하고 연결합니다.
+
+OpenChamber는 이 SSH 명령으로 remote instance를 만듭니다. 상태가 **ready**가 되면 원격 OpenChamber UI가 데스크톱 앱에서 열립니다.
+
+## 추가 포트 포워딩 추가
+
+각 remote instance에는 **Port Forwards** 섹션이 있습니다. SSH 연결의 한쪽에서 다른 쪽의 포트에 접근해야 할 때 사용하세요.
+
+OpenChamber는 세 가지 포워딩 유형을 지원합니다:
+
+- **Local (-L)** — 내 컴퓨터에 포트를 열고 원격 컴퓨터의 대상에 연결합니다.
+- **Remote (-R)** — 원격 컴퓨터에 포트를 열고 내 컴퓨터로 다시 연결합니다.
+- **Dynamic (-D)** — SSH 연결을 통해 로컬 SOCKS proxy를 엽니다.
+
+원격 컴퓨터에서 실행 중인 대부분의 앱 preview와 dashboard에는 **Local (-L)**을 사용하세요.
+
+## SOCKS proxy 사용
+
+내 컴퓨터의 다른 도구가 원격 컴퓨터를 통해 접속하게 하려면 **Dynamic (-D)**을 선택하세요. OpenChamber는 해당 SSH 연결에 로컬 SOCKS proxy 포트를 엽니다.
+
+연결이 ready가 되면 포워딩 행에서 로컬 proxy 주소를 복사하거나 사용합니다. 브라우저나 도구에서 이 주소를 SOCKS5 proxy로 설정하세요.
+
+## 비공개로 유지
+
+네트워크의 다른 기기가 포워딩된 포트에 접근해야 하는 경우가 아니라면 local bind host에는 `127.0.0.1` 또는 `localhost`를 사용하세요.
+
+## 관련 문서
+
+- [원격 인스턴스](/ko/remote-instances/) — 데스크톱 앱을 다른 컴퓨터의 OpenChamber에 연결하세요
+- [원격 접속](/ko/troubleshooting/remote-access/) — SSH 또는 원격 접속이 연결되지 않을 때

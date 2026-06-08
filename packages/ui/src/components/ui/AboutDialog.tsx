@@ -10,6 +10,7 @@ import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { getDesktopAppVersion } from '@/lib/desktopNative';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 interface AboutDialogProps {
   open: boolean;
@@ -64,7 +65,7 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
 
     const fetchVersion = async () => {
       try {
-        const response = await fetch('/api/system/info');
+        const response = await runtimeFetch('/api/system/info');
         if (response.ok) {
           const data = await response.json();
           if (typeof data.openchamberVersion === 'string' && data.openchamberVersion.trim()) {
@@ -88,7 +89,7 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
     let cancelled = false;
     const fetchOpenCodeVersion = async () => {
       try {
-        const response = await fetch('/api/opencode/upgrade-status', {
+        const response = await runtimeFetch('/api/opencode/upgrade-status', {
           headers: { Accept: 'application/json' },
         });
         if (!response.ok) return;

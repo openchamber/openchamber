@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..');
-const useDetachedChildren = process.platform === 'darwin';
+const useDetachedChildren = process.platform === 'darwin' || process.platform === 'linux';
 const webRoot = path.join(repoRoot, 'packages/web');
 
 const quoteWindowsCommandArg = (value) => `"${String(value).replace(/"/g, '""')}"`;
@@ -172,9 +172,10 @@ const vite = run(
   { cwd: webRoot },
 );
 
+const lanAddresses = hmrHost === '0.0.0.0' || hmrHost === '::' ? getLanAddresses() : [];
+
 console.log(`[dev:web:hmr] UI with HMR: http://127.0.0.1:${uiPort}`);
 if (hmrHost === '0.0.0.0' || hmrHost === '::') {
-  const lanAddresses = getLanAddresses();
   if (lanAddresses.length > 0) {
     for (const address of lanAddresses) {
       console.log(`[dev:web:hmr] LAN/mobile UI: http://${address}:${uiPort}`);

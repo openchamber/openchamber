@@ -139,9 +139,10 @@ export function materializeSessionSnapshots(
     .filter((record) => !!record?.info?.id)
     .sort((left, right) => cmp(left.info.id, right.info.id))
   const nextMessages = snapshots.map((record) => record.info)
-  const currentMessages = state.message[sessionID] ?? []
+  const existingMessages = state.message[sessionID]
+  const currentMessages = existingMessages ?? []
   const messages = mergeMessages(currentMessages, nextMessages)
-  const messagesChanged = messages !== currentMessages
+  const messagesChanged = messages !== currentMessages || (existingMessages === undefined && snapshots.length === 0)
 
   let partsChanged = false
   const nextPartState = { ...state.part }

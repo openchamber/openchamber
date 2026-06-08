@@ -27,7 +27,23 @@ mock.module('@/sync/session-ui-store', () => ({
   },
 }));
 
-import { buildQueuedAutoSendPayload, sendQueuedAutoSendPayload } from './useQueuedMessageAutoSend';
+import {
+  buildQueuedAutoSendPayload,
+  sendQueuedAutoSendPayload,
+  shouldDispatchQueuedAutoSend,
+} from './useQueuedMessageAutoSend';
+
+describe('shouldDispatchQueuedAutoSend', () => {
+  test('dispatches only after an active session becomes idle', () => {
+    expect(shouldDispatchQueuedAutoSend('busy', 'idle')).toBe(true);
+    expect(shouldDispatchQueuedAutoSend('retry', 'idle')).toBe(true);
+  });
+
+  test('does not dispatch when idle is only first seen or status is missing', () => {
+    expect(shouldDispatchQueuedAutoSend(undefined, 'idle')).toBe(false);
+    expect(shouldDispatchQueuedAutoSend('idle', 'idle')).toBe(false);
+  });
+});
 
 describe('buildQueuedAutoSendPayload', () => {
   beforeEach(() => {

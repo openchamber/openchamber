@@ -16,6 +16,7 @@ import type {
 import { refreshSkillsAfterOpenCodeRestart, useSkillsStore } from '@/stores/useSkillsStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { startConfigUpdate, finishConfigUpdate, updateConfigUpdateMessage } from '@/lib/configUpdate';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 const FALLBACK_SOURCES: SkillsCatalogSource[] = [
   {
@@ -150,7 +151,7 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
             const timeoutId = window.setTimeout(() => controller.abort(), 3000);
 
             try {
-              const response = await fetch(`/api/config/skills/catalog${refresh}`, {
+              const response = await runtimeFetch(`/api/config/skills/catalog${refresh}`, {
                 method: 'GET',
                 headers: { Accept: 'application/json' },
                 signal: controller.signal,
@@ -227,7 +228,7 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
             ? `?directory=${encodeURIComponent(currentDirectory)}&sourceId=${encodeURIComponent(sourceId)}${refresh}`
             : `?sourceId=${encodeURIComponent(sourceId)}${refresh}`;
 
-          const response = await fetch(`/api/config/skills/catalog/source${queryParams}`, {
+          const response = await runtimeFetch(`/api/config/skills/catalog/source${queryParams}`, {
             method: 'GET',
             headers: { Accept: 'application/json' },
           });
@@ -235,7 +236,7 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
           const payload = (await response.json().catch(() => null)) as SkillsCatalogSourceResponse | null;
           const hasItems = Array.isArray((payload as SkillsCatalogSourceResponse | null)?.items);
           if (!response.ok || (!payload?.ok && !hasItems)) {
-            const fallback = await fetch(`/api/config/skills/catalog${queryParams}`, {
+            const fallback = await runtimeFetch(`/api/config/skills/catalog${queryParams}`, {
               method: 'GET',
               headers: { Accept: 'application/json' },
             });
@@ -302,7 +303,7 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
           }
           const queryParams = `?${parts.join('&')}`;
 
-          const response = await fetch(`/api/config/skills/catalog/source${queryParams}`, {
+          const response = await runtimeFetch(`/api/config/skills/catalog/source${queryParams}`, {
             method: 'GET',
             headers: { Accept: 'application/json' },
           });
@@ -357,7 +358,7 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
           const currentDirectory = getCurrentDirectory();
           const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
 
-          const response = await fetch(`/api/config/skills/scan${queryParams}`, {
+          const response = await runtimeFetch(`/api/config/skills/scan${queryParams}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
             body: JSON.stringify(request),
@@ -393,7 +394,7 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
           const currentDirectory = directoryOverride ?? getCurrentDirectory();
           const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
 
-          const response = await fetch(`/api/config/skills/install${queryParams}`, {
+          const response = await runtimeFetch(`/api/config/skills/install${queryParams}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
             body: JSON.stringify(request),

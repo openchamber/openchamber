@@ -17,6 +17,7 @@ const MONITOR_INITIAL_POLL_MS = 2000;
 const MONITOR_STEADY_POLL_MS = 10000;
 const MONITOR_STABILIZE_TICKS = 5;
 const SSH_STATUS_EVENT = 'openchamber:ssh-instance-status';
+const WINDOWS_HIDDEN_SPAWN_OPTIONS = process.platform === 'win32' ? { windowsHide: true } : {};
 
 const nowMillis = () => Date.now();
 
@@ -221,6 +222,7 @@ const runOutput = async (command, args, options = {}) => {
   return await new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
+      ...WINDOWS_HIDDEN_SPAWN_OPTIONS,
       ...options,
     });
 
@@ -761,6 +763,7 @@ export class ElectronSshManager {
       '-N',
     ]), {
       stdio: ['ignore', 'pipe', 'pipe'],
+      ...WINDOWS_HIDDEN_SPAWN_OPTIONS,
       env: {
         ...process.env,
         SSH_ASKPASS_REQUIRE: 'force',
@@ -919,6 +922,7 @@ export class ElectronSshManager {
       '-L', `${bindHost}:${localPort}:127.0.0.1:${remotePort}`,
     ]), {
       stdio: ['ignore', 'ignore', 'pipe'],
+      ...WINDOWS_HIDDEN_SPAWN_OPTIONS,
     });
   }
 

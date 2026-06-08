@@ -20,8 +20,11 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
+import { Button } from '@/components/ui/button';
+import { toast } from '@/components/ui';
 import { Text } from '@/components/ui/text';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
+import { copyTextToClipboard } from '@/lib/clipboard';
 import type { ContentChangeReason } from '@/hooks/useChatAutoFollow';
 import type { ToolPopupContent } from '../types';
 import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
@@ -665,7 +668,47 @@ const getToolDescriptionPath = (part: ToolPartType, state: ToolStateUnion, curre
         }
     }
 
+    if (part.tool === 'lsp' && input) {
+        const filePath = input?.filePath || input?.file_path || input?.path;
+        if (typeof filePath === 'string') {
+            return getRelativePath(filePath, currentDirectory);
+        }
+    }
+
     return null;
+};
+
+const getLspToolDescription = (input: Record<string, unknown> | undefined, currentDirectory: string): string => {
+    if (!input) {
+        return '';
+    }
+
+    const operation = typeof input.operation === 'string' ? input.operation : 'lsp';
+    if (operation === 'workspaceSymbol') {
+        const query = typeof input.query === 'string' && input.query.trim().length > 0
+            ? ` "${input.query.trim()}"`
+            : '';
+        return `${operation}${query}`;
+    }
+
+    const filePath = typeof input.filePath === 'string'
+        ? input.filePath
+        : typeof input.file_path === 'string'
+            ? input.file_path
+            : typeof input.path === 'string'
+                ? input.path
+                : '';
+    const displayPath = filePath ? getRelativePath(filePath, currentDirectory) : '';
+
+    if (operation === 'documentSymbol') {
+        return displayPath ? `${operation} ${displayPath}` : operation;
+    }
+
+    const line = typeof input.line === 'number' && Number.isFinite(input.line) ? Math.trunc(input.line) : undefined;
+    const character = typeof input.character === 'number' && Number.isFinite(input.character) ? Math.trunc(input.character) : undefined;
+    const position = line !== undefined && character !== undefined ? `:${line}:${character}` : '';
+
+    return displayPath ? `${operation} ${displayPath}${position}` : operation;
 };
 
 const getToolDescription = (part: ToolPartType, state: ToolStateUnion, currentDirectory: string): string => {
@@ -699,6 +742,10 @@ const getToolDescription = (part: ToolPartType, state: ToolStateUnion, currentDi
 
     if (part.tool === 'task' && input?.description && typeof input.description === 'string') {
         return input.description.substring(0, 80);
+    }
+
+    if (part.tool === 'lsp') {
+        return getLspToolDescription(input, currentDirectory);
     }
 
     const desc = input?.description || metadata?.description || ('title' in state && state.title) || '';
@@ -768,18 +815,83 @@ const ToolScrollableTextOutput: React.FC<{
     input: Record<string, unknown> | undefined;
     syntaxTheme: { [key: string]: React.CSSProperties };
 }> = ({ output, part, metadata, input, syntaxTheme }) => {
+    const { t } = useI18n();
     const renderedOutput = getToolOutputText(output, part, metadata);
     const outputLanguage = getToolOutputLanguage(output, part, metadata, input);
     const jsonResult = React.useMemo(() => tryParseJsonOutput(renderedOutput), [renderedOutput]);
+    const [jsonViewMode, setJsonViewMode] = React.useState<'formatted' | 'raw'>('formatted');
+    const [copiedJson, setCopiedJson] = React.useState(false);
+
+    React.useEffect(() => {
+        setJsonViewMode('formatted');
+        setCopiedJson(false);
+    }, [renderedOutput]);
+
+    const handleToggleJsonView = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+        event.stopPropagation();
+        setJsonViewMode((prev) => prev === 'formatted' ? 'raw' : 'formatted');
+    }, []);
+
+    const handleCopyOutput = React.useCallback(async (event: React.MouseEvent<HTMLButtonElement>) => {
+        event.stopPropagation();
+        const result = await copyTextToClipboard(renderedOutput);
+        if (!result.ok) {
+            toast.error(t('chat.toolPart.copyOutputFailed'));
+            return;
+        }
+        setCopiedJson(true);
+        if (typeof window !== 'undefined') {
+            window.setTimeout(() => setCopiedJson(false), 1200);
+        }
+    }, [renderedOutput, t]);
 
     if (jsonResult.isJson) {
         return (
-            <div className="tool-output-surface p-2 rounded-xl w-full min-w-0">
-                <JsonTreeViewer
-                    data={jsonResult.data}
-                    initiallyExpandedDepth={1}
-                    maxHeight="400px"
-                />
+            <div className="tool-output-surface relative p-2 rounded-xl w-full min-w-0">
+                <div className="absolute right-2 top-2 z-10 flex items-center gap-1">
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 rounded-md bg-[var(--surface-elevated)]/80 text-muted-foreground hover:text-foreground"
+                        onClick={handleToggleJsonView}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        aria-label={jsonViewMode === 'formatted' ? t('chat.toolPart.showRawJson') : t('chat.toolPart.showFormattedJson')}
+                        title={jsonViewMode === 'formatted' ? t('chat.toolPart.showRawJson') : t('chat.toolPart.showFormattedJson')}
+                    >
+                        <Icon name={jsonViewMode === 'formatted' ? 'code-box' : 'list-check-2'} className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 rounded-md bg-[var(--surface-elevated)]/80 text-muted-foreground hover:text-foreground"
+                        onClick={handleCopyOutput}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        aria-label={copiedJson ? t('chat.toolPart.copiedOutput') : t('chat.toolPart.copyOutput')}
+                        title={copiedJson ? t('chat.toolPart.copiedOutput') : t('chat.toolPart.copyOutput')}
+                    >
+                        <Icon name={copiedJson ? 'check' : 'file-copy'} className="h-3.5 w-3.5" />
+                    </Button>
+                </div>
+                {jsonViewMode === 'formatted' ? (
+                    <JsonTreeViewer
+                        data={jsonResult.data}
+                        initiallyExpandedDepth={1}
+                        maxHeight="400px"
+                    />
+                ) : (
+                    <div className="typography-code pr-12 text-muted-foreground/90">
+                        <SyntaxHighlighter
+                            style={syntaxTheme}
+                            language="json"
+                            PreTag="div"
+                            customStyle={TOOL_COLLAPSED_CUSTOM_STYLE}
+                            codeTagProps={CODE_TAG_PROPS}
+                            wrapLongLines
+                        >
+                            {renderedOutput}
+                        </SyntaxHighlighter>
+                    </div>
+                )}
             </div>
         );
     }
@@ -2461,6 +2573,9 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         if (normalizedPartTool === 'apply_patch') {
             return null;
         }
+        if (normalizedPartTool === 'lsp') {
+            return null;
+        }
         if (
             descriptionPath
             && (normalizedPartTool === 'apply_patch' || normalizedPartTool === 'edit' || normalizedPartTool === 'multiedit' || normalizedPartTool === 'write')
@@ -2477,7 +2592,6 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         }
         return null;
     }, [descriptionPath, normalizedPartTool, stateWithData, input]);
-
     const runtime = React.useContext(RuntimeAPIContext);
 
     const handleMainClick = (e: { stopPropagation: () => void }) => {
@@ -2505,6 +2619,10 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
             }
         } else if (['write', 'create', 'file_write'].includes(part.tool)) {
             filePath = input?.filePath || input?.file_path || input?.path || metadata?.filePath || metadata?.file_path || metadata?.path;
+        } else if (part.tool === 'lsp') {
+            filePath = input?.filePath || input?.file_path || input?.path;
+            const line = input?.line;
+            targetLine = typeof line === 'number' && Number.isFinite(line) ? Math.trunc(line) : undefined;
         }
 
         if (typeof filePath === 'string') {
@@ -2632,7 +2750,10 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                                     {justificationText}
                                 </span>
                             )}
-                            {!justificationText && description && (
+                            {!justificationText && normalizedPartTool === 'lsp' && descriptionPath ? (
+                                renderAnimatedPathWithIcon(descriptionPath, animateTailText, false, showToolFileIcons)
+                            ) : null}
+                            {!justificationText && normalizedPartTool !== 'lsp' && description && (
                                 descriptionPath && description === descriptionPath ? (
                                     renderAnimatedPathWithIcon(descriptionPath, animateTailText, false, showToolFileIcons)
                                 ) : (

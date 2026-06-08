@@ -193,25 +193,23 @@ function getAgentPermissionSource(agentName, workingDirectory, lookupCache = nul
     }
   }
 
-  // Check JSON layers (project > user)
+  // Check JSON layers in effective override order. readConfigLayers merges
+  // user -> project -> custom, so custom wins over project, project over user.
   const layers = readConfigLayers(workingDirectory);
 
-  // Project opencode.json
+  const customJsonPermission = layers.customConfig?.agent?.[agentName]?.permission;
+  if (customJsonPermission !== undefined && layers.paths.customPath) {
+    return { source: 'json', scope: 'custom', path: layers.paths.customPath };
+  }
+
   const projectJsonPermission = layers.projectConfig?.agent?.[agentName]?.permission;
   if (projectJsonPermission !== undefined && layers.paths.projectPath) {
     return { source: 'json', scope: AGENT_SCOPE.PROJECT, path: layers.paths.projectPath };
   }
 
-  // User opencode.json
   const userJsonPermission = layers.userConfig?.agent?.[agentName]?.permission;
   if (userJsonPermission !== undefined) {
     return { source: 'json', scope: AGENT_SCOPE.USER, path: layers.paths.userPath };
-  }
-
-  // Custom config (env var)
-  const customJsonPermission = layers.customConfig?.agent?.[agentName]?.permission;
-  if (customJsonPermission !== undefined && layers.paths.customPath) {
-    return { source: 'json', scope: 'custom', path: layers.paths.customPath };
   }
 
   return { source: null, scope: null, path: null };
@@ -486,19 +484,31 @@ function updateAgent(agentName, updates, workingDirectory) {
       const newPermission = mergePermissionWithNonWildcards(value, permissionSource, agentName);
 
       if (permissionSource.source === 'md') {
-        const existingMdData = parseMdFile(permissionSource.path);
-        existingMdData.frontmatter.permission = newPermission;
-        writeMdFile(permissionSource.path, existingMdData.frontmatter, existingMdData.body);
-        console.log(`Updated permission in .md file: ${permissionSource.path}`);
+        if (mdData && permissionSource.path === targetPath) {
+          mdData.frontmatter.permission = newPermission;
+          mdModified = true;
+        } else {
+          const existingMdData = parseMdFile(permissionSource.path);
+          existingMdData.frontmatter.permission = newPermission;
+          writeMdFile(permissionSource.path, existingMdData.frontmatter, existingMdData.body);
+          console.log(`Updated permission in .md file: ${permissionSource.path}`);
+        }
       } else if (permissionSource.source === 'json') {
-        const existingConfig = readConfigFile(permissionSource.path);
-        if (!existingConfig.agent) existingConfig.agent = {};
-        if (!existingConfig.agent[agentName]) existingConfig.agent[agentName] = {};
-        existingConfig.agent[agentName].permission = newPermission;
-        writeConfig(existingConfig, permissionSource.path);
-        console.log(`Updated permission in JSON: ${permissionSource.path}`);
+        if (permissionSource.path === (jsonTarget.path || CONFIG_FILE)) {
+          if (!config.agent) config.agent = {};
+          if (!config.agent[agentName]) config.agent[agentName] = {};
+          config.agent[agentName].permission = newPermission;
+          jsonModified = true;
+        } else {
+          const existingConfig = readConfigFile(permissionSource.path);
+          if (!existingConfig.agent) existingConfig.agent = {};
+          if (!existingConfig.agent[agentName]) existingConfig.agent[agentName] = {};
+          existingConfig.agent[agentName].permission = newPermission;
+          writeConfig(existingConfig, permissionSource.path);
+          console.log(`Updated permission in JSON: ${permissionSource.path}`);
+        }
       } else {
-        if ((mdExists || creatingNewMd) && mdData) {
+        if (mdExists && mdData) {
           mdData.frontmatter.permission = newPermission;
           mdModified = true;
         } else if (hasJsonFields) {
@@ -507,9 +517,7 @@ function updateAgent(agentName, updates, workingDirectory) {
           config.agent[agentName].permission = newPermission;
           jsonModified = true;
         } else {
-          const writeTarget = workingDirectory
-            ? { config: layers.projectConfig || {}, path: layers.paths.projectPath || layers.paths.userPath }
-            : { config: layers.userConfig || {}, path: layers.paths.userPath };
+          const writeTarget = getJsonWriteTarget(layers, AGENT_SCOPE.USER);
           if (!writeTarget.config.agent) writeTarget.config.agent = {};
           if (!writeTarget.config.agent[agentName]) writeTarget.config.agent[agentName] = {};
           writeTarget.config.agent[agentName].permission = newPermission;

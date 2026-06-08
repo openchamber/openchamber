@@ -306,6 +306,23 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  /**
+   * Ask the webview to run the full OpenCode reload flow (overlay + managed
+   * restart via the bridge + config/data refresh) — the same flow used after an
+   * OpenCode update. Returns false if no webview is resolved to drive it.
+   */
+  public reloadOpenCode(): boolean {
+    if (!this._view) {
+      return false;
+    }
+
+    this._view.webview.postMessage({
+      type: 'command',
+      command: 'reloadOpenCode',
+    });
+    return true;
+  }
+
   public notifyWindowFocusChanged(focused: boolean): void {
     if (!this._view) {
       return;
