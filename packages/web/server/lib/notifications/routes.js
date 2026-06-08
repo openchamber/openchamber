@@ -47,6 +47,8 @@ export const registerNotificationRoutes = (app, dependencies) => {
     markUserMessageSent,
     setPushInitialized,
     setAutoAcceptSession,
+    setYoloSuppression,
+    getYoloSuppression,
   } = dependencies;
 
   const ensureSessionWatcher = async () => {
@@ -313,5 +315,30 @@ export const registerNotificationRoutes = (app, dependencies) => {
       setAutoAcceptSession(sessionId, enabled);
     }
     return res.json({ success: true, sessionId, enabled });
+  });
+
+  // Mirror client-side YOLO mode to the server so it can silence every
+  // notification trigger (completion, error, question, permission) at the
+  // source. Permission auto-accept is per-session and only covers the
+  // permission.asked path; this is the global flow-mode kill switch.
+  app.get('/api/notifications/yolo-suppress', (_req, res) => {
+    const enabled = typeof getYoloSuppression === 'function' ? getYoloSuppression() : false;
+    return res.json({ enabled });
+  });
+
+  app.post('/api/notifications/yolo-suppress', async (req, res) => {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const enabled = body.enabled === true;
+    if (typeof setYoloSuppression === 'function') {
+      setYoloSuppression(enabled);
+    }
+    // Persist to disk so the flag survives server restarts and page reloads.
+    try {
+      const settings = (await readSettingsFromDiskMigrated()) || {};
+      await writeSettingsToDisk({ ...settings, yolo: enabled });
+    } catch {
+      /* best-effort: in-memory flag still works for current session */
+    }
+    return res.json({ success: true, enabled });
   });
 };

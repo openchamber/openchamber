@@ -671,6 +671,8 @@ const notificationTriggerRuntime = createNotificationTriggerRuntime({
 
 const maybeSendPushForTrigger = (...args) => notificationTriggerRuntime.maybeSendPushForTrigger(...args);
 const setAutoAcceptSession = (...args) => notificationTriggerRuntime.setAutoAcceptSession(...args);
+const setYoloSuppression = (...args) => notificationTriggerRuntime.setYoloSuppression(...args);
+const getYoloSuppression = (...args) => notificationTriggerRuntime.getYoloSuppression(...args);
 
 const globalMessageStreamHub = createGlobalMessageStreamHub({
   buildOpenCodeUrl,
@@ -1104,6 +1106,20 @@ async function main(options = {}) {
   server = http.createServer(app);
 
   const uiPassword = typeof options.uiPassword === 'string' ? options.uiPassword : null;
+
+  // Initialize YOLO suppression from persisted settings BEFORE routes register
+  // or the OpenCode event watcher starts — eliminates the startup-race window
+  // where a notification-debounce timer could be set while yoloSuppressed is
+  // still false (async IIFE in registerNotificationRoutes can't block startup).
+  try {
+    const settings = await readSettingsFromDiskMigrated();
+    if (settings?.yolo === true) {
+      setYoloSuppression(true);
+    }
+  } catch {
+    /* best-effort: defaults to no suppression */
+  }
+
   const bootstrapResult = bootstrapRuntime.setupBaseRoutes(app, {
     process,
     openchamberVersion: OPENCHAMBER_VERSION,
@@ -1171,6 +1187,8 @@ async function main(options = {}) {
     fetchFreeZenModels,
     getCachedZenModels,
     setAutoAcceptSession,
+    setYoloSuppression,
+    getYoloSuppression,
   });
   uiAuthController = bootstrapResult.uiAuthController;
 

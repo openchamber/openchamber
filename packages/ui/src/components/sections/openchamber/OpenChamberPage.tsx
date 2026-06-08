@@ -12,6 +12,7 @@ import { TunnelSettings } from './TunnelSettings';
 import { OpenCodeCliSettings } from './OpenCodeCliSettings';
 import { DesktopNetworkSettings } from './DesktopNetworkSettings';
 import { KeyboardShortcutsSettings } from './KeyboardShortcutsSettings';
+import { PermissionsSettings } from './PermissionsSettings';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useDeviceInfo } from '@/lib/device';
 import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
@@ -100,6 +101,8 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
                 return <VoiceSectionContent />;
             case 'tunnel':
                 return <TunnelSectionContent />;
+            case 'permissions':
+                return <PermissionsSectionContent />;
             default:
                 return null;
         }
@@ -209,4 +212,8 @@ const TunnelSectionContent: React.FC = () => {
         return null;
     }
     return <TunnelSettings />;
+};
+
+const PermissionsSectionContent: React.FC = () => {
+    return <PermissionsSettings />;
 };

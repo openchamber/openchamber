@@ -1759,4 +1759,13 @@ export const settingsDict = {
   'settings.promptTemplates.page.toast.created': '템플릿이 생성되었습니다',
   'settings.promptTemplates.page.toast.createFailed': '템플릿 생성 실패',
   'settings.promptTemplates.page.toast.saveUnexpectedError': '저장 중 예기치 않은 오류가 발생했습니다',
+  'settings.page.permissions.title': 'Permissions',
+  'settings.permissions.yolo.section.title': 'Permission Auto-Approve',
+  'settings.permissions.yolo.section.description': 'Skip permission prompts across all sessions. Explicit deny rules are still respected.',
+  'settings.permissions.yolo.toggle.aria': 'YOLO mode (auto-approve permissions)',
+  'settings.permissions.yolo.toggle.label': 'YOLO mode',
+  'settings.permissions.yolo.toggle.description': 'Auto-approve every "ask" permission prompt globally. Resets only when you turn it off.',
+  'settings.permissions.yolo.warning.active': 'Active. The agent will run tool calls without prompting you.',
+  'settings.permissions.yolo.confirm.enable': 'YOLO mode auto-approves every permission prompt. Use only in disposable environments. Continue?',
+  'settings.permissions.yolo.error.label': 'Failed: {message}',
 } as const;

@@ -1747,4 +1747,13 @@ export const settingsDict = {
   'settings.voice.page.tooltip.sttBrowser': 'Web Speech API (Chrome/Edge). Darmowe, bez konfiguracji.',
   'settings.voice.page.tooltip.sttServer': 'Serwer Whisper zgodny z OpenAI. Lepsza dokładność, dowolny język.',
   'settings.window.description': 'Okno ustawień OpenChamber.',
+  'settings.page.permissions.title': 'Permissions',
+  'settings.permissions.yolo.section.title': 'Permission Auto-Approve',
+  'settings.permissions.yolo.section.description': 'Skip permission prompts across all sessions. Explicit deny rules are still respected.',
+  'settings.permissions.yolo.toggle.aria': 'YOLO mode (auto-approve permissions)',
+  'settings.permissions.yolo.toggle.label': 'YOLO mode',
+  'settings.permissions.yolo.toggle.description': 'Auto-approve every "ask" permission prompt globally. Resets only when you turn it off.',
+  'settings.permissions.yolo.warning.active': 'Active. The agent will run tool calls without prompting you.',
+  'settings.permissions.yolo.confirm.enable': 'YOLO mode auto-approves every permission prompt. Use only in disposable environments. Continue?',
+  'settings.permissions.yolo.error.label': 'Failed: {message}',
 };

@@ -48,6 +48,30 @@ export const createNotificationTriggerRuntime = (deps) => {
     }
   };
 
+  // Global YOLO notification suppression. Mirrored from the client-side
+  // useYoloStore via POST /api/notifications/yolo-suppress so the server
+  // silences ALL desktop/UI/push notifications while the user is in flow
+  // mode. Permission auto-accept is per-session and only covers the
+  // permission.asked trigger; this covers completion, error, question, and
+  // permission notifications across every session at once.
+  let yoloSuppressed = false;
+  const setYoloSuppression = (enabled) => {
+    yoloSuppressed = enabled === true;
+    if (yoloSuppressed) {
+      // Clear any pending debounce timers — a timer may have been set before
+      // the flag was armed (startup race, or toggle-on while debounce in flight).
+      for (const timer of pushQuestionDebounceTimers.values()) {
+        clearTimeout(timer);
+      }
+      pushQuestionDebounceTimers.clear();
+      for (const entry of pushPermissionDebounceTimers.values()) {
+        clearTimeout(entry.timer);
+      }
+      pushPermissionDebounceTimers.clear();
+    }
+  };
+  const getYoloSuppression = () => yoloSuppressed;
+
   const buildSessionDeepLinkUrl = (sessionId) => {
     if (!sessionId || typeof sessionId !== 'string') {
       return '/';
@@ -200,6 +224,10 @@ export const createNotificationTriggerRuntime = (deps) => {
 
   const maybeSendPushForTrigger = async (payload) => {
     if (!payload || typeof payload !== 'object') {
+      return;
+    }
+
+    if (yoloSuppressed) {
       return;
     }
 
@@ -372,6 +400,10 @@ export const createNotificationTriggerRuntime = (deps) => {
       const timer = setTimeout(async () => {
         pushQuestionDebounceTimers.delete(sessionId);
 
+        // YOLO may have been armed after the timer was set (startup race or
+        // runtime toggle). Check before dispatching.
+        if (yoloSuppressed) return;
+
         const settings = await readSettingsFromDisk();
         if (settings.notifyOnQuestion === false) {
           return;
@@ -490,6 +522,10 @@ export const createNotificationTriggerRuntime = (deps) => {
       const timer = setTimeout(async () => {
         pushPermissionDebounceTimers.delete(sessionId);
 
+        // YOLO may have been armed after the timer was set (startup race or
+        // runtime toggle). Check before dispatching.
+        if (yoloSuppressed) return;
+
         if (await isSessionAutoAccepting(sessionId)) {
           if (requestKey) notifiedPermissionRequests.add(requestKey);
           return;
@@ -577,6 +613,8 @@ export const createNotificationTriggerRuntime = (deps) => {
   return {
     maybeSendPushForTrigger,
     setAutoAcceptSession,
+    setYoloSuppression,
+    getYoloSuppression,
     setGetIsWindowFocused,
   };
 };

@@ -66,6 +66,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { createWorktreeDraft } from '@/lib/worktreeSessionCreator';
 import { buildSessionTargetOptions } from '@/sync/session-worktree-contract';
 import { usePermissionStore } from '@/stores/permissionStore';
+import { useYoloStore } from '@/stores/useYoloStore';
 import { extractGitChangedFiles } from './changedFiles';
 import { useI18n } from '@/lib/i18n';
 import { fetchResponseStyleInstruction } from '@/lib/responseStyle';
@@ -663,6 +664,102 @@ const PermissionAutoAcceptButton = React.memo(function PermissionAutoAcceptButto
             </TooltipTrigger>
             <TooltipContent side="top" sideOffset={8}>
                 {tooltipLabel}
+            </TooltipContent>
+        </Tooltip>
+    );
+});
+
+type YoloStatusPillProps = {
+    footerIconButtonClass: string;
+    iconSizeClass: string;
+};
+
+const YoloStatusPill = React.memo(function YoloStatusPill(props: YoloStatusPillProps) {
+    const { t } = useI18n();
+    const { footerIconButtonClass, iconSizeClass } = props;
+    const enabled = useYoloStore((state) => state.enabled);
+    const loading = useYoloStore((state) => state.loading);
+    const saving = useYoloStore((state) => state.saving);
+    const lastError = useYoloStore((state) => state.lastError);
+    const refresh = useYoloStore((state) => state.refresh);
+    const setEnabled = useYoloStore((state) => state.setEnabled);
+
+    React.useEffect(() => {
+        void refresh();
+    }, [refresh]);
+
+    const handleToggle = React.useCallback(() => {
+        if (saving || loading) return;
+        const next = !enabled;
+        // Mirror the first-enable confirmation guard from PermissionsSettings.tsx.
+        // A user who has never visited the Permissions page must confirm before
+        // YOLO mode silently auto-approves every permission prompt.
+        if (next && typeof window !== 'undefined' && !window.localStorage.getItem('openchamber.yolo.confirmed.v1')) {
+            const accepted = window.confirm(t('settings.permissions.yolo.confirm.enable'));
+            if (!accepted) {
+                return;
+            }
+            window.localStorage.setItem('openchamber.yolo.confirmed.v1', '1');
+        }
+        void setEnabled(next);
+    }, [enabled, loading, saving, setEnabled, t]);
+
+    const ariaLabel = enabled
+        ? t('chat.chatInput.yolo.disable')
+        : t('chat.chatInput.yolo.enable');
+
+    const tooltipLabel = enabled
+        ? t('chat.chatInput.yolo.on')
+        : t('chat.chatInput.yolo.off');
+
+    const button = (
+        <button
+            type="button"
+            onClick={handleToggle}
+            disabled={saving || loading}
+            className={cn(
+                footerIconButtonClass,
+                'rounded-md hover:bg-transparent',
+                !enabled && 'opacity-50',
+            )}
+            onMouseDown={(event) => {
+                event.preventDefault();
+            }}
+            onPointerDownCapture={(event) => {
+                if (event.pointerType === 'touch') {
+                    event.preventDefault();
+                    event.stopPropagation();
+                }
+            }}
+            aria-pressed={enabled}
+            aria-label={ariaLabel}
+            title={ariaLabel}
+        >
+            <Icon
+                name="shield-keyhole"
+                className={cn(iconSizeClass)}
+                style={enabled ? { color: 'var(--status-warning)' } : undefined}
+            />
+        </button>
+    );
+
+    return (
+        <Tooltip>
+            <TooltipTrigger asChild>
+                {button}
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={8}>
+                <div className="space-y-0.5">
+                    <div>{tooltipLabel}</div>
+                    {lastError ? (
+                        <div
+                            className="typography-meta"
+                            style={{ color: 'var(--status-error)' }}
+                        >
+                            {t('chat.chatInput.yolo.error', { message: lastError })}
+                        </div>
+                    ) : null}
+                </div>
             </TooltipContent>
         </Tooltip>
     );
@@ -4386,6 +4483,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                             permissionAutoAcceptEnabled={permissionAutoAcceptEnabled}
                                             handlePermissionAutoAcceptToggle={handlePermissionAutoAcceptToggle}
                                         />
+                                        <YoloStatusPill
+                                            footerIconButtonClass={footerIconButtonClass}
+                                            iconSizeClass={iconSizeClass}
+                                        />
                                     </div>
                                     <div className="flex items-center min-w-0 gap-x-1 justify-end">
                                         <div className="flex items-center gap-x-1 min-w-0 max-w-[60vw] flex-shrink">
@@ -4448,6 +4549,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                         permissionAutoAcceptEnabled={permissionAutoAcceptEnabled}
                                         handlePermissionAutoAcceptToggle={handlePermissionAutoAcceptToggle}
                                         withTooltip
+                                    />
+                                    <YoloStatusPill
+                                        footerIconButtonClass={footerIconButtonClass}
+                                        iconSizeClass={iconSizeClass}
                                     />
                                 </div>
                                 <div className={cn('flex items-center flex-1 justify-end', footerGapClass, 'md:gap-x-3')}>

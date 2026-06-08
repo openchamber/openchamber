@@ -98,6 +98,7 @@ const pageOrder: SettingsPageSlug[] = [
   'skills.catalog',
   'voice',
   'tunnel',
+  'permissions',
 ];
 
 const SNIPPETS_SETTINGS_ICON = { icon: 'chat-thread' } as const;
@@ -195,6 +196,8 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
       return 'mic';
     case 'tunnel':
       return 'global';
+    case 'permissions':
+      return 'shield';
     case 'home':
       return null;
     default:
@@ -446,6 +449,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     notifications: 'notifications',
     voice: 'voice',
     tunnel: 'tunnel',
+    permissions: 'permissions',
   }), []);
 
   const getPageTitle = React.useCallback((slug: SettingsPageSlug): string => {
@@ -492,6 +496,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return t('settings.page.voice.title');
       case 'tunnel':
         return t('settings.page.tunnel.title');
+      case 'permissions':
+        return t('settings.page.permissions.title');
       case 'home':
       default:
         return t('settings.view.home.title');
@@ -579,7 +585,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       case 'sessions':
       case 'notifications':
       case 'voice':
-      case 'tunnel': {
+      case 'tunnel':
+      case 'permissions': {
         const section = openChamberSectionBySlug[slug] ?? 'visual';
         return <OpenChamberPage section={section} />;
       }

@@ -29,6 +29,7 @@ import { syncDebug } from "./debug"
 import { getReconnectCandidateSessionIds } from "./reconnect-recovery"
 import { opencodeClient } from "@/lib/opencode/client"
 import { usePermissionStore } from "@/stores/permissionStore"
+import { useYoloStore } from "@/stores/useYoloStore"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { toast } from "@/components/ui"
@@ -1332,6 +1333,16 @@ function handleEvent(
   if (payload.type === "permission.asked") {
     const permission = payload.properties as PermissionRequest
     const permissionStore = usePermissionStore.getState()
+
+    // YOLO mode: auto-approve every permission silently — no toast, no dialog.
+    if (useYoloStore.getState().enabled) {
+      if (permission.sessionID && permission.id) {
+        updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload)
+        void sessionActions.respondToPermission(permission.sessionID, permission.id, "once").catch(() => undefined)
+      }
+      return
+    }
+
     if (permissionStore.isSessionAutoAccepting(permission.sessionID)) {
       updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload)
       void sessionActions.respondToPermission(permission.sessionID, permission.id, "once").catch(() => undefined)

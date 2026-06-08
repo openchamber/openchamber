@@ -49,6 +49,8 @@ export const createBootstrapRuntime = (dependencies) => {
       fetchFreeZenModels,
       getCachedZenModels,
       setAutoAcceptSession,
+      setYoloSuppression,
+      getYoloSuppression,
     } = options;
 
     registerServerStatusRoutes(app, {
@@ -107,6 +109,8 @@ export const createBootstrapRuntime = (dependencies) => {
       markUserMessageSent: sessionRuntime.markUserMessageSent,
       setPushInitialized,
       setAutoAcceptSession,
+      setYoloSuppression,
+      getYoloSuppression,
     });
 
     registerOpenChamberRoutes(app, {

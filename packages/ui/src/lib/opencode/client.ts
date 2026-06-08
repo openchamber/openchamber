@@ -1257,6 +1257,27 @@ class OpencodeService {
     return result;
   }
 
+  // YOLO mode (OpenCode `yolo: true` config field).
+  // SDK v1.15.10 does not yet expose `yolo` on its `Config` type, so the
+  // value is read/written via the `Record<string, unknown>` cast on
+  // `updateConfig` (documented SDK gap). The OpenCode server merges unknown
+  // top-level fields, so this round-trips as long as the running server
+  // version supports yolo (PR anomalyco/opencode#11833, merged 2026-02).
+  async getYoloStatus(): Promise<boolean> {
+    const config = await this.getConfig();
+    const raw = (config as unknown as Record<string, unknown>).yolo;
+    return raw === true;
+  }
+
+  async setYolo(enabled: boolean): Promise<Config> {
+    return this.updateConfigPartial((current) => {
+      return {
+        ...current,
+        yolo: enabled,
+      } as unknown as Config;
+    });
+  }
+
   async getProviders(): Promise<{
     providers: Provider[];
     default: { [key: string]: string };
