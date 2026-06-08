@@ -800,6 +800,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const [loadedFileLineEnding, setLoadedFileLineEnding] = React.useState<FileLineEnding>('\n');
   const dialogInputRef = React.useRef<HTMLInputElement>(null);
   const autoSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const diagramAutoSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const diagramXmlRef = React.useRef('');
+  const diagramSavedXmlRef = React.useRef('');
   const diagramEditorRef = React.useRef<React.ComponentRef<typeof DiagramEditor>>(null);
   const lastLoadedFileStatRef = React.useRef<FileStatSnapshot | null>(null);
   const activeFileLoadIdRef = React.useRef(0);
@@ -1508,6 +1511,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         return false;
       }
       setFileContent(draftContent);
+      if (selectedFile?.path && isDrawioFile(selectedFile.path)) {
+        diagramXmlRef.current = draftContent;
+        diagramSavedXmlRef.current = draftContent;
+      }
       // Refresh stat after write so polling doesn't see a stale metadata change.
       void readFileStat(selectedFile.path)
         .then((stat) => {
@@ -1681,6 +1688,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         const editorContent = normalizeEditorLineEndings(content);
         setLoadedFileLineEnding(detectFileLineEnding(content));
         setFileContent(editorContent);
+        diagramXmlRef.current = editorContent;
+        diagramSavedXmlRef.current = editorContent;
         setDraftContent(editorContent.length > MAX_VIEW_CHARS
           ? `${editorContent.slice(0, MAX_VIEW_CHARS)}\n\n… truncated …`
           : editorContent);
@@ -1799,6 +1808,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     setFileError(null);
     setDesktopImageSrc('');
     setFileContent('');
+    diagramXmlRef.current = '';
+    diagramSavedXmlRef.current = '';
     setDraftContent('');
     setLoadedFilePath(null);
     if (isMobile) {
@@ -2295,8 +2306,64 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     if (selectedPath) {
       drawioViewModeByPathRef.current[selectedPath] = mode;
     }
+    if (mode === 'edit') {
+      setDraftContent(diagramXmlRef.current || fileContent);
+    }
     setDrawioViewMode(mode);
-  }, [selectedFile?.path]);
+  }, [fileContent, selectedFile?.path]);
+
+  const saveDiagramXml = React.useCallback(async (path: string, xml: string) => {
+    if (!files.writeFile || xml === diagramSavedXmlRef.current) {
+      return false;
+    }
+
+    const result = await files.writeFile(path, xml);
+    if (!result?.success) {
+      toast.error(t('filesView.toast.writeFileFailed'));
+      return false;
+    }
+
+    diagramXmlRef.current = xml;
+    diagramSavedXmlRef.current = xml;
+    setDraftContent(xml);
+    const stat = await readFileStat(path, selectedFileReadOptions).catch(() => null);
+    if (stat) {
+      lastLoadedFileStatRef.current = stat;
+    }
+    return true;
+  }, [files, readFileStat, selectedFileReadOptions, t]);
+
+  React.useEffect(() => {
+    return () => {
+      if (diagramAutoSaveTimerRef.current) {
+        clearTimeout(diagramAutoSaveTimerRef.current);
+        diagramAutoSaveTimerRef.current = null;
+      }
+    };
+  }, [drawioViewMode, selectedFile?.path]);
+
+  const handleDiagramChange = React.useCallback((xml: string) => {
+    diagramXmlRef.current = xml;
+    if (!selectedFile?.path || drawioViewMode !== 'preview' || !files.writeFile) {
+      return;
+    }
+
+    if (diagramAutoSaveTimerRef.current) {
+      clearTimeout(diagramAutoSaveTimerRef.current);
+    }
+
+    const path = selectedFile.path;
+    diagramAutoSaveTimerRef.current = setTimeout(() => {
+      diagramAutoSaveTimerRef.current = null;
+      void saveDiagramXml(path, xml).then((saved) => {
+        if (!saved) return;
+        setDiagramSaved(true);
+        setTimeout(() => setDiagramSaved(false), 1500);
+      }).catch((error) => {
+        toast.error(error instanceof Error ? error.message : t('filesView.toast.saveFailed'));
+      });
+    }, AUTO_SAVE_DELAY);
+  }, [drawioViewMode, files.writeFile, saveDiagramXml, selectedFile?.path, t]);
 
   const getHtmlViewMode = React.useCallback((): PreviewViewMode => {
     return htmlViewMode;
@@ -2985,10 +3052,15 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                 size="sm"
                 onClick={async () => {
                   const xml = diagramEditorRef.current?.getXml();
-                  if (selectedFile?.path && xml && files.writeFile && xml !== fileContent) {
+                  if (diagramAutoSaveTimerRef.current) {
+                    clearTimeout(diagramAutoSaveTimerRef.current);
+                    diagramAutoSaveTimerRef.current = null;
+                  }
+                  if (selectedFile?.path && xml) {
+                    const saved = await saveDiagramXml(selectedFile.path, xml);
+                    if (!saved) return;
                     setDiagramSaved(true);
                     setTimeout(() => setDiagramSaved(false), 1500);
-                    await files.writeFile(selectedFile.path, xml);
                   }
                 }}
                 className="size-6 p-0 text-foreground hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
@@ -3376,6 +3448,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
               <DiagramEditor
                 ref={diagramEditorRef}
                 xml={fileContent}
+                onChange={handleDiagramChange}
               />
             </div>
           ) : selectedFile && isJson && jsonViewMode === 'tree' ? (
