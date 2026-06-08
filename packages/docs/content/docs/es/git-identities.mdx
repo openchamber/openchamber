@@ -1,0 +1,30 @@
+---
+title: Identidades de Git
+description: Haz commit con el nombre y correo correctos para cada repositorio.
+---
+
+# Identidades de Git
+
+Una identidad de git es el nombre y el correo con los que se firman tus commits. Si trabajas en repos personales y de trabajo, puedes guardar identidades y aplicar la correcta en cada repositorio, en lugar de depender de un único ajuste global. Gestiónalas en **Settings → Git**.
+
+## Añade una identidad
+
+1. Abre **Settings → Git** y elige **New**.
+2. Introduce el **nombre** y el **correo** con los que harás commit.
+3. Elige cómo se autentica con el remoto:
+   - **SSH** — apúntala a una clave SSH
+   - **token** — usa una credencial guardada para un host
+4. Opcionalmente, dale un color y un icono para reconocerla fácilmente.
+
+La identidad global de tu sistema también se muestra, como solo lectura.
+
+## Aplica una identidad a un repo
+
+Al aplicar una identidad se escribe en la configuración **local** de git de ese repositorio: solo afecta a ese repo, no a tu ajuste global. Las identidades SSH también configuran el comando SSH para usar tu clave; las identidades de token configuran el almacenamiento de credenciales para el host.
+
+Puedes importar identidades que OpenChamber descubre a partir de tus credenciales de git existentes y guardarlas como identidades de token.
+
+## Relacionado
+
+- [Flujos de trabajo de Git y GitHub](/es/git/) — haz commit con la identidad que configures
+- [Issues y PRs de GitHub](/es/github/) — conecta una cuenta de GitHub para los PRs

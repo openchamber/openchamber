@@ -10,7 +10,7 @@ import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { cn } from '@/lib/utils';
-import { isDesktopLocalOriginActive, isTauriShell, openDesktopPath, openDesktopProjectInApp } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isDesktopShell, openDesktopPath, openDesktopProjectInApp } from '@/lib/desktop';
 import { DEFAULT_OPEN_IN_APP_ID, OPEN_IN_APPS } from '@/lib/openInApps';
 import { useOpenInAppsStore, type OpenInAppOption } from '@/stores/useOpenInAppsStore';
 import { useI18n } from '@/lib/i18n';
@@ -24,7 +24,7 @@ type OpenInAppOptionWithFallback = OpenInAppOption & {
 
 const withFallbackIcon = (app: OpenInAppOption): OpenInAppOptionWithFallback => ({
   ...app,
-  fallbackIconDataUrl: app.id === 'finder'
+  fallbackIconDataUrl: app.id === 'finder' && window.__OPENCHAMBER_PLATFORM__ !== 'win32'
     ? FINDER_DEFAULT_ICON_DATA_URL
     : app.id === 'terminal'
       ? TERMINAL_DEFAULT_ICON_DATA_URL
@@ -87,7 +87,7 @@ export const OpenInAppButton = ({ directory, className }: OpenInAppButtonProps) 
     initialize();
   }, [initialize]);
 
-  const isDesktopLocal = isTauriShell() && isDesktopLocalOriginActive();
+  const isDesktopLocal = isDesktopShell() && isDesktopLocalOriginActive();
 
   const selectedApp = React.useMemo(() => {
     const known = availableApps.find((app) => app.id === selectedAppId)
@@ -142,8 +142,9 @@ export const OpenInAppButton = ({ directory, className }: OpenInAppButtonProps) 
         type="button"
         onClick={() => void handleOpen(selectedApp)}
         className={cn(
-          'inline-flex h-full items-center gap-2 px-3 typography-ui-label font-medium',
-          'text-foreground hover:bg-interactive-hover transition-colors'
+          'inline-flex h-full items-center px-2.5 typography-ui-label font-medium',
+          'text-foreground hover:bg-interactive-hover transition-colors',
+          isScanning && 'animate-pulse'
         )}
         aria-label={t('openInApp.actions.openInAria', { app: selectedApp.label })}
       >
@@ -152,9 +153,6 @@ export const OpenInAppButton = ({ directory, className }: OpenInAppButtonProps) 
           iconDataUrl={selectedApp.iconDataUrl}
           fallbackIconDataUrl={selectedApp.fallbackIconDataUrl}
         />
-        <span className={cn('header-open-label', isScanning ? 'animate-pulse text-muted-foreground' : undefined)}>
-          {t('openInApp.actions.open')}
-        </span>
       </button>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -171,9 +169,8 @@ export const OpenInAppButton = ({ directory, className }: OpenInAppButtonProps) 
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent
-          align="center"
+          align="end"
           className="w-56 max-h-[70vh] overflow-y-auto"
-          style={{ translate: '-30px 0' }}
         >
           <DropdownMenuItem className="flex items-center gap-2" onClick={() => void handleCopyPath()}>
             <Icon name="file-copy" className="h-4 w-4" />

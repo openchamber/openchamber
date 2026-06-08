@@ -438,6 +438,44 @@ export const createSettingsRuntime = (deps) => {
     }
   };
 
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const isTransientWindowsReplaceError = (error) => {
+    if (process.platform !== 'win32' || !error || typeof error !== 'object') {
+      return false;
+    }
+    return error.code === 'EPERM' || error.code === 'EACCES' || error.code === 'EBUSY';
+  };
+
+  const replaceFile = async (tmp, target) => {
+    const maxAttempts = process.platform === 'win32' ? 6 : 1;
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        await fsPromises.rename(tmp, target);
+        return;
+      } catch (error) {
+        lastError = error;
+        if (!isTransientWindowsReplaceError(error) || attempt === maxAttempts) {
+          break;
+        }
+        await sleep(25 * attempt);
+      }
+    }
+
+    if (!isTransientWindowsReplaceError(lastError)) {
+      throw lastError;
+    }
+
+    // Windows can transiently reject atomic replacement when another process
+    // briefly opens the target file. Preserve atomic rename everywhere it works,
+    // but fall back to a direct replacement so settings persistence does not
+    // get permanently wedged on Windows desktop installs.
+    await fsPromises.copyFile(tmp, target);
+    await fsPromises.rm(tmp, { force: true });
+  };
+
   const writeSettingsToDisk = async (settings) => {
     try {
       await fsPromises.mkdir(path.dirname(SETTINGS_FILE_PATH), { recursive: true });
@@ -447,7 +485,7 @@ export const createSettingsRuntime = (deps) => {
       // read-modify-write wipe the settings file.
       const tmp = `${SETTINGS_FILE_PATH}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       await fsPromises.writeFile(tmp, JSON.stringify(settings, null, 2), 'utf8');
-      await fsPromises.rename(tmp, SETTINGS_FILE_PATH);
+      await replaceFile(tmp, SETTINGS_FILE_PATH);
     } catch (error) {
       console.warn('Failed to write settings file:', error);
       throw error;

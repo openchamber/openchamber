@@ -1,7 +1,7 @@
 import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import type { OpenCodeManager } from './opencode';
 
-// Session activity tracking (mirrors web server and desktop Tauri behavior)
+// Session activity tracking (mirrors web server and desktop behavior)
 type ActivityPhase = 'idle' | 'busy' | 'cooldown';
 
 interface SessionActivity {
@@ -24,6 +24,19 @@ const clearGlobalEventWatcherRetry = (): void => {
   }
   clearTimeout(globalEventWatcherRetryTimer);
   globalEventWatcherRetryTimer = null;
+};
+
+const unwrapGlobalEventPayload = (eventData: unknown): Record<string, unknown> | null => {
+  if (!eventData || typeof eventData !== 'object') {
+    return null;
+  }
+
+  const record = eventData as { payload?: unknown };
+  if (record.payload && typeof record.payload === 'object') {
+    return record.payload as Record<string, unknown>;
+  }
+
+  return eventData as Record<string, unknown>;
 };
 
 const reconcileSessionActivityFromStatus = async (manager: OpenCodeManager): Promise<void> => {
@@ -61,7 +74,6 @@ const reconcileSessionActivityFromStatus = async (manager: OpenCodeManager): Pro
 const setSessionActivityPhase = (sessionId: string, phase: ActivityPhase): void => {
   if (!sessionId) return;
 
-  // Cancel existing cooldown timer
   const existingTimer = sessionActivityCooldowns.get(sessionId);
   if (existingTimer) {
     clearTimeout(existingTimer);
@@ -69,36 +81,30 @@ const setSessionActivityPhase = (sessionId: string, phase: ActivityPhase): void 
   }
 
   const current = sessionActivityPhases.get(sessionId);
-  if (current?.phase === phase) return; // No change
+  if (current?.phase === phase) return;
 
   sessionActivityPhases.set(sessionId, { phase, updatedAt: Date.now() });
 
-  // Notify webview if available
-  if (chatViewProvider) {
-    chatViewProvider.postMessage({
-      type: 'openchamber:session-activity',
-      properties: {
-        sessionId,
-        phase,
-      },
-    });
-  }
+  chatViewProvider?.postMessage({
+    type: 'openchamber:session-activity',
+    properties: {
+      sessionId,
+      phase,
+    },
+  });
 
-  // Schedule transition from cooldown to idle
   if (phase === 'cooldown') {
     const timer = setTimeout(() => {
       const now = sessionActivityPhases.get(sessionId);
       if (now?.phase === 'cooldown') {
         sessionActivityPhases.set(sessionId, { phase: 'idle', updatedAt: Date.now() });
-        if (chatViewProvider) {
-          chatViewProvider.postMessage({
-            type: 'openchamber:session-activity',
-            properties: {
-              sessionId,
-              phase: 'idle',
-            },
-          });
-        }
+        chatViewProvider?.postMessage({
+          type: 'openchamber:session-activity',
+          properties: {
+            sessionId,
+            phase: 'idle',
+          },
+        });
       }
       sessionActivityCooldowns.delete(sessionId);
     }, SESSION_COOLDOWN_DURATION_MS);
@@ -230,22 +236,19 @@ export const startGlobalEventWatcher = async (
         const result = await client.global.event({
           signal,
           sseMaxRetryAttempts: 0,
-          onSseEvent: (event) => {
-            const payload = event.data;
-            if (!payload || typeof payload !== 'object') {
-              return;
-            }
-            const activity = deriveSessionActivity(payload as Record<string, unknown>);
-            if (activity) {
-              setSessionActivityPhase(activity.sessionId, activity.phase);
-            }
-          },
         });
 
         console.log('[VSCode:Activity] connected');
 
-        for await (const _ of result.stream) {
-          void _;
+        for await (const event of result.stream) {
+          const payload = unwrapGlobalEventPayload((event as { payload?: unknown }).payload ?? event);
+          if (payload) {
+            const activity = deriveSessionActivity(payload);
+            if (activity) {
+              setSessionActivityPhase(activity.sessionId, activity.phase);
+            }
+          }
+
           if (signal.aborted) {
             break;
           }
@@ -279,7 +282,6 @@ export const stopGlobalEventWatcher = (): void => {
   globalEventWatcherAbortController = null;
   chatViewProvider = null;
 
-  // Clear all cooldown timers
   for (const timer of sessionActivityCooldowns.values()) {
     clearTimeout(timer);
   }

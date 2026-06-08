@@ -189,6 +189,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
             placeholder={t('gitView.branch.searchPlaceholder')}
             value={search}
             onValueChange={setSearch}
+            onKeyDown={stopDropdownTypeahead}
           />
           <CommandList
             scrollbarClassName="overlay-scrollbar--flush overlay-scrollbar--dense overlay-scrollbar--zero"

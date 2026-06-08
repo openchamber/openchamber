@@ -6,8 +6,7 @@ const HEARTBEAT_MS = 20000;
 
 const resolveVisibilityState = (): 'visible' | 'hidden' => {
   if (typeof document === 'undefined') return 'visible';
-  const state = document.visibilityState;
-  return state === 'hidden' && document.hasFocus() ? 'visible' : state;
+  return document.visibilityState === 'visible' && document.hasFocus() ? 'visible' : 'hidden';
 };
 
 const sendVisibility = (visible: boolean) => {

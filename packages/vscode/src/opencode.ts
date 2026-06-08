@@ -10,6 +10,11 @@ import { randomBytes } from 'crypto';
 import { normalizeWindowsDriveLetter } from './pathUtils';
 
 const READY_CHECK_TIMEOUT_MS = 30000;
+const WINDOWS_EXECUTABLE_EXTENSIONS = (process.env.PATHEXT || '.EXE;.CMD;.BAT;.COM')
+  .split(';')
+  .map((ext) => ext.trim().toLowerCase())
+  .filter(Boolean)
+  .map((ext) => (ext.startsWith('.') ? ext : `.${ext}`));
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
 export type OpenCodeDebugInfo = {
@@ -139,15 +144,18 @@ function findExecutableInPath(binaryName: string): string | null {
     return null;
   }
 
+  const extensions = process.platform === 'win32' ? WINDOWS_EXECUTABLE_EXTENSIONS : [''];
   for (const segment of current.split(path.delimiter)) {
     const dir = segment.trim();
     if (!dir) {
       continue;
     }
 
-    const candidate = path.join(dir, trimmed);
-    if (isExecutable(candidate)) {
-      return candidate;
+    for (const ext of extensions) {
+      const candidate = path.join(dir, process.platform === 'win32' ? `${trimmed}${ext}` : trimmed);
+      if (isExecutable(candidate)) {
+        return candidate;
+      }
     }
   }
 
@@ -309,14 +317,18 @@ function resolveOpencodeCliPath(): string | null {
 
   const winFallbacks = (() => {
     const userProfile = process.env.USERPROFILE || home;
-    const appData = process.env.APPDATA || '';
+    const appData = process.env.APPDATA || path.join(userProfile, 'AppData', 'Roaming');
     const localAppData = process.env.LOCALAPPDATA || '';
     const programData = process.env.ProgramData || 'C:\\ProgramData';
+    const npmDir = path.join(appData, 'npm');
 
     return [
       path.join(userProfile, '.opencode', 'bin', 'opencode.exe'),
       path.join(userProfile, '.opencode', 'bin', 'opencode.cmd'),
-      path.join(appData, 'npm', 'opencode.cmd'),
+      path.join(npmDir, 'node_modules', 'opencode-ai', 'bin', 'opencode.exe'),
+      path.join(npmDir, 'opencode.exe'),
+      path.join(npmDir, 'opencode.cmd'),
+      path.join(npmDir, 'opencode.bat'),
       path.join(userProfile, 'scoop', 'shims', 'opencode.cmd'),
       path.join(programData, 'chocolatey', 'bin', 'opencode.exe'),
       path.join(programData, 'chocolatey', 'bin', 'opencode.cmd'),
@@ -345,6 +357,12 @@ function resolveOpencodeCliPath(): string | null {
   }
 
   if (process.platform === 'win32') {
+    const fromPath = findExecutableInPath('opencode');
+    if (fromPath) {
+      cachedDetectedOpencodeCliPath = fromPath;
+      return fromPath;
+    }
+
     try {
       const result = spawnSync('where', ['opencode'], {
         encoding: 'utf8',
@@ -549,7 +567,7 @@ async function waitForReady(
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 3000);
 
-        // OpenCode readiness check.
+        // OpenCode readiness check. Use /global/health for OpenCode 1.15.x compatibility.
         const url = new URL(`${baseUrl}/global/health`);
         const res = await fetch(url.toString(), {
           method: 'GET',
@@ -1048,16 +1066,17 @@ export function createOpenCodeManager(_context: vscode.ExtensionContext): OpenCo
     getApiUrl,
     getOpenCodeAuthHeaders,
     getWorkingDirectory: () => workingDirectory,
-    isCliAvailable: () => !cliMissing,
+    isCliAvailable: () => !cliMissing || Boolean(cliPath || resolveOpencodeCliPath()),
     getDebugInfo: () => {
       const secureConnection = Boolean(getOpenCodeAuthHeaders().Authorization);
+      const detectedCliPath = cliPath || resolveOpencodeCliPath();
       return {
         mode: useConfiguredUrl && configuredApiUrl ? 'external' : 'managed',
         status,
         lastError,
         workingDirectory,
-        cliAvailable: !cliMissing,
-        cliPath,
+        cliAvailable: !cliMissing || Boolean(detectedCliPath),
+        cliPath: detectedCliPath,
         configuredApiUrl: useConfiguredUrl && configuredApiUrl ? configuredApiUrl.replace(/\/+$/, '') : null,
         configuredPort,
         detectedPort,

@@ -4,7 +4,10 @@ import type { Part } from '@opencode-ai/sdk/v2';
 import type { AgentMentionInfo } from '../types';
 import { SimpleMarkdownRenderer } from '../../MarkdownRenderer';
 import { useUIStore } from '@/stores/useUIStore';
+import { useSkillsStore } from '@/stores/useSkillsStore';
 import { Icon } from "@/components/icon/Icon";
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { getDirectoryForFilePath } from '@/lib/path-utils';
 
 type PartWithText = Part & { text?: string; content?: string; value?: string };
 
@@ -20,6 +23,20 @@ const buildMentionUrl = (name: string): string => {
     return `https://opencode.ai/docs/agents/#${encoded}`;
 };
 
+const SKILL_TOKEN_PATTERN = /(^|\s)\/([a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)/g;
+const SKILL_LINK_PREFIX = '#openchamber-skill:';
+
+const buildSkillHref = (name: string): string => `${SKILL_LINK_PREFIX}${encodeURIComponent(name)}`;
+
+const parseSkillHref = (href: string | null | undefined): string | null => {
+    if (!href?.startsWith(SKILL_LINK_PREFIX)) return null;
+    try {
+        return decodeURIComponent(href.slice(SKILL_LINK_PREFIX.length));
+    } catch {
+        return null;
+    }
+};
+
 const escapeHtml = (text: string): string => {
     return text
         .replace(/&/g, '&amp;')
@@ -33,6 +50,16 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
+// In Markdown a single "\n" is a soft break (rendered as a space). Users type plain
+// text where each newline is meant literally, so convert soft breaks into hard breaks
+// (two trailing spaces) outside of fenced code blocks, where newlines are already literal.
+const applyHardLineBreaks = (markdown: string): string => {
+    return markdown
+        .split(/(```[\s\S]*?```|~~~[\s\S]*?~~~)/g)
+        .map((segment, index) => (index % 2 === 1 ? segment : segment.replace(/ *\n/g, '  \n')))
+        .join('');
+};
+
 const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMention }) => {
     const partWithText = part as PartWithText;
     const rawText = partWithText.text;
@@ -41,8 +68,18 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
     const [isExpanded, setIsExpanded] = React.useState(false);
     const [isTruncated, setIsTruncated] = React.useState(false);
     const userMessageRenderingMode = useUIStore((state) => state.userMessageRenderingMode);
+    const skills = useSkillsStore((state) => state.skills);
+    const openContextFile = useUIStore((state) => state.openContextFile);
+    const effectiveDirectory = useEffectiveDirectory();
     const normalizedRenderingMode = normalizeUserMessageRenderingMode(userMessageRenderingMode);
     const textRef = React.useRef<HTMLDivElement>(null);
+    const skillByName = React.useMemo(() => new Map(skills.map((skill) => [skill.name, skill])), [skills]);
+
+    const openSkill = React.useCallback((name: string) => {
+        const skill = skillByName.get(name);
+        if (!skill?.path) return;
+        openContextFile(effectiveDirectory || getDirectoryForFilePath('', skill.path) || '/', skill.path);
+    }, [effectiveDirectory, openContextFile, skillByName]);
 
     const hasActiveSelectionInElement = React.useCallback((element: HTMLElement): boolean => {
         if (typeof window === 'undefined') {
@@ -76,7 +113,18 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
         return () => resizeObserver.disconnect();
     }, [textContent, isExpanded]);
 
-    const handleClick = React.useCallback(() => {
+    const handleClick = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+        const target = event.target as HTMLElement | null;
+        const skillLink = target?.closest<HTMLElement>('[data-skill-name]');
+        const skillName = skillLink?.dataset.skillName
+            ?? parseSkillHref(target?.closest<HTMLAnchorElement>('a[href]')?.getAttribute('href'));
+        if (skillName) {
+            event.preventDefault();
+            event.stopPropagation();
+            openSkill(skillName);
+            return;
+        }
+
         const element = textRef.current;
         if (!element) {
             return;
@@ -89,7 +137,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
         if (!isExpanded && isTruncated) {
             setIsExpanded(true);
         }
-    }, [hasActiveSelectionInElement, isExpanded, isTruncated]);
+    }, [hasActiveSelectionInElement, isExpanded, isTruncated, openSkill]);
 
     const handleCollapse = React.useCallback((event: React.MouseEvent) => {
         event.stopPropagation();
@@ -108,21 +156,64 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
             content = content.replace(agentMention.token, mentionHtml);
         }
 
+        content = content.replace(SKILL_TOKEN_PATTERN, (match, prefix: string, skillName: string) => {
+            if (!skillByName.has(skillName)) return match;
+            return `${prefix}[/${skillName}](${buildSkillHref(skillName)})`;
+        });
+
+        // Step 4: Preserve user newlines (markdown soft breaks would otherwise collapse to spaces)
+        content = applyHardLineBreaks(content);
+
         return content;
-    }, [agentMention, textContent]);
+    }, [agentMention, skillByName, textContent]);
 
     const plainTextContent = React.useMemo(() => {
-        if (!agentMention?.token || !textContent.includes(agentMention.token)) {
-            return textContent;
+        const nodes: React.ReactNode[] = [];
+        let cursor = 0;
+        let agentMentionUsed = false;
+        let match: RegExpExecArray | null;
+        SKILL_TOKEN_PATTERN.lastIndex = 0;
+
+        while ((match = SKILL_TOKEN_PATTERN.exec(textContent)) !== null) {
+            const prefix = match[1] || '';
+            const skillName = match[2];
+            const slashIndex = match.index + prefix.length;
+            if (!skillByName.has(skillName)) continue;
+
+            if (match.index > cursor) nodes.push(textContent.slice(cursor, match.index));
+            if (prefix) nodes.push(prefix);
+            nodes.push(
+                <button
+                    key={`skill-${slashIndex}-${skillName}`}
+                    type="button"
+                    className="text-primary hover:underline"
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        openSkill(skillName);
+                    }}
+                >
+                    /{skillName}
+                </button>
+            );
+            cursor = slashIndex + skillName.length + 1;
         }
 
-        const idx = textContent.indexOf(agentMention.token);
-        const before = textContent.slice(0, idx);
-        const after = textContent.slice(idx + agentMention.token.length);
-        return (
-            <>
-                {before}
+        if (cursor < textContent.length) nodes.push(textContent.slice(cursor));
+
+        const withSkills = nodes.length > 0 ? nodes : [textContent];
+        if (!agentMention?.token || !textContent.includes(agentMention.token)) {
+            return withSkills;
+        }
+
+        return withSkills.flatMap((node, index) => {
+            if (agentMentionUsed || typeof node !== 'string') return node;
+            const idx = node.indexOf(agentMention.token);
+            if (idx === -1) return node;
+            agentMentionUsed = true;
+            return [
+                node.slice(0, idx),
                 <a
+                    key={`agent-${index}`}
                     href={buildMentionUrl(agentMention.name)}
                     className="text-primary hover:underline"
                     target="_blank"
@@ -130,11 +221,11 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
                     onClick={(event) => event.stopPropagation()}
                 >
                     {agentMention.token}
-                </a>
-                {after}
-            </>
-        );
-    }, [agentMention, textContent]);
+                </a>,
+                node.slice(idx + agentMention.token.length),
+            ];
+        });
+    }, [agentMention, openSkill, skillByName, textContent]);
 
     if (!textContent || textContent.trim().length === 0) {
         return null;
@@ -154,7 +245,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
             )}
             <div
                 className={cn(
-                    "break-words font-sans typography-markdown",
+                    "break-words font-sans typography-markdown-body",
                     isExpanded && "pb-3",
                     normalizedRenderingMode === 'plain' && 'whitespace-pre-wrap',
                     !isExpanded && "line-clamp-2",
@@ -164,8 +255,9 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
                 onClick={handleClick}
             >
                 {normalizedRenderingMode === 'markdown' ? (
-                    <SimpleMarkdownRenderer 
-                        content={processedMarkdownContent} 
+                    <SimpleMarkdownRenderer
+                        content={processedMarkdownContent}
+                        className="[&_.markdown-content>*:first-child]:mt-0 [&_.markdown-content>*:last-child]:mb-0"
                         disableLinkSafety 
                     />
                 ) : (

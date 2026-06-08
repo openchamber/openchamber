@@ -21,6 +21,8 @@ import {
   findWorktreeRoot,
 } from './shared.js';
 
+const BUILT_IN_SKILL_LOCATION = '<built-in>';
+
 function ensureProjectSkillDir(workingDirectory) {
   const projectSkillDir = path.join(workingDirectory, '.opencode', 'skills');
   if (!fs.existsSync(projectSkillDir)) {
@@ -69,6 +71,14 @@ function getClaudeSkillPath(workingDirectory, skillName) {
   return path.join(getClaudeSkillDir(workingDirectory, skillName), 'SKILL.md');
 }
 
+function getUserClaudeSkillDir(skillName) {
+  return path.join(os.homedir(), '.claude', 'skills', skillName);
+}
+
+function getUserClaudeSkillPath(skillName) {
+  return path.join(getUserClaudeSkillDir(skillName), 'SKILL.md');
+}
+
 function getUserAgentsSkillDir(skillName) {
   return path.join(os.homedir(), '.agents', 'skills', skillName);
 }
@@ -106,6 +116,16 @@ function getSkillScope(skillName, workingDirectory) {
   const userPath = getUserSkillPath(skillName);
   if (fs.existsSync(userPath)) {
     return { scope: SKILL_SCOPE.USER, path: userPath, source: 'opencode' };
+  }
+
+  const userClaudePath = getUserClaudeSkillPath(skillName);
+  if (fs.existsSync(userClaudePath)) {
+    return { scope: SKILL_SCOPE.USER, path: userClaudePath, source: 'claude' };
+  }
+
+  const userAgentsPath = getUserAgentsSkillPath(skillName);
+  if (fs.existsSync(userAgentsPath)) {
+    return { scope: SKILL_SCOPE.USER, path: userAgentsPath, source: 'agents' };
   }
   
   return { scope: null, path: null, source: null };
@@ -218,7 +238,39 @@ function discoverSkills(workingDirectory) {
   return Array.from(skills.values());
 }
 
+function mergeDiscoveredSkills(primarySkills = [], fallbackSkills = []) {
+  const merged = [];
+  const seenNames = new Set();
+
+  const appendSkill = (skill) => {
+    const name = typeof skill?.name === 'string' ? skill.name.trim() : '';
+    if (!name || seenNames.has(name)) {
+      return;
+    }
+    seenNames.add(name);
+    merged.push(skill);
+  };
+
+  for (const skill of primarySkills || []) {
+    appendSkill(skill);
+  }
+  for (const skill of fallbackSkills || []) {
+    appendSkill(skill);
+  }
+
+  return merged;
+}
+
 function getSkillSources(skillName, workingDirectory, discoveredSkill = null) {
+  const isReadableFile = (filePath) => {
+    if (!filePath) return false;
+    try {
+      return fs.statSync(filePath).isFile();
+    } catch {
+      return false;
+    }
+  };
+
   const projectPath = workingDirectory ? getProjectSkillPath(workingDirectory, skillName) : null;
   const projectExists = projectPath && fs.existsSync(projectPath);
   const projectDir = projectExists ? path.dirname(projectPath) : null;
@@ -226,21 +278,49 @@ function getSkillSources(skillName, workingDirectory, discoveredSkill = null) {
   const claudePath = workingDirectory ? getClaudeSkillPath(workingDirectory, skillName) : null;
   const claudeExists = claudePath && fs.existsSync(claudePath);
   const claudeDir = claudeExists ? path.dirname(claudePath) : null;
+  const userClaudePath = getUserClaudeSkillPath(skillName);
+  const userClaudeExists = fs.existsSync(userClaudePath);
+  const userClaudeDir = userClaudeExists ? path.dirname(userClaudePath) : null;
   
   const userPath = getUserSkillPath(skillName);
   const userExists = fs.existsSync(userPath);
   const userDir = userExists ? path.dirname(userPath) : null;
 
+  const userAgentsPath = getUserAgentsSkillPath(skillName);
+  const userAgentsExists = fs.existsSync(userAgentsPath);
+  const userAgentsDir = userAgentsExists ? path.dirname(userAgentsPath) : null;
+
   const matchedDiscovered = discoveredSkill && discoveredSkill.name === skillName
     ? discoveredSkill
     : discoverSkills(workingDirectory).find((skill) => skill.name === skillName);
+  const discoveredDescription =
+    matchedDiscovered && typeof matchedDiscovered.description === 'string'
+      ? matchedDiscovered.description
+      : '';
+  const discoveredContent =
+    matchedDiscovered && typeof matchedDiscovered.content === 'string'
+      ? matchedDiscovered.content
+      : '';
+  const discoveredPath =
+    matchedDiscovered && typeof matchedDiscovered.path === 'string'
+      ? matchedDiscovered.path
+      : null;
+  const isBuiltInDiscovered = discoveredPath === BUILT_IN_SKILL_LOCATION;
   
   let mdPath = null;
   let mdScope = null;
   let mdSource = null;
   let mdDir = null;
   
-  if (projectExists) {
+  if (isBuiltInDiscovered) {
+    mdScope = matchedDiscovered.scope || SKILL_SCOPE.USER;
+    mdSource = matchedDiscovered.source || 'opencode';
+  } else if (discoveredPath) {
+    mdPath = discoveredPath;
+    mdScope = matchedDiscovered.scope || null;
+    mdSource = matchedDiscovered.source || null;
+    mdDir = isReadableFile(discoveredPath) ? path.dirname(discoveredPath) : null;
+  } else if (projectExists) {
     mdPath = projectPath;
     mdScope = SKILL_SCOPE.PROJECT;
     mdSource = 'opencode';
@@ -255,14 +335,25 @@ function getSkillSources(skillName, workingDirectory, discoveredSkill = null) {
     mdScope = SKILL_SCOPE.USER;
     mdSource = 'opencode';
     mdDir = userDir;
-  } else if (matchedDiscovered?.path) {
-    mdPath = matchedDiscovered.path;
-    mdScope = matchedDiscovered.scope || null;
-    mdSource = matchedDiscovered.source || null;
-    mdDir = path.dirname(matchedDiscovered.path);
+  } else if (userClaudeExists) {
+    mdPath = userClaudePath;
+    mdScope = SKILL_SCOPE.USER;
+    mdSource = 'claude';
+    mdDir = userClaudeDir;
+  } else if (userAgentsExists) {
+    mdPath = userAgentsPath;
+    mdScope = SKILL_SCOPE.USER;
+    mdSource = 'agents';
+    mdDir = userAgentsDir;
   }
   
-  const mdExists = !!mdPath;
+  const mdExists = isBuiltInDiscovered || isReadableFile(mdPath);
+  if (!mdExists) {
+    mdPath = null;
+    mdDir = null;
+    mdScope = null;
+    mdSource = null;
+  }
 
   const sources = {
     md: {
@@ -271,8 +362,11 @@ function getSkillSources(skillName, workingDirectory, discoveredSkill = null) {
       dir: mdDir,
       scope: mdScope,
       source: mdSource,
-      fields: [],
-      supportingFiles: []
+      fields: isBuiltInDiscovered ? ['description', 'instructions'] : [],
+      supportingFiles: [],
+      name: matchedDiscovered?.name || skillName,
+      description: discoveredDescription,
+      instructions: isBuiltInDiscovered ? discoveredContent : ''
     },
     projectMd: {
       exists: projectExists,
@@ -288,6 +382,16 @@ function getSkillSources(skillName, workingDirectory, discoveredSkill = null) {
       exists: userExists,
       path: userPath,
       dir: userDir
+    },
+    userClaudeMd: {
+      exists: userClaudeExists,
+      path: userClaudePath,
+      dir: userClaudeDir
+    },
+    userAgentsMd: {
+      exists: userAgentsExists,
+      path: userAgentsPath,
+      dir: userAgentsDir
     }
   };
 
@@ -374,22 +478,34 @@ function createSkill(skillName, config, workingDirectory, scope) {
   console.log(`Created new skill: ${skillName} (scope: ${targetScope}, path: ${targetPath})`);
 }
 
-function updateSkill(skillName, updates, workingDirectory) {
+function updateSkill(skillName, updates, workingDirectory, targetPath = null) {
   ensureDirs();
 
-  const existing = getSkillScope(skillName, workingDirectory);
+  const requestedPath = typeof targetPath === 'string' && targetPath.trim()
+    ? path.resolve(targetPath.trim())
+    : null;
+  const existing = requestedPath && fs.existsSync(requestedPath)
+    ? { scope: null, path: requestedPath, source: null }
+    : getSkillScope(skillName, workingDirectory);
   if (!existing.path) {
     throw new Error(`Skill "${skillName}" not found`);
+  }
+  if (path.basename(existing.path) !== 'SKILL.md') {
+    throw new Error(`Skill "${skillName}" target must be a SKILL.md file`);
   }
   
   const mdPath = existing.path;
   const mdDir = path.dirname(mdPath);
   const mdData = parseMdFile(mdPath);
+  const frontmatterName = typeof mdData.frontmatter?.name === 'string' ? mdData.frontmatter.name : skillName;
+  if (frontmatterName !== skillName) {
+    throw new Error(`Skill "${skillName}" does not match ${mdPath}`);
+  }
 
   let mdModified = false;
 
   for (const [field, value] of Object.entries(updates)) {
-    if (field === 'scope') {
+    if (field === 'scope' || field === 'source' || field === 'targetPath') {
       continue;
     }
     
@@ -464,6 +580,13 @@ function deleteSkill(skillName, workingDirectory) {
     deleted = true;
   }
 
+  const userClaudeDir = getUserClaudeSkillDir(skillName);
+  if (fs.existsSync(userClaudeDir)) {
+    fs.rmSync(userClaudeDir, { recursive: true, force: true });
+    console.log(`Deleted user-level claude skill directory: ${userClaudeDir}`);
+    deleted = true;
+  }
+
   if (!deleted) {
     throw new Error(`Skill "${skillName}" not found`);
   }
@@ -474,6 +597,7 @@ export {
   getSkillScope,
   getSkillWritePath,
   discoverSkills,
+  mergeDiscoveredSkills,
   createSkill,
   updateSkill,
   deleteSkill,

@@ -1,0 +1,41 @@
+---
+title: Flujos de trabajo de Git y GitHub
+description: Prepara, confirma y gestiona ramas sin salir de OpenChamber.
+---
+
+# Flujos de trabajo de Git y GitHub
+
+OpenChamber tiene una vista de git integrada para que revises cambios, hagas commit y gestiones ramas sin cambiar a una terminal. Ábrela desde la pestaña **Git** en la barra lateral derecha.
+
+## Revisar y confirmar
+
+La vista de git divide tus cambios en **staged** y **unstaged**:
+
+- haz clic en el **+** de un archivo para prepararlo, o en **−** para quitarlo del área de preparación
+- prepara o quita todo un grupo de una vez
+- haz clic en un archivo para ver su diff
+
+Luego escribe un mensaje de commit y confirma. Puedes hacer que OpenChamber **genere un mensaje de commit** a partir de tus cambios preparados: usa el modelo de la sesión actual, así que necesitas una sesión abierta.
+
+## Ramas e historial
+
+La vista de git también cubre el resto del día a día de git:
+
+- crear, cambiar, renombrar y eliminar ramas
+- push, pull y fetch
+- explorar el historial y los diffs por commit
+- guardar (stash) y restaurar cambios
+
+## Pull requests
+
+Conecta GitHub (consulta [Issues y PRs de GitHub](/es/github/)) y la pestaña **PR** te permite abrir un pull request, actualizarlo, marcarlo como listo o fusionarlo, y generar su título y descripción de la misma forma que los mensajes de commit.
+
+## Resolver conflictos
+
+Si una fusión, rebase o integración encuentra un conflicto, OpenChamber muestra qué está atascado y te deja resolverlo, incluso entregándoselo al agente.
+
+## Relacionado
+
+- [Issues y PRs de GitHub](/es/github/) — conecta GitHub y empieza a trabajar desde issues
+- [Sesiones de worktree](/es/worktrees/) — aísla una rama en su propia carpeta
+- [Identidades de Git](/es/git-identities/) — haz commit como la persona correcta en cada repo

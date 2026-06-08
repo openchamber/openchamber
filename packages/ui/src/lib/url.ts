@@ -1,15 +1,7 @@
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 
-/**
- * Utility for opening external URLs with Tauri shell support.
- * In desktop runtime, uses tauri.shell.open() for proper system browser handling.
- * Falls back to window.open() for web runtime.
- */
-
-type TauriShell = {
-  shell?: {
-    open?: (url: string) => Promise<unknown>;
-  };
+type DesktopBridgeGlobal = {
+  openExternal?: (url: string) => Promise<unknown>;
 };
 
 const parseUrlSafely = (value: string): URL | null => {
@@ -26,6 +18,15 @@ export const isExternalHttpUrl = (url: string): boolean => {
     return false;
   }
   return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+};
+
+export const getExternalFaviconUrl = (url: string): string | null => {
+  const parsed = parseUrlSafely(url.trim());
+  if (!parsed || (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')) {
+    return null;
+  }
+
+  return `https://icons.duckduckgo.com/ip3/${parsed.hostname.toLowerCase()}.ico`;
 };
 
 const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1']);
@@ -81,7 +82,7 @@ export const extractLoopbackUrls = (text: string): string[] => {
 
 /**
  * Opens an external URL in the system browser.
- * In Tauri desktop runtime, uses tauri.shell.open() for proper handling.
+ * In desktop runtime, uses the native shell for proper handling.
  * Falls back to window.open() for web runtime.
  *
  * @param url - The URL to open
@@ -118,10 +119,10 @@ export const openExternalUrl = async (url: string): Promise<boolean> => {
     }
   }
 
-  const tauri = (window as unknown as { __TAURI__?: TauriShell }).__TAURI__;
-  if (tauri?.shell?.open) {
+  const desktop = (window as unknown as { __OPENCHAMBER_DESKTOP__?: DesktopBridgeGlobal }).__OPENCHAMBER_DESKTOP__;
+  if (desktop?.openExternal) {
     try {
-      await tauri.shell.open(normalizedTarget);
+      await desktop.openExternal(normalizedTarget);
       return true;
     } catch {
       // Fall through to window.open

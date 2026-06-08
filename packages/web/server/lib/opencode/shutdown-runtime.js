@@ -29,7 +29,9 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     tunnelAuthController,
   } = dependencies;
 
-  const gracefulShutdown = async (options = {}) => {
+  let shutdownPromise = null;
+
+  const runShutdown = async (options = {}) => {
     if (getIsShuttingDown()) return;
 
     setIsShuttingDown(true);
@@ -131,6 +133,12 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     if (exitProcess) {
       process.exit(0);
     }
+  };
+
+  const gracefulShutdown = (options = {}) => {
+    if (shutdownPromise) return shutdownPromise;
+    shutdownPromise = runShutdown(options);
+    return shutdownPromise;
   };
 
   return {

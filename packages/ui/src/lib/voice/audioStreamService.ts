@@ -18,6 +18,8 @@
  * ```
  */
 
+import { runtimeFetch } from '@/lib/runtime-fetch';
+
 export type SpeechResultCallback = (text: string, isFinal: boolean) => void;
 export type ErrorCallback = (error: string) => void;
 
@@ -39,6 +41,8 @@ export interface AudioStreamConfig {
    * Default: 1500
    */
   silenceHoldMs?: number;
+  /** Optional API key for the STT server. */
+  apiKey?: string;
 }
 
 // How often (ms) the VAD samples the analyser
@@ -69,6 +73,7 @@ class AudioStreamService {
     language: '',
     silenceThresholdDb: -45,
     silenceHoldMs: 1500,
+    apiKey: '',
   };
 
   /** Update service configuration. Can be called before or after startListening. */
@@ -77,8 +82,10 @@ class AudioStreamService {
       silenceThresholdDb: -45,
       silenceHoldMs: 1500,
       language: '',
+      apiKey: '',
       ...config,
     };
+    this.cfg.apiKey = config.apiKey ?? '';
   }
 
   /** Whether the browser supports the required APIs. */
@@ -336,6 +343,9 @@ class AudioStreamService {
         'X-Base-URL': this.cfg.baseURL,
         'X-Model': this.cfg.model,
       };
+      if (this.cfg.apiKey) {
+        headers['Authorization'] = `Bearer ${this.cfg.apiKey}`;
+      }
       if (this.cfg.language) {
         headers['X-Language'] = this.cfg.language;
       } else if (this.lang && this.lang !== 'auto') {
@@ -344,7 +354,7 @@ class AudioStreamService {
         headers['X-Language'] = baseLang;
       }
 
-      const response = await fetch('/api/stt/transcribe', {
+      const response = await runtimeFetch('/api/stt/transcribe', {
         method: 'POST',
         headers,
         body: blob,

@@ -1,0 +1,347 @@
+---
+title: Зворотний проксі
+description: Налаштуйте OpenChamber коректно за Nginx, Nginx Proxy Manager або іншим зворотним проксі.
+---
+
+# Зворотний проксі
+
+Скористайтеся цією сторінкою, якщо запускаєте OpenChamber за Nginx, Nginx Proxy Manager, Caddy, Cloudflare або іншим зворотним проксі.
+
+## Перш ніж проксувати
+
+1. Спершу переконайтеся, що OpenChamber працює напряму.
+2. Відкрийте `http://<server-ip>:3000` або свій власний порт із тієї самої мережі.
+3. Додавайте зворотний проксі лише після того, як пряме підключення працює.
+
+## Що має підтримувати проксі
+
+- WebSocket для живого транспорту повідомлень:
+  - `/api/event/ws`
+  - `/api/global/event/ws`
+  - `/api/terminal/ws`
+- SSE без буферизації:
+  - `/api/event`
+  - `/api/global/event`
+  - `/api/notifications/stream`
+  - `/api/openchamber/events`
+  - `/api/terminal/:sessionId/stream`
+- Великі тіла запитів для вкладень і файлових операцій
+- Довгі таймаути читання для живих потоків і термінальних сесій
+
+## Правила, що мають значення
+
+- Увімкніть проксування WebSocket.
+- Вимкніть буферизацію на SSE-маршрутах.
+- Вимкніть gzip на проксі, якщо OpenChamber уже стискає відповіді.
+- Тримайте стиснення увімкненим лише в одному шарі.
+- Передавайте звичайні проксі-заголовки, як-от `Host`, `X-Forwarded-For` та `X-Forwarded-Proto`.
+- Збільшіть ліміти розміру тіла, якщо користувачі завантажують файли.
+
+## Швидкий чеклист
+
+- OpenChamber доступний напряму в LAN
+- WebSocket увімкнено в проксі
+- На SSE-маршрутах вимкнено буферизацію
+- `gzip off` на хості проксі, або стиснення проксі вимкнено інакше
+- `client_max_body_size` достатньо великий для вкладень
+- `proxy_read_timeout` достатньо довгий для потоків
+
+## Приклад: Nginx
+
+<details>
+<summary>Показати приклад конфігу</summary>
+
+```nginx
+client_max_body_size 50M;
+client_body_buffer_size 50M;
+proxy_request_buffering off;
+
+proxy_http_version 1.1;
+proxy_set_header Connection "";
+proxy_set_header Host $host;
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-Proto $scheme;
+proxy_set_header X-Forwarded-Host $host;
+
+gzip off;
+
+location = /api/terminal/ws {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
+
+location = /api/global/event/ws {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
+
+location = /api/event/ws {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
+
+location ~ ^/api/(event|global/event|notifications/stream|openchamber/events)$ {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Accept "text/event-stream";
+    proxy_set_header Cache-Control "no-cache";
+    proxy_buffering off;
+    proxy_cache off;
+    gzip off;
+    add_header X-Accel-Buffering "no" always;
+    add_header Cache-Control "no-cache, no-transform" always;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
+
+location ~ ^/api/terminal/.+/stream$ {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Accept "text/event-stream";
+    proxy_set_header Cache-Control "no-cache";
+    proxy_buffering off;
+    proxy_cache off;
+    gzip off;
+    add_header X-Accel-Buffering "no" always;
+    add_header Cache-Control "no-cache, no-transform" always;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
+
+location /api {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
+
+location / {
+    proxy_pass http://127.0.0.1:3000;
+}
+```
+
+</details>
+
+## Приклад: Nginx Proxy Manager
+
+<details>
+<summary>Показати приклад вкладки Advanced</summary>
+
+```nginx
+client_max_body_size 50M;
+client_body_buffer_size 50M;
+proxy_request_buffering off;
+
+proxy_http_version 1.1;
+proxy_set_header Connection "";
+proxy_set_header Host $host;
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-Proto $scheme;
+proxy_set_header X-Forwarded-Host $host;
+
+gzip off;
+
+location = /api/terminal/ws {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
+
+location = /api/global/event/ws {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
+
+location = /api/event/ws {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
+
+location = /api/event {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Accept "text/event-stream";
+    proxy_set_header Cache-Control "no-cache";
+    proxy_buffering off;
+    proxy_cache off;
+    gzip off;
+    add_header X-Accel-Buffering "no" always;
+    add_header Cache-Control "no-cache, no-transform" always;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
+
+location = /api/global/event {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Accept "text/event-stream";
+    proxy_set_header Cache-Control "no-cache";
+    proxy_buffering off;
+    proxy_cache off;
+    gzip off;
+    add_header X-Accel-Buffering "no" always;
+    add_header Cache-Control "no-cache, no-transform" always;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
+
+location = /api/notifications/stream {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Accept "text/event-stream";
+    proxy_set_header Cache-Control "no-cache";
+    proxy_buffering off;
+    proxy_cache off;
+    gzip off;
+    add_header X-Accel-Buffering "no" always;
+    add_header Cache-Control "no-cache, no-transform" always;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
+
+location = /api/openchamber/events {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Accept "text/event-stream";
+    proxy_set_header Cache-Control "no-cache";
+    proxy_buffering off;
+    proxy_cache off;
+    gzip off;
+    add_header X-Accel-Buffering "no" always;
+    add_header Cache-Control "no-cache, no-transform" always;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
+
+location ~ ^/api/terminal/.+/stream$ {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Accept "text/event-stream";
+    proxy_set_header Cache-Control "no-cache";
+    proxy_buffering off;
+    proxy_cache off;
+    gzip off;
+    add_header X-Accel-Buffering "no" always;
+    add_header Cache-Control "no-cache, no-transform" always;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
+
+location /api {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
+
+location / {
+    proxy_pass http://127.0.0.1:3000;
+}
+```
+
+</details>
+
+Також увімкніть `Websockets Support` у Nginx Proxy Manager для цього хоста.
+
+## Типові ознаки проблем
+
+### Сторінка завантажується, але надсилання повідомлень не працює
+
+- WebSocket не увімкнено в проксі
+- `/api/event/ws` або `/api/global/event/ws` проходить некоректно
+
+### Сповіщення або живий статус не оновлюються
+
+- один із SSE-маршрутів буферизується або кешується
+- відсутній `X-Accel-Buffering "no"`
+
+### Завантаження файлів не вдається
+
+- `client_max_body_size` замалий
+
+### Усе працює локально, але ламається лише за проксі
+
+- проксі стискає й буферизує живий трафік
+- у проксі відсутня підтримка WebSocket
+
+## Приклад: Caddy
+
+<details>
+<summary>Показати приклад конфігу</summary>
+
+```caddy
+reverse_proxy 127.0.0.1:3000 {
+    # WebSocket support is automatic in Caddy
+
+    # Flush SSE responses immediately
+    flush_interval -1
+
+    # Pass through Host and proxy headers
+    header_up Host {host}
+    header_up X-Real-IP {remote_host}
+    header_up X-Forwarded-For {remote_host}
+    header_up X-Forwarded-Proto {scheme}
+
+    # Increase timeouts for long-lived streams
+    transport http {
+        read_timeout 3600s
+        write_timeout 3600s
+    }
+}
+```
+
+</details>
+
+Caddy обробляє WebSocket-апгрейди автоматично — додаткове налаштування не потрібне. Директива `flush_interval -1` гарантує, що SSE-фрагменти пересилаються негайно, без буферизації.
+
+## CDN і подвійне стиснення — попередження
+
+Якщо ви ставите CDN (наприклад, Cloudflare) перед своїм зворотним проксі, памʼятайте про подвійне стиснення:
+
+- OpenChamber стискає HTTP-відповіді через gzip (поріг 1 КБ).
+- Cloudflare та інші CDN теж стискають відповіді типово.
+- Це може призвести до подвійно стиснутих відповідей або некоректних заголовків `Content-Encoding`.
+
+Щоб цього уникнути, вимкніть стиснення на **одному** шарі:
+
+- **Cloudflare:** Rules → Compression → disable (або режим "Passthrough").
+- **Nginx:** `gzip off` (уже показано в прикладах вище).
+- **Caddy:** Caddy не перестискає типово, якщо джерело вже надсилає стиснутий контент.
+
+SSE-маршрути потоків виключені зі стиснення в OpenChamber, але CDN усе одно може їх буферизувати. Перевірте документацію свого CDN щодо вимкнення буферизації на SSE-шляхах.
+
+## Повʼязане
+
+- [Тунелі](/uk/tunnels/)
+- [Усунення несправностей](/uk/troubleshooting/)

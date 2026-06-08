@@ -5,24 +5,7 @@ export const VIEWPORT_META_SELECTOR = 'meta[name="viewport"]';
 export const VIEWPORT_CONTENT_BASE = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover';
 
 export const supportsMobileKeyboardResizeContent = (): boolean => {
-  if (typeof navigator === 'undefined') {
-    return true;
-  }
-
-  const userAgent = navigator.userAgent || '';
-  const platform = navigator.platform || '';
-  const maxTouchPoints = navigator.maxTouchPoints ?? 0;
-  const isIOS = /iPhone|iPad|iPod/i.test(userAgent)
-    || ((/Macintosh|MacIntel/i.test(userAgent) || /MacIntel/i.test(platform)) && maxTouchPoints > 1);
-
-  return !isIOS;
-};
-
-const getSupportedMobileKeyboardMode = (mode: MobileKeyboardMode): MobileKeyboardMode => {
-  if (mode === 'resize-content' && !supportsMobileKeyboardResizeContent()) {
-    return 'native';
-  }
-  return mode;
+  return true;
 };
 
 export function normalizeMobileKeyboardMode(value: unknown): MobileKeyboardMode;
@@ -30,7 +13,7 @@ export function normalizeMobileKeyboardMode(value: unknown, fallback: MobileKeyb
 export function normalizeMobileKeyboardMode(value: unknown, fallback: undefined): MobileKeyboardMode | undefined;
 export function normalizeMobileKeyboardMode(
   value: unknown,
-  fallback: MobileKeyboardMode | undefined = 'native',
+  fallback: MobileKeyboardMode | undefined = 'resize-content',
 ): MobileKeyboardMode | undefined {
   if (value === 'native' || value === 'resize-content') {
     return value;
@@ -39,7 +22,7 @@ export function normalizeMobileKeyboardMode(
 }
 
 export const getViewportContentForMobileKeyboardMode = (value: unknown): string => {
-  const mode = getSupportedMobileKeyboardMode(normalizeMobileKeyboardMode(value));
+  const mode = normalizeMobileKeyboardMode(value);
   return mode === 'resize-content'
     ? `${VIEWPORT_CONTENT_BASE}, interactive-widget=resizes-content`
     : VIEWPORT_CONTENT_BASE;
@@ -47,22 +30,22 @@ export const getViewportContentForMobileKeyboardMode = (value: unknown): string 
 
 export const getStoredMobileKeyboardMode = (): MobileKeyboardMode => {
   if (typeof window === 'undefined') {
-    return 'native';
+    return 'resize-content';
   }
 
   try {
-    return getSupportedMobileKeyboardMode(normalizeMobileKeyboardMode(localStorage.getItem(MOBILE_KEYBOARD_MODE_STORAGE_KEY)));
+    return normalizeMobileKeyboardMode(localStorage.getItem(MOBILE_KEYBOARD_MODE_STORAGE_KEY));
   } catch {
-    return 'native';
+    return 'resize-content';
   }
 };
 
 export const setStoredMobileKeyboardMode = (value: unknown): MobileKeyboardMode => {
-  const mode = getSupportedMobileKeyboardMode(normalizeMobileKeyboardMode(value));
+  const mode = normalizeMobileKeyboardMode(value);
 
   if (typeof window !== 'undefined') {
     try {
-      if (mode === 'native') {
+      if (mode === 'resize-content') {
         localStorage.removeItem(MOBILE_KEYBOARD_MODE_STORAGE_KEY);
       } else {
         localStorage.setItem(MOBILE_KEYBOARD_MODE_STORAGE_KEY, mode);

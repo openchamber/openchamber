@@ -30,6 +30,10 @@ interface SkillsSidebarProps {
   onItemSelect?: () => void;
 }
 
+const BUILT_IN_SKILL_LOCATION = '<built-in>';
+
+const isBuiltInSkill = (skill: DiscoveredSkill | null | undefined): boolean => skill?.path === BUILT_IN_SKILL_LOCATION;
+
 export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) => {
   const { t } = useI18n();
   const [renameDialogSkill, setRenameDialogSkill] = React.useState<DiscoveredSkill | null>(null);
@@ -78,11 +82,16 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
   };
 
   const handleDeleteSkill = async (skill: DiscoveredSkill) => {
+    if (isBuiltInSkill(skill)) return;
     setDeleteDialogSkill(skill);
   };
 
   const handleConfirmDeleteSkill = async () => {
     if (!deleteDialogSkill) {
+      return;
+    }
+    if (isBuiltInSkill(deleteDialogSkill)) {
+      setDeleteDialogSkill(null);
       return;
     }
 
@@ -98,6 +107,8 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
   };
 
   const handleDuplicateSkill = async (skill: DiscoveredSkill) => {
+    if (isBuiltInSkill(skill)) return;
+
     const baseName = skill.name;
     let copyNumber = 1;
     let newName = `${baseName}-copy`;
@@ -127,12 +138,17 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
   };
 
   const handleOpenRenameDialog = (skill: DiscoveredSkill) => {
+    if (isBuiltInSkill(skill)) return;
     setRenameNewName(skill.name);
     setRenameDialogSkill(skill);
   };
 
   const handleRenameSkill = async () => {
     if (!renameDialogSkill) return;
+    if (isBuiltInSkill(renameDialogSkill)) {
+      setRenameDialogSkill(null);
+      return;
+    }
 
     const sanitizedName = renameNewName.trim().replace(/\s+/g, '-').toLowerCase();
 
@@ -437,6 +453,13 @@ const SkillListItem: React.FC<SkillListItemProps> = ({
 }) => {
   const { t } = useI18n();
   const isMobile = isMobileDeviceViaCSS();
+  const sourceLabel = skill.source === 'claude'
+    ? t('settings.skills.sidebar.badge.claude')
+    : skill.source === 'agents'
+      ? t('settings.skills.sidebar.badge.agents')
+      : t('settings.skills.sidebar.badge.opencode');
+  const badgeClassName = 'typography-micro text-muted-foreground bg-[var(--surface-muted)] px-1 rounded flex-shrink-0 leading-none pb-px border border-[var(--interactive-border)]/50';
+  const isBuiltIn = isBuiltInSkill(skill);
   return (
     <div
       className={cn(
@@ -458,23 +481,14 @@ const SkillListItem: React.FC<SkillListItemProps> = ({
             <span className="typography-ui-label font-normal truncate text-foreground">
               {skill.name}
             </span>
-            <span className="typography-micro text-muted-foreground bg-muted px-1 rounded flex-shrink-0 leading-none pb-px border border-border/50">
+            <span className={badgeClassName}>
               {skill.scope}
             </span>
-            {skill.source === 'claude' && (
-              <span className="typography-micro text-muted-foreground bg-muted px-1 rounded flex-shrink-0 leading-none pb-px border border-border/50">
-                {t('settings.skills.sidebar.badge.claude')}
-              </span>
-            )}
-            {skill.source === 'agents' && (
-              <span className="typography-micro text-muted-foreground bg-muted px-1 rounded flex-shrink-0 leading-none pb-px border border-border/50">
-                {t('settings.skills.sidebar.badge.agents')}
-              </span>
-            )}
+            <span className={badgeClassName}>{sourceLabel}</span>
           </div>
         </button>
 
-        <DropdownMenu open={isMenuOpen} onOpenChange={onMenuOpenChange}>
+        {!isBuiltIn ? <DropdownMenu open={isMenuOpen} onOpenChange={onMenuOpenChange}>
           <DropdownMenuTrigger asChild>
             <Button size="sm"
               variant="ghost"
@@ -515,7 +529,7 @@ const SkillListItem: React.FC<SkillListItemProps> = ({
               {t('settings.common.actions.delete')}
             </DropdownMenuItem>
           </DropdownMenuContent>
-        </DropdownMenu>
+        </DropdownMenu> : null}
       </div>
     </div>
   );

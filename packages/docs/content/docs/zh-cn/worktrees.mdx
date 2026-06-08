@@ -1,0 +1,36 @@
+---
+title: Worktree 会话
+description: 为会话提供独立的分支和文件夹，让工作保持隔离。
+---
+
+# Worktree 会话
+
+worktree 会话运行在你仓库自己独立检出的副本中，位于它自己的分支上（一个 git worktree）。这能防止并行会话相互干扰彼此的文件 — 一个会话可以做重构，另一个可以修复 bug，无需来回切换。
+
+## 创建一个
+
+1. 从会话侧边栏顶部的按钮打开新建 worktree 对话框。
+2. 选择一个起点：
+   - **new branch** — 命名分支并选择从哪个分支开始
+   - **existing branch** — 检出一个你已经拥有的分支
+3. 确认 worktree 文件夹（OpenChamber 会根据分支名建议一个）。
+4. 创建它。
+
+OpenChamber 会创建分支、设置文件夹，并在其中启动一个会话。你也可以直接从一个 [待办](/zh-cn/notes-todos-plans/) 或一个 [GitHub issue 或 PR](/zh-cn/github/) 发起一个。
+
+## 把工作带回来
+
+当工作完成得不错时，在 Git 视图中使用 **Integrate** 将 worktree 的提交带到另一个分支（比如 `main`）上。如果某个变更产生冲突，你可以把冲突交给智能体来解决。
+
+## 清理
+
+删除或归档会话可以移除 worktree。你可以选择是否同时删除分支 — 本地的，以及远程的（如果有）。没有你的请求，不会删除任何东西。
+
+## 如果有什么看起来不对劲
+
+如果 worktree 的文件夹丢失、分支处于游离状态，或一次合并或变基处于半完成状态，它可能需要关注。OpenChamber 会标记这些情况，以便你修复它们 — 参阅 [Worktree 与 Git](/zh-cn/troubleshooting/worktrees-git/)。
+
+## 相关内容
+
+- [Multi-run](/zh-cn/multi-run/) — 一次启动多个 worktree 会话
+- [Git 与 GitHub 工作流](/zh-cn/git/) — 在 OpenChamber 内部提交和集成

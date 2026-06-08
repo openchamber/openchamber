@@ -198,6 +198,14 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
+    vscode.window.onDidChangeWindowState((state) => {
+      chatViewProvider?.notifyWindowFocusChanged(state.focused);
+      sessionEditorProvider?.notifyWindowFocusChanged(state.focused);
+      agentManagerProvider?.notifyWindowFocusChanged(state.focused);
+    })
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand('openchamber.openAgentManager', () => {
       agentManagerProvider?.createOrShow();
     })
@@ -254,6 +262,13 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand('openchamber.restartApi', async () => {
       try {
+        // Prefer the full in-app reload flow (overlay + managed restart via the
+        // bridge + config/data refresh) driven by the webview — same as after an
+        // OpenCode update. Fall back to a bare manager restart when no webview is
+        // open to drive it.
+        if (chatViewProvider?.reloadOpenCode()) {
+          return;
+        }
         await openCodeManager?.restart();
         vscode.window.showInformationMessage('OpenChamber: API connection restarted');
       } catch (e) {
@@ -280,20 +295,24 @@ export async function activate(context: vscode.ExtensionContext) {
 
       // Get file info for context
       const filePath = vscode.workspace.asRelativePath(editor.document.uri);
-      const languageId = editor.document.languageId;
-      
       // Get line numbers (1-based for display)
       const startLine = selection.start.line + 1;
       const endLine = selection.end.line + 1;
       const lineRange = startLine === endLine ? `${startLine}` : `${startLine}-${endLine}`;
 
-      // Format as file path with line numbers, followed by markdown code block
-      const contextText = `${filePath}:${lineRange}\n\`\`\`${languageId}\n${selectedText}\n\`\`\``;
+      const filename = `${editor.document.fileName.split(/[\\/]/).pop() || filePath}:${lineRange}`;
+      const contextSelection = {
+        filePath: editor.document.uri.fsPath,
+        filename,
+        text: selectedText,
+      };
 
-      if (!(await revealChatViewForPayload())) {
-        return;
+      if (!sessionEditorProvider?.addContextSelectionToActivePanel(contextSelection)) {
+        if (!(await revealChatViewForPayload())) {
+          return;
+        }
+        chatViewProvider?.addContextSelection(contextSelection);
       }
-      chatViewProvider?.addTextToInput(contextText);
     })
   );
 
@@ -314,7 +333,7 @@ export async function activate(context: vscode.ExtensionContext) {
       }
 
       const uniqueUris = Array.from(new Map(uriCandidates.map((uri) => [uri.toString(), uri])).values());
-      const mentionPaths: string[] = [];
+      const attachedFiles: Array<{ filePath: string; fileName: string; fileSize: number | null }> = [];
       const skippedEntries: string[] = [];
 
       for (const uri of uniqueUris) {
@@ -334,23 +353,33 @@ export async function activate(context: vscode.ExtensionContext) {
           continue;
         }
 
-        const relativePath = vscode.workspace.asRelativePath(uri, false).replace(/\\/g, '/').trim();
-        if (!relativePath) {
+        const filePath = uri.fsPath.trim();
+        const fileName = uri.fsPath.replace(/\\/g, '/').split('/').pop() || vscode.workspace.asRelativePath(uri, false).replace(/\\/g, '/').trim();
+        if (!filePath || !fileName) {
           skippedEntries.push(uri.fsPath || uri.toString());
           continue;
         }
-        mentionPaths.push(relativePath);
+        let fileSize: number | null = null;
+        try {
+          const stat = await vscode.workspace.fs.stat(uri);
+          fileSize = stat.size;
+        } catch {
+          fileSize = null;
+        }
+        attachedFiles.push({ filePath, fileName, fileSize });
       }
 
-      if (mentionPaths.length === 0) {
+      if (attachedFiles.length === 0) {
         vscode.window.showWarningMessage('OpenChamber: No file selected to mention');
         return;
       }
 
-      if (!(await revealChatViewForPayload())) {
-        return;
+      if (!sessionEditorProvider?.addFileAttachmentsToActivePanel(attachedFiles)) {
+        if (!(await revealChatViewForPayload())) {
+          return;
+        }
+        chatViewProvider?.addFileAttachments(attachedFiles);
       }
-      chatViewProvider?.addFileMentions(mentionPaths);
 
       if (skippedEntries.length > 0) {
         vscode.window.showInformationMessage('OpenChamber: Some selected entries were skipped (folders or unsupported resources)');
@@ -384,10 +413,12 @@ export async function activate(context: vscode.ExtensionContext) {
         prompt = `Explain the following Code / Text:\n\n${filePath}`;
       }
 
-      if (!(await revealChatViewForPayload())) {
-        return;
+      if (!sessionEditorProvider?.createSessionWithPromptInActivePanel(prompt)) {
+        if (!(await revealChatViewForPayload())) {
+          return;
+        }
+        chatViewProvider?.createNewSessionWithPrompt(prompt);
       }
-      chatViewProvider?.createNewSessionWithPrompt(prompt);
     })
   );
 
@@ -415,10 +446,12 @@ export async function activate(context: vscode.ExtensionContext) {
 
       const prompt = `Improve the following Code:\n\n${filePath}:${lineRange}\n\`\`\`${languageId}\n${selectedText}\n\`\`\``;
 
-      if (!(await revealChatViewForPayload())) {
-        return;
+      if (!sessionEditorProvider?.createSessionWithPromptInActivePanel(prompt)) {
+        if (!(await revealChatViewForPayload())) {
+          return;
+        }
+        chatViewProvider?.createNewSessionWithPrompt(prompt);
       }
-      chatViewProvider?.createNewSessionWithPrompt(prompt);
     })
   );
 
@@ -650,7 +683,7 @@ export async function activate(context: vscode.ExtensionContext) {
       sessionEditorProvider?.updateConnectionStatus(status, error);
 
       // Start/stop global event watcher based on connection status
-      // Mirrors web server and desktop Tauri behavior
+      // Mirrors web server and desktop behavior
       if (status === 'connected' && chatViewProvider && openCodeManager) {
         setChatViewProvider(chatViewProvider);
         void startGlobalEventWatcher(openCodeManager, chatViewProvider);

@@ -1,118 +1,39 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { summarizeText } from './summarization.js';
+import { sanitizeForTTS, summarizeText } from './summarization.js';
 
-const originalFetch = globalThis.fetch;
-
-function stubFetch(fetchMock) {
-  globalThis.fetch = fetchMock;
-}
-
-describe('text summarization zen requests', () => {
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
+describe('text summarization stubs', () => {
+  it('removes code from TTS text before stripping markdown punctuation', () => {
+    expect(sanitizeForTTS('Read `const value = 1` aloud')).toBe('Read aloud');
+    expect(sanitizeForTTS('Before\n```js\nconst value = 1\n```\nAfter')).toBe('Before After');
   });
 
-  it('uses responses endpoint for gpt models', async () => {
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        output: [{
-          type: 'message',
-          content: [{ type: 'output_text', text: 'Short summary' }],
-        }],
-      }),
-    }));
-    stubFetch(fetchMock);
-
+  it('does not call the retired zen provider', async () => {
     const result = await summarizeText({
-      text: 'Long text '.repeat(30),
+      text: 'The implementation now correctly loads notification templates before dispatching the notification. It also fetches the latest assistant message when the event payload does not include message parts. This should make completion notifications match user settings.',
+      threshold: 0,
+      maxLength: 80,
+      zenModel: 'gpt-5-nano',
+      mode: 'notification',
+    });
+
+    expect(result.summarized).toBe(false);
+    expect(result.reason).toBe('Model summarization provider unavailable');
+    expect(result.summary).toBe('The implementation now correctly loads notification templates before dispatchin…');
+  });
+
+  it('returns local note fallback while provider is unavailable', async () => {
+    const result = await summarizeText({
+      text: 'First sentence. Second sentence with the useful insight.',
       threshold: 0,
       maxLength: 100,
-      zenModel: 'gpt-5-nano',
-      mode: 'notification',
+      mode: 'note',
     });
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://opencode.ai/zen/v1/responses',
-      expect.objectContaining({
-        body: expect.stringContaining('"input"'),
-      }),
-    );
-    expect(result.summary).toBe('Short summary');
-  });
-
-  it('uses chat completions endpoint for openai-compatible zen models', async () => {
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        choices: [{ message: { content: 'Chat summary' } }],
-      }),
-    }));
-    stubFetch(fetchMock);
-
-    const result = await summarizeText({
-      text: 'Long text '.repeat(30),
-      threshold: 0,
-      maxLength: 100,
-      zenModel: 'big-pickle',
-      mode: 'notification',
+    expect(result).toMatchObject({
+      summary: 'First sentence.',
+      summarized: false,
+      reason: 'Model summarization provider unavailable',
     });
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://opencode.ai/zen/v1/chat/completions',
-      expect.objectContaining({
-        body: expect.stringContaining('"messages"'),
-      }),
-    );
-    expect(result.summary).toBe('Chat summary');
-  });
-
-  it('clamps successful model summaries to the requested max length', async () => {
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        output: [{
-          type: 'message',
-          content: [{ type: 'output_text', text: 'This response is too long' }],
-        }],
-      }),
-    }));
-    stubFetch(fetchMock);
-
-    const result = await summarizeText({
-      text: 'Long text '.repeat(30),
-      threshold: 0,
-      maxLength: 12,
-      zenModel: 'gpt-5-nano',
-      mode: 'notification',
-    });
-
-    expect(result.summary).toBe('This respons');
-    expect(result.summaryLength).toBe(12);
-  });
-
-  it('does not clamp successful model summaries for non-finite max lengths', async () => {
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        output: [{
-          type: 'message',
-          content: [{ type: 'output_text', text: 'Full response' }],
-        }],
-      }),
-    }));
-    stubFetch(fetchMock);
-
-    const result = await summarizeText({
-      text: 'Long text '.repeat(30),
-      threshold: 0,
-      maxLength: Infinity,
-      zenModel: 'gpt-5-nano',
-      mode: 'notification',
-    });
-
-    expect(result.summary).toBe('Full response');
-    expect(result.summaryLength).toBe(13);
   });
 });

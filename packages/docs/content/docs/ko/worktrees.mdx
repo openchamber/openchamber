@@ -1,0 +1,36 @@
+---
+title: Worktree 세션
+description: 세션에 자체 브랜치와 폴더를 부여하여 작업을 격리하세요.
+---
+
+# Worktree 세션
+
+worktree 세션은 자체 브랜치 위에서 체크아웃된 저장소 사본으로 실행됩니다(git worktree). 그래서 병렬 세션이 서로의 파일을 건드리지 않으며, 한 세션이 리팩터링하는 동안 다른 세션이 버그를 고칠 수 있고 오갈 필요가 없습니다.
+
+## 만들기
+
+1. 세션 사이드바 상단의 버튼에서 새 worktree 대화 상자를 엽니다.
+2. 시작 지점을 선택합니다.
+   - **new branch** — 브랜치 이름을 지정하고 어느 브랜치에서 시작할지 선택합니다
+   - **existing branch** — 이미 가지고 있는 브랜치를 체크아웃합니다
+3. worktree 폴더를 확인합니다(OpenChamber가 브랜치 이름에서 하나를 제안합니다).
+4. 만듭니다.
+
+OpenChamber가 브랜치를 만들고 폴더를 설정한 뒤 그 안에서 세션을 시작합니다. [할 일](/ko/notes-todos-plans/)이나 [GitHub 이슈 또는 PR](/ko/github/)에서 바로 시작할 수도 있습니다.
+
+## 작업 되돌려 가져오기
+
+작업이 만족스러우면 Git 보기에서 **Integrate**를 사용해 worktree의 커밋을 다른 브랜치(예: `main`)로 가져옵니다. 변경 사항이 충돌하면 충돌을 에이전트에게 넘겨 해결하게 할 수 있습니다.
+
+## 정리하기
+
+세션을 삭제하거나 보관하면 worktree를 제거할 수 있습니다. 로컬 브랜치와, 있다면 원격 브랜치까지 함께 삭제할지 선택합니다. 요청하지 않으면 아무것도 삭제되지 않습니다.
+
+## 무언가 잘못된 것처럼 보이면
+
+worktree는 폴더가 사라졌거나, 브랜치가 detached 상태이거나, 병합 또는 리베이스가 절반만 끝난 경우 주의가 필요할 수 있습니다. OpenChamber가 이를 표시하여 고칠 수 있게 합니다. [Worktrees & Git](/ko/troubleshooting/worktrees-git/)을 참고하세요.
+
+## 관련 항목
+
+- [Multi-run](/ko/multi-run/) — 여러 worktree 세션을 한 번에 시작하세요
+- [Git & GitHub Workflows](/ko/git/) — OpenChamber 안에서 커밋하고 통합하세요

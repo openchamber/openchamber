@@ -1,0 +1,42 @@
+---
+title: 远程实例
+description: 通过 SSH 将桌面应用连接到另一台机器上的 OpenChamber。
+---
+
+# 远程实例
+
+桌面应用可以通过 SSH 连接到运行在另一台机器上的 OpenChamber — 工作服务器、云主机、家庭实验室 — 并把它的 UI 带到你的屏幕上，仿佛它在本地一样。在 **Settings → Remote Instances** 中设置它。
+
+> 远程实例是一项**仅限桌面**的功能。在网页端或 VS Code 中，请改用 [OpenCode Server](/zh-cn/opencode-server/) 中的环境变量连接到远程服务器。
+
+## 添加远程实例
+
+1. 打开 **Settings → Remote Instances** 并添加一个。
+2. 给它你通常用来访问该机器的 SSH 命令，外加一个昵称。
+3. 选择 OpenChamber 在那里如何运行：
+   - **managed** — OpenChamber 在远程机器上安装并启动它自己
+   - **external** — 连接到一个已经运行的实例
+4. 连接。
+
+OpenChamber 会引导你完成各个步骤 — 检查连接、设置远程、启动服务器并转发端口 — 并在每个阶段显示进度。当它到达 **ready** 时，远程 UI 会在本地加载。
+
+## 凭证
+
+你来决定是保存 SSH 和 UI 密码，还是每次都输入它们。如果连接断开，OpenChamber 会报告哪一步失败了，以便你修复它 — 参阅 [远程访问](/zh-cn/troubleshooting/remote-access/)。
+
+## 直接连接链接
+
+如果远程机器已经在运行 OpenChamber，请在那台机器上创建连接链接，然后在 **Settings → Remote Instances → Server links** 中导入：
+
+```bash
+openchamber connect-url --port 3000 --server http://your-host:3000 --qr
+```
+
+如果该端口上没有服务器，`connect-url` 会先启动服务器。使用 `--api-only` 可启动 headless 服务器，`--lan` 可在启动时绑定到 LAN，`--ui-password` 可保护浏览器访问，`--name` 可为保存的连接命名。
+
+生成的链接包含 OpenChamber 应用使用的 client token。这个 token 独立于浏览器 UI 密码，并会在服务器重启后继续有效，直到你撤销或删除它。
+
+## 相关内容
+
+- [OpenCode Server](/zh-cn/opencode-server/) — 在网页端或 VS Code 中连接到远程服务器
+- [远程访问](/zh-cn/troubleshooting/remote-access/) — 当连接无法完成时

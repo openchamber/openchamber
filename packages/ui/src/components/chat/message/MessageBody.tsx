@@ -4,17 +4,18 @@ import type { Part } from '@opencode-ai/sdk/v2';
 import UserTextPart from './parts/UserTextPart';
 import ToolPart from './parts/ToolPart';
 import AssistantTextPart from './parts/AssistantTextPart';
-import ReasoningPart from './parts/ReasoningPart';
+import ReasoningPart, { MergedReasoningPart } from './parts/ReasoningPart';
 import { MessageFilesDisplay } from '../FileAttachment';
 import { TurnChangedFilesDropdown } from '../TurnChangedFilesDropdown';
 import type { ToolPart as ToolPartType } from '@opencode-ai/sdk/v2';
 import type { StreamPhase, ToolPopupContent, AgentMentionInfo } from './types';
-import type { TurnGroupingContext } from '../lib/turns/types';
+import type { TurnChangedFile, TurnGroupingContext } from '../lib/turns/types';
 import { cn } from '@/lib/utils';
 import { isEmptyTextPart, extractTextContent } from './partUtils';
 import { FadeInOnReveal } from './FadeInOnReveal';
 import { Button } from '@/components/ui/button';
 import { SaveProjectPlanDialog } from '@/components/session/SaveProjectPlanDialog';
+import { ForkSessionDialog, type ForkSessionExecution } from '@/components/session/ForkSessionDialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import type { ContentChangeReason } from '@/hooks/useChatAutoFollow';
@@ -31,6 +32,7 @@ import { TextSelectionMenu } from './TextSelectionMenu';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useChatSurfaceMode } from '@/components/chat/useChatSurfaceMode';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { toPng } from 'html-to-image';
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
@@ -42,13 +44,57 @@ import TurnActivity from '../components/TurnActivity';
 import { createProjectPlanFile } from '@/lib/openchamberConfig';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
-import { useSessions } from '@/sync/sync-context';
 import { useI18n } from '@/lib/i18n';
 import { extractLoopbackUrls } from '@/lib/url';
+import { useDeviceInfo } from '@/lib/device';
+import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
+import {
+    type ReviewTransferDirection,
+    sendImplementationResponseToReviewer,
+    sendReviewFeedbackToOriginal,
+} from '@/lib/reviewFlow';
+
 
 const CONTAIN_LAYOUT_STYLE = { contain: 'layout' as const, transform: 'translateZ(0)' };
 const MESSAGE_FOOTER_CONTAINER_STYLE = { containerType: 'inline-size' as const, containerName: 'message-footer' };
 const INLINE_MESSAGE_ACTIONS_CLASS_NAME = 'mt-2 mb-1 flex items-center justify-start gap-1.5';
+
+const getDisplayFileName = (file: string): string => {
+    const normalized = file.replace(/\\/g, '/');
+    const segments = normalized.split('/').filter(Boolean);
+    return segments.at(-1) ?? file;
+};
+
+const TurnChangedFilePills = React.memo(({ files }: { files?: TurnChangedFile[] }) => {
+    if (!files || files.length === 0) {
+        return null;
+    }
+
+    return (
+        <>
+            {files.map((file) => {
+                return (
+                    <Tooltip key={file.file}>
+                        <TooltipTrigger asChild>
+                            <span className="inline-flex h-8 max-w-full items-center">
+                                <span className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-border/30 bg-muted/30 px-2 py-1 text-xs leading-[1.35] text-muted-foreground">
+                                    <FileTypeIcon filePath={file.file} className="h-3.5 w-3.5 flex-shrink-0" />
+                                    <span className="max-w-52 truncate text-foreground/80" title={file.file}>{getDisplayFileName(file.file)}</span>
+                                    <span className="flex-shrink-0 inline-flex items-center gap-0 typography-meta" style={{ fontSize: '0.8rem', lineHeight: '1' }}>
+                                        <span style={{ color: 'var(--status-success)' }}>+{file.additions}</span>
+                                        <span className="text-muted-foreground/70">/</span>
+                                        <span style={{ color: 'var(--status-error)' }}>-{file.deletions}</span>
+                                    </span>
+                                </span>
+                            </span>
+                        </TooltipTrigger>
+                        <TooltipContent>{file.file}</TooltipContent>
+                    </Tooltip>
+                );
+            })}
+        </>
+    );
+});
 
 type SubtaskPartLike = Part & {
     type: 'subtask';
@@ -92,6 +138,8 @@ const normalizeSubtaskModel = (model: SubtaskPartLike['model']): string | null =
 const UserSubtaskPart: React.FC<{ part: SubtaskPartLike }> = ({ part }) => {
     const [expanded, setExpanded] = React.useState(false);
     const effectiveDirectory = useEffectiveDirectory();
+    const { isMobile } = useDeviceInfo();
+    const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
     const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
     const { t } = useI18n();
 
@@ -153,6 +201,11 @@ const UserSubtaskPart: React.FC<{ part: SubtaskPartLike }> = ({ part }) => {
                         className="typography-meta text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2"
                         onClick={() => {
                             if (!effectiveDirectory) return;
+                            if (isMobile || isVSCodeRuntime()) {
+                                setCurrentSession(taskSessionID, effectiveDirectory);
+                                return;
+                            }
+
                             openContextPanelTab(effectiveDirectory, {
                                 mode: 'chat',
                                 dedupeKey: `session:${taskSessionID}`,
@@ -312,6 +365,7 @@ interface MessageBodyProps {
     errorVariant?: 'error' | 'info';
     userActionsMode?: 'inline' | 'external-content' | 'external-actions';
     stickyUserHeaderEnabled?: boolean;
+    reviewTransferDirection?: ReviewTransferDirection | null;
 }
 
 const TOOL_REVEAL_CACHE_MAX = 200;
@@ -593,6 +647,11 @@ interface AssistantMessageActionButtonsProps {
     hasCopyableText: boolean;
     isTouchContext: boolean;
     onCopyMessage?: () => void | boolean | Promise<void | boolean>;
+    reviewTransferAction?: {
+        ariaLabel: string;
+        tooltip: string;
+        onClick: () => void | Promise<void>;
+    };
     onShareImage: (sourceElement?: HTMLElement | null) => Promise<void>;
     ttsText: string;
 }
@@ -601,6 +660,7 @@ const AssistantMessageActionButtons = React.memo(({
     hasCopyableText,
     isTouchContext,
     onCopyMessage,
+    reviewTransferAction,
     onShareImage,
     ttsText,
 }: AssistantMessageActionButtonsProps) => {
@@ -612,6 +672,7 @@ const AssistantMessageActionButtons = React.memo(({
     const [copyHintVisible, setCopyHintVisible] = React.useState(false);
     const [isMessageCopied, setIsMessageCopied] = React.useState(false);
     const [isSharing, setIsSharing] = React.useState(false);
+    const [isTransferringReview, setIsTransferringReview] = React.useState(false);
     const copyHintTimeoutRef = React.useRef<number | null>(null);
     const copiedResetTimeoutRef = React.useRef<number | null>(null);
     const canCopyMessage = Boolean(onCopyMessage);
@@ -710,6 +771,21 @@ const AssistantMessageActionButtons = React.memo(({
         [hasCopyableText, isSharing, onShareImage]
     );
 
+    const handleReviewTransferClick = React.useCallback(
+        async (event: React.MouseEvent<HTMLButtonElement>) => {
+            event.stopPropagation();
+            event.preventDefault();
+            if (!reviewTransferAction || isTransferringReview || !hasCopyableText) return;
+            setIsTransferringReview(true);
+            try {
+                await reviewTransferAction.onClick();
+            } finally {
+                setIsTransferringReview(false);
+            }
+        },
+        [hasCopyableText, isTransferringReview, reviewTransferAction]
+    );
+
     const readAloudTooltip = React.useMemo(() => {
         if (isTTSPlaying) {
             return t('chat.messageBody.tts.stopSpeaking');
@@ -783,6 +859,34 @@ const AssistantMessageActionButtons = React.memo(({
                     <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.copyAnswer')}</TooltipContent>
                 </Tooltip>
             )}
+            {reviewTransferAction && chatSurfaceMode !== 'mini-chat' ? (
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            disabled={isTransferringReview || !hasCopyableText}
+                            className={cn(
+                                'h-8 w-8 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50',
+                                (!hasCopyableText || isTransferringReview) && 'opacity-50'
+                            )}
+                            aria-label={reviewTransferAction.ariaLabel}
+                            onPointerDown={(event) => event.stopPropagation()}
+                            onClick={(event) => {
+                                void handleReviewTransferClick(event);
+                            }}
+                        >
+                            {isTransferringReview ? (
+                                <Icon name="loader-4" className="h-4 w-4 animate-spin" />
+                            ) : (
+                                <Icon name="arrow-left-right" className="h-4 w-4" />
+                            )}
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent sideOffset={6}>{reviewTransferAction.tooltip}</TooltipContent>
+                </Tooltip>
+            ) : null}
             {chatSurfaceMode !== 'mini-chat' ? <Tooltip>
                 <TooltipTrigger asChild>
                     <Button
@@ -863,6 +967,7 @@ const AssistantMessageBody = React.memo(({
     turnGroupingContext,
     errorMessage,
     errorVariant = 'error',
+    reviewTransferDirection = null,
 }: Omit<MessageBodyProps, 'isUser'>) => {
     const { t } = useI18n();
     const chatSurfaceMode = useChatSurfaceMode();
@@ -977,8 +1082,16 @@ const AssistantMessageBody = React.memo(({
     const suggestedPlanTitle = React.useMemo(() => suggestPlanTitleFromText(assistantPlanText), [assistantPlanText]);
 
     const openContextPreview = useUIStore((state) => state.openContextPreview);
+    const isVSCode = isVSCodeRuntime();
+    const isMiniChatSurface = chatSurfaceMode === 'mini-chat';
+    const canUseProjectPlanActions = !isVSCode && !isMiniChatSurface && !isMobile;
+    const canShowMultiRunAction = !isVSCode && !isMiniChatSurface && !isMobile;
 
     const messagePreviewUrl = React.useMemo(() => {
+        if (isVSCode || isMobile || isMiniChatSurface) {
+            return null;
+        }
+
         for (const part of assistantTextParts) {
             const text = (part as { text?: unknown }).text;
             if (typeof text !== 'string' || text.length === 0) {
@@ -1004,38 +1117,72 @@ const AssistantMessageBody = React.memo(({
             return url.includes('0.0.0.0') ? url.replace('0.0.0.0', '127.0.0.1') : url;
         }
         return null;
-    }, [assistantTextParts, toolParts]);
+    }, [assistantTextParts, isMobile, isMiniChatSurface, isVSCode, toolParts]);
 
     const createSessionFromAssistantMessage = useSessionUIStore((state) => state.createSessionFromAssistantMessage);
     const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+    const getDirectoryForSession = useSessionUIStore((state) => state.getDirectoryForSession);
     const openMultiRunLauncherWithPrompt = useUIStore((state) => state.openMultiRunLauncherWithPrompt);
     const projects = useProjectsStore((state) => state.projects);
     const effectiveDirectory = useEffectiveDirectory();
-    const sessions = useSessions();
+    const isReviewSessionView = reviewTransferDirection === 'review-to-original';
+    const effectiveReviewTransferDirection = (!isMobile && !isVSCode) ? reviewTransferDirection : null;
+    const reviewTransferAction = React.useMemo(() => {
+        const transferText = assistantPlanText.trim();
+        if (!sessionId || !effectiveDirectory || !transferText || !effectiveReviewTransferDirection) return undefined;
+        if (effectiveReviewTransferDirection === 'review-to-original') {
+            return {
+                ariaLabel: t('chat.messageBody.actions.sendReviewFeedback'),
+                tooltip: t('chat.messageBody.actions.sendReviewFeedback'),
+                onClick: async () => {
+                    try {
+                        await sendReviewFeedbackToOriginal(sessionId, effectiveDirectory, transferText);
+                    } catch (error) {
+                        console.error('[review-flow] failed to send review feedback', error);
+                    }
+                },
+            };
+        }
+        return {
+            ariaLabel: t('chat.messageBody.actions.sendImplementationResponse'),
+            tooltip: t('chat.messageBody.actions.sendImplementationResponse'),
+            onClick: async () => {
+                try {
+                    await sendImplementationResponseToReviewer(sessionId, effectiveDirectory, transferText);
+                } catch (error) {
+                    console.error('[review-flow] failed to send implementation response', error);
+                }
+            },
+        };
+    }, [assistantPlanText, effectiveDirectory, effectiveReviewTransferDirection, sessionId, t]);
     const [isPlanDialogOpen, setIsPlanDialogOpen] = React.useState(false);
     const [isSavingPlan, setIsSavingPlan] = React.useState(false);
+    const [isForkDialogOpen, setIsForkDialogOpen] = React.useState(false);
+    const [isForkSubmitting, setIsForkSubmitting] = React.useState(false);
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
+    const collapsibleThinkingBlocks = useUIStore((state) => state.collapsibleThinkingBlocks);
+    const groupReasoningBlocks = useUIStore((state) => state.groupReasoningBlocks);
     const showSplitAssistantMessageActions = useUIStore((state) => state.showSplitAssistantMessageActions);
+    const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
+    const vscodeApi = useRuntimeAPIs().vscode;
     const isSortedRenderMode = chatRenderMode === 'sorted';
-    const isMiniChatSurface = chatSurfaceMode === 'mini-chat';
     const collapsedPreviewCount = 7;
     const isLastAssistantInTurn = turnGroupingContext?.isLastAssistantInTurn ?? false;
     const hasStopFinish = messageFinish === 'stop';
-
-    const currentSession = React.useMemo(() => {
-        if (!currentSessionId) {
-            return null;
-        }
-        return sessions.find((session) => session.id === currentSessionId) ?? null;
-    }, [currentSessionId, sessions]);
+    const effectiveStreamPhase: StreamPhase = hasStopFinish ? 'completed' : streamPhase;
 
     const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
     const currentProjectRef = React.useMemo(() => {
+        if (!canUseProjectPlanActions) {
+            return null;
+        }
+
         const directory = effectiveDirectory
-            ?? (typeof currentSession?.directory === 'string' ? currentSession.directory : '');
+            ?? (currentSessionId ? getDirectoryForSession(currentSessionId) : null)
+            ?? '';
         const resolved = resolveProjectForSessionDirectory(projects, availableWorktreesByProject, directory);
         return resolved ? { id: resolved.id, path: resolved.path } : null;
-    }, [availableWorktreesByProject, currentSession?.directory, effectiveDirectory, projects]);
+    }, [availableWorktreesByProject, canUseProjectPlanActions, currentSessionId, effectiveDirectory, getDirectoryForSession, projects]);
 
     const hasTools = toolParts.length > 0;
 
@@ -1161,10 +1308,26 @@ const AssistantMessageBody = React.memo(({
         (event: React.MouseEvent<HTMLButtonElement>) => {
             event.stopPropagation();
             event.preventDefault();
+            if (!createSessionFromAssistantMessage || !assistantPlanText.trim()) {
+                return;
+            }
+            setIsForkDialogOpen(true);
+        },
+        [createSessionFromAssistantMessage, assistantPlanText]
+    );
+
+    const handleConfirmFork = React.useCallback(
+        async (execution: ForkSessionExecution) => {
             if (!createSessionFromAssistantMessage) {
                 return;
             }
-            void createSessionFromAssistantMessage(messageId);
+            setIsForkSubmitting(true);
+            try {
+                await createSessionFromAssistantMessage(messageId, execution);
+                setIsForkDialogOpen(false);
+            } finally {
+                setIsForkSubmitting(false);
+            }
         },
         [createSessionFromAssistantMessage, messageId]
     );
@@ -1303,17 +1466,10 @@ const AssistantMessageBody = React.memo(({
                 const fileName = `message-${messageId}.png`;
 
                 if (isVSCodeRuntime()) {
-                    const response = await fetch('/api/vscode/save-image', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ fileName, dataUrl }),
-                    });
-
-                    if (!response.ok) {
+                    const payload = await vscodeApi?.saveImage?.({ fileName, dataUrl }) as { saved?: boolean; canceled?: boolean; error?: string } | undefined;
+                    if (!payload) {
                         throw new Error('Failed to save image in VS Code');
                     }
-
-                    const payload = await response.json() as { saved?: boolean; canceled?: boolean; error?: string };
                     if (payload.saved !== true) {
                         if (payload.canceled) {
                             return;
@@ -1339,7 +1495,7 @@ const AssistantMessageBody = React.memo(({
                 }
             }
         },
-        [messageId, t]
+        [messageId, t, vscodeApi]
     );
 
     const activityPartsForTurn = React.useMemo(() => {
@@ -1412,8 +1568,9 @@ const AssistantMessageBody = React.memo(({
             onCopyMessage={onCopyMessage}
             onShareImage={shareMessageAsImage}
             ttsText={assistantPlanText}
+            reviewTransferAction={reviewTransferAction}
         />
-    ), [assistantPlanText, hasCopyableText, isTouchContext, onCopyMessage, shareMessageAsImage]);
+    ), [assistantPlanText, hasCopyableText, isTouchContext, onCopyMessage, reviewTransferAction, shareMessageAsImage]);
 
     const renderJustificationActions = React.useCallback((activity: NonNullable<TurnGroupingContext['activityParts']>[number]) => {
         if (!showSplitAssistantMessageActions || !isSortedRenderMode) {
@@ -1491,7 +1648,7 @@ const AssistantMessageBody = React.memo(({
                             onToggleTool={onToggleTool}
                             onShowPopup={onShowPopup}
                             onContentChange={onContentChange}
-                            streamPhase={streamPhase}
+                            streamPhase={effectiveStreamPhase}
                             showHeader={true}
                             animateRows={animateActivityRows}
                             animatedToolIds={animatedToolIdsLookup}
@@ -1506,7 +1663,16 @@ const AssistantMessageBody = React.memo(({
         // Flat rendering: iterate parts in natural order.
         // Group consecutive static tools (read, grep, glob, etc.) into compact rows.
         // Expandable tools (bash, edit, task) get individual rows.
-        // Text and reasoning render inline at their natural position.
+        // Text renders inline at its natural position.
+        // Reasoning: all reasoning parts for this message are merged into ONE block
+        // at the position of the first reasoning part (VSCode Copilot pattern).
+        const flatReasoningParts = visibleParts.filter((p) => {
+            if (p.type !== 'reasoning') return false;
+            const a = activityByPart.get(p);
+            return a?.kind !== 'reasoning';
+        });
+        let reasoningMergeRendered = false;
+
         let i = 0;
         while (i < visibleParts.length) {
             const part = visibleParts[i];
@@ -1527,7 +1693,7 @@ const AssistantMessageBody = React.memo(({
                             part={part}
                             sessionId={sessionId}
                             messageId={messageId}
-                            streamPhase={streamPhase}
+                            streamPhase={effectiveStreamPhase}
                             chatRenderMode={chatRenderMode}
                             onContentChange={onContentChange}
                         />
@@ -1553,25 +1719,41 @@ const AssistantMessageBody = React.memo(({
                     continue;
                 }
                 if (showReasoningTraces) {
-                    if (isSortedRenderMode) {
-                        rendered.push(
-                            <ReasoningPart
-                                key={`reasoning-${messageId}-${i}`}
-                                part={part}
-                                messageId={messageId}
-                                onContentChange={onContentChange}
-                                alwaysShowActions={alwaysShowMessageActions}
-                            />
-                        );
-                    } else {
+                    if (!collapsibleThinkingBlocks) {
+                        // Non-collapsible mode: render thinking blocks as plain text inline.
                         rendered.push(
                             <AssistantTextPart
                                 key={`reasoning-${messageId}-${i}`}
                                 part={part}
                                 sessionId={sessionId}
                                 messageId={messageId}
-                                streamPhase={streamPhase}
+                                streamPhase={effectiveStreamPhase}
                                 chatRenderMode={chatRenderMode}
+                                onContentChange={onContentChange}
+                            />
+                        );
+                    } else if (groupReasoningBlocks) {
+                        // Merged mode (VSCode pattern): one block for all reasoning parts.
+                        if (!reasoningMergeRendered) {
+                            reasoningMergeRendered = true;
+                            rendered.push(
+                                <MergedReasoningPart
+                                    key={`reasoning-merged-${messageId}`}
+                                    parts={flatReasoningParts}
+                                    messageId={messageId}
+                                    streamPhase={effectiveStreamPhase}
+                                    onContentChange={onContentChange}
+                                />
+                            );
+                        }
+                    } else {
+                        // Per-part mode: each reasoning block at its natural position.
+                        rendered.push(
+                            <ReasoningPart
+                                key={`reasoning-${messageId}-${i}`}
+                                part={part}
+                                messageId={messageId}
+                                streamPhase={effectiveStreamPhase}
                                 onContentChange={onContentChange}
                             />
                         );
@@ -1661,6 +1843,8 @@ const AssistantMessageBody = React.memo(({
         animatedToolIdsLookup,
         animateActivityRows,
         chatRenderMode,
+        collapsibleThinkingBlocks,
+        groupReasoningBlocks,
         collapsedPreviewCount,
         expandedTools,
         isMobile,
@@ -1677,7 +1861,7 @@ const AssistantMessageBody = React.memo(({
         shouldRenderActivityGroup,
         shouldShowStandaloneMessageActions,
         shouldShowTool,
-        streamPhase,
+        effectiveStreamPhase,
         showReasoningTraces,
         shouldDeferSortedInlineText,
         syntaxTheme,
@@ -1700,12 +1884,11 @@ const AssistantMessageBody = React.memo(({
             : (typeof messageCreatedAt === 'number' && messageCreatedAt > 0 ? messageCreatedAt : null);
         if (timestamp === null) return null;
 
-        const formatted = formatTimestampForDisplay(timestamp);
+        const formatted = formatTimestampForDisplay(timestamp, timeFormatPreference);
         return formatted.length > 0 ? formatted : null;
-    }, [messageCompletedAt, messageCreatedAt]);
+    }, [messageCompletedAt, messageCreatedAt, timeFormatPreference]);
 
     const footerTimestampClassName = 'text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1';
-    const isVSCode = isVSCodeRuntime();
     const canOpenMessagePreview = !isMiniChatSurface && !isMobile && !isVSCode;
 
     const finalTurnActionButtons = (
@@ -1722,7 +1905,7 @@ const AssistantMessageBody = React.memo(({
                             onPointerDown={(event) => event.stopPropagation()}
                             onClick={() => {
                                 const directory = effectiveDirectory
-                                    ?? (typeof currentSession?.directory === 'string' ? currentSession.directory : null);
+                                    ?? (currentSessionId ? getDirectoryForSession(currentSessionId) : null);
                                 if (!directory) {
                                     return;
                                 }
@@ -1735,7 +1918,7 @@ const AssistantMessageBody = React.memo(({
                     <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.openPreview')}</TooltipContent>
                 </Tooltip>
             ) : null}
-            {!isMiniChatSurface && !isVSCode ? (
+            {canUseProjectPlanActions && !isReviewSessionView ? (
                 <Tooltip>
                     <TooltipTrigger asChild>
                         <Button
@@ -1756,7 +1939,7 @@ const AssistantMessageBody = React.memo(({
                     <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.saveAsPlan')}</TooltipContent>
                 </Tooltip>
             ) : null}
-            {!isMiniChatSurface ? <Tooltip>
+            {!isMiniChatSurface && !isReviewSessionView ? <Tooltip>
                 <TooltipTrigger asChild>
                     <Button
                         type="button"
@@ -1771,7 +1954,7 @@ const AssistantMessageBody = React.memo(({
                 </TooltipTrigger>
                 <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.startNewSession')}</TooltipContent>
             </Tooltip> : null}
-            {!isMiniChatSurface && !isVSCode ? (
+            {canShowMultiRunAction && !isReviewSessionView ? (
                 <Tooltip>
                     <TooltipTrigger asChild>
                         <Button
@@ -1802,14 +1985,25 @@ const AssistantMessageBody = React.memo(({
               style={CONTAIN_LAYOUT_STYLE}
           >
               <TextSelectionMenu containerRef={messageContentRef} />
-             <SaveProjectPlanDialog
-                 open={isPlanDialogOpen}
-                 onOpenChange={setIsPlanDialogOpen}
-                 initialTitle={suggestedPlanTitle}
-                 sourceText={assistantPlanText}
-                 saving={isSavingPlan}
-                 onSave={handleConfirmSaveAsPlan}
-             />
+             {canUseProjectPlanActions ? (
+                 <SaveProjectPlanDialog
+                     open={isPlanDialogOpen}
+                     onOpenChange={setIsPlanDialogOpen}
+                     initialTitle={suggestedPlanTitle}
+                     sourceText={assistantPlanText}
+                     saving={isSavingPlan}
+                     onSave={handleConfirmSaveAsPlan}
+                 />
+             ) : null}
+             {isForkDialogOpen ? (
+                 <ForkSessionDialog
+                     open={isForkDialogOpen}
+                     onOpenChange={setIsForkDialogOpen}
+                     projectDirectory={effectiveDirectory ?? null}
+                     submitting={isForkSubmitting}
+                     onConfirm={handleConfirmFork}
+                 />
+             ) : null}
               <div>
                  <div
                      className="message-content-text leading-relaxed overflow-hidden text-foreground/90 [&_p:last-child]:mb-0 [&_ul:last-child]:mb-0 [&_ol:last-child]:mb-0"
@@ -1850,43 +2044,44 @@ const AssistantMessageBody = React.memo(({
                 )}
                 {shouldShowTurnFooter && (
                     <div
-                        className="mt-2 mb-1 flex items-center justify-start gap-1.5"
+                        className="mt-2 mb-1 flex flex-wrap items-center justify-start gap-1.5"
                         style={MESSAGE_FOOTER_CONTAINER_STYLE}
                     >
                         <div className="flex items-center gap-1.5" data-message-action-group="true">
                             {messageActionButtons}
                             {finalTurnActionButtons}
                         </div>
-                        <div className="flex items-center gap-1.5">
-                            {turnDurationText ? (
-                                <Tooltip>
-                                    <TooltipTrigger asChild>
-                                        <span className="text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1">
-                                            <Icon name="hourglass" className="h-3.5 w-3.5" />
-                                            <span className="message-footer__label">{turnDurationText}</span>
-                                        </span>
-                                    </TooltipTrigger>
-                                    <TooltipContent>{turnDurationText}</TooltipContent>
-                                </Tooltip>
-                            ) : null}
-                            {footerTimestamp ? (
-                                <Tooltip>
-                                    <TooltipTrigger asChild>
-                                        <span
-                                            className={footerTimestampClassName}
-                                            aria-label={`Message time: ${footerTimestamp}`}
-                                        >
-                                            <Icon name="time" className="h-3.5 w-3.5" />
-                                            <span className="message-footer__label">{footerTimestamp}</span>
-                                        </span>
-                                    </TooltipTrigger>
-                                    <TooltipContent>{footerTimestamp}</TooltipContent>
-                                </Tooltip>
-                            ) : null}
-                            {!isMiniChatSurface && isLastAssistantInTurn && hasStopFinish ? (
-                                <TurnChangedFilesDropdown activityParts={turnGroupingContext?.activityParts} />
-                            ) : null}
-                        </div>
+                        {turnDurationText ? (
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <span className="text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1">
+                                        <Icon name="hourglass" className="h-3.5 w-3.5" />
+                                        <span className="message-footer__label">{turnDurationText}</span>
+                                    </span>
+                                </TooltipTrigger>
+                                <TooltipContent>{turnDurationText}</TooltipContent>
+                            </Tooltip>
+                        ) : null}
+                        {footerTimestamp ? (
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <span
+                                        className={footerTimestampClassName}
+                                        aria-label={`Message time: ${footerTimestamp}`}
+                                    >
+                                        <Icon name="time" className="h-3.5 w-3.5" />
+                                        <span className="message-footer__label">{footerTimestamp}</span>
+                                    </span>
+                                </TooltipTrigger>
+                                <TooltipContent>{footerTimestamp}</TooltipContent>
+                            </Tooltip>
+                        ) : null}
+                        {!isMiniChatSurface && isLastAssistantInTurn && hasStopFinish ? (
+                            <TurnChangedFilesDropdown activityParts={turnGroupingContext?.activityParts} />
+                        ) : null}
+                        {!isMiniChatSurface && isLastAssistantInTurn && hasStopFinish ? (
+                            <TurnChangedFilePills files={turnGroupingContext?.changedFiles} />
+                        ) : null}
                     </div>
                 )}
 

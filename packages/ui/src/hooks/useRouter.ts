@@ -27,7 +27,7 @@ function isVSCodeContext(): boolean {
  *
  * Works in:
  * - Web: Full bidirectional sync
- * - Desktop (Tauri): Full bidirectional sync
+ * - Desktop: Full bidirectional sync
  * - VS Code: State-only (no URL updates, reads initial params)
  */
 export function useRouter(): void {

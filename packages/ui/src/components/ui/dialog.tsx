@@ -84,20 +84,14 @@ DialogOverlay.displayName = "DialogOverlay";
 type DialogContentProps = Omit<React.ComponentProps<typeof BaseDialog.Popup>, "children"> & {
   showCloseButton?: boolean
   children?: React.ReactNode
-  onOpenAutoFocus?: (event: Event) => void
-  onCloseAutoFocus?: (event: Event) => void
 }
 
 function DialogContent({
   className,
   children,
   showCloseButton = true,
-  onOpenAutoFocus,
-  onCloseAutoFocus,
   ...props
 }: DialogContentProps) {
-  void onOpenAutoFocus
-  void onCloseAutoFocus
   const { t } = useI18n()
 
   return (

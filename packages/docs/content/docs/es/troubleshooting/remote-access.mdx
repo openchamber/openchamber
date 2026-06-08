@@ -1,0 +1,38 @@
+---
+title: Acceso remoto
+description: Soluciona túneles, instancias remotas y el acceso a OpenChamber desde otro dispositivo.
+---
+
+# Acceso remoto
+
+Cuando no puedes alcanzar OpenChamber desde tu teléfono u otra máquina, la solución depende de cómo te estés conectando.
+
+## Comprueba lo básico primero
+
+- abre `http://localhost:3000` en la misma computadora primero; si eso falla, no es un problema remoto; consulta [Conexión de OpenCode](/es/troubleshooting/opencode-connection/)
+- confirma que el servidor está en funcionamiento con `openchamber status`
+
+## El enlace del túnel no funciona
+
+- ejecuta `openchamber tunnel status --all`
+- reinicia el túnel desde la misma instancia y puerto
+- regenera el enlace de conexión si el anterior ya se usó
+
+Consulta [Túneles](/es/tunnels/) para la configuración completa.
+
+## La instancia remota no se conecta (escritorio)
+
+Cuando una [instancia remota](/es/remote-instances/) se atasca, OpenChamber nombra el paso que falló:
+
+- **auth** — tu contraseña de SSH o de UI fue rechazada; vuelve a introducirla
+- **install / start** — OpenChamber no pudo configurar o iniciar el servidor en la máquina remota; comprueba los requisitos de esa máquina
+- **forwarding** — la conexión está activa pero el puerto no te llega; prueba un puerto local distinto
+
+## Detrás de tu propio servidor
+
+Si pones OpenChamber detrás de un proxy inverso y carga de forma extraña o no se conecta, consulta [Proxy inverso](/es/reverse-proxy/).
+
+## Relacionado
+
+- [Túneles](/es/tunnels/) · [Instancias remotas](/es/remote-instances/) · [Proxy inverso](/es/reverse-proxy/)
+- [Seguridad](/es/security/) — protege la UI antes de exponerla

@@ -7,7 +7,9 @@ import { setDirectoryShowHidden } from '@/lib/directoryShowHidden';
 import { setFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { loadAppearancePreferences, applyAppearancePreferences } from '@/lib/appearancePersistence';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { sanitizeStarterRefs } from '@/lib/draftStarters';
 import { normalizeMobileKeyboardMode, setStoredMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 const persistToLocalStorage = (settings: DesktopSettings) => {
   if (typeof window === 'undefined') {
@@ -96,6 +98,14 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
   if (typeof settings.mobileKeyboardMode === 'string') {
     setStoredMobileKeyboardMode(settings.mobileKeyboardMode);
   }
+  if (typeof settings.openCodeUpdateToastDismissedVersion === 'string') {
+    const version = settings.openCodeUpdateToastDismissedVersion.trim();
+    if (version) {
+      localStorage.setItem('opencode-update-toast-dismissed-version', version);
+    } else {
+      localStorage.removeItem('opencode-update-toast-dismissed-version');
+    }
+  }
   if (settings.sttProvider === 'browser' || settings.sttProvider === 'server') {
     localStorage.setItem('sttProvider', settings.sttProvider);
   }
@@ -117,6 +127,13 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
   if (typeof settings.sttTranscribeOnStop === 'boolean') {
     localStorage.setItem('sttTranscribeOnStop', String(settings.sttTranscribeOnStop));
   }
+};
+
+const dispatchSettingsSynced = (settings: DesktopSettings): void => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  window.dispatchEvent(new CustomEvent<DesktopSettings>('openchamber:settings-synced', { detail: settings }));
 };
 
 type PersistApi = {
@@ -156,6 +173,27 @@ const sanitizeSkillCatalogs = (value: unknown): DesktopSettings['skillCatalogs']
   }
 
   return result;
+};
+
+const sanitizeShortcutOverrides = (value: unknown): Record<string, string> | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const result: Record<string, string> = {};
+  for (const [key, combo] of Object.entries(value)) {
+    const normalizedKey = typeof key === 'string' ? key.trim() : '';
+    const normalizedCombo = typeof combo === 'string' ? combo.trim() : '';
+    if (!normalizedKey || !normalizedCombo) continue;
+    result[normalizedKey] = normalizedCombo;
+  }
+  return result;
+};
+
+const areStringRecordsEqual = (left: Record<string, string>, right: Record<string, string>): boolean => {
+  const leftEntries = Object.entries(left);
+  const rightEntries = Object.entries(right);
+  if (leftEntries.length !== rightEntries.length) return false;
+  return leftEntries.every(([key, value]) => right[key] === value);
 };
 
 const HEX_COLOR_PATTERN = /^#(?:[\da-fA-F]{3}|[\da-fA-F]{6})$/;
@@ -345,6 +383,9 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.showReasoningTraces === 'boolean' && settings.showReasoningTraces !== store.showReasoningTraces) {
     store.setShowReasoningTraces(settings.showReasoningTraces);
   }
+  if (typeof settings.collapsibleThinkingBlocks === 'boolean' && settings.collapsibleThinkingBlocks !== store.collapsibleThinkingBlocks) {
+    store.setCollapsibleThinkingBlocks(settings.collapsibleThinkingBlocks);
+  }
   if (typeof settings.autoDeleteEnabled === 'boolean' && settings.autoDeleteEnabled !== store.autoDeleteEnabled) {
     store.setAutoDeleteEnabled(settings.autoDeleteEnabled);
   }
@@ -405,8 +446,17 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.inputSpellcheckEnabled === 'boolean' && settings.inputSpellcheckEnabled !== store.inputSpellcheckEnabled) {
     store.setInputSpellcheckEnabled(settings.inputSpellcheckEnabled);
   }
+  if (
+    typeof settings.showOpenCodeUpdateNotifications === 'boolean'
+    && settings.showOpenCodeUpdateNotifications !== store.showOpenCodeUpdateNotifications
+  ) {
+    store.setShowOpenCodeUpdateNotifications(settings.showOpenCodeUpdateNotifications);
+  }
   if (typeof settings.showToolFileIcons === 'boolean' && settings.showToolFileIcons !== store.showToolFileIcons) {
     store.setShowToolFileIcons(settings.showToolFileIcons);
+  }
+  if (typeof settings.showTurnChangedFiles === 'boolean' && settings.showTurnChangedFiles !== store.showTurnChangedFiles) {
+    store.setShowTurnChangedFiles(settings.showTurnChangedFiles);
   }
   if (typeof settings.showExpandedBashTools === 'boolean' && settings.showExpandedBashTools !== store.showExpandedBashTools) {
     store.setShowExpandedBashTools(settings.showExpandedBashTools);
@@ -474,6 +524,12 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.fontSize === 'number' && Number.isFinite(settings.fontSize) && settings.fontSize !== store.fontSize) {
     store.setFontSize(settings.fontSize);
   }
+  if (Array.isArray(settings.draftStarters)) {
+    const nextStarters = sanitizeStarterRefs(settings.draftStarters);
+    if (JSON.stringify(store.globalDraftStarters) !== JSON.stringify(nextStarters)) {
+      store.setGlobalDraftStarters(nextStarters);
+    }
+  }
   if (typeof settings.terminalFontSize === 'number' && Number.isFinite(settings.terminalFontSize) && settings.terminalFontSize !== store.terminalFontSize) {
     store.setTerminalFontSize(settings.terminalFontSize);
   }
@@ -491,6 +547,9 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   }
   if (typeof settings.inputBarOffset === 'number' && Number.isFinite(settings.inputBarOffset) && settings.inputBarOffset !== store.inputBarOffset) {
     store.setInputBarOffset(settings.inputBarOffset);
+  }
+  if (settings.shortcutOverrides && !areStringRecordsEqual(settings.shortcutOverrides, store.shortcutOverrides)) {
+    useUIStore.setState({ shortcutOverrides: settings.shortcutOverrides });
   }
   if (typeof settings.mobileKeyboardMode === 'string') {
     const mode = normalizeMobileKeyboardMode(settings.mobileKeyboardMode, store.mobileKeyboardMode);
@@ -636,8 +695,14 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
       )
     );
   }
+  if (Array.isArray(candidate.draftStarters)) {
+    result.draftStarters = sanitizeStarterRefs(candidate.draftStarters);
+  }
   if (typeof candidate.showReasoningTraces === 'boolean') {
     result.showReasoningTraces = candidate.showReasoningTraces;
+  }
+  if (typeof candidate.collapsibleThinkingBlocks === 'boolean') {
+    result.collapsibleThinkingBlocks = candidate.collapsibleThinkingBlocks;
   }
   if (typeof candidate.autoDeleteEnabled === 'boolean') {
     result.autoDeleteEnabled = candidate.autoDeleteEnabled;
@@ -777,6 +842,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (candidate.usageDisplayMode === 'usage' || candidate.usageDisplayMode === 'remaining') {
     result.usageDisplayMode = candidate.usageDisplayMode;
   }
+  if (typeof candidate.usageShowPredValues === 'boolean') {
+    result.usageShowPredValues = candidate.usageShowPredValues;
+  }
   if (Array.isArray(candidate.usageDropdownProviders)) {
     result.usageDropdownProviders = candidate.usageDropdownProviders.filter(
       (entry): entry is string => typeof entry === 'string' && entry.length > 0
@@ -883,8 +951,17 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.inputSpellcheckEnabled === 'boolean') {
     result.inputSpellcheckEnabled = candidate.inputSpellcheckEnabled;
   }
+  if (typeof candidate.showOpenCodeUpdateNotifications === 'boolean') {
+    result.showOpenCodeUpdateNotifications = candidate.showOpenCodeUpdateNotifications;
+  }
+  if (typeof candidate.openCodeUpdateToastDismissedVersion === 'string') {
+    result.openCodeUpdateToastDismissedVersion = candidate.openCodeUpdateToastDismissedVersion.trim().slice(0, 128);
+  }
   if (typeof candidate.showToolFileIcons === 'boolean') {
     result.showToolFileIcons = candidate.showToolFileIcons;
+  }
+  if (typeof candidate.showTurnChangedFiles === 'boolean') {
+    result.showTurnChangedFiles = candidate.showTurnChangedFiles;
   }
   if (typeof candidate.showExpandedBashTools === 'boolean') {
     result.showExpandedBashTools = candidate.showExpandedBashTools;
@@ -950,10 +1027,13 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.inputBarOffset === 'number' && Number.isFinite(candidate.inputBarOffset)) {
     result.inputBarOffset = candidate.inputBarOffset;
   }
+  const shortcutOverrides = sanitizeShortcutOverrides(candidate.shortcutOverrides);
+  if (shortcutOverrides) {
+    result.shortcutOverrides = shortcutOverrides;
+  }
   if (typeof candidate.mobileKeyboardMode === 'string') {
-    const mode = normalizeMobileKeyboardMode(candidate.mobileKeyboardMode, undefined);
-    if (mode) {
-      result.mobileKeyboardMode = mode;
+    if (candidate.mobileKeyboardMode === 'native' || candidate.mobileKeyboardMode === 'resize-content') {
+      result.mobileKeyboardMode = candidate.mobileKeyboardMode;
     }
   }
 
@@ -1084,7 +1164,7 @@ const fetchWebSettings = async (): Promise<DesktopSettings | null> => {
     }
 
     try {
-      const response = await fetch('/api/config/settings', {
+      const response = await runtimeFetch('/api/config/settings', {
         method: 'GET',
         headers: { Accept: 'application/json' },
       });
@@ -1159,9 +1239,7 @@ export const syncDesktopSettings = async (): Promise<void> => {
       console.warn('applyDesktopUiPreferences failed:', error);
     }
 
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent<DesktopSettings>('openchamber:settings-synced', { detail: settings }));
-    }
+    dispatchSettingsSynced(settings);
   };
 
   try {
@@ -1192,6 +1270,7 @@ const _flushSettingsUpdate = async (): Promise<void> => {
       if (updated) {
         persistToLocalStorage(updated);
         applyDesktopUiPreferences(updated);
+        dispatchSettingsSynced(updated);
       }
       return;
     } catch (error) {
@@ -1200,7 +1279,7 @@ const _flushSettingsUpdate = async (): Promise<void> => {
   }
 
   try {
-    const response = await fetch('/api/config/settings', {
+    const response = await runtimeFetch('/api/config/settings', {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -1218,6 +1297,7 @@ const _flushSettingsUpdate = async (): Promise<void> => {
     if (updated) {
       persistToLocalStorage(updated);
       applyDesktopUiPreferences(updated);
+      dispatchSettingsSynced(updated);
       // Invalidate GET cache so next read sees the fresh data
       _settingsCache = null;
     }

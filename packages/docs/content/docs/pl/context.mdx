@@ -1,0 +1,38 @@
+---
+title: Kontekst
+description: Zobacz, ile pamięci modelu zużywa sesja.
+---
+
+# Kontekst
+
+Każdy model może pomieścić naraz tylko określoną część rozmowy — swój kontekst. OpenChamber pokazuje, jak bardzo jest on zapełniony, dzięki czemu widzisz, kiedy sesja zbliża się do limitu i odpowiedź może zacząć pomijać starsze szczegóły.
+
+## Szybki wskaźnik
+
+Podczas czatu mały wskaźnik pokazuje procent wykorzystanego kontekstu. Zmienia kolor w miarę zapełniania:
+
+- zielony — dużo miejsca
+- żółty — coraz pełniej (około trzech czwartych)
+- czerwony — niemal pełny
+
+Najedź na niego (lub stuknij na telefonie), aby zobaczyć dokładną liczbę tokenów.
+
+## Pełny panel kontekstu
+
+Otwórz zakładkę **Context** w prawym pasku bocznym, aby zobaczyć pełniejszy obraz bieżącej sesji:
+
+- używany model i kiedy sesja się rozpoczęła
+- łączna liczba tokenów względem limitu modelu
+- sumy wiadomości i kosztów
+- podział tokenów ostatniej odpowiedzi
+- przybliżony podział tego, co zajmuje kontekst (Twoje wiadomości, agenta, wynik narzędzi)
+
+Podział jest szacunkiem, a nie dokładnym wyliczeniem — używaj go do wykrycia, co zapełnia okno, a nie do rozliczeń.
+
+## Co zrobić, gdy jest pełny
+
+Rozpocznij świeżą sesję dla nowego zadania, zamiast pozwalać jednej sesji rosnąć w nieskończoność. Krótszy kontekst jest szybszy i utrzymuje model skupionym.
+
+## Powiązane
+
+- [Projekty](/pl/projects/) — sesje są grupowane według projektu

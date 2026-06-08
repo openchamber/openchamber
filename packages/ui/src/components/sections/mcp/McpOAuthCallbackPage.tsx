@@ -2,6 +2,7 @@ import React from 'react';
 import { Button } from '@/components/ui/button';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { parseMcpOAuthCallbackContext, parseMcpOAuthCallbackStateKey } from '@/components/sections/mcp/mcpOAuth';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 const parseQueryParam = (params: URLSearchParams, key: string): string | null => {
   const value = params.get(key);
@@ -42,7 +43,7 @@ export const McpOAuthCallbackPage: React.FC = () => {
 
     if (error) {
       if (callbackStateKey) {
-        void fetch(`/api/mcp/auth/pending?state=${encodeURIComponent(callbackStateKey)}`, { method: 'DELETE' }).catch(() => undefined);
+        void runtimeFetch(`/api/mcp/auth/pending?state=${encodeURIComponent(callbackStateKey)}`, { method: 'DELETE' }).catch(() => undefined);
       }
       setStatus('error');
       setMessage(errorDescription ?? error);
@@ -57,7 +58,7 @@ export const McpOAuthCallbackPage: React.FC = () => {
 
         let pendingContext = callbackContext;
         if (!pendingContext && callbackStateKey) {
-          const response = await fetch(`/api/mcp/auth/pending?state=${encodeURIComponent(callbackStateKey)}`);
+          const response = await runtimeFetch(`/api/mcp/auth/pending?state=${encodeURIComponent(callbackStateKey)}`);
           if (response.ok) {
             const payload = await response.json().catch(() => null) as { name?: string; directory?: string | null } | null;
             if (payload?.name?.trim()) {
@@ -75,13 +76,13 @@ export const McpOAuthCallbackPage: React.FC = () => {
 
         await completeAuth(pendingContext.name, code, pendingContext.directory);
         if (callbackStateKey) {
-          await fetch(`/api/mcp/auth/pending?state=${encodeURIComponent(callbackStateKey)}`, { method: 'DELETE' }).catch(() => undefined);
+          await runtimeFetch(`/api/mcp/auth/pending?state=${encodeURIComponent(callbackStateKey)}`, { method: 'DELETE' }).catch(() => undefined);
         }
         setStatus('success');
         setMessage('Authorization completed. You can close this tab and return to OpenChamber.');
       } catch (authError) {
         if (callbackStateKey) {
-          await fetch(`/api/mcp/auth/pending?state=${encodeURIComponent(callbackStateKey)}`, { method: 'DELETE' }).catch(() => undefined);
+          await runtimeFetch(`/api/mcp/auth/pending?state=${encodeURIComponent(callbackStateKey)}`, { method: 'DELETE' }).catch(() => undefined);
         }
         setStatus('error');
         setMessage(normalizeMcpAuthErrorMessage(authError, 'Failed to complete MCP authorization.'));

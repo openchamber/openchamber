@@ -1,0 +1,42 @@
+---
+title: Instancias remotas
+description: Conecta la app de escritorio a OpenChamber en otra máquina por SSH.
+---
+
+# Instancias remotas
+
+La app de escritorio puede conectarse a OpenChamber ejecutándose en otra máquina por SSH —un servidor de trabajo, una máquina en la nube, un homelab— y traer su UI a tu pantalla como si fuera local. Configúralo en **Settings → Remote Instances**.
+
+> Las instancias remotas son una función **solo de escritorio**. En la web o en VS Code, conéctate a un servidor remoto con las variables de entorno de [OpenCode Server](/es/opencode-server/) en su lugar.
+
+## Añade una instancia remota
+
+1. Abre **Settings → Remote Instances** y añade una.
+2. Dale el comando SSH que usarías normalmente para alcanzar la máquina, más un apodo.
+3. Elige cómo se ejecuta OpenChamber allí:
+   - **managed** — OpenChamber se instala y se inicia por sí mismo en la máquina remota
+   - **external** — conéctate a una que ya está en funcionamiento
+4. Conecta.
+
+OpenChamber recorre los pasos —comprobar la conexión, configurar el remoto, iniciar el servidor y reenviar el puerto— y muestra en qué punto está en cada etapa. Cuando llega a **ready**, la UI remota se carga localmente.
+
+## Credenciales
+
+Tú decides si guardar las contraseñas de SSH y de UI o introducirlas cada vez. Si la conexión se cae, OpenChamber informa qué paso falló para que puedas arreglarlo; consulta [Acceso remoto](/es/troubleshooting/remote-access/).
+
+## Enlaces de conexión directa
+
+Si una máquina remota ya ejecuta OpenChamber, crea allí un enlace de conexión e impórtalo en **Settings → Remote Instances → Server links**:
+
+```bash
+openchamber connect-url --port 3000 --server http://your-host:3000 --qr
+```
+
+`connect-url` inicia el servidor primero si no hay nada ejecutándose en ese puerto. Añade `--api-only` para un servidor headless, `--lan` para escuchar en la LAN al iniciar, `--ui-password` para proteger el acceso del navegador y `--name` para etiquetar la conexión guardada.
+
+El enlace generado contiene un token de cliente para apps de OpenChamber. Ese token es independiente de la contraseña de la UI del navegador y sobrevive a reinicios hasta que lo revoques o elimines.
+
+## Relacionado
+
+- [OpenCode Server](/es/opencode-server/) — conéctate a un servidor remoto en la web o en VS Code
+- [Acceso remoto](/es/troubleshooting/remote-access/) — cuando una conexión no se completa

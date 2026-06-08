@@ -1,4 +1,5 @@
-const pad2 = (value: number): string => String(value).padStart(2, '0');
+import { formatTimeForPreference } from '@/lib/timeFormat';
+import type { TimeFormatPreference } from '@/stores/useUIStore';
 
 const isSameDay = (left: Date, right: Date): boolean => {
     return (
@@ -18,7 +19,7 @@ const isValidTimestamp = (timestamp: number): boolean => {
     return Number.isFinite(timestamp) && !Number.isNaN(new Date(timestamp).getTime());
 };
 
-export const formatTimestampForDisplay = (timestamp: number): string => {
+export const formatTimestampForDisplay = (timestamp: number, timeFormatPreference: TimeFormatPreference): string => {
     if (!isValidTimestamp(timestamp)) {
         return '';
     }
@@ -26,7 +27,7 @@ export const formatTimestampForDisplay = (timestamp: number): string => {
     const date = new Date(timestamp);
     const now = new Date();
 
-    const timePart = `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+    const timePart = formatTimeForPreference(date, timeFormatPreference);
 
     if (isSameDay(date, now)) {
         return timePart;

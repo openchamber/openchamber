@@ -1,7 +1,9 @@
 import React from 'react';
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { CodeMirrorEditor } from '@/components/ui/CodeMirrorEditor';
 import { toast } from '@/components/ui';
 import { useSkillsStore, type SkillConfig, type SkillScope, type SupportingFile, type PendingFile } from '@/stores/useSkillsStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -21,6 +23,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Icon } from "@/components/icon/Icon";
+import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
+import { PreviewToggleButton } from '@/components/views/PreviewToggleButton';
 import { SkillsCatalogPage } from './catalog/SkillsCatalogPage';
 import {
   SKILL_LOCATION_OPTIONS,
@@ -29,6 +33,12 @@ import {
   type SkillLocationValue,
 } from './skillLocations';
 import { useI18n } from '@/lib/i18n';
+import { languageByExtension } from '@/lib/codemirror/languageByExtension';
+import { createFlexokiCodeMirrorTheme } from '@/lib/codemirror/flexokiTheme';
+import { useThemeSystem } from '@/contexts/useThemeSystem';
+import { cn } from '@/lib/utils';
+import { EditorView } from '@codemirror/view';
+import type { Extension } from '@codemirror/state';
 
 export interface SkillsPageProps {
   view?: 'installed' | 'catalog';
@@ -38,8 +48,57 @@ const SkillsCatalogStandalone: React.FC = () => (
   <SkillsCatalogPage mode="external" onModeChange={() => {}} showModeTabs={false} />
 );
 
+type SkillDocumentParseResult = {
+  description: string | null;
+  instructions: string;
+};
+
+const SKILL_DOCUMENT_PATH = 'SKILL.md';
+const SKILL_EDITOR_HEIGHT_CLASS = 'h-[clamp(320px,58dvh,680px)] min-h-[260px] max-h-[calc(100dvh-220px)]';
+
+const buildSkillMarkdown = (description: string, instructions: string): string => {
+  const frontmatter = stringifyYaml({ description }).trimEnd();
+  const body = instructions.trimStart();
+  return `---\n${frontmatter}\n---${body ? `\n\n${body}` : '\n'}`;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+);
+
+const parseSkillMarkdown = (value: string): SkillDocumentParseResult => {
+  const match = value.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)([\s\S]*)$/);
+  if (!match) {
+    return { description: null, instructions: value };
+  }
+
+  let description: string | null = null;
+  try {
+    const frontmatter: unknown = parseYaml(match[1]);
+    if (isRecord(frontmatter)) {
+      const candidate = frontmatter.description;
+      if (typeof candidate === 'string') {
+        description = candidate;
+      }
+    }
+  } catch {
+    description = null;
+  }
+
+  return {
+    description,
+    instructions: match[2].replace(/^\r?\n/, ''),
+  };
+};
+
+const replaceSkillMarkdownDescription = (value: string, description: string): string => {
+  const parsed = parseSkillMarkdown(value);
+  return buildSkillMarkdown(description, parsed.instructions);
+};
+
 const SkillsInstalledPage: React.FC = () => {
   const { t } = useI18n();
+  const { currentTheme } = useThemeSystem();
   const {
     selectedSkillName,
     getSkillByName,
@@ -65,6 +124,7 @@ const SkillsInstalledPage: React.FC = () => {
   const selectedSkill = selectedSkillName ? getSkillByName(selectedSkillName) : null;
   const isNewSkill = Boolean(skillDraft && skillDraft.name === selectedSkillName && !selectedSkill);
   const hasStaleSelection = Boolean(selectedSkillName && !selectedSkill && !skillDraft);
+  const isReadOnlySkill = selectedSkill?.path === '<built-in>';
 
   React.useEffect(() => {
     if (!hasStaleSelection) {
@@ -79,6 +139,8 @@ const SkillsInstalledPage: React.FC = () => {
   const [draftSource, setDraftSource] = React.useState<'opencode' | 'agents'>('opencode');
   const [description, setDescription] = React.useState('');
   const [instructions, setInstructions] = React.useState('');
+  const [skillMarkdown, setSkillMarkdown] = React.useState(() => buildSkillMarkdown('', ''));
+  const [skillEditorMode, setSkillEditorMode] = React.useState<'edit' | 'preview'>('edit');
   const [supportingFiles, setSupportingFiles] = React.useState<SupportingFile[]>([]);
   const [pendingFiles, setPendingFiles] = React.useState<PendingFile[]>([]);
   const [isSaving, setIsSaving] = React.useState(false);
@@ -108,6 +170,10 @@ const SkillsInstalledPage: React.FC = () => {
     switch (value) {
       case 'project-opencode':
         return t('settings.skills.location.option.projectOpencode.label');
+      case 'user-claude':
+        return t('settings.skills.location.option.userClaude.label');
+      case 'project-claude':
+        return t('settings.skills.location.option.projectClaude.label');
       case 'user-agents':
         return t('settings.skills.location.option.userAgents.label');
       case 'project-agents':
@@ -121,6 +187,10 @@ const SkillsInstalledPage: React.FC = () => {
     switch (value) {
       case 'project-opencode':
         return t('settings.skills.location.option.projectOpencode.description');
+      case 'user-claude':
+        return t('settings.skills.location.option.userClaude.description');
+      case 'project-claude':
+        return t('settings.skills.location.option.projectClaude.description');
       case 'user-agents':
         return t('settings.skills.location.option.userAgents.description');
       case 'project-agents':
@@ -133,11 +203,14 @@ const SkillsInstalledPage: React.FC = () => {
   React.useEffect(() => {
     const loadSkillDetails = async () => {
       if (isNewSkill && skillDraft) {
+        const nextDescription = skillDraft.description || '';
+        const nextInstructions = skillDraft.instructions || '';
         setDraftName(skillDraft.name || '');
         setDraftScope(skillDraft.scope || 'user');
         setDraftSource(skillDraft.source === 'agents' ? 'agents' : 'opencode');
-        setDescription(skillDraft.description || '');
-        setInstructions(skillDraft.instructions || '');
+        setDescription(nextDescription);
+        setInstructions(nextInstructions);
+        setSkillMarkdown(buildSkillMarkdown(nextDescription, nextInstructions));
         setOriginalDescription('');
         setOriginalInstructions('');
         setSupportingFiles([]);
@@ -148,10 +221,13 @@ const SkillsInstalledPage: React.FC = () => {
           const detail = await getSkillDetail(selectedSkillName);
           if (detail) {
             const md = detail.sources.md;
-            setDescription(md.description || '');
-            setInstructions(md.instructions || '');
-            setOriginalDescription(md.description || '');
-            setOriginalInstructions(md.instructions || '');
+            const nextDescription = md.description || '';
+            const nextInstructions = md.instructions || '';
+            setDescription(nextDescription);
+            setInstructions(nextInstructions);
+            setSkillMarkdown(buildSkillMarkdown(nextDescription, nextInstructions));
+            setOriginalDescription(nextDescription);
+            setOriginalInstructions(nextInstructions);
             setSupportingFiles(md.supportingFiles || []);
           }
         } catch (error) {
@@ -164,6 +240,39 @@ const SkillsInstalledPage: React.FC = () => {
 
     loadSkillDetails();
   }, [selectedSkill, isNewSkill, selectedSkillName, skills, skillDraft, getSkillDetail]);
+
+  const skillEditorExtensions = React.useMemo<Extension[]>(() => {
+    const extensions: Extension[] = [createFlexokiCodeMirrorTheme(currentTheme)];
+    const markdownExtension = languageByExtension(SKILL_DOCUMENT_PATH);
+    if (markdownExtension) {
+      extensions.push(markdownExtension);
+    }
+    extensions.push(EditorView.lineWrapping);
+    return extensions;
+  }, [currentTheme]);
+
+  const supportingFileEditorExtensions = React.useMemo<Extension[]>(() => {
+    const filePath = newFileName.trim() || 'supporting-file.md';
+    const extensions: Extension[] = [createFlexokiCodeMirrorTheme(currentTheme)];
+    const languageExtension = languageByExtension(filePath);
+    if (languageExtension) {
+      extensions.push(languageExtension);
+    }
+    extensions.push(EditorView.lineWrapping);
+    return extensions;
+  }, [currentTheme, newFileName]);
+
+  const handleDescriptionChange = React.useCallback((nextDescription: string) => {
+    setDescription(nextDescription);
+    setSkillMarkdown((current) => replaceSkillMarkdownDescription(current, nextDescription));
+  }, []);
+
+  const handleSkillMarkdownChange = React.useCallback((nextMarkdown: string) => {
+    setSkillMarkdown(nextMarkdown);
+    const parsed = parseSkillMarkdown(nextMarkdown);
+    setDescription(parsed.description ?? '');
+    setInstructions(parsed.instructions);
+  }, []);
 
   const handleSave = async () => {
     const skillName = isNewSkill ? draftName.trim().replace(/\s+/g, '-').toLowerCase() : selectedSkillName?.trim();
@@ -197,6 +306,7 @@ const SkillsInstalledPage: React.FC = () => {
         instructions: instructions.trim() || undefined,
         scope: isNewSkill ? draftScope : undefined,
         source: isNewSkill ? draftSource : undefined,
+        targetPath: !isNewSkill ? selectedSkill?.path : undefined,
         supportingFiles: isNewSkill && pendingFiles.length > 0 ? pendingFiles : undefined,
       };
 
@@ -386,11 +496,6 @@ const SkillsInstalledPage: React.FC = () => {
           <div className="min-w-0">
             <h2 className="typography-ui-header font-semibold text-foreground truncate flex items-center gap-2">
               {isNewSkill ? t('settings.skills.page.title.newSkill') : selectedSkillName}
-              {selectedSkill?.source === 'claude' && (
-                <span className="typography-micro font-normal bg-[var(--surface-muted)] text-muted-foreground px-1.5 py-0.5 rounded">
-                  {t('settings.skills.page.badge.claudeCompatible')}
-                </span>
-              )}
             </h2>
             <p className="typography-meta text-muted-foreground truncate">
               {selectedSkill
@@ -465,10 +570,11 @@ const SkillsInstalledPage: React.FC = () => {
               <div className="mt-1.5">
                 <Textarea
                   value={description}
-                  onChange={(e) => setDescription(e.target.value)}
+                  onChange={(e) => handleDescriptionChange(e.target.value)}
                   placeholder={t('settings.skills.page.field.descriptionPlaceholder')}
                   rows={2}
                   className="w-full resize-none min-h-[60px] max-h-32 bg-transparent"
+                  disabled={isReadOnlySkill}
                 />
               </div>
             </div>
@@ -478,19 +584,44 @@ const SkillsInstalledPage: React.FC = () => {
 
         {/* Instructions */}
         <div className="mb-8">
-          <div className="mb-1 px-1">
+          <div className="mb-1 px-1 flex items-center justify-between gap-2">
             <h3 className="typography-ui-header font-medium text-foreground">
               {t('settings.skills.page.section.instructions')}
             </h3>
+            <PreviewToggleButton
+              currentMode={skillEditorMode === 'preview' ? 'preview' : 'edit'}
+              onToggle={() => setSkillEditorMode((mode) => mode === 'preview' ? 'edit' : 'preview')}
+            />
           </div>
 
           <section className="px-2 pb-2 pt-0">
-            <Textarea
-              value={instructions}
-              onChange={(e) => setInstructions(e.target.value)}
-              placeholder={t('settings.skills.page.field.instructionsPlaceholder')}
-              className="min-h-[220px] max-h-[60vh] font-mono typography-meta"
-            />
+            <div
+              className={cn(
+                'overflow-hidden rounded-md border border-[var(--surface-subtle)] bg-background',
+                SKILL_EDITOR_HEIGHT_CLASS,
+              )}
+            >
+              {skillEditorMode === 'preview' ? (
+                <ScrollableOverlay outerClassName="h-full" className="h-full">
+                  <div className="min-h-full px-4 py-3">
+                    <SimpleMarkdownRenderer
+                      content={skillMarkdown}
+                      className="typography-markdown-body"
+                      stripFrontmatter
+                    />
+                  </div>
+                </ScrollableOverlay>
+              ) : (
+                <CodeMirrorEditor
+                  value={skillMarkdown}
+                  onChange={handleSkillMarkdownChange}
+                  readOnly={isReadOnlySkill}
+                  extensions={skillEditorExtensions}
+                  className="h-full"
+                  enableSearch
+                />
+              )}
+            </div>
           </section>
         </div>
 
@@ -500,7 +631,7 @@ const SkillsInstalledPage: React.FC = () => {
             <h3 className="typography-ui-header font-medium text-foreground">
               {t('settings.skills.page.section.supportingFiles')}
             </h3>
-            <Button variant="outline" size="xs" className="!font-normal gap-1" onClick={handleAddFile}>
+            <Button variant="outline" size="xs" className="!font-normal gap-1" onClick={handleAddFile} disabled={isReadOnlySkill}>
               <Icon name="add" className="h-3.5 w-3.5" /> {t('settings.skills.page.actions.addFile')}
             </Button>
           </div>
@@ -532,16 +663,18 @@ const SkillsInstalledPage: React.FC = () => {
                           {t('settings.skills.page.badge.pending')}
                         </span>
                       )}
-                      <Button size="sm"
-                        variant="ghost"
-                        className="h-5 w-5 px-0 flex-shrink-0 text-muted-foreground hover:text-[var(--status-error)] opacity-0 group-hover:opacity-100 transition-opacity"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteFile(file.path);
-                        }}
-                      >
-                        <Icon name="delete-bin" className="h-3 w-3" />
-                      </Button>
+                      {!isReadOnlySkill && (
+                        <Button size="sm"
+                          variant="ghost"
+                          className="h-5 w-5 px-0 flex-shrink-0 text-muted-foreground hover:text-[var(--status-error)] opacity-0 group-hover:opacity-100 transition-opacity"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteFile(file.path);
+                          }}
+                        >
+                          <Icon name="delete-bin" className="h-3 w-3" />
+                        </Button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -554,7 +687,7 @@ const SkillsInstalledPage: React.FC = () => {
         <div className="px-2 py-1">
           <Button
             onClick={handleSave}
-            disabled={isSaving || !hasSkillChanges}
+            disabled={isReadOnlySkill || isSaving || !hasSkillChanges}
             size="xs"
             className="!font-normal"
           >
@@ -634,13 +767,15 @@ const SkillsInstalledPage: React.FC = () => {
                 <label className="typography-ui-label font-medium text-foreground flex-shrink-0">
                   {t('settings.skills.page.fileDialog.field.content')}
                 </label>
-                <Textarea
-                  value={newFileContent}
-                  onChange={(e) => setNewFileContent(e.target.value)}
-                  placeholder={t('settings.skills.page.fileDialog.field.contentPlaceholder')}
-                  outerClassName="h-[45vh] min-h-[250px] max-h-[55vh]"
-                  className="h-full min-h-0 font-mono typography-meta"
-                />
+                <div className="h-[45vh] min-h-[250px] max-h-[55vh] overflow-hidden rounded-md border border-[var(--surface-subtle)] bg-background">
+                  <CodeMirrorEditor
+                    value={newFileContent}
+                    onChange={setNewFileContent}
+                    extensions={supportingFileEditorExtensions}
+                    className="h-full"
+                    enableSearch
+                  />
+                </div>
               </div>
             </div>
           )}

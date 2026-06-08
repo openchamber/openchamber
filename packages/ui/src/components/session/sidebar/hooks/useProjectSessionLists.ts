@@ -1,5 +1,6 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
+import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { dedupeSessionsById, isSessionRelatedToProject, normalizePath } from '../utils';
 
 type WorktreeMeta = { path: string };
@@ -22,8 +23,7 @@ export const useProjectSessionLists = (args: Args) => {
   const sessionsByDirectory = React.useMemo(() => {
     const next = new Map<string, Session[]>();
     sessions.forEach((session) => {
-      const directory = normalizePath((session as Session & { directory?: string | null }).directory ?? null)
-        ?? normalizePath((session as Session & { project?: { worktree?: string | null } | null }).project?.worktree ?? null);
+      const directory = resolveGlobalSessionDirectory(session);
       if (!directory) {
         return;
       }

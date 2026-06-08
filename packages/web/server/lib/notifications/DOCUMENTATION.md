@@ -1,7 +1,7 @@
 # Notifications Module Documentation
 
 ## Purpose
-This module provides notification message preparation utilities for the web server runtime, including text truncation, plain-text normalization, and optional message summarization for system notifications.
+This module provides notification message preparation utilities for the web server runtime, including text truncation and plain-text normalization for system notifications.
 
 ## Entrypoints and structure
 - `packages/web/server/lib/notifications/index.js`: public entrypoint imported by `packages/web/server/index.js`.
@@ -9,7 +9,7 @@ This module provides notification message preparation utilities for the web serv
 - `packages/web/server/lib/notifications/push-runtime.js`: push subscription persistence, VAPID initialization, and UI visibility runtime.
 - `packages/web/server/lib/notifications/emitter-runtime.js`: desktop/stdout + UI SSE notification emission runtime.
 - `packages/web/server/lib/notifications/runtime.js`: trigger runtime for OpenCode event-driven notification fanout.
-- `packages/web/server/lib/notifications/template-runtime.js`: notification template variables, zen-model helpers, and session text/title enrichment runtime.
+- `packages/web/server/lib/notifications/template-runtime.js`: notification template variables and session text/title enrichment runtime. Zen-model helpers are retained as compatibility stubs only.
 - `packages/web/server/lib/notifications/message.js`: helper implementation module.
 - `packages/web/server/lib/notifications/message.test.js`: unit tests for notification message helpers.
 
@@ -17,7 +17,7 @@ This module provides notification message preparation utilities for the web serv
 
 ### Notifications API (re-exported from message.js)
 - `truncateNotificationText(text, maxLength)`: Truncates text to specified max length, appending `...` if truncated.
-- `prepareNotificationLastMessage({ message, settings, summarize })`: Prepares the last message for notification display, with optional summarization support.
+- `prepareNotificationLastMessage({ message, settings })`: Prepares the last message for notification display by normalizing and truncating text.
 
 ### Route registration API (routes.js)
 - `registerNotificationRoutes(app, dependencies)`: Registers notification-owned endpoints:
@@ -45,6 +45,7 @@ This module provides notification message preparation utilities for the web serv
   - session parent cache for subtask suppression
   - template resolution and fallback behavior
   - native notification fanout and web push payload fanout
+  - push suppression while any fresh UI visibility heartbeat reports a focused client
 
 ### Push runtime API (push-runtime.js)
 - `createPushRuntime(dependencies)`: creates runtime for web push and UI visibility state.
@@ -67,14 +68,14 @@ This module provides notification message preparation utilities for the web serv
   - `broadcastUiNotification(payload)`
 
 ### Template runtime API (template-runtime.js)
-- `createNotificationTemplateRuntime(dependencies)`: creates shared notification/template runtime and consumes shared text summarization from `packages/web/server/lib/text/summarization.js` in `notification` mode.
+- `createNotificationTemplateRuntime(dependencies)`: creates shared notification/template runtime. Model-backed summarization was retired after the Zen provider became unavailable.
 - Returned API:
   - `resolveNotificationTemplate(template, variables)`
   - `shouldApplyResolvedTemplateMessage(template, resolved, variables)`
-  - `fetchFreeZenModels()`
-  - `resolveZenModel(override)`
-  - `validateZenModelAtStartup()`
-  - `summarizeText(text, targetLength, zenModel)`
+  - `fetchFreeZenModels()` compatibility stub returning `[]`
+  - `resolveZenModel(override)` compatibility stub preserving stored values without validation
+  - `validateZenModelAtStartup()` compatibility no-op
+  - `summarizeText(text, targetLength, zenModel)` compatibility stub returning local fallback text
   - `extractLastMessageText(payload, maxLength?)`
   - `fetchLastAssistantMessageText(sessionId, messageId, maxLength?)`
   - `maybeCacheSessionInfoFromEvent(payload)`
@@ -85,16 +86,10 @@ This module provides notification message preparation utilities for the web serv
 
 ### Default values
 - `DEFAULT_NOTIFICATION_MESSAGE_MAX_LENGTH`: 250 (default max length for notification text).
-- `DEFAULT_NOTIFICATION_SUMMARY_THRESHOLD`: 200 (minimum message length to trigger summarization).
-- `DEFAULT_NOTIFICATION_SUMMARY_LENGTH`: 100 (target length for summarized messages).
 
 ## Settings object format
 
-The `settings` parameter for `prepareNotificationLastMessage` supports:
-- `summarizeLastMessage` (boolean): Whether to enable summarization for long messages.
-- `summaryThreshold` (number): Minimum message length to trigger summarization (default: 200).
-- `summaryLength` (number): Target length for summarized messages (default: 100).
-- `maxLastMessageLength` (number): Maximum length for the final notification text (default: 250).
+The `settings` parameter for `prepareNotificationLastMessage` supports `maxLastMessageLength` (number), the maximum length for the final notification text (default: 250). Legacy summarization settings may still exist in persisted settings but are ignored.
 
 ## Response contracts
 
@@ -105,8 +100,7 @@ The `settings` parameter for `prepareNotificationLastMessage` supports:
 
 ### `prepareNotificationLastMessage`
 - Returns empty string for empty/null message.
-- Returns truncated original message if summarization disabled, message under threshold, or summarization fails.
-- Returns truncated summary if summarization succeeds and returns non-empty string.
+- Returns truncated original message. Model-backed notification summarization is retired.
 - Normalizes markdown-like formatting to plain text before truncation.
 - Always applies `maxLastMessageLength` truncation to final result.
 
@@ -120,10 +114,10 @@ The `settings` parameter for `prepareNotificationLastMessage` supports:
 5. Add corresponding unit tests in `packages/web/server/lib/notifications/message.test.js`.
 
 ### Error handling
-- `prepareNotificationLastMessage` catches summarization errors and falls back to original message.
+- `prepareNotificationLastMessage` does not call model summarization.
 - Invalid numeric parameters default to safe fallback values.
 - Non-string inputs are handled gracefully (return empty string).
 
 ### Testing
 - Run `bun run type-check`, `bun run lint`, and `bun run build` before finalizing changes.
-- Unit tests should cover truncation behavior, summarization success/failure, and edge cases (empty strings, invalid inputs).
+- Unit tests should cover truncation behavior and edge cases (empty strings, invalid inputs).

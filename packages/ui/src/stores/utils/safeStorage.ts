@@ -1,6 +1,18 @@
 let safeStorageInstance: Storage | null = null;
 let safeSessionStorageInstance: Storage | null = null;
 
+const getWindowStorage = (key: 'localStorage' | 'sessionStorage'): Storage | null => {
+    if (typeof window === 'undefined') {
+        return null;
+    }
+
+    try {
+        return window[key] ?? null;
+    } catch {
+        return null;
+    }
+};
+
 const createInMemoryStorage = (): Storage => {
     const store = new Map<string, string>();
     return {
@@ -22,11 +34,12 @@ const createInMemoryStorage = (): Storage => {
 };
 
 const createSafeStorage = (): Storage => {
-    if (typeof window === 'undefined' || !window.localStorage) {
+    const baseStorage = getWindowStorage('localStorage');
+
+    if (!baseStorage) {
         return createInMemoryStorage();
     }
 
-    const baseStorage = window.localStorage;
     const fallback = createInMemoryStorage();
     let storageAvailable = true;
 
@@ -123,11 +136,12 @@ export const getSafeStorage = (): Storage => {
 };
 
 const createSafeSessionStorage = (): Storage => {
-    if (typeof window === 'undefined' || !window.sessionStorage) {
+    const baseStorage = getWindowStorage('sessionStorage');
+
+    if (!baseStorage) {
         return createInMemoryStorage();
     }
 
-    const baseStorage = window.sessionStorage;
     const fallback = createInMemoryStorage();
     let storageAvailable = true;
 

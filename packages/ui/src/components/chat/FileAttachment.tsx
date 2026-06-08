@@ -6,7 +6,7 @@ import { toast } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { openExternalUrl } from '@/lib/url';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
-import { useIsVSCodeRuntime } from '@/hooks/useRuntimeAPIs';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
@@ -19,7 +19,8 @@ export const FileAttachmentButton = memo(() => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const addAttachedFile = useInputStore((state) => state.addAttachedFile);
   const isMobile = useUIStore((state) => state.isMobile);
-  const isVSCodeRuntime = useIsVSCodeRuntime();
+  const runtimeApis = useRuntimeAPIs();
+  const isVSCodeRuntime = runtimeApis.runtime.isVSCode;
   const buttonSizeClass = isMobile ? 'h-9 w-9' : 'h-7 w-7';
   const iconSizeClass = isMobile ? 'h-5 w-5' : 'h-[18px] w-[18px]';
 
@@ -47,8 +48,10 @@ export const FileAttachmentButton = memo(() => {
 
   const handleVSCodePick = async () => {
     try {
-      const response = await fetch('/api/vscode/pick-files');
-      const data = await response.json();
+      const data = (await runtimeApis.vscode?.pickFiles?.()) as {
+        files?: Array<{ name: string; mimeType?: string; dataUrl?: string }>;
+        skipped?: Array<{ name?: string; reason?: string }>;
+      } | undefined;
       const picked = Array.isArray(data?.files) ? data.files : [];
       const skipped = Array.isArray(data?.skipped) ? data.skipped : [];
 
@@ -124,9 +127,12 @@ FileAttachmentButton.displayName = 'FileAttachmentButton';
 interface ImagePreviewProps {
   file: AttachedFile;
   onRemove: () => void;
+  onShowPopup?: (content: ToolPopupContent) => void;
+  gallery?: NonNullable<ToolPopupContent['image']>['gallery'];
+  index?: number;
 }
 
-const ImagePreview = memo(({ file, onRemove }: ImagePreviewProps) => {
+const ImagePreview = memo(({ file, onRemove, onShowPopup, gallery, index = 0 }: ImagePreviewProps) => {
   const { t } = useI18n();
   const { isMobile, isTablet } = useDeviceInfo();
   const alwaysShowActions = isMobile || isTablet;
@@ -151,6 +157,29 @@ const ImagePreview = memo(({ file, onRemove }: ImagePreviewProps) => {
 
   const displayName = extractFilename(file.filename);
   const extension = getFileExtension(file.filename);
+  const handleOpenPreview = React.useCallback(() => {
+    if (!onShowPopup || !imageUrl) return;
+
+    onShowPopup({
+      open: true,
+      title: displayName || 'Image',
+      content: '',
+      metadata: {
+        tool: 'image-preview',
+        filename: displayName,
+        mime: file.mimeType,
+        size: file.size,
+      },
+      image: {
+        url: imageUrl,
+        mimeType: file.mimeType,
+        filename: displayName,
+        size: file.size,
+        gallery,
+        index,
+      },
+    });
+  }, [displayName, file.mimeType, file.size, gallery, imageUrl, index, onShowPopup]);
 
   if (!imageUrl) {
     // Fallback to text-only for server images without preview
@@ -178,7 +207,20 @@ const ImagePreview = memo(({ file, onRemove }: ImagePreviewProps) => {
   }
 
   return (
-    <div className="relative h-10 w-10 rounded-lg border border-border/40 bg-muted/10 overflow-hidden flex-shrink-0 group">
+    <div
+      role={onShowPopup ? 'button' : undefined}
+      tabIndex={onShowPopup ? 0 : undefined}
+      onClick={handleOpenPreview}
+      onKeyDown={(event) => {
+        if (!onShowPopup) return;
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          handleOpenPreview();
+        }
+      }}
+      className="relative h-10 w-10 rounded-lg border border-border/40 bg-muted/10 overflow-hidden flex-shrink-0 group cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      aria-label={displayName}
+    >
       <img
         src={imageUrl}
         alt={displayName}
@@ -186,7 +228,10 @@ const ImagePreview = memo(({ file, onRemove }: ImagePreviewProps) => {
         loading="lazy"
       />
       <button
-        onClick={onRemove}
+        onClick={(event) => {
+          event.stopPropagation();
+          onRemove();
+        }}
         className={cn(
           "absolute top-0.5 right-0.5 h-4 w-4 rounded-full bg-background/80 text-foreground hover:text-destructive flex items-center justify-center transition-opacity focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
           alwaysShowActions ? "opacity-100" : "opacity-0 group-hover:opacity-100"
@@ -274,7 +319,7 @@ FileChip.displayName = 'FileChip';
 const VSCodeFileChip = memo(({ file, onRemove }: FileChipProps) => {
   const { t } = useI18n();
   const { displayName, extension } = useFileDetails(file);
-  
+
   // Detect selection-style attachments: ends with ":N" or ":N-M"
   const isSelectionAttachment = /:\d+(?:-\d+)?$/.test(displayName);
 
@@ -313,7 +358,11 @@ const VSCodeFileChip = memo(({ file, onRemove }: FileChipProps) => {
 
 VSCodeFileChip.displayName = 'VSCodeFileChip';
 
-export const AttachedVSCodeFileChips = memo(() => {  
+interface AttachedFilesListProps {
+  onShowPopup?: (content: ToolPopupContent) => void;
+}
+
+export const AttachedVSCodeFileChips = memo(({ onShowPopup }: AttachedFilesListProps) => {
   const attachedFiles = useInputStore((state) => state.attachedFiles);
   const removeAttachedFile = useInputStore((state) => state.removeAttachedFile);
 
@@ -323,11 +372,17 @@ export const AttachedVSCodeFileChips = memo(() => {
 
   const images = vscodeFiles.filter((f) => f.mimeType.startsWith('image/'));
   const otherFiles = vscodeFiles.filter((f) => !f.mimeType.startsWith('image/'));
+  const imageGallery = images.map((file) => ({
+    url: file.dataUrl || file.serverPath || '',
+    mimeType: file.mimeType,
+    filename: file.filename,
+    size: file.size,
+  })).filter((image) => image.url);
 
   return (
     <div className="flex items-center gap-2 flex-wrap">
-      {images.map((file) => (
-        <ImagePreview key={file.id} file={file} onRemove={() => removeAttachedFile(file.id)} />
+      {images.map((file, index) => (
+        <ImagePreview key={file.id} file={file} onRemove={() => removeAttachedFile(file.id)} onShowPopup={onShowPopup} gallery={imageGallery} index={index} />
       ))}
       {otherFiles.map((file) => (
         <VSCodeFileChip key={file.id} file={file} onRemove={() => removeAttachedFile(file.id)} />
@@ -338,7 +393,7 @@ export const AttachedVSCodeFileChips = memo(() => {
 
 AttachedVSCodeFileChips.displayName = 'AttachedVSCodeFileChips';
 
-export const AttachedFilesList = memo(() => {
+export const AttachedFilesList = memo(({ onShowPopup }: AttachedFilesListProps) => {
   const attachedFiles = useInputStore((state) => state.attachedFiles);
   const removeAttachedFile = useInputStore((state) => state.removeAttachedFile);
 
@@ -348,17 +403,26 @@ export const AttachedFilesList = memo(() => {
 
   const images = localFiles.filter((f) => f.mimeType.startsWith('image/'));
   const otherFiles = localFiles.filter((f) => !f.mimeType.startsWith('image/'));
+  const imageGallery = images.map((file) => ({
+    url: file.dataUrl || file.serverPath || '',
+    mimeType: file.mimeType,
+    filename: file.filename,
+    size: file.size,
+  })).filter((image) => image.url);
 
   return (
     <div className="pb-4 w-full px-1 space-y-3">
       {/* Images row - inline with previews */}
       {images.length > 0 && (
         <div className="flex items-center gap-1.5 flex-wrap">
-          {images.map((file) => (
+          {images.map((file, index) => (
             <ImagePreview
               key={file.id}
               file={file}
               onRemove={() => removeAttachedFile(file.id)}
+              onShowPopup={onShowPopup}
+              gallery={imageGallery}
+              index={index}
             />
           ))}
         </div>
@@ -388,7 +452,7 @@ export const ActiveEditorFileSuggestion = memo(() => {
   const attachedFiles = useInputStore((s) => s.attachedFiles)
   const addVSCodeFileAttachment = useInputStore((s) => s.addVSCodeFileAttachment)
   const addVSCodeSelectionAttachment = useInputStore((s) => s.addVSCodeSelectionAttachment)
-  const isVSCodeRuntime = useIsVSCodeRuntime();
+  const isVSCodeRuntime = useRuntimeAPIs().runtime.isVSCode;
 
   if (!isVSCodeRuntime || !activeEditorFile) return null;
 

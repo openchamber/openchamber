@@ -9,10 +9,9 @@ import { cn } from '@/lib/utils';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
-import { getProjectNotesAndTodos, saveProjectNotesAndTodos } from '@/lib/openchamberConfig';
+import { OPENCHAMBER_PROJECT_NOTES_MAX_LENGTH, getProjectNotesAndTodos, saveProjectNotesAndTodos } from '@/lib/openchamberConfig';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
-import { summarizeText } from '@/lib/voice/summarize';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 
@@ -33,7 +32,7 @@ interface SelectionPayload {
 }
 
 const appendDistilledInsightToNotes = (existingNotes: string, insight: string): string => {
-  const trimmedInsight = insight.trim().replace(/^[-*+]\s+/, '');
+  const trimmedInsight = insight.trim().replace(/^[-*+]\s+/, '').slice(0, OPENCHAMBER_PROJECT_NOTES_MAX_LENGTH);
   if (!trimmedInsight) {
     return existingNotes;
   }
@@ -519,18 +518,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
 
     try {
       setIsAddingToNotes(true);
-      let noteText = selectedText;
-      let usedSummaryFallback = false;
-      try {
-        noteText = await summarizeText(selectedText, {
-          threshold: 0,
-          maxLength: 100,
-          mode: 'note',
-        });
-      } catch (summaryError) {
-        usedSummaryFallback = true;
-        console.warn('[AddToNotes] Summary failed, saving selected text:', summaryError);
-      }
+      const noteText = selectedTextMarkdown || selectedText;
       const projectData = await getProjectNotesAndTodos(currentProjectRef);
       const nextNotes = appendDistilledInsightToNotes(projectData.notes, noteText);
       const saved = await saveProjectNotesAndTodos(currentProjectRef, {
@@ -544,11 +532,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
       window.dispatchEvent(new CustomEvent('openchamber:project-notes-updated', {
         detail: { projectId: currentProjectRef.id },
       }));
-      if (usedSummaryFallback) {
-        toast.warning(t('chat.textSelection.toast.addToNotesSummaryFailed'));
-      } else {
-        toast.success(t('chat.textSelection.toast.addToNotesSuccess'));
-      }
+      toast.success(t('chat.textSelection.toast.addToNotesSuccess'));
       hideMenu();
       window.getSelection()?.removeAllRanges();
     } catch (error) {
@@ -557,7 +541,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     } finally {
       setIsAddingToNotes(false);
     }
-  }, [currentProjectRef, hideMenu, selectedText, t]);
+  }, [currentProjectRef, hideMenu, selectedText, selectedTextMarkdown, t]);
 
   if (!position.show) return null;
 

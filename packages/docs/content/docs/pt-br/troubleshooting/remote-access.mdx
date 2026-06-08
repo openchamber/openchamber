@@ -1,0 +1,38 @@
+---
+title: Acesso Remoto
+description: Resolva túneis, instâncias remotas e o acesso ao OpenChamber de outro dispositivo.
+---
+
+# Acesso Remoto
+
+Quando você não consegue alcançar o OpenChamber pelo seu celular ou outra máquina, a solução depende de como você está conectando.
+
+## Confira o básico primeiro
+
+- abra `http://localhost:3000` no mesmo computador primeiro — se isso falhar, não é um problema remoto; veja [Conexão com o OpenCode](/pt-br/troubleshooting/opencode-connection/)
+- confirme que o servidor está em execução com `openchamber status`
+
+## O link do túnel não funciona
+
+- execute `openchamber tunnel status --all`
+- reinicie o túnel a partir da mesma instância e porta
+- regere o link de conexão se o anterior já foi usado
+
+Veja [Túneis](/pt-br/tunnels/) para a configuração completa.
+
+## A instância remota não conecta (desktop)
+
+Quando uma [instância remota](/pt-br/remote-instances/) trava, o OpenChamber nomeia a etapa que falhou:
+
+- **auth** — sua senha SSH ou de UI foi rejeitada; insira-a novamente
+- **install / start** — o OpenChamber não conseguiu configurar ou iniciar o servidor na máquina remota; verifique os requisitos daquela máquina
+- **forwarding** — a conexão está de pé, mas a porta não está chegando até você; tente uma porta local diferente
+
+## Atrás do seu próprio servidor
+
+Se você colocou o OpenChamber atrás de um reverse proxy e ele carrega de forma estranha ou não conecta, veja [Reverse Proxy](/pt-br/reverse-proxy/).
+
+## Relacionado
+
+- [Túneis](/pt-br/tunnels/) · [Instâncias Remotas](/pt-br/remote-instances/) · [Reverse Proxy](/pt-br/reverse-proxy/)
+- [Segurança](/pt-br/security/) — proteja a UI antes de expô-la

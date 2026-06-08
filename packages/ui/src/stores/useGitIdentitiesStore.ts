@@ -12,6 +12,7 @@ import {
 } from "@/lib/gitApi";
 import { updateDesktopSettings } from "@/lib/persistence";
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry";
+import { runtimeFetch } from "@/lib/runtime-fetch";
 
 export type GitIdentityAuthType = 'ssh' | 'token';
 
@@ -159,7 +160,7 @@ export const useGitIdentitiesStore = create<GitIdentitiesStore>()(
 
             if (defaultId === null) {
               try {
-                const response = await fetch('/api/config/settings', {
+                const response = await runtimeFetch('/api/config/settings', {
                   method: 'GET',
                   headers: { Accept: 'application/json' },
                 });

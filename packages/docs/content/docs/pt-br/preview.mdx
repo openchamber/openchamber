@@ -1,0 +1,32 @@
+---
+title: Preview e Servidores de Desenvolvimento
+description: Abra um servidor de desenvolvimento em execução dentro do OpenChamber.
+---
+
+# Preview e Servidores de Desenvolvimento
+
+Quando você inicia um servidor de desenvolvimento, o OpenChamber pode abri-lo logo dentro do app em vez de uma aba separada do navegador — para que você veja seu site ao lado do chat, capture seu console e aponte para elementos para perguntar sobre eles.
+
+## Abrir um preview
+
+O OpenChamber observa a saída do terminal em busca de um endereço local (a linha `Local:` que ferramentas como Vite, Next.js ou Astro imprimem). Quando ele detecta um:
+
+- no terminal, aparece um botão **Open preview**
+- uma [ação de projeto](/pt-br/project-actions/) com auto-open ativado o abre para você
+- um link local em uma mensagem do chat também pode abri-lo
+
+O site carrega no painel lateral. Apenas endereços locais (na sua própria máquina) podem ter preview.
+
+## Console e inspeção
+
+No painel de preview você pode:
+
+- acompanhar o **console** da página — erros, avisos e logs, filtrados como você quiser
+- ativar o **inspect**, clicar em qualquer elemento e enviar uma nota sobre ele — seletor, estilos, posição e uma captura de tela — direto no chat
+
+Esta é a forma mais rápida de dizer ao agente "este botão, aqui" sem descrevê-lo.
+
+## Relacionado
+
+- [Ações de Projeto](/pt-br/project-actions/) — abra um servidor automaticamente ao iniciá-lo
+- [Navegador no Desktop](/pt-br/desktop-browser/) — as mesmas ferramentas para qualquer página, no desktop

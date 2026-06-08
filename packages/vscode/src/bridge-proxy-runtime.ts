@@ -20,10 +20,39 @@ type ApiSessionMessageRequestPayload = {
   bodyText?: string;
 };
 
+type ApiProxyAbortPayload = {
+  requestID?: string;
+};
+
 type ApiProxyResponsePayload = {
   status: number;
   headers: Record<string, string>;
-  bodyBase64: string;
+  bodyBase64?: string;
+  bodyText?: string;
+};
+
+const shouldReturnTextBody = (headers: Headers): boolean => {
+  const contentType = headers.get('content-type')?.toLowerCase() || '';
+  return contentType.startsWith('application/json')
+    || contentType.startsWith('text/')
+    || contentType.includes('+json');
+};
+
+const collectProxyResponseHeaders = (headers: Headers, deps: Pick<ProxyRuntimeDeps, 'collectHeaders'>): Record<string, string> => {
+  const result = deps.collectHeaders(headers);
+  delete result['content-length'];
+  delete result['content-encoding'];
+  delete result['transfer-encoding'];
+  return result;
+};
+
+const isSseProxyPath = (requestPath: string): boolean => {
+  try {
+    const parsed = new URL(requestPath, 'https://openchamber.invalid');
+    return parsed.pathname === '/event' || parsed.pathname === '/global/event';
+  } catch {
+    return requestPath === '/event' || requestPath === '/global/event';
+  }
 };
 
 type ProxyRuntimeDeps = {
@@ -34,6 +63,8 @@ type ProxyRuntimeDeps = {
   base64EncodeUtf8: (text: string) => string;
 };
 
+const proxyAbortControllers = new Map<string, AbortController>();
+
 export async function handleProxyBridgeMessage(
   message: BridgeMessageInput,
   ctx: BridgeContext | undefined,
@@ -42,6 +73,15 @@ export async function handleProxyBridgeMessage(
   const { id, type, payload } = message;
 
   switch (type) {
+    case 'api:proxy:abort': {
+      const { requestID } = (payload || {}) as ApiProxyAbortPayload;
+      if (typeof requestID === 'string' && requestID.length > 0) {
+        proxyAbortControllers.get(requestID)?.abort();
+        proxyAbortControllers.delete(requestID);
+      }
+      return { id, type, success: true, data: { aborted: true } };
+    }
+
     case 'api:proxy': {
       const { method, path: requestPath, headers, bodyBase64 } = (payload || {}) as ApiProxyRequestPayload;
       const normalizedMethod = typeof method === 'string' && method.trim() ? method.trim().toUpperCase() : 'GET';
@@ -49,8 +89,17 @@ export async function handleProxyBridgeMessage(
         typeof requestPath === 'string' && requestPath.trim().length > 0
           ? requestPath.trim().startsWith('/')
             ? requestPath.trim()
-            : `/${requestPath.trim()}`
+          : `/${requestPath.trim()}`
           : '/';
+
+      if (isSseProxyPath(normalizedPath)) {
+        const data: ApiProxyResponsePayload = {
+          status: 400,
+          headers: { 'content-type': 'application/json' },
+          bodyText: JSON.stringify({ error: 'SSE requests must use api:sse:start' }),
+        };
+        return { id, type, success: true, data };
+      }
 
       const localFsResponse = await deps.tryHandleLocalFsProxy(normalizedMethod, normalizedPath);
       if (localFsResponse) {
@@ -70,13 +119,8 @@ export async function handleProxyBridgeMessage(
         ...ctx?.manager?.getOpenCodeAuthHeaders(),
       };
 
-      if (normalizedPath === '/event' || normalizedPath === '/global/event') {
-        if (!requestHeaders.Accept) {
-          requestHeaders.Accept = 'text/event-stream';
-        }
-        requestHeaders['Cache-Control'] = requestHeaders['Cache-Control'] || 'no-cache';
-        requestHeaders.Connection = requestHeaders.Connection || 'keep-alive';
-      }
+      const abortController = new AbortController();
+      proxyAbortControllers.set(id, abortController);
 
       try {
         const response = await fetch(targetUrl, {
@@ -86,12 +130,25 @@ export async function handleProxyBridgeMessage(
             typeof bodyBase64 === 'string' && bodyBase64.length > 0 && normalizedMethod !== 'GET' && normalizedMethod !== 'HEAD'
               ? Buffer.from(bodyBase64, 'base64')
               : undefined,
+          signal: abortController.signal,
         });
+
+        const responseHeaders = collectProxyResponseHeaders(response.headers, deps);
+        if (shouldReturnTextBody(response.headers)) {
+          const bodyText = await response.text();
+          const data: ApiProxyResponsePayload = {
+            status: response.status,
+            headers: responseHeaders,
+            bodyText,
+          };
+
+          return { id, type, success: true, data };
+        }
 
         const arrayBuffer = await response.arrayBuffer();
         const data: ApiProxyResponsePayload = {
           status: response.status,
-          headers: deps.collectHeaders(response.headers),
+          headers: responseHeaders,
           bodyBase64: Buffer.from(arrayBuffer).toString('base64'),
         };
 
@@ -103,9 +160,11 @@ export async function handleProxyBridgeMessage(
         const data: ApiProxyResponsePayload = {
           status: 502,
           headers: { 'content-type': 'application/json' },
-          bodyBase64: deps.base64EncodeUtf8(body),
+          bodyText: body,
         };
         return { id, type, success: true, data };
+      } finally {
+        proxyAbortControllers.delete(id);
       }
     }
 
@@ -140,19 +199,36 @@ export async function handleProxyBridgeMessage(
         ...deps.sanitizeForwardHeaders(headers),
         ...ctx?.manager?.getOpenCodeAuthHeaders(),
       };
+      const timeoutSignal = AbortSignal.timeout(45000);
+      const abortController = new AbortController();
+      proxyAbortControllers.set(id, abortController);
+      const onTimeout = () => abortController.abort();
+      timeoutSignal.addEventListener('abort', onTimeout, { once: true });
 
       try {
         const response = await fetch(targetUrl, {
           method: 'POST',
           headers: requestHeaders,
           body: typeof bodyText === 'string' ? bodyText : '',
-          signal: AbortSignal.timeout(45000),
+          signal: abortController.signal,
         });
+
+        const responseHeaders = collectProxyResponseHeaders(response.headers, deps);
+        if (shouldReturnTextBody(response.headers)) {
+          const bodyText = await response.text();
+          const data: ApiProxyResponsePayload = {
+            status: response.status,
+            headers: responseHeaders,
+            bodyText,
+          };
+
+          return { id, type, success: true, data };
+        }
 
         const arrayBuffer = await response.arrayBuffer();
         const data: ApiProxyResponsePayload = {
           status: response.status,
-          headers: deps.collectHeaders(response.headers),
+          headers: responseHeaders,
           bodyBase64: Buffer.from(arrayBuffer).toString('base64'),
         };
 
@@ -168,9 +244,12 @@ export async function handleProxyBridgeMessage(
         const data: ApiProxyResponsePayload = {
           status: isTimeout ? 504 : 503,
           headers: { 'content-type': 'application/json' },
-          bodyBase64: deps.base64EncodeUtf8(body),
+          bodyText: body,
         };
         return { id, type, success: true, data };
+      } finally {
+        timeoutSignal.removeEventListener('abort', onTimeout);
+        proxyAbortControllers.delete(id);
       }
     }
 

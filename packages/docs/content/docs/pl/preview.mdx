@@ -1,0 +1,32 @@
+---
+title: Podgląd i serwery deweloperskie
+description: Otwórz działający serwer deweloperski wewnątrz OpenChamber.
+---
+
+# Podgląd i serwery deweloperskie
+
+Gdy uruchamiasz serwer deweloperski, OpenChamber może otworzyć go bezpośrednio w aplikacji zamiast w osobnej karcie przeglądarki — dzięki czemu widzisz swoją witrynę obok czatu, przechwytujesz jej konsolę i wskazujesz elementy, aby o nie zapytać.
+
+## Otwórz podgląd
+
+OpenChamber obserwuje wynik terminala pod kątem adresu lokalnego (wiersz `Local:`, który drukują narzędzia takie jak Vite, Next.js czy Astro). Gdy go wykryje:
+
+- w terminalu pojawia się przycisk **Open preview**
+- [akcja projektu](/pl/project-actions/) z włączonym auto-open otwiera go za Ciebie
+- lokalny link w wiadomości czatu również może go otworzyć
+
+Witryna ładuje się w panelu bocznym. Podglądać można wyłącznie adresy lokalne (na Twojej własnej maszynie).
+
+## Konsola i inspekcja
+
+W panelu podglądu możesz:
+
+- obserwować **konsolę** strony — błędy, ostrzeżenia i logi, filtrowane wedle uznania
+- włączyć **inspect**, kliknąć dowolny element i wysłać o nim notatkę — selektor, style, pozycję i zrzut ekranu — prosto do czatu
+
+To najszybszy sposób, by powiedzieć agentowi „ten przycisk, tutaj”, bez opisywania go.
+
+## Powiązane
+
+- [Akcje projektu](/pl/project-actions/) — automatycznie otwórz serwer przy uruchomieniu
+- [Przeglądarka na komputerze](/pl/desktop-browser/) — te same narzędzia dla dowolnej strony, na komputerze

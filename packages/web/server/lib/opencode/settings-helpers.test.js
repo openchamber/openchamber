@@ -52,6 +52,17 @@ describe('settings helpers', () => {
     });
   });
 
+  it('accepts desktopUiPassword as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ desktopUiPassword: ' secret ' })).toEqual({
+      desktopUiPassword: 'secret',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ desktopUiPassword: '' })).toEqual({
+      desktopUiPassword: '',
+    });
+  });
+
   it('accepts mobileKeyboardMode as a persisted shared setting', () => {
     const helpers = createTestHelpers();
 
@@ -70,5 +81,88 @@ describe('settings helpers', () => {
     const helpers = createTestHelpers();
 
     expect(helpers.sanitizeSettingsUpdate({ mobileKeyboardMode: 'fixed-layout' })).toEqual({});
+  });
+
+  it('accepts collapsibleThinkingBlocks as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ collapsibleThinkingBlocks: true })).toEqual({
+      collapsibleThinkingBlocks: true,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ collapsibleThinkingBlocks: false })).toEqual({
+      collapsibleThinkingBlocks: false,
+    });
+  });
+
+  it('accepts shortcut overrides as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({
+      shortcutOverrides: {
+        open_settings: 'mod+comma',
+        new_chat: '__unassigned__',
+        invalid: 123,
+        empty: '',
+      },
+    })).toEqual({
+      shortcutOverrides: {
+        open_settings: 'mod+comma',
+        new_chat: '__unassigned__',
+      },
+    });
+  });
+
+  it('preserves empty shortcut overrides when resetting all shortcuts', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ shortcutOverrides: {} })).toEqual({
+      shortcutOverrides: {},
+    });
+  });
+
+  it('accepts OpenCode update notification preference as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ showOpenCodeUpdateNotifications: false })).toEqual({
+      showOpenCodeUpdateNotifications: false,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ showOpenCodeUpdateNotifications: true })).toEqual({
+      showOpenCodeUpdateNotifications: true,
+    });
+  });
+
+  it('accepts dismissed OpenCode update toast version as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ openCodeUpdateToastDismissedVersion: ' 1.16.0 ' })).toEqual({
+      openCodeUpdateToastDismissedVersion: '1.16.0',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ openCodeUpdateToastDismissedVersion: '' })).toEqual({
+      openCodeUpdateToastDismissedVersion: '',
+    });
+  });
+
+  it('rejects non-boolean collapsibleThinkingBlocks values', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ collapsibleThinkingBlocks: 'true' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ collapsibleThinkingBlocks: 1 })).toEqual({});
+  });
+
+  it('includes collapsibleThinkingBlocks in formatSettingsResponse', () => {
+    const helpers = createTestHelpers();
+
+    const response = helpers.formatSettingsResponse({ collapsibleThinkingBlocks: false });
+    expect(response.collapsibleThinkingBlocks).toBe(false);
+
+    const responseTrue = helpers.formatSettingsResponse({ collapsibleThinkingBlocks: true });
+    expect(responseTrue.collapsibleThinkingBlocks).toBe(true);
+  });
+
+  it('defaults collapsibleThinkingBlocks to true in formatSettingsResponse when absent', () => {
+    const helpers = createTestHelpers();
+
+    const response = helpers.formatSettingsResponse({});
+    expect(response.collapsibleThinkingBlocks).toBe(true);
   });
 });

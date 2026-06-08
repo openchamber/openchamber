@@ -20,7 +20,9 @@ import { audioStreamService } from '@/lib/voice/audioStreamService';
 import { wasmSttService, WASM_MODELS } from '@/lib/voice/wasmSttService';
 import type { WasmModelStatus } from '@/lib/voice/wasmSttService';
 import { cn } from '@/lib/utils';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useI18n } from '@/lib/i18n';
+import { disposePreviewAudio } from './voicePreviewAudio';
 const LANGUAGE_OPTIONS = [
     { value: 'en-US', label: 'English' },
     { value: 'es-ES', label: 'Español' },
@@ -152,6 +154,8 @@ export const VoiceSettings: React.FC = () => {
     const setOpenaiApiKey = useConfigStore((state) => state.setOpenaiApiKey);
     const openaiCompatibleUrl = useConfigStore((state) => state.openaiCompatibleUrl);
     const setOpenaiCompatibleUrl = useConfigStore((state) => state.setOpenaiCompatibleUrl);
+    const openaiCompatibleApiKey = useConfigStore((state) => state.openaiCompatibleApiKey);
+    const setOpenaiCompatibleApiKey = useConfigStore((state) => state.setOpenaiCompatibleApiKey);
     const openaiCompatibleVoice = useConfigStore((state) => state.openaiCompatibleVoice);
     const setOpenaiCompatibleVoice = useConfigStore((state) => state.setOpenaiCompatibleVoice);
     const openaiCompatibleTtsModel = useConfigStore((state) => state.openaiCompatibleTtsModel);
@@ -162,6 +166,8 @@ export const VoiceSettings: React.FC = () => {
     const setSttProvider = useConfigStore((state) => state.setSttProvider);
     const sttServerUrl = useConfigStore((state) => state.sttServerUrl);
     const setSttServerUrl = useConfigStore((state) => state.setSttServerUrl);
+    const sttApiKey = useConfigStore((state) => state.sttApiKey);
+    const setSttApiKey = useConfigStore((state) => state.setSttApiKey);
     const sttModel = useConfigStore((state) => state.sttModel);
     const setSttModel = useConfigStore((state) => state.setSttModel);
     const wasmSttModel = useConfigStore((state) => state.wasmSttModel);
@@ -177,14 +183,6 @@ export const VoiceSettings: React.FC = () => {
     const setShowMessageTTSButtons = useConfigStore((state) => state.setShowMessageTTSButtons);
     const voiceModeEnabled = useConfigStore((state) => state.voiceModeEnabled);
     const setVoiceModeEnabled = useConfigStore((state) => state.setVoiceModeEnabled);
-    const summarizeMessageTTS = useConfigStore((state) => state.summarizeMessageTTS);
-    const setSummarizeMessageTTS = useConfigStore((state) => state.setSummarizeMessageTTS);
-    const summarizeVoiceConversation = useConfigStore((state) => state.summarizeVoiceConversation);
-    const setSummarizeVoiceConversation = useConfigStore((state) => state.setSummarizeVoiceConversation);
-    const summarizeCharacterThreshold = useConfigStore((state) => state.summarizeCharacterThreshold);
-    const setSummarizeCharacterThreshold = useConfigStore((state) => state.setSummarizeCharacterThreshold);
-    const summarizeMaxLength = useConfigStore((state) => state.summarizeMaxLength);
-    const setSummarizeMaxLength = useConfigStore((state) => state.setSummarizeMaxLength);
 
     const [isSayAvailable, setIsSayAvailable] = useState(false);
     const [sayVoices, setSayVoices] = useState<Array<{ name: string; locale: string }>>([]);
@@ -281,7 +279,7 @@ export const VoiceSettings: React.FC = () => {
 
         const checkOpenAIAvailability = async () => {
             try {
-                const response = await fetch('/api/tts/status');
+                const response = await runtimeFetch('/api/tts/status');
                 const data = await response.json();
                 const hasServerKey = data.available;
                 const hasSettingsKey = openaiApiKey.trim().length > 0;
@@ -301,7 +299,7 @@ export const VoiceSettings: React.FC = () => {
             return;
         }
 
-        fetch('/api/tts/say/status')
+        runtimeFetch('/api/tts/say/status')
             .then(res => res.json())
             .then(data => {
                 setIsSayAvailable(data.available);
@@ -321,16 +319,16 @@ export const VoiceSettings: React.FC = () => {
 
     const previewVoice = useCallback(async () => {
         if (previewAudio) {
-            previewAudio.pause();
-            previewAudio.currentTime = 0;
+            disposePreviewAudio(previewAudio);
             setPreviewAudio(null);
             setIsPreviewPlaying(false);
             return;
         }
 
         setIsPreviewPlaying(true);
+        let audio: HTMLAudioElement | null = null;
         try {
-            const response = await fetch('/api/tts/say/speak', {
+            const response = await runtimeFetch('/api/tts/say/speak', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -344,16 +342,16 @@ export const VoiceSettings: React.FC = () => {
 
             const blob = await response.blob();
             const url = URL.createObjectURL(blob);
-            const audio = new Audio(url);
+            audio = new Audio(url);
 
             audio.onended = () => {
-                URL.revokeObjectURL(url);
+                disposePreviewAudio(audio);
                 setPreviewAudio(null);
                 setIsPreviewPlaying(false);
             };
 
             audio.onerror = () => {
-                URL.revokeObjectURL(url);
+                disposePreviewAudio(audio);
                 setPreviewAudio(null);
                 setIsPreviewPlaying(false);
             };
@@ -361,30 +359,30 @@ export const VoiceSettings: React.FC = () => {
             setPreviewAudio(audio);
             await audio.play();
         } catch {
+            disposePreviewAudio(audio);
+            setPreviewAudio(null);
             setIsPreviewPlaying(false);
         }
     }, [sayVoice, speechRate, previewAudio, t]);
 
     useEffect(() => {
         return () => {
-            if (previewAudio) {
-                previewAudio.pause();
-            }
+            disposePreviewAudio(previewAudio);
         };
     }, [previewAudio]);
 
     const previewOpenAIVoice = useCallback(async () => {
         if (openaiPreviewAudio) {
-            openaiPreviewAudio.pause();
-            openaiPreviewAudio.currentTime = 0;
+            disposePreviewAudio(openaiPreviewAudio);
             setOpenaiPreviewAudio(null);
             setIsOpenAIPreviewPlaying(false);
             return;
         }
 
         setIsOpenAIPreviewPlaying(true);
+        let audio: HTMLAudioElement | null = null;
         try {
-            const response = await fetch('/api/tts/speak', {
+            const response = await runtimeFetch('/api/tts/speak', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -402,16 +400,16 @@ export const VoiceSettings: React.FC = () => {
 
             const blob = await response.blob();
             const url = URL.createObjectURL(blob);
-            const audio = new Audio(url);
+            audio = new Audio(url);
 
             audio.onended = () => {
-                URL.revokeObjectURL(url);
+                disposePreviewAudio(audio);
                 setOpenaiPreviewAudio(null);
                 setIsOpenAIPreviewPlaying(false);
             };
 
             audio.onerror = () => {
-                URL.revokeObjectURL(url);
+                disposePreviewAudio(audio);
                 setOpenaiPreviewAudio(null);
                 setIsOpenAIPreviewPlaying(false);
             };
@@ -419,22 +417,21 @@ export const VoiceSettings: React.FC = () => {
             setOpenaiPreviewAudio(audio);
             await audio.play();
         } catch {
+            disposePreviewAudio(audio);
+            setOpenaiPreviewAudio(null);
             setIsOpenAIPreviewPlaying(false);
         }
     }, [openaiVoice, speechRate, openaiPreviewAudio, openaiApiKey, t]);
 
     useEffect(() => {
         return () => {
-            if (openaiPreviewAudio) {
-                openaiPreviewAudio.pause();
-            }
+            disposePreviewAudio(openaiPreviewAudio);
         };
     }, [openaiPreviewAudio]);
 
     const previewCompatibleVoice = useCallback(async () => {
         if (compatiblePreviewAudio) {
-            compatiblePreviewAudio.pause();
-            compatiblePreviewAudio.currentTime = 0;
+            disposePreviewAudio(compatiblePreviewAudio);
             setCompatiblePreviewAudio(null);
             setIsCompatiblePreviewPlaying(false);
             return;
@@ -443,8 +440,9 @@ export const VoiceSettings: React.FC = () => {
         if (!openaiCompatibleUrl.trim()) return;
 
         setIsCompatiblePreviewPlaying(true);
+        let audio: HTMLAudioElement | null = null;
         try {
-            const response = await fetch('/api/tts/speak', {
+            const response = await runtimeFetch('/api/tts/speak', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -453,6 +451,7 @@ export const VoiceSettings: React.FC = () => {
                     model: openaiCompatibleTtsModel || undefined,
                     speed: speechRate,
                     baseURL: openaiCompatibleUrl,
+                    apiKey: openaiCompatibleApiKey || undefined,
                 }),
             });
 
@@ -463,16 +462,16 @@ export const VoiceSettings: React.FC = () => {
 
             const blob = await response.blob();
             const url = URL.createObjectURL(blob);
-            const audio = new Audio(url);
+            audio = new Audio(url);
 
             audio.onended = () => {
-                URL.revokeObjectURL(url);
+                disposePreviewAudio(audio);
                 setCompatiblePreviewAudio(null);
                 setIsCompatiblePreviewPlaying(false);
             };
 
             audio.onerror = () => {
-                URL.revokeObjectURL(url);
+                disposePreviewAudio(audio);
                 setCompatiblePreviewAudio(null);
                 setIsCompatiblePreviewPlaying(false);
             };
@@ -480,15 +479,15 @@ export const VoiceSettings: React.FC = () => {
             setCompatiblePreviewAudio(audio);
             await audio.play();
         } catch {
+            disposePreviewAudio(audio);
+            setCompatiblePreviewAudio(null);
             setIsCompatiblePreviewPlaying(false);
         }
-    }, [openaiCompatibleUrl, openaiCompatibleVoice, openaiCompatibleTtsModel, speechRate, compatiblePreviewAudio, t]);
+    }, [openaiCompatibleUrl, openaiCompatibleVoice, openaiCompatibleTtsModel, openaiCompatibleApiKey, speechRate, compatiblePreviewAudio, t]);
 
     useEffect(() => {
         return () => {
-            if (compatiblePreviewAudio) {
-                compatiblePreviewAudio.pause();
-            }
+            disposePreviewAudio(compatiblePreviewAudio);
         };
     }, [compatiblePreviewAudio]);
 
@@ -639,6 +638,30 @@ export const VoiceSettings: React.FC = () => {
                                                 <button
                                                     type="button"
                                                     onClick={() => setOpenaiCompatibleUrl('')}
+                                                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                                >
+                                                    <Icon name="close" className="w-3.5 h-3.5" />
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <span className="typography-ui-label text-foreground">API Key</span>
+                                        <span className="typography-meta ml-2 text-muted-foreground">
+                                            Optional
+                                        </span>
+                                        <div className="relative mt-1.5 max-w-xs">
+                                            <input
+                                                type="password"
+                                                value={openaiCompatibleApiKey}
+                                                onChange={(e) => setOpenaiCompatibleApiKey(e.target.value)}
+                                                placeholder="sk-..."
+                                                className="w-full h-7 rounded-lg border border-input bg-transparent px-2 typography-ui-label text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/70"
+                                            />
+                                            {openaiCompatibleApiKey && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setOpenaiCompatibleApiKey('')}
                                                     className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                                                 >
                                                     <Icon name="close" className="w-3.5 h-3.5" />
@@ -904,6 +927,30 @@ export const VoiceSettings: React.FC = () => {
                                     </div>
                                 </div>
                                 <div>
+                                    <span className="typography-ui-label text-foreground">API Key</span>
+                                    <span className="typography-meta ml-2 text-muted-foreground">
+                                        Optional
+                                    </span>
+                                    <div className="relative mt-1.5 max-w-xs">
+                                        <input
+                                            type="password"
+                                            value={sttApiKey}
+                                            onChange={(e) => setSttApiKey(e.target.value)}
+                                            placeholder="sk-..."
+                                            className="w-full h-7 rounded-lg border border-input bg-transparent px-2 typography-ui-label text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/70"
+                                        />
+                                        {sttApiKey && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setSttApiKey('')}
+                                                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                            >
+                                                <Icon name="close" className="w-3.5 h-3.5" />
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                                <div>
                                     <span className="typography-ui-label text-foreground">{t('settings.voice.page.field.model')}</span>
                                     <div className="relative mt-1.5 max-w-xs">
                                         <input
@@ -1006,51 +1053,6 @@ export const VoiceSettings: React.FC = () => {
                         <span className="typography-ui-label text-foreground">{t('settings.voice.page.field.messageReadAloudButton')}</span>
                     </div>
 
-                    <div
-                        className="group flex cursor-pointer items-center gap-2 py-1.5"
-                        role="button"
-                        tabIndex={0}
-                        aria-pressed={summarizeMessageTTS}
-                        onClick={() => setSummarizeMessageTTS(!summarizeMessageTTS)}
-                        onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setSummarizeMessageTTS(!summarizeMessageTTS); } }}
-                    >
-                        <Checkbox checked={summarizeMessageTTS} onChange={setSummarizeMessageTTS} ariaLabel={t('settings.voice.page.field.summarizeBeforePlaybackAria')} />
-                        <span className="typography-ui-label text-foreground">{t('settings.voice.page.field.summarizeBeforePlayback')}</span>
-                    </div>
-
-                    {voiceModeEnabled && (
-                        <div
-                            className="group flex cursor-pointer items-center gap-2 py-1.5"
-                            role="button"
-                            tabIndex={0}
-                            aria-pressed={summarizeVoiceConversation}
-                            onClick={() => setSummarizeVoiceConversation(!summarizeVoiceConversation)}
-                            onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setSummarizeVoiceConversation(!summarizeVoiceConversation); } }}
-                        >
-                            <Checkbox checked={summarizeVoiceConversation} onChange={setSummarizeVoiceConversation} ariaLabel={t('settings.voice.page.field.summarizeVoiceModeResponsesAria')} />
-                            <span className="typography-ui-label text-foreground">{t('settings.voice.page.field.summarizeVoiceModeResponses')}</span>
-                        </div>
-                    )}
-
-                    {(summarizeMessageTTS || summarizeVoiceConversation) && (
-                        <>
-                            <div className="flex items-center gap-8 py-1.5">
-                                <span className="typography-ui-label text-foreground sm:w-56 shrink-0">{t('settings.voice.page.field.summarizationThreshold')}</span>
-                                <div className="flex items-center gap-2 w-fit">
-                                    {!isMobile && <input type="range" min={50} max={2000} step={50} value={summarizeCharacterThreshold} onChange={(e) => setSummarizeCharacterThreshold(Number(e.target.value))} className={sliderClass} />}
-                                    <NumberInput value={summarizeCharacterThreshold} onValueChange={setSummarizeCharacterThreshold} min={50} max={2000} step={50} className="w-16 tabular-nums" />
-                                </div>
-                            </div>
-
-                            <div className="flex items-center gap-8 py-1.5">
-                                <span className="typography-ui-label text-foreground sm:w-56 shrink-0">{t('settings.voice.page.field.summaryMaxLength')}</span>
-                                <div className="flex items-center gap-2 w-fit">
-                                    {!isMobile && <input type="range" min={50} max={2000} step={50} value={summarizeMaxLength} onChange={(e) => setSummarizeMaxLength(Number(e.target.value))} className={sliderClass} />}
-                                    <NumberInput value={summarizeMaxLength} onValueChange={setSummarizeMaxLength} min={50} max={2000} step={50} className="w-16 tabular-nums" />
-                                </div>
-                            </div>
-                        </>
-                    )}
                 </section>
 
                 {voiceModeEnabled && isSupported && (

@@ -5,6 +5,31 @@ import {
   collectForwardProxyHeaders,
   shouldForwardProxyResponseHeader,
 } from '../../proxy-headers.js';
+import { createRealpathCache } from '../path-realpath-cache.js';
+
+export const createDirectoryQueryCanonicalizer = ({ realpath, ...cacheOptions } = {}) => {
+  const realpathCache = createRealpathCache({ fallbackOnError: true, realpath, ...cacheOptions });
+
+  return async (requestUrl) => {
+    if (typeof requestUrl !== 'string' || !requestUrl.includes('directory=')) {
+      return requestUrl;
+    }
+
+    const url = new URL(requestUrl, 'http://localhost');
+    const directory = url.searchParams.get('directory');
+    if (!directory) {
+      return requestUrl;
+    }
+
+    const canonicalDirectory = await realpathCache.resolve(directory);
+    if (!canonicalDirectory || canonicalDirectory === directory) {
+      return requestUrl;
+    }
+
+    url.searchParams.set('directory', canonicalDirectory);
+    return `${url.pathname}${url.search}`;
+  };
+};
 
 export const waitForSseDrain = (res, signal) => new Promise((resolve) => {
   if (signal?.aborted || res.writableEnded || res.destroyed) {
@@ -94,6 +119,64 @@ export const registerOpenCodeProxy = (app, deps) => {
 
   const isAbortError = (error) => error?.name === 'AbortError';
   const FALLBACK_PROXY_TARGET = 'http://127.0.0.1:3902';
+  const canonicalizeDirectoryQuery = createDirectoryQueryCanonicalizer({
+    realpath: fs?.promises?.realpath?.bind(fs.promises),
+  });
+
+  const hasParsedBodyValue = (body) => {
+    if (body === undefined || body === null) return false;
+    if (Buffer.isBuffer(body)) return body.length > 0;
+    if (typeof body === 'string') return body.length > 0;
+    if (Array.isArray(body)) return body.length > 0;
+    if (typeof body === 'object') return Object.keys(body).length > 0;
+    return true;
+  };
+
+  const getContentType = (proxyReq, req) => {
+    const value = proxyReq.getHeader?.('content-type') ?? req.headers?.['content-type'] ?? '';
+    if (Array.isArray(value)) return value[0] || '';
+    return String(value || '');
+  };
+
+  const serializeUrlEncodedBody = (body) => {
+    if (!body || typeof body !== 'object' || Buffer.isBuffer(body)) {
+      return String(body ?? '');
+    }
+
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(body)) {
+      if (value === undefined || value === null) continue;
+      if (Array.isArray(value)) {
+        for (const entry of value) {
+          if (entry !== undefined && entry !== null) params.append(key, String(entry));
+        }
+        continue;
+      }
+      params.append(key, String(value));
+    }
+    return params.toString();
+  };
+
+  const serializeParsedBody = (req, proxyReq) => {
+    if (req.method === 'GET' || req.method === 'HEAD') return null;
+    if (req.body === undefined || req.body === null) return null;
+    const originalContentLength = Number.parseInt(req.headers?.['content-length'] || '0', 10) || 0;
+    if (!hasParsedBodyValue(req.body) && originalContentLength <= 0) return null;
+
+    const contentType = getContentType(proxyReq, req).toLowerCase();
+    if (Buffer.isBuffer(req.body)) return req.body;
+    if (contentType.includes('application/json')) return Buffer.from(JSON.stringify(req.body));
+    if (contentType.includes('application/x-www-form-urlencoded')) return Buffer.from(serializeUrlEncodedBody(req.body));
+    if (typeof req.body === 'string') return Buffer.from(req.body);
+    return null;
+  };
+
+  const replayParsedBody = (proxyReq, req) => {
+    const body = serializeParsedBody(req, proxyReq);
+    if (!body) return;
+    proxyReq.setHeader('content-length', String(body.length));
+    proxyReq.write(body);
+  };
 
   const normalizeProxyTarget = (candidate) => {
     if (typeof candidate !== 'string') {
@@ -389,7 +472,7 @@ export const registerOpenCodeProxy = (app, deps) => {
     // Dynamic target — port can change after restart
     router: () => resolveProxyTarget(),
     on: {
-      proxyReq: (proxyReq) => {
+      proxyReq: (proxyReq, req) => {
         // Inject OpenCode auth headers
         const authHeaders = getOpenCodeAuthHeaders();
         if (authHeaders.Authorization) {
@@ -399,6 +482,8 @@ export const registerOpenCodeProxy = (app, deps) => {
         // Defensive: request identity encoding from upstream OpenCode.
         // This avoids compressed-body/header mismatches in multi-proxy setups.
         proxyReq.setHeader('accept-encoding', 'identity');
+
+        replayParsedBody(proxyReq, req);
       },
       proxyRes: (proxyRes) => {
         for (const key of Object.keys(proxyRes.headers || {})) {
@@ -414,6 +499,21 @@ export const registerOpenCodeProxy = (app, deps) => {
         }
       },
     },
+  });
+
+  // Best-effort fallback for stale clients still sending symlink paths.
+  // Settings and project selection normalize at source; this cached async path
+  // avoids blocking the proxy hot path on every directory-scoped request.
+  app.use('/api', async (req, _res, next) => {
+    try {
+      const rewrittenUrl = await canonicalizeDirectoryQuery(req.url);
+      if (rewrittenUrl !== req.url) {
+        req.url = rewrittenUrl;
+      }
+    } catch {
+      // Pass through as-is if URL parsing or realpath resolution fails.
+    }
+    next();
   });
 
   app.use('/api', apiProxy);

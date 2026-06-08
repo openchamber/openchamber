@@ -3,12 +3,12 @@ import {
   desktopHostsGet,
   desktopHostsSet,
   desktopHostProbe,
-  normalizeHostUrl,
+  resolveDesktopHostUrl,
   type HostProbeResult,
 } from '@/lib/desktopHosts';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { isTauriShell } from '@/lib/desktop';
+import { isDesktopShell, restartDesktopApp } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 
 type ConnectionState = 'idle' | 'testing' | 'success' | 'error';
@@ -37,6 +37,10 @@ function getProbeStatusMessageKey(status: ProbeStatus): string | null {
       return null; // Success is shown separately
     case 'auth':
       return 'onboarding.remoteConnection.probe.authMessage';
+    case 'update-recommended':
+      return 'onboarding.remoteConnection.probe.updateRecommendedMessage';
+    case 'incompatible':
+      return 'onboarding.remoteConnection.probe.incompatibleMessage';
     case 'wrong-service':
       return 'onboarding.remoteConnection.probe.wrongServiceMessage';
     case 'unreachable':
@@ -47,7 +51,7 @@ function getProbeStatusMessageKey(status: ProbeStatus): string | null {
 }
 
 function isBlockingStatus(status: ProbeStatus): boolean {
-  return status === 'wrong-service' || status === 'unreachable';
+  return status === 'wrong-service' || status === 'unreachable' || status === 'incompatible';
 }
 
 export function RemoteConnectionForm({
@@ -66,7 +70,8 @@ export function RemoteConnectionForm({
   const [probeResult, setProbeResult] = useState<HostProbeResult | null>(null);
   const [error, setError] = useState('');
 
-  const normalizedUrl = normalizeHostUrl(url);
+  const resolvedUrl = resolveDesktopHostUrl(url);
+  const normalizedUrl = resolvedUrl?.persistedUrl ?? null;
 
   const handleUrlChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setUrl(e.target.value);
@@ -89,7 +94,7 @@ export function RemoteConnectionForm({
     try {
       const result = await desktopHostProbe(normalizedUrl);
       setProbeResult(result);
-      setState(result.status === 'ok' ? 'success' : 'error');
+      setState(result.status === 'ok' || result.status === 'update-recommended' ? 'success' : 'error');
     } catch (err) {
       setError(err instanceof Error ? err.message : t('onboarding.remoteConnection.errors.connectionTestFailed'));
       setState('error');
@@ -97,14 +102,15 @@ export function RemoteConnectionForm({
   }, [normalizedUrl, t]);
 
   const handleConnect = useCallback(async () => {
-    if (!normalizedUrl) return;
+    if (!resolvedUrl) return;
+    const targetUrl = resolvedUrl.persistedUrl;
 
     setState('testing');
     setProbeResult(null);
     setError('');
 
     try {
-      const probe = await desktopHostProbe(normalizedUrl);
+      const probe = await desktopHostProbe(targetUrl);
       setProbeResult(probe);
 
       // Block connection on wrong-service or unreachable
@@ -114,10 +120,10 @@ export function RemoteConnectionForm({
       }
 
       const config = await desktopHostsGet();
-      const hostLabel = label.trim() || normalizedUrl;
+      const hostLabel = label.trim() || targetUrl;
 
       const existingHost = config.hosts.find(
-        (h) => h.url === normalizedUrl
+        (h) => h.url === targetUrl
       );
 
       const hostId = existingHost ? existingHost.id : `host-${Date.now().toString(16)}`;
@@ -125,7 +131,8 @@ export function RemoteConnectionForm({
       const newHost = {
         id: hostId,
         label: hostLabel,
-        url: normalizedUrl,
+        url: targetUrl,
+        apiUrl: targetUrl,
       };
 
       const updatedHosts = existingHost
@@ -141,15 +148,19 @@ export function RemoteConnectionForm({
 
       onConnect?.();
 
-      if (isTauriShell()) {
-        const tauri = (window as unknown as { __TAURI__?: { core?: { invoke?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> } } }).__TAURI__;
-        await tauri?.core?.invoke?.('desktop_restart');
+      if (resolvedUrl.redeemUrl) {
+        window.location.assign(resolvedUrl.redeemUrl);
+        return;
+      }
+
+      if (isDesktopShell()) {
+        await restartDesktopApp();
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : t('onboarding.remoteConnection.errors.failedToSaveConnection'));
       setState('error');
     }
-  }, [normalizedUrl, label, onConnect, t]);
+  }, [resolvedUrl, label, onConnect, t]);
 
   const isTesting = state === 'testing';
   const canTest = normalizedUrl !== null && !isTesting;
@@ -157,6 +168,7 @@ export function RemoteConnectionForm({
 
   const probeMessageKey = getProbeStatusMessageKey(probeResult?.status ?? null);
   const isSuccess = probeResult?.status === 'ok';
+  const isUpdateRecommended = probeResult?.status === 'update-recommended';
   const isAuth = probeResult?.status === 'auth';
   const isBlocking = isBlockingStatus(probeResult?.status ?? null);
 
@@ -235,6 +247,18 @@ export function RemoteConnectionForm({
             }}
           >
             {t('onboarding.remoteConnection.status.authWarning')}
+          </div>
+        )}
+
+        {probeResult && isUpdateRecommended && (
+          <div
+            className="rounded-lg border p-3 text-sm"
+            style={{
+              borderColor: 'var(--status-warning)',
+              color: 'var(--status-warning)',
+            }}
+          >
+            {probeMessageKey ? t(probeMessageKey as Parameters<typeof t>[0]) : null}
           </div>
         )}
 

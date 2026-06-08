@@ -1,4 +1,14 @@
 import React from 'react';
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
+import { CSS as DndCSS } from '@dnd-kit/utilities';
 import { toast } from '@/components/ui';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -22,6 +32,7 @@ import {
   type OpenChamberProjectTodoItem,
   type ProjectRef,
 } from '@/lib/openchamberConfig';
+import { requestFileAccess } from '@/lib/desktop';
 import { generateBranchName } from '@/lib/git/branchNameGenerator';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -33,7 +44,27 @@ import { createWorktreeSessionForNewBranch } from '@/lib/worktreeSessionCreator'
 import { cn } from '@/lib/utils';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { useI18n } from '@/lib/i18n';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 import { TodoSendDialog, type TodoSendExecution } from './TodoSendDialog';
+
+const TODO_PANEL_MIN_ITEMS = 5;
+const TODO_PANEL_MAX_ITEMS = 15;
+
+const getEffectiveItemHeight = (padding: number) => {
+  const scale = Math.sqrt(padding / 100);
+  const paddingPx = 12 * scale;
+  const contentPx = 24 * scale; // h-6 uses --spacing-6 which also scales with --padding-scale
+  const borderPx = 1;
+  return Math.ceil(paddingPx + contentPx + borderPx);
+};
+
+const getPanelHeightForItems = (itemCount: number, padding: number) => {
+  const itemHeight = getEffectiveItemHeight(padding);
+  return Math.max(
+    itemHeight * TODO_PANEL_MIN_ITEMS,
+    Math.min(itemHeight * TODO_PANEL_MAX_ITEMS, itemHeight * itemCount)
+  );
+};
 
 interface ProjectNotesTodoPanelProps {
   projectRef: ProjectRef | null;
@@ -71,6 +102,54 @@ const createTodoId = (): string => {
   return `todo_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 };
 
+const sortTodosWithCompletedLast = (items: OpenChamberProjectTodoItem[]): OpenChamberProjectTodoItem[] => [
+  ...items.filter((todo) => !todo.completed),
+  ...items.filter((todo) => todo.completed),
+];
+
+const insertTodoBeforeCompleted = (items: OpenChamberProjectTodoItem[], item: OpenChamberProjectTodoItem): OpenChamberProjectTodoItem[] => {
+  const firstCompletedIndex = items.findIndex((todo) => todo.completed);
+  if (firstCompletedIndex === -1) {
+    return [...items, item];
+  }
+  return [...items.slice(0, firstCompletedIndex), item, ...items.slice(firstCompletedIndex)];
+};
+
+type SortableTodoHandleProps = {
+  attributes: ReturnType<typeof useSortable>['attributes'];
+  listeners: ReturnType<typeof useSortable>['listeners'];
+  setActivatorNodeRef: ReturnType<typeof useSortable>['setActivatorNodeRef'];
+  isDragging: boolean;
+};
+
+const SortableTodoItem: React.FC<{
+  id: string;
+  children: (dragHandleProps: SortableTodoHandleProps) => React.ReactNode;
+}> = ({ id, children }) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
+
+  return (
+    <li
+      ref={setNodeRef}
+      style={{
+        transform: DndCSS.Transform.toString(transform),
+        transition,
+      }}
+      className={cn(isDragging && 'opacity-60')}
+    >
+      {children({ attributes, listeners, setActivatorNodeRef, isDragging })}
+    </li>
+  );
+};
+
 export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   projectRef,
   projectLabel,
@@ -91,6 +170,13 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   const [contextReloadTick, setContextReloadTick] = React.useState(0);
   const notesHydratedRef = React.useRef(false);
   const lastSavedNotesRef = React.useRef('');
+  const todoPanelHeight = useUIStore((state) => state.todoPanelHeight);
+  const setTodoPanelHeight = useUIStore((state) => state.setTodoPanelHeight);
+  const notesPanelHeight = useUIStore((state) => state.notesPanelHeight);
+  const setNotesPanelHeight = useUIStore((state) => state.setNotesPanelHeight);
+  const [isTodoPanelResizing, setIsTodoPanelResizing] = React.useState(false);
+  const todoPanelStartYRef = React.useRef(0);
+  const todoPanelStartHeightRef = React.useRef(todoPanelHeight);
 
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const createSession = useSessionUIStore((state) => state.createSession);
@@ -102,6 +188,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
+  const padding = useUIStore((state) => state.padding);
 
   const persistProjectData = React.useCallback(
     async (nextNotes: string, nextTodos: OpenChamberProjectTodoItem[]) => {
@@ -143,7 +230,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
           return;
         }
         setNotes(data.notes);
-        setTodos(data.todos);
+        setTodos(sortTodosWithCompletedLast(data.todos));
         setPlans(nextPlans);
         lastSavedNotesRef.current = data.notes;
         notesHydratedRef.current = true;
@@ -191,6 +278,53 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
     };
   }, [projectRef]);
 
+  React.useEffect(() => {
+    if (todos.length < 7) {
+      return;
+    }
+    const targetHeight = getPanelHeightForItems(todos.length, padding);
+    const minHeight = getEffectiveItemHeight(padding) * TODO_PANEL_MIN_ITEMS;
+    if (todoPanelHeight < minHeight || todoPanelHeight > targetHeight) {
+      setTodoPanelHeight(targetHeight);
+    }
+  }, [todos.length, padding, todoPanelHeight, setTodoPanelHeight]);
+
+  React.useEffect(() => {
+    if (!isTodoPanelResizing) {
+      return;
+    }
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const delta = event.clientY - todoPanelStartYRef.current;
+      const nextHeight = Math.min(
+        getEffectiveItemHeight(padding) * TODO_PANEL_MAX_ITEMS,
+        Math.max(getEffectiveItemHeight(padding) * TODO_PANEL_MIN_ITEMS, todoPanelStartHeightRef.current + delta)
+      );
+      setTodoPanelHeight(nextHeight);
+    };
+
+    const handlePointerEnd = () => {
+      setIsTodoPanelResizing(false);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerEnd, { once: true });
+    window.addEventListener('pointercancel', handlePointerEnd, { once: true });
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerEnd);
+      window.removeEventListener('pointercancel', handlePointerEnd);
+    };
+  }, [isTodoPanelResizing, padding, setTodoPanelHeight]);
+
+  const handleTodoPanelResizeStart = React.useCallback((event: React.PointerEvent) => {
+    setIsTodoPanelResizing(true);
+    todoPanelStartYRef.current = event.clientY;
+    todoPanelStartHeightRef.current = todoPanelHeight;
+    event.preventDefault();
+  }, [todoPanelHeight]);
+
   const handleNotesBlur = React.useCallback(() => {
     lastSavedNotesRef.current = notes;
     void persistProjectData(notes, todos);
@@ -221,15 +355,12 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
       return;
     }
 
-    const nextTodos = [
-      ...todos,
-      {
-        id: createTodoId(),
-        text: trimmed.slice(0, OPENCHAMBER_PROJECT_TODO_TEXT_MAX_LENGTH),
-        completed: false,
-        createdAt: Date.now(),
-      },
-    ];
+    const nextTodos = insertTodoBeforeCompleted(todos, {
+      id: createTodoId(),
+      text: trimmed.slice(0, OPENCHAMBER_PROJECT_TODO_TEXT_MAX_LENGTH),
+      completed: false,
+      createdAt: Date.now(),
+    });
     setTodos(nextTodos);
     setNewTodoText('');
     void persistProjectData(notes, nextTodos);
@@ -249,7 +380,15 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
 
   const handleToggleTodo = React.useCallback(
     (id: string, completed: boolean) => {
-      const nextTodos = todos.map((todo) => (todo.id === id ? { ...todo, completed } : todo));
+      const todo = todos.find((item) => item.id === id);
+      if (!todo || todo.completed === completed) {
+        return;
+      }
+      const remainingTodos = todos.filter((item) => item.id !== id);
+      const updatedTodo = { ...todo, completed };
+      const nextTodos = completed
+        ? [...remainingTodos, updatedTodo]
+        : insertTodoBeforeCompleted(remainingTodos, updatedTodo);
       setTodos(nextTodos);
       void persistProjectData(notes, nextTodos);
     },
@@ -273,6 +412,28 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
     setTodos(nextTodos);
     void persistProjectData(notes, nextTodos);
   }, [notes, persistProjectData, todos]);
+
+  const handleTodoReorder = React.useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (!over || active.id === over.id) {
+        return;
+      }
+      const oldIndex = todos.findIndex((todo) => todo.id === active.id);
+      const newIndex = todos.findIndex((todo) => todo.id === over.id);
+      if (oldIndex === -1 || newIndex === -1) {
+        return;
+      }
+      const nextTodos = sortTodosWithCompletedLast(arrayMove(todos, oldIndex, newIndex));
+      setTodos(nextTodos);
+      void persistProjectData(notes, nextTodos);
+    },
+    [notes, persistProjectData, todos]
+  );
+
+  const todoSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+  );
 
   const todoInputValue = newTodoText.slice(0, OPENCHAMBER_PROJECT_TODO_TEXT_MAX_LENGTH);
   const completedTodoCount = todos.reduce((count, todo) => count + (todo.completed ? 1 : 0), 0);
@@ -354,7 +515,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
             return;
           }
           sessionId = created.id;
-          directoryHint = null;
+          directoryHint = created.path;
         } else {
           const session = await createSession(undefined, projectRef.path, null);
           if (!session?.id) {
@@ -441,12 +602,55 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
     [deletingPlanId, projectRef, t]
   );
 
-  const handleTriggerUploadPlan = React.useCallback(() => {
+  const handleTriggerUploadPlan = React.useCallback(async () => {
     if (!projectRef || isImportingPlan) {
       return;
     }
-    planFileInputRef.current?.click();
-  }, [isImportingPlan, projectRef]);
+    const result = await requestFileAccess({
+      defaultPath: projectRef.path,
+      filters: [
+        { name: 'Plan files', extensions: ['md', 'markdown', 'txt'] },
+        { name: 'All files', extensions: ['*'] },
+      ],
+    });
+    if (result.success && result.path) {
+      setIsImportingPlan(true);
+      try {
+        const params = new URLSearchParams({
+          path: result.path,
+          allowOutsideWorkspace: 'true',
+        });
+        const response = await runtimeFetch(`/api/fs/read?${params.toString()}`, { cache: 'no-store' });
+        if (!response.ok) {
+          toast.error(t('rightSidebar.contextNotesTodo.toast.readPlanFileFailed'));
+          return;
+        }
+        const text = await response.text();
+        if (!text.trim()) {
+          toast.error(t('rightSidebar.contextNotesTodo.toast.planFileEmpty'));
+          return;
+        }
+        const fallbackTitle = result.path.split('/').pop()?.replace(/\.(md|markdown|txt)$/i, '').trim() || '';
+        const created = await importProjectPlanFileFromContent(projectRef, text, fallbackTitle);
+        if (!created) {
+          toast.error(t('rightSidebar.contextNotesTodo.toast.importPlanFailed'));
+          return;
+        }
+        window.dispatchEvent(new CustomEvent('openchamber:project-plan-saved', {
+          detail: { projectId: projectRef.id },
+        }));
+        toast.success(t('rightSidebar.contextNotesTodo.toast.planImported'));
+      } catch (error) {
+        const description = error instanceof Error ? error.message : undefined;
+        toast.error(t('rightSidebar.contextNotesTodo.toast.readPlanFileFailed'), description ? { description } : undefined);
+      } finally {
+        setIsImportingPlan(false);
+      }
+    } else if (result.error === 'Native file picker not available') {
+      // Fall back to HTML file input for web/non-desktop runtimes
+      planFileInputRef.current?.click();
+    }
+  }, [isImportingPlan, projectRef, t]);
 
   const handleUploadPlanFile = React.useCallback(
     async (file: File | null) => {
@@ -523,7 +727,8 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
           onChange={(event) => setNotes(event.target.value.slice(0, OPENCHAMBER_PROJECT_NOTES_MAX_LENGTH))}
           onBlur={handleNotesBlur}
           placeholder={t('rightSidebar.contextNotesTodo.notes.placeholder')}
-          className="min-h-28 max-h-80 resize-none"
+          resizedHeight={notesPanelHeight}
+          onResizeHeightChange={setNotesPanelHeight}
           useScrollShadow
           scrollShadowSize={56}
           disabled={isLoading}
@@ -579,86 +784,141 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
           </button>
         </div>
 
-        <div className="max-h-56 overflow-y-auto rounded-lg border border-border/60 bg-background/40">
+        <div
+          className={cn(
+            'overflow-y-auto rounded-lg border border-border/60 bg-background/40',
+            isTodoPanelResizing && 'transition-none'
+          )}
+          style={
+            todos.length < 7
+              ? undefined
+              : {
+                  height: `${todoPanelHeight}px`,
+                  maxHeight: `${todoPanelHeight}px`,
+                }
+          }
+        >
           {todos.length === 0 ? (
             <p className="px-3 py-3 typography-meta text-muted-foreground">
               {t('rightSidebar.contextNotesTodo.todo.empty')}
             </p>
           ) : (
-            <ul className="divide-y divide-border/50">
-              {todos.map((todo) => {
-                const isExpandedTodo = expandedTodoIds.has(todo.id);
-                return (
-                  <li key={todo.id} className="flex items-start gap-1.5 px-2.5 py-1.5">
-                    <div className="flex h-6 items-center">
-                      <Checkbox
-                        checked={todo.completed}
-                        onChange={(checked) => handleToggleTodo(todo.id, checked)}
-                        ariaLabel={t('rightSidebar.contextNotesTodo.todo.actions.markComplete', { text: todo.text })}
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleToggleTodoExpanded(todo.id)}
-                      className={cn(
-                        'block min-h-6 min-w-0 flex-1 bg-transparent p-0 text-left typography-ui-label leading-6 text-foreground',
-                        isExpandedTodo ? 'whitespace-normal break-words' : 'overflow-hidden text-ellipsis whitespace-nowrap',
-                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
-                        todo.completed && 'text-muted-foreground line-through'
-                      )}
-                      title={isExpandedTodo ? undefined : todo.text}
-                      aria-label={
-                        isExpandedTodo
-                          ? t('rightSidebar.contextNotesTodo.todo.actions.collapse', { text: todo.text })
-                          : t('rightSidebar.contextNotesTodo.todo.actions.expand', { text: todo.text })
-                      }
-                    >
-                      {todo.text}
-                    </button>
-                    <div className="flex h-6 items-center gap-0.5">
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteTodo(todo.id)}
-                        className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                        aria-label={t('rightSidebar.contextNotesTodo.todo.actions.delete', { text: todo.text })}
-                        title={t('rightSidebar.contextNotesTodo.todo.actions.delete', { text: todo.text })}
-                      >
-                        <Icon name="delete-bin" className="h-3.5 w-3.5" />
-                      </button>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <button
-                            type="button"
-                            disabled={sendingTodoId === todo.id}
-                            className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-50"
-                            aria-label={t('rightSidebar.contextNotesTodo.todo.actions.send', { text: todo.text })}
-                            title={t('rightSidebar.contextNotesTodo.todo.actions.send', { text: todo.text })}
-                          >
-                            <Icon name="send-plane" className="h-3.5 w-3.5" />
-                          </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-56">
-                          <DropdownMenuItem onClick={() => handleSendToCurrentSession(todo.text)}>
-                            {t('rightSidebar.contextNotesTodo.todo.sendMenu.currentSession')}
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleSendToNewSession(todo.id, todo.text)}>
-                            {t('rightSidebar.contextNotesTodo.todo.sendMenu.newSession')}
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => void handleSendToNewWorktreeSession(todo.id, todo.text)}
-                            disabled={!canCreateWorktree}
-                          >
-                            {t('rightSidebar.contextNotesTodo.todo.sendMenu.newWorktreeSession')}
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
+            <DndContext
+              sensors={todoSensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleTodoReorder}
+            >
+              <SortableContext
+                items={todos.map((todo) => todo.id)}
+                strategy={verticalListSortingStrategy}
+              >
+                <ul className="divide-y divide-border/50">
+                  {todos.map((todo) => {
+                    const isExpandedTodo = expandedTodoIds.has(todo.id);
+                    return (
+                      <SortableTodoItem key={todo.id} id={todo.id}>
+                        {(dragHandleProps) => (
+                          <div className={cn('flex gap-1.5 px-2.5 py-1.5', isExpandedTodo ? 'items-start' : 'items-center')}>
+                            <button
+                              type="button"
+                              ref={dragHandleProps.setActivatorNodeRef}
+                              {...dragHandleProps.attributes}
+                              {...dragHandleProps.listeners}
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                              }}
+                              className="flex h-6 w-4 flex-shrink-0 touch-none items-center justify-center text-muted-foreground hover:text-foreground"
+                              aria-label={t('rightSidebar.contextNotesTodo.todo.actions.reorder', { text: todo.text })}
+                              title={t('rightSidebar.contextNotesTodo.todo.actions.reorder', { text: todo.text })}
+                            >
+                              <Icon name="draggable" className="h-3.5 w-3.5" />
+                            </button>
+                            <div className="flex h-6 items-center">
+                              <Checkbox
+                                checked={todo.completed}
+                                onChange={(checked) => handleToggleTodo(todo.id, checked)}
+                                ariaLabel={t('rightSidebar.contextNotesTodo.todo.actions.markComplete', { text: todo.text })}
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleTodoExpanded(todo.id)}
+                              className={cn(
+                                'block min-h-6 min-w-0 flex-1 bg-transparent p-0 text-left typography-ui-label leading-normal text-foreground',
+                                isExpandedTodo ? 'whitespace-normal break-words' : 'overflow-hidden text-ellipsis whitespace-nowrap',
+                                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+                                todo.completed && 'text-muted-foreground line-through'
+                              )}
+                              title={isExpandedTodo ? undefined : todo.text}
+                              aria-label={
+                                isExpandedTodo
+                                  ? t('rightSidebar.contextNotesTodo.todo.actions.collapse', { text: todo.text })
+                                  : t('rightSidebar.contextNotesTodo.todo.actions.expand', { text: todo.text })
+                              }
+                            >
+                              {todo.text}
+                            </button>
+                            <div className="flex h-6 items-center gap-0.5">
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteTodo(todo.id)}
+                                className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                                aria-label={t('rightSidebar.contextNotesTodo.todo.actions.delete', { text: todo.text })}
+                                title={t('rightSidebar.contextNotesTodo.todo.actions.delete', { text: todo.text })}
+                              >
+                                <Icon name="delete-bin" className="h-3.5 w-3.5" />
+                              </button>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <button
+                                    type="button"
+                                    disabled={sendingTodoId === todo.id}
+                                    className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-50"
+                                    aria-label={t('rightSidebar.contextNotesTodo.todo.actions.send', { text: todo.text })}
+                                    title={t('rightSidebar.contextNotesTodo.todo.actions.send', { text: todo.text })}
+                                  >
+                                    <Icon name="send-plane" className="h-3.5 w-3.5" />
+                                  </button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" className="w-56">
+                                  <DropdownMenuItem onClick={() => handleSendToCurrentSession(todo.text)}>
+                                    {t('rightSidebar.contextNotesTodo.todo.sendMenu.currentSession')}
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleSendToNewSession(todo.id, todo.text)}>
+                                    {t('rightSidebar.contextNotesTodo.todo.sendMenu.newSession')}
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => void handleSendToNewWorktreeSession(todo.id, todo.text)}
+                                    disabled={!canCreateWorktree}
+                                  >
+                                    {t('rightSidebar.contextNotesTodo.todo.sendMenu.newWorktreeSession')}
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </div>
+                          </div>
+                        )}
+                      </SortableTodoItem>
+                    );
+                  })}
+                </ul>
+              </SortableContext>
+            </DndContext>
           )}
         </div>
+        {todos.length >= 7 && (
+          <div
+            className={cn(
+              'h-[3px] w-full cursor-row-resize hover:bg-[var(--interactive-border)]/80 transition-colors',
+              isTodoPanelResizing && 'bg-[var(--interactive-border)]'
+            )}
+            onPointerDown={handleTodoPanelResizeStart}
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label={t('rightSidebar.contextNotesTodo.todo.resizeAria')}
+          />
+        )}
       </div>
 
       <div className="space-y-2">

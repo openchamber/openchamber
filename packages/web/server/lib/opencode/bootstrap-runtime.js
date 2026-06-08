@@ -21,9 +21,9 @@ export const createBootstrapRuntime = (dependencies) => {
       verboseRequestLogs,
       uiPassword,
       tunnelAuthController,
+      remoteClientAuthRuntime,
       readSettingsFromDiskMigrated,
       normalizeTunnelSessionTtlMs,
-      resolveZenModel,
       sayTTSCapability,
       ensurePushInitialized,
       ensureGlobalWatcherStarted,
@@ -66,19 +66,22 @@ export const createBootstrapRuntime = (dependencies) => {
     const uiAuthController = createUiAuth({
       password: uiPassword,
       readSettingsFromDiskMigrated,
+      clientAuthController: remoteClientAuthRuntime,
     });
     if (uiAuthController.enabled) {
       console.log('UI password protection enabled for browser sessions');
     }
 
     registerAuthAndAccessRoutes(app, {
+      express,
       tunnelAuthController,
       uiAuthController,
+      remoteClientAuthRuntime,
       readSettingsFromDiskMigrated,
       normalizeTunnelSessionTtlMs,
     });
 
-    registerTtsRoutes(app, { resolveZenModel, sayTTSCapability });
+    registerTtsRoutes(app, { sayTTSCapability });
 
     registerNotificationRoutes(app, {
       uiAuthController,

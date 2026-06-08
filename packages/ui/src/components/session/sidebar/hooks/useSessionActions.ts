@@ -3,10 +3,12 @@ import type { Session } from '@opencode-ai/sdk/v2';
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
+import type { MainTab } from '@/stores/useUIStore';
 
 type DeleteSessionConfirmSetter = React.Dispatch<React.SetStateAction<{
   session: Session;
   descendantCount: number;
+  descendantIds: string[];
   archivedBucket: boolean;
 } | null>>;
 
@@ -23,7 +25,7 @@ type Args = {
   setIsSessionSearchOpen: (open: boolean) => void;
   setActiveProjectIdOnly: (id: string) => void;
   setDirectory: (directory: string, options?: { showOverlay?: boolean }) => void;
-  setActiveMainTab: (tab: 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files') => void;
+  setActiveMainTab: (tab: MainTab) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
   setCurrentSession: (sessionId: string | null, directoryHint?: string | null) => void;
   updateSessionTitle: (id: string, title: string) => Promise<void>;
@@ -36,7 +38,7 @@ type Args = {
   childrenMap: Map<string, Session[]>;
   showDeletionDialog: boolean;
   setDeleteSessionConfirm: DeleteSessionConfirmSetter;
-  deleteSessionConfirm: { session: Session; descendantCount: number; archivedBucket: boolean } | null;
+  deleteSessionConfirm: { session: Session; descendantCount: number; descendantIds: string[]; archivedBucket: boolean } | null;
   setEditingId: (id: string | null) => void;
   setEditTitle: (value: string) => void;
   editingId: string | null;
@@ -97,16 +99,19 @@ export const useSessionActions = (args: Args) => {
     [args],
   );
 
-  const handleSessionDoubleClick = React.useCallback(() => {
-    args.setActiveMainTab('chat');
+  const handleSessionDoubleClick = React.useCallback((sessionId: string, sessionTitle: string) => {
+    args.setEditingId(sessionId);
+    args.setEditTitle(sessionTitle);
   }, [args]);
 
   const handleSaveEdit = React.useCallback(async () => {
-    if (args.editingId && args.editTitle.trim()) {
-      await args.updateSessionTitle(args.editingId, args.editTitle.trim());
-      args.setEditingId(null);
-      args.setEditTitle('');
+    if (!args.editingId) return;
+    const trimmed = args.editTitle.trim();
+    if (trimmed) {
+      await args.updateSessionTitle(args.editingId, trimmed);
     }
+    args.setEditingId(null);
+    args.setEditTitle('');
   }, [args]);
 
   const handleCancelEdit = React.useCallback(() => {
@@ -168,11 +173,30 @@ export const useSessionActions = (args: Args) => {
     return collected;
   }, [args.childrenMap]);
 
+  // Archive cascades to subagents that aren't already archived; hard-delete
+  // cascades to every descendant unconditionally. We collect once and filter
+  // per-action so the dialog count and the executed ID list always agree.
+  const filterDescendantsForAction = React.useCallback(
+    (descendants: Session[], shouldHardDelete: boolean): Session[] => {
+      if (shouldHardDelete) return descendants;
+      return descendants.filter((s) => !s.time?.archived);
+    },
+    [],
+  );
+
   const executeDeleteSession = React.useCallback(
-    async (session: Session, source?: { archivedBucket?: boolean }) => {
-      const descendants = collectDescendants(session.id);
+    async (
+      session: Session,
+      source?: { archivedBucket?: boolean },
+      precomputed?: { descendantIds: string[] },
+    ) => {
       const shouldHardDelete = source?.archivedBucket === true;
-      if (descendants.length === 0) {
+      // Use the snapshot taken when the dialog opened (if any) so the
+      // executed list matches what the user was told. Fall back to a fresh
+      // collection for direct-execute (no-dialog) callers.
+      const descendantIds = precomputed?.descendantIds
+        ?? filterDescendantsForAction(collectDescendants(session.id), shouldHardDelete).map((s) => s.id);
+      if (descendantIds.length === 0) {
         const success = shouldHardDelete
           ? await args.deleteSession(session.id)
           : await args.archiveSession(session.id);
@@ -188,7 +212,7 @@ export const useSessionActions = (args: Args) => {
         return;
       }
 
-      const ids = [session.id, ...descendants.map((s) => s.id)];
+      const ids = [session.id, ...descendantIds];
       if (shouldHardDelete) {
         const { deletedIds, failedIds } = await args.deleteSessions(ids);
         if (deletedIds.length > 0) {
@@ -216,26 +240,35 @@ export const useSessionActions = (args: Args) => {
           : t('sessions.sidebar.bulkActions.failedArchivePlural', { count: failedIds.length }));
       }
     },
-    [args, collectDescendants, t],
+    [args, collectDescendants, filterDescendantsForAction, t],
   );
 
   const handleDeleteSession = React.useCallback(
     (session: Session, source?: { archivedBucket?: boolean }) => {
-      const descendants = collectDescendants(session.id);
+      const shouldHardDelete = source?.archivedBucket === true;
+      const effectiveDescendantIds = filterDescendantsForAction(
+        collectDescendants(session.id),
+        shouldHardDelete,
+      ).map((s) => s.id);
       if (!args.showDeletionDialog) {
-        void executeDeleteSession(session, source);
+        void executeDeleteSession(session, source, { descendantIds: effectiveDescendantIds });
         return;
       }
-      args.setDeleteSessionConfirm({ session, descendantCount: descendants.length, archivedBucket: source?.archivedBucket === true });
+      args.setDeleteSessionConfirm({
+        session,
+        descendantCount: effectiveDescendantIds.length,
+        descendantIds: effectiveDescendantIds,
+        archivedBucket: shouldHardDelete,
+      });
     },
-    [args, collectDescendants, executeDeleteSession],
+    [args, collectDescendants, executeDeleteSession, filterDescendantsForAction],
   );
 
   const confirmDeleteSession = React.useCallback(async () => {
     if (!args.deleteSessionConfirm) return;
-    const { session, archivedBucket } = args.deleteSessionConfirm;
+    const { session, archivedBucket, descendantIds } = args.deleteSessionConfirm;
     args.setDeleteSessionConfirm(null);
-    await executeDeleteSession(session, { archivedBucket });
+    await executeDeleteSession(session, { archivedBucket }, { descendantIds });
   }, [args, executeDeleteSession]);
 
   return {

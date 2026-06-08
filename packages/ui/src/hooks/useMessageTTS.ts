@@ -10,7 +10,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useServerTTS } from './useServerTTS';
 import { useSayTTS } from './useSayTTS';
 import { browserVoiceService } from '@/lib/voice/browserVoiceService';
-import { summarizeText, shouldSummarize, sanitizeForTTS } from '@/lib/voice/summarize';
+import { sanitizeForTTS } from '@/lib/voice/summarize';
 
 export interface UseMessageTTSReturn {
     /** Whether TTS is currently playing for this message */
@@ -34,8 +34,6 @@ export function useMessageTTS(): UseMessageTTSReturn {
     const openaiCompatibleVoice = useConfigStore((state) => state.openaiCompatibleVoice);
     const openaiCompatibleUrl = useConfigStore((state) => state.openaiCompatibleUrl);
     const openaiCompatibleTtsModel = useConfigStore((state) => state.openaiCompatibleTtsModel);
-    const summarizeMessageTTS = useConfigStore((state) => state.summarizeMessageTTS);
-    const summarizeCharacterThreshold = useConfigStore((state) => state.summarizeCharacterThreshold);
     const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
 
     const isServerProvider = voiceProvider === 'openai' || voiceProvider === 'openai-compatible';
@@ -66,16 +64,7 @@ export function useMessageTTS(): UseMessageTTSReturn {
         setIsPlaying(true);
         
         try {
-            // Summarize text if enabled and over threshold
-            let textToSpeak = text;
-            if (summarizeMessageTTS && shouldSummarize(text, 'message')) {
-                textToSpeak = await summarizeText(text, {
-                    threshold: summarizeCharacterThreshold,
-                });
-            } else {
-                // Still sanitize for TTS even when not summarizing
-                textToSpeak = sanitizeForTTS(text);
-            }
+            const textToSpeak = sanitizeForTTS(text);
             
             if (isServerProvider && isServerTTSAvailable) {
                 const voice = voiceProvider === 'openai-compatible' ? openaiCompatibleVoice : openaiVoice;
@@ -87,7 +76,7 @@ export function useMessageTTS(): UseMessageTTSReturn {
                     speed: speechRate,
                     pitch: speechPitch,
                     volume: speechVolume,
-                    summarize: false, // We already summarized client-side
+                    summarize: false,
                     baseURL,
                     onEnd: () => setIsPlaying(false),
                     onError: () => setIsPlaying(false),
@@ -132,8 +121,6 @@ export function useMessageTTS(): UseMessageTTSReturn {
         openaiCompatibleVoice,
         openaiCompatibleUrl,
         openaiCompatibleTtsModel,
-        summarizeMessageTTS,
-        summarizeCharacterThreshold,
         isServerTTSAvailable,
         isSayTTSAvailable,
         speakServerTTS,

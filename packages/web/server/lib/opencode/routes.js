@@ -155,7 +155,20 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
           error: payload?.error || response.statusText || 'Failed to upgrade OpenCode',
         });
       }
-      return res.json(payload ?? { success: true });
+
+      try {
+        await refreshOpenCodeAfterConfigChange('OpenCode upgrade');
+      } catch (restartError) {
+        return res.status(500).json({
+          success: false,
+          upgraded: true,
+          error: restartError instanceof Error
+            ? `OpenCode upgraded, but restart failed: ${restartError.message}`
+            : 'OpenCode upgraded, but restart failed',
+        });
+      }
+
+      return res.json({ ...(payload ?? { success: true }), restarted: true });
     } catch (error) {
       console.error('Failed to upgrade OpenCode:', error);
       return res.status(500).json({
@@ -195,6 +208,51 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       return res.status(500).json({
         available: null,
         error: error instanceof Error ? error.message : 'Failed to check OpenCode upgrade status',
+      });
+    }
+  });
+
+  app.get('/api/opencode/health', async (_req, res) => {
+    try {
+      const healthResponse = await fetch(buildOpenCodeUrl('/global/health', ''), {
+        method: 'GET',
+        headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+      });
+      const health = await healthResponse.json().catch(() => null);
+      if (!healthResponse.ok) {
+        return res.status(healthResponse.status).json({
+          healthy: false,
+          error: health?.error || healthResponse.statusText || 'OpenCode health check failed',
+        });
+      }
+      return res.json({ healthy: health?.healthy === true });
+    } catch (error) {
+      return res.status(503).json({
+        healthy: false,
+        error: error instanceof Error ? error.message : 'OpenCode health check failed',
+      });
+    }
+  });
+
+  app.get('/api/opencode/version', async (_req, res) => {
+    try {
+      const healthResponse = await fetch(buildOpenCodeUrl('/global/health', ''), {
+        method: 'GET',
+        headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+      });
+      const health = await healthResponse.json().catch(() => null);
+      if (!healthResponse.ok) {
+        return res.status(healthResponse.status).json({
+          version: null,
+          error: health?.error || healthResponse.statusText || 'Failed to read OpenCode version',
+        });
+      }
+      const version = typeof health?.version === 'string' ? health.version.replace(/^v/, '') : null;
+      return res.json({ version });
+    } catch (error) {
+      return res.status(500).json({
+        version: null,
+        error: error instanceof Error ? error.message : 'Failed to read OpenCode version',
       });
     }
   });

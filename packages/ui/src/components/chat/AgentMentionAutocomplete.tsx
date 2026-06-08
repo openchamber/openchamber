@@ -44,18 +44,20 @@ export const AgentMentionAutocomplete = React.forwardRef<AgentMentionAutocomplet
   const { t } = useI18n();
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const [selectedIndex, setSelectedIndex] = React.useState(0);
+  const selectedIndexRef = React.useRef(0);
   const [agents, setAgents] = React.useState<AgentInfo[]>([]);
   const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
   const ignoreTabClickRef = React.useRef(false);
   const getVisibleAgents = useConfigStore((state) => state.getVisibleAgents);
+  const configAgentsCount = useConfigStore((state) => state.agents.length);
   const agentsWithMetadata = useAgentsStore((state) => state.agents);
   const loadAgents = useAgentsStore((state) => state.loadAgents);
 
   React.useEffect(() => {
-    if (agentsWithMetadata.length === 0) {
+    if (agentsWithMetadata.length === 0 && configAgentsCount === 0) {
       void loadAgents();
     }
-  }, [loadAgents, agentsWithMetadata.length]);
+  }, [loadAgents, agentsWithMetadata.length, configAgentsCount]);
 
   React.useEffect(() => {
     const visibleAgents = getVisibleAgents();
@@ -84,8 +86,11 @@ export const AgentMentionAutocomplete = React.forwardRef<AgentMentionAutocomplet
   }, [getVisibleAgents, searchQuery, agentsWithMetadata]);
 
   React.useEffect(() => {
+    selectedIndexRef.current = selectedIndex;
+  }, [selectedIndex]);
+
+  React.useEffect(() => {
     itemRefs.current[selectedIndex]?.scrollIntoView({
-      behavior: 'smooth',
       block: 'nearest',
     });
   }, [selectedIndex]);
@@ -129,13 +134,14 @@ export const AgentMentionAutocomplete = React.forwardRef<AgentMentionAutocomplet
       }
 
       if (key === 'Enter' || key === 'Tab') {
-        const agent = agents[(selectedIndex + agents.length) % agents.length];
+        const safeIndex = ((selectedIndexRef.current % agents.length) + agents.length) % agents.length;
+        const agent = agents[safeIndex];
         if (agent) {
           onAgentSelect(agent.name);
         }
       }
     },
-  }), [agents, onAgentSelect, onClose, selectedIndex]);
+  }), [agents, onAgentSelect, onClose]);
 
   const renderAgent = (agent: AgentInfo, index: number) => {
     const isSystem = agent.isBuiltIn;
@@ -150,9 +156,9 @@ export const AgentMentionAutocomplete = React.forwardRef<AgentMentionAutocomplet
           className={cn(
             'flex items-start gap-2 px-3 py-1.5 cursor-pointer rounded-lg typography-ui-label',
           index === selectedIndex && 'bg-interactive-selection'
-          )}
+        )}
         onClick={() => onAgentSelect(agent.name)}
-        onMouseEnter={() => setSelectedIndex(index)}
+        onMouseMove={() => setSelectedIndex(index)}
       >
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">

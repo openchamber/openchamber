@@ -1,0 +1,26 @@
+---
+title: Magic Prompts
+description: 自定义 OpenChamber 自动化流程背后的内置提示词。
+---
+
+# Magic Prompts
+
+每当 OpenChamber 自动做某件事时 — 编写提交信息、起草 PR、审阅 issue、解决冲突、总结会话 — 它都会在幕后使用内置的提示词。Magic Prompts 就是你阅读和重写这些提示词的地方。在 **Settings → Magic Prompts** 中打开它。
+
+日常使用并不需要本页。当你想让某个流程表现得有所不同时再用它 — 比如让提交信息采用某种特定风格。
+
+## 编辑提示词
+
+1. 打开 **Settings → Magic Prompts**。
+2. 从侧边栏的分组中选择一个提示词 — Git、GitHub、Planning 和 Session。
+3. 编辑文本并保存。
+
+有些提示词有一个可见部分（你会看到的消息）和一个指令部分（对智能体隐藏的引导）。提示词可以包含 OpenChamber 会填入的 `{{placeholders}}`，比如 diff 或 issue 标题 — 请保留它们原样。
+
+## 重置
+
+改主意了？每个提示词都有 **reset to default**，如果你想在所有地方重新开始，还有一个 **reset all**。
+
+## 相关内容
+
+- [Git 与 GitHub 工作流](/zh-cn/git/) — 其中许多提示词为 git 流程提供动力

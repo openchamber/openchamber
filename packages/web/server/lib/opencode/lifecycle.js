@@ -1,6 +1,20 @@
 import { spawn, spawnSync } from 'node:child_process';
 import net from 'node:net';
 
+const parsePositiveInt = (value, fallback) => {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const HEALTH_CHECK_TIMEOUT_MS = parsePositiveInt(process.env.OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS, 5000);
+const HEALTH_CHECK_MAX_CONSECUTIVE_FAILURES = parsePositiveInt(
+  process.env.OPENCHAMBER_OPENCODE_HEALTH_CONSECUTIVE_FAILURES,
+  20
+);
+const HEALTH_CHECK_INTERVAL_OVERRIDE_MS = parsePositiveInt(process.env.OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS, 0);
+const HEALTH_CHECK_RESULT_CACHE_MS = parsePositiveInt(process.env.OPENCHAMBER_OPENCODE_HEALTH_CACHE_MS, 750);
+const OPENCODE_HEALTH_PATH = '/global/health';
+
 export const createOpenCodeLifecycleRuntime = (deps) => {
   const {
     state,
@@ -14,8 +28,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     applyOpencodeBinaryFromSettings,
     ensureOpencodeCliEnv,
     ensureLocalOpenCodeServerPassword,
-    buildWslExecArgs,
-    resolveWslExecutablePath,
     resolveManagedOpenCodeLaunchSpec,
     setOpenCodePort,
     setDetectedOpenCodeApiPrefix,
@@ -48,6 +60,18 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   };
 
   const hasChildProcessExited = (child) => !child || child.exitCode !== null || child.signalCode !== null;
+
+  const isManagedOpenCodeProcessAlive = () => {
+    const child = state.openCodeProcess;
+    if (!child || hasChildProcessExited(child)) return false;
+    if (!child.pid) return true;
+    try {
+      process.kill(child.pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
 
   const waitForChildProcessClose = (child, timeoutMs) => new Promise((resolve) => {
     if (!child || hasChildProcessExited(child)) {
@@ -127,6 +151,20 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       return;
     }
 
+    const signalProcessTree = (signal) => {
+      if (process.platform !== 'win32') {
+        try {
+          process.kill(-pid, signal);
+        } catch {
+        }
+      }
+
+      try {
+        child.kill(signal);
+      } catch {
+      }
+    };
+
     if (process.platform === 'win32') {
       try {
         child.kill();
@@ -163,19 +201,13 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       return;
     }
 
-    try {
-      child.kill('SIGTERM');
-    } catch {
-    }
+    signalProcessTree('SIGTERM');
 
     if (await waitForChildProcessClose(child, 2500)) {
       return;
     }
 
-    try {
-      child.kill('SIGKILL');
-    } catch {
-    }
+    signalProcessTree('SIGKILL');
 
     await waitForChildProcessClose(child, 1000);
   };
@@ -197,25 +229,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     let launchWrapperType = null;
 
     if (process.platform === 'win32' && state.useWslForOpencode) {
-      const wslBinary = state.resolvedWslBinary || resolveWslExecutablePath();
-      if (!wslBinary) {
-        throw new Error('WSL executable not found while attempting to launch OpenCode from WSL');
-      }
-
-      const wslOpencode = state.resolvedWslOpencodePath && state.resolvedWslOpencodePath.trim().length > 0
-        ? state.resolvedWslOpencodePath.trim()
-        : 'opencode';
-      const serveHost = hostname === '127.0.0.1' ? '0.0.0.0' : hostname;
-
-      binary = wslBinary;
-      args = buildWslExecArgs([
-        wslOpencode,
-        'serve',
-        '--hostname',
-        serveHost,
-        '--port',
-        String(port),
-      ], state.resolvedWslDistro);
+      throw new Error('Launching OpenCode through WSL is no longer supported. Install OpenCode natively on Windows and configure opencode.cmd or opencode.exe.');
     }
 
     if (process.platform === 'win32' && !state.useWslForOpencode) {
@@ -249,6 +263,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     const child = spawn(binary, args, {
       cwd,
       env: processEnv,
+      detached: process.platform !== 'win32',
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -311,6 +326,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
     return {
       url,
+      pid: child.pid || null,
       async close() {
         await closeManagedOpenCodeChild(child);
       },
@@ -357,13 +373,13 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     }
 
     try {
-      const response = await fetch(buildOpenCodeUrl('/global/health', ''), {
+      const response = await fetch(buildOpenCodeUrl(OPENCODE_HEALTH_PATH, ''), {
         method: 'GET',
         headers: {
           Accept: 'application/json',
           ...getOpenCodeAuthHeaders(),
         },
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(HEALTH_CHECK_TIMEOUT_MS),
       });
       if (!response.ok) return false;
       const body = await response.json().catch(() => null);
@@ -382,7 +398,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 3000);
       const base = origin ?? `http://127.0.0.1:${port}`;
-      const response = await fetch(`${base}/global/health`, {
+      const response = await fetch(`${base}${OPENCODE_HEALTH_PATH}`, {
         method: 'GET',
         headers: {
           Accept: 'application/json',
@@ -624,51 +640,40 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     let lastError = null;
 
     while (Date.now() < deadline) {
+      let timeout = null;
       try {
-        const [configResult, agentResult] = await Promise.all([
-          fetch(buildOpenCodeUrl('/config', ''), {
-            method: 'GET',
-            headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
-          }).catch((error) => error),
-          fetch(buildOpenCodeUrl('/agent', ''), {
-            method: 'GET',
-            headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
-          }).catch((error) => error),
-        ]);
+        const controller = new AbortController();
+        timeout = setTimeout(() => controller.abort(), HEALTH_CHECK_TIMEOUT_MS);
+        const response = await fetch(buildOpenCodeUrl(OPENCODE_HEALTH_PATH, ''), {
+          method: 'GET',
+          headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+        timeout = null;
 
-        if (configResult instanceof Error) {
-          lastError = configResult;
+        if (!response.ok) {
+          lastError = new Error(`OpenCode health endpoint responded with status ${response.status}`);
           await new Promise((resolve) => setTimeout(resolve, intervalMs));
           continue;
         }
 
-        if (!configResult.ok) {
-          lastError = new Error(`OpenCode config endpoint responded with status ${configResult.status}`);
+        const body = await response.json().catch(() => null);
+        if (body?.healthy !== true) {
+          lastError = new Error('OpenCode health endpoint returned unhealthy response');
           await new Promise((resolve) => setTimeout(resolve, intervalMs));
           continue;
         }
-
-        await configResult.json().catch(() => null);
-
-        if (agentResult instanceof Error) {
-          lastError = agentResult;
-          await new Promise((resolve) => setTimeout(resolve, intervalMs));
-          continue;
-        }
-
-        if (!agentResult.ok) {
-          lastError = new Error(`Agent endpoint responded with status ${agentResult.status}`);
-          await new Promise((resolve) => setTimeout(resolve, intervalMs));
-          continue;
-        }
-
-        await agentResult.json().catch(() => []);
 
         state.isOpenCodeReady = true;
         state.lastOpenCodeError = null;
         return;
       } catch (error) {
         lastError = error;
+      } finally {
+        if (timeout) {
+          clearTimeout(timeout);
+        }
       }
 
       await new Promise((resolve) => setTimeout(resolve, intervalMs));
@@ -812,6 +817,37 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
    */
   const STALE_BUSY_GRACE_MS = 2 * 60 * 1000;
   let lastUnhealthyWithBusySessionsAt = 0;
+  let consecutiveHealthFailures = 0;
+  let healthProbePromise = null;
+  let healthCheckCyclePromise = null;
+  let lastHealthProbeResult = null;
+
+  const resetHealthFailureState = () => {
+    consecutiveHealthFailures = 0;
+    lastUnhealthyWithBusySessionsAt = 0;
+  };
+
+  const probeOpenCodeHealth = async () => {
+    const now = Date.now();
+    if (lastHealthProbeResult && now - lastHealthProbeResult.at < HEALTH_CHECK_RESULT_CACHE_MS) {
+      return lastHealthProbeResult.healthy;
+    }
+
+    if (healthProbePromise) {
+      return healthProbePromise;
+    }
+
+    healthProbePromise = isOpenCodeProcessHealthy()
+      .then((healthy) => {
+        lastHealthProbeResult = { at: Date.now(), healthy };
+        return healthy;
+      })
+      .finally(() => {
+        healthProbePromise = null;
+      });
+
+    return healthProbePromise;
+  };
 
   const shouldSkipRestartForBusySessions = () => {
     const activeCount = getActiveSessionCount();
@@ -837,18 +873,43 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     return true;
   };
 
-  const triggerHealthCheck = async () => {
+  const runHealthCheckCycle = async (source) => {
     if (!state.openCodeProcess || state.isShuttingDown || state.isRestartingOpenCode) return;
+    if (healthCheckCyclePromise) return healthCheckCyclePromise;
 
-    try {
-      const healthy = await isOpenCodeProcessHealthy();
+    healthCheckCyclePromise = (async () => {
+      const healthy = await probeOpenCodeHealth();
       if (!healthy) {
+        if (!isManagedOpenCodeProcessAlive()) {
+          console.log(`[lifecycle] ${source} health check: OpenCode process exited, restarting...`);
+          consecutiveHealthFailures = 0;
+          lastHealthProbeResult = null;
+          await restartOpenCode();
+          return;
+        }
+        consecutiveHealthFailures += 1;
+        console.warn(
+          `[lifecycle] ${source} health check failed (${consecutiveHealthFailures}/${HEALTH_CHECK_MAX_CONSECUTIVE_FAILURES})`
+        );
+        if (consecutiveHealthFailures < HEALTH_CHECK_MAX_CONSECUTIVE_FAILURES) return;
         if (shouldSkipRestartForBusySessions()) return;
-        console.log('[lifecycle] immediate health check: OpenCode not healthy, restarting...');
+        console.log(`[lifecycle] ${source} health check failure threshold reached, restarting OpenCode...`);
+        consecutiveHealthFailures = 0;
+        lastHealthProbeResult = null;
         await restartOpenCode();
       } else {
-        lastUnhealthyWithBusySessionsAt = 0;
+        resetHealthFailureState();
       }
+    })().finally(() => {
+      healthCheckCyclePromise = null;
+    });
+
+    return healthCheckCyclePromise;
+  };
+
+  const triggerHealthCheck = async () => {
+    try {
+      await runHealthCheckCycle('immediate');
     } catch (error) {
       console.error(`[lifecycle] immediate health check error: ${error.message}`);
     }
@@ -859,22 +920,15 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       clearInterval(state.healthCheckInterval);
     }
 
-    state.healthCheckInterval = setInterval(async () => {
-      if (!state.openCodeProcess || state.isShuttingDown || state.isRestartingOpenCode) return;
+    const effectiveIntervalMs = HEALTH_CHECK_INTERVAL_OVERRIDE_MS || healthCheckIntervalMs;
 
+    state.healthCheckInterval = setInterval(async () => {
       try {
-        const healthy = await isOpenCodeProcessHealthy();
-        if (!healthy) {
-          if (shouldSkipRestartForBusySessions()) return;
-          console.log('OpenCode process not running, restarting...');
-          await restartOpenCode();
-        } else {
-          lastUnhealthyWithBusySessionsAt = 0;
-        }
+        await runHealthCheckCycle('periodic');
       } catch (error) {
         console.error(`Health check error: ${error.message}`);
       }
-    }, healthCheckIntervalMs);
+    }, effectiveIntervalMs);
   };
 
   return {

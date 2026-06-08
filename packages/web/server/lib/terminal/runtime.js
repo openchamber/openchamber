@@ -230,6 +230,19 @@ export function createTerminalRuntime({
     }
   };
 
+  const sendTerminalOutputWsData = (socket, sessionId, replayChunk, data = replayChunk?.data) => {
+    if (!socket || socket.readyState !== 1 || !replayChunk) {
+      return false;
+    }
+
+    try {
+      socket.send(createTerminalInputWsControlFrame({ t: 'd', s: sessionId, i: replayChunk.id, d: data }), { binary: true });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   let terminalInputWsServer = new WebSocketServer({
     noServer: true,
     maxPayload: TERMINAL_INPUT_WS_MAX_PAYLOAD_BYTES,
@@ -339,12 +352,11 @@ export function createTerminalRuntime({
 
         const replayChunks = listTerminalOutputReplayChunksSince(targetSession.outputReplayBuffer, replaySince);
         for (const replayChunk of replayChunks) {
-          try {
-            socket.send(replayChunk.data);
+          if (sendTerminalOutputWsData(socket, nextSessionId, replayChunk)) {
             connectionState.replayCursorBySession.set(nextSessionId, replayChunk.id);
-          } catch {
-            break;
+            continue;
           }
+          break;
         }
         return;
       }
@@ -444,12 +456,8 @@ export function createTerminalRuntime({
           continue;
         }
 
-        try {
-          wsConnection.socket.send(data);
-          if (replayChunk) {
-            wsConnection.replayCursorBySession.set(sessionId, replayChunk.id);
-          }
-        } catch {
+        if (sendTerminalOutputWsData(wsConnection.socket, sessionId, replayChunk, data)) {
+          wsConnection.replayCursorBySession.set(sessionId, replayChunk.id);
         }
       }
     });

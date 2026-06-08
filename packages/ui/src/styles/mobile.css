@@ -385,11 +385,23 @@
 @media (display-mode: standalone) and (max-width: 768px) {
   .pwa-dialog-content {
     --pwa-dialog-padding: clamp(0.75rem, 3vw, 1.25rem);
-    top: calc(50% + (var(--oc-safe-area-top, 0px) * 0.22));
-    max-height: calc(100vh - var(--oc-safe-area-top, 0px) - var(--oc-safe-area-bottom-visual, 0px) - 20px);
+    /* Browsers that don't understand dvh ignore the second declaration and
+       keep the vh-based fallback. Newer browsers use 100dvh so Android
+       Chrome's collapsible URL bar doesn't push the dialog footer off-screen. */
+    max-height: calc(
+      100vh
+      - var(--oc-safe-area-top, 0px)
+      - var(--oc-safe-area-bottom-visual, 0px)
+      - 20px
+    );
+    max-height: calc(
+      100dvh
+      - var(--oc-safe-area-top, 0px)
+      - var(--oc-safe-area-bottom-visual, 0px)
+      - 20px
+    );
     padding: var(--pwa-dialog-padding);
     padding-top: calc(var(--pwa-dialog-padding) + (var(--oc-safe-area-top, 0px) * 0.35));
-    --tw-translate-y: calc(-50% + (var(--oc-safe-area-top, 0px) * 0.6));
     row-gap: clamp(0.75rem, 2vw, 1.25rem);
   }
 
@@ -426,8 +438,7 @@
   }
 
   .pwa-overlay-panel {
-    margin-bottom: max(var(--oc-safe-area-bottom-visual, 0px), 12px);
-    padding-bottom: calc(var(--oc-safe-area-bottom-visual, 0px) * 0.4);
+    margin-bottom: 0;
   }
 
   .pwa-overlay-panel .pwa-overlay-scroll {

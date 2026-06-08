@@ -41,9 +41,13 @@ interface PierreDiffViewerProps {
   layout?: 'fill' | 'inline';
 }
 
-// CSS injected into Pierre's Shadow DOM for WebKit scroll optimization
-// Note: avoid will-change and contain:paint as they break resize behavior
-const WEBKIT_SCROLL_FIX_CSS = `
+/**
+ * Base CSS injected into Pierre's Shadow DOM. Pins font-family/size to the
+ * app tokens (so Files view and Diff view render at the same scale on mobile)
+ * and enables touch-friendly line interactions. Re-exported so plain
+ * <PierreFile> consumers (e.g. `MobileFilesSurface`) can inject the same.
+ */
+export const PIERRE_RUNTIME_BASE_CSS = `
   :host {
     font-family: var(--font-mono);
     font-size: var(--text-code);
@@ -65,6 +69,13 @@ const WEBKIT_SCROLL_FIX_CSS = `
   pre[data-interactive-line-numbers] [data-line-number] {
     touch-action: manipulation;
   }
+`;
+
+// CSS injected into Pierre's Shadow DOM for WebKit scroll optimization +
+// diff-specific separator height. Note: avoid will-change and contain:paint
+// as they break resize behavior.
+const WEBKIT_SCROLL_FIX_CSS = `
+  ${PIERRE_RUNTIME_BASE_CSS}
 
   [data-diff-header],
   [data-diff] {

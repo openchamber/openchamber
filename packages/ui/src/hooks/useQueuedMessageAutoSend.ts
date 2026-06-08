@@ -38,6 +38,33 @@ export const buildQueuedAutoSendPayload = (queue: QueuedMessage[]) => {
   };
 };
 
+type QueuedAutoSendPayload = NonNullable<ReturnType<typeof buildQueuedAutoSendPayload>>;
+type ResolvedQueuedSendConfig = {
+  providerID: string;
+  modelID: string;
+  agent?: string;
+  variant?: string;
+};
+
+export const sendQueuedAutoSendPayload = (
+  sessionId: string,
+  payload: QueuedAutoSendPayload,
+  resolved: ResolvedQueuedSendConfig,
+) => {
+  return useSessionUIStore.getState().sendMessage(
+    payload.primaryText,
+    resolved.providerID,
+    resolved.modelID,
+    resolved.agent,
+    payload.primaryAttachments,
+    payload.agentMentionName,
+    undefined,
+    resolved.variant,
+    'normal',
+    { sessionId },
+  );
+};
+
 const resolveSessionSendConfig = (sessionId: string) => {
   const context = useContextStore.getState();
   const config = useConfigStore.getState();
@@ -77,6 +104,14 @@ const resolveSessionSendConfig = (sessionId: string) => {
     agent: selectedAgent,
     variant,
   };
+};
+
+export const shouldDispatchQueuedAutoSend = (
+  previousStatusType: SessionStatusType | undefined,
+  currentStatusType: SessionStatusType,
+): boolean => {
+  return (previousStatusType === 'busy' || previousStatusType === 'retry')
+    && currentStatusType === 'idle';
 };
 
 export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?: boolean }) {
@@ -128,17 +163,12 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
       inFlightSessionsRef.current.add(sessionId);
 
       try {
-        await useSessionUIStore.getState().sendMessage(
-          payload.primaryText,
-          resolved.providerID,
-          resolved.modelID,
-          resolved.agent,
-          payload.primaryAttachments,
-          payload.agentMentionName,
-          undefined,
-          resolved.variant,
-          'normal'
-        );
+        await sendQueuedAutoSendPayload(sessionId, payload, {
+          providerID: resolved.providerID,
+          modelID: resolved.modelID,
+          agent: resolved.agent,
+          variant: resolved.variant,
+        });
 
         const removeFromQueue = useMessageQueueStore.getState().removeFromQueue;
         removeFromQueue(sessionId, payload.queuedMessageId);
@@ -161,12 +191,8 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
     queueEntries.forEach(([sessionId, queue]) => {
       const currentStatusType = (statusRecord[sessionId]?.type ?? 'idle') as SessionStatusType;
       const previousStatusType = previousStatusRef.current.get(sessionId);
-      const becameIdle =
-        (previousStatusType === 'busy' || previousStatusType === 'retry')
-        && currentStatusType === 'idle';
-      const firstSeenIdle = previousStatusType === undefined && currentStatusType === 'idle';
 
-      if (queue.length > 0 && (becameIdle || firstSeenIdle)) {
+      if (queue.length > 0 && shouldDispatchQueuedAutoSend(previousStatusType, currentStatusType)) {
         void dispatchSessionQueue(sessionId, queue);
       }
 

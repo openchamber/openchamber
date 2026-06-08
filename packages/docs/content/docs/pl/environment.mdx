@@ -1,0 +1,138 @@
+---
+title: Zmienne środowiskowe
+description: Skonfiguruj integrację OpenChamber i OpenCode za pomocą zmiennych środowiskowych.
+---
+
+# Zmienne środowiskowe
+
+OpenChamber odczytuje te zmienne przy starcie. Dla usług startowych `openchamber startup enable` domyślnie zapisuje snapshot bieżącego środowiska, więc uruchom tę komendę ponownie po zmianie zmiennych, których ma używać usługa.
+
+## Serwer OpenChamber
+
+### `OPENCHAMBER_HOST`
+
+Adres, na którym nasłuchuje serwer web OpenChamber. Użyj `0.0.0.0`, aby pozwolić na dostęp z innych maszyn.
+
+### `OPENCHAMBER_UI_PASSWORD`
+
+Hasło do interfejsu w przeglądarce. Ustaw je przy dostępie spoza localhost, tunelach albo reverse proxy.
+
+### `OPENCHAMBER_API_ONLY`
+
+Uruchamia OpenChamber w trybie headless, gdy ustawione na `true` lub `1`. Trasy API pozostają dostępne dla klientów desktopowych i mobilnych, ale UI przeglądarki nie jest serwowane.
+
+### `OPENCHAMBER_DATA_DIR`
+
+Nadpisuje katalog danych OpenChamber. Domyślnie jest to `~/.config/openchamber`.
+
+### `OPENCHAMBER_COMPRESS_API`
+
+Steruje kompresją odpowiedzi API. `true` albo `1` ją włącza, `false` albo `0` wyłącza.
+
+### `OPENCHAMBER_SKIP_API_COMPRESSION`
+
+Wyłącza kompresję odpowiedzi API, gdy ma wartość `true` albo `1`. Ma pierwszeństwo przed `OPENCHAMBER_COMPRESS_API`.
+
+### `OPENCHAMBER_VERBOSE_REQUEST_LOGS`
+
+Włącza szczegółowe HTTP request logs, gdy ma wartość `true` albo `1`.
+
+### `OPENCHAMBER_UPDATE_API_URL`
+
+Nadpisuje endpoint sprawdzania aktualizacji. Większość użytkowników nie powinna tego ustawiać.
+
+### `OPENCHAMBER_PACKAGE_MANAGER`
+
+Wymusza package manager używany do aktualizacji, gdy automatyczne wykrywanie się pomyli.
+
+## Serwer OpenCode
+
+### `OPENCODE_HOST`
+
+Łączy OpenChamber z istniejącym OpenCode server. Wartość musi być origin `http` albo `https` z jawnym portem i bez path, query ani hash. `OPENCODE_HOST` ma pierwszeństwo przed `OPENCODE_PORT`.
+
+### `OPENCODE_PORT`
+
+Ustawia port OpenCode server. Dla managed OpenCode prosi o ten port; z `OPENCODE_SKIP_START=true` łączy się z zewnętrznym serwerem na tym porcie.
+
+### `OPENCODE_SKIP_START`
+
+Gdy ma wartość `true`, blokuje uruchamianie własnego OpenCode server przez OpenChamber.
+
+### `OPENCHAMBER_OPENCODE_HOSTNAME`
+
+Hostname dla OpenCode server zarządzanego przez OpenChamber. Domyślnie `127.0.0.1`.
+
+### `OPENCODE_BINARY`
+
+Ścieżka do executable `opencode`, którego ma używać OpenChamber.
+
+### `OPENCODE_CONFIG`
+
+Ścieżka do konkretnego pliku config OpenCode.
+
+### `OPENCODE_CONFIG_DIR`
+
+Ścieżka do katalogu config OpenCode dla agents, skills, snippets i config discovery.
+
+### `OPENCODE_DATA_DIR`
+
+Własny katalog danych dla managed OpenCode server.
+
+### `OPENCODE_WSL_DISTRO`
+
+Wybiera WSL distro używane do integracji OpenCode w Windows.
+
+### `OPENCHAMBER_OPENCODE_WSL_DISTRO`
+
+Alias specyficzny dla OpenChamber do wyboru WSL distro. `OPENCODE_WSL_DISTRO` ma pierwszeństwo, gdy ustawione są obie zmienne.
+
+### `OPENCODE_JWT_SECRET`
+
+Secret używany do podpisywania UI auth tokens. Dla trwałych usług użyj długiej losowej wartości.
+
+## Terminal i Git
+
+### `OPENCHAMBER_TERMINAL_SHELL`
+
+Shell executable używany przez terminal sessions w OpenChamber.
+
+### `OPENCHAMBER_GIT_BINARY`
+
+Git executable używany przez funkcje Git w OpenChamber.
+
+### `GIT_BINARY`
+
+Alternatywny override dla Git executable. Dla konfiguracji specyficznej dla OpenChamber preferuj `OPENCHAMBER_GIT_BINARY`.
+
+### `OPENCHAMBER_GIT_READ_CACHE_TTL_MS`
+
+TTL w milisekundach dla cached Git-backed file reads. Ustaw `0`, aby wyłączyć cache podczas debugowania.
+
+## Głos i tunele
+
+### `OPENAI_API_KEY`
+
+API key używany przez funkcje głosowe OpenChamber, które wywołują OpenAI-compatible services.
+
+### `OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS`
+
+Pozwala na zdalne OpenAI-compatible base URLs dla funkcji głosowych, gdy ma wartość `true` albo `1`.
+
+### `NGROK_AUTHTOKEN`
+
+ngrok auth token używany przez tunnel commands OpenChamber. Możesz też skonfigurować go przez `ngrok config add-authtoken <token>`.
+
+## Runtime helpers
+
+### `BUN_BINARY`
+
+Bun executable, którego OpenChamber ma używać do uruchamiania daemon processes.
+
+### `BUN_INSTALL`
+
+Katalog główny instalacji Bun. OpenChamber używa go, aby znaleźć `bin/bun` dla daemon startup i aktualizacji.
+
+### `VITE_OPENCODE_URL`
+
+Build-time API base URL dla Vite-built web app. Przy normalnym użyciu CLI lub desktop większość użytkowników nie powinna tego ustawiać.

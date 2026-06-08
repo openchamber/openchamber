@@ -7,8 +7,10 @@ import { useSkillsStore } from '@/stores/useSkillsStore';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
+import { useUIStore } from '@/stores/useUIStore';
+import { isVSCodeRuntime } from '@/lib/desktop';
 
-type CommandSource = 'openchamber' | 'opencode';
+type CommandSource = 'openchamber' | 'opencode' | 'skill';
 
 export interface CommandInfo {
   id: string;
@@ -27,15 +29,28 @@ export interface CommandAutocompleteHandle {
   handleKeyDown: (key: string) => void;
 }
 
-type AutocompleteTab = 'commands' | 'agents' | 'files';
+const BASE_BADGE_CLASS = "text-[10px] leading-none uppercase font-bold tracking-tight px-1.5 py-1 rounded border flex-shrink-0";
+const TYPE_BADGE_CLASS = cn(
+  BASE_BADGE_CLASS,
+  "bg-[color-mix(in_srgb,var(--primary-base)_12%,transparent)] text-[color-mix(in_srgb,var(--primary-base)_70%,transparent)] border-[color-mix(in_srgb,var(--primary-base)_24%,transparent)]"
+);
+const USER_BADGE_CLASS = cn(
+  BASE_BADGE_CLASS,
+  "bg-[color-mix(in_srgb,var(--status-success)_12%,transparent)] text-[color-mix(in_srgb,var(--status-success)_70%,transparent)] border-[color-mix(in_srgb,var(--status-success)_24%,transparent)]"
+);
+const PROJECT_BADGE_CLASS = cn(
+  BASE_BADGE_CLASS,
+  "bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[color-mix(in_srgb,var(--status-info)_70%,transparent)] border-[color-mix(in_srgb,var(--status-info)_24%,transparent)]"
+);
+const NEUTRAL_BADGE_CLASS = cn(
+  BASE_BADGE_CLASS,
+  "bg-[var(--surface-muted)] text-muted-foreground border-[var(--interactive-border)]/60"
+);
 
 interface CommandAutocompleteProps {
   searchQuery: string;
   onCommandSelect: (command: CommandInfo, options?: { dismissKeyboard?: boolean }) => void;
   onClose: () => void;
-  showTabs?: boolean;
-  activeTab?: AutocompleteTab;
-  onTabSelect?: (tab: AutocompleteTab) => void;
   style?: React.CSSProperties;
 }
 
@@ -43,9 +58,6 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
   searchQuery,
   onCommandSelect,
   onClose,
-  showTabs,
-  activeTab = 'commands',
-  onTabSelect,
   style,
 }, ref) => {
   const { t } = useI18n();
@@ -55,6 +67,8 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
   const hasSession = Boolean(currentSessionId);
   const hasNewSessionDraft = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
   const canStartSessionCommand = hasSession || hasNewSessionDraft;
+  const isMobile = useUIStore((state) => state.isMobile);
+  const canUseReviewHandoffFlow = hasSession && !isMobile && !isVSCodeRuntime();
 
   const [commands, setCommands] = React.useState<CommandInfo[]>([]);
   const [loading, setLoading] = React.useState(false);
@@ -63,12 +77,13 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
   const skills = useSkillsStore((s) => s.skills);
   const refreshSkills = useSkillsStore((s) => s.loadSkills);
   const [selectedIndex, setSelectedIndex] = React.useState(0);
+  const selectedIndexRef = React.useRef(0);
+  const keyboardNavigationRef = React.useRef(false);
   const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const ignoreClickRef = React.useRef(false);
   const pointerStartRef = React.useRef<{ x: number; y: number } | null>(null);
   const pointerMovedRef = React.useRef(false);
-  const ignoreTabClickRef = React.useRef(false);
 
   React.useEffect(() => {
     const handlePointerDown = (event: MouseEvent | TouchEvent) => {
@@ -107,8 +122,16 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
           agent: cmd.agent ?? undefined,
           model: cmd.model ?? undefined,
           isBuiltIn: cmd.name === 'init' || cmd.name === 'review',
-          isSkill: skillNames.has(cmd.name),
+          isSkill: cmd.source === 'skill' || skillNames.has(cmd.name),
           scope: cmd.scope,
+        }));
+        const skillCommands: CommandInfo[] = skills.map((skill, index) => ({
+          id: `skill:${skill.scope}:${skill.source ?? 'opencode'}:${skill.name}:${index}`,
+          name: skill.name,
+          source: 'skill',
+          description: skill.description,
+          isSkill: true,
+          scope: skill.scope,
         }));
 
         const builtInCommands: CommandInfo[] = [
@@ -133,8 +156,32 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
             ? [{ id: 'openchamber:workspace-review', name: 'workspace-review', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.workspaceReviewDescription'), isOpenChamber: true }]
             : []
           ),
+          ...(canUseReviewHandoffFlow
+            ? [{ id: 'openchamber:handoff-review', name: 'handoff-review', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.handoffReviewDescription'), isOpenChamber: true }]
+            : []
+          ),
+          ...(canStartSessionCommand
+            ? [{ id: 'openchamber:plan-feature', name: 'plan-feature', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.featurePlanDescription'), isOpenChamber: true }]
+            : []
+          ),
+          ...(canStartSessionCommand
+            ? [{ id: 'openchamber:catch-up', name: 'catch-up', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.catchUpDescription'), isOpenChamber: true }]
+            : []
+          ),
+          ...(canStartSessionCommand
+            ? [{ id: 'openchamber:debug', name: 'debug', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.debugDescription'), isOpenChamber: true }]
+            : []
+          ),
+          ...(canStartSessionCommand
+            ? [{ id: 'openchamber:weigh', name: 'weigh', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.weighDescription'), isOpenChamber: true }]
+            : []
+          ),
+          ...(canStartSessionCommand
+            ? [{ id: 'openchamber:explore', name: 'explore', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.exploreDescription'), isOpenChamber: true }]
+            : []
+          ),
         ];
-        const allCommands = [...builtInCommands, ...customCommands];
+        const allCommands = [...builtInCommands, ...customCommands, ...skillCommands];
 
         const allowInitCommand = !hasMessagesInCurrentSession;
         const filtered = (searchQuery
@@ -178,6 +225,30 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
             ? [{ id: 'openchamber:workspace-review', name: 'workspace-review', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.workspaceReviewDescription'), isOpenChamber: true }]
             : []
           ),
+          ...(canUseReviewHandoffFlow
+            ? [{ id: 'openchamber:handoff-review', name: 'handoff-review', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.handoffReviewDescription'), isOpenChamber: true }]
+            : []
+          ),
+          ...(canStartSessionCommand
+            ? [{ id: 'openchamber:plan-feature', name: 'plan-feature', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.featurePlanDescription'), isOpenChamber: true }]
+            : []
+          ),
+          ...(canStartSessionCommand
+            ? [{ id: 'openchamber:catch-up', name: 'catch-up', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.catchUpDescription'), isOpenChamber: true }]
+            : []
+          ),
+          ...(canStartSessionCommand
+            ? [{ id: 'openchamber:debug', name: 'debug', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.debugDescription'), isOpenChamber: true }]
+            : []
+          ),
+          ...(canStartSessionCommand
+            ? [{ id: 'openchamber:weigh', name: 'weigh', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.weighDescription'), isOpenChamber: true }]
+            : []
+          ),
+          ...(canStartSessionCommand
+            ? [{ id: 'openchamber:explore', name: 'explore', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.exploreDescription'), isOpenChamber: true }]
+            : []
+          ),
         ];
 
         const filtered = (searchQuery
@@ -194,15 +265,18 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
     };
 
     loadCommands();
-  }, [searchQuery, hasMessagesInCurrentSession, hasSession, canStartSessionCommand, commandsWithMetadata, skills, t]);
+  }, [searchQuery, hasMessagesInCurrentSession, hasSession, canStartSessionCommand, canUseReviewHandoffFlow, commandsWithMetadata, skills, t]);
 
   React.useEffect(() => {
     setSelectedIndex(0);
   }, [commands]);
 
   React.useEffect(() => {
+    selectedIndexRef.current = selectedIndex;
+  }, [selectedIndex]);
+
+  React.useEffect(() => {
     itemRefs.current[selectedIndex]?.scrollIntoView({
-      behavior: 'smooth',
       block: 'nearest'
     });
   }, [selectedIndex]);
@@ -220,24 +294,26 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
       }
 
       if (key === 'ArrowDown') {
+        keyboardNavigationRef.current = true;
         setSelectedIndex((prev) => (prev + 1) % total);
         return;
       }
 
       if (key === 'ArrowUp') {
+        keyboardNavigationRef.current = true;
         setSelectedIndex((prev) => (prev - 1 + total) % total);
         return;
       }
 
       if (key === 'Enter' || key === 'Tab') {
-        const safeIndex = ((selectedIndex % total) + total) % total;
+        const safeIndex = ((selectedIndexRef.current % total) + total) % total;
         const command = commands[safeIndex];
         if (command) {
           onCommandSelect(command);
         }
       }
     }
-  }), [commands, selectedIndex, onClose, onCommandSelect]);
+  }), [commands, onClose, onCommandSelect]);
 
   const getCommandIcon = (command: CommandInfo) => {
 
@@ -272,46 +348,6 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
       className="absolute z-[100] min-w-0 w-full max-w-[450px] max-h-64 bg-background border-2 border-border/60 rounded-xl shadow-none bottom-full mb-2 left-0 flex flex-col"
       style={style}
     >
-      {showTabs ? (
-        <div className="px-2 pt-2 pb-1 border-b border-border/60">
-          <div className="flex items-center gap-1 rounded-lg bg-[var(--surface-elevated)] p-1">
-            {([
-              { id: 'commands' as const, label: t('chat.autocomplete.tabs.commands') },
-              { id: 'agents' as const, label: t('chat.autocomplete.tabs.agents') },
-              { id: 'files' as const, label: t('chat.autocomplete.tabs.files') },
-            ]).map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                className={cn(
-                  'flex-1 px-2.5 py-1 rounded-md typography-meta font-semibold transition-none',
-                  activeTab === tab.id
-                    ? 'bg-interactive-selection text-interactive-selection-foreground shadow-none'
-                    : 'text-muted-foreground hover:bg-interactive-hover/50'
-                )}
-                onPointerDown={(event) => {
-                  if (event.pointerType !== 'touch') {
-                    return;
-                  }
-                  event.preventDefault();
-                  event.stopPropagation();
-                  ignoreTabClickRef.current = true;
-                  onTabSelect?.(tab.id);
-                }}
-                onClick={() => {
-                  if (ignoreTabClickRef.current) {
-                    ignoreTabClickRef.current = false;
-                    return;
-                  }
-                  onTabSelect?.(tab.id);
-                }}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : null}
       <ScrollableOverlay outerClassName="flex-1 min-h-0" className="px-0 pb-2">
         {loading ? (
           <div className="flex items-center justify-center py-4">
@@ -322,8 +358,6 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
             {commands.map((command, index) => {
               const isSystem = command.isBuiltIn;
               const isOpenChamberBadge = command.isOpenChamber;
-              const isProject = command.scope === 'project';
-              
               return (
                 <div
                   key={command.id}
@@ -375,7 +409,10 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
                     }
                     onCommandSelect(command);
                   }}
-                  onMouseEnter={() => setSelectedIndex(index)}
+                  onMouseMove={() => {
+                    keyboardNavigationRef.current = false;
+                    setSelectedIndex(index);
+                  }}
                 >
                   <div className="mt-0.5">
                     {getCommandIcon(command)}
@@ -384,37 +421,29 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
                     <div className="flex items-center gap-2">
                       <span className="typography-ui-label font-medium">/{command.name}</span>
                       {command.isSkill ? (
-                        <span className="text-[10px] leading-none uppercase font-bold tracking-tight bg-[var(--status-info-background)] text-[var(--status-info)] border-[var(--status-info-border)] px-1.5 py-1 rounded border flex-shrink-0">
+                        <span className={TYPE_BADGE_CLASS}>
                           {t('chat.commandAutocomplete.badge.skill')}
                         </span>
-                      ) : null}
+                      ) : (
+                        <span className={TYPE_BADGE_CLASS}>
+                          {t('chat.commandAutocomplete.badge.command')}
+                        </span>
+                      )}
                       {isOpenChamberBadge ? (
-                        <span
-                          className="text-[10px] leading-none uppercase font-bold tracking-tight px-1.5 py-1 rounded border flex-shrink-0"
-                          style={{
-                            backgroundColor: 'color-mix(in srgb, var(--primary-base) 14%, transparent)',
-                            color: 'var(--primary-base)',
-                            borderColor: 'color-mix(in srgb, var(--primary-base) 28%, transparent)',
-                          }}
-                        >
+                        <span className={NEUTRAL_BADGE_CLASS}>
                           OpenChamber
                         </span>
                       ) : isSystem ? (
-                        <span className="text-[10px] leading-none uppercase font-bold tracking-tight bg-[var(--status-warning-background)] text-[var(--status-warning)] border-[var(--status-warning-border)] px-1.5 py-1 rounded border flex-shrink-0">
+                        <span className={NEUTRAL_BADGE_CLASS}>
                           {t('chat.commandAutocomplete.badge.system')}
                         </span>
                       ) : command.scope ? (
-                        <span className={cn(
-                          "text-[10px] leading-none uppercase font-bold tracking-tight px-1.5 py-1 rounded border flex-shrink-0",
-                          isProject 
-                            ? "bg-[var(--status-info-background)] text-[var(--status-info)] border-[var(--status-info-border)]"
-                            : "bg-[var(--status-success-background)] text-[var(--status-success)] border-[var(--status-success-border)]"
-                        )}>
+                        <span className={command.scope === 'project' ? PROJECT_BADGE_CLASS : USER_BADGE_CLASS}>
                           {command.scope}
                         </span>
                       ) : null}
                       {command.agent && (
-                        <span className="text-[10px] leading-none font-bold tracking-tight bg-[var(--surface-subtle)] text-[var(--surface-foreground)] border-[var(--interactive-border)] px-1.5 py-1 rounded border flex-shrink-0">
+                        <span className={NEUTRAL_BADGE_CLASS}>
                           {command.agent}
                         </span>
                       )}

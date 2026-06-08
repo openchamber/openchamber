@@ -30,7 +30,9 @@ The following functions are exported and used by the web server:
 - `getRangeFiles(directory, { base, head })`: Get list of changed files between two refs.
 - `getFileDiff(directory, { path, staged })`: Get original and modified file contents for a single file (handles images as data URLs).
 - `collectDiffs(directory, files)`: Collect diff output for multiple files.
-- `revertFile(directory, filePath)`: Revert a file to HEAD state.
+- `revertFile(directory, filePath, options)`: Revert a file. Default scope `all` discards staged and working-tree changes; scope `working` discards only unstaged/working-tree changes.
+- `stageFile(directory, filePath)`: Add one file path to the index.
+- `unstageFile(directory, filePath)`: Remove one file path from the index while preserving working-tree content.
 
 ### Branch Operations
 - `getBranches(directory)`: Get list of local and remote branches (filtered to active remote branches).
@@ -48,7 +50,7 @@ The following functions are exported and used by the web server:
 - `isLinkedWorktree(directory)`: Check if directory is a linked worktree (not primary).
 
 ### Commit and Remote Operations
-- `commit(directory, message, options)`: Create a commit (supports addAll or specific files).
+- `commit(directory, message, options)`: Create a commit from the current index. `options.stageFiles` may be provided with `options.files` by older callers to stage only selected unstaged rows before committing, but the shared Git panel now stages/unstages explicitly before commit.
 - `pull(directory, options)`: Pull changes from remote.
 - `push(directory, options)`: Push changes to remote (auto-sets upstream if needed).
 - `fetch(directory, options)`: Fetch changes from remote.
@@ -58,6 +60,7 @@ The following functions are exported and used by the web server:
 ### Log Operations
 - `getLog(directory, options)`: Get commit history with stats (supports maxCount, from, to, file filters).
 - `getCommitFiles(directory, commitHash)`: Get file changes for a specific commit.
+- `getCommitFileDiff(directory, hash, filePath, isBinary)`: Get before/after content for a specific file in a commit. Returns `{ original, modified, isBinary }`. Runs `git show <hash>^:<path>` and `git show <hash>:<path>` in parallel; returns empty strings on failure (added/deleted/root-commit edge cases).
 
 ### Merge and Rebase Operations
 - `rebase(directory, options)`: Start a rebase onto a target branch.
@@ -98,17 +101,26 @@ The following functions are internal helpers used by exported functions:
 - `tracking`: Upstream branch (e.g., 'origin/main').
 - `ahead`: Number of commits ahead of upstream.
 - `behind`: Number of commits behind upstream.
+- `upstreamComparison`: Optional comparison against `upstream/<current-branch>`, with `{ remote, branch, ahead, behind }`.
 - `files`: Array of file objects with `path`, `index`, `working_dir` status codes.
 - `isClean`: Boolean indicating if working tree is clean.
 - `diffStats`: Object mapping file paths to `{ insertions, deletions }`.
 - `mergeInProgress`: Object with `{ head, message }` if merge in progress.
 - `rebaseInProgress`: Object with `{ headName, onto }` if rebase in progress.
 
+### Staged and unstaged change handling
+- `status.files` exposes both `index` and `working_dir` codes. Shared UI uses these as separate scopes: staged rows are derived from non-empty `index` statuses, while unstaged rows are derived from `working_dir` statuses and untracked files.
+- A file with both staged and unstaged changes can appear in both UI sections. Staged rows request diffs with `staged: true`; unstaged rows request normal working-tree diffs.
+- The shared Git panel exposes explicit staging actions. Unstaged rows use `stageFile`, staged rows use `unstageFile`, and commits operate on the current staged index.
+- `stageFiles` remains supported for callers that need to stage a selected unstaged subset as part of commit. In that mode the server temporarily unstages unrelated index entries, stages `stageFiles`, commits from the index, then restores temporarily unstaged entries.
 ### Worktree Create/Remove Response
 - `head`: HEAD commit SHA.
 - `name`: Worktree name.
 - `branch`: Local branch name.
 - `path`: Absolute path to worktree directory.
+- `directoryCreated`: Present when create returned after the target directory exists while background Git/bootstrap work continues.
+- `bootstrapStatus`: Background setup status, with `pending`, `ready`, or `failed`.
+- Fast-create background failures remove OpenCode sandbox metadata for directories that never became Git worktrees, and remove the pre-created directory only if it is still empty. User-created files are never recursively deleted by this cleanup.
 
 ### Log Response
 - `all`: Array of commit objects with hash, date, message, author info, stats.
