@@ -270,6 +270,8 @@ const MobileUsageLimits: React.FC<{
   const { t } = useI18n();
   const modeLabel = displayMode === 'remaining' ? t('header.services.remaining') : t('header.services.used');
 
+  if (groups.length === 0) return null;
+
   return (
     <div className="pt-2.5">
       <div className="flex min-w-0 items-center gap-3 px-2.5 pb-1.5">
@@ -285,60 +287,54 @@ const MobileUsageLimits: React.FC<{
         </span>
       </div>
 
-      {groups.length === 0 ? (
-        <div className="rounded-xl bg-[var(--surface-muted)] px-3 py-3 text-center typography-micro text-muted-foreground">
-          {isLoading ? t('common.loading') : t('header.services.noRateLimits')}
-        </div>
-      ) : (
-        <div className="space-y-1.5">
-          {groups.map((group) => (
-            <div key={group.providerId} className="min-w-0 rounded-xl bg-[var(--surface-muted)] p-2.5">
-              <div className="flex min-w-0 items-center gap-2">
-                <ProviderLogo providerId={group.providerId} className="size-4 shrink-0" />
-                <span className="min-w-0 flex-1 truncate typography-ui-label font-medium text-foreground">
-                  {group.providerName}
+      <div className="space-y-1.5">
+        {groups.map((group) => (
+          <div key={group.providerId} className="min-w-0 rounded-xl bg-[var(--surface-muted)] p-2.5">
+            <div className="flex min-w-0 items-center gap-2">
+              <ProviderLogo providerId={group.providerId} className="size-4 shrink-0" />
+              <span className="min-w-0 flex-1 truncate typography-ui-label font-medium text-foreground">
+                {group.providerName}
+              </span>
+              {group.status && group.rows.length === 0 ? (
+                <span className="shrink-0 truncate typography-micro text-muted-foreground">
+                  {group.status}
                 </span>
-                {group.status && group.rows.length === 0 ? (
-                  <span className="shrink-0 truncate typography-micro text-muted-foreground">
-                    {group.status}
-                  </span>
-                ) : null}
-              </div>
-              {group.rows.length > 0 ? (
-                <div className="mt-1.5 space-y-1">
-                  {group.rows.map((row) => {
-                    const displayPercent = displayMode === 'remaining' ? row.window.remainingPercent : row.window.usedPercent;
-                    const metricLabel = formatQuotaValueLabel(row.window.valueLabel, displayPercent);
-                    const resetLabel = formatQuotaResetLabel(
-                      row.window.resetAt,
-                      row.window.resetAfterFormatted ?? row.window.resetAtFormatted,
-                      timeFormatPreference,
-                    );
-                    return (
-                      <div key={row.key} className="flex min-w-0 items-baseline justify-between gap-3">
-                        <span className="inline-flex min-w-0 flex-1 items-baseline gap-1.5">
-                          <span className="truncate typography-ui-label text-muted-foreground">
-                            {row.subtitle ? `${row.subtitle} · ${row.label}` : row.label}
-                          </span>
-                          {resetLabel ? (
-                            <span className="shrink-0 truncate typography-micro text-muted-foreground/70">{resetLabel}</span>
-                          ) : null}
-                        </span>
-                        <span className={cn('shrink-0 typography-ui-label font-semibold tabular-nums', getWindowValueClass(row.window))}>
-                          {metricLabel === '-' ? '' : metricLabel}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : null}
-              {group.status && group.rows.length > 0 ? (
-                <div className="mt-1.5 typography-micro text-muted-foreground">{group.status}</div>
               ) : null}
             </div>
-          ))}
-        </div>
-      )}
+            {group.rows.length > 0 ? (
+              <div className="mt-1.5 space-y-1">
+                {group.rows.map((row) => {
+                  const displayPercent = displayMode === 'remaining' ? row.window.remainingPercent : row.window.usedPercent;
+                  const metricLabel = formatQuotaValueLabel(row.window.valueLabel, displayPercent);
+                  const resetLabel = formatQuotaResetLabel(
+                    row.window.resetAt,
+                    row.window.resetAfterFormatted ?? row.window.resetAtFormatted,
+                    timeFormatPreference,
+                  );
+                  return (
+                    <div key={row.key} className="flex min-w-0 items-baseline justify-between gap-3">
+                      <span className="inline-flex min-w-0 flex-1 items-baseline gap-1.5">
+                        <span className="truncate typography-ui-label text-muted-foreground">
+                          {row.subtitle ? `${row.subtitle} · ${row.label}` : row.label}
+                        </span>
+                        {resetLabel ? (
+                          <span className="shrink-0 truncate typography-micro text-muted-foreground/70">{resetLabel}</span>
+                        ) : null}
+                      </span>
+                      <span className={cn('shrink-0 typography-ui-label font-semibold tabular-nums', getWindowValueClass(row.window))}>
+                        {metricLabel === '-' ? '' : metricLabel}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+            {group.status && group.rows.length > 0 ? (
+              <div className="mt-1.5 typography-micro text-muted-foreground">{group.status}</div>
+            ) : null}
+          </div>
+        ))}
+      </div>
     </div>
   );
 };
@@ -572,8 +568,9 @@ const MobileHeader: React.FC<{
     const resultsByProvider = new Map(quotaResults.map((result) => [result.providerId, result]));
     return QUOTA_PROVIDERS
       .filter((providerMeta) => dropdownProviderIds.includes(providerMeta.id))
+      .filter((providerMeta) => resultsByProvider.get(providerMeta.id)?.configured === true)
       .map((providerMeta) => {
-        const result = resultsByProvider.get(providerMeta.id);
+        const result = resultsByProvider.get(providerMeta.id)!;
         const rows: MobileUsageLimitRow[] = [];
 
         for (const [label, window] of Object.entries(result?.usage?.windows ?? {})) {
@@ -601,15 +598,11 @@ const MobileHeader: React.FC<{
           });
         }
 
-        const status = !result
-          ? (isQuotaLoading || quotaResults.length === 0 ? t('common.loading') : t('common.unavailable'))
-          : !result.configured
-            ? t('settings.usage.sidebar.status.notSet')
-            : !result.ok && result.error
-              ? result.error
-              : rows.length === 0
-                ? t('header.services.noRateLimitsReported')
-                : null;
+        const status = !result.ok && result.error
+          ? result.error
+          : rows.length === 0
+            ? t('header.services.noRateLimitsReported')
+            : null;
 
         return {
           providerId: providerMeta.id,
@@ -618,7 +611,7 @@ const MobileHeader: React.FC<{
           status,
         };
       });
-  }, [dropdownProviderIds, isQuotaLoading, quotaResults, selectedQuotaModels, t]);
+  }, [dropdownProviderIds, quotaResults, selectedQuotaModels, t]);
 
   const handleOpenSessions = React.useCallback(() => {
     setMetadataOpen(false);
