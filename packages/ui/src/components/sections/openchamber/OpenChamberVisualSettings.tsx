@@ -1,4 +1,5 @@
 import React from 'react';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
@@ -27,6 +28,7 @@ import { CODE_FONT_OPTIONS, DEFAULT_MONO_FONT, DEFAULT_UI_FONT, UI_FONT_OPTIONS,
 import { useI18n, type Locale } from '@/lib/i18n';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { normalizeMobileKeyboardMode, supportsMobileKeyboardResizeContent, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
+import { getStoredMobileLayoutPreference, setStoredMobileLayoutPreference, type MobileLayoutPreference } from '@/lib/mobileLayoutPreference';
 import {
     setDirectoryShowHidden,
     useDirectoryShowHidden,
@@ -126,6 +128,17 @@ const MOBILE_KEYBOARD_MODE_OPTIONS: Option<MobileKeyboardMode>[] = [
         id: 'resize-content',
         labelKey: 'settings.openchamber.visual.option.mobileKeyboardMode.resizeContent.label',
         descriptionKey: 'settings.openchamber.visual.option.mobileKeyboardMode.resizeContent.description',
+    },
+];
+
+const MOBILE_LAYOUT_OPTIONS: Array<{ value: MobileLayoutPreference; labelKey: string }> = [
+    {
+        value: 'default',
+        labelKey: 'settings.openchamber.visual.option.mobileLayout.default',
+    },
+    {
+        value: 'new',
+        labelKey: 'settings.openchamber.visual.option.mobileLayout.new',
     },
 ];
 
@@ -234,7 +247,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-export type VisibleSetting = 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'stickyUserHeader' | 'wideChatLayout' | 'splitAssistantMessageActions' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'showToolFileIcons' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage';
+export type VisibleSetting = 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'stickyUserHeader' | 'wideChatLayout' | 'splitAssistantMessageActions' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage';
 
 interface OpenChamberVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
@@ -294,6 +307,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setInputSpellcheckEnabled = useUIStore(state => state.setInputSpellcheckEnabled);
     const showToolFileIcons = useUIStore(state => state.showToolFileIcons);
     const setShowToolFileIcons = useUIStore(state => state.setShowToolFileIcons);
+    const showTurnChangedFiles = useUIStore(state => state.showTurnChangedFiles);
+    const setShowTurnChangedFiles = useUIStore(state => state.setShowTurnChangedFiles);
     const showExpandedBashTools = useUIStore(state => state.showExpandedBashTools);
     const setShowExpandedBashTools = useUIStore(state => state.setShowExpandedBashTools);
     const showExpandedEditTools = useUIStore(state => state.showExpandedEditTools);
@@ -308,6 +323,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setShowMobileSessionStatusBar = useUIStore(state => state.setShowMobileSessionStatusBar);
     const messageStreamTransport = useConfigStore((state) => state.settingsMessageStreamTransport);
     const setMessageStreamTransport = useConfigStore((state) => state.setSettingsMessageStreamTransport);
+    const settingsDefaultFileViewerPreview = useConfigStore((state) => state.settingsDefaultFileViewerPreview);
+    const setSettingsDefaultFileViewerPreview = useConfigStore((state) => state.setSettingsDefaultFileViewerPreview);
     const isSettingsDialogOpen = useUIStore(state => state.isSettingsDialogOpen);
     const {
         themeMode,
@@ -428,6 +445,17 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         void updateDesktopSettings({ showToolFileIcons: enabled });
     }, [setShowToolFileIcons]);
 
+    const handleShowTurnChangedFilesChange = React.useCallback((enabled: boolean) => {
+        setShowTurnChangedFiles(enabled);
+        void updateDesktopSettings({ showTurnChangedFiles: enabled });
+    }, [setShowTurnChangedFiles]);
+
+    const handleFileViewerPreviewChange = React.useCallback((enabled: boolean) => {
+        setSettingsDefaultFileViewerPreview(enabled);
+        void updateDesktopSettings({ defaultFileViewerPreview: enabled });
+        window.dispatchEvent(new CustomEvent('openchamber:file-viewer-preview-mode-changed', { detail: { enabled } }));
+    }, [setSettingsDefaultFileViewerPreview]);
+
     const handleShowExpandedBashToolsChange = React.useCallback((enabled: boolean) => {
         setShowExpandedBashTools(enabled);
         void updateDesktopSettings({ showExpandedBashTools: enabled });
@@ -485,9 +513,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const isVSCode = isVSCodeRuntime();
     const hasThemeSettings = shouldShow('theme') && !isVSCode;
     const hasLocalizationSettings = shouldShow('theme') || shouldShow('timeFormat') || shouldShow('weekStart');
+    const showMobileLayoutSetting = isMobile && isWebRuntime() && !isDesktopShell() && !isVSCode;
     const hasAppearanceSettings = isVSCode
         ? hasLocalizationSettings
-        : (shouldShow('theme') || shouldShow('pwaInstallName') || shouldShow('pwaOrientation') || shouldShow('timeFormat') || shouldShow('weekStart'));
+        : (shouldShow('theme') || showMobileLayoutSetting || shouldShow('pwaInstallName') || shouldShow('pwaOrientation') || shouldShow('timeFormat') || shouldShow('weekStart'));
     const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('spacing') || shouldShow('inputBarOffset');
     const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || shouldShow('fileEditorKeymap');
     const hasBehaviorSettings = shouldShow('mermaidRendering')
@@ -501,6 +530,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('diffLayout')
         || (shouldShow('mobileStatusBar') && isMobile)
         || shouldShow('dotfiles')
+        || shouldShow('fileViewerPreview')
         || shouldShow('reasoning')
         || shouldShow('queueMode')
         || shouldShow('persistDraft')
@@ -511,6 +541,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const showPwaInstallNameSetting = shouldShow('pwaInstallName') && isWebRuntime() && browserTab && !isDesktopShell() && !isVSCode;
     const showPwaOrientationSetting = shouldShow('pwaOrientation') && isWebRuntime() && !isDesktopShell() && !isVSCode;
     const showMobileKeyboardModeSetting = shouldShow('mobileKeyboardMode') && isWebRuntime() && !isDesktopShell() && !isVSCode && supportsMobileKeyboardResizeContent();
+    const [mobileLayoutPreference, setMobileLayoutPreference] = React.useState<MobileLayoutPreference>(() => getStoredMobileLayoutPreference());
     const [pwaInstallName, setPwaInstallName] = React.useState('');
     const [pwaOrientation, setPwaOrientation] = React.useState<'system' | 'portrait' | 'landscape'>('system');
     const selectedTimeFormatLabel = React.useMemo(() => {
@@ -529,6 +560,16 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         const option = MOBILE_KEYBOARD_MODE_OPTIONS.find((item) => item.id === mobileKeyboardMode);
         return option ? tUnsafe(option.labelKey) : undefined;
     }, [mobileKeyboardMode, tUnsafe]);
+
+    const handleMobileLayoutPreferenceChange = React.useCallback((value: MobileLayoutPreference) => {
+        if (value === mobileLayoutPreference) {
+            return;
+        }
+
+        setMobileLayoutPreference(value);
+        setStoredMobileLayoutPreference(value);
+        window.location.reload();
+    }, [mobileLayoutPreference]);
 
     const applyPwaInstallName = React.useCallback(async (value: string) => {
         if (typeof window === 'undefined') {
@@ -580,7 +621,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
         const loadPwaInstallName = async () => {
             try {
-                const response = await fetch('/api/config/settings', {
+                const response = await runtimeFetch('/api/config/settings', {
                     method: 'GET',
                     headers: { Accept: 'application/json' },
                     cache: 'no-store',
@@ -657,6 +698,26 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         ))}
                                     </div>
                                 </div>
+
+                                {showMobileLayoutSetting && (
+                                    <div className="flex min-w-0 flex-col gap-1.5 py-1.5">
+                                        <span className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.visual.section.mobileLayout')}</span>
+                                        <div className="flex flex-wrap items-center gap-1">
+                                            {MOBILE_LAYOUT_OPTIONS.map((option) => (
+                                                <Button
+                                                    key={option.value}
+                                                    variant="chip"
+                                                    size="xs"
+                                                    aria-pressed={mobileLayoutPreference === option.value}
+                                                    className="!font-normal"
+                                                    onClick={() => handleMobileLayoutPreferenceChange(option.value)}
+                                                >
+                                                    {tUnsafe(option.labelKey)}
+                                                </Button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
 
                                 <div className="grid grid-cols-1 gap-2 py-1.5 md:grid-cols-[14rem_auto] md:gap-x-8 md:gap-y-2">
                                     <div className="flex min-w-0 items-center gap-2">
@@ -762,7 +823,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     </Select>
                                 </div>
 
-                                {!isVSCode && (shouldShow('timeFormat') || shouldShow('weekStart')) && (
+                                {(shouldShow('timeFormat') || shouldShow('weekStart')) && (
                                     <div className="grid grid-cols-1 gap-2 py-1.5 md:grid-cols-[14rem_auto] md:gap-x-8 md:gap-y-2">
                                         {shouldShow('timeFormat') && (
                                             <div className="flex min-w-0 items-center gap-2">
@@ -1164,31 +1225,31 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     >
                                         {(['default', 'vim'] as const).map((keymap) => {
                                             const selected = fileEditorKeymap === keymap;
-                                            const selectKeymap = () => setFileEditorKeymap(keymap);
+                                            const labelText = t(`settings.openchamber.visual.option.fileEditorKeymap.${keymap}`);
                                             return (
-                                                <div
+                                                <button
                                                     key={keymap}
-                                                    className="flex cursor-pointer items-center gap-2 py-0.5"
-                                                    role="button"
-                                                    tabIndex={0}
-                                                    aria-pressed={selected}
-                                                    onClick={selectKeymap}
-                                                    onKeyDown={(event) => {
-                                                        if (event.key === ' ' || event.key === 'Enter') {
-                                                            event.preventDefault();
-                                                            selectKeymap();
-                                                        }
-                                                    }}
+                                                    type="button"
+                                                    className="flex cursor-pointer items-center gap-2 py-0.5 text-left"
+                                                    role="radio"
+                                                    aria-checked={selected}
+                                                    onClick={() => setFileEditorKeymap(keymap)}
                                                 >
-                                                    <Radio
-                                                        checked={selected}
-                                                        onChange={selectKeymap}
-                                                        ariaLabel={t(`settings.openchamber.visual.option.fileEditorKeymap.${keymap}`)}
-                                                    />
-                                                    <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
-                                                        {t(`settings.openchamber.visual.option.fileEditorKeymap.${keymap}`)}
+                                                    <span
+                                                        aria-hidden
+                                                        className={cn(
+                                                            'relative flex h-[14px] w-[14px] min-h-[14px] min-w-[14px] shrink-0 self-center items-center justify-center rounded-full transition-[background-color,box-shadow] duration-200 ease-out',
+                                                            selected
+                                                                ? 'bg-[color-mix(in_srgb,var(--primary-base)_80%,transparent)] shadow-none'
+                                                                : 'bg-[var(--surface-muted)] shadow-[inset_0_0_0_1px_var(--interactive-border)]'
+                                                        )}
+                                                    >
+                                                        <span className={cn('block h-[5px] w-[5px] rounded-full bg-white', !selected && 'opacity-0')} />
                                                     </span>
-                                                </div>
+                                                    <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
+                                                        {labelText}
+                                                    </span>
+                                                </button>
                                             );
                                         })}
                                     </div>
@@ -1577,7 +1638,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 </div>
                             )}
 
-                            {(shouldShow('stickyUserHeader') || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || (shouldShow('mobileStatusBar') && isMobile) || shouldShow('dotfiles') || shouldShow('queueMode') || shouldShow('persistDraft') || shouldShow('showToolFileIcons') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('reasoning')) && (
+                            {(shouldShow('stickyUserHeader') || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || (shouldShow('mobileStatusBar') && isMobile) || shouldShow('dotfiles') || shouldShow('fileViewerPreview') || shouldShow('queueMode') || shouldShow('persistDraft') || shouldShow('showToolFileIcons') || shouldShow('showTurnChangedFiles') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('reasoning')) && (
                                 <section className="p-2 space-y-0.5">
                                     {shouldShow('reasoning') && (
                                         <div
@@ -1727,6 +1788,29 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         </div>
                                     )}
 
+                                    {shouldShow('showTurnChangedFiles') && (
+                                        <div
+                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
+                                            role="button"
+                                            tabIndex={0}
+                                            aria-pressed={showTurnChangedFiles}
+                                            onClick={() => handleShowTurnChangedFilesChange(!showTurnChangedFiles)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    handleShowTurnChangedFilesChange(!showTurnChangedFiles);
+                                                }
+                                            }}
+                                        >
+                                            <Checkbox
+                                                checked={showTurnChangedFiles}
+                                                onChange={handleShowTurnChangedFilesChange}
+                                                ariaLabel={t('settings.openchamber.visual.field.showTurnChangedFilesAria')}
+                                            />
+                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.showTurnChangedFiles')}</span>
+                                        </div>
+                                    )}
+
                                     {shouldShow('mobileStatusBar') && isMobile && (
                                         <div
                                             className="group flex cursor-pointer items-center gap-2 py-0.5"
@@ -1770,6 +1854,31 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 ariaLabel={t('settings.openchamber.visual.field.showDotfilesAria')}
                                             />
                                             <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.showDotfiles')}</span>
+                                        </div>
+                                    )}
+
+                                    {shouldShow('fileViewerPreview') && (
+                                        <div
+                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
+                                            role="button"
+                                            tabIndex={0}
+                                            aria-pressed={settingsDefaultFileViewerPreview}
+                                            onClick={() => handleFileViewerPreviewChange(!settingsDefaultFileViewerPreview)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    handleFileViewerPreviewChange(!settingsDefaultFileViewerPreview);
+                                                }
+                                            }}
+                                        >
+                                            <span onClick={(event) => event.stopPropagation()}>
+                                                <Checkbox
+                                                    checked={settingsDefaultFileViewerPreview}
+                                                    onChange={handleFileViewerPreviewChange}
+                                                    ariaLabel={t('settings.openchamber.defaults.field.openFilesPreviewAria')}
+                                                />
+                                            </span>
+                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.defaults.field.openFilesPreview')}</span>
                                         </div>
                                     )}
 

@@ -1,0 +1,48 @@
+---
+title: SSH Hosts & Proxying
+description: Import saved SSH hosts and add extra SSH port forwards in the desktop app.
+---
+
+# SSH Hosts & Proxying
+
+Use **Settings → Remote Instances** in the desktop app to import saved SSH hosts, connect to a remote machine, and make extra ports available through the same SSH connection.
+
+> SSH hosts and SSH proxying are **desktop-only** features. They use the SSH client on your computer.
+
+## Import an SSH host
+
+OpenChamber can read hosts from your local SSH config, the same place used by commands like `ssh work-server`.
+
+1. Open **Settings → Remote Instances**.
+2. Choose a host from **Saved SSH hosts**.
+3. If the host is a pattern, enter the real destination, such as `deploy@app.example.com`.
+4. Save and connect.
+
+OpenChamber creates a remote instance using that SSH command. When it reaches **ready**, the remote OpenChamber UI opens in the desktop app.
+
+## Add extra port forwards
+
+Each remote instance has a **Port Forwards** section. Use it when something on one side of the SSH connection needs to reach a port on the other side.
+
+OpenChamber supports three forward types:
+
+- **Local (-L)** — open a port on your computer that connects to something on the remote machine.
+- **Remote (-R)** — open a port on the remote machine that connects back to your computer.
+- **Dynamic (-D)** — open a local SOCKS proxy through the SSH connection.
+
+For most app previews and dashboards running on the remote machine, use **Local (-L)**.
+
+## Use the SOCKS proxy
+
+Choose **Dynamic (-D)** when you want other tools on your computer to browse through the remote machine. OpenChamber opens a local SOCKS proxy port for that SSH connection.
+
+After the connection is ready, copy or use the local proxy address from the forward row. Configure your browser or tool to use it as a SOCKS5 proxy.
+
+## Keep it private
+
+Use `127.0.0.1` or `localhost` for local bind hosts unless you intentionally want other devices on your network to reach the forwarded port.
+
+## Related
+
+- [Remote Instances](/remote-instances/) — connect the desktop app to OpenChamber on another machine
+- [Remote access](/troubleshooting/remote-access/) — when SSH or remote access does not connect

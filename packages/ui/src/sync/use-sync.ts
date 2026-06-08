@@ -47,6 +47,35 @@ type SyncMeta = {
   loading: boolean
 }
 
+type SdkResult<T> = {
+  data?: T
+  error?: unknown
+  response?: {
+    status?: number
+    headers?: { get?: (name: string) => string | null }
+  }
+}
+
+function formatSdkError(error: unknown): string {
+  if (error instanceof Error) return error.message
+  if (typeof error === "string") return error
+  if (error && typeof error === "object") {
+    const message = (error as { message?: unknown }).message
+    if (typeof message === "string" && message.length > 0) return message
+  }
+  try {
+    return JSON.stringify(error)
+  } catch {
+    return String(error)
+  }
+}
+
+function assertSdkSuccess<T>(result: SdkResult<T>, operation: string): void {
+  if (!result.error) return
+  const status = result.response?.status
+  throw new Error(`${operation} failed${status ? ` (${status})` : ""}: ${formatSdkError(result.error)}`)
+}
+
 const isConstrainedSessionRuntime = () => isVSCodeRuntime() || isMobileSurfaceRuntime()
 const getConstrainedInitialPageExpansionMax = () => VSCODE_INITIAL_PAGE_EXPANSION_LIMITS[VSCODE_INITIAL_PAGE_EXPANSION_LIMITS.length - 1]
 const getEffectiveSessionCacheLimit = () => {
@@ -228,16 +257,16 @@ export function useSync() {
 
   // Optimistic operations
   const getOptimistic = useCallback(
-    (sessionID: string): OptimisticItem[] => {
-      const key = `${directory}\n${sessionID}`
+    (sessionID: string, directoryOverride?: string | null): OptimisticItem[] => {
+      const key = `${directoryOverride || directory}\n${sessionID}`
       return [...(optimistic.current.get(key)?.values() ?? [])]
     },
     [directory],
   )
 
   const setOptimistic = useCallback(
-    (sessionID: string, item: OptimisticItem) => {
-      const key = `${directory}\n${sessionID}`
+    (sessionID: string, item: OptimisticItem, directoryOverride?: string | null) => {
+      const key = `${directoryOverride || directory}\n${sessionID}`
       const list = optimistic.current.get(key)
       const sorted: OptimisticItem = { message: item.message, parts: sortParts(item.parts) }
       if (list) {
@@ -250,8 +279,8 @@ export function useSync() {
   )
 
   const clearOptimistic = useCallback(
-    (sessionID: string, messageID?: string) => {
-      const key = `${directory}\n${sessionID}`
+    (sessionID: string, messageID?: string, directoryOverride?: string | null) => {
+      const key = `${directoryOverride || directory}\n${sessionID}`
       if (!messageID) {
         optimistic.current.delete(key)
         return
@@ -264,12 +293,22 @@ export function useSync() {
     [directory],
   )
 
+  const getOptimisticStore = useCallback(
+    (directoryOverride?: string | null) => {
+      if (!directoryOverride || directoryOverride === directory) return store
+      return childStores.ensureChild(directoryOverride, { bootstrap: false })
+    },
+    [childStores, directory, store],
+  )
+
   // Fetch messages from API
   const fetchMessages = useCallback(
     async (sessionID: string, limit: number, before?: string) => {
-      const result = await retry(() =>
-        sdk.session.messages({ sessionID, directory, limit, before }),
-      )
+      const result = await retry(async () => {
+        const response = await sdk.session.messages({ sessionID, directory, limit, before })
+        assertSdkSuccess(response, "session.messages")
+        return response
+      })
       const items = (result.data ?? []).filter((x: { info?: { id?: string } }) => !!x?.info?.id)
       const session = items
         .map((x: { info: Message }) => stripMessageDiffSnapshots(x.info))
@@ -397,7 +436,11 @@ export function useSync() {
           shouldFetchSession
             ? (async () => {
                 try {
-                  const result = await retry(() => sdk.session.get({ sessionID, directory }))
+                  const result = await retry(async () => {
+                    const response = await sdk.session.get({ sessionID, directory })
+                    assertSdkSuccess(response, "session.get")
+                    return response
+                  })
                   if (result.data) {
                     const s = store.getState()
                     const sessions = [...s.session]
@@ -455,9 +498,10 @@ export function useSync() {
 
   // Optimistic add (for prompt submission)
   const optimisticAdd = useCallback(
-    (input: { sessionID: string; message: Message; parts: Part[] }) => {
-      setOptimistic(input.sessionID, { message: input.message, parts: input.parts })
-      const current = store.getState()
+    (input: { sessionID: string; directory?: string | null; message: Message; parts: Part[] }) => {
+      setOptimistic(input.sessionID, { message: input.message, parts: input.parts }, input.directory)
+      const targetStore = getOptimisticStore(input.directory)
+      const current = targetStore.getState()
       const message = { ...current.message }
       const part = { ...current.part }
 
@@ -470,16 +514,17 @@ export function useSync() {
       // Insert parts
       part[input.message.id] = sortParts(input.parts)
 
-      store.setState({ message, part })
+      targetStore.setState({ message, part })
     },
-    [store, setOptimistic],
+    [getOptimisticStore, setOptimistic],
   )
 
   // Optimistic remove (for rollback on error)
   const optimisticRemove = useCallback(
-    (input: { sessionID: string; messageID: string }) => {
-      clearOptimistic(input.sessionID, input.messageID)
-      const current = store.getState()
+    (input: { sessionID: string; directory?: string | null; messageID: string }) => {
+      clearOptimistic(input.sessionID, input.messageID, input.directory)
+      const targetStore = getOptimisticStore(input.directory)
+      const current = targetStore.getState()
       const message = { ...current.message }
       const part = { ...current.part }
 
@@ -494,9 +539,9 @@ export function useSync() {
       }
       delete part[input.messageID]
 
-      store.setState({ message, part })
+      targetStore.setState({ message, part })
     },
-    [store, clearOptimistic],
+    [clearOptimistic, getOptimisticStore],
   )
 
   return useMemo(

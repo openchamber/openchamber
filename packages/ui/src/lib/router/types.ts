@@ -29,7 +29,7 @@ export interface RouterContext {
 /**
  * Valid main tab values for URL routing.
  */
-export const VALID_TABS: readonly MainTab[] = ['chat', 'git', 'diff', 'terminal', 'files'] as const;
+export const VALID_TABS: readonly MainTab[] = ['chat', 'git', 'diff', 'terminal', 'files', 'diagram'] as const;
 
 /**
  * Valid settings section values for URL routing.

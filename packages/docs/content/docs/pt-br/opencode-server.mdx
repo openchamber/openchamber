@@ -60,7 +60,23 @@ Para proteger a UI, defina a senha ao habilitar o serviço:
 OPENCHAMBER_UI_PASSWORD='secret' openchamber startup enable
 ```
 
+Para um servidor headless que inicia no login e é usado por apps desktop ou mobile, inclua `--api-only` e um host acessível:
+
+```bash
+openchamber startup enable --port 3000 --api-only --host 0.0.0.0 --ui-password secret
+```
+
 `startup enable` salva um snapshot do ambiente atual no serviço para que a inicialização se pareça mais com executar `openchamber` na mesma shell. Isso preserva tokens de provedores, `PATH`, configurações do agente SSH e outras variáveis CLI de auth/config. Use `--no-env-snapshot` se quiser um ambiente de serviço mínimo.
+
+O serviço de inicialização lembra `--port`, `--host`, `--ui-password` e `--api-only`. Reinícios pela CLI e reinícios durante atualização reutilizam essas configurações salvas.
+
+Para criar um link de conexão para outro app OpenChamber, use:
+
+```bash
+openchamber connect-url --port 3000 --server http://your-host:3000 --qr
+```
+
+Execute `openchamber connect-url --help` para ver todas as opções de link, incluindo `--name`, `--lan`, `--server`, `--api-only`, `--ui-password` e `--qr`.
 
 Você ainda pode gerenciar túneis de forma independente para esse serviço em execução:
 

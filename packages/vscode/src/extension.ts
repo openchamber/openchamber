@@ -683,7 +683,7 @@ export async function activate(context: vscode.ExtensionContext) {
       sessionEditorProvider?.updateConnectionStatus(status, error);
 
       // Start/stop global event watcher based on connection status
-      // Mirrors web server and desktop Tauri behavior
+      // Mirrors web server and desktop behavior
       if (status === 'connected' && chatViewProvider && openCodeManager) {
         setChatViewProvider(chatViewProvider);
         void startGlobalEventWatcher(openCodeManager, chatViewProvider);

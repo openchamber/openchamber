@@ -1,4 +1,5 @@
 import type { SettingsAPI, SettingsLoadResult, SettingsPayload } from '@openchamber/ui/lib/api/types';
+import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
 
 const SETTINGS_ENDPOINT = '/api/config/settings';
 const RELOAD_ENDPOINT = '/api/config/reload';
@@ -12,7 +13,7 @@ const sanitizePayload = (data: unknown): SettingsPayload => {
 
 export const createWebSettingsAPI = (): SettingsAPI => ({
   async load(): Promise<SettingsLoadResult> {
-    const response = await fetch(SETTINGS_ENDPOINT, {
+    const response = await runtimeFetch(SETTINGS_ENDPOINT, {
       method: 'GET',
       headers: { Accept: 'application/json' },
     });
@@ -29,7 +30,7 @@ export const createWebSettingsAPI = (): SettingsAPI => ({
   },
 
   async save(changes: Partial<SettingsPayload>): Promise<SettingsPayload> {
-    const response = await fetch(SETTINGS_ENDPOINT, {
+    const response = await runtimeFetch(SETTINGS_ENDPOINT, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -48,7 +49,7 @@ export const createWebSettingsAPI = (): SettingsAPI => ({
   },
 
   async restartOpenCode(): Promise<{ restarted: boolean }> {
-    const response = await fetch(RELOAD_ENDPOINT, { method: 'POST' });
+    const response = await runtimeFetch(RELOAD_ENDPOINT, { method: 'POST' });
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: response.statusText }));
       throw new Error(error.error || 'Failed to restart OpenCode');

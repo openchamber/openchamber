@@ -1,12 +1,62 @@
 import { describe, expect, it } from 'vitest';
 
-import { classifyPreviewNavigation, classifyPreviewResourceError, normalizeProxyTargetUrl, rewritePreviewBody } from './proxy-runtime.js';
+import {
+  applyPreviewPassthroughRequestHeaders,
+  applyPreviewPassthroughResponseHeaders,
+  classifyPreviewNavigation,
+  classifyPreviewResourceError,
+  normalizeProxyTargetUrl,
+  rewritePreviewBody,
+  rewritePreviewCspHeader,
+  rewritePreviewRedirectLocation,
+} from './proxy-runtime.js';
 
 const rewrite = (bodyText, kind) => rewritePreviewBody({
   bodyText,
   kind,
   proxyBasePath: '/api/preview/proxy/abc123',
   targetOrigin: 'http://127.0.0.1:3000',
+});
+
+describe('preview Inertia header passthrough', () => {
+  it('forwards Inertia request headers to the preview target', () => {
+    const forwarded = new Map();
+    const proxyReq = {
+      setHeader: (name, value) => forwarded.set(name, value),
+    };
+
+    applyPreviewPassthroughRequestHeaders({
+      headers: {
+        'x-inertia': 'true',
+        'x-inertia-version': 'asset-hash',
+        'x-unrelated': 'ignored',
+      },
+    }, proxyReq);
+
+    expect(forwarded.get('x-inertia')).toBe('true');
+    expect(forwarded.get('x-inertia-version')).toBe('asset-hash');
+    expect(forwarded.has('x-unrelated')).toBe(false);
+  });
+
+  it('forwards Inertia response headers back to the preview client', () => {
+    const forwarded = new Map();
+    const res = {
+      headersSent: false,
+      setHeader: (name, value) => forwarded.set(name, value),
+    };
+
+    applyPreviewPassthroughResponseHeaders({
+      headers: {
+        'x-inertia': 'true',
+        'x-inertia-location': 'http://127.0.0.1:8000/login',
+        'x-unrelated': 'ignored',
+      },
+    }, res);
+
+    expect(forwarded.get('x-inertia')).toBe('true');
+    expect(forwarded.get('x-inertia-location')).toBe('http://127.0.0.1:8000/login');
+    expect(forwarded.has('x-unrelated')).toBe(false);
+  });
 });
 
 describe('preview resource error classification', () => {
@@ -90,6 +140,45 @@ describe('preview body URL rewriting', () => {
     expect(output).toContain('const url = "/api/data";');
   });
 
+  it('rewrites inline module imports in HTML responses', () => {
+    const input = [
+      '<script type="module">',
+      'import RefreshRuntime from "/@react-refresh";',
+      'window.__vite_plugin_react_preamble_installed__ = true;',
+      '</script>',
+      '<script>const refreshUrl = "/@react-refresh";</script>',
+    ].join('');
+    const output = rewrite(input, 'html');
+
+    expect(output).toContain('from "/api/preview/proxy/abc123/@react-refresh"');
+    expect(output).toContain('window.__vite_plugin_react_preamble_installed__ = true;');
+    expect(output).toContain('const refreshUrl = "/@react-refresh";');
+  });
+
+  it('removes CSP meta tags that block the preview bridge', () => {
+    const input = '<meta http-equiv="Content-Security-Policy" content="script-src \'self\'"><div>Preview</div>';
+    const output = rewrite(input, 'html');
+
+    expect(output).not.toContain('Content-Security-Policy');
+    expect(output).toContain('<div>Preview</div>');
+  });
+
+  it('adds preview and URL auth tokens to rewritten proxy resources when provided', () => {
+    const output = rewritePreviewBody({
+      bodyText: '<script src="/entry.js"></script><script type="module">import RefreshRuntime from "/@react-refresh";</script><a href="http://localhost:3000/docs?x=1&oc_client_token=legacy">Docs</a>',
+      kind: 'html',
+      proxyBasePath: '/api/preview/proxy/abc123',
+      targetOrigin: 'http://127.0.0.1:3000',
+      previewToken: 'preview-secret',
+      urlAuthToken: 'url-secret',
+    });
+
+    expect(output).toContain('src="/api/preview/proxy/abc123/entry.js?oc_preview_token=preview-secret&oc_url_token=url-secret"');
+    expect(output).toContain('from "/api/preview/proxy/abc123/@react-refresh?oc_preview_token=preview-secret&oc_url_token=url-secret"');
+    expect(output).toContain('href="/api/preview/proxy/abc123/docs?x=1&oc_preview_token=preview-secret&oc_url_token=url-secret"');
+    expect(output).not.toContain('oc_client_token');
+  });
+
   it('rewrites only CSS imports and url references in CSS responses', () => {
     const input = '@import "/theme.css"; .hero { background: url(/hero.png); } .copy::after { content: "/not-a-url"; }';
     const output = rewrite(input, 'css');
@@ -107,6 +196,66 @@ describe('preview body URL rewriting', () => {
     expect(output).toContain('from "/api/preview/proxy/abc123/module.js"');
     expect(output).toContain('const url = "/api/data"');
     expect(output).toContain('fetch("/api/data")');
+  });
+
+  it('adds URL auth tokens to CSS and JavaScript rewritten resources', () => {
+    const cssOutput = rewritePreviewBody({
+      bodyText: '@import "/theme.css"; .hero { background: url(/hero.png); }',
+      kind: 'css',
+      proxyBasePath: '/api/preview/proxy/abc123',
+      targetOrigin: 'http://127.0.0.1:3000',
+      previewToken: 'preview-secret',
+      urlAuthToken: 'url-secret',
+    });
+    const jsOutput = rewritePreviewBody({
+      bodyText: 'import("/entry.js"); import value from "/module.js";',
+      kind: 'javascript',
+      proxyBasePath: '/api/preview/proxy/abc123',
+      targetOrigin: 'http://127.0.0.1:3000',
+      previewToken: 'preview-secret',
+      urlAuthToken: 'url-secret',
+    });
+
+    expect(cssOutput).toContain('@import "/api/preview/proxy/abc123/theme.css?oc_preview_token=preview-secret&oc_url_token=url-secret"');
+    expect(cssOutput).toContain('url(/api/preview/proxy/abc123/hero.png?oc_preview_token=preview-secret&oc_url_token=url-secret)');
+    expect(jsOutput).toContain('import("/api/preview/proxy/abc123/entry.js?oc_preview_token=preview-secret&oc_url_token=url-secret")');
+    expect(jsOutput).toContain('from "/api/preview/proxy/abc123/module.js?oc_preview_token=preview-secret&oc_url_token=url-secret"');
+  });
+});
+
+describe('preview redirect URL rewriting', () => {
+  it('rewrites loopback redirects through the preview proxy', () => {
+    expect(rewritePreviewRedirectLocation({
+      location: 'http://localhost:3000/login?next=%2F#top',
+      proxyBasePath: '/api/preview/proxy/abc123',
+      targetOrigin: 'http://127.0.0.1:3000',
+    })).toBe('/api/preview/proxy/abc123/login?next=%2F#top');
+  });
+
+  it('leaves external redirects unchanged', () => {
+    expect(rewritePreviewRedirectLocation({
+      location: 'https://example.com/login',
+      proxyBasePath: '/api/preview/proxy/abc123',
+      targetOrigin: 'http://127.0.0.1:3000',
+    })).toBe('https://example.com/login');
+  });
+
+  it('adds proxy auth tokens to loopback redirects when provided', () => {
+    expect(rewritePreviewRedirectLocation({
+      location: 'http://localhost:3000/login?next=%2F#top',
+      proxyBasePath: '/api/preview/proxy/abc123',
+      targetOrigin: 'http://127.0.0.1:3000',
+      previewToken: 'preview-secret',
+      urlAuthToken: 'url-secret',
+    })).toBe('/api/preview/proxy/abc123/login?next=%2F&oc_preview_token=preview-secret&oc_url_token=url-secret#top');
+  });
+
+  it('leaves redirects unchanged when no target origin is provided', () => {
+    expect(rewritePreviewRedirectLocation({
+      location: 'http://localhost:5174/callback',
+      proxyBasePath: '/api/preview/proxy/abc123',
+      previewToken: 'preview-secret',
+    })).toBe('http://localhost:5174/callback');
   });
 });
 
@@ -185,5 +334,43 @@ describe('proxy target normalization (SSRF guard)', () => {
 
   it('still blocks private hosts even via IPv4-mapped IPv6', () => {
     expect(normalizeProxyTargetUrl('http://[::ffff:127.0.0.1]/', { allowExternal: true }).ok).toBe(false);
+  });
+});
+
+describe('preview CSP rewrite', () => {
+  it('drops frame-ancestors and require-trusted-types-for but keeps the rest', () => {
+    const result = rewritePreviewCspHeader(
+      "default-src 'self'; frame-ancestors 'none'; require-trusted-types-for 'script'",
+      'abc123',
+    );
+    expect(result).not.toContain('frame-ancestors');
+    expect(result).not.toContain('require-trusted-types-for');
+    expect(result).toContain("default-src 'self'");
+  });
+
+  it('adds the nonce to an existing script-src instead of removing it', () => {
+    const result = rewritePreviewCspHeader("script-src 'self'", 'abc123');
+    expect(result).toContain("script-src 'self' 'nonce-abc123'");
+  });
+
+  it('adds the nonce to script-src-elem when present', () => {
+    const result = rewritePreviewCspHeader("script-src-elem 'self'", 'abc123');
+    expect(result).toContain("script-src-elem 'self' 'nonce-abc123'");
+  });
+
+  it('synthesizes script-src from default-src when no script directive exists', () => {
+    const result = rewritePreviewCspHeader("default-src 'self' https://cdn.example.com", 'abc123');
+    expect(result).toContain("default-src 'self' https://cdn.example.com");
+    expect(result).toContain("script-src 'self' https://cdn.example.com 'nonce-abc123'");
+  });
+
+  it("drops a lone 'none' so the nonce takes effect", () => {
+    const result = rewritePreviewCspHeader("script-src 'none'", 'abc123');
+    expect(result).toBe("script-src 'nonce-abc123'");
+  });
+
+  it('returns empty/unset CSP values unchanged', () => {
+    expect(rewritePreviewCspHeader('', 'abc123')).toBe('');
+    expect(rewritePreviewCspHeader(undefined, 'abc123')).toBe(undefined);
   });
 });

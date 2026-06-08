@@ -105,10 +105,53 @@ export const listIssues = async (
   accessToken: string,
   directory: string,
   page: number = 1,
+  searchQuery?: string,
 ): Promise<GitHubIssuesListResult> => {
   const repo = await resolveRepoFromDirectory(directory);
   if (!repo) {
     return { connected: true, repo: null, issues: [] };
+  }
+
+  if (searchQuery) {
+    const q = `repo:${repo.owner}/${repo.repo} ${searchQuery} type:issue state:open`;
+    const url = new URL(`${API_BASE}/search/issues`);
+    url.searchParams.set('q', q);
+    url.searchParams.set('per_page', '50');
+    url.searchParams.set('page', String(page));
+
+    const resp = await githubFetch(url.toString(), accessToken);
+    if (resp.status === 401) {
+      return { connected: false };
+    }
+
+    const json = await jsonOrNull<{ total_count?: number; items?: unknown[] }>(resp);
+    if (!resp.ok || !json) {
+      throw new Error('Failed to search issues');
+    }
+
+    const totalCount = typeof json.total_count === 'number' ? json.total_count : 0;
+    const items = Array.isArray(json.items) ? json.items : [];
+    const issues = items
+      .map((entry) => {
+        const rec = entry && typeof entry === 'object' ? (entry as JsonRecord) : null;
+        if (!rec || rec.pull_request) return null;
+        const number = typeof rec.number === 'number' ? rec.number : 0;
+        if (!number) return null;
+        const state = readString(rec.state) === 'closed' ? 'closed' : 'open';
+        return {
+          number,
+          title: readString(rec.title) || '',
+          url: readString(rec.html_url) || '',
+          state,
+          author: mapUser(rec.user),
+          labels: mapLabels(rec.labels),
+        };
+      })
+      .filter(Boolean) as GitHubIssuesListResult['issues'];
+
+    const fetchedCount = (page - 1) * 50 + items.length;
+    const hasMore = fetchedCount < totalCount;
+    return { connected: true, repo, issues: issues || [], page, hasMore };
   }
 
   const url = new URL(`${API_BASE}/repos/${repo.owner}/${repo.repo}/issues`);

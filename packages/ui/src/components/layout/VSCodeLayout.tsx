@@ -5,11 +5,13 @@ import { SessionDialogs } from '@/components/session/SessionDialogs';
 import { ChatView } from '@/components/views/ChatView';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useViewportStore } from '@/sync/viewport-store';
-import { useDirectorySync, useSessionMessages, useSessionMessagesResolved } from '@/sync/sync-context';
+import { useSessions, useDirectorySync, useSessionMessages, useSessionMessagesResolved } from '@/sync/sync-context';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { McpDropdown } from '@/components/mcp/McpDropdown';
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
+import { SessionsTabTitle } from '@/components/session/SessionsTabTitle';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { cn } from '@/lib/utils';
 import {
@@ -22,6 +24,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useI18n } from '@/lib/i18n';
+import { toast } from '@/components/ui';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { UsageProgressBar } from '@/components/sections/usage/UsageProgressBar';
 import { PaceIndicator } from '@/components/sections/usage/PaceIndicator';
@@ -30,19 +33,18 @@ import { formatQuotaValueLabel, formatQuotaResetLabel, formatWindowLabel, QUOTA_
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { updateDesktopSettings } from '@/lib/persistence';
+import { formatTimeForPreference } from '@/lib/timeFormat';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
-import type { UsageWindow } from '@/types';
+import type { Session, UsageWindow } from '@/types';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
+import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
 
 const SettingsView = lazyWithChunkRecovery(() => import('@/components/views/SettingsView').then(m => ({ default: m.SettingsView })));
 
-const formatTime = (timestamp: number | null) => {
+const formatTime = (timestamp: number | null, timeFormatPreference: TimeFormatPreference) => {
   if (!timestamp) return '-';
   try {
-    return new Date(timestamp).toLocaleTimeString(undefined, {
-      hour: 'numeric',
-      minute: '2-digit',
-    });
+    return formatTimeForPreference(timestamp, timeFormatPreference, { fallback: '-' });
   } catch {
     return '-';
   }
@@ -56,6 +58,15 @@ const EXPANDED_LAYOUT_THRESHOLD = 1400;
 const SESSIONS_SIDEBAR_WIDTH = 280;
 const SESSIONS_SIDEBAR_MIN_WIDTH = Math.round(SESSIONS_SIDEBAR_WIDTH * 0.7);
 const SESSIONS_SIDEBAR_MAX_WIDTH = 520;
+
+const normalizePath = (value?: string | null): string | null => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const replaced = trimmed.replace(/\\/g, '/');
+  if (replaced === '/') return '/';
+  return replaced.length > 1 ? replaced.replace(/\/+$/, '') : replaced;
+};
 
 type VSCodeView = 'sessions' | 'chat' | 'settings';
 
@@ -136,6 +147,18 @@ export const VSCodeLayout: React.FC = () => {
   const expandedSidebarResizeStartWidthRef = React.useRef(SESSIONS_SIDEBAR_WIDTH);
   const expandedSidebarResizePointerIdRef = React.useRef<number | null>(null);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const sessions = useSessions();
+  const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
+  const globalArchivedSessions = useGlobalSessionsStore((state) => state.archivedSessions);
+  const projects = useProjectsStore((state) => state.projects);
+  const activeProjectId = useProjectsStore((state) => state.activeProjectId);
+
+  const activeWorkspacePath = React.useMemo(() => {
+    const activeProject = activeProjectId
+      ? projects.find((project) => project.id === activeProjectId) ?? null
+      : projects[0] ?? null;
+    return normalizePath(activeProject?.path ?? null);
+  }, [activeProjectId, projects]);
   const newSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
   const activeSessionTitleValue = useDirectorySync(
     React.useCallback((state) => {
@@ -250,6 +273,82 @@ export const VSCodeLayout: React.FC = () => {
     setCurrentView('sessions');
   }, []);
 
+  const isSessionInActiveWorkspace = React.useCallback((session: Session): boolean => {
+    if (!activeWorkspacePath) {
+      return false;
+    }
+
+    const sessionDirectory = resolveGlobalSessionDirectory(session);
+    if (sessionDirectory) {
+      return sessionDirectory.toLowerCase() === activeWorkspacePath.toLowerCase();
+    }
+
+    return false;
+  }, [activeWorkspacePath]);
+
+  const traversalSessions = React.useMemo(() => {
+    const byId = new Map<string, Session>();
+    for (const session of sessions) byId.set(session.id, session);
+    for (const session of globalActiveSessions) byId.set(session.id, session);
+    for (const session of globalArchivedSessions) byId.set(session.id, session);
+    return Array.from(byId.values());
+  }, [globalActiveSessions, globalArchivedSessions, sessions]);
+
+  /** Collect root session IDs and all descendants (subagent sessions). */
+  const collectSessionIdsWithDescendants = React.useCallback(
+    (allSessions: Session[], rootSessions: Session[]): string[] => {
+      const byId = new Map<string, Session>();
+      for (const session of allSessions) byId.set(session.id, session);
+
+      const childrenMap = new Map<string, string[]>();
+      for (const session of allSessions) {
+        const parentID = session.parentID;
+        if (parentID) {
+          const list = childrenMap.get(parentID) ?? [];
+          list.push(session.id);
+          childrenMap.set(parentID, list);
+        }
+      }
+
+      const ids = new Set<string>();
+      const addDescendants = (sessionId: string, visited: Set<string>) => {
+        if (visited.has(sessionId)) return; // cycle guard
+        visited.add(sessionId);
+        const children = childrenMap.get(sessionId) ?? [];
+        for (const childId of children) {
+          const child = byId.get(childId);
+          if (child?.time?.archived) continue; // skip already-archived children
+          ids.add(childId);
+          addDescendants(childId, visited);
+        }
+      };
+
+      for (const session of rootSessions) {
+        ids.add(session.id);
+        addDescendants(session.id, new Set());
+      }
+
+      return Array.from(ids);
+    },
+    [],
+  );
+
+  const handleArchiveAll = React.useCallback(async () => {
+    const store = useSessionUIStore.getState();
+    const rootSessions = traversalSessions.filter((session) => !session.time?.archived && isSessionInActiveWorkspace(session));
+    const allIds = collectSessionIdsWithDescendants(traversalSessions, rootSessions);
+    if (allIds.length === 0) return;
+
+    const { archivedIds, failedIds } = await store.archiveSessions(allIds);
+    if (archivedIds.length > 0) {
+      toast.success(t('vscodeLayout.actions.archiveAllSuccess', { count: archivedIds.length }));
+    }
+    if (failedIds.length > 0) {
+      toast.error(t('vscodeLayout.actions.archiveAllError', { count: failedIds.length }));
+    }
+  }, [collectSessionIdsWithDescendants, isSessionInActiveWorkspace, traversalSessions, t]);
+
+
   // Listen for connection status changes
   React.useEffect(() => {
     // Catch up with the latest status even if the extension posted the connection message
@@ -321,10 +420,10 @@ export const VSCodeLayout: React.FC = () => {
         // Keep trying to fetch core datasets on cold starts.
         if (configStore.isConnected) {
           if (configStore.providers.length === 0) {
-            await configStore.loadProviders();
+            await configStore.loadProviders({ source: 'vscodeLayout:bootstrap' });
           }
           if (configStore.agents.length === 0) {
-            await configStore.loadAgents();
+            await configStore.loadAgents({ source: 'vscodeLayout:bootstrap' });
           }
         }
 
@@ -520,6 +619,7 @@ export const VSCodeLayout: React.FC = () => {
             <div className="flex flex-col h-full">
               <VSCodeHeader
                 title={t('vscodeLayout.title.sessions')}
+                onArchiveAll={handleArchiveAll}
               />
               <div className="flex-1 overflow-hidden">
                 <SessionSidebar
@@ -560,6 +660,7 @@ interface VSCodeHeaderProps {
   title: string;
   showBack?: boolean;
   onBack?: () => void;
+  onArchiveAll?: () => void;
   onNewSession?: () => void;
   onSettings?: () => void;
   onAgentManager?: () => void;
@@ -569,7 +670,8 @@ interface VSCodeHeaderProps {
   enableSessionSwitcher?: boolean;
 }
 
-const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, onNewSession, onSettings, onAgentManager, showMcp, showContextUsage, showRateLimits, enableSessionSwitcher }) => {
+
+const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, onArchiveAll, onNewSession, onSettings, onAgentManager, showMcp, showContextUsage, showRateLimits, enableSessionSwitcher }) => {
   const { t } = useI18n();
   const getCurrentModel = useConfigStore((state) => state.getCurrentModel);
   const providers = useConfigStore((state) => state.providers);
@@ -583,6 +685,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
   const quotaLastUpdated = useQuotaStore((state) => state.lastUpdated);
   const quotaDisplayMode = useQuotaStore((state) => state.displayMode);
   const showPredValues = useQuotaStore((state) => state.showPredValues);
+  const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const dropdownProviderIds = useQuotaStore((state) => state.dropdownProviderIds);
   const loadQuotaSettings = useQuotaStore((state) => state.loadSettings);
   const setQuotaDisplayMode = useQuotaStore((state) => state.setDisplayMode);
@@ -744,7 +847,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
           </button>
         </SessionSwitcherDropdown>
       ) : (
-        <h1 className="text-sm font-medium truncate flex-1" title={title}>{title}</h1>
+        <SessionsTabTitle title={title} onArchiveAll={onArchiveAll} />
       )}
       <div className="min-w-0 flex-1" />
       {onNewSession && (
@@ -839,7 +942,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
               </DropdownMenuLabel>
             </div>
             <div className="border-b border-[var(--interactive-border)] px-2 pb-2 typography-micro text-muted-foreground text-[10px]">
-              {t('vscodeLayout.quota.lastUpdated', { time: formatTime(quotaLastUpdated) })}
+              {t('vscodeLayout.quota.lastUpdated', { time: formatTime(quotaLastUpdated, timeFormatPreference) })}
             </div>
             {!hasRateLimits && (
               <DropdownMenuItem className="cursor-default" closeOnClick={false}>
@@ -899,7 +1002,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
                                 </div>
                               )}
                               <span className="flex items-center justify-between typography-micro text-muted-foreground text-[10px]">
-                                <span>{formatQuotaResetLabel(window.resetAt, window.resetAfterFormatted ?? window.resetAtFormatted)}</span>
+                                <span>{formatQuotaResetLabel(window.resetAt, window.resetAfterFormatted ?? window.resetAtFormatted, timeFormatPreference)}</span>
                               </span>
                       </span>
                     </DropdownMenuItem>

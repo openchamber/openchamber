@@ -18,6 +18,7 @@ import { validateWorktreeCreate } from '@/lib/worktrees/worktreeManager';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { Icon } from "@/components/icon/Icon";
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import type {
   GitHubIssue,
   GitHubIssueSummary,
@@ -80,8 +81,9 @@ export function GitHubIntegrationDialog({
   const [page, setPage] = React.useState(1);
   const [hasMore, setHasMore] = React.useState(false);
 
-  // Load GitHub data
-  const loadData = React.useCallback(async () => {
+  const debouncedSearchQuery = useDebouncedValue(searchQuery, 350);
+
+  const loadData = React.useCallback(async (query?: string) => {
     if (!projectDirectory || !github) return;
     if (githubAuthChecked && githubAuthStatus?.connected === false) return;
     
@@ -92,7 +94,7 @@ export function GitHubIntegrationDialog({
     
     try {
       if (activeTab === 'issues' && github.issuesList) {
-        const result = await github.issuesList(projectDirectory, { page: 1 });
+        const result = await github.issuesList(projectDirectory, { page: 1, query });
         if (result.connected === false) {
           setError(t('session.githubIntegration.error.notConnected'));
           setIssues([]);
@@ -102,7 +104,7 @@ export function GitHubIntegrationDialog({
           setHasMore(Boolean(result.hasMore));
         }
       } else if (activeTab === 'prs' && github.prsList) {
-        const result = await github.prsList(projectDirectory, { page: 1 });
+        const result = await github.prsList(projectDirectory, { page: 1, query });
         if (result.connected === false) {
           setError(t('session.githubIntegration.error.notConnected'));
           setPrs([]);
@@ -119,7 +121,66 @@ export function GitHubIntegrationDialog({
     }
   }, [projectDirectory, github, githubAuthChecked, githubAuthStatus, activeTab, t]);
 
-  // Load more data
+  React.useEffect(() => {
+    if (!open || !projectDirectory) return;
+    if (githubAuthChecked && githubAuthStatus?.connected === false) return;
+    if (!github) return;
+    if (!debouncedSearchQuery.trim()) {
+      void loadData();
+      return;
+    }
+
+    const controller = new AbortController();
+    setLoading(true);
+    setError(null);
+    setPage(1);
+    setHasMore(false);
+
+    const apiCall = activeTab === 'issues' && github.issuesList
+      ? github.issuesList(projectDirectory, { page: 1, query: debouncedSearchQuery.trim() })
+      : activeTab === 'prs' && github.prsList
+        ? github.prsList(projectDirectory, { page: 1, query: debouncedSearchQuery.trim() })
+        : null;
+
+    if (!apiCall) {
+      setLoading(false);
+      return;
+    }
+
+    apiCall
+      .then((result) => {
+        if (controller.signal.aborted) return;
+        if ('issues' in result) {
+          if (result.connected === false) {
+            setError(t('session.githubIntegration.error.notConnected'));
+            setIssues([]);
+          } else {
+            setIssues(result.issues ?? []);
+            setPage(result.page ?? 1);
+            setHasMore(Boolean(result.hasMore));
+          }
+        } else if ('prs' in result) {
+          if (result.connected === false) {
+            setError(t('session.githubIntegration.error.notConnected'));
+            setPrs([]);
+          } else {
+            setPrs(result.prs ?? []);
+            setPage(result.page ?? 1);
+            setHasMore(Boolean(result.hasMore));
+          }
+        }
+      })
+      .catch((err) => {
+        if (controller.signal.aborted) return;
+        setError(err instanceof Error ? err.message : t('session.githubIntegration.error.loadDataFailed'));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+
+    return () => controller.abort();
+  }, [open, projectDirectory, github, githubAuthChecked, githubAuthStatus, activeTab, debouncedSearchQuery, loadData, t]);
+
   const loadMore = React.useCallback(async () => {
     if (!projectDirectory || !github) return;
     if (loading || loadingMore) return;
@@ -131,14 +192,18 @@ export function GitHubIntegrationDialog({
       const nextPage = page + 1;
       
       if (activeTab === 'issues' && github.issuesList) {
-        const result = await github.issuesList(projectDirectory, { page: nextPage });
+        const result = debouncedSearchQuery.trim()
+          ? await github.issuesList(projectDirectory, { page: nextPage, query: debouncedSearchQuery.trim() })
+          : await github.issuesList(projectDirectory, { page: nextPage });
         if (result.connected !== false) {
           setIssues(prev => [...prev, ...(result.issues ?? [])]);
           setPage(result.page ?? nextPage);
           setHasMore(Boolean(result.hasMore));
         }
       } else if (activeTab === 'prs' && github.prsList) {
-        const result = await github.prsList(projectDirectory, { page: nextPage });
+        const result = debouncedSearchQuery.trim()
+          ? await github.prsList(projectDirectory, { page: nextPage, query: debouncedSearchQuery.trim() })
+          : await github.prsList(projectDirectory, { page: nextPage });
         if (result.connected !== false) {
           setPrs(prev => [...prev, ...(result.prs ?? [])]);
           setPage(result.page ?? nextPage);
@@ -150,7 +215,7 @@ export function GitHubIntegrationDialog({
     } finally {
       setLoadingMore(false);
     }
-  }, [projectDirectory, github, activeTab, page, hasMore, loading, loadingMore]);
+  }, [projectDirectory, github, activeTab, page, hasMore, loading, loadingMore, debouncedSearchQuery]);
 
   // Reset state when dialog opens/closes
   React.useEffect(() => {
@@ -214,25 +279,6 @@ export function GitHubIntegrationDialog({
       }
     });
   }, [open, activeTab, prs, validateBranch]);
-
-  // Filtered results
-  const filteredIssues = React.useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return issues;
-    return issues.filter(issue => {
-      if (String(issue.number) === q.replace(/^#/, '')) return true;
-      return issue.title.toLowerCase().includes(q);
-    });
-  }, [issues, searchQuery]);
-
-  const filteredPrs = React.useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return prs;
-    return prs.filter(pr => {
-      if (String(pr.number) === q.replace(/^#/, '')) return true;
-      return pr.title.toLowerCase().includes(q);
-    });
-  }, [prs, searchQuery]);
 
   // GitHub connection check
   const isGitHubConnected = githubAuthChecked && githubAuthStatus?.connected === true;
@@ -337,8 +383,8 @@ export function GitHubIntegrationDialog({
               {/* Issues List */}
               {!loading && !error && activeTab === 'issues' && (
                 <div className="space-y-0.5 min-h-full">
-                  {filteredIssues.length > 0 ? (
-                    filteredIssues.map(issue => (
+                  {issues.length > 0 ? (
+                    issues.map(issue => (
                       <button
                         key={`${issue.sourceRepo?.owner ?? ''}-${issue.sourceRepo?.repo ?? ''}-${issue.number}`}
                         onClick={() => handleSelectIssue(issue)}
@@ -391,8 +437,8 @@ export function GitHubIntegrationDialog({
               {/* PRs List */}
               {!loading && !error && activeTab === 'prs' && (
                 <div className="space-y-0.5 min-h-full">
-                  {filteredPrs.length > 0 ? (
-                    filteredPrs.map(pr => {
+                  {prs.length > 0 ? (
+                    prs.map(pr => {
                       const blocked = isPrBlocked(pr);
                       const validation = pr.head ? validations.get(pr.head) : undefined;
                       

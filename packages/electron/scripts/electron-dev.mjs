@@ -45,6 +45,25 @@ function spawnProcess(command, args, options = {}) {
   });
 }
 
+function runProcess(command, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: repoRoot,
+      env: { ...process.env, OPENCHAMBER_ELECTRON_DEV: '1' },
+      stdio: 'inherit',
+      ...options,
+    });
+    child.on('error', reject);
+    child.on('exit', (code, signal) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`${command} ${args.join(' ')} exited with code ${code ?? 'null'} signal ${signal ?? 'none'}`));
+    });
+  });
+}
+
 function waitForExit(child, timeoutMs) {
   return new Promise((resolve) => {
     if (!child || child.exitCode !== null || child.signalCode !== null) {
@@ -159,23 +178,33 @@ async function stopChildTree(child) {
 }
 
 async function main() {
-  const hmrApiPort = String(await findAvailablePort(preferredHmrApiPort));
-  const hmrUiPort = String(await findAvailablePort(preferredHmrUiPort));
+  const useBundledUi = process.env.OPENCHAMBER_ELECTRON_USE_BUNDLED_UI === '1';
+  let devServer = null;
+  let hmrApiPort = '';
+  let hmrUiPort = '';
 
-  const devServer = spawnProcess('node', ['./scripts/dev-web-hmr.mjs'], {
-    env: {
-      ...process.env,
-      OPENCHAMBER_ELECTRON_DEV: '1',
-      OPENCHAMBER_HMR_UI_PORT: hmrUiPort,
-      OPENCHAMBER_HMR_API_PORT: hmrApiPort,
-      OPENCHAMBER_DISABLE_PWA_DEV: '1',
-    },
-  });
+  if (useBundledUi) {
+    await runProcess('bun', ['run', '--cwd', 'packages/electron', 'build:web-assets']);
+  } else {
+    hmrApiPort = String(await findAvailablePort(preferredHmrApiPort));
+    hmrUiPort = String(await findAvailablePort(preferredHmrUiPort));
+    devServer = spawnProcess('node', ['./scripts/dev-web-hmr.mjs'], {
+      env: {
+        ...process.env,
+        OPENCHAMBER_ELECTRON_DEV: '1',
+        OPENCHAMBER_HMR_UI_PORT: hmrUiPort,
+        OPENCHAMBER_HMR_API_PORT: hmrApiPort,
+        OPENCHAMBER_DISABLE_PWA_DEV: '1',
+      },
+    });
+  }
+
   const electron = spawnProcess('npx', ['electron', './main.mjs'], {
     cwd: electronDir,
     env: {
       ...process.env,
       OPENCHAMBER_ELECTRON_DEV: '1',
+      ...(useBundledUi ? { OPENCHAMBER_ELECTRON_USE_BUNDLED_UI: '1' } : {}),
       OPENCHAMBER_HMR_UI_PORT: hmrUiPort,
       OPENCHAMBER_HMR_API_PORT: hmrApiPort,
       OPENCHAMBER_DISABLE_PWA_DEV: '1',
@@ -200,9 +229,9 @@ async function main() {
     void teardown(code ?? 1);
   };
 
-  devServer.on('exit', onChildExit('dev server'));
+  devServer?.on('exit', onChildExit('dev server'));
   electron.on('exit', onChildExit('electron'));
-  devServer.on('error', (error) => {
+  devServer?.on('error', (error) => {
     console.error('[electron:dev] failed to start dev server:', error);
     void teardown(1);
   });

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
+import { opencodeClient } from '@/lib/opencode/client';
 import { useSessionWorktreeStore } from './session-worktree-store';
-import { useSessionUIStore } from './session-ui-store';
+import { routeMessage, useSessionUIStore } from './session-ui-store';
 
 /**
  * Unit tests for session worktree routing through the authoritative store.
@@ -187,5 +188,49 @@ describe('session-worktree-store worktree routing', () => {
     const attachment = store.getAttachment('session-not-repo');
     expect(attachment).toBeDefined();
     expect(attachment.worktreeStatus).toBe('not-a-repo');
+  });
+});
+
+describe('routeMessage directory scoping', () => {
+  test('runs sends in the provided session directory', async () => {
+    const calls = [];
+    let activeDirectory = '/current/project';
+    const originalWithDirectory = opencodeClient.withDirectory;
+    const originalGetDirectory = opencodeClient.getDirectory;
+    const originalShellSession = opencodeClient.shellSession;
+
+    opencodeClient.withDirectory = async (directory, fn) => {
+      calls.push({ method: 'withDirectory', directory });
+      const previousDirectory = activeDirectory;
+      activeDirectory = directory ?? undefined;
+      try {
+        return await fn();
+      } finally {
+        activeDirectory = previousDirectory;
+      }
+    };
+    opencodeClient.getDirectory = () => activeDirectory;
+    opencodeClient.shellSession = async (params) => {
+      calls.push({ method: 'session.shell', params });
+      return { info: {}, parts: [] };
+    };
+
+    try {
+      await routeMessage({
+        sessionId: 'session-a',
+        directory: '/session/project',
+        content: 'pwd',
+        providerID: 'provider-a',
+        modelID: 'model-a',
+        inputMode: 'shell',
+      });
+    } finally {
+      opencodeClient.withDirectory = originalWithDirectory;
+      opencodeClient.getDirectory = originalGetDirectory;
+      opencodeClient.shellSession = originalShellSession;
+    }
+
+    expect(calls[0]).toEqual({ method: 'withDirectory', directory: '/session/project' });
+    expect(calls[1].params.directory).toBe('/session/project');
   });
 });

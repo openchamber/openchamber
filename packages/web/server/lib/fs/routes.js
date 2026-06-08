@@ -18,6 +18,12 @@ const createGitReadCacheTtlMs = () => {
   return 30 * 1000;
 };
 
+const createGitCheckIgnoreTimeoutMs = () => {
+  const raw = Number(process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS);
+  if (Number.isFinite(raw) && raw >= 0) return raw;
+  return 2500;
+};
+
 // Only deterministic, side-effect-free git plumbing path queries are cacheable.
 // Anything outside this allowlist (including any non-git command) runs normally
 // — we never cache arbitrary exec.
@@ -279,6 +285,7 @@ export const registerFsRoutes = (app, dependencies) => {
   const execJobs = new Map();
   const commandTimeoutMs = createCommandTimeoutMs();
   const gitReadCacheTtlMs = createGitReadCacheTtlMs();
+  const gitCheckIgnoreTimeoutMs = createGitCheckIgnoreTimeoutMs();
   const gitReadCache = new Map();
   const inFlightGitReadCache = new Map();
 
@@ -661,7 +668,18 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: 'Specified path is not a file' });
       }
 
-      const content = await fsPromises.readFile(canonicalPath, 'utf8');
+      let content = await fsPromises.readFile(canonicalPath, 'utf8');
+      // Retry empty reads — concurrent writer may have truncated the file
+      // between our stat and read (O_TRUNC window). If the file existed with
+      // content at stat time but we read nothing, the writer hasn't finished
+      // writing yet.
+      if (content.length === 0 && stats.size > 0) {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          await new Promise((r) => setTimeout(r, 50 * (attempt + 1)));
+          content = await fsPromises.readFile(canonicalPath, 'utf8');
+          if (content.length > 0) break;
+        }
+      }
       return res.type('text/plain').send(content);
     } catch (error) {
       const err = error;
@@ -778,7 +796,19 @@ export const registerFsRoutes = (app, dependencies) => {
       }
 
       await fsPromises.mkdir(path.dirname(resolved.resolved), { recursive: true });
-      await fsPromises.writeFile(resolved.resolved, content, 'utf8');
+
+      // Atomic write: write to temp then rename to avoid concurrent readers
+      // seeing an empty file during the O_TRUNC window of direct writeFile.
+      const tmp = `${resolved.resolved}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      let tmpExists = false;
+      try {
+        await fsPromises.writeFile(tmp, content, 'utf8');
+        tmpExists = true;
+        await fsPromises.rename(tmp, resolved.resolved);
+      } catch (error) {
+        if (tmpExists) await fsPromises.unlink(tmp).catch(() => {});
+        throw error;
+      }
       return res.json({ success: true, path: resolved.resolved });
     } catch (error) {
       const err = error;
@@ -1065,9 +1095,28 @@ export const registerFsRoutes = (app, dependencies) => {
                 });
 
                 let stdout = '';
+                let settled = false;
+                let timeout = null;
+                const finish = (value) => {
+                  if (settled) return;
+                  settled = true;
+                  if (timeout) clearTimeout(timeout);
+                  resolve(value);
+                };
+
+                if (gitCheckIgnoreTimeoutMs > 0) {
+                  timeout = setTimeout(() => {
+                    try {
+                      child.kill('SIGKILL');
+                    } catch {
+                    }
+                    finish('');
+                  }, gitCheckIgnoreTimeoutMs);
+                }
+
                 child.stdout.on('data', (data) => { stdout += data.toString(); });
-                child.on('close', () => resolve(stdout));
-                child.on('error', () => resolve(''));
+                child.on('close', () => finish(stdout));
+                child.on('error', () => finish(''));
               });
 
               result.split('\n').filter(Boolean).forEach((name) => {

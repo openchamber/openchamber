@@ -9,8 +9,8 @@ export const createOpenCodeEnvRuntime = (deps) => {
     state,
     normalizeDirectoryPath,
     readSettingsFromDiskMigrated,
-    ENV_CONFIGURED_OPENCODE_WSL_DISTRO,
   } = deps;
+  const runSpawnSync = typeof deps.spawnSync === 'function' ? deps.spawnSync : spawnSync;
 
   const parseNullSeparatedEnvSnapshot = (raw) => {
     if (typeof raw !== 'string' || raw.length === 0) {
@@ -32,7 +32,18 @@ export const createOpenCodeEnvRuntime = (deps) => {
       result[key] = value;
     }
 
-    return Object.keys(result).length > 0 ? result : null;
+    if (Object.keys(result).length === 0) {
+      return null;
+    }
+
+    if (process.platform === 'win32' && typeof result.PATH !== 'string') {
+      const pathEntry = Object.entries(result).find(([key]) => key.toLowerCase() === 'path');
+      if (pathEntry && typeof pathEntry[1] === 'string') {
+        result.PATH = pathEntry[1];
+      }
+    }
+
+    return result;
   };
 
   const isExecutable = (filePath) => {
@@ -122,8 +133,13 @@ export const createOpenCodeEnvRuntime = (deps) => {
   const getWindowsShellEnvSnapshot = () => {
     const parseResult = (stdout) => parseNullSeparatedEnvSnapshot(typeof stdout === 'string' ? stdout : '');
 
-    const psScript =
-      "Get-ChildItem Env: | ForEach-Object { [Console]::Out.Write($_.Name); [Console]::Out.Write('='); [Console]::Out.Write($_.Value); [Console]::Out.Write([char]0) }";
+    const psScript = [
+      '$entries = [ordered]@{}',
+      'Get-ChildItem Env: | ForEach-Object { $entries[$_.Name] = $_.Value }',
+      "$pathValues = @([Environment]::GetEnvironmentVariable('Path', 'Machine'), [Environment]::GetEnvironmentVariable('Path', 'User'), [Environment]::GetEnvironmentVariable('Path', 'Process')) | Where-Object { $_ }",
+      "if ($pathValues.Count -gt 0) { $entries['Path'] = ($pathValues -join ';') }",
+      "$entries.GetEnumerator() | ForEach-Object { [Console]::Out.Write($_.Name); [Console]::Out.Write('='); [Console]::Out.Write($_.Value); [Console]::Out.Write([char]0) }",
+    ].join('; ');
 
     const powershellCandidates = [
       'pwsh.exe',
@@ -133,7 +149,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
 
     for (const shellPath of powershellCandidates) {
       try {
-        const result = spawnSync(shellPath, ['-NoLogo', '-Command', psScript], {
+        const result = runSpawnSync(shellPath, ['-NoLogo', '-Command', psScript], {
           encoding: 'utf8',
           stdio: ['ignore', 'pipe', 'pipe'],
           maxBuffer: 10 * 1024 * 1024,
@@ -152,7 +168,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
 
     const comspec = process.env.ComSpec || 'cmd.exe';
     try {
-      const result = spawnSync(comspec, ['/d', '/s', '/c', 'set'], {
+      const result = runSpawnSync(comspec, ['/d', '/s', '/c', 'set'], {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
         maxBuffer: 10 * 1024 * 1024,
@@ -186,7 +202,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
       }
 
       try {
-        const result = spawnSync(shellPath, ['-lic', 'env -0'], {
+        const result = runSpawnSync(shellPath, ['-lic', 'env -0'], {
           encoding: 'utf8',
           stdio: ['ignore', 'pipe', 'pipe'],
           maxBuffer: 10 * 1024 * 1024,
@@ -249,122 +265,6 @@ export const createOpenCodeEnvRuntime = (deps) => {
     state.resolvedWslBinary = null;
     state.resolvedWslOpencodePath = null;
     state.resolvedWslDistro = null;
-  };
-
-  const resolveWslExecutablePath = () => {
-    if (process.platform !== 'win32') {
-      return null;
-    }
-
-    const explicit = [process.env.WSL_BINARY, process.env.OPENCHAMBER_WSL_BINARY]
-      .map((v) => (typeof v === 'string' ? v.trim() : ''))
-      .filter(Boolean);
-
-    for (const candidate of explicit) {
-      if (isExecutable(candidate)) {
-        return candidate;
-      }
-    }
-
-    try {
-      const result = spawnSync('where', ['wsl'], {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: true,
-      });
-      if (result.status === 0) {
-        const lines = (result.stdout || '')
-          .split(/\r?\n/)
-          .map((line) => line.trim())
-          .filter(Boolean);
-        const found = lines.find((line) => isExecutable(line));
-        if (found) {
-          return found;
-        }
-      }
-    } catch {
-    }
-
-    const systemRoot = process.env.SystemRoot || 'C:\\Windows';
-    const fallback = path.join(systemRoot, 'System32', 'wsl.exe');
-    if (isExecutable(fallback)) {
-      return fallback;
-    }
-
-    return null;
-  };
-
-  const buildWslExecArgs = (execArgs, distroOverride = null) => {
-    const distro = typeof distroOverride === 'string' && distroOverride.trim().length > 0
-      ? distroOverride.trim()
-      : ENV_CONFIGURED_OPENCODE_WSL_DISTRO;
-
-    const prefix = distro ? ['-d', distro] : [];
-    return [...prefix, '--exec', ...execArgs];
-  };
-
-  const probeWslForOpencode = () => {
-    if (process.platform !== 'win32') {
-      return null;
-    }
-
-    const wslBinary = resolveWslExecutablePath();
-    if (!wslBinary) {
-      return null;
-    }
-
-    try {
-      const result = spawnSync(
-        wslBinary,
-        buildWslExecArgs(['sh', '-lc', 'command -v opencode']),
-        {
-          encoding: 'utf8',
-          stdio: ['ignore', 'pipe', 'pipe'],
-          timeout: 6000,
-          windowsHide: true,
-        }
-      );
-
-      if (result.status !== 0) {
-        return null;
-      }
-
-      const lines = (result.stdout || '')
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter(Boolean);
-      const found = lines[0] || '';
-      if (!found) {
-        return null;
-      }
-
-      return {
-        wslBinary,
-        opencodePath: found,
-        distro: ENV_CONFIGURED_OPENCODE_WSL_DISTRO,
-      };
-    } catch {
-      return null;
-    }
-  };
-
-  const applyWslOpencodeResolution = ({ wslBinary, opencodePath, source = 'wsl', distro = null } = {}) => {
-    const resolvedWsl = wslBinary || resolveWslExecutablePath();
-    if (!resolvedWsl) {
-      return null;
-    }
-
-    state.useWslForOpencode = true;
-    state.resolvedWslBinary = resolvedWsl;
-    state.resolvedWslOpencodePath = typeof opencodePath === 'string' && opencodePath.trim().length > 0
-      ? opencodePath.trim()
-      : 'opencode';
-    state.resolvedWslDistro = typeof distro === 'string' && distro.trim().length > 0 ? distro.trim() : ENV_CONFIGURED_OPENCODE_WSL_DISTRO;
-    state.resolvedOpencodeBinary = `wsl:${state.resolvedWslOpencodePath}`;
-    state.resolvedOpencodeBinarySource = source;
-
-    delete process.env.OPENCODE_BINARY;
-    return state.resolvedOpencodeBinary;
   };
 
   const resolveOpencodeCliPath = () => {
@@ -434,7 +334,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
 
     if (process.platform === 'win32') {
       try {
-        const result = spawnSync('where', ['opencode'], {
+        const result = runSpawnSync('where', ['opencode'], {
           encoding: 'utf8',
           stdio: ['ignore', 'pipe', 'pipe'],
           windowsHide: true,
@@ -453,15 +353,9 @@ export const createOpenCodeEnvRuntime = (deps) => {
         }
       } catch {
       }
-      const wsl = probeWslForOpencode();
-      if (wsl) {
-        return applyWslOpencodeResolution({
-          wslBinary: wsl.wslBinary,
-          opencodePath: wsl.opencodePath,
-          source: 'wsl',
-          distro: wsl.distro,
-        });
-      }
+      // Do not auto-detect OpenCode from WSL. OpenCode sessions are keyed by
+      // server-visible directories, and mixing Windows paths with WSL paths
+      // creates duplicate/missing project state in the desktop app.
       return null;
     }
 
@@ -469,7 +363,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
     for (const shell of shells) {
       if (!isExecutable(shell)) continue;
       try {
-        const result = spawnSync(shell, ['-lic', 'command -v opencode'], {
+        const result = runSpawnSync(shell, ['-lic', 'command -v opencode'], {
           encoding: 'utf8',
           stdio: ['ignore', 'pipe', 'pipe'],
           windowsHide: true,
@@ -514,7 +408,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
 
     if (process.platform === 'win32') {
       try {
-        const result = spawnSync('where', ['node'], {
+        const result = runSpawnSync('where', ['node'], {
           encoding: 'utf8',
           stdio: ['ignore', 'pipe', 'pipe'],
           windowsHide: true,
@@ -536,7 +430,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
     for (const shell of shells) {
       if (!isExecutable(shell)) continue;
       try {
-        const result = spawnSync(shell, ['-lic', 'command -v node'], {
+        const result = runSpawnSync(shell, ['-lic', 'command -v node'], {
           encoding: 'utf8',
           stdio: ['ignore', 'pipe', 'pipe'],
           windowsHide: true,
@@ -595,7 +489,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
       }
 
       try {
-        const result = spawnSync('where', ['bun'], {
+        const result = runSpawnSync('where', ['bun'], {
           encoding: 'utf8',
           stdio: ['ignore', 'pipe', 'pipe'],
           windowsHide: true,
@@ -617,7 +511,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
     for (const shell of shells) {
       if (!isExecutable(shell)) continue;
       try {
-        const result = spawnSync(shell, ['-lic', 'command -v bun'], {
+        const result = runSpawnSync(shell, ['-lic', 'command -v bun'], {
           encoding: 'utf8',
           stdio: ['ignore', 'pipe', 'pipe'],
           windowsHide: true,
@@ -748,7 +642,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
         return null;
       }
 
-      const launcherPath = path.resolve(path.dirname(wrapperPath), launcherMatch[0]);
+      const launcherPath = path.resolve(path.dirname(wrapperPath), launcherMatch[0].replace(/[\\/]+/g, path.sep));
       return path.dirname(path.dirname(path.dirname(launcherPath)));
     } catch {
       return null;
@@ -1016,35 +910,21 @@ export const createOpenCodeEnvRuntime = (deps) => {
         : null;
 
       if (explicitWslPath && explicitWslPath[1] && explicitWslPath[1].trim().length > 0) {
-        const probe = probeWslForOpencode();
-        const applied = applyWslOpencodeResolution({
-          wslBinary: probe?.wslBinary || resolveWslExecutablePath(),
-          opencodePath: explicitWslPath[1].trim(),
-          source: 'settings-wsl-path',
-          distro: probe?.distro || ENV_CONFIGURED_OPENCODE_WSL_DISTRO,
-        });
-        if (applied) {
-          return applied;
-        }
+        clearWslOpencodeResolution();
         if (strict) {
           throw createConfiguredWslOpencodeError(raw);
         }
+        console.warn(`Configured settings.opencodeBinary uses WSL, which is no longer supported by OpenChamber desktop: ${raw}`);
+        return null;
       }
 
       if (process.platform === 'win32' && (isWslExecutableValue(raw) || isWslExecutableValue(normalized || ''))) {
-        const probe = probeWslForOpencode();
-        const applied = applyWslOpencodeResolution({
-          wslBinary: probe?.wslBinary || normalized || raw || null,
-          opencodePath: probe?.opencodePath || 'opencode',
-          source: 'settings-wsl',
-          distro: probe?.distro || ENV_CONFIGURED_OPENCODE_WSL_DISTRO,
-        });
-        if (applied) {
-          return applied;
-        }
+        clearWslOpencodeResolution();
         if (strict) {
           throw createConfiguredWslOpencodeError(raw);
         }
+        console.warn(`Configured settings.opencodeBinary points to WSL, which is no longer supported by OpenChamber desktop: ${raw}`);
+        return null;
       }
 
       if (normalized && isExecutable(normalized) && !isMacOpenCodeAppBundlePath(normalized)) {
@@ -1203,8 +1083,6 @@ export const createOpenCodeEnvRuntime = (deps) => {
     isExecutable,
     searchPathFor,
     resolveGitBinaryForSpawn,
-    resolveWslExecutablePath,
-    buildWslExecArgs,
     clearResolvedOpenCodeBinary,
   };
 };
