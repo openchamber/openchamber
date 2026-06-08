@@ -7,6 +7,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { Icon } from "@/components/icon/Icon";
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { getDirectoryForFilePath } from '@/lib/path-utils';
 
 type PartWithText = Part & { text?: string; content?: string; value?: string };
 
@@ -49,6 +50,16 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
+// In Markdown a single "\n" is a soft break (rendered as a space). Users type plain
+// text where each newline is meant literally, so convert soft breaks into hard breaks
+// (two trailing spaces) outside of fenced code blocks, where newlines are already literal.
+const applyHardLineBreaks = (markdown: string): string => {
+    return markdown
+        .split(/(```[\s\S]*?```|~~~[\s\S]*?~~~)/g)
+        .map((segment, index) => (index % 2 === 1 ? segment : segment.replace(/ *\n/g, '  \n')))
+        .join('');
+};
+
 const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMention }) => {
     const partWithText = part as PartWithText;
     const rawText = partWithText.text;
@@ -67,7 +78,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
     const openSkill = React.useCallback((name: string) => {
         const skill = skillByName.get(name);
         if (!skill?.path) return;
-        openContextFile(effectiveDirectory || skill.path.replace(/\/[^/]*$/, '') || '/', skill.path);
+        openContextFile(effectiveDirectory || getDirectoryForFilePath('', skill.path) || '/', skill.path);
     }, [effectiveDirectory, openContextFile, skillByName]);
 
     const hasActiveSelectionInElement = React.useCallback((element: HTMLElement): boolean => {
@@ -149,6 +160,9 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
             if (!skillByName.has(skillName)) return match;
             return `${prefix}[/${skillName}](${buildSkillHref(skillName)})`;
         });
+
+        // Step 4: Preserve user newlines (markdown soft breaks would otherwise collapse to spaces)
+        content = applyHardLineBreaks(content);
 
         return content;
     }, [agentMention, skillByName, textContent]);

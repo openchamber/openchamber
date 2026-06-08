@@ -19,6 +19,7 @@ export const parseServeCliOptions = ({
     : undefined;
   const envTunnelToken = env.OPENCHAMBER_TUNNEL_TOKEN || undefined;
   const envTunnelHostname = env.OPENCHAMBER_TUNNEL_HOSTNAME || undefined;
+  const envApiOnly = env.OPENCHAMBER_API_ONLY === '1' || env.OPENCHAMBER_API_ONLY === 'true';
 
   const options = {
     port: defaultPort,
@@ -30,6 +31,7 @@ export const parseServeCliOptions = ({
     tunnelConfigPath: envTunnelConfig,
     tunnelToken: envTunnelToken,
     tunnelHostname: envTunnelHostname,
+    apiOnly: envApiOnly,
   };
 
   const consumeValue = (currentIndex, inlineValue) => {
@@ -72,6 +74,11 @@ export const parseServeCliOptions = ({
       const { value, nextIndex } = consumeValue(i, inlineValue);
       i = nextIndex;
       options.uiPassword = typeof value === 'string' ? value : '';
+      continue;
+    }
+
+    if (optionName === 'api-only') {
+      options.apiOnly = true;
       continue;
     }
 

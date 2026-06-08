@@ -469,6 +469,18 @@
           }
         },
         {
+          "label": "SSH Hosts & Proxying",
+          "link": "/ssh-hosts-proxying/",
+          "translations": {
+            "uk": "SSH-хости та проксі",
+            "zh-CN": "SSH 主机与代理",
+            "es": "Hosts SSH y proxy",
+            "pt-BR": "Hosts SSH e proxy",
+            "ko": "SSH 호스트 및 프록시",
+            "pl": "Hosty SSH i proxy"
+          }
+        },
+        {
           "label": "Updates",
           "link": "/updates/",
           "translations": {

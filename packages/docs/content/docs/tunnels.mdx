@@ -30,6 +30,8 @@ ngrok config add-authtoken <your-ngrok-token>
 openchamber
 ```
 
+If you skip this step, `openchamber tunnel start` can auto-start a CLI server. When auto-starting, you can pass server options such as `--port`, `--host`, `--lan`, `--ui-password`, and `--api-only`.
+
 2. Start a Cloudflare tunnel:
 
 ```bash
@@ -105,6 +107,7 @@ openchamber tunnel stop --port 3000
 - one active tunnel per OpenChamber instance (port)
 - starting a new mode/provider on same instance replaces previous tunnel
 - generating a new connect link revokes previous unused one
+- tunnel auto-start preserves server flags like `--ui-password` and `--api-only` in the instance settings used by restart/update flows
 
 ## Related
 

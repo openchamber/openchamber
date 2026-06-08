@@ -5,6 +5,7 @@ import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
 import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/sonner';
+import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { VSCodeLayout } from '@/components/layout/VSCodeLayout';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
@@ -12,6 +13,7 @@ import { useRouter } from '@/hooks/useRouter';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { opencodeClient } from '@/lib/opencode/client';
 import type { RuntimeAPIs } from '@/lib/api/types';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -69,7 +71,7 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
     let cancelled = false;
 
     const run = async () => {
-      const res = await fetch('/health', { method: 'GET' }).catch(() => null);
+      const res = await runtimeFetch('/health', { method: 'GET' }).catch(() => null);
       if (!res || !res.ok || cancelled) return;
       const data = (await res.json().catch(() => null)) as null | {
         planModeExperimentalEnabled?: unknown;
@@ -124,6 +126,7 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
                 <SyncAppEffects embeddedBackgroundWorkEnabled={true} />
                 <VSCodeLayout />
                 <Toaster />
+                <ConfigUpdateOverlay />
               </div>
             </TooltipProvider>
           </FireworksProvider>

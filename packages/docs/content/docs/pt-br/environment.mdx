@@ -17,6 +17,10 @@ Endereço onde o servidor web do OpenChamber escuta. Use `0.0.0.0` para permitir
 
 Senha da interface no navegador. Use quando expor fora do localhost, por túnel ou por proxy reverso.
 
+### `OPENCHAMBER_API_ONLY`
+
+Inicia o OpenChamber em modo headless quando definido como `true` ou `1`. As rotas de API continuam disponíveis para clientes desktop e mobile, mas a UI do navegador não é servida.
+
 ### `OPENCHAMBER_DATA_DIR`
 
 Altera o diretório de dados do OpenChamber. O padrão é `~/.config/openchamber`.

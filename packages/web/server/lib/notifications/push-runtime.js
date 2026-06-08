@@ -1,4 +1,5 @@
 const PUSH_SUBSCRIPTIONS_VERSION = 1;
+const UI_VISIBILITY_TTL_MS = 30_000;
 
 const isLoopbackHttpOrigin = (value) => {
   if (typeof value !== 'string') {
@@ -24,7 +25,13 @@ export const createPushRuntime = (deps) => {
   let pushInitialized = false;
 
   const uiVisibilityByToken = new Map();
-  let globalVisibilityState = false;
+  const pruneUiVisibility = (now = Date.now()) => {
+    for (const [token, state] of uiVisibilityByToken) {
+      if (!state || now - state.updatedAt > UI_VISIBILITY_TTL_MS) {
+        uiVisibilityByToken.delete(token);
+      }
+    }
+  };
 
   const readPushSubscriptionsFromDisk = async () => {
     try {
@@ -235,12 +242,25 @@ export const createPushRuntime = (deps) => {
     const now = Date.now();
     const nextVisible = Boolean(visible);
     uiVisibilityByToken.set(token, { visible: nextVisible, updatedAt: now });
-    globalVisibilityState = nextVisible;
   };
 
-  const isAnyUiVisible = () => globalVisibilityState === true;
+  const isAnyUiVisible = () => {
+    const now = Date.now();
+    pruneUiVisibility(now);
+    for (const state of uiVisibilityByToken.values()) {
+      if (state.visible === true && now - state.updatedAt <= UI_VISIBILITY_TTL_MS) {
+        return true;
+      }
+    }
+    return false;
+  };
 
-  const isUiVisible = (token) => uiVisibilityByToken.get(token)?.visible === true;
+  const isUiVisible = (token) => {
+    const now = Date.now();
+    pruneUiVisibility(now);
+    const state = uiVisibilityByToken.get(token);
+    return state?.visible === true && now - state.updatedAt <= UI_VISIBILITY_TTL_MS;
+  };
 
   const resolveVapidSubject = async () => {
     const configured = process.env.OPENCHAMBER_VAPID_SUBJECT;

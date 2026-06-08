@@ -49,6 +49,7 @@ interface ChangesPanelProps {
   diffStats: Record<string, { insertions: number; deletions: number }> | undefined;
   revertingPaths: Set<string>;
   isRevertingAll?: boolean;
+  headerBackgroundClassName?: string;
   onVisiblePathsChange?: (paths: string[]) => void;
   /** Reverts every changed path across all groups; rendered once for the panel. */
   onRevertAll?: (paths: string[]) => Promise<void> | void;
@@ -80,6 +81,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
   diffStats,
   revertingPaths,
   isRevertingAll = false,
+  headerBackgroundClassName = 'bg-sidebar',
   onVisiblePathsChange,
   onRevertAll,
   onRevertDirectory,
@@ -310,7 +312,8 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
       return (
         <div
           className={cn(
-            'sticky top-0 z-10 flex items-center gap-2 bg-sidebar py-2',
+            'sticky top-0 z-10 flex items-center gap-2 py-2',
+            headerBackgroundClassName,
             ROW_PADDING_CLASSNAME,
             !isFirst && 'mt-1 border-t border-border/40'
           )}
@@ -344,7 +347,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
         </div>
       );
     },
-    [collapsedGroups, toggleGroupCollapsed]
+    [collapsedGroups, headerBackgroundClassName, toggleGroupCollapsed]
   );
 
   const renderDirectory = React.useCallback(

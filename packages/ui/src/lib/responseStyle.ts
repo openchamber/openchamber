@@ -1,3 +1,5 @@
+import { runtimeFetch } from './runtime-fetch';
+
 export const RESPONSE_STYLE_PRESETS = ['concise', 'detailed', 'mentor', 'pushback', 'noFiller', 'matchEnergy', 'warmPeer'] as const;
 export type ResponseStylePreset = typeof RESPONSE_STYLE_PRESETS[number];
 
@@ -43,7 +45,7 @@ export const buildResponseStyleInstruction = ({
 };
 
 export const fetchResponseStyleInstruction = async (): Promise<string | null> => {
-  const response = await fetch('/api/config/settings', {
+  const response = await runtimeFetch('/api/config/settings', {
     method: 'GET',
     headers: { Accept: 'application/json' },
   });

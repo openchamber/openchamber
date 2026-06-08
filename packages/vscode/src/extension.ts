@@ -262,6 +262,13 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand('openchamber.restartApi', async () => {
       try {
+        // Prefer the full in-app reload flow (overlay + managed restart via the
+        // bridge + config/data refresh) driven by the webview — same as after an
+        // OpenCode update. Fall back to a bare manager restart when no webview is
+        // open to drive it.
+        if (chatViewProvider?.reloadOpenCode()) {
+          return;
+        }
         await openCodeManager?.restart();
         vscode.window.showInformationMessage('OpenChamber: API connection restarted');
       } catch (e) {
@@ -676,7 +683,7 @@ export async function activate(context: vscode.ExtensionContext) {
       sessionEditorProvider?.updateConnectionStatus(status, error);
 
       // Start/stop global event watcher based on connection status
-      // Mirrors web server and desktop Tauri behavior
+      // Mirrors web server and desktop behavior
       if (status === 'connected' && chatViewProvider && openCodeManager) {
         setChatViewProvider(chatViewProvider);
         void startGlobalEventWatcher(openCodeManager, chatViewProvider);

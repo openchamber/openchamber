@@ -4,14 +4,16 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
 import { useI18n } from '@/lib/i18n';
 import { Icon } from "@/components/icon/Icon";
+import { Button } from '@/components/ui/button';
 
 interface QueuedMessageChipProps {
     message: QueuedMessage;
     sessionId: string;
     onEdit: (message: QueuedMessage) => void;
+    onSend: (message: QueuedMessage) => void;
 }
 
-const QueuedMessageChip = memo(({ message, sessionId, onEdit }: QueuedMessageChipProps) => {
+const QueuedMessageChip = memo(({ message, sessionId, onEdit, onSend }: QueuedMessageChipProps) => {
     const { t } = useI18n();
     const removeFromQueue = useMessageQueueStore((state) => state.removeFromQueue);
 
@@ -29,24 +31,31 @@ const QueuedMessageChip = memo(({ message, sessionId, onEdit }: QueuedMessageChi
     const attachmentCount = message.attachments?.length ?? 0;
 
     return (
-        <div className="flex w-full items-center gap-1.5 text-sm h-5 px-1">
-            <button
+        <div className="flex min-w-0 items-center gap-2 py-1">
+            <span className="min-w-0 flex-1 truncate typography-ui-label text-foreground">
+                {firstLine || t('chat.queuedMessage.empty')}
+                {attachmentCount > 0 && (
+                    <span className="ml-1 text-muted-foreground">{t('chat.queuedMessage.attachments', { count: attachmentCount })}</span>
+                )}
+            </span>
+            <Button
                 type="button"
+                variant="secondary"
+                size="xs"
                 onClick={() => onEdit(message)}
-                className="flex min-w-0 flex-1 items-center gap-1.5 text-left hover:opacity-80 transition-opacity"
             >
-                <Icon name="message-2" className="h-4 w-4 flex-shrink-0 text-muted-foreground"
-                    />
-                <span className="text-muted-foreground flex-shrink-0">
-                    Queued
-                    {attachmentCount > 0 && (
-                        <span className="ml-1">{t('chat.queuedMessage.attachments', { count: attachmentCount })}</span>
-                    )}
-                </span>
-                <span className="text-foreground truncate">
-                    {firstLine || t('chat.queuedMessage.empty')}
-                </span>
-            </button>
+                <Icon name="edit" className="h-3 w-3" aria-hidden="true" />
+                {t('chat.queuedMessage.edit')}
+            </Button>
+            <Button
+                type="button"
+                variant="secondary"
+                size="xs"
+                onClick={() => onSend(message)}
+            >
+                <Icon name="send-plane" className="h-3 w-3" aria-hidden="true" />
+                {t('chat.queuedMessage.send')}
+            </Button>
             <button
                 type="button"
                 onClick={() => removeFromQueue(sessionId, message.id)}
@@ -63,11 +72,13 @@ QueuedMessageChip.displayName = 'QueuedMessageChip';
 
 interface QueuedMessageChipsProps {
     onEditMessage: (content: string, attachments?: QueuedMessage['attachments']) => void;
+    onSendMessage: (messageId: string) => void;
 }
 
 const EMPTY_QUEUE: QueuedMessage[] = [];
 
-export const QueuedMessageChips = memo(({ onEditMessage }: QueuedMessageChipsProps) => {
+export const QueuedMessageChips = memo(({ onEditMessage, onSendMessage }: QueuedMessageChipsProps) => {
+    const { t } = useI18n();
     const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
     const queuedMessages = useMessageQueueStore(
         React.useCallback(
@@ -93,20 +104,35 @@ export const QueuedMessageChips = memo(({ onEditMessage }: QueuedMessageChipsPro
         }
     }, [currentSessionId, popToInput, onEditMessage]);
 
+    const handleSend = React.useCallback((message: QueuedMessage) => {
+        onSendMessage(message.id);
+    }, [onSendMessage]);
+
     if (queuedMessages.length === 0 || !currentSessionId) {
         return null;
     }
 
     return (
-        <div className="pb-2 w-full px-1 space-y-1">
-            {queuedMessages.map((message) => (
-                <QueuedMessageChip
-                    key={message.id}
-                    message={message}
-                    sessionId={currentSessionId}
-                    onEdit={handleEdit}
-                />
-            ))}
+        <div className="pb-2 w-full px-1">
+            <div className="rounded-xl border border-border/60 bg-[var(--surface-elevated)] text-[var(--surface-elevated-foreground)] shadow-sm overflow-hidden">
+                <div className="flex w-full items-center gap-2 px-3 py-2 text-left">
+                    <span className="typography-ui-label font-medium text-foreground flex-shrink-0">
+                        {t('chat.queuedMessage.title')} {queuedMessages.length}
+                    </span>
+                    <Icon name="time" className="ml-auto h-4 w-4 text-muted-foreground" aria-hidden="true" />
+                </div>
+                <div className="px-3 pb-3 flex flex-col gap-1.5 max-h-[10.5rem] overflow-y-auto">
+                    {queuedMessages.map((message) => (
+                        <QueuedMessageChip
+                            key={message.id}
+                            message={message}
+                            sessionId={currentSessionId}
+                            onEdit={handleEdit}
+                            onSend={handleSend}
+                        />
+                    ))}
+                </div>
+            </div>
         </div>
     );
 });

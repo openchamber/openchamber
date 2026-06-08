@@ -29,6 +29,7 @@ export type DesktopBootOutcome =
   // Recovery screens - something is wrong
   | { target: 'local'; status: 'unreachable' }
   | { target: 'remote'; status: 'unreachable'; hostId: string; url: string }
+  | { target: 'remote'; status: 'incompatible'; hostId: string; url: string }
   | { target: 'remote'; status: 'wrong-service'; hostId: string; url: string }
   | { target: 'remote'; status: 'missing'; hostId: string };
 
@@ -40,6 +41,7 @@ export type DesktopBootView =
   | { screen: 'chooser' }
   | { screen: 'recovery'; variant: 'local-unavailable' }
   | { screen: 'recovery'; variant: 'remote-unreachable'; hostId: string; url: string }
+  | { screen: 'recovery'; variant: 'remote-incompatible'; hostId: string; url: string }
   | { screen: 'recovery'; variant: 'remote-wrong-service'; hostId: string; url: string }
   | { screen: 'recovery'; variant: 'remote-missing'; hostId: string };
 
@@ -56,7 +58,7 @@ export type DesktopBootViewInput = {
 const VALID_TARGETS = ['local', 'remote', null] as const;
 
 /** Valid status values */
-const VALID_STATUSES = ['ok', 'not-configured', 'unreachable', 'wrong-service', 'missing'] as const;
+const VALID_STATUSES = ['ok', 'not-configured', 'unreachable', 'incompatible', 'wrong-service', 'missing'] as const;
 
 /** Return type for `validateBootOutcome`. */
 type ValidationResult =
@@ -115,12 +117,12 @@ function validateBootOutcome(raw: unknown): ValidationResult {
       }
     }
 
-    if (status === 'wrong-service') {
+    if (status === 'incompatible' || status === 'wrong-service') {
       if (target !== 'remote') return { valid: false };
       if (typeof record.hostId !== 'string' || typeof record.url !== 'string') {
         return { valid: false };
       }
-      return { valid: true, outcome: { target: 'remote', status: 'wrong-service', hostId: record.hostId, url: record.url } };
+      return { valid: true, outcome: { target: 'remote', status, hostId: record.hostId, url: record.url } };
     }
 
     if (status === 'missing') {
@@ -187,6 +189,8 @@ export function resolveDesktopBootView(
   if (outcome.target === 'remote') {
     if (outcome.status === 'unreachable') {
       return { screen: 'recovery', variant: 'remote-unreachable', hostId: outcome.hostId, url: outcome.url };
+    } else if (outcome.status === 'incompatible') {
+      return { screen: 'recovery', variant: 'remote-incompatible', hostId: outcome.hostId, url: outcome.url };
     } else if (outcome.status === 'wrong-service') {
       return { screen: 'recovery', variant: 'remote-wrong-service', hostId: outcome.hostId, url: outcome.url };
     } else if (outcome.status === 'missing') {
@@ -218,14 +222,14 @@ export type InitialLoadingState = {
 };
 
 export type DesktopBootFlowRestartInput = {
-  isTauriShell: boolean;
+  isDesktopShell: boolean;
   isDesktopLocalOriginActive: boolean;
 };
 
 /**
  * Whether the initial loading screen can be dismissed.
  *
- * Desktop shells must wait until a valid boot outcome is injected by Rust.
+ * Desktop shells must wait until a valid boot outcome is injected by the native host.
  * For non-main views (chooser, recovery), the splash can dismiss as soon as
  * the outcome is known — `isInitialized` is not required because OpenCode
  * may not be available in those flows.
@@ -250,16 +254,16 @@ export function canDismissInitialLoading(state: InitialLoadingState): boolean {
 }
 
 /**
- * Boot/recovery UI can render in the Tauri startup window before the local
+ * Boot/recovery UI can render in the desktop startup window before the local
  * desktop HTTP origin is active. In that state, same-origin reloads and
- * `/api/*` requests cannot recover the app, so callers must restart Tauri.
+ * `/api/*` requests cannot recover the app, so callers must restart desktop.
  */
 export function shouldRestartDesktopBootFlow(input: DesktopBootFlowRestartInput): boolean {
-  return input.isTauriShell && !input.isDesktopLocalOriginActive;
+  return input.isDesktopShell && !input.isDesktopLocalOriginActive;
 }
 
 /**
- * Read the boot outcome injected by the Rust backend.
+ * Read the boot outcome injected by the native desktop host.
  * Returns `null` when not in desktop, when the outcome has not been set yet,
  * or when the injected payload is malformed.
  */

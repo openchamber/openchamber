@@ -11,6 +11,7 @@ import {
   TUNNEL_PROVIDER_NGROK,
   TunnelServiceError,
 } from '../types.js';
+import { getTunnelDependencyInstallInfo } from '../install-help.js';
 
 export const ngrokTunnelProviderCapabilities = {
   provider: TUNNEL_PROVIDER_NGROK,
@@ -37,17 +38,22 @@ export function createNgrokTunnelProvider() {
     checkAvailability: async () => {
       const result = await checkNgrokAvailable();
       if (result.available) {
-        return result;
+        return {
+          ...result,
+          ...getTunnelDependencyInstallInfo(TUNNEL_PROVIDER_NGROK),
+        };
       }
+      const installInfo = getTunnelDependencyInstallInfo(TUNNEL_PROVIDER_NGROK);
       return {
         ...result,
-        message: 'ngrok is not installed. Install it with: brew install ngrok',
+        ...installInfo,
       };
     },
     diagnose: async () => {
       const dependency = await checkNgrokAvailable();
       const authtoken = await checkNgrokAuthtokenConfigured(dependency.path);
       const network = await checkNgrokApiReachability();
+      const installInfo = getTunnelDependencyInstallInfo(TUNNEL_PROVIDER_NGROK);
       const startupReady = dependency.available && authtoken.configured && network.reachable;
       const providerChecks = [
         {
@@ -56,7 +62,7 @@ export function createNgrokTunnelProvider() {
           status: dependency.available ? 'pass' : 'fail',
           detail: dependency.available
             ? (dependency.version || dependency.path || 'ngrok available')
-            : 'ngrok is not installed. Install it with: brew install ngrok',
+            : installInfo.message,
         },
         {
           id: 'authtoken',

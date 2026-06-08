@@ -34,6 +34,12 @@ export interface TurnDiffStats {
     files: number;
 }
 
+export interface TurnChangedFile {
+    file: string;
+    additions: number;
+    deletions: number;
+}
+
 export interface TurnActivityGroup {
     id: string;
     anchorMessageId: string;
@@ -70,6 +76,7 @@ export interface TurnRecord {
     hasTools: boolean;
     hasReasoning: boolean;
     diffStats?: TurnDiffStats;
+    changedFiles?: TurnChangedFile[];
     stream: TurnStreamState;
     startedAt?: number;
     completedAt?: number;
@@ -115,6 +122,7 @@ export interface TurnGroupingContext {
     hasTools: boolean;
     hasReasoning: boolean;
     diffStats?: TurnDiffStats;
+    changedFiles?: TurnChangedFile[];
     userMessageCreatedAt?: number;
     userMessageVariant?: string;
     isWorking: boolean;

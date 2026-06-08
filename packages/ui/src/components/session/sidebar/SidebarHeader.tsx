@@ -15,7 +15,7 @@ import { useI18n } from '@/lib/i18n';
 
 type Props = {
   hideDirectoryControls: boolean;
-  mobileVariant: boolean;
+  showRecentControls: boolean;
   handleOpenDirectoryDialog: () => void;
   openNewSessionDraft: () => void;
   canOpenMultiRun: boolean;
@@ -40,7 +40,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
   const { t } = useI18n();
   const {
     hideDirectoryControls,
-    mobileVariant,
+    showRecentControls,
     handleOpenDirectoryDialog,
     openNewSessionDraft,
     canOpenMultiRun,
@@ -63,8 +63,10 @@ export function SidebarHeader(props: Props): React.ReactNode {
 
   const displayMode = useSessionDisplayStore((state) => state.displayMode);
   const showRecentSection = useSessionDisplayStore((state) => state.showRecentSection);
+  const showArchivedSessions = useSessionDisplayStore((state) => state.showArchivedSessions);
   const setDisplayMode = useSessionDisplayStore((state) => state.setDisplayMode);
   const toggleRecentSection = useSessionDisplayStore((state) => state.toggleRecentSection);
+  const toggleArchivedSessions = useSessionDisplayStore((state) => state.toggleArchivedSessions);
 
   if (hideDirectoryControls) {
     return null;
@@ -89,21 +91,19 @@ export function SidebarHeader(props: Props): React.ReactNode {
               <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.addProject')}</p></TooltipContent>
             </Tooltip>
 
-            {mobileVariant ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={openNewSessionDraft}
-                    className={headerActionButtonClass}
-                    aria-label={t('sessions.sidebar.header.actions.newSession')}
-                  >
-                    <Icon name="chat-new" className={headerActionIconClass} />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.newSession')}</p></TooltipContent>
-              </Tooltip>
-            ) : null}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={openNewSessionDraft}
+                  className={headerActionButtonClass}
+                  aria-label={t('sessions.sidebar.header.actions.newSession')}
+                >
+                  <Icon name="chat-new" className={headerActionIconClass} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.newSession')}</p></TooltipContent>
+            </Tooltip>
 
             <Tooltip>
               <TooltipTrigger asChild>
@@ -202,14 +202,25 @@ export function SidebarHeader(props: Props): React.ReactNode {
                   <span>{t('sessions.sidebar.header.displayMode.minimal')}</span>
                   {displayMode === 'minimal' ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
                 </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={toggleRecentSection}
-                  className="flex items-center justify-between"
-                >
-                  <span>{t('sessions.sidebar.header.displayMode.showRecent')}</span>
-                  {showRecentSection ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
-                </DropdownMenuItem>
+                {showRecentControls ? (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={toggleRecentSection}
+                      className="flex items-center justify-between"
+                    >
+                      <span>{t('sessions.sidebar.header.displayMode.showRecent')}</span>
+                      {showRecentSection ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={toggleArchivedSessions}
+                      className="flex items-center justify-between"
+                    >
+                      <span>{t('sessions.sidebar.header.displayMode.showArchived')}</span>
+                      {showArchivedSessions ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
+                    </DropdownMenuItem>
+                  </>
+                ) : null}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={collapseAllProjects} className="flex items-center gap-2">
                   <Icon name="contract-up-down" className="h-4 w-4" />

@@ -30,6 +30,8 @@ ngrok config add-authtoken <your-ngrok-token>
 openchamber
 ```
 
+Якщо пропустити цей крок, `openchamber tunnel start` може автоматично запустити CLI server. Під час auto-start можна передати server options: `--port`, `--host`, `--lan`, `--ui-password` і `--api-only`.
+
 2. Запустіть тунель Cloudflare:
 
 ```bash

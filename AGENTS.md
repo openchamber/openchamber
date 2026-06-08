@@ -1,34 +1,31 @@
-# OpenChamber - AI Agent Reference (verified)
+# OpenChamber - AI Agent Reference
 
 ## Core purpose
 
-OpenChamber provides UI runtimes (web/desktop/VS Code) for interacting with an OpenCode server (local auto-start or remote URL). UI uses HTTP + SSE via `@opencode-ai/sdk`.
+OpenChamber provides UI runtimes (web/desktop/VS Code) for interacting with an OpenCode server (local auto-start or remote URL). Official OpenCode traffic goes through `@opencode-ai/sdk`; OpenChamber-owned runtime capabilities go through `RuntimeAPIs`, `runtimeFetch`, and browser/realtime URL helpers.
 
 ## Runtime architecture (IMPORTANT)
 
 - `Desktop` (Electron) boots the web server **in the same Node process** as the Electron main, then loads the web UI from `http://127.0.0.1:<port>`. No sidecar subprocess.
-- `Desktop` (Tauri, legacy) still spawns `openchamber-server` as a bun-compiled sidecar binary. Kept only for auto-update compatibility with existing Tauri installs.
-- All backend logic lives in `packages/web/server/*` (and `packages/vscode/*` for the VS Code runtime). The native shell is not a feature backend.
-- The shell is used only for stable native integrations: menu, dialog (open folder), notifications, updater, deep-links, quit confirmation.
+- Backend/domain logic lives in `packages/web/server/*` (and `packages/vscode/*` for VS Code bridge/runtime parity). Electron owns the desktop shell/security boundary: windows, menus, dialogs, notifications, updater, deep-links, runtime host switching, local IPC gates, and SSH/tunnel management.
+- Do not add OpenCode feature backends to the native shell. Shared UI features should remain server/runtime APIs unless the capability is inherently native.
 
-### Desktop shell: Electron is the target, Tauri is legacy
+### Desktop Shell
 
-- **New desktop work goes into `packages/electron/`.** This is the forward path.
-- `packages/desktop/` (Tauri) is kept running in parallel only to preserve auto-update for existing installs until the cutover. Do **not** add features to it; do **not** port bug fixes back unless they actually affect currently-released Tauri users.
-- Desktop-side changes (IPC handlers, native integrations, window/quit/notification behavior) land in `packages/electron/main.mjs` + `packages/electron/preload.mjs`. The `__TAURI__` shim exposed by the preload keeps the shared UI working against both shells, so renderer-side code should not branch on shell type.
+- **Desktop work goes into `packages/electron/`.**
+- Desktop-side changes (IPC handlers, native integrations, window/quit/notification behavior) land in `packages/electron/main.mjs` + `packages/electron/preload.mjs`.
 - Electron imports the server via `@openchamber/web/server/index.js` (workspace dep) and calls `startWebUiServer({...})`. The returned handle has `getPort()` / `stop()`. Notifications flow via an `onDesktopNotification` callback injected at startup — no stdout-parsing IPC.
-- Build/release: both shells ship in the same GitHub release today (`.github/workflows/release.yml`). The one-shot Tauri → Electron auto-update migration is documented in `docs/TAURI_TO_ELECTRON_CUTOVER.md`; run that when the user decides to flip.
-- After the cutover ships and stabilises, `packages/desktop/` is deleted; this note collapses back to "Desktop is Electron".
+- Windows OS integrations must avoid console-window flashes. Any non-user-visible `child_process` call on Windows (system probes, tool discovery, updater/install helpers, SSH/tunnel helpers, cleanup, etc.) should run the target executable directly with `windowsHide: true`; detached/background helpers usually also need `stdio: 'ignore'`. Avoid `cmd.exe /c` pipelines and wrappers that spawn console grandchildren (`taskkill`, `ping`, nested `powershell`, batch shims), because `windowsHide` only reliably applies to the first child. If a delayed/background operation must outlive the app process, use a single hidden first-level helper (for example `powershell.exe -WindowStyle Hidden -EncodedCommand ...`) or a native Node/Electron API. Only omit this for intentionally user-visible shells/apps.
+- Build/release: Electron is the desktop release target.
 
 ## Tech stack (source of truth: `package.json`, resolved: `bun.lock`)
 
 - Runtime/tooling: Bun (`package.json` `packageManager`), Node >=20 (`package.json` `engines`)
 - UI: React, TypeScript, Vite, Tailwind v4
-- State: Zustand (`packages/ui/src/stores/`)
-- UI primitives: Base UI (`@base-ui/react`, primary source for dropdown/select/dialog/menu/tooltip/etc. — wrappers live in `packages/ui/src/components/ui/`), Radix UI (`package.json` deps, legacy usages being migrated), HeroUI (`package.json` deps), Remixicon (`package.json` deps)
+- State: Zustand stores and sync layer (`packages/ui/src/stores/`, `packages/ui/src/sync/`)
+- UI primitives: Base UI (`@base-ui/react`, primary source for dropdown/select/dialog/menu/tooltip/etc. — wrappers live in `packages/ui/src/components/ui/`), Radix UI (`package.json` deps, legacy usages being migrated), HeroUI (`package.json` deps), Remixicon as SVG sprite source only (use shared `Icon`, never direct `@remixicon/react` imports)
 - Server: Express (`packages/web/server/index.js`)
-- Desktop (forward): Electron 41 (`packages/electron/`)
-- Desktop (legacy, maintenance-only): Tauri v2 (`packages/desktop/src-tauri/`)
+- Desktop: Electron 41 (`packages/electron/`)
 - VS Code: extension + webview (`packages/vscode/`)
 
 ## Monorepo layout
@@ -37,8 +34,7 @@ Workspaces are `packages/*` (see `package.json`).
 
 - Shared UI: `packages/ui`
 - Web app + server + CLI: `packages/web`
-- Desktop shell (Electron — forward): `packages/electron`
-- Desktop shell (Tauri — legacy, maintenance-only): `packages/desktop`
+- Desktop shell: `packages/electron`
 - VS Code extension: `packages/vscode`
 
 ## Documentation map
@@ -52,6 +48,18 @@ Web runtime and server implementation for OpenChamber.
 #### lib
 
 Server-side integration modules used by API routes and runtime services.
+
+##### event-stream
+
+OpenChamber-owned event stream helpers for server-sent runtime events.
+
+- Module docs: `packages/web/server/lib/event-stream/DOCUMENTATION.md`
+
+##### fs
+
+Filesystem routes, raw file access, search helpers, and workspace-scoped file operations.
+
+- Module docs: `packages/web/server/lib/fs/DOCUMENTATION.md`
 
 ##### quota
 
@@ -83,6 +91,18 @@ Notification message preparation utilities for system notifications, including t
 
 - Module docs: `packages/web/server/lib/notifications/DOCUMENTATION.md`
 
+##### scheduled-tasks
+
+Scheduled task persistence, execution, and event fanout for recurring sessions.
+
+- Module docs: `packages/web/server/lib/scheduled-tasks/DOCUMENTATION.md`
+
+##### text
+
+Text processing helpers shared by server-side routes and summarization flows.
+
+- Module docs: `packages/web/server/lib/text/DOCUMENTATION.md`
+
 ##### terminal
 
 WebSocket protocol utilities for terminal input handling including message normalization, control frame parsing, and rate limiting.
@@ -95,11 +115,51 @@ Server-side text-to-speech services and summarization helpers for `/api/tts/*` e
 
 - Module docs: `packages/web/server/lib/tts/DOCUMENTATION.md`
 
+##### tunnels
+
+Tunnel provider setup and runtime helpers for exposing OpenChamber over remote URLs.
+
+- Module docs: `packages/web/server/lib/tunnels/DOCUMENTATION.md`
+
+##### ui-auth
+
+UI session auth, client tokens, URL-token scoping, passkey/reset flows, and route-level auth gates.
+
+- Module docs: `packages/web/server/lib/ui-auth/DOCUMENTATION.md`
+
 ##### skills-catalog
 
 Skills catalog management including discovery, installation, and configuration of agent skill packages.
 
 - Module docs: `packages/web/server/lib/skills-catalog/DOCUMENTATION.md`
+
+### ui
+
+Shared React UI, sync layer, runtime API contracts, and stores.
+
+#### sync
+
+Session synchronization, event pipeline, optimistic updates, caches, and live-state stores.
+
+- Module docs: `packages/ui/src/sync/DOCUMENTATION.md`
+
+#### stores
+
+Zustand store ownership, persistence expectations, and store-splitting guidance.
+
+- Module docs: `packages/ui/src/stores/DOCUMENTATION.md`
+
+#### session sidebar
+
+Session sidebar grouping, ordering, virtualization-adjacent behavior, and project/worktree display.
+
+- Module docs: `packages/ui/src/components/session/sidebar/DOCUMENTATION.md`
+
+#### message parts
+
+Chat message part rendering and message-row performance expectations.
+
+- Module docs: `packages/ui/src/components/chat/message/parts/DOCUMENTATION.md`
 
 ## Build / dev commands (verified)
 
@@ -109,7 +169,6 @@ All scripts are in `package.json`.
 - Build all: `bun run build`
 - Desktop build (Electron — primary): `bun run electron:build`
 - Desktop dev (Electron): `bun run electron:dev`
-- Desktop build (Tauri — legacy): `bun run desktop:build`
 - VS Code build: `bun run vscode:build`
 - Release smoke build: `bun run release:test` (shell script: `scripts/test-release-build.sh`)
 
@@ -118,17 +177,16 @@ All scripts are in `package.json`.
 - Web bootstrap: `packages/web/src/main.tsx`
 - Web server: `packages/web/server/index.js`
 - Web CLI: `packages/web/bin/cli.js` (package bin: `packages/web/package.json`)
-- Desktop (Electron — primary): `packages/electron/main.mjs` (boots the web server in-process via `startWebUiServer`, loads web UI over loopback; preload at `packages/electron/preload.mjs` exposes the `__TAURI__` IPC shim so shared UI code is shell-agnostic)
-- Desktop (Tauri — legacy): `packages/desktop/src-tauri/src/main.rs`
+- Desktop: `packages/electron/main.mjs` (boots the web server in-process via `startWebUiServer`, loads web UI over loopback; preload at `packages/electron/preload.mjs` exposes the desktop IPC bridge)
 - VS Code extension host: `packages/vscode/src/extension.ts`
 - VS Code webview bootstrap: `packages/vscode/webview/main.tsx`
 
 ## OpenCode integration
 
 - UI client wrapper: `packages/ui/src/lib/opencode/client.ts` (imports `@opencode-ai/sdk/v2`)
-- SSE hookup: `packages/ui/src/hooks/useEventStream.ts`
+- Sync/event pipeline: app roots mount `SyncProvider` from `packages/ui/src/sync/sync-context.tsx`; OpenCode SSE/WS event handling lives in `packages/ui/src/sync/event-pipeline.ts`
 - Web server embeds/starts OpenCode server: `packages/web/server/index.js` (`createOpencodeServer`)
-- Web runtime filesystem endpoints: search `packages/web/server/index.js` for `/api/fs/`
+- Web runtime filesystem endpoints: `packages/web/server/lib/fs/routes.js`, registered by `packages/web/server/lib/opencode/feature-routes-runtime.js`
 - External server support: Set `OPENCODE_HOST` (full base URL, e.g. `http://hostname:4096`) or `OPENCODE_PORT`, plus `OPENCODE_SKIP_START=true`, to connect to existing OpenCode instance
 
 ## Key UI patterns (reference files)
@@ -142,8 +200,10 @@ All scripts are in `package.json`.
 
 ## External / system integrations (active)
 
-- Git: `packages/ui/src/lib/gitApi.ts`, `packages/web/server/index.js` (`simple-git`)
-- Terminal PTY: `packages/web/server/index.js` (`bun-pty`/`node-pty`)
+- Runtime API contracts: `packages/ui/src/lib/api/types.ts`; React consumption via `packages/ui/src/hooks/useRuntimeAPIs.ts`
+- Runtime transport/auth: `packages/ui/src/lib/runtime-fetch.ts`, `packages/ui/src/lib/runtime-url.ts`, `packages/ui/src/lib/runtime-auth.ts`
+- Git: `packages/ui/src/lib/gitApi.ts`, `packages/web/server/lib/git/service.js` (`simple-git`)
+- Terminal PTY: `packages/web/server/lib/terminal/runtime.js` (`bun-pty`/`node-pty`)
 - Skills catalog: `packages/web/server/lib/skills-catalog/`, UI: `packages/ui/src/components/sections/skills/`
 
 ## Agent constraints
@@ -268,29 +328,20 @@ Do not rely on prompts to enforce policy.
 Detailed Clack UX patterns (primitives, prompt gating, and implementation checklist)
 are defined in the `clack-cli-patterns` skill and should not be duplicated here.
 
-## Clack CLI Skill (MANDATORY for terminal CLI work)
+## Project Skills (MANDATORY)
 
-When working on terminal CLI commands, prompts, or output formatting, agents **MUST** study the Clack CLI skill first.
+Project skills live under `.agents/skills/*/SKILL.md`. Before editing, agents **MUST** load every skill whose trigger matches the work; if multiple rows apply, load all of them.
 
-**Before starting terminal CLI work:**
+| Work being done | Required skill call |
+|---|---|
+| Terminal CLI commands, prompts, or output formatting, especially `packages/web/bin/*` | `skill({ name: "clack-cli-patterns" })` |
+| Shared UI data access, `RuntimeAPIs`, `runtimeFetch`, `runtime-url`, OpenCode SDK calls, VS Code bridges/proxies, authenticated browser assets, Electron runtime switching, or web server API endpoints | `skill({ name: "ui-api-decoupling" })` |
+| UI components, styling, visual elements, colors, buttons, or icons | `skill({ name: "theme-system" })` |
+| User-facing UI text: labels, buttons, placeholders, aria labels, empty/error/loading states, toasts, dialogs, settings copy, or navigation labels | `skill({ name: "locale-ui-patterns" })` |
+| Settings pages, settings dialogs, configuration UI, or visual/layout changes inside Settings | `skill({ name: "settings-ui-patterns" })` |
+| Drag-to-reorder, sortable lists/chips/grids, or `@dnd-kit` behavior including touch/mobile and wrapping variable-width items | `skill({ name: "drag-to-reorder" })` |
 
-```
-skill({ name: "clack-cli-patterns" })
-```
-
-Scope: terminal CLI only (for example `packages/web/bin/*`). Do not apply this requirement to VS Code or web UI work.
-
-## Theme System (MANDATORY for UI work)
-
-When working on any UI components, styling, or visual changes, agents **MUST** study the theme system skill first.
-
-**Before starting any UI work:**
-
-```
-skill({ name: "theme-system" })
-```
-
-This skill contains all color tokens, semantic logic, decision tree, and usage patterns. All UI colors must use theme tokens - never hardcoded values or Tailwind color classes.
+Skill docs are the source of truth for detailed patterns. Do not duplicate their full guidance here; load the skill and follow it before making matching changes.
 
 ## Performance rules (MANDATORY)
 
@@ -400,7 +451,7 @@ A single store with N properties means every subscriber re-evaluates on every st
 
 ## Validation expectations
 
-- Run `bun run type-check` and `bun run lint` before finalizing.
+- Run `bun run type-check` and `bun run lint` before finalizing (set longer timeouts since on slower machines it may take more time for tool to run this).
 - For hot-path changes, verify behavior under streaming or repeated events, not just static render.
 - For sync or startup changes, verify fresh load, retry/failure, and restart behavior.
 - For session changes, verify create, stream, abort, permission, archive/delete, and revisit flows when relevant.
@@ -408,4 +459,4 @@ A single store with N properties means every subscriber re-evaluates on every st
 ## Recent changes
 
 - Releases + high-level changes: `CHANGELOG.md`
-- Recent commits: `git log --oneline` (latest tags: `v1.4.6`, `v1.4.5`)
+- Recent commits: `git log --oneline` (latest tags: `v1.11.7`, `v1.11.6`)

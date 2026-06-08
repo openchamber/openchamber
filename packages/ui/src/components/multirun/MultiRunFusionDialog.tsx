@@ -166,21 +166,20 @@ export function MultiRunFusionDialog({
       useSessionUIStore.getState().setCurrentSession(fusionSession.id, directory);
       onOpenChange(false);
 
-      await opencodeClient.withDirectory(directory ?? opencodeClient.getDirectory(), () =>
-        opencodeClient.sendMessage({
-          id: fusionSession.id,
-          providerID,
-          modelID,
-          variant: variant || undefined,
-          agent: agent || undefined,
-          text: visiblePrompt,
-          additionalParts: [
-            { text: instructionsPrompt, synthetic: true },
-            ...usableSources.map((item, index) => ({ text: buildSourcePart(item.source, item.text, index), synthetic: true })),
-            { text: '\n\n--- FUSION INPUTS END ---\nNow write the final fused answer.', synthetic: true },
-          ],
-        })
-      );
+      await opencodeClient.sendMessage({
+        id: fusionSession.id,
+        providerID,
+        modelID,
+        variant: variant || undefined,
+        agent: agent || undefined,
+        text: visiblePrompt,
+        additionalParts: [
+          { text: instructionsPrompt, synthetic: true },
+          ...usableSources.map((item, index) => ({ text: buildSourcePart(item.source, item.text, index), synthetic: true })),
+          { text: '\n\n--- FUSION INPUTS END ---\nNow write the final fused answer.', synthetic: true },
+        ],
+        directory: directory ?? opencodeClient.getDirectory(),
+      });
     } catch (error) {
       console.error('[MultiRunFusion] Failed to start fusion', error);
       toast.error(t('multirun.fusion.toast.failed'));

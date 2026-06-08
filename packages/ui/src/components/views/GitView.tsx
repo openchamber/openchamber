@@ -1712,7 +1712,7 @@ export const GitView: React.FC = () => {
   );
 
   const handleRevertPaths = React.useCallback(
-    async (paths: string[], setGlobalReverting: boolean) => {
+    async (paths: string[], setGlobalReverting: boolean, scope: 'all' | 'working' = 'all') => {
       if (!currentDirectory || paths.length === 0) {
         return;
       }
@@ -1723,7 +1723,7 @@ export const GitView: React.FC = () => {
       }
 
       const stagedPaths = new Set(stagedChangeEntries.map((entry) => entry.path));
-      const touchesStagedIndex = uniquePaths.some((path) => stagedPaths.has(path));
+      const touchesStagedIndex = scope === 'all' && uniquePaths.some((path) => stagedPaths.has(path));
 
       if (setGlobalReverting) {
         setIsRevertingAll(true);
@@ -1739,7 +1739,7 @@ export const GitView: React.FC = () => {
       try {
         await Promise.all(uniquePaths.map(async (filePath) => {
           try {
-            await git.revertGitFile(currentDirectory, filePath);
+            await git.revertGitFile(currentDirectory, filePath, { scope });
           } catch (err) {
             failed.push({
               path: filePath,
@@ -1793,7 +1793,7 @@ export const GitView: React.FC = () => {
 
   const handleRevertDirectory = React.useCallback(
     async (paths: string[]) => {
-      await handleRevertPaths(paths, false);
+      await handleRevertPaths(paths, false, 'working');
     },
     [handleRevertPaths]
   );
