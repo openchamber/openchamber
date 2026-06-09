@@ -2031,20 +2031,6 @@ export const useConfigStore = create<ConfigStore>()(
                             });
                         };
 
-                        // Prefer the selected agent's configured model when switching agents.
-                        const agent = agents.find((candidate) => candidate.name === agentName);
-                        const agentModelSelection = agent?.model;
-                        if (agentModelSelection?.providerID && agentModelSelection?.modelID) {
-                            const { providerID, modelID } = agentModelSelection;
-                            const agentProvider = providers.find((provider) => provider.id === providerID);
-                            const agentModel = agentProvider?.models.find((model) => model.id === modelID);
-
-                            if (agentModel) {
-                                applyResolvedModelSelection(providerID, modelID, undefined);
-                                return;
-                            }
-                        }
-
                         if (currentSessionId) {
                             const existingAgentModel = useSelectionStore.getState().getAgentModelForSession(currentSessionId, agentName);
                             if (existingAgentModel && hasProviderModel(providers, existingAgentModel.providerId, existingAgentModel.modelId)) {
@@ -2061,6 +2047,20 @@ export const useConfigStore = create<ConfigStore>()(
                                 ) {
                                     applyResolvedModelSelection(existingAgentModel.providerId, existingAgentModel.modelId, savedVariant);
                                 }
+                                return;
+                            }
+                        }
+
+                        // Fall back to the selected agent's configured model when no session-saved selection exists.
+                        const agent = agents.find((candidate) => candidate.name === agentName);
+                        const agentModelSelection = agent?.model;
+                        if (agentModelSelection?.providerID && agentModelSelection?.modelID) {
+                            const { providerID, modelID } = agentModelSelection;
+                            const agentProvider = providers.find((provider) => provider.id === providerID);
+                            const agentModel = agentProvider?.models.find((model) => model.id === modelID);
+
+                            if (agentModel) {
+                                applyResolvedModelSelection(providerID, modelID, undefined);
                                 return;
                             }
                         }
