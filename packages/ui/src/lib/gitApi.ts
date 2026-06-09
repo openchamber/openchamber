@@ -360,6 +360,23 @@ const resolveSessionGenerationContext = (): SessionGenerationContext | null => {
   const context = useContextStore.getState();
   const config = useConfigStore.getState();
 
+  const configuredGitModel = config.getResolvedGitGenerationModel();
+  if (configuredGitModel?.providerId && configuredGitModel?.modelId) {
+    const agent = context.getSessionAgentSelection(sessionId) || config.currentAgentName || undefined;
+    const agentVariant = agent
+      ? context.getAgentModelVariantForSession(sessionId, agent, configuredGitModel.providerId, configuredGitModel.modelId)
+      : undefined;
+    const variant = agentVariant || config.currentVariant || undefined;
+
+    return {
+      sessionId,
+      providerID: configuredGitModel.providerId,
+      modelID: configuredGitModel.modelId,
+      agent,
+      variant,
+    };
+  }
+
   const agent = context.getSessionAgentSelection(sessionId) || config.currentAgentName || undefined;
   const sessionModel = context.getSessionModelSelection(sessionId);
   const agentModel = agent ? context.getAgentModelForSession(sessionId, agent) : null;

@@ -678,6 +678,8 @@ export const settingsDict = {
   'settings.openchamber.desktopNetwork.hint.openAfterRestart': 'Po restarcie otwórz z innego urządzenia: ',
   'settings.openchamber.desktopNetwork.hint.openNow': 'Otwórz z innego urządzenia: ',
   'settings.openchamber.desktopNetwork.title': 'Dostęp sieciowy pulpitu',
+  'settings.openchamber.git.generationModelTitle': 'Model generowania',
+  'settings.openchamber.git.generationModelPlaceholder': 'Użyj modelu aktywnej sesji',
   'settings.openchamber.git.changesViewAria': 'Tryb widoku zmian Git',
   'settings.openchamber.git.changesViewTitle': 'Widok zmian',
   'settings.openchamber.git.enableGitmoji': 'Włącz wybieranie Gitmoji',
