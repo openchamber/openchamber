@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import type { Snippet } from '@/types/snippet';
 import { opencodeClient } from '@/lib/opencode/client';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 
 export type SnippetScope = 'global' | 'project';
@@ -67,7 +68,7 @@ export const useSnippetsStore = create<SnippetsStore>()(
           try {
             const directory = getRequestDirectory();
             const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
-            const response = await fetch(`/api/config/snippets${queryParams}`, {
+            const response = await runtimeFetch(`/api/config/snippets${queryParams}`, {
               headers: { 'Cache-Control': 'no-cache', ...(directory ? { 'x-opencode-directory': directory } : {}) },
             });
             if (!response.ok) throw new Error('Failed to load snippets');
@@ -94,7 +95,7 @@ export const useSnippetsStore = create<SnippetsStore>()(
         try {
           const directory = getRequestDirectory();
           const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
-          const response = await fetch(`/api/config/snippets/${encodeURIComponent(name)}${queryParams}`, {
+          const response = await runtimeFetch(`/api/config/snippets/${encodeURIComponent(name)}${queryParams}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...(directory ? { 'x-opencode-directory': directory } : {}) },
             body: JSON.stringify({ content, aliases: options.aliases, description: options.description, scope: options.scope }),
@@ -119,7 +120,7 @@ export const useSnippetsStore = create<SnippetsStore>()(
         try {
           const directory = getRequestDirectory();
           const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
-          const response = await fetch(`/api/config/snippets/${encodeURIComponent(name)}${queryParams}`, {
+          const response = await runtimeFetch(`/api/config/snippets/${encodeURIComponent(name)}${queryParams}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json', ...(directory ? { 'x-opencode-directory': directory } : {}) },
             body: JSON.stringify(updates),
@@ -138,7 +139,7 @@ export const useSnippetsStore = create<SnippetsStore>()(
         try {
           const directory = getRequestDirectory();
           const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
-          const response = await fetch(`/api/config/snippets/${encodeURIComponent(name)}${queryParams}`, {
+          const response = await runtimeFetch(`/api/config/snippets/${encodeURIComponent(name)}${queryParams}`, {
             method: 'DELETE',
             headers: directory ? { 'x-opencode-directory': directory } : undefined,
           });
@@ -157,7 +158,7 @@ export const useSnippetsStore = create<SnippetsStore>()(
         if (!/#[a-z0-9_-]+/i.test(text)) return text;
         const directory = getRequestDirectory();
         const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
-        const response = await fetch(`/api/config/snippets/expand${queryParams}`, {
+        const response = await runtimeFetch(`/api/config/snippets/expand${queryParams}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...(directory ? { 'x-opencode-directory': directory } : {}) },
           body: JSON.stringify({ text }),

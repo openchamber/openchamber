@@ -22,6 +22,7 @@ import { isDesktopShell } from '@/lib/desktop';
 import { getAgentColor } from '@/lib/agentColors';
 import { useDeviceInfo } from '@/lib/device';
 import { mergeModelMetadataWithLiveModel } from '@/lib/modelMetadata';
+import { getModelDisplayName as getSharedModelDisplayName } from '@/lib/modelDisplay';
 import { getEditModeColors } from '@/lib/permissions/editModeColors';
 import { cn, fuzzyMatch } from '@/lib/utils';
 import { useContextStore } from '@/stores/contextStore';
@@ -38,6 +39,7 @@ import { formatEffortLabel, getCycledPrimaryAgentName, type MobileControlsPanel 
 import { useI18n } from '@/lib/i18n';
 import { useOpenCodeReadiness } from '@/hooks/useOpenCodeReadiness';
 import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
+import { markStartupTrace } from '@/lib/startupTrace';
 
 type IconComponent = IconName;
 
@@ -312,6 +314,19 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     // Use visible agents (excludes hidden internal agents)
     const agents = getVisibleAgents();
     const primaryAgents = React.useMemo(() => agents.filter((agent) => agent.mode === 'primary'), [agents]);
+    const tracedReadyRef = React.useRef(false);
+
+    React.useEffect(() => {
+        if (tracedReadyRef.current || !isReady) return;
+        tracedReadyRef.current = true;
+        markStartupTrace('ModelControls:ready', {
+            providers: providers.length,
+            agents: agents.length,
+            currentProviderId,
+            currentModelId,
+            currentAgentName,
+        });
+    }, [agents.length, currentAgentName, currentModelId, currentProviderId, isReady, providers.length]);
 
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
     const getDirectoryForSession = useSessionUIStore((s) => s.getDirectoryForSession);
@@ -1244,12 +1259,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         }
     };
 
-    const getModelDisplayName = (model: ProviderModel | undefined) => {
-        const name = (typeof model?.name === 'string' ? model.name : (typeof model?.id === 'string' ? model.id : ''));
-        if (name.length > 40) {
-            return name.substring(0, 37) + '...';
-        }
-        return name;
+    const getModelDisplayName = (model: ProviderModel | undefined, fallbackModelId?: string) => {
+        return getSharedModelDisplayName(model, fallbackModelId, { maxLength: 40 });
     };
 
     const getProviderDisplayName = () => {
@@ -1258,10 +1269,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     };
 
     const getCurrentModelDisplayName = () => {
-        if (!currentProviderId || !currentModelId) return 'Not selected';
-        if (models.length === 0) return 'Not selected';
+        if (!currentModelId) return t('chat.modelControls.selectModel');
         const currentModel = models.find((m: ProviderModel) => m.id === currentModelId);
-        return getModelDisplayName(currentModel);
+        return getModelDisplayName(currentModel, currentModelId) || t('chat.modelControls.selectModel');
     };
 
     const currentModelDisplayName = getCurrentModelDisplayName();

@@ -16,6 +16,9 @@ import { hasPendingUserSendAnimation, consumePendingUserSendAnimation } from '@/
 import { streamPerfCount, streamPerfMeasure } from '@/stores/utils/streamDebug';
 import type { StreamPhase } from './message/types';
 import { normalizeParts } from './message/partUtils';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { getReviewTransferDirection, type ReviewTransferDirection } from '@/lib/reviewFlow';
+import { getOriginalSessionID, getReviewSessionID } from '@/lib/sessionReviewMetadata';
 
 const MESSAGE_LIST_VIRTUALIZE_THRESHOLD = 5;
 const MESSAGE_LIST_OVERSCAN = 6;
@@ -391,7 +394,6 @@ const getNormalizedMessageForDisplay = (message: ChatMessageEntry): ChatMessageE
 
 interface MessageListProps {
     sessionKey: string;
-    turnStart: number;
     disableStaging?: boolean;
     messages: ChatMessageEntry[];
     sessionIsWorking?: boolean;
@@ -405,9 +407,7 @@ interface MessageListProps {
     } | null;
     onMessageContentChange: (reason?: ContentChangeReason) => void;
     getAnimationHandlers: (messageId: string) => AnimationHandlers;
-    hasMoreAbove: boolean;
     isLoadingOlder: boolean;
-    onLoadOlder: () => void;
     scrollToBottom?: () => void;
     scrollRef?: React.RefObject<HTMLDivElement | null>;
 }
@@ -447,6 +447,7 @@ interface MessageRowProps {
     onContentChange: (reason?: ContentChangeReason) => void;
     animationHandlers: AnimationHandlers;
     scrollToBottom?: () => void;
+    reviewTransferDirection?: ReviewTransferDirection | null;
 }
 
 const MessageRow = React.memo<MessageRowProps>(({ 
@@ -462,6 +463,7 @@ const MessageRow = React.memo<MessageRowProps>(({
     onContentChange,
     animationHandlers,
     scrollToBottom,
+    reviewTransferDirection,
 }) => {
     return (
         <ChatMessage
@@ -477,6 +479,7 @@ const MessageRow = React.memo<MessageRowProps>(({
             assistantHeaderMessageId={assistantHeaderMessageId}
             isInActiveTurn={isInActiveTurn}
             activeStreamingPhase={activeStreamingPhase}
+            reviewTransferDirection={reviewTransferDirection}
         />
     );
 }, (prev, next) => {
@@ -494,6 +497,7 @@ const MessageRow = React.memo<MessageRowProps>(({
         && prev.assistantHeaderMessageId === next.assistantHeaderMessageId
         && prev.isInActiveTurn === next.isInActiveTurn
         && prev.activeStreamingPhase === next.activeStreamingPhase
+        && prev.reviewTransferDirection === next.reviewTransferDirection
         && prev.animationHandlers?.onChunk === next.animationHandlers?.onChunk
         && prev.animationHandlers?.onComplete === next.animationHandlers?.onComplete
         && prev.animationHandlers?.onStreamingCandidate === next.animationHandlers?.onStreamingCandidate
@@ -521,6 +525,7 @@ interface TurnBlockProps {
     onUserAnimationConsumed: (messageId: string) => void;
     activeStreamingMessageId?: string | null;
     activeStreamingPhase?: StreamPhase | null;
+    reviewTransferDirection?: ReviewTransferDirection | null;
 }
 
 const TurnBlock = React.memo(({
@@ -539,6 +544,7 @@ const TurnBlock = React.memo(({
     onUserAnimationConsumed,
     activeStreamingMessageId,
     activeStreamingPhase,
+    reviewTransferDirection,
 }: TurnBlockProps) => {
     const turnUiState = turnUiStates.get(turn.turnId) ?? { isExpanded: defaultActivityExpanded };
     const handleToggleTurnGroup = React.useCallback(() => {
@@ -688,10 +694,11 @@ const TurnBlock = React.memo(({
             hasTools: turn.hasTools,
             hasReasoning: turn.hasReasoning,
             diffStats: turn.diffStats,
+            changedFiles: turn.changedFiles,
             userMessageCreatedAt: typeof userCreatedAt === 'number' ? userCreatedAt : undefined,
             userMessageVariant,
         };
-    }, [turn.diffStats, turn.hasReasoning, turn.hasTools, turn.headerMessageId, turn.summaryText, turn.turnId, turn.userMessage.info, visibleActivityParts, visibleActivitySegments]);
+    }, [turn.changedFiles, turn.diffStats, turn.hasReasoning, turn.hasTools, turn.headerMessageId, turn.summaryText, turn.turnId, turn.userMessage.info, visibleActivityParts, visibleActivitySegments]);
 
     const renderMessage = React.useCallback(
         (message: ChatMessageEntry) => {
@@ -739,6 +746,7 @@ const TurnBlock = React.memo(({
                         activityGroupSegments: turnGroupingContextBase.activityGroupSegments,
                         headerMessageId: turnGroupingContextBase.headerMessageId,
                         diffStats: turnGroupingContextBase.diffStats,
+                        changedFiles: turnGroupingContextBase.changedFiles,
                         userMessageCreatedAt: turnGroupingContextBase.userMessageCreatedAt,
                         userMessageVariant: turnGroupingContextBase.userMessageVariant,
                         isGroupExpanded: turnUiState.isExpanded,
@@ -757,6 +765,7 @@ const TurnBlock = React.memo(({
                     assistantHeaderMessageId={assistantHeaderMessageId}
                     isInActiveTurn={Boolean(streamingAssistantMessageId) && message.info.id === streamingAssistantMessageId}
                     activeStreamingPhase={message.info.id === streamingAssistantMessageId ? activeStreamingPhase : null}
+                    reviewTransferDirection={reviewTransferDirection}
                     animateUserOnMount={shouldAnimateUserMessage(message)}
                     onUserAnimationConsumed={onUserAnimationConsumed}
                     onContentChange={onMessageContentChange}
@@ -783,6 +792,7 @@ const TurnBlock = React.memo(({
             turnGroupingContextBase,
             streamingAssistantMessageId,
             activeStreamingPhase,
+            reviewTransferDirection,
             visibleAssistantMessages,
             visibleAssistantIds,
             visibleActivitySegments,
@@ -821,6 +831,7 @@ interface UngroupedMessageRowProps {
     onUserAnimationConsumed: (messageId: string) => void;
     activeStreamingMessageId?: string | null;
     activeStreamingPhase?: StreamPhase | null;
+    reviewTransferDirection?: ReviewTransferDirection | null;
 }
 
 const UngroupedMessageRow = React.memo(({
@@ -834,6 +845,7 @@ const UngroupedMessageRow = React.memo(({
     onUserAnimationConsumed,
     activeStreamingMessageId,
     activeStreamingPhase,
+    reviewTransferDirection,
 }: UngroupedMessageRowProps) => {
     return (
         <MessageRow
@@ -847,6 +859,7 @@ const UngroupedMessageRow = React.memo(({
             scrollToBottom={scrollToBottom}
             isInActiveTurn={Boolean(activeStreamingMessageId) && message.info.id === activeStreamingMessageId}
             activeStreamingPhase={message.info.id === activeStreamingMessageId ? activeStreamingPhase : null}
+            reviewTransferDirection={reviewTransferDirection}
         />
     );
 });
@@ -868,6 +881,7 @@ interface MessageListEntryProps {
     onUserAnimationConsumed: (messageId: string) => void;
     activeStreamingMessageId?: string | null;
     activeStreamingPhase?: StreamPhase | null;
+    reviewTransferDirection?: ReviewTransferDirection | null;
 }
 
 const turnContainsMessageId = (turn: TurnRecord, messageId: string | null | undefined): boolean => {
@@ -897,6 +911,7 @@ const MessageListEntry = React.memo(({
     onUserAnimationConsumed,
     activeStreamingMessageId,
     activeStreamingPhase,
+    reviewTransferDirection,
 }: MessageListEntryProps) => {
     if (entry.kind === 'ungrouped') {
         return (
@@ -911,6 +926,7 @@ const MessageListEntry = React.memo(({
                 onUserAnimationConsumed={onUserAnimationConsumed}
                 activeStreamingMessageId={activeStreamingMessageId}
                 activeStreamingPhase={activeStreamingPhase}
+                reviewTransferDirection={reviewTransferDirection}
             />
         );
     }
@@ -928,6 +944,7 @@ const MessageListEntry = React.memo(({
             onUserAnimationConsumed={onUserAnimationConsumed}
             activeStreamingMessageId={activeStreamingMessageId}
             activeStreamingPhase={activeStreamingPhase}
+            reviewTransferDirection={reviewTransferDirection}
             onMessageContentChange={onMessageContentChange}
             getAnimationHandlers={getAnimationHandlers}
             scrollToBottom={scrollToBottom}
@@ -957,9 +974,10 @@ type StaticHistoryListProps = {
     shouldAnimateUserMessage: (message: ChatMessageEntry) => boolean;
     onUserAnimationConsumed: (messageId: string) => void;
     activeStreamingPhase?: StreamPhase | null;
+    reviewTransferDirection?: ReviewTransferDirection | null;
 };
 
-const StaticHistoryList = React.memo(({ entries, shouldVirtualize, virtualRows, totalSize, measureElement, contentRef, onMessageContentChange, getAnimationHandlers, scrollToBottom, stickyUserHeader, defaultActivityExpanded, turnUiStates, onToggleTurnGroup, chatRenderMode, shouldAnimateUserMessage, onUserAnimationConsumed, activeStreamingPhase }: StaticHistoryListProps) => {
+const StaticHistoryList = React.memo(({ entries, shouldVirtualize, virtualRows, totalSize, measureElement, contentRef, onMessageContentChange, getAnimationHandlers, scrollToBottom, stickyUserHeader, defaultActivityExpanded, turnUiStates, onToggleTurnGroup, chatRenderMode, shouldAnimateUserMessage, onUserAnimationConsumed, activeStreamingPhase, reviewTransferDirection }: StaticHistoryListProps) => {
     const renderEntry = React.useCallback((entry: RenderEntry) => {
         return (
             <MessageListEntry
@@ -978,9 +996,10 @@ const StaticHistoryList = React.memo(({ entries, shouldVirtualize, virtualRows, 
                 onUserAnimationConsumed={onUserAnimationConsumed}
                 activeStreamingMessageId={null}
                 activeStreamingPhase={activeStreamingPhase}
+                reviewTransferDirection={reviewTransferDirection}
             />
         );
-    }, [activeStreamingPhase, chatRenderMode, defaultActivityExpanded, getAnimationHandlers, onMessageContentChange, onToggleTurnGroup, onUserAnimationConsumed, scrollToBottom, shouldAnimateUserMessage, stickyUserHeader, turnUiStates]);
+    }, [activeStreamingPhase, chatRenderMode, defaultActivityExpanded, getAnimationHandlers, onMessageContentChange, onToggleTurnGroup, onUserAnimationConsumed, reviewTransferDirection, scrollToBottom, shouldAnimateUserMessage, stickyUserHeader, turnUiStates]);
 
     const paddingTop = shouldVirtualize && virtualRows.length > 0
         ? virtualRows[0]?.start ?? 0
@@ -1005,15 +1024,9 @@ const StaticHistoryList = React.memo(({ entries, shouldVirtualize, virtualRows, 
     }
 
     if (virtualRows.length === 0 && entries.length > 0) {
-        const fallbackStart = Math.max(0, entries.length - MESSAGE_LIST_OVERSCAN * 2);
-        const fallbackEntries = entries.slice(fallbackStart);
-        const fallbackHeight = fallbackEntries.reduce((total, entry) => total + estimateHistoryEntryHeight(entry), 0);
-        const fallbackPaddingTop = Math.max(0, totalSize - fallbackHeight);
-
         return (
             <div ref={contentRef} className="relative w-full">
-                {fallbackPaddingTop > 0 ? <div aria-hidden="true" style={{ height: `${fallbackPaddingTop}px` }} /> : null}
-                {fallbackEntries.map((entry) => (
+                {entries.map((entry) => (
                     <div
                         key={entry.key}
                         data-turn-entry={entry.key}
@@ -1067,6 +1080,7 @@ const StreamingTailContent: React.FC<{
     onUserAnimationConsumed: (messageId: string) => void;
     activeStreamingMessageId?: string | null;
     activeStreamingPhase?: StreamPhase | null;
+    reviewTransferDirection?: ReviewTransferDirection | null;
 }> = ({
     entry,
     onMessageContentChange,
@@ -1082,6 +1096,7 @@ const StreamingTailContent: React.FC<{
     onUserAnimationConsumed,
     activeStreamingMessageId,
     activeStreamingPhase,
+    reviewTransferDirection,
 }) => {
     return (
         <MessageListEntry
@@ -1099,6 +1114,7 @@ const StreamingTailContent: React.FC<{
             onUserAnimationConsumed={onUserAnimationConsumed}
             activeStreamingMessageId={activeStreamingMessageId}
             activeStreamingPhase={activeStreamingPhase}
+            reviewTransferDirection={reviewTransferDirection}
         />
     );
 };
@@ -1107,8 +1123,7 @@ StreamingTailContent.displayName = 'StreamingTailContent';
 
 const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({ 
     sessionKey,
-    turnStart,
-    disableStaging: _disableStaging,
+    disableStaging = false,
     messages,
     sessionIsWorking = false,
     activeStreamingMessageId = null,
@@ -1116,18 +1131,30 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     retryOverlay = null,
     onMessageContentChange,
     getAnimationHandlers,
-    hasMoreAbove,
     isLoadingOlder,
-    onLoadOlder,
     scrollToBottom,
     scrollRef,
 }, ref) => {
     streamPerfCount('ui.message_list.render');
-    void _disableStaging;
     const stickyUserHeader = useUIStore(state => state.stickyUserHeader);
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
     const activityRenderMode = useUIStore((state) => state.activityRenderMode);
+    const showTurnChangedFiles = useUIStore((state) => state.showTurnChangedFiles);
     const defaultActivityExpanded = activityRenderMode === 'summary';
+    const reviewTransferDirection = useGlobalSessionsStore((state) => {
+        const currentSession = state.activeSessions.find((session) => session.id === sessionKey);
+        const direction = getReviewTransferDirection(currentSession);
+        if (!currentSession || !direction) return null;
+
+        const targetSessionId = direction === 'review-to-original'
+            ? getOriginalSessionID(currentSession)
+            : getReviewSessionID(currentSession);
+        if (!targetSessionId) return null;
+
+        return state.activeSessions.some((session) => session.id === targetSessionId)
+            ? direction
+            : null;
+    });
     const [turnUiStates, setTurnUiStates] = React.useState<Map<string, TurnUiState>>(() => new Map());
     const userAnimationRef = React.useRef<{
         sessionKey: string | undefined;
@@ -1135,7 +1162,6 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         animatedIds: Set<string>;
     }>({ sessionKey: undefined, previousOrder: [], animatedIds: new Set() });
     const stableGetAnimationHandlers = useStableEvent(getAnimationHandlers);
-    const stableOnLoadOlder = useStableEvent(onLoadOlder);
     const stableScrollToBottom = useStableEvent(() => {
         scrollToBottom?.();
     });
@@ -1226,6 +1252,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     const { projection, staticTurns, streamingTurn } = useTurnRecords(displayMessages, {
         sessionKey,
         showTextJustificationActivity: chatRenderMode === 'sorted',
+        showTurnChangedFiles,
     });
     const hasUngroupedStaticEntries = projection.ungroupedMessageIds.size > 0;
     const staticEntryMessages = hasUngroupedStaticEntries ? displayMessages : EMPTY_STATIC_ENTRY_MESSAGES;
@@ -1320,7 +1347,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
 
         const grew = currentLen > previousLen;
         const firstChanged = previousFirstKey !== currentFirstKey;
-        if (!shouldVirtualizeHistory || !grew || !firstChanged || previousLen === 0) {
+        if (!shouldVirtualizeHistory || isLoadingOlder || disableStaging || !grew || !firstChanged || previousLen === 0) {
             return;
         }
 
@@ -1379,36 +1406,9 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         if (!shouldVirtualizeHistory) {
             return;
         }
-        const scrollEl = resolveScrollContainer();
-        const prevTotal = historyVirtualizer.getTotalSize();
-        const nearBottom = scrollEl && prevTotal > 0
-            ? scrollEl.scrollTop + scrollEl.clientHeight >= prevTotal - 10
-            : false
 
         historyVirtualizer.measure();
-
-        // measure() defers via useAnimationFrameWithResizeObserver.
-        // Wait two frames then, if we were near the estimated bottom, scroll
-        // to the real bottom after measurements settle.
-        let frame2: number | null = null;
-        const frame1 = requestAnimationFrame(() => {
-            frame2 = requestAnimationFrame(() => {
-                if (!nearBottom) return
-                const el = resolveScrollContainer()
-                if (!el) return
-                const target = Math.max(0, el.scrollHeight - el.clientHeight)
-                if (target > 0 && Math.abs(el.scrollTop - target) > 5) {
-                    el.scrollTop = target
-                }
-            })
-        })
-        return () => {
-            cancelAnimationFrame(frame1)
-            if (frame2 !== null) {
-                cancelAnimationFrame(frame2)
-            }
-        }
-    }, [historyVirtualizer, resolveScrollContainer, shouldVirtualizeHistory]);
+    }, [historyEntries.length, historyVirtualizer, shouldVirtualizeHistory]);
 
     const scheduleVirtualMeasure = React.useCallback(() => {
         if (!shouldVirtualizeHistory) {
@@ -1673,7 +1673,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                 if (!applyAnchor()) {
                     const index = messageIndexMap.get(anchor.messageId);
                     if (typeof index === 'number' && index < historyEntries.length) {
-                        scrollHistoryIndexIntoView(index, 'auto');
+                        return scrollHistoryIndexIntoView(index, 'auto');
                     }
                 }
 
@@ -1709,24 +1709,6 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
 
     return (
         <div>
-                {(turnStart > 0 || hasMoreAbove) && (
-                    <div className="flex justify-center py-3">
-                        {isLoadingOlder ? (
-                            <span className="text-xs uppercase tracking-wide text-muted-foreground/80">
-                                Loading…
-                            </span>
-                        ) : (
-                            <button
-                                type="button"
-                                onClick={stableOnLoadOlder}
-                                className="text-xs uppercase tracking-wide text-muted-foreground/80 hover:text-foreground"
-                            >
-                                Load older messages
-                            </button>
-                        )}
-                    </div>
-                )}
-
                 <FadeInDisabledProvider disabled={disableFadeIn}>
                     <div className="relative w-full">
                         <StaticHistoryList
@@ -1747,6 +1729,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                             shouldAnimateUserMessage={shouldAnimateUserMessage}
                             onUserAnimationConsumed={onUserAnimationConsumed}
                             activeStreamingPhase={activeStreamingPhase}
+                            reviewTransferDirection={reviewTransferDirection}
                         />
                         {trailingStreamingEntry ? (
                             <StreamingTailContent
@@ -1764,6 +1747,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                                 onUserAnimationConsumed={onUserAnimationConsumed}
                                 activeStreamingMessageId={activeStreamingMessageId}
                                 activeStreamingPhase={activeStreamingPhase}
+                                reviewTransferDirection={reviewTransferDirection}
                             />
                         ) : null}
                     </div>

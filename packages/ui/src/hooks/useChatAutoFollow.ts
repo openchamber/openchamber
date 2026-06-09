@@ -2,7 +2,7 @@ import React from 'react';
 
 import { MessageFreshnessDetector } from '@/lib/messageFreshness';
 import { createScrollSpy } from '@/components/chat/lib/scroll/scrollSpy';
-import { useViewportStore, type SessionMemoryState } from '@/sync/viewport-store';
+import { getViewportSessionMemory, useViewportStore, type SessionMemoryState } from '@/sync/viewport-store';
 
 export type AutoFollowState = 'following' | 'released';
 
@@ -358,7 +358,7 @@ export const useChatAutoFollow = ({
         }
         pendingInitialRestoreRef.current = null;
 
-        const saved = useViewportStore.getState().sessionMemoryState.get(sessionId)?.scrollPosition;
+        const saved = getViewportSessionMemory(sessionId)?.scrollPosition;
 
         if (!saved || isAtBottomSnapshot(saved, isMobile)) {
             setStateValue('following');
@@ -378,7 +378,7 @@ export const useChatAutoFollow = ({
         setStateValue('released');
         writeScrollTopInstant(targetTop);
 
-        const memState = useViewportStore.getState().sessionMemoryState.get(sessionId);
+        const memState = getViewportSessionMemory(sessionId);
         updateViewportAnchor(sessionId, memState?.viewportAnchor ?? 0, {
             scrollTop: container.scrollTop,
             scrollHeight: container.scrollHeight,

@@ -2,8 +2,10 @@ import React, { useRef, useEffect } from 'react';
 import { animate, motion, useMotionValue } from 'motion/react';
 import { Header } from './Header';
 import { BottomTerminalDock } from './BottomTerminalDock';
-import { Sidebar, SIDEBAR_CONTENT_WIDTH } from './Sidebar';
-import { RightSidebar, RIGHT_SIDEBAR_CONTENT_WIDTH } from './RightSidebar';
+import { Sidebar } from './Sidebar';
+import { SidebarTopBar } from './SidebarTopBar';
+import { TitlebarLeftControls } from './TitlebarLeftControls';
+import { RightSidebar } from './RightSidebar';
 import { ProjectContextPanel, RightSidebarTabs } from './RightSidebarTabs';
 import { ContextPanel } from './ContextPanel';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
@@ -24,21 +26,17 @@ import { cn } from '@/lib/utils';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 
 import { ChatView } from '@/components/views/ChatView';
+import { DiffView } from '@/components/views/DiffView';
+import { FilesView } from '@/components/views/FilesView';
+import { GitView } from '@/components/views/GitView';
+import { PlanView } from '@/components/views/PlanView';
 
 // Heavy views loaded on-demand to reduce initial bundle parse time.
-const PlanView = lazyWithChunkRecovery(() => import('@/components/views/PlanView').then(m => ({ default: m.PlanView })));
-const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView').then(m => ({ default: m.GitView })));
-const DiffView = lazyWithChunkRecovery(() => import('@/components/views/DiffView').then(m => ({ default: m.DiffView })));
 const TerminalView = lazyWithChunkRecovery(() => import('@/components/views/TerminalView').then(m => ({ default: m.TerminalView })));
-const FilesView = lazyWithChunkRecovery(() => import('@/components/views/FilesView').then(m => ({ default: m.FilesView })));
+const DiagramView = lazyWithChunkRecovery(() => import('@/components/views/DiagramView').then(m => ({ default: m.DiagramView })));
 const SettingsView = lazyWithChunkRecovery(() => import('@/components/views/SettingsView').then(m => ({ default: m.SettingsView })));
 const SettingsWindow = lazyWithChunkRecovery(() => import('@/components/views/SettingsWindow').then(m => ({ default: m.SettingsWindow })));
 const MultiRunWindow = lazyWithChunkRecovery(() => import('@/components/views/MultiRunWindow').then(m => ({ default: m.MultiRunWindow })));
-
-const DESKTOP_SIDEBAR_MIN_WIDTH = 280;
-const DESKTOP_SIDEBAR_MAX_WIDTH = 500;
-const DESKTOP_RIGHT_SIDEBAR_MIN_WIDTH = 360;
-const DESKTOP_RIGHT_SIDEBAR_MAX_WIDTH = 860;
 
 export const MainLayout: React.FC = () => {
     const RIGHT_SIDEBAR_AUTO_CLOSE_WIDTH = 1140;
@@ -59,8 +57,6 @@ export const MainLayout: React.FC = () => {
     const setMultiRunLauncherOpen = useUIStore((state) => state.setMultiRunLauncherOpen);
     const multiRunLauncherPrefillPrompt = useUIStore((state) => state.multiRunLauncherPrefillPrompt);
     const { isMobile, isTablet } = useDeviceInfo();
-    const sidebarWidth = useUIStore((state) => state.sidebarWidth);
-    const rightSidebarWidth = useUIStore((state) => state.rightSidebarWidth);
     const rightSidebarAutoClosedRef = React.useRef(false);
     const bottomTerminalAutoClosedRef = React.useRef(false);
     const mobilePanelsResetRef = React.useRef(false);
@@ -271,24 +267,24 @@ export const MainLayout: React.FC = () => {
             return;
         }
 
-        let timeoutId: number | undefined;
+        let frameId: number | undefined;
 
         const handleResize = () => {
-            if (timeoutId !== undefined) {
-                window.clearTimeout(timeoutId);
+            if (frameId !== undefined) {
+                return;
             }
-
-            timeoutId = window.setTimeout(() => {
+            frameId = window.requestAnimationFrame(() => {
+                frameId = undefined;
                 useUIStore.getState().updateProportionalSidebarWidths();
-            }, 150);
+            });
         };
 
         window.addEventListener('resize', handleResize);
 
         return () => {
             window.removeEventListener('resize', handleResize);
-            if (timeoutId !== undefined) {
-                window.clearTimeout(timeoutId);
+            if (frameId !== undefined) {
+                window.cancelAnimationFrame(frameId);
             }
         };
     }, []);
@@ -298,7 +294,7 @@ export const MainLayout: React.FC = () => {
             return;
         }
 
-        let timeoutId: number | undefined;
+        let frameId: number | undefined;
 
         const handleResponsivePanels = () => {
             const state = useUIStore.getState();
@@ -340,13 +336,13 @@ export const MainLayout: React.FC = () => {
         };
 
         const handleResize = () => {
-            if (timeoutId !== undefined) {
-                window.clearTimeout(timeoutId);
+            if (frameId !== undefined) {
+                return;
             }
-
-            timeoutId = window.setTimeout(() => {
+            frameId = window.requestAnimationFrame(() => {
+                frameId = undefined;
                 handleResponsivePanels();
-            }, 100);
+            });
         };
 
         handleResponsivePanels();
@@ -354,8 +350,8 @@ export const MainLayout: React.FC = () => {
 
         return () => {
             window.removeEventListener('resize', handleResize);
-            if (timeoutId !== undefined) {
-                window.clearTimeout(timeoutId);
+            if (frameId !== undefined) {
+                window.cancelAnimationFrame(frameId);
             }
         };
     }, [isMobile, isTablet, setBottomTerminalOpen, setRightSidebarOpen]);
@@ -408,20 +404,14 @@ export const MainLayout: React.FC = () => {
                 return <React.Suspense fallback={null}><FilesView /></React.Suspense>;
             case 'context':
                 return <React.Suspense fallback={null}><ProjectContextPanel /></React.Suspense>;
+            case 'diagram':
+                return <React.Suspense fallback={null}><DiagramView /></React.Suspense>;
             default:
                 return null;
         }
     }, [activeMainTab]);
 
     const isChatActive = activeMainTab === 'chat';
-    const visibleSidebarWidth = React.useMemo(() => {
-        const rawWidth = sidebarWidth || SIDEBAR_CONTENT_WIDTH;
-        return Math.min(DESKTOP_SIDEBAR_MAX_WIDTH, Math.max(DESKTOP_SIDEBAR_MIN_WIDTH, rawWidth));
-    }, [sidebarWidth]);
-    const visibleRightSidebarWidth = React.useMemo(() => {
-        const rawWidth = rightSidebarWidth || RIGHT_SIDEBAR_CONTENT_WIDTH;
-        return Math.min(DESKTOP_RIGHT_SIDEBAR_MAX_WIDTH, Math.max(DESKTOP_RIGHT_SIDEBAR_MIN_WIDTH, rawWidth));
-    }, [rightSidebarWidth]);
 
     return (
         <DiffWorkerProvider>
@@ -429,7 +419,7 @@ export const MainLayout: React.FC = () => {
                 data-page-scroll-lock="true"
                 className={cn(
                     'main-content-safe-area',
-                    isMobile ? 'flex h-[100dvh] flex-col' : 'flex h-[100dvh]',
+                    isMobile ? 'flex h-[100dvh] flex-col' : 'relative flex h-[100dvh]',
                     'bg-background'
                 )}
             >
@@ -534,103 +524,55 @@ export const MainLayout: React.FC = () => {
                 </DrawerProvider>
             ) : (
                 <>
-                    {/* Desktop: full-width Header above [Sidebar | chat-frame | RightSidebar] row */}
-                    <div className="flex flex-1 flex-col overflow-hidden">
-                        <Header />
-                        <div className="relative flex flex-1 min-h-0 overflow-hidden bg-sidebar" data-page-scroll-lock="true">
-                            <div
-                                aria-hidden
-                                className="pointer-events-none absolute top-0 z-0 bg-sidebar transition-[left,opacity] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
-                                style={{
-                                    left: `${isSidebarOpen ? visibleSidebarWidth : 0}px`,
-                                    opacity: isSidebarOpen ? 1 : 0,
-                                    width: '10px',
-                                    height: '10px',
-                                    WebkitMaskImage: 'radial-gradient(circle at 100% 100%, transparent calc(10px - 1px), black 10px)',
-                                    maskImage: 'radial-gradient(circle at 100% 100%, transparent calc(10px - 1px), black 10px)',
-                                }}
-                            />
-                            <div
-                                aria-hidden
-                                className="pointer-events-none absolute bottom-0 z-0 bg-sidebar transition-[left,opacity] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
-                                style={{
-                                    left: `${isSidebarOpen ? visibleSidebarWidth : 0}px`,
-                                    opacity: isSidebarOpen ? 1 : 0,
-                                    width: '10px',
-                                    height: '10px',
-                                    WebkitMaskImage: 'radial-gradient(circle at 100% 0%, transparent calc(10px - 1px), black 10px)',
-                                    maskImage: 'radial-gradient(circle at 100% 0%, transparent calc(10px - 1px), black 10px)',
-                                }}
-                            />
-                            <div
-                                aria-hidden
-                                className="pointer-events-none absolute top-0 z-0 bg-sidebar transition-[right,opacity] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
-                                style={{
-                                    right: `${isRightSidebarOpen ? visibleRightSidebarWidth : 0}px`,
-                                    opacity: isRightSidebarOpen ? 1 : 0,
-                                    width: '10px',
-                                    height: '10px',
-                                    WebkitMaskImage: 'radial-gradient(circle at 0 100%, transparent calc(10px - 1px), black 10px)',
-                                    maskImage: 'radial-gradient(circle at 0 100%, transparent calc(10px - 1px), black 10px)',
-                                }}
-                            />
-                            <div
-                                aria-hidden
-                                className="pointer-events-none absolute bottom-0 z-0 bg-sidebar transition-[right,opacity] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
-                                style={{
-                                    right: `${isRightSidebarOpen ? visibleRightSidebarWidth : 0}px`,
-                                    opacity: isRightSidebarOpen ? 1 : 0,
-                                    width: '10px',
-                                    height: '10px',
-                                    WebkitMaskImage: 'radial-gradient(circle at 0 0, transparent calc(10px - 1px), black 10px)',
-                                    maskImage: 'radial-gradient(circle at 0 0, transparent calc(10px - 1px), black 10px)',
-                                }}
-                            />
-                            <Sidebar
-                                isOpen={isSidebarOpen}
-                                isMobile={isMobile}
-                                className="border-0"
-                            >
-                                <SessionSidebar />
-                            </Sidebar>
-                            <div className={cn(
-                                'relative flex flex-1 min-w-0 flex-col overflow-hidden',
-                                'bg-background',
-                                'border border-border/50 rounded-[10px]',
-                                !isSidebarOpen && 'border-l-transparent',
-                                !isRightSidebarOpen && 'border-r-transparent'
-                            )} data-page-scroll-lock="true">
-                                <div className="flex flex-1 min-h-0 overflow-hidden" data-page-scroll-lock="true">
-                                    <div className="relative flex flex-1 min-h-0 min-w-0 overflow-hidden" data-page-scroll-lock="true">
-                                        <main className="flex-1 overflow-hidden bg-background relative" data-page-scroll-lock="true">
-                                            <div className={cn('absolute inset-0', !isChatActive && 'invisible')}>
-                                                <ErrorBoundary><ChatView /></ErrorBoundary>
-                                            </div>
-                                            {secondaryView && (
-                                                <div className="absolute inset-0">
-                                                    <ErrorBoundary>{secondaryView}</ErrorBoundary>
+                    {/* Persistent top-left controls (toggle + project actions) that
+                        stay put while the sidebar/header animate beneath them. */}
+                    <TitlebarLeftControls />
+                    {/* Desktop: full-height Sidebar beside [Header above (chat | RightSidebar)] */}
+                    <div className="flex flex-1 overflow-hidden" data-page-scroll-lock="true">
+                        <Sidebar
+                            isOpen={isSidebarOpen}
+                            isMobile={isMobile}
+                            className="border-border/50"
+                            topBar={<SidebarTopBar />}
+                        >
+                            <SessionSidebar />
+                        </Sidebar>
+                        <div className="relative flex flex-1 min-w-0 flex-col overflow-hidden bg-background" data-page-scroll-lock="true">
+                            <Header />
+                            <div className="relative flex flex-1 min-h-0 overflow-hidden bg-background" data-page-scroll-lock="true">
+                                <div className="relative flex flex-1 min-w-0 flex-col overflow-hidden border-t border-border/50 bg-background" data-page-scroll-lock="true">
+                                    <div className="flex flex-1 min-h-0 overflow-hidden" data-page-scroll-lock="true">
+                                        <div className="relative flex flex-1 min-h-0 min-w-0 overflow-hidden" data-page-scroll-lock="true">
+                                            <main className="flex-1 overflow-hidden bg-background relative" data-page-scroll-lock="true">
+                                                <div className={cn('absolute inset-0', !isChatActive && 'invisible')}>
+                                                    <ErrorBoundary><ChatView /></ErrorBoundary>
                                                 </div>
-                                            )}
-                                        </main>
-                                        <ContextPanel />
+                                                {secondaryView && (
+                                                    <div className="absolute inset-0">
+                                                        <ErrorBoundary>{secondaryView}</ErrorBoundary>
+                                                    </div>
+                                                )}
+                                            </main>
+                                            <ContextPanel />
+                                        </div>
                                     </div>
+                                    <BottomTerminalDock isOpen={isBottomTerminalOpen} isMobile={isMobile}>
+                                        {isBottomTerminalOpen ? (
+                                            <ErrorBoundary>
+                                                <React.Suspense fallback={null}>
+                                                    <TerminalView />
+                                                </React.Suspense>
+                                            </ErrorBoundary>
+                                        ) : null}
+                                    </BottomTerminalDock>
                                 </div>
-                                <BottomTerminalDock isOpen={isBottomTerminalOpen} isMobile={isMobile}>
-                                    {isBottomTerminalOpen ? (
-                                        <ErrorBoundary>
-                                            <React.Suspense fallback={null}>
-                                                <TerminalView />
-                                            </React.Suspense>
-                                        </ErrorBoundary>
-                                    ) : null}
-                                </BottomTerminalDock>
+                                <RightSidebar
+                                    isOpen={isRightSidebarOpen}
+                                    className="bg-background border-t border-border/50"
+                                >
+                                    <ErrorBoundary><RightSidebarTabs /></ErrorBoundary>
+                                </RightSidebar>
                             </div>
-                            <RightSidebar
-                                isOpen={isRightSidebarOpen}
-                                className="border-0"
-                            >
-                                <ErrorBoundary><RightSidebarTabs /></ErrorBoundary>
-                            </RightSidebar>
                         </div>
                     </div>
 

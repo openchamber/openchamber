@@ -12,6 +12,7 @@ type WorktreeMeta = { path: string };
 
 type Args = {
   isSessionsLoading: boolean;
+  hasLoadedGlobalSessions: boolean;
   sessions: Session[];
   archivedSessions: Session[];
   normalizedProjects: NormalizedProject[];
@@ -23,6 +24,7 @@ type Args = {
 export const useSessionFolderCleanup = (args: Args): void => {
   const {
     isSessionsLoading,
+    hasLoadedGlobalSessions,
     sessions,
     archivedSessions,
     normalizedProjects,
@@ -32,7 +34,7 @@ export const useSessionFolderCleanup = (args: Args): void => {
   } = args;
 
   React.useEffect(() => {
-    if (isSessionsLoading) {
+    if (isSessionsLoading || !hasLoadedGlobalSessions) {
       return;
     }
 
@@ -86,6 +88,7 @@ export const useSessionFolderCleanup = (args: Args): void => {
     archivedSessions,
     availableWorktreesByProject,
     cleanupSessions,
+    hasLoadedGlobalSessions,
     isSessionsLoading,
     isVSCode,
     normalizedProjects,

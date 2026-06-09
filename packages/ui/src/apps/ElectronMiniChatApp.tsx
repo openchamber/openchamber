@@ -15,6 +15,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useGitStore } from '@/stores/useGitStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { SyncProvider, useSessions } from '@/sync/sync-context';
+import { useSync } from '@/sync/use-sync';
 import { SyncRuntimeEffects } from './AppEffects';
 import { useAppFontEffects } from './useAppFontEffects';
 import { useMiniChatKeyboardShortcuts } from '@/hooks/useMiniChatKeyboardShortcuts';
@@ -65,6 +66,7 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
   const loadAgents = useConfigStore((state) => state.loadAgents);
   const providersCount = useConfigStore((state) => state.providers.length);
   const agentsCount = useConfigStore((state) => state.agents.length);
+  const sync = useSync();
 
   React.useEffect(() => {
     void initializeApp();
@@ -112,8 +114,8 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
 
   React.useEffect(() => {
     if (!isConnected) return;
-    if (providersCount === 0) void loadProviders();
-    if (agentsCount === 0) void loadAgents();
+    if (providersCount === 0) void loadProviders({ source: 'electronMiniChat:recovery' });
+    if (agentsCount === 0) void loadAgents({ source: 'electronMiniChat:recovery' });
   }, [agentsCount, isConnected, loadAgents, loadProviders, providersCount]);
 
   const sessionBootstrappedRef = React.useRef(false);
@@ -130,11 +132,14 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
       return;
     }
     const session = sessions.find((entry) => entry.id === config.sessionId);
-    if (!session) return;
+    if (!session) {
+      void sync.ensureSessionRenderable(config.sessionId);
+      return;
+    }
     const directory = (session as { directory?: string | null }).directory ?? config.directory;
     setCurrentSession(config.sessionId, directory);
     sessionBootstrappedRef.current = true;
-  }, [config, currentSessionId, sessions, setCurrentSession]);
+  }, [config, currentSessionId, sessions, setCurrentSession, sync]);
 
   React.useEffect(() => {
     if (config.mode !== 'draft' || draftOpen || currentSessionId) return;

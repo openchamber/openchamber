@@ -30,6 +30,8 @@ ngrok config add-authtoken <your-ngrok-token>
 openchamber
 ```
 
+Se você pular esta etapa, `openchamber tunnel start` pode iniciar automaticamente um servidor CLI. Ao iniciar automaticamente, você pode passar opções do servidor como `--port`, `--host`, `--lan`, `--ui-password` e `--api-only`.
+
 2. Inicie um túnel da Cloudflare:
 
 ```bash
@@ -105,6 +107,7 @@ openchamber tunnel stop --port 3000
 - um único túnel ativo por instância do OpenChamber (porta)
 - iniciar um novo modo/provedor na mesma instância substitui o túnel anterior
 - gerar um novo link de conexão revoga o anterior não utilizado
+- o auto-start do túnel preserva flags do servidor como `--ui-password` e `--api-only` nas configurações da instância usadas por reinícios e atualizações
 
 ## Relacionado
 

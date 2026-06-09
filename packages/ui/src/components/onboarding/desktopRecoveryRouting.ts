@@ -20,6 +20,7 @@ export function resolveRecoveryNextStep(
     case 'local-unavailable':
       return { kind: 'local-setup' };
     case 'remote-unreachable':
+    case 'remote-incompatible':
     case 'remote-wrong-service':
     case 'remote-missing':
     case 'missing-default-host':

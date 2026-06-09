@@ -385,6 +385,7 @@
 @media (display-mode: standalone) and (max-width: 768px) {
   .pwa-dialog-content {
     --pwa-dialog-padding: clamp(0.75rem, 3vw, 1.25rem);
+    top: auto;
     /* Browsers that don't understand dvh ignore the second declaration and
        keep the vh-based fallback. Newer browsers use 100dvh so Android
        Chrome's collapsible URL bar doesn't push the dialog footer off-screen. */
@@ -419,17 +420,6 @@
     top: calc(0.2rem + (var(--oc-safe-area-top, 0px) * 0.3));
   }
 
-  /* iOS-only: the original PWA dialog was offset down to clear the
-     status bar / notch. Android centers fine on its own and the extra
-     `top` + translate combo pushed dialogs (and their action buttons)
-     below the visible viewport, so keep this scoped to iOS. */
-  @supports (-webkit-touch-callout: none) {
-    .pwa-dialog-content {
-      top: calc(50% + (var(--oc-safe-area-top, 0px) * 0.22));
-      --tw-translate-y: calc(-50% + (var(--oc-safe-area-top, 0px) * 0.6));
-    }
-  }
-
   .pwa-dialog-content .settings-page-body {
     max-width: 100%;
     padding: 0.75rem 1rem;
@@ -449,8 +439,7 @@
   }
 
   .pwa-overlay-panel {
-    margin-bottom: max(var(--oc-safe-area-bottom-visual, 0px), 12px);
-    padding-bottom: calc(var(--oc-safe-area-bottom-visual, 0px) * 0.4);
+    margin-bottom: 0;
   }
 
   .pwa-overlay-panel .pwa-overlay-scroll {

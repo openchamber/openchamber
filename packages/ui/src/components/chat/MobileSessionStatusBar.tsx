@@ -1,57 +1,21 @@
 import React from 'react';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSelectionStore } from '@/sync/selection-store';
-import {
-  useSessions,
-  useAllSessionStatuses,
-  useLiveSessionStatusCounts,
-  useSession,
-  useDirectorySync,
-} from '@/sync/sync-context';
+import { useAllSessionStatuses, useAllLiveSessions } from '@/sync/sync-context';
+import { mergeSessionDirectoryMetadata, useGlobalSessionsStore, ensureGlobalSessionsLoaded, refreshGlobalSessions } from '@/stores/useGlobalSessionsStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import type { Session } from '@opencode-ai/sdk/v2';
 import type { ProjectEntry } from '@/lib/api/types';
 import { cn, formatDirectoryName } from '@/lib/utils';
-import { getAgentColor } from '@/lib/agentColors';
-import {
-  DndContext,
-  closestCenter,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from '@dnd-kit/core';
-import {
-  arrayMove,
-  SortableContext,
-  sortableKeyboardCoordinates,
-  useSortable,
-  verticalListSortingStrategy,
-} from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
-import { PROJECT_ICON_MAP, PROJECT_COLOR_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
+import { PROJECT_ICON_MAP, PROJECT_COLOR_MAP, ProjectIconImage } from '@/lib/projectMeta';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { sessionEvents } from '@/lib/sessionEvents';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { ProjectEditDialog } from '@/components/layout/ProjectEditDialog';
-import { useDrawerSwipe } from '@/hooks/useDrawerSwipe';
-import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { Icon } from "@/components/icon/Icon";
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useNotificationStore } from '@/sync/notification-store';
 import { useI18n } from '@/lib/i18n';
+import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 
 interface MobileSessionStatusBarProps {
   onSessionSwitch?: (sessionId: string) => void;
@@ -64,6 +28,31 @@ interface SessionWithStatus extends Session {
   _childIndicators?: Array<{ session: Session; isRunning: boolean }>;
 }
 
+// Cross-project session source. Mirrors the dedicated MobileSessionsSheet:
+// global sessions cover all directories (even unbootstrapped ones), while the
+// live aggregate (`useAllLiveSessions`) surfaces fresher data and every
+// bootstrapped directory. Merging both makes other projects' sessions appear.
+function useAllProjectSessions(): Session[] {
+  const liveSessions = useAllLiveSessions();
+  const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
+  return React.useMemo(() => {
+    const liveById = new Map(liveSessions.map((session) => [session.id, session]));
+    const merged = globalActiveSessions.map((session) => {
+      const liveSession = liveById.get(session.id);
+      return liveSession ? mergeSessionDirectoryMetadata(liveSession, session) : session;
+    });
+    const seen = new Set(merged.map((session) => session.id));
+    for (const session of liveSessions) {
+      if (!seen.has(session.id)) merged.push(session);
+    }
+    return merged;
+  }, [globalActiveSessions, liveSessions]);
+}
+
+// Max sessions shown per (filtered) project list - a "recent" cap applied
+// after filtering, so each project view shows at most this many.
+const MAX_RECENT_SESSIONS = 25;
+
 // Normalize path for comparison
 const normalize = (value: string): string => {
   if (!value) return '';
@@ -71,61 +60,21 @@ const normalize = (value: string): string => {
   return replaced === '/' ? '/' : replaced.replace(/\/+$/, '');
 };
 
-const getDisplaySessionTitle = (session: Session): string => {
-  const title = session.title;
-  if (title && title.trim()) return title;
-  return 'New session';
-};
-
-const countUnreadSessions = (unseenCounts: Record<string, number>): number => {
-  let count = 0;
-  for (const value of Object.values(unseenCounts)) {
-    if (value > 0) count += 1;
-  }
-  return count;
-};
-
-function useCurrentContextUsage(): SessionContextUsage | null {
-  const getContextUsage = useSessionUIStore((state) => state.getContextUsage);
-  const getCurrentModel = useConfigStore((state) => state.getCurrentModel);
-
-  const currentModel = getCurrentModel();
-  const limit = currentModel && typeof currentModel.limit === 'object' && currentModel.limit !== null
-    ? (currentModel.limit as Record<string, unknown>)
-    : null;
-  const contextLimit = (limit && typeof limit.context === 'number' ? limit.context : 0);
-  const outputLimit = (limit && typeof limit.output === 'number' ? limit.output : 0);
-  return getContextUsage(contextLimit, outputLimit);
-}
-
-function useCurrentProjectDisplay() {
-  const { currentTheme } = useThemeSystem();
-  const projects = useProjectsStore((state) => state.projects);
-  const activeProjectId = useProjectsStore((state) => state.activeProjectId);
-  const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
-  const activeProject = React.useMemo(
-    () => projects.find((project) => project.id === activeProjectId) ?? null,
-    [activeProjectId, projects],
-  );
-
-  const currentProjectIconImageUrl = activeProject
-    ? getProjectIconImageUrl(activeProject, {
-      themeVariant: currentTheme.metadata.variant,
-      iconColor: currentTheme.colors.surface.foreground,
-    })
-    : null;
-
-  return {
-    projects,
-    activeProjectId,
-    homeDirectory,
-    currentProjectLabel: activeProject?.label || formatDirectoryName(activeProject?.path || '', homeDirectory),
-    currentProjectIcon: activeProject?.icon,
-    currentProjectIconImageUrl,
-    currentProjectIconBackground: activeProject?.iconBackground ?? null,
-    currentProjectColor: activeProject?.color,
+// A session's directory, mirroring the store's canonical resolution.
+const sessionDirectory = (session: Session): string => {
+  const record = session as Session & {
+    directory?: string | null;
+    project?: { worktree?: string | null } | null;
   };
-}
+  return normalize(record.directory ?? record.project?.worktree ?? '');
+};
+
+// Prefix-match used to group a session under a project root or worktree.
+const pathBelongsToRoot = (path: string, root: string): boolean => {
+  const p = normalize(path);
+  const r = normalize(root);
+  return Boolean(p && r && (p === r || p.startsWith(`${r}/`)));
+};
 
 function useSessionGrouping(
   sessions: Session[],
@@ -224,38 +173,22 @@ function useSessionGrouping(
   return { sessions: processedSessions, totalRunning, totalUnread, totalCount: processedSessions.length };
 }
 
-function useSessionHelpers(
-  agents: Array<{ name: string }>,
-  sessionStatus: Record<string, { type: string }> | undefined
-) {
-  const getSessionAgentName = React.useCallback((session: Session): string => {
-    const agent = (session as { agent?: string }).agent;
-    if (agent) return agent;
-
-    const sessionAgentSelection = useSelectionStore.getState().getSessionAgentSelection(session.id);
-    if (sessionAgentSelection) return sessionAgentSelection;
-
-    return agents[0]?.name ?? 'agent';
-  }, [agents]);
-
+function useSessionHelpers() {
   const getSessionTitle = React.useCallback((session: Session): string => {
-    return getDisplaySessionTitle(session);
+    const title = session.title;
+    if (title && title.trim()) return title;
+    return 'New session';
   }, []);
-
-  const isRunning = React.useCallback((sessionId: string): boolean => {
-    const status = sessionStatus?.[sessionId];
-    return status?.type === 'busy' || status?.type === 'retry';
-  }, [sessionStatus]);
 
   const unseenCounts = useNotificationStore((s) => s.index.session.unseenCount);
   const needsAttention = React.useCallback((sessionId: string): boolean => {
     return (unseenCounts[sessionId] ?? 0) > 0;
   }, [unseenCounts]);
 
-  return { getSessionAgentName, getSessionTitle, isRunning, needsAttention };
+  return { getSessionTitle, needsAttention };
 }
 
-// Hook to calculate project status indicators
+// Per-project status indicators (running / unread) for the filter chips.
 function useProjectStatus(
   sessions: Session[],
   sessionStatus: Record<string, { type: string }> | undefined,
@@ -265,7 +198,7 @@ function useProjectStatus(
   const getSessionsByDirectory = useSessionUIStore((state) => state.getSessionsByDirectory);
   const notifUnseenCounts = useNotificationStore((s) => s.index.session.unseenCount);
 
-  const projectStatusMap = React.useCallback((projectPath: string): { hasRunning: boolean; hasUnread: boolean } => {
+  return React.useCallback((projectPath: string): { hasRunning: boolean; hasUnread: boolean } => {
     const getStatusType = (sessionId: string): 'busy' | 'retry' | 'idle' => {
       const status = sessionStatus?.[sessionId];
       if (status?.type === 'busy' || status?.type === 'retry') return status.type;
@@ -273,9 +206,7 @@ function useProjectStatus(
     };
 
     const projectRoot = normalize(projectPath);
-    if (!projectRoot) {
-      return { hasRunning: false, hasUnread: false };
-    }
+    if (!projectRoot) return { hasRunning: false, hasUnread: false };
 
     const dirs: string[] = [projectRoot];
     const worktrees = availableWorktreesByProject.get(projectRoot) ?? [];
@@ -283,9 +214,7 @@ function useProjectStatus(
       const p = (meta && typeof meta === 'object' && 'path' in meta) ? (meta as { path?: unknown }).path : null;
       if (typeof p === 'string' && p.trim()) {
         const normalized = normalize(p);
-        if (normalized && normalized !== projectRoot) {
-          dirs.push(normalized);
-        }
+        if (normalized && normalized !== projectRoot) dirs.push(normalized);
       }
     }
 
@@ -294,45 +223,49 @@ function useProjectStatus(
     let hasUnread = false;
 
     for (const dir of dirs) {
-      const list = getSessionsByDirectory(dir);
-      for (const session of list) {
-        if (!session?.id || seen.has(session.id)) {
-          continue;
-        }
+      for (const session of getSessionsByDirectory(dir)) {
+        if (!session?.id || seen.has(session.id)) continue;
         seen.add(session.id);
 
-        const statusType = getStatusType(session.id);
-        if (statusType === 'busy' || statusType === 'retry') {
-          hasRunning = true;
-        }
-
-        if (session.id !== currentSessionId && (notifUnseenCounts[session.id] ?? 0) > 0) {
-          hasUnread = true;
-        }
-
-        if (hasRunning && hasUnread) {
-          break;
-        }
+        if (getStatusType(session.id) !== 'idle') hasRunning = true;
+        if (session.id !== currentSessionId && (notifUnseenCounts[session.id] ?? 0) > 0) hasUnread = true;
+        if (hasRunning && hasUnread) break;
       }
-      if (hasRunning && hasUnread) {
-        break;
-      }
+      if (hasRunning && hasUnread) break;
     }
 
     return { hasRunning, hasUnread };
   }, [getSessionsByDirectory, availableWorktreesByProject, sessionStatus, notifUnseenCounts, currentSessionId]);
+}
 
-  return projectStatusMap;
+// Resolves the project's root directories (root + known worktrees) for
+// prefix-matching sessions, mirroring the dedicated MobileSessionsSheet.
+function useProjectRootsResolver() {
+  const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
+
+  return React.useCallback((project: ProjectEntry): string[] => {
+    const projectRoot = normalize(project.path);
+    const roots = [projectRoot];
+    const worktrees = availableWorktreesByProject.get(projectRoot) ?? [];
+    for (const meta of worktrees) {
+      const p = (meta && typeof meta === 'object' && 'path' in meta) ? (meta as { path?: unknown }).path : null;
+      if (typeof p === 'string' && p.trim()) {
+        const normalized = normalize(p);
+        if (normalized) roots.push(normalized);
+      }
+    }
+    return roots;
+  }, [availableWorktreesByProject]);
 }
 
 function StatusIndicator({ isRunning, needsAttention }: { isRunning: boolean; needsAttention: boolean }) {
   if (isRunning) {
-    return <Icon name="loader-4" className="h-2.5 w-2.5 animate-spin text-[var(--status-info)]" />;
+    return <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin text-[var(--status-info)]" />;
   }
   if (needsAttention) {
-    return <div className="h-1.5 w-1.5 rounded-full bg-[var(--status-error)]" />;
+    return <div className="h-2 w-2 rounded-full bg-[var(--status-error)]" />;
   }
-  return <div className="h-1.5 w-1.5 rounded-full border border-[var(--surface-mutedForeground)]" />;
+  return <div className="h-2 w-2 rounded-full border border-[var(--surface-mutedForeground)]" />;
 }
 
 function RunningIndicator({ count }: { count: number }) {
@@ -355,1580 +288,405 @@ function UnreadIndicator({ count }: { count: number }) {
   );
 }
 
-function SessionItem({
-  session,
-  isCurrent,
-  getSessionAgentName,
-  getSessionTitle,
-  onClick,
-  onDoubleClick,
-  needsAttention,
-  isEditing = false,
-  editingTitle = '',
-  onEditingTitleChange,
-  onEditSave,
-  onEditCancel,
-}: {
-  session: SessionWithStatus;
-  isCurrent: boolean;
-  getSessionAgentName: (s: Session) => string;
-  getSessionTitle: (s: Session) => string;
-  onClick: () => void;
-  onDoubleClick?: (sessionId: string, sessionTitle: string) => void;
-  needsAttention: (sessionId: string) => boolean;
-  isEditing?: boolean;
-  editingTitle?: string;
-  onEditingTitleChange?: (value: string) => void;
-  onEditSave?: () => void;
-  onEditCancel?: () => void;
-}) {
-  const agentName = getSessionAgentName(session);
-  const agentColor = getAgentColor(agentName);
-  const extraCount = (session._runningChildrenCount || 0) + (session._statusType !== 'idle' ? 1 : 0) - 1 - (session._childIndicators?.length || 0);
-  const sessionTitle = getSessionTitle(session);
-  const editInputRef = React.useRef<HTMLInputElement>(null);
-  const editCancelledRef = React.useRef(false);
-
-  React.useEffect(() => {
-    if (isEditing) {
-      editCancelledRef.current = false;
-      const node = editInputRef.current;
-      if (node) {
-        node.focus();
-        node.select();
-      }
-    }
-  }, [isEditing]);
-
-  return (
-    <div
-      role={isEditing ? undefined : 'button'}
-      tabIndex={isEditing ? undefined : 0}
-      onClick={isEditing ? undefined : onClick}
-      onDoubleClick={(e) => {
-        if (isEditing) return;
-        e.stopPropagation();
-        onDoubleClick?.(session.id, sessionTitle);
-      }}
-      onKeyDown={(e) => {
-        if (isEditing) return;
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onClick();
-        }
-      }}
-      className={cn(
-        "flex items-center gap-0.5 px-1.5 py-px text-left transition-colors",
-        "hover:bg-[var(--interactive-hover)] active:bg-[var(--interactive-selection)]",
-        isCurrent && "bg-[var(--interactive-selection)]/30"
-      )}
-    >
-      <div className="flex-shrink-0 w-3 flex items-center justify-center">
-        <StatusIndicator
-          isRunning={session._statusType !== 'idle'}
-          needsAttention={needsAttention(session.id)}
-        />
-      </div>
-
-      <div
-        className="flex-shrink-0 h-1.5 w-1.5 rounded-full"
-        style={{ backgroundColor: `var(${agentColor.var})` }}
-      />
-
-      {isEditing ? (
-        <input
-          ref={editInputRef}
-          type="text"
-          value={editingTitle}
-          onChange={(e) => onEditingTitleChange?.(e.target.value)}
-          onClick={(e) => e.stopPropagation()}
-          onDoubleClick={(e) => e.stopPropagation()}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              e.stopPropagation();
-              onEditSave?.();
-            } else if (e.key === 'Escape') {
-              e.preventDefault();
-              e.stopPropagation();
-              editCancelledRef.current = true;
-              onEditCancel?.();
-            }
-          }}
-          onBlur={() => {
-            if (editCancelledRef.current) {
-              editCancelledRef.current = false;
-              return;
-            }
-            onEditSave?.();
-          }}
-          className={cn(
-            "flex-1 min-w-0 text-[13px] leading-tight px-1 py-px rounded",
-            "bg-background border border-[var(--interactive-border)]",
-            "text-[var(--surface-foreground)] outline-none",
-            "focus:border-[var(--primary-base)]"
-          )}
-        />
-      ) : (
-        <span className={cn(
-          "text-[13px] truncate leading-tight",
-          isCurrent ? "text-[var(--interactive-selection-foreground)] font-medium" : "text-[var(--surface-foreground)]"
-        )}>
-          {sessionTitle}
-        </span>
-      )}
-
-      {(session._childIndicators?.length || 0) > 0 && (
-        <div className="flex items-center gap-0.5 text-[var(--surface-mutedForeground)]">
-          <span className="text-[10px]">[</span>
-          <div className="flex items-center gap-0.5">
-            {session._childIndicators!.map(({ session: child }) => {
-              const childColor = getAgentColor(getSessionAgentName(child));
-              return (
-                <div
-                  key={child.id}
-                  className="flex-shrink-0"
-                  title={`Sub-session: ${getSessionTitle(child)}`}
-                >
-                  <Icon name="loader-4" className="h-2.5 w-2.5 animate-spin"
-                    style={{ color: `var(${childColor.var})` }}/>
-                </div>
-              );
-            })}
-            {extraCount > 0 && (
-              <span className="text-[10px] text-[var(--surface-mutedForeground)]">
-                +{extraCount}
-              </span>
-            )}
-          </div>
-          <span className="text-[10px]">]</span>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function TokenUsageIndicator({ contextUsage }: { contextUsage: SessionContextUsage | null }) {
   if (!contextUsage || contextUsage.totalTokens === 0) return null;
 
-  const percentage = Math.min(contextUsage.percentage, 999);
+  // Recompute with a fraction: contextUsage.percentage is rounded to an integer
+  // in the store, which would always render as "X.0%".
+  const percentage = contextUsage.contextLimit > 0
+    ? Math.min((contextUsage.totalTokens / contextUsage.contextLimit) * 100, 999)
+    : 0;
   const colorClass =
     percentage >= 90 ? 'text-[var(--status-error)]' :
     percentage >= 75 ? 'text-[var(--status-warning)]' : 'text-[var(--status-success)]';
 
+  const formatTokens = (value: number): string => {
+    if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+    if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+    return String(value);
+  };
+
+  const tokens = contextUsage.contextLimit > 0
+    ? `${formatTokens(contextUsage.totalTokens)}/${formatTokens(contextUsage.contextLimit)}`
+    : formatTokens(contextUsage.totalTokens);
+
   return (
-    <span className={cn("text-[12px] tabular-nums font-medium", colorClass)}>
-      {percentage.toFixed(1)}%
+    <span className="flex items-baseline gap-1.5 text-[15px] tabular-nums">
+      <span className={cn("font-medium", colorClass)}>{percentage.toFixed(1)}%</span>
+      <span className="text-[var(--surface-mutedForeground)]">{tokens}</span>
     </span>
   );
 }
 
-interface SessionStatusHeaderProps {
-  currentSessionId?: string | null;
-  currentSessionTitle: string;
-  currentProjectLabel?: string;
-  currentProjectIcon?: string | null;
-  currentProjectIconImageUrl?: string | null;
-  currentProjectIconBackground?: string | null;
-  currentProjectColor?: string | null;
-  onToggle: () => void;
-  isExpanded?: boolean;
-  childIndicators?: Array<{ session: Session; isRunning: boolean }>;
-  isEditing?: boolean;
-  editingTitle?: string;
-  onTitleDoubleClick?: (sessionId: string, sessionTitle: string) => void;
-  onEditingTitleChange?: (value: string) => void;
-  onEditSave?: () => void;
-  onEditCancel?: () => void;
-}
-
-function SessionStatusHeader({
-  currentSessionId,
-  currentSessionTitle,
-  currentProjectLabel,
-  currentProjectIcon,
-  currentProjectIconImageUrl,
-  currentProjectIconBackground,
-  currentProjectColor,
-  onToggle,
-  isExpanded = false,
-  childIndicators = [],
-  isEditing = false,
-  editingTitle = '',
-  onTitleDoubleClick,
-  onEditingTitleChange,
-  onEditSave,
-  onEditCancel,
-}: SessionStatusHeaderProps) {
-  const [imageFailed, setImageFailed] = React.useState(false);
-  const projectIconName = currentProjectIcon ? PROJECT_ICON_MAP[currentProjectIcon] : null;
-  const imageUrl = !imageFailed ? currentProjectIconImageUrl : null;
-  const projectColorVar = currentProjectColor ? (PROJECT_COLOR_MAP[currentProjectColor] ?? null) : null;
-  const extraCount = childIndicators.length > 3 ? childIndicators.length - 3 : 0;
-  const editInputRef = React.useRef<HTMLInputElement>(null);
-  const editCancelledRef = React.useRef(false);
-
-  React.useEffect(() => {
-    setImageFailed(false);
-  }, [currentProjectIconImageUrl]);
-
-  React.useEffect(() => {
-    if (isEditing) {
-      editCancelledRef.current = false;
-      const node = editInputRef.current;
-      if (node) {
-        node.focus();
-        node.select();
-      }
-    }
-  }, [isEditing]);
-
-  return (
-    <div
-      role={isEditing ? undefined : 'button'}
-      tabIndex={isEditing ? undefined : 0}
-      onClick={isEditing ? undefined : onToggle}
-      onKeyDown={(e) => {
-        if (isEditing) return;
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onToggle();
-        }
-      }}
-      className="w-full flex flex-col px-2 py-0.5 text-left transition-colors hover:bg-[var(--interactive-hover)]"
-    >
-      {!isExpanded && currentProjectLabel && (
-        <div className="flex flex-col items-start">
-          <div className="flex items-center gap-1 leading-none">
-            {imageUrl ? (
-              <span
-                className="inline-flex h-2.5 w-2.5 items-center justify-center overflow-hidden rounded-[1px]"
-                style={currentProjectIconBackground ? { backgroundColor: currentProjectIconBackground } : undefined}
-              >
-                <img
-                  src={imageUrl}
-                  alt=""
-                  className="h-full w-full object-contain"
-                  draggable={false}
-                  onError={() => setImageFailed(true)}
-                />
-              </span>
-            ) : projectIconName && (
-              <Icon name={projectIconName}
-                className="h-2.5 w-2.5"
-                style={projectColorVar ? { color: projectColorVar } : undefined}
-              />
-            )}
-            <span
-              className="text-[11px] leading-none text-[var(--surface-mutedForeground)] truncate max-w-[120px]"
-              style={projectColorVar ? { color: projectColorVar } : undefined}
-            >
-              {currentProjectLabel}
-              </span>
-          </div>
-          <div className="w-full h-px bg-[var(--interactive-border)] my-1" />
-        </div>
-      )}
-      <div className="flex items-center gap-1.5 min-w-0">
-        {isEditing ? (
-          <input
-            ref={editInputRef}
-            type="text"
-            value={editingTitle}
-            onChange={(e) => onEditingTitleChange?.(e.target.value)}
-            onClick={(e) => e.stopPropagation()}
-            onDoubleClick={(e) => e.stopPropagation()}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                e.stopPropagation();
-                onEditSave?.();
-              } else if (e.key === 'Escape') {
-                e.preventDefault();
-                e.stopPropagation();
-                editCancelledRef.current = true;
-                onEditCancel?.();
-              }
-            }}
-            onBlur={() => {
-              if (editCancelledRef.current) {
-                editCancelledRef.current = false;
-                return;
-              }
-              onEditSave?.();
-            }}
-            className={cn(
-              "flex-1 min-w-0 text-[13px] leading-none px-1 py-0.5 rounded",
-              "bg-background border border-[var(--interactive-border)]",
-              "text-[var(--surface-foreground)] outline-none",
-              "focus:border-[var(--primary-base)]"
-            )}
-          />
-        ) : (
-          <span
-            className="flex-1 min-w-0 text-[13px] text-[var(--surface-foreground)] truncate leading-none"
-            onDoubleClick={(e) => {
-              if (!currentSessionId || !onTitleDoubleClick) return;
-              e.preventDefault();
-              e.stopPropagation();
-              onTitleDoubleClick(currentSessionId, currentSessionTitle);
-            }}
-          >
-            {currentSessionTitle}
-          </span>
-        )}
-        {childIndicators.length > 0 && (
-          <div className="flex items-center gap-0.5 text-[var(--surface-mutedForeground)]">
-            <span className="text-[10px]">[</span>
-            <div className="flex items-center gap-0.5">
-              {childIndicators.slice(0, 3).map((child) => {
-                const childAgent = (child.session as { agent?: string }).agent || 'agent';
-                const childColor = getAgentColor(childAgent);
-                return (
-                  <div
-                    key={child.session.id}
-                    className="flex-shrink-0"
-                    title={`Sub-session: ${child.session.title || 'Untitled'}`}
-                  >
-                    <Icon name="loader-4" className="h-2.5 w-2.5 animate-spin"
-                      style={{ color: `var(${childColor.var})` }}/>
-                  </div>
-                );
-              })}
-              {extraCount > 0 && (
-                <span className="text-[10px] text-[var(--surface-mutedForeground)]">
-                  +{extraCount}
-                </span>
-              )}
-            </div>
-            <span className="text-[10px]">]</span>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// Hook for long press with movement detection
-function useLongPress(
-  onLongPress: () => void,
-  onClick: () => void,
-  ms = 500
-) {
-  const timerRef = React.useRef<NodeJS.Timeout | null>(null);
-  const isLongPress = React.useRef(false);
-  const startPosRef = React.useRef<{ x: number; y: number } | null>(null);
-  const hasMovedRef = React.useRef(false);
-  const MOVE_THRESHOLD = 10; // pixels
-
-  const start = React.useCallback((clientX: number, clientY: number) => {
-    isLongPress.current = false;
-    hasMovedRef.current = false;
-    startPosRef.current = { x: clientX, y: clientY };
-    timerRef.current = setTimeout(() => {
-      if (!hasMovedRef.current) {
-        isLongPress.current = true;
-        onLongPress();
-      }
-    }, ms);
-  }, [onLongPress, ms]);
-
-  const move = React.useCallback((clientX: number, clientY: number) => {
-    if (!startPosRef.current) return;
-    
-    const dx = Math.abs(clientX - startPosRef.current.x);
-    const dy = Math.abs(clientY - startPosRef.current.y);
-    
-    if (dx > MOVE_THRESHOLD || dy > MOVE_THRESHOLD) {
-      hasMovedRef.current = true;
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-        timerRef.current = null;
-      }
-    }
-  }, []);
-
-  const end = React.useCallback(() => {
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-    startPosRef.current = null;
-  }, []);
-
-  const handleClick = React.useCallback(() => {
-    if (!isLongPress.current) {
-      onClick();
-    }
-  }, [onClick]);
-
-  return {
-    onMouseDown: (e: React.MouseEvent) => start(e.clientX, e.clientY),
-    onMouseUp: end,
-    onMouseLeave: end,
-    onMouseMove: (e: React.MouseEvent) => move(e.clientX, e.clientY),
-    onTouchStart: (e: React.TouchEvent) => {
-      const touch = e.touches[0];
-      start(touch.clientX, touch.clientY);
-    },
-    onTouchMove: (e: React.TouchEvent) => {
-      const touch = e.touches[0];
-      move(touch.clientX, touch.clientY);
-    },
-    onTouchEnd: end,
-    onClick: handleClick,
-  };
-}
-
-// Sortable project item for edit panel
-interface SortableProjectItemProps {
-  project: ProjectEntry;
-  isFirst: boolean;
-  isLast: boolean;
-  onMoveUp: () => void;
-  onMoveDown: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
-  formatProjectLabel: (project: ProjectEntry) => string;
-}
-
-function SortableProjectItem({
-  project,
-  isFirst,
-  isLast,
-  onMoveUp,
-  onMoveDown,
-  onEdit,
-  onDelete,
-  formatProjectLabel,
-}: SortableProjectItemProps) {
-  const { currentTheme } = useThemeSystem();
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: project.id });
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    zIndex: isDragging ? 10 : 1,
-  };
-
-  const [imageFailed, setImageFailed] = React.useState(false);
-  const projectIconName = project.icon ? PROJECT_ICON_MAP[project.icon] : null;
-  const projectIconImageUrl = !imageFailed
-    ? getProjectIconImageUrl(project, {
-      themeVariant: currentTheme.metadata.variant,
-      iconColor: currentTheme.colors.surface.foreground,
-    })
-    : null;
-  const projectColorVar = project.color ? (PROJECT_COLOR_MAP[project.color] ?? null) : null;
-
-  return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className={cn(
-        "flex items-center gap-2 p-3 bg-[var(--surface-elevated)] rounded-lg border border-[var(--interactive-border)]",
-        isDragging && "shadow-lg opacity-90"
-      )}
-    >
-      {/* Drag handle */}
-      <button
-        type="button"
-        className="flex-shrink-0 p-1.5 text-[var(--surface-mutedForeground)] hover:text-[var(--surface-foreground)] cursor-grab active:cursor-grabbing touch-none"
-        {...attributes}
-        {...listeners}
-      >
-        <Icon name="drag-move-2" className="h-4 w-4" />
-      </button>
-
-      {/* Project info */}
-      <div className="flex-1 flex items-center gap-2 min-w-0">
-        {projectIconImageUrl ? (
-          <span
-            className="inline-flex h-5 w-5 items-center justify-center overflow-hidden rounded-[2px] flex-shrink-0"
-            style={project.iconBackground ? { backgroundColor: project.iconBackground } : undefined}
-          >
-            <img
-              src={projectIconImageUrl}
-              alt=""
-              className="h-full w-full object-contain"
-              draggable={false}
-              onError={() => setImageFailed(true)}
-            />
-          </span>
-        ) : projectIconName ? (
-          <Icon name={projectIconName}
-            className="h-5 w-5 flex-shrink-0"
-            style={projectColorVar ? { color: projectColorVar } : undefined}
-          />
-        ) : (
-          <div className="h-5 w-5 rounded bg-[var(--surface-muted)] flex-shrink-0" />
-        )}
-        <span className="text-sm text-[var(--surface-foreground)] truncate">
-          {formatProjectLabel(project)}
-        </span>
-      </div>
-
-      {/* Actions */}
-      <div className="flex items-center gap-1">
-        {/* Move up/down buttons (for non-drag sorting) */}
-        <button
-          type="button"
-          onClick={onMoveUp}
-          disabled={isFirst}
-          className="p-1.5 rounded text-[var(--surface-mutedForeground)] hover:text-[var(--surface-foreground)] hover:bg-[var(--interactive-hover)] disabled:opacity-30 disabled:cursor-not-allowed"
-        >
-          <Icon name="arrow-up" className="h-4 w-4" />
-        </button>
-        <button
-          type="button"
-          onClick={onMoveDown}
-          disabled={isLast}
-          className="p-1.5 rounded text-[var(--surface-mutedForeground)] hover:text-[var(--surface-foreground)] hover:bg-[var(--interactive-hover)] disabled:opacity-30 disabled:cursor-not-allowed"
-        >
-          <Icon name="arrow-down" className="h-4 w-4" />
-        </button>
-
-        <div className="w-px h-5 bg-[var(--interactive-border)] mx-1" />
-
-        {/* Edit button */}
-        <button
-          type="button"
-          onClick={onEdit}
-          className="p-1.5 rounded text-[var(--surface-mutedForeground)] hover:text-[var(--primary-base)] hover:bg-[var(--primary-base)]/10"
-        >
-          <Icon name="edit" className="h-4 w-4" />
-        </button>
-
-        {/* Delete button */}
-        <button
-          type="button"
-          onClick={onDelete}
-          className="p-1.5 rounded text-[var(--surface-mutedForeground)] hover:text-[var(--status-error)] hover:bg-[var(--status-error)]/10"
-        >
-          <Icon name="delete-bin" className="h-4 w-4" />
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// Project edit panel for mobile
-interface ProjectEditPanelProps {
-  isOpen: boolean;
-  onClose: () => void;
-  projects: ProjectEntry[];
-  onReorder: (fromIndex: number, toIndex: number) => void;
-  onEdit: (project: ProjectEntry) => void;
-  onDelete: (project: ProjectEntry) => void;
-  homeDirectory: string | null;
-}
-
-function ProjectEditPanel({
-  isOpen,
-  onClose,
-  projects,
-  onReorder,
-  onEdit,
-  onDelete,
-  homeDirectory,
-}: ProjectEditPanelProps) {
-  const { t } = useI18n();
-  const [localProjects, setLocalProjects] = React.useState(projects);
-
-  React.useEffect(() => {
-    setLocalProjects(projects);
-  }, [projects, isOpen]);
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: {
-        distance: 8,
-      },
-    }),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    })
-  );
-
-  const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event;
-    if (over && active.id !== over.id) {
-      const oldIndex = localProjects.findIndex((p) => p.id === active.id);
-      const newIndex = localProjects.findIndex((p) => p.id === over.id);
-      
-      setLocalProjects((items) => arrayMove(items, oldIndex, newIndex));
-      onReorder(oldIndex, newIndex);
-    }
-  };
-
-  const handleMoveUp = (index: number) => {
-    if (index > 0) {
-      setLocalProjects((items) => arrayMove(items, index, index - 1));
-      onReorder(index, index - 1);
-    }
-  };
-
-  const handleMoveDown = (index: number) => {
-    if (index < localProjects.length - 1) {
-      setLocalProjects((items) => arrayMove(items, index, index + 1));
-      onReorder(index, index + 1);
-    }
-  };
-
-  const formatProjectLabel = (project: ProjectEntry): string => {
-    return project.label?.trim()
-      || formatDirectoryName(project.path, homeDirectory)
-      || project.path;
-  };
-
-  return (
-    <MobileOverlayPanel
-      open={isOpen}
-      onClose={onClose}
-      title={t('chat.mobileStatus.editProjects.title')}
-      footer={
-        <p className="text-xs text-[var(--surface-mutedForeground)] text-center">
-          {t('chat.mobileStatus.editProjects.footer')}
-        </p>
-      }
-    >
-      <div className="flex flex-col gap-2">
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCenter}
-          onDragEnd={handleDragEnd}
-        >
-          <SortableContext
-            items={localProjects.map((p) => p.id)}
-            strategy={verticalListSortingStrategy}
-          >
-            {localProjects.map((project, index) => (
-              <SortableProjectItem
-                key={project.id}
-                project={project}
-                isFirst={index === 0}
-                isLast={index === localProjects.length - 1}
-                onMoveUp={() => handleMoveUp(index)}
-                onMoveDown={() => handleMoveDown(index)}
-                onEdit={() => onEdit(project)}
-                onDelete={() => onDelete(project)}
-                formatProjectLabel={formatProjectLabel}
-              />
-            ))}
-          </SortableContext>
-        </DndContext>
-
-        {localProjects.length === 0 && (
-          <div className="text-center py-8 text-[var(--surface-mutedForeground)]">
-            {t('chat.mobileStatus.editProjects.empty')}
-          </div>
-        )}
-      </div>
-    </MobileOverlayPanel>
-  );
-}
-
-// Project button component with long press support
-interface ProjectButtonProps {
-  project: ProjectEntry;
-  isActive: boolean;
-  status: { hasRunning: boolean; hasUnread: boolean };
-  projectColorVar: string | null;
-  onProjectSwitch: () => void;
-  onOpenEditPanel?: () => void;
-  formatProjectLabel: (project: ProjectEntry) => string;
-}
-
-function ProjectButton({
-  project,
-  isActive,
-  status,
-  projectColorVar,
-  onProjectSwitch,
-  onOpenEditPanel,
-  formatProjectLabel,
-}: ProjectButtonProps) {
-  const { currentTheme } = useThemeSystem();
-  const [imageFailed, setImageFailed] = React.useState(false);
-  const projectIconName = project.icon ? PROJECT_ICON_MAP[project.icon] : null;
-  const projectIconImageUrl = !imageFailed
-    ? getProjectIconImageUrl(project, {
-      themeVariant: currentTheme.metadata.variant,
-      iconColor: currentTheme.colors.surface.foreground,
-    })
-    : null;
-
-  React.useEffect(() => {
-    setImageFailed(false);
-  }, [project.id, project.iconImage?.updatedAt]);
-
-  const longPressHandlers = useLongPress(
-    () => {
-      if (onOpenEditPanel) {
-        onOpenEditPanel();
-      }
-    },
-    onProjectSwitch,
-    600
-  );
+// A single session row sized for comfortable touch.
+function SessionItem({
+  session,
+  isCurrent,
+  getSessionTitle,
+  onClick,
+  needsAttention,
+}: {
+  session: SessionWithStatus;
+  isCurrent: boolean;
+  getSessionTitle: (s: Session) => string;
+  onClick: () => void;
+  needsAttention: (sessionId: string) => boolean;
+}) {
+  const attention = needsAttention(session.id);
 
   return (
     <button
       type="button"
-      data-project-id={project.id}
+      onClick={onClick}
       className={cn(
-        "flex items-center gap-1 px-2.5 !py-1.5 rounded-md text-[12px] whitespace-nowrap transition-colors shrink-0 border !min-h-0 leading-none select-none",
-        isActive
-          ? "border-[var(--primary-base)]/60 text-[var(--primary-base)]/80 bg-[var(--primary-base)]/5 hover:text-[var(--primary-base)] hover:bg-[var(--primary-base)]/10"
-          : "border-[var(--interactive-border)] text-[var(--surface-foreground)] bg-[var(--surface-elevated)] hover:bg-[var(--interactive-hover)]"
+        "flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition-colors min-h-[56px]",
+        "active:bg-[var(--interactive-selection)]",
+        isCurrent ? "bg-[color-mix(in_srgb,var(--interactive-selection)_40%,transparent)]" : "hover:bg-[var(--interactive-hover)]"
       )}
-      {...longPressHandlers}
     >
-      {/* Status indicators */}
-      <div className="flex items-center gap-0.5">
-        {status.hasRunning && (
-          <Icon name="loader-4" className="h-2.5 w-2.5 animate-spin text-[var(--status-info)]" />
-        )}
-        {!status.hasRunning && status.hasUnread && (
-          <div className="h-1.5 w-1.5 rounded-full bg-[var(--status-error)]" />
-        )}
-      </div>
+      <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center">
+        <StatusIndicator isRunning={session._statusType !== 'idle'} needsAttention={attention} />
+      </span>
 
-      {/* Icon */}
-      {projectIconImageUrl ? (
-        <span
-          className="inline-flex h-3.5 w-3.5 items-center justify-center overflow-hidden rounded-[2px]"
-          style={project.iconBackground ? { backgroundColor: project.iconBackground } : undefined}
-        >
-          <img
-            src={projectIconImageUrl}
-            alt=""
-            className="h-full w-full object-contain"
-            draggable={false}
-            onError={() => setImageFailed(true)}
-          />
+      <span className={cn(
+        "flex-1 truncate text-[15px] leading-tight",
+        isCurrent ? "font-semibold text-[var(--surface-foreground)]" : "text-[var(--surface-foreground)]"
+      )}>
+        {getSessionTitle(session)}
+      </span>
+
+      {(session._runningChildrenCount ?? 0) > 0 && (
+        <span className="flex flex-shrink-0 items-center gap-1 text-[12px] text-[var(--status-info)]">
+          <Icon name="loader-4" className="h-3 w-3 animate-spin" />
+          {session._runningChildrenCount}
         </span>
-      ) : projectIconName && (
-        <Icon name={projectIconName}
-          className="h-3.5 w-3.5"
-          style={projectColorVar ? { color: projectColorVar } : undefined}
-        />
       )}
 
-      {/* Label */}
-      <span
-        className="truncate max-w-[100px]"
-        style={isActive && projectColorVar ? { color: projectColorVar } : undefined}
-      >
-        {formatProjectLabel(project)}
-      </span>
+      {isCurrent && (
+        <Icon name="check" className="h-4 w-4 flex-shrink-0 text-[var(--primary-base)]" />
+      )}
     </button>
   );
 }
 
-// Project bar component for expanded view
-interface ProjectBarProps {
-  projects: ProjectEntry[];
-  activeProjectId: string | null;
-  getProjectStatus: (path: string) => { hasRunning: boolean; hasUnread: boolean };
-  onProjectSwitch: (projectId: string) => void;
-  onAddProject: () => void;
-  onRemoveProject?: (projectId: string) => void;
-  homeDirectory: string | null;
+// A project filter pill sized for touch. Selecting it filters
+// the session list; it does NOT switch the active project.
+interface ProjectFilterChipProps {
+  label: string;
+  icon?: string | null;
+  project?: Pick<ProjectEntry, 'id' | 'iconImage'> | null;
+  iconOptions?: React.ComponentProps<typeof ProjectIconImage>['options'];
+  iconBackground?: string | null;
+  colorVar?: string | null;
+  isActive: boolean;
+  status?: { hasRunning: boolean; hasUnread: boolean };
+  onClick: () => void;
 }
 
-function ProjectBar({
-  projects,
-  activeProjectId,
-  getProjectStatus,
-  onProjectSwitch,
-  onAddProject,
-  onRemoveProject,
-  homeDirectory
-}: ProjectBarProps) {
-  const { t } = useI18n();
-  const scrollRef = React.useRef<HTMLDivElement>(null);
-  const [editPanelOpen, setEditPanelOpen] = React.useState(false);
-  const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
-  const [projectToDelete, setProjectToDelete] = React.useState<ProjectEntry | null>(null);
-  const reorderProjects = useProjectsStore((state) => state.reorderProjects);
-
-  // Scroll active project into view
-  React.useEffect(() => {
-    if (scrollRef.current && activeProjectId) {
-      const activeElement = scrollRef.current.querySelector(`[data-project-id="${activeProjectId}"]`);
-      if (activeElement) {
-        activeElement.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
-      }
-    }
-  }, [activeProjectId]);
-
-  const handleOpenEditPanel = () => {
-    setEditPanelOpen(true);
-  };
-
-  const handleReorder = (fromIndex: number, toIndex: number) => {
-    reorderProjects(fromIndex, toIndex);
-  };
-
-  const [editingProject, setEditingProject] = React.useState<ProjectEntry | null>(null);
-  const updateProjectMeta = useProjectsStore((state) => state.updateProjectMeta);
-
-  const handleEditProject = (project: ProjectEntry) => {
-    setEditingProject(project);
-  };
-
-  const handleSaveProjectEdit = (data: { label: string; icon: string | null; color: string | null; iconBackground: string | null }) => {
-    if (editingProject) {
-      updateProjectMeta(editingProject.id, data);
-    }
-    setEditingProject(null);
-  };
-
-  const handleDeleteProject = (project: ProjectEntry) => {
-    setProjectToDelete(project);
-    setDeleteDialogOpen(true);
-  };
-
-  const handleConfirmDelete = () => {
-    if (projectToDelete && onRemoveProject) {
-      onRemoveProject(projectToDelete.id);
-    }
-    setDeleteDialogOpen(false);
-    setProjectToDelete(null);
-  };
-
-  if (projects.length === 0) {
-    return (
-      <div className="flex items-center gap-2 px-2 py-1 border-b border-[var(--interactive-border)] bg-transparent">
-        <span className="text-[11px] text-[var(--surface-mutedForeground)]">{t('chat.mobileStatus.projects.empty')}</span>
-        <button
-          type="button"
-          onClick={onAddProject}
-          className="flex items-center justify-center !py-1.5 px-2 rounded-md border border-[var(--primary-base)]/60 bg-[var(--primary-base)]/5 text-[var(--primary-base)]/80 hover:text-[var(--primary-base)] hover:bg-[var(--primary-base)]/10 !min-h-0"
-          aria-label={t('chat.mobileStatus.projects.addAria')}
-        >
-          <Icon name="add" className="h-3 w-3" />
-        </button>
-      </div>
-    );
-  }
-
-  const formatProjectLabel = (project: ProjectEntry): string => {
-    return project.label?.trim()
-      || formatDirectoryName(project.path, homeDirectory)
-      || project.path;
-  };
-
-  // Handle touch events to prevent drawer swipe when scrolling project bar
-  const handleTouchStart = (e: React.TouchEvent) => {
-    // Store initial touch position for this component
-    (e.currentTarget as HTMLElement).dataset.touchStartX = String(e.touches[0].clientX);
-    (e.currentTarget as HTMLElement).dataset.touchStartY = String(e.touches[0].clientY);
-  };
-
-  const handleTouchMove = (e: React.TouchEvent) => {
-    const target = e.currentTarget as HTMLElement;
-    const startX = Number(target.dataset.touchStartX || 0);
-    const startY = Number(target.dataset.touchStartY || 0);
-    const deltaX = e.touches[0].clientX - startX;
-    const deltaY = e.touches[0].clientY - startY;
-
-    // If horizontal scroll dominates, prevent default to stop drawer gesture
-    if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 5) {
-      e.stopPropagation();
-    }
-  };
-
-  const handleTouchEnd = (e: React.TouchEvent) => {
-    // Clean up
-    const target = e.currentTarget as HTMLElement;
-    delete target.dataset.touchStartX;
-    delete target.dataset.touchStartY;
-  };
+function ProjectFilterChip({
+  label,
+  icon,
+  project,
+  iconOptions,
+  iconBackground,
+  colorVar,
+  isActive,
+  status,
+  onClick,
+}: ProjectFilterChipProps) {
+  const projectIconName = icon ? PROJECT_ICON_MAP[icon] : null;
+  const fallbackIcon = projectIconName ? (
+    <Icon name={projectIconName} className="h-4 w-4" style={!isActive && colorVar ? { color: colorVar } : undefined} />
+  ) : null;
 
   return (
-    <div className="flex items-center gap-1.5 px-2 py-1.5 bg-transparent">
-      <div
-        ref={scrollRef}
-        className="flex-1 flex items-center gap-1.5 overflow-x-auto scrollbar-none touch-pan-x"
-        style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
-      >
-        {projects.map((project) => {
-          const isActive = project.id === activeProjectId;
-          const status = getProjectStatus(project.path);
-          const projectColorVar = project.color ? (PROJECT_COLOR_MAP[project.color] ?? null) : null;
-
-          return (
-            <ProjectButton
-              key={project.id}
-              project={project}
-              isActive={isActive}
-              status={status}
-              projectColorVar={projectColorVar}
-              onProjectSwitch={() => onProjectSwitch(project.id)}
-              onOpenEditPanel={handleOpenEditPanel}
-              formatProjectLabel={formatProjectLabel}
-            />
-          );
-        })}
-      </div>
-
-      {/* Add project button */}
-      <button
-        type="button"
-        onClick={onAddProject}
-        className="flex items-center justify-center !py-1.5 px-2 rounded-md border border-[var(--primary-base)]/60 bg-[var(--primary-base)]/5 text-[var(--primary-base)]/80 hover:text-[var(--primary-base)] hover:bg-[var(--primary-base)]/10 shrink-0 !min-h-0"
-        aria-label={t('chat.mobileStatus.projects.addAria')}
-      >
-        <Icon name="add" className="h-3.5 w-3.5" />
-      </button>
-
-      {/* Delete confirmation dialog */}
-      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>{t('chat.mobileStatus.projects.removeTitle')}</DialogTitle>
-            <DialogDescription>
-              {t('chat.mobileStatus.projects.removeDescriptionPrefix')} <span className="font-medium text-foreground">{projectToDelete?.label || formatDirectoryName(projectToDelete?.path || '', homeDirectory)}</span>?
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="flex gap-2">
-            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
-              {t('chat.mobileStatus.projects.cancel')}
-            </Button>
-            <Button variant="destructive" onClick={handleConfirmDelete}>
-              {t('chat.mobileStatus.projects.remove')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Project edit panel */}
-      <ProjectEditPanel
-        isOpen={editPanelOpen}
-        onClose={() => setEditPanelOpen(false)}
-        projects={projects}
-        onReorder={handleReorder}
-        onEdit={handleEditProject}
-        onDelete={handleDeleteProject}
-        homeDirectory={homeDirectory}
-      />
-
-      {/* Project edit dialog */}
-      {editingProject && (
-        <ProjectEditDialog
-          open={!!editingProject}
-          onOpenChange={(open) => {
-            if (!open) setEditingProject(null);
-          }}
-          projectId={editingProject.id}
-          projectName={editingProject.label || formatDirectoryName(editingProject.path, homeDirectory)}
-          projectPath={editingProject.path}
-          initialIcon={editingProject.icon}
-          initialColor={editingProject.color}
-          initialIconBackground={editingProject.iconBackground}
-          onSave={handleSaveProjectEdit}
-        />
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "flex min-h-[40px] shrink-0 select-none items-center gap-1.5 rounded-full border px-3.5 text-[13px] leading-none whitespace-nowrap transition-colors",
+        isActive
+          ? "border-transparent bg-[var(--primary-base)] text-[var(--primary-foreground)] font-medium"
+          : "border-[var(--interactive-border)] bg-[var(--surface-subtle)] text-[var(--surface-foreground)] active:bg-[var(--interactive-hover)]"
       )}
-    </div>
-  );
-}
-
-function CollapsedView({
-  runningCount,
-  unreadCount,
-  currentSessionId,
-  currentSessionTitle,
-  currentProjectLabel,
-  currentProjectIcon,
-  currentProjectIconImageUrl,
-  currentProjectIconBackground,
-  currentProjectColor,
-  onToggle,
-  onNewSession,
-  contextUsage,
-  childIndicators = [],
-  editingSessionId = null,
-  editingTitle = '',
-  onTitleDoubleClick,
-  onEditingTitleChange,
-  onEditSave,
-  onEditCancel,
-}: {
-  runningCount: number;
-  unreadCount: number;
-  currentSessionId?: string | null;
-  currentSessionTitle: string;
-  currentProjectLabel?: string;
-  currentProjectIcon?: string | null;
-  currentProjectIconImageUrl?: string | null;
-  currentProjectIconBackground?: string | null;
-  currentProjectColor?: string | null;
-  onToggle: () => void;
-  onNewSession: () => void;
-  contextUsage: SessionContextUsage | null;
-  childIndicators?: Array<{ session: Session; isRunning: boolean }>;
-  editingSessionId?: string | null;
-  editingTitle?: string;
-  onTitleDoubleClick?: (sessionId: string, sessionTitle: string) => void;
-  onEditingTitleChange?: (value: string) => void;
-  onEditSave?: () => void;
-  onEditCancel?: () => void;
-}) {
-  const { t } = useI18n();
-  const { handleTouchStart, handleTouchMove, handleTouchEnd } = useDrawerSwipe();
-
-  return (
-    <div
-      className="w-full flex items-center justify-between px-2 py-1 border-b border-[var(--interactive-border)] bg-[var(--surface-muted)] order-first text-left overflow-hidden"
-      style={{
-        borderTopLeftRadius: 'var(--radius-lg)',
-        borderTopRightRadius: 'var(--radius-lg)',
-      }}
-      onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
     >
-      <div className="flex-1 min-w-0 mr-1">
-        <SessionStatusHeader
-          currentSessionId={currentSessionId}
-          currentSessionTitle={currentSessionTitle}
-          currentProjectLabel={currentProjectLabel}
-          currentProjectIcon={currentProjectIcon}
-          currentProjectIconImageUrl={currentProjectIconImageUrl}
-          currentProjectIconBackground={currentProjectIconBackground}
-          currentProjectColor={currentProjectColor}
-          onToggle={onToggle}
-          childIndicators={childIndicators}
-          isEditing={Boolean(currentSessionId) && editingSessionId === currentSessionId}
-          editingTitle={editingTitle}
-          onTitleDoubleClick={onTitleDoubleClick}
-          onEditingTitleChange={onEditingTitleChange}
-          onEditSave={onEditSave}
-          onEditCancel={onEditCancel}
-        />
-      </div>
-      <div className="flex items-center gap-2 flex-shrink-0">
-        <button
-          type="button"
-          className="flex items-center gap-2"
-          onClick={onToggle}
+      {status && (status.hasRunning || status.hasUnread) && !isActive && (
+        status.hasRunning
+          ? <Icon name="loader-4" className="h-2.5 w-2.5 animate-spin text-[var(--status-info)]" />
+          : <span className="h-1.5 w-1.5 rounded-full bg-[var(--status-error)]" />
+      )}
+
+      {project?.iconImage ? (
+        <span
+          className="inline-flex h-4 w-4 items-center justify-center overflow-hidden rounded-[2px]"
+          style={iconBackground ? { backgroundColor: iconBackground } : undefined}
         >
-          <RunningIndicator count={runningCount} />
-          <UnreadIndicator count={unreadCount} />
-          <TokenUsageIndicator contextUsage={contextUsage} />
-        </button>
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onNewSession();
-          }}
-          className="flex items-center gap-0.5 px-2 py-1 text-[12px] leading-tight !min-h-0 rounded border border-[var(--primary-base)]/60 bg-[var(--primary-base)]/5 text-[var(--primary-base)]/80 hover:text-[var(--primary-base)] hover:bg-[var(--primary-base)]/10 self-center"
-        >
-          {t('chat.mobileStatus.new')}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function ExpandedView({
-  sessions,
-  currentSessionId,
-  runningCount,
-  unreadCount,
-  currentSessionTitle,
-  currentProjectLabel,
-  currentProjectIcon,
-  currentProjectIconImageUrl,
-  currentProjectIconBackground,
-  currentProjectColor,
-  isExpanded,
-  onToggleCollapse,
-  onNewSession,
-  onSessionClick,
-  onSessionDoubleClick,
-  onProjectSwitch,
-  onAddProject,
-  onRemoveProject,
-  getSessionAgentName,
-  getSessionTitle,
-  needsAttention,
-  contextUsage,
-  projects,
-  activeProjectId,
-  getProjectStatus,
-  homeDirectory,
-  childIndicators = [],
-  editingSessionId = null,
-  editingTitle = '',
-  onEditingTitleChange,
-  onEditSave,
-  onEditCancel,
-}: {
-  sessions: SessionWithStatus[];
-  currentSessionId: string;
-  runningCount: number;
-  unreadCount: number;
-  currentSessionTitle: string;
-  currentProjectLabel?: string;
-  currentProjectIcon?: string | null;
-  currentProjectIconImageUrl?: string | null;
-  currentProjectIconBackground?: string | null;
-  currentProjectColor?: string | null;
-  isExpanded: boolean;
-  onToggleCollapse: () => void;
-  onNewSession: () => void;
-  onSessionClick: (id: string) => void;
-  onSessionDoubleClick?: (sessionId: string, sessionTitle: string) => void;
-  onProjectSwitch: (projectId: string) => void;
-  onAddProject: () => void;
-  onRemoveProject?: (projectId: string) => void;
-  getSessionAgentName: (s: Session) => string;
-  getSessionTitle: (s: Session) => string;
-  needsAttention: (sessionId: string) => boolean;
-  contextUsage: SessionContextUsage | null;
-  projects: ProjectEntry[];
-  activeProjectId: string | null;
-  getProjectStatus: (path: string) => { hasRunning: boolean; hasUnread: boolean };
-  homeDirectory: string | null;
-  childIndicators?: Array<{ session: Session; isRunning: boolean }>;
-  editingSessionId?: string | null;
-  editingTitle?: string;
-  onEditingTitleChange?: (value: string) => void;
-  onEditSave?: () => void;
-  onEditCancel?: () => void;
-}) {
-  const { t } = useI18n();
-  const containerRef = React.useRef<HTMLDivElement>(null);
-  const [collapsedHeight, setCollapsedHeight] = React.useState<number | null>(null);
-  const [hasMeasured, setHasMeasured] = React.useState(false);
-  const { handleTouchStart, handleTouchMove, handleTouchEnd } = useDrawerSwipe();
-  const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
-
-  React.useEffect(() => {
-    if (containerRef.current && !hasMeasured && !isExpanded) {
-      setCollapsedHeight(containerRef.current.offsetHeight);
-      setHasMeasured(true);
-    }
-  }, [hasMeasured, isExpanded]);
-
-  // Filter sessions by active project
-  const filteredSessions = React.useMemo(() => {
-    if (!activeProjectId) return sessions;
-    
-    const activeProject = projects.find(p => p.id === activeProjectId);
-    if (!activeProject) return sessions;
-
-    const projectRoot = normalize(activeProject.path);
-    const projectDirs = new Set<string>([projectRoot]);
-    
-    // Add worktrees
-    const worktrees = availableWorktreesByProject.get(projectRoot) ?? [];
-    for (const meta of worktrees) {
-      const p = (meta && typeof meta === 'object' && 'path' in meta) ? (meta as { path?: unknown }).path : null;
-      if (typeof p === 'string' && p.trim()) {
-        const normalized = normalize(p);
-        if (normalized) projectDirs.add(normalized);
-      }
-    }
-
-    return sessions.filter(session => {
-      const sessionDir = normalize((session as { directory?: string | null }).directory ?? '');
-      return projectDirs.has(sessionDir);
-    });
-  }, [sessions, activeProjectId, projects, availableWorktreesByProject]);
-
-  const previewHeight = collapsedHeight ?? undefined;
-  const displaySessions = hasMeasured || isExpanded
-    ? filteredSessions.filter(s => s.id !== currentSessionId)
-    : filteredSessions.slice(0, 3);
-
-  return (
-    <div
-      className="w-full border-b border-[var(--interactive-border)] bg-[var(--surface-muted)] order-first overflow-hidden"
-      style={{
-        borderTopLeftRadius: 'var(--radius-lg)',
-        borderTopRightRadius: 'var(--radius-lg)',
-      }}
-      onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
-    >
-      {/* Header row */}
-      <div className="flex items-center justify-between px-2 py-1.5 border-b border-[var(--interactive-border)]">
-        <div className="flex-1 min-w-0 mr-1">
-          <SessionStatusHeader
-            currentSessionId={currentSessionId}
-            currentSessionTitle={currentSessionTitle}
-            currentProjectLabel={currentProjectLabel}
-            currentProjectIcon={currentProjectIcon}
-            currentProjectIconImageUrl={currentProjectIconImageUrl}
-            currentProjectIconBackground={currentProjectIconBackground}
-            currentProjectColor={currentProjectColor}
-            onToggle={onToggleCollapse}
-            isExpanded={true}
-            childIndicators={childIndicators}
-            isEditing={editingSessionId === currentSessionId}
-            editingTitle={editingTitle}
-            onTitleDoubleClick={onSessionDoubleClick}
-            onEditingTitleChange={onEditingTitleChange}
-            onEditSave={onEditSave}
-            onEditCancel={onEditCancel}
+          <ProjectIconImage
+            project={project}
+            options={iconOptions}
+            className="h-full w-full object-contain"
+            fallback={fallbackIcon}
           />
-        </div>
-        <div
-          className="flex items-center gap-2 flex-shrink-0 cursor-pointer !min-h-0"
-          onClick={onToggleCollapse}
-          tabIndex={0}
-          role="button"
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-              onToggleCollapse();
-            }
-          }}
-        >
-          <RunningIndicator count={runningCount} />
-          <UnreadIndicator count={unreadCount} />
-          <TokenUsageIndicator contextUsage={contextUsage} />
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onNewSession();
-            }}
-            className="flex items-center gap-0.5 px-2 py-1 text-[12px] leading-tight !min-h-0 rounded border border-[var(--primary-base)]/60 bg-[var(--primary-base)]/5 text-[var(--primary-base)]/80 hover:text-[var(--primary-base)] hover:bg-[var(--primary-base)]/10 self-start"
-          >
-            {t('chat.mobileStatus.new')}
-          </button>
-        </div>
-      </div>
+        </span>
+      ) : fallbackIcon}
 
-      {/* Project switcher bar */}
-      <ProjectBar
-        projects={projects}
-        activeProjectId={activeProjectId}
-        getProjectStatus={getProjectStatus}
-        onProjectSwitch={onProjectSwitch}
-        onAddProject={onAddProject}
-        onRemoveProject={onRemoveProject}
-        homeDirectory={homeDirectory}
-      />
-
-      {/* Sessions list */}
-      <div
-        ref={containerRef}
-        className="flex flex-col overflow-y-auto"
-        style={{ maxHeight: isExpanded ? '60vh' : previewHeight }}
-      >
-        {displaySessions.length === 0 ? (
-          <div className="flex items-center justify-center py-3 text-[11px] text-[var(--surface-mutedForeground)]">
-            <span>{t('chat.mobileStatus.noSessionsInProject')}</span>
-          </div>
-        ) : (
-          displaySessions.map((session) => {
-            // When the current session is being edited, the sticky header
-            // already renders the rename input; suppress the duplicate
-            // input on this row to avoid two simultaneous editors.
-            const isCurrent = session.id === currentSessionId;
-            const isEditingHere = editingSessionId === session.id && !isCurrent;
-            return (
-              <SessionItem
-                key={session.id}
-                session={session}
-                isCurrent={isCurrent}
-                getSessionAgentName={getSessionAgentName}
-                getSessionTitle={getSessionTitle}
-                onClick={() => onSessionClick(session.id)}
-                onDoubleClick={onSessionDoubleClick}
-                needsAttention={needsAttention}
-                isEditing={isEditingHere}
-                editingTitle={editingTitle}
-                onEditingTitleChange={onEditingTitleChange}
-                onEditSave={onEditSave}
-                onEditCancel={onEditCancel}
-              />
-            );
-          })
-        )}
-      </div>
-    </div>
+      <span className="max-w-[140px] truncate">{label}</span>
+    </button>
   );
 }
 
-const MobileSessionStatusBarCollapsed: React.FC<{ onExpand: () => void }> = ({
-  onExpand,
+// The chip that lives in the composer footer and toggles the slide-up sheet.
+// This is the only persistent affordance; there is no longer a permanent bar.
+interface MobileSessionPanelTriggerProps {
+  footerIconButtonClass: string;
+  iconSizeClass: string;
+}
+
+export const MobileSessionPanelTrigger: React.FC<MobileSessionPanelTriggerProps> = ({
+  footerIconButtonClass,
+  iconSizeClass,
 }) => {
   const { t } = useI18n();
-  const sessionCount = useDirectorySync(React.useCallback((state) => state.session.length, []));
-  const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const currentSession = useSession(currentSessionId, currentDirectory || undefined);
-  const statusCounts = useLiveSessionStatusCounts();
-  const unseenCounts = useNotificationStore((state) => state.index.session.unseenCount);
-  const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
-  const updateSessionTitle = useSessionUIStore((state) => state.updateSessionTitle);
-  const contextUsage = useCurrentContextUsage();
-  const {
-    currentProjectLabel,
-    currentProjectIcon,
-    currentProjectIconImageUrl,
-    currentProjectIconBackground,
-    currentProjectColor,
-  } = useCurrentProjectDisplay();
+  const isMobile = useUIStore((state) => state.isMobile);
+  const showMobileSessionStatusBar = useUIStore((state) => state.showMobileSessionStatusBar);
+  const open = useUIStore((state) => state.mobileSessionPanelOpen);
+  const setOpen = useUIStore((state) => state.setMobileSessionPanelOpen);
 
-  const totalUnread = React.useMemo(() => countUnreadSessions(unseenCounts), [unseenCounts]);
-  const currentSessionTitle = currentSession
-    ? getDisplaySessionTitle(currentSession)
-    : t('chat.mobileStatus.swipeHint');
+  // Ensure the cross-project session list is loaded once, so the panel reflects
+  // every project, not just the active directory.
+  React.useEffect(() => {
+    if (isMobile && showMobileSessionStatusBar) {
+      void ensureGlobalSessionsLoaded();
+    }
+  }, [isMobile, showMobileSessionStatusBar]);
 
-  const [editingSessionId, setEditingSessionId] = React.useState<string | null>(null);
-  const [editingTitle, setEditingTitle] = React.useState('');
-
-  if (sessionCount === 0) {
+  if (!isMobile || !showMobileSessionStatusBar) {
     return null;
   }
 
-  const handleSessionDoubleClick = (sessionId: string, sessionTitle: string) => {
-    setEditingSessionId(sessionId);
-    setEditingTitle(sessionTitle);
-  };
-
-  const handleEditCancel = () => {
-    setEditingSessionId(null);
-    setEditingTitle('');
-  };
-
-  const handleEditSave = () => {
-    if (!editingSessionId) return;
-    const trimmed = editingTitle.trim();
-    const originalTitle = currentSession && currentSession.id === editingSessionId
-      ? getDisplaySessionTitle(currentSession)
-      : '';
-    if (trimmed && trimmed !== originalTitle) {
-      void updateSessionTitle(editingSessionId, trimmed);
-    }
-    setEditingSessionId(null);
-    setEditingTitle('');
-  };
-
   return (
-    <CollapsedView
-      runningCount={statusCounts.running}
-      unreadCount={totalUnread}
-      currentSessionId={currentSessionId}
-      currentSessionTitle={currentSessionTitle}
-      currentProjectLabel={currentProjectLabel}
-      currentProjectIcon={currentProjectIcon}
-      currentProjectIconImageUrl={currentProjectIconImageUrl}
-      currentProjectIconBackground={currentProjectIconBackground}
-      currentProjectColor={currentProjectColor}
-      onToggle={onExpand}
-      onNewSession={() => openNewSessionDraft()}
-      contextUsage={contextUsage}
-      editingSessionId={editingSessionId}
-      editingTitle={editingTitle}
-      onTitleDoubleClick={handleSessionDoubleClick}
-      onEditingTitleChange={setEditingTitle}
-      onEditSave={handleEditSave}
-      onEditCancel={handleEditCancel}
-    />
-  );
-};
-
-const MobileSessionStatusBarExpanded: React.FC<MobileSessionStatusBarProps & { onCollapse: () => void }> = ({
-  onSessionSwitch,
-  onCollapse,
-}) => {
-  const { t } = useI18n();
-  const sessions = useSessions();
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const sessionStatus = useAllSessionStatuses();
-  const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
-  const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
-  const updateSessionTitle = useSessionUIStore((state) => state.updateSessionTitle);
-  const agents = useConfigStore((state) => state.agents);
-  const setActiveProject = useProjectsStore((state) => state.setActiveProject);
-  const setActiveProjectIdOnly = useProjectsStore((state) => state.setActiveProjectIdOnly);
-  const removeProject = useProjectsStore((state) => state.removeProject);
-  const contextUsage = useCurrentContextUsage();
-  const {
-    projects,
-    activeProjectId,
-    homeDirectory,
-    currentProjectLabel,
-    currentProjectIcon,
-    currentProjectIconImageUrl,
-    currentProjectIconBackground,
-    currentProjectColor,
-  } = useCurrentProjectDisplay();
-
-  const { sessions: sortedSessions, totalRunning, totalUnread, totalCount } = useSessionGrouping(sessions, sessionStatus);
-  const { getSessionAgentName, getSessionTitle, needsAttention } = useSessionHelpers(agents, sessionStatus);
-  const getProjectStatus = useProjectStatus(sessions, sessionStatus, currentSessionId);
-
-  const currentSession = sessions.find((s) => s.id === currentSessionId);
-  const currentSessionTitle = currentSession
-    ? getSessionTitle(currentSession)
-    : t('chat.mobileStatus.swipeHint');
-
-  // Calculate current session's child indicators
-  const currentSessionWithStatus = sortedSessions.find((s) => s.id === currentSessionId);
-  const currentSessionChildIndicators = currentSessionWithStatus?._childIndicators ?? [];
-
-  const [isExpanded, setIsExpanded] = React.useState(false);
-  const [editingSessionId, setEditingSessionId] = React.useState<string | null>(null);
-  const [editingTitle, setEditingTitle] = React.useState('');
-
-  if (totalCount === 0) {
-    return null;
-  }
-
-  const handleSessionClick = (sessionId: string) => {
-    if (editingSessionId) return;
-    setCurrentSession(sessionId);
-    onSessionSwitch?.(sessionId);
-    setIsExpanded(false);
-  };
-
-  const handleSessionDoubleClick = (sessionId: string, sessionTitle: string) => {
-    setEditingSessionId(sessionId);
-    setEditingTitle(sessionTitle);
-  };
-
-  const handleEditCancel = () => {
-    setEditingSessionId(null);
-    setEditingTitle('');
-  };
-
-  const handleEditSave = () => {
-    if (!editingSessionId) return;
-    const trimmed = editingTitle.trim();
-    const target = sessions.find((s) => s.id === editingSessionId);
-    const originalTitle = target ? getSessionTitle(target) : '';
-    if (trimmed && trimmed !== originalTitle) {
-      void updateSessionTitle(editingSessionId, trimmed);
-    }
-    setEditingSessionId(null);
-    setEditingTitle('');
-  };
-
-  const handleEditingTitleChange = (value: string) => {
-    setEditingTitle(value);
-  };
-
-  const handleCreateSession = () => {
-    openNewSessionDraft();
-  };
-
-  const handleProjectSwitch = (projectId: string) => {
-    if (projectId === activeProjectId) {
-      return;
-    }
-    const draft = useSessionUIStore.getState().newSessionDraft;
-    if (draft?.open) {
-      if (
-        draft.pendingWorktreeRequestId ||
-        draft.bootstrapPendingDirectory ||
-        draft.preserveDirectoryOverride
-      ) {
-        return;
-      }
-      const project = projects.find((p) => p.id === projectId);
-      if (project) {
-        setActiveProjectIdOnly(projectId);
-        useSessionUIStore.getState().setNewSessionDraftTarget({
-          projectId,
-          directoryOverride: project.path,
-        });
-      }
-      return;
-    }
-    setActiveProject(projectId);
-  };
-
-  const handleAddProject = () => {
-    sessionEvents.requestDirectoryDialog();
-  };
-
-  return (
-    <ExpandedView
-      sessions={sortedSessions}
-      currentSessionId={currentSessionId ?? ''}
-      runningCount={totalRunning}
-      unreadCount={totalUnread}
-      currentSessionTitle={currentSessionTitle}
-      currentProjectLabel={currentProjectLabel}
-      currentProjectIcon={currentProjectIcon}
-      currentProjectIconImageUrl={currentProjectIconImageUrl}
-      currentProjectIconBackground={currentProjectIconBackground}
-      currentProjectColor={currentProjectColor}
-      isExpanded={isExpanded}
-      onToggleCollapse={() => {
-        onCollapse();
-        setIsExpanded(false);
+    <button
+      type="button"
+      className={cn(
+        footerIconButtonClass,
+        'rounded-md relative hover:bg-[var(--interactive-hover)]',
+        open && 'text-[var(--primary-base)]'
+      )}
+      onPointerDownCapture={(event) => {
+        if (event.pointerType === 'touch') {
+          event.preventDefault();
+          event.stopPropagation();
+        }
       }}
-      onNewSession={handleCreateSession}
-      onSessionClick={handleSessionClick}
-      onSessionDoubleClick={handleSessionDoubleClick}
-      onProjectSwitch={handleProjectSwitch}
-      onAddProject={handleAddProject}
-      onRemoveProject={removeProject}
-      getSessionAgentName={getSessionAgentName}
-      getSessionTitle={getSessionTitle}
-      needsAttention={needsAttention}
-      contextUsage={contextUsage}
-      projects={projects}
-      activeProjectId={activeProjectId}
-      getProjectStatus={getProjectStatus}
-      homeDirectory={homeDirectory}
-      childIndicators={currentSessionChildIndicators}
-      editingSessionId={editingSessionId}
-      editingTitle={editingTitle}
-      onEditingTitleChange={handleEditingTitleChange}
-      onEditSave={handleEditSave}
-      onEditCancel={handleEditCancel}
-    />
+      onClick={() => setOpen(!open)}
+      title={t('mobile.sessions.search.section.sessions')}
+      aria-label={t('mobile.sessions.search.section.sessions')}
+      aria-expanded={open}
+    >
+      <Icon name="stack" className={cn(iconSizeClass)} />
+    </button>
   );
 };
 
 export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
   onSessionSwitch,
 }) => {
+  const { t } = useI18n();
+  const { currentTheme } = useThemeSystem();
+  const sessions = useAllProjectSessions();
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const sessionStatus = useAllSessionStatuses();
+  const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
+  const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
+  const getContextUsage = useSessionUIStore((state) => state.getContextUsage);
+  const getCurrentModel = useConfigStore((state) => state.getCurrentModel);
   const isMobile = useUIStore((state) => state.isMobile);
   const showMobileSessionStatusBar = useUIStore((state) => state.showMobileSessionStatusBar);
-  const isMobileSessionStatusBarCollapsed = useUIStore((state) => state.isMobileSessionStatusBarCollapsed);
-  const setIsMobileSessionStatusBarCollapsed = useUIStore((state) => state.setIsMobileSessionStatusBarCollapsed);
+  const open = useUIStore((state) => state.mobileSessionPanelOpen);
+  const setOpen = useUIStore((state) => state.setMobileSessionPanelOpen);
+
+  const projects = useProjectsStore((state) => state.projects);
+  const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
+
+  const { sessions: sortedSessions, totalRunning, totalUnread } = useSessionGrouping(sessions, sessionStatus);
+  const { getSessionTitle, needsAttention } = useSessionHelpers();
+  const getProjectStatus = useProjectStatus(sessions, sessionStatus, currentSessionId);
+  const resolveProjectRoots = useProjectRootsResolver();
+
+  // Project filter, persisted in the UI store so the choice survives closing and
+  // reopening the sheet. Defaults to "All" so sessions from every project are
+  // visible regardless of which session is currently selected.
+  const filterProjectId = useUIStore((state) => state.mobileSessionFilterProjectId);
+  const setFilterProjectId = useUIStore((state) => state.setMobileSessionFilterProjectId);
+
+  // Refresh the cross-project session list when the panel opens (mirrors the
+  // dedicated MobileSessionsSheet). The active-directory sync only upserts the
+  // current project's sessions, so other projects need this global load.
+  React.useEffect(() => {
+    if (open) {
+      void refreshGlobalSessions(sessions);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const formatProjectLabel = React.useCallback((project: ProjectEntry): string => {
+    return project.label?.trim()
+      || formatDirectoryName(project.path, homeDirectory)
+      || project.path;
+  }, [homeDirectory]);
+
+  // Filter sessions by the selected project (root + worktrees), using the
+  // store's canonical directory keying.
+  const filteredSessions = React.useMemo(() => {
+    if (!filterProjectId) return sortedSessions;
+    const project = projects.find((p) => p.id === filterProjectId);
+    if (!project) return sortedSessions;
+    const roots = resolveProjectRoots(project);
+    return sortedSessions.filter((session) => {
+      const dir = sessionDirectory(session);
+      return roots.some((root) => pathBelongsToRoot(dir, root));
+    });
+  }, [sortedSessions, filterProjectId, projects, resolveProjectRoots]);
+
+  // Cap to the most recent N (already sorted running-first, then by updated).
+  const visibleSessions = React.useMemo(
+    () => filteredSessions.slice(0, MAX_RECENT_SESSIONS),
+    [filteredSessions],
+  );
+
+  // Token usage for the current session.
+  const currentModel = getCurrentModel();
+  const limit = currentModel && typeof currentModel.limit === 'object' && currentModel.limit !== null
+    ? (currentModel.limit as Record<string, unknown>)
+    : null;
+  const contextLimit = (limit && typeof limit.context === 'number' ? limit.context : 0);
+  const outputLimit = (limit && typeof limit.output === 'number' ? limit.output : 0);
+  const contextUsage = getContextUsage(contextLimit, outputLimit);
+
+  const handleSessionClick = (session: SessionWithStatus) => {
+    setCurrentSession(session.id, sessionDirectory(session) || null);
+    onSessionSwitch?.(session.id);
+    setOpen(false);
+  };
+
+  // "+" — start a new session draft. Target the project selected in the filter;
+  // for "All", use the most recently active session's directory, falling back to
+  // the store's own default target when there are no sessions.
+  const handleNewChat = React.useCallback(() => {
+    setOpen(false);
+    if (filterProjectId) {
+      const project = projects.find((p) => p.id === filterProjectId);
+      if (project) {
+        openNewSessionDraft({ selectedProjectId: project.id, directoryOverride: project.path });
+        return;
+      }
+    }
+    const mostRecent = [...sessions].sort((a, b) => {
+      const aTime = (a as { time?: { updated?: number } }).time?.updated ?? 0;
+      const bTime = (b as { time?: { updated?: number } }).time?.updated ?? 0;
+      return bTime - aTime;
+    })[0];
+    const directory = mostRecent ? sessionDirectory(mostRecent) : '';
+    openNewSessionDraft(directory ? { directoryOverride: directory } : undefined);
+  }, [filterProjectId, projects, sessions, openNewSessionDraft, setOpen]);
+
+  const renderHeader = React.useCallback(() => (
+    <div className="shrink-0">
+      <div className="flex justify-center pt-2.5 pb-1">
+        <div className="h-1 w-9 rounded-full bg-[color-mix(in_srgb,var(--surface-mutedForeground)_40%,transparent)]" />
+      </div>
+
+      <div className="flex items-center justify-between gap-2 px-4 pb-2">
+        <h2 className="text-[16px] font-semibold text-[var(--surface-foreground)]">
+          {t('mobile.sessions.search.section.sessions')}
+        </h2>
+        <div className="flex items-center gap-3">
+          <RunningIndicator count={totalRunning} />
+          <UnreadIndicator count={totalUnread} />
+          <TokenUsageIndicator contextUsage={contextUsage} />
+          <button
+            type="button"
+            onClick={handleNewChat}
+            aria-label={t('mobile.sessions.newChat')}
+            className="flex size-8 items-center justify-center rounded-full text-[var(--surface-mutedForeground)] transition-colors hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]"
+            style={{ touchAction: 'manipulation' }}
+          >
+            <Icon name="add" className="h-5 w-5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            className="flex size-8 items-center justify-center rounded-full text-[var(--surface-mutedForeground)] transition-colors hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]"
+            style={{ touchAction: 'manipulation' }}
+          >
+            <Icon name="close" className="h-5 w-5" />
+          </button>
+        </div>
+      </div>
+
+      {projects.length > 1 && (
+        <div
+          className="flex items-center gap-2 overflow-x-auto border-t border-[color-mix(in_srgb,var(--interactive-border)_40%,transparent)] px-4 py-2.5 scrollbar-none"
+          style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+        >
+          <ProjectFilterChip
+            label={t('chat.modelControls.modeValue.all')}
+            isActive={filterProjectId === null}
+            onClick={() => setFilterProjectId(null)}
+          />
+          {projects.map((project) => (
+            <ProjectFilterChip
+              key={project.id}
+              label={formatProjectLabel(project)}
+              icon={project.icon}
+              project={{ id: project.id, iconImage: project.iconImage ?? null }}
+              iconOptions={{
+                themeVariant: currentTheme.metadata.variant,
+                iconColor: currentTheme.colors.surface.foreground,
+              }}
+              iconBackground={project.iconBackground ?? null}
+              colorVar={project.color ? (PROJECT_COLOR_MAP[project.color] ?? null) : null}
+              isActive={filterProjectId === project.id}
+              status={getProjectStatus(project.path)}
+              onClick={() => setFilterProjectId(project.id)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  ), [t, totalRunning, totalUnread, contextUsage, projects, filterProjectId, setFilterProjectId, formatProjectLabel, currentTheme, getProjectStatus, handleNewChat, setOpen]);
 
   if (!isMobile || !showMobileSessionStatusBar) {
     return null;
   }
 
-  if (isMobileSessionStatusBarCollapsed) {
-    return (
-      <MobileSessionStatusBarCollapsed
-        onExpand={() => setIsMobileSessionStatusBarCollapsed(false)}
-      />
-    );
-  }
-
   return (
-    <MobileSessionStatusBarExpanded
-      onSessionSwitch={onSessionSwitch}
-      onCollapse={() => setIsMobileSessionStatusBarCollapsed(true)}
-    />
+    <MobileOverlayPanel
+      open={open}
+      onClose={() => setOpen(false)}
+      title={t('mobile.sessions.search.section.sessions')}
+      renderHeader={renderHeader}
+      className="h-[72vh]"
+      contentMaxHeightClassName="max-h-full"
+    >
+      <div className="flex min-h-full flex-col gap-0.5">
+        {visibleSessions.length === 0 ? (
+          <div className="flex flex-1 items-center justify-center py-10 text-[13px] text-[var(--surface-mutedForeground)]">
+            <span>{t('chat.mobileStatus.noSessionsInProject')}</span>
+          </div>
+        ) : (
+          visibleSessions.map((session) => (
+            <SessionItem
+              key={session.id}
+              session={session}
+              isCurrent={session.id === currentSessionId}
+              getSessionTitle={getSessionTitle}
+              onClick={() => handleSessionClick(session)}
+              needsAttention={needsAttention}
+            />
+          ))
+        )}
+      </div>
+    </MobileOverlayPanel>
   );
 };

@@ -49,14 +49,15 @@ export const AgentMentionAutocomplete = React.forwardRef<AgentMentionAutocomplet
   const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
   const ignoreTabClickRef = React.useRef(false);
   const getVisibleAgents = useConfigStore((state) => state.getVisibleAgents);
+  const configAgentsCount = useConfigStore((state) => state.agents.length);
   const agentsWithMetadata = useAgentsStore((state) => state.agents);
   const loadAgents = useAgentsStore((state) => state.loadAgents);
 
   React.useEffect(() => {
-    if (agentsWithMetadata.length === 0) {
+    if (agentsWithMetadata.length === 0 && configAgentsCount === 0) {
       void loadAgents();
     }
-  }, [loadAgents, agentsWithMetadata.length]);
+  }, [loadAgents, agentsWithMetadata.length, configAgentsCount]);
 
   React.useEffect(() => {
     const visibleAgents = getVisibleAgents();

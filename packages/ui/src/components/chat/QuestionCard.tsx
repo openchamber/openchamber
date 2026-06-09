@@ -25,7 +25,7 @@ const SUMMARY_TAB = 'summary';
 export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
   const { t } = useI18n();
   const respondToQuestion = sessionActions.respondToQuestion;
-    const rejectQuestion = sessionActions.rejectQuestion;;
+  const rejectQuestion = sessionActions.rejectQuestion;
   const isMobile = useUIStore((state) => state.isMobile);
   const sessions = useSessions();
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
@@ -174,12 +174,19 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
       const answers = buildAnswersPayload();
       await respondToQuestion(question.sessionID, question.id, answers);
       setHasResponded(true);
-    } catch {
-      // ignored
+    } catch (error) {
+      if (sessionActions.isQuestionRequestNotFoundError(error)) {
+        toast.info(t('chat.questionCard.noLongerPending'));
+        setHasResponded(true);
+      } else {
+        toast.error(t('chat.questionCard.submitFailed'), {
+          description: t('chat.questionCard.tryAgain'),
+        });
+      }
     } finally {
       setIsResponding(false);
     }
-  }, [buildAnswersPayload, question.id, question.sessionID, requiredSatisfied, respondToQuestion]);
+  }, [buildAnswersPayload, question.id, question.sessionID, requiredSatisfied, respondToQuestion, t]);
 
   const handleKeyDown = React.useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -202,12 +209,19 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
     try {
       await rejectQuestion(question.sessionID, question.id);
       setHasResponded(true);
-    } catch {
-      // ignored
+    } catch (error) {
+      if (sessionActions.isQuestionRequestNotFoundError(error)) {
+        toast.info(t('chat.questionCard.noLongerPending'));
+        setHasResponded(true);
+      } else {
+        toast.error(t('chat.questionCard.dismissFailed'), {
+          description: t('chat.questionCard.tryAgain'),
+        });
+      }
     } finally {
       setIsResponding(false);
     }
-  }, [question.id, question.sessionID, rejectQuestion]);
+  }, [question.id, question.sessionID, rejectQuestion, t]);
 
   const handleCopyMarkdown = React.useCallback(async () => {
     const text = serializeQuestionAsMarkdown(question);

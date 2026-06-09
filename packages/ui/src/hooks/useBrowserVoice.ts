@@ -140,6 +140,7 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
   const currentProviderId = useConfigStore((state) => state.currentProviderId);
   const currentModelId = useConfigStore((state) => state.currentModelId);
   const currentAgentName = useConfigStore((state) => state.currentAgentName);
+  const currentVariant = useConfigStore((state) => state.currentVariant);
   const voiceModeEnabled = useConfigStore((state) => state.voiceModeEnabled);
   const voiceProvider = useConfigStore((state) => state.voiceProvider);
   const speechRate = useConfigStore((state) => state.speechRate);
@@ -446,7 +447,11 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
         finalText.trim(),
         currentProviderId,
         currentModelId,
-        currentAgentName ?? undefined
+        currentAgentName ?? undefined,
+        undefined,
+        undefined,
+        undefined,
+        currentVariant ?? undefined,
       );
       
       // Wait for AI response and speak it
@@ -602,7 +607,7 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
       setStatus('error');
       processingMessageRef.current = false;
     }
-  }, [currentSessionId, currentProviderId, currentModelId, currentAgentName, language, sendMessage, setPendingInputText, createSession, speechRate, speechPitch, speechVolume, isServerTTSAvailable, speakServerTTS, isSayTTSAvailable, speakSayTTS, voiceProvider, sayVoice, browserVoice, openaiVoice, openaiCompatibleVoice, openaiCompatibleUrl, openaiCompatibleTtsModel, conversationMode, startCurrentSTT]);
+  }, [currentSessionId, currentProviderId, currentModelId, currentAgentName, currentVariant, language, sendMessage, setPendingInputText, createSession, speechRate, speechPitch, speechVolume, isServerTTSAvailable, speakServerTTS, isSayTTSAvailable, speakSayTTS, voiceProvider, sayVoice, browserVoice, openaiVoice, openaiCompatibleVoice, openaiCompatibleUrl, openaiCompatibleTtsModel, conversationMode, startCurrentSTT]);
 
   // Handle speech recognition result
   const handleSpeechResult = useCallback(async (text: string, isFinal: boolean) => {

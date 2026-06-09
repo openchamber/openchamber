@@ -40,6 +40,63 @@ button,
   animation: none !important;
 }
 
+/* ── macOS vibrancy ───────────────────────────────────────────────────────
+   The window is created transparent with a native 'sidebar' NSVisualEffectView
+   behind it. We keep the whole app opaque (bg-background covers the window)
+   EXCEPT the left sidebar, which is the only translucent surface that lets the
+   native vibrancy show through. `data-oc-vibrancy` = vibrancy active;
+   `data-oc-vibrancy-ready` = native layer has settled (set from the main
+   process after show/restore) — until then the sidebar stays solid to avoid a
+   flash of raw transparency. */
+html[data-oc-vibrancy] body,
+html[data-oc-vibrancy] #root {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+html[data-oc-vibrancy] .main-content-safe-area {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/* Left sidebar: solid until the native layer is ready, then a translucent
+   overlay so the vibrancy frosts through. */
+html[data-oc-vibrancy] .oc-vibrancy-surface {
+  background: var(--sidebar) !important;
+}
+
+html[data-oc-vibrancy][data-oc-vibrancy-ready] .oc-vibrancy-surface {
+  background: var(--sidebar-vibrancy-overlay) !important;
+}
+
+/* Inner bg-sidebar elements inside the vibrant surface must not re-paint an
+   opaque fill, or they'd cover the frosted effect. */
+html[data-oc-vibrancy] .oc-vibrancy-surface .bg-sidebar {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/* Project-actions pill over the open sidebar: drop its opaque surface so it
+   frosts to the exact same level as the sidebar (border keeps its outline). */
+html[data-oc-vibrancy] .oc-vibrancy-pill {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/* Accessibility: drop translucency when the OS asks for reduced transparency. */
+@media (prefers-reduced-transparency: reduce) {
+  html[data-oc-vibrancy] body,
+  html[data-oc-vibrancy] #root,
+  html[data-oc-vibrancy] .main-content-safe-area {
+    background: var(--surface-background) !important;
+  }
+
+  html[data-oc-vibrancy] .oc-vibrancy-surface,
+  html[data-oc-vibrancy][data-oc-vibrancy-ready] .oc-vibrancy-surface {
+    background: var(--sidebar) !important;
+  }
+}
+
 /* Suppress WebKit-specific hover/focus adornments on the chat textarea */
 textarea[data-chat-input="true"] {
   -webkit-appearance: none;

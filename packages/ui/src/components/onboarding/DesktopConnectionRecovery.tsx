@@ -50,7 +50,7 @@ export function DesktopConnectionRecovery({
     if (variant === 'remote-unreachable') {
       return { host: t('onboarding.desktopRecovery.placeholders.remoteServer') };
     }
-    if (variant === 'remote-wrong-service') {
+    if (variant === 'remote-wrong-service' || variant === 'remote-incompatible') {
       return { host: t('onboarding.desktopRecovery.placeholders.unknownServer') };
     }
     return undefined;
@@ -84,7 +84,7 @@ export function DesktopConnectionRecovery({
         </div>
 
         {/* Host info if available */}
-        {hostUrl && (variant === 'remote-unreachable' || variant === 'remote-wrong-service') && (
+        {hostUrl && (variant === 'remote-unreachable' || variant === 'remote-wrong-service' || variant === 'remote-incompatible') && (
           <div className="rounded-lg border border-border bg-background/50 p-3">
             <div className="text-xs text-muted-foreground mb-1">{t('onboarding.remoteConnection.field.serverAddress')}</div>
             <div className="font-mono text-sm text-foreground truncate">{redactSensitiveUrl(hostUrl)}</div>

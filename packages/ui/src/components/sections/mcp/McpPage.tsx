@@ -20,6 +20,8 @@ import {
 } from './mcpImport';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { runtimeFetch } from '@/lib/runtime-fetch';
+import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { cn } from '@/lib/utils';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { MCP_OAUTH_CALLBACK_PATH, parseMcpOAuthCallbackContext, parseMcpOAuthCallbackStateKey } from '@/components/sections/mcp/mcpOAuth';
@@ -501,7 +503,7 @@ const buildMcpOAuthRedirectUri = (name?: string | null, directory?: string | nul
     return null;
   }
 
-  const url = new URL(MCP_OAUTH_CALLBACK_PATH, window.location.origin);
+  const url = new URL(MCP_OAUTH_CALLBACK_PATH, getRuntimeApiBaseUrl() || window.location.origin);
   if (typeof name === 'string' && name.trim()) {
     url.searchParams.set('server', name.trim());
   }
@@ -516,7 +518,7 @@ const queuePendingMcpAuthContext = async (input: {
   name: string;
   directory?: string | null;
 }): Promise<void> => {
-  const response = await fetch('/api/mcp/auth/pending', {
+  const response = await runtimeFetch('/api/mcp/auth/pending', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -533,7 +535,7 @@ const queuePendingMcpAuthContext = async (input: {
 };
 
 const getPendingMcpAuthContext = async (stateKey: string): Promise<{ name: string; directory: string | null } | null> => {
-  const response = await fetch(`/api/mcp/auth/pending?state=${encodeURIComponent(stateKey)}`);
+  const response = await runtimeFetch(`/api/mcp/auth/pending?state=${encodeURIComponent(stateKey)}`);
   if (!response.ok) {
     return null;
   }
@@ -554,7 +556,7 @@ const clearPendingMcpAuthContext = async (stateKey: string | null | undefined): 
     return;
   }
 
-  await fetch(`/api/mcp/auth/pending?state=${encodeURIComponent(stateKey.trim())}`, { method: 'DELETE' }).catch(() => undefined);
+  await runtimeFetch(`/api/mcp/auth/pending?state=${encodeURIComponent(stateKey.trim())}`, { method: 'DELETE' }).catch(() => undefined);
 };
 
 const normalizeMcpAuthErrorMessage = (

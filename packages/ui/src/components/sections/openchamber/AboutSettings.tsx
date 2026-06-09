@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 const GITHUB_URL = 'https://github.com/btriapitsyn/openchamber';
 
@@ -17,6 +18,7 @@ export const AboutSettings: React.FC = () => {
   const { t } = useI18n();
   const [updateDialogOpen, setUpdateDialogOpen] = React.useState(false);
   const [showChecking, setShowChecking] = React.useState(false);
+  const [openCodeVersion, setOpenCodeVersion] = React.useState<string | null>(null);
   const updateStore = useUpdateStore(useShallow((s) => ({
     info: s.info,
     checking: s.checking,
@@ -33,6 +35,33 @@ export const AboutSettings: React.FC = () => {
   const { isMobile } = useDeviceInfo();
 
   const currentVersion = updateStore.info?.currentVersion || 'unknown';
+
+  React.useEffect(() => {
+    let cancelled = false;
+
+    const loadOpenCodeVersion = async () => {
+      try {
+        const response = await runtimeFetch('/api/opencode/version', {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+        });
+        if (!response.ok) return;
+        const data = await response.json().catch(() => null) as { version?: unknown } | null;
+        const version = typeof data?.version === 'string' && data.version.trim().length > 0
+          ? data.version.trim()
+          : null;
+        if (!cancelled) setOpenCodeVersion(version);
+      } catch {
+        if (!cancelled) setOpenCodeVersion(null);
+      }
+    };
+
+    void loadOpenCodeVersion();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Track if we initiated a check to show toast on completion
   const didInitiateCheck = React.useRef(false);
@@ -89,6 +118,11 @@ export const AboutSettings: React.FC = () => {
               {t('settings.openchamber.about.actions.update')}
             </button>
           )}
+        </div>
+
+        <div className="flex items-center justify-between">
+          <span className="typography-meta text-muted-foreground">{t('settings.openchamber.about.field.openCodeVersion')}</span>
+          <span className="typography-meta text-muted-foreground font-mono">{openCodeVersion || t('settings.openchamber.about.state.unknown')}</span>
         </div>
 
         {updateStore.error && (
@@ -158,6 +192,10 @@ export const AboutSettings: React.FC = () => {
           <div className="flex min-w-0 flex-col">
             <span className="typography-ui-label text-foreground">{t('settings.openchamber.about.field.version')}</span>
             <span className="typography-meta text-muted-foreground font-mono">{currentVersion}</span>
+          </div>
+          <div className="flex min-w-0 flex-col">
+            <span className="typography-ui-label text-foreground">{t('settings.openchamber.about.field.openCodeVersion')}</span>
+            <span className="typography-meta text-muted-foreground font-mono">{openCodeVersion || t('settings.openchamber.about.state.unknown')}</span>
           </div>
           
           <div className="flex items-center gap-3">

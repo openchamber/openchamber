@@ -9,7 +9,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..');
 const extensionPath = path.join(repoRoot, 'packages', 'vscode');
-const useDetachedChildren = process.platform === 'darwin';
+const useDetachedChildren = process.platform === 'darwin' || process.platform === 'linux';
 
 const codeBin = process.env.OPENCHAMBER_VSCODE_BIN || 'code';
 const workspaceArg = process.argv[2] || process.env.OPENCHAMBER_VSCODE_DEV_WORKSPACE || repoRoot;

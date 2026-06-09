@@ -35,6 +35,7 @@ export function useMessageTTS(): UseMessageTTSReturn {
     const openaiCompatibleUrl = useConfigStore((state) => state.openaiCompatibleUrl);
     const openaiCompatibleTtsModel = useConfigStore((state) => state.openaiCompatibleTtsModel);
     const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
+    const ttsInputMode = useConfigStore((state) => state.ttsInputMode);
 
     const isServerProvider = voiceProvider === 'openai' || voiceProvider === 'openai-compatible';
     const shouldCheckOpenAIAvailability = showMessageTTSButtons && isServerProvider;
@@ -64,7 +65,9 @@ export function useMessageTTS(): UseMessageTTSReturn {
         setIsPlaying(true);
         
         try {
-            const textToSpeak = sanitizeForTTS(text);
+            const shouldUseRaw = ttsInputMode === 'raw' && isServerProvider;
+            const sanitizedText = sanitizeForTTS(text);
+            const textToSpeak = shouldUseRaw ? text : sanitizedText;
             
             if (isServerProvider && isServerTTSAvailable) {
                 const voice = voiceProvider === 'openai-compatible' ? openaiCompatibleVoice : openaiVoice;
@@ -83,7 +86,7 @@ export function useMessageTTS(): UseMessageTTSReturn {
                 });
             } else if (voiceProvider === 'say' && isSayTTSAvailable) {
                 const wordsPerMinute = Math.round(100 + (speechRate - 0.5) * 200);
-                await speakSayTTS(textToSpeak, {
+                await speakSayTTS(sanitizedText, {
                     voice: sayVoice,
                     rate: wordsPerMinute,
                     onEnd: () => setIsPlaying(false),
@@ -94,7 +97,7 @@ export function useMessageTTS(): UseMessageTTSReturn {
                 await browserVoiceService.waitForVoices();
                 await browserVoiceService.resumeAudioContext();
                 await browserVoiceService.speakText(
-                    textToSpeak,
+                    sanitizedText,
                     navigator.language || 'en-US',
                     () => setIsPlaying(false),
                     {
@@ -123,6 +126,7 @@ export function useMessageTTS(): UseMessageTTSReturn {
         openaiCompatibleTtsModel,
         isServerTTSAvailable,
         isSayTTSAvailable,
+        ttsInputMode,
         speakServerTTS,
         speakSayTTS,
         stop,

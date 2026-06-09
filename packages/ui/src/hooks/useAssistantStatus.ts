@@ -249,6 +249,7 @@ const getToolDisplayName = (part: ToolPart): string => {
 
 export function useAssistantStatus(): AssistantStatusSnapshot {
     const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+    const currentSessionDirectory = useSessionUIStore((state) => state.currentSessionDirectory);
 
     const rawSessionMessages = useDirectorySync(
         React.useCallback((state) => {
@@ -256,7 +257,8 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
                 return EMPTY_MESSAGES;
             }
             return state.message[currentSessionId] ?? EMPTY_MESSAGES;
-        }, [currentSessionId])
+        }, [currentSessionId]),
+        currentSessionDirectory ?? undefined,
     );
 
     // Only subscribe to parts for the last assistant message — avoids re-render
@@ -273,11 +275,12 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
             const genericKey = `${currentSessionId ?? ''}:${lastAssistantId ?? ''}`;
             const parts = lastAssistantId ? (state.part[lastAssistantId] ?? EMPTY_PARTS) : EMPTY_PARTS;
             return encodeParsedStatus(createParsedStatus(parts, genericKey));
-        }, [currentSessionId, lastAssistantId])
+        }, [currentSessionId, lastAssistantId]),
+        currentSessionDirectory ?? undefined,
     );
 
-    const sessionPermissionRequests = useSessionPermissions(currentSessionId ?? '');
-    const sessionQuestionRequests = useSessionQuestions(currentSessionId ?? '');
+    const sessionPermissionRequests = useSessionPermissions(currentSessionId ?? '', currentSessionDirectory ?? undefined);
+    const sessionQuestionRequests = useSessionQuestions(currentSessionId ?? '', currentSessionDirectory ?? undefined);
 
     const sessionAbortRecord = useSessionUIStore(
         React.useCallback((state) => {
@@ -290,7 +293,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
 
     const { phase: activityPhase, isWorking: isPhaseWorking } = useCurrentSessionActivity();
 
-    const currentSessionStatus = useSessionStatus(currentSessionId ?? '');
+    const currentSessionStatus = useSessionStatus(currentSessionId ?? '', currentSessionDirectory ?? undefined);
 
     const sessionRetryAttempt = currentSessionStatus?.type === 'retry'
         ? (currentSessionStatus as { type: 'retry'; attempt?: number }).attempt

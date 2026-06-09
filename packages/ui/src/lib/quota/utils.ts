@@ -1,3 +1,6 @@
+import { formatDateTimeForPreference, formatTimeForPreference } from '@/lib/timeFormat';
+import type { TimeFormatPreference } from '@/stores/useUIStore';
+
 export const clampPercent = (value: number | null): number | null => {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return null;
@@ -22,6 +25,7 @@ export const formatQuotaValueLabel = (
 export const formatQuotaResetLabel = (
   resetAt: number | null,
   fallback?: string | null,
+  timeFormatPreference: TimeFormatPreference = 'auto',
 ): string => {
   if (!resetAt) {
     return fallback ?? '';
@@ -37,13 +41,10 @@ export const formatQuotaResetLabel = (
     const isToday = resetDate.toDateString() === now.toDateString();
 
     if (isToday) {
-      return resetDate.toLocaleTimeString(undefined, {
-        hour: 'numeric',
-        minute: '2-digit',
-      });
+      return formatTimeForPreference(resetDate, timeFormatPreference, { fallback: fallback ?? '' });
     }
 
-    return resetDate.toLocaleString(undefined, {
+    return formatDateTimeForPreference(resetDate, timeFormatPreference, {
       month: 'short',
       day: 'numeric',
       weekday: 'short',
