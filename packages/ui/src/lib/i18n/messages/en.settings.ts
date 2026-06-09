@@ -1370,6 +1370,8 @@ export const settingsDict = {
   'settings.openchamber.defaults.option.default': 'Default',
   'settings.openchamber.defaults.option.defaultLowercase': 'default',
   'settings.openchamber.git.title': 'Git Preferences',
+  'settings.openchamber.git.generationModelTitle': 'Generation Model',
+  'settings.openchamber.git.generationModelPlaceholder': 'Use active session model',
   'settings.openchamber.git.changesViewTitle': 'Changes View',
   'settings.openchamber.git.changesViewAria': 'Git changes view mode',
   'settings.openchamber.git.option.flatList': 'Flat List',

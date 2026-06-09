@@ -1337,6 +1337,8 @@ export const settingsDict = {
   'settings.openchamber.defaults.option.default': '기본값',
   'settings.openchamber.defaults.option.defaultLowercase': '기본값',
   'settings.openchamber.git.title': 'Git',
+  'settings.openchamber.git.generationModelTitle': '개선 모델',
+  'settings.openchamber.git.generationModelPlaceholder': '활성 세션 모델 사용',
   'settings.openchamber.git.changesViewTitle': '변경사항 보기',
   'settings.openchamber.git.changesViewAria': 'Git 변경사항 보기 모드',
   'settings.openchamber.git.option.flatList': '평면 목록',

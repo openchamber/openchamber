@@ -1,6 +1,7 @@
 import React from 'react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Radio } from '@/components/ui/radio';
+import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -13,6 +14,9 @@ export const GitSettings: React.FC = () => {
   const { t } = useI18n();
   const settingsGitmojiEnabled = useConfigStore((state) => state.settingsGitmojiEnabled);
   const setSettingsGitmojiEnabled = useConfigStore((state) => state.setSettingsGitmojiEnabled);
+  const settingsGitProviderId = useConfigStore((state) => state.settingsGitProviderId);
+  const settingsGitModelId = useConfigStore((state) => state.settingsGitModelId);
+  const setSettingsGitModel = useConfigStore((state) => state.setSettingsGitModel);
   const showGitignored = useFilesViewShowGitignored();
   const gitChangesViewMode = useUIStore((state) => state.gitChangesViewMode);
   const setGitChangesViewMode = useUIStore((state) => state.setGitChangesViewMode);
@@ -111,6 +115,16 @@ export const GitSettings: React.FC = () => {
     void updateDesktopSettings({ gitChangesViewMode: mode });
   }, [gitChangesViewMode, setGitChangesViewMode]);
 
+  const handleGitModelChange = React.useCallback((providerId: string, modelId: string) => {
+    if (providerId && modelId) {
+      setSettingsGitModel(providerId, modelId);
+      void updateDesktopSettings({ gitProviderId: providerId, gitModelId: modelId });
+    } else {
+      setSettingsGitModel(undefined, undefined);
+      void updateDesktopSettings({ gitProviderId: '', gitModelId: '' });
+    }
+  }, [setSettingsGitModel]);
+
   if (isLoading) {
     return null;
   }
@@ -122,6 +136,18 @@ export const GitSettings: React.FC = () => {
       </div>
 
       <section className="px-2 pb-2 pt-0 space-y-0.5">
+        <div className="pt-1 pb-1">
+          <div className="flex items-center justify-between gap-2">
+            <h4 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.git.generationModelTitle')}</h4>
+            <ModelSelector
+              providerId={settingsGitProviderId ?? ''}
+              modelId={settingsGitModelId ?? ''}
+              onChange={handleGitModelChange}
+              placeholder={t('settings.openchamber.git.generationModelPlaceholder')}
+            />
+          </div>
+        </div>
+
         <div className="pt-1 pb-1">
           <h4 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.git.changesViewTitle')}</h4>
           <div role="radiogroup" aria-label={t('settings.openchamber.git.changesViewAria')} className="mt-0.5 space-y-0">

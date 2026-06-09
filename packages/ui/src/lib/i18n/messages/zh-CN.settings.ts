@@ -1337,6 +1337,8 @@ export const settingsDict = {
   'settings.openchamber.defaults.option.default': '默认',
   'settings.openchamber.defaults.option.defaultLowercase': '默认',
   'settings.openchamber.git.title': 'Git 偏好设置',
+  'settings.openchamber.git.generationModelTitle': '生成模型',
+  'settings.openchamber.git.generationModelPlaceholder': '使用当前会话模型',
   'settings.openchamber.git.changesViewTitle': '更改视图',
   'settings.openchamber.git.changesViewAria': 'Git 更改视图模式',
   'settings.openchamber.git.option.flatList': '平铺列表',
