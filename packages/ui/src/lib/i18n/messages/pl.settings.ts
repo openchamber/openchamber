@@ -949,6 +949,9 @@ export const settingsDict = {
   'settings.openchamber.visual.field.terminalQuickKeys': 'Szybkie klawisze terminala',
   'settings.openchamber.visual.field.terminalQuickKeysAria': 'Szybkie klawisze terminala',
   'settings.openchamber.visual.field.terminalQuickKeysTooltip': 'Pokaż Esc, Ctrl i strzałki w widoku terminala',
+  'settings.openchamber.visual.field.fileEditorKeymap': 'Mapa klawiszy edytora plików',
+  'settings.openchamber.visual.option.fileEditorKeymap.default': 'Domyślna',
+  'settings.openchamber.visual.option.fileEditorKeymap.vim': 'Vim',
   'settings.openchamber.visual.field.themeImportInfoAria': 'Informacje o imporcie motywów',
   'settings.openchamber.visual.field.themeImportInfoTooltip': 'Importuj własne motywy z ~/.config/openchamber/themes/',
   'settings.openchamber.visual.field.timeFormat': 'Format czasu',
@@ -1746,5 +1749,8 @@ export const settingsDict = {
   'settings.voice.page.tooltip.say': 'Natywne dla macOS. Szybkie, darmowe, offline.',
   'settings.voice.page.tooltip.sttBrowser': 'Web Speech API (Chrome/Edge). Darmowe, bez konfiguracji.',
   'settings.voice.page.tooltip.sttServer': 'Serwer Whisper zgodny z OpenAI. Lepsza dokładność, dowolny język.',
+  'settings.voice.page.field.ttsInputMode': 'Tryb wejścia TTS',
+  'settings.voice.page.field.ttsInputModeSanitized': 'Oczyszczony tekst',
+  'settings.voice.page.field.ttsInputModeRaw': 'Surowy Markdown',
   'settings.window.description': 'Okno ustawień OpenChamber.',
 };

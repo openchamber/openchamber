@@ -15,6 +15,7 @@ import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { mergeModelMetadataWithLiveModel } from '@/lib/modelMetadata';
+import { getModelDisplayName as getSharedModelDisplayName } from '@/lib/modelDisplay';
 import { cn } from '@/lib/utils';
 import type { ModelMetadata } from '@/types';
 
@@ -58,10 +59,7 @@ const CURRENCY_FORMATTER = new Intl.NumberFormat('en-US', {
 });
 
 const getModelDisplayName = (model: Record<string, unknown>) => {
-  const name = model?.name || model?.id || '';
-  const nameStr = String(name);
-  if (nameStr.length > 40) return `${nameStr.substring(0, 37)}...`;
-  return nameStr;
+  return getSharedModelDisplayName(model, undefined, { maxLength: 40 });
 };
 
 const formatModelContextTokens = (value?: number | null) => {
