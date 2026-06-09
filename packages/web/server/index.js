@@ -1624,6 +1624,16 @@ async function main(options = {}) {
   }, 60_000);
   relayReconcileTimer.unref?.();
 
+  // Wire process signals to graceful shutdown so the auto-started OpenCode
+  // child process is killed when the server exits (Ctrl+C, SIGTERM, etc.).
+  // The existing attachProcessHandlers in server-startup-runtime.js covers
+  // SIGTERM/SIGINT/SIGQUIT when attachSignals is enabled (CLI mode), but not
+  // SIGHUP. Register SIGHUP here unconditionally since no other handler covers it.
+  // Use exitProcess:true so the process exits even in programmatic mode.
+  process.on('SIGHUP', () => {
+    gracefulShutdown({ exitProcess: true });
+  });
+
   return {
     expressApp: app,
     httpServer: server,
@@ -1668,21 +1678,6 @@ async function main(options = {}) {
       return gracefulShutdown({ exitProcess: shutdownOptions.exitProcess ?? false });
     }
   };
-
-  // Wire process signals to graceful shutdown so the auto-started OpenCode
-  // child process is killed when the server exits (Ctrl+C, SIGTERM, etc.).
-  // Without this, orphaned opencode serve processes accumulate on every restart.
-  const shutdownOnSignal = (signal) => {
-    if (typeof process === 'undefined') return;
-    process.on(signal, () => {
-      console.log(`[server] received ${signal}, shutting down...`);
-      gracefulShutdown({ exitProcess: true });
-    });
-  };
-  shutdownOnSignal('SIGTERM');
-  shutdownOnSignal('SIGINT');
-  // SIGHUP on POSIX (terminal close), SIGQUIT on some platforms
-  shutdownOnSignal('SIGHUP');
 }
 
 runCliEntryIfMain({
