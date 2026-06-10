@@ -731,6 +731,7 @@ export function createOpenCodeManager(_context: vscode.ExtensionContext): OpenCo
   const listeners = new Set<(status: ConnectionStatus, error?: string) => void>();
   const workspaceDirectory = (): string =>
     normalizeWindowsDriveLetter(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir());
+  const serverWorkingDirectory = (): string => normalizeWindowsDriveLetter(os.homedir());
   let workingDirectory: string = workspaceDirectory();
   let startCount = 0;
   let restartCount = 0;
@@ -889,14 +890,14 @@ export function createOpenCodeManager(_context: vscode.ExtensionContext): OpenCo
       });
       process.env.OPENCODE_SERVER_PASSWORD = password;
 
-      // SDK spawns `opencode serve` in current process cwd.
-      // Some OpenCode endpoints behave differently based on server process cwd,
-      // so ensure we start it from the workspace directory.
+      // Match the web runtime: keep the server process in a neutral cwd and pass
+      // the selected workspace through explicit `directory` API parameters.
+      const serverCwd = serverWorkingDirectory();
       const originalCwd = process.cwd();
       try {
-        process.chdir(workingDirectory);
+        process.chdir(serverCwd);
         const port = await allocateManagedOpenCodePort();
-        server = await spawnManagedOpenCodeServer(workingDirectory, port, READY_CHECK_TIMEOUT_MS);
+        server = await spawnManagedOpenCodeServer(serverCwd, port, READY_CHECK_TIMEOUT_MS);
       } finally {
         try {
           process.chdir(originalCwd);
@@ -994,9 +995,10 @@ export function createOpenCodeManager(_context: vscode.ExtensionContext): OpenCo
 
   async function restartInternal(): Promise<void> {
     restartCount += 1;
+    const restartDirectory = workingDirectory;
     await stopInternal();
     await new Promise(r => setTimeout(r, 250));
-    await startInternal(undefined, { rotateManaged: true });
+    await startInternal(restartDirectory, { rotateManaged: true });
   }
 
   async function start(workdir?: string): Promise<void> {
