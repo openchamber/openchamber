@@ -8,6 +8,7 @@ import { spawnSync } from 'child_process';
 import { spawn } from 'child_process';
 import { randomBytes } from 'crypto';
 import { normalizeWindowsDriveLetter } from './pathUtils';
+import { resolveWorkingDirectoryChange } from './workingDirectoryChange';
 
 const READY_CHECK_TIMEOUT_MS = 30000;
 const WINDOWS_EXECUTABLE_EXTENSIONS = (process.env.PATHEXT || '.EXE;.CMD;.BAT;.COM')
@@ -1059,17 +1060,13 @@ export function createOpenCodeManager(_context: vscode.ExtensionContext): OpenCo
       return { success: false, error: 'path not found' };
     }
 
-    const normalized = normalizeWindowsDriveLetter(trimmed);
-    if (workingDirectory === normalized) {
-      return { success: true, restarted: false, path: normalized };
+    const change = resolveWorkingDirectoryChange(workingDirectory, trimmed);
+    if (!change.changed) {
+      return { success: true, restarted: change.restarted, path: change.path };
     }
 
-    workingDirectory = normalized;
-    if (useConfiguredUrl && configuredApiUrl) {
-      return { success: true, restarted: false, path: normalized };
-    }
-    await restartInternal();
-    return { success: true, restarted: true, path: normalized };
+    workingDirectory = change.path;
+    return { success: true, restarted: change.restarted, path: change.path };
   }
 
   return {
