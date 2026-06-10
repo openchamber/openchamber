@@ -1568,6 +1568,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.scrollToBottom.hold": "Утримуйте, щоб перейти в кінець сесії",
   "chat.jumpToPreviousMessage.aria": "Перейти до попереднього повідомлення користувача",
   "chat.jumpToPreviousMessage.hold": "Утримуйте, щоб перейти на початок сесії",
+  "chat.loadAllHistory.aria": "Завантаження всієї історії",
   "chat.timeline.relative.justNow": "щойно",
   "chat.timeline.relative.minutesAgo": "{count} хв тому",
   "chat.timeline.relative.hoursAgo": "{count} год тому",

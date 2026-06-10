@@ -1604,6 +1604,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.scrollToBottom.hold': '길게 누르면 세션 끝 부분으로 이동',
   'chat.jumpToPreviousMessage.aria': '이전 사용자 메시지로 이동',
   'chat.jumpToPreviousMessage.hold': '길게 누르면 세션 시작 부분으로 이동',
+  'chat.loadAllHistory.aria': '전체 기록 로드 중',
   'chat.timeline.relative.justNow': '방금 전',
   'chat.timeline.relative.minutesAgo': '{count}분 전',
   'chat.timeline.relative.hoursAgo': '{count}시간 전',

@@ -1602,6 +1602,7 @@ export const dict = {
   'chat.scrollToBottom.hold': 'Hold to jump to end of session',
   'chat.jumpToPreviousMessage.aria': 'Jump to previous user message',
   'chat.jumpToPreviousMessage.hold': 'Hold to jump to beginning of session',
+  'chat.loadAllHistory.aria': 'Loading all history',
   'chat.timeline.relative.justNow': 'just now',
   'chat.timeline.relative.minutesAgo': '{count}m ago',
   'chat.timeline.relative.hoursAgo': '{count}h ago',

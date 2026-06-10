@@ -120,7 +120,7 @@ const ScrollToTopButton: React.FC<ScrollToTopButtonProps> = ({ visible, onClick,
     }, []);
 
     const currentLabel = isLoadingHistory
-        ? "Loading session history" + ".".repeat(dotCount)
+        ? t('chat.loadAllHistory.aria') + ".".repeat(dotCount)
         : isLongHover
         ? t('chat.jumpToPreviousMessage.hold')
         : label;

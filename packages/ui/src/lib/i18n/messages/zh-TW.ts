@@ -1572,6 +1572,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.scrollToBottom.hold': '長按以跳轉到會話結束處',
   'chat.jumpToPreviousMessage.aria': '跳至上一條使用者訊息',
   'chat.jumpToPreviousMessage.hold': '長按以跳轉到會話開始處',
+  'chat.loadAllHistory.aria': '正在載入所有歷史記錄',
   'chat.timeline.relative.justNow': '剛剛',
   'chat.timeline.relative.minutesAgo': '{count} 分鐘前',
   'chat.timeline.relative.hoursAgo': '{count} 小時前',

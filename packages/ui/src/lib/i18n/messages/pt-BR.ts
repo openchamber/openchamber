@@ -1568,6 +1568,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.scrollToBottom.hold": "Segure para pular para o fim da sessão",
   "chat.jumpToPreviousMessage.aria": "Ir para a mensagem anterior do usuário",
   "chat.jumpToPreviousMessage.hold": "Segure para pular para o início da sessão",
+  "chat.loadAllHistory.aria": "Carregando todo o histórico",
   "chat.timeline.relative.justNow": "agora mesmo",
   "chat.timeline.relative.minutesAgo": "há {count}m",
   "chat.timeline.relative.hoursAgo": "há {count}h",
