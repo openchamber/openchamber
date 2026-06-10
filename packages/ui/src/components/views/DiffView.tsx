@@ -667,7 +667,7 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         }, [directory, file.path])
     );
     const setDiff = useGitStore((state) => state.setDiff);
-    const clearDiffCache = useGitStore((state) => state.clearDiffCache);
+    const clearDiffCacheEntry = useGitStore((state) => state.clearDiffCacheEntry);
     const fetchStatus = useGitStore((state) => state.fetchStatus);
     const bumpIndexRevision = useGitStore((state) => state.bumpIndexRevision);
     const setDiffFileLayout = useUIStore((state) => state.setDiffFileLayout);
@@ -773,7 +773,7 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                 staged,
                 patch: action.patch,
             });
-            clearDiffCache(directory);
+            clearDiffCacheEntry(directory, file.path);
             setHunkActions([]);
             if (staged) {
                 setStagedDiffData(null);
@@ -783,7 +783,7 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         } catch (error) {
             toast.error(error instanceof Error ? error.message : t('gitView.toast.revertFailed'));
         }
-    }, [bumpIndexRevision, clearDiffCache, directory, fetchStatus, file.path, git, staged, t]);
+    }, [bumpIndexRevision, clearDiffCacheEntry, directory, fetchStatus, file.path, git, staged, t]);
 
     React.useEffect(() => {
         if (!isExpanded || !hasBeenVisible) return;
@@ -1038,7 +1038,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const ensureStatus = useGitStore((state) => state.ensureStatus);
     const fetchStatus = useGitStore((state) => state.fetchStatus);
     const setDiff = useGitStore((state) => state.setDiff);
-    const clearDiffCache = useGitStore((state) => state.clearDiffCache);
+    const clearDiffCacheEntry = useGitStore((state) => state.clearDiffCacheEntry);
     const bumpIndexRevision = useGitStore((state) => state.bumpIndexRevision);
     const indexRevision = useGitStore(React.useCallback((state) => {
         if (!effectiveDirectory) return 0;
@@ -1579,7 +1579,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 staged: activeDiffStaged,
                 patch: action.patch,
             });
-            clearDiffCache(effectiveDirectory);
+            clearDiffCacheEntry(effectiveDirectory, selectedFile);
             setSelectedHunkActions([]);
             if (activeDiffStaged) {
                 setSelectedStagedDiffData(null);
@@ -1589,7 +1589,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
         } catch (error) {
             toast.error(error instanceof Error ? error.message : t('gitView.toast.revertFailed'));
         }
-    }, [activeDiffStaged, bumpIndexRevision, clearDiffCache, effectiveDirectory, fetchStatus, git, selectedFile, t]);
+    }, [activeDiffStaged, bumpIndexRevision, clearDiffCacheEntry, effectiveDirectory, fetchStatus, git, selectedFile, t]);
 
     const [openingEditorFilePath, setOpeningEditorFilePath] = React.useState<string | null>(null);
 

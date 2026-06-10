@@ -23,6 +23,7 @@ const DIFF_PREFETCH_LARGE_FILE_THRESHOLD = 500; // skip prefetch for files with 
 const DIFF_CACHE_MAX_ENTRIES = 30;
 const DIFF_CACHE_MAX_TOTAL_SIZE_BYTES = 20 * 1024 * 1024; // 20MB
 type GitStatusFetchMode = 'full' | 'light';
+type DiffCacheEntry = { original: string; modified: string; fetchedAt: number; isBinary?: boolean; hunkPatch?: string };
 
 interface DirectoryGitState {
   isGitRepo: boolean | null;
@@ -30,7 +31,7 @@ interface DirectoryGitState {
   branches: GitBranch | null;
   log: GitLogResponse | null;
   identity: GitIdentitySummary | null;
-  diffCache: Map<string, { original: string; modified: string; fetchedAt: number; isBinary?: boolean; hunkPatch?: string }>;
+  diffCache: Map<string, DiffCacheEntry>;
   indexRevision: number;
   lastRepoCheckAt: number;
   lastStatusFetch: number;
@@ -69,6 +70,7 @@ interface GitStore {
   getDiff: (directory: string, filePath: string) => { original: string; modified: string; fetchedAt: number; isBinary?: boolean; hunkPatch?: string } | null;
   setDiff: (directory: string, filePath: string, diff: { original: string; modified: string; isBinary?: boolean; hunkPatch?: string }) => void;
   clearDiffCache: (directory: string) => void;
+  clearDiffCacheEntry: (directory: string, filePath: string) => void;
   fetchAllDiffs: (directory: string, git: GitAPI) => Promise<void>;
   prefetchDiffs: (directory: string, git: GitAPI, filePaths: string[], options?: { maxFiles?: number }) => Promise<void>;
 
@@ -143,10 +145,10 @@ const createEmptyDirectoryState = (): DirectoryGitState => ({
 
 // LRU eviction helper for diff cache
 const evictDiffCacheIfNeeded = (
-  diffCache: Map<string, { original: string; modified: string; fetchedAt: number; isBinary?: boolean; hunkPatch?: string }>,
+  diffCache: Map<string, DiffCacheEntry>,
   maxEntries: number = DIFF_CACHE_MAX_ENTRIES,
   maxTotalSize: number = DIFF_CACHE_MAX_TOTAL_SIZE_BYTES
-): Map<string, { original: string; modified: string; fetchedAt: number; isBinary?: boolean }> => {
+): Map<string, DiffCacheEntry> => {
   // Calculate total size
   let totalSize = 0;
   for (const entry of diffCache.values()) {
@@ -162,7 +164,7 @@ const evictDiffCacheIfNeeded = (
   const entries = Array.from(diffCache.entries())
     .sort((a, b) => a[1].fetchedAt - b[1].fetchedAt);
 
-  const newCache = new Map<string, { original: string; modified: string; fetchedAt: number; isBinary?: boolean }>();
+  const newCache = new Map<string, DiffCacheEntry>();
   let newTotalSize = 0;
 
   // Keep entries from newest to oldest until limits are reached
@@ -774,6 +776,20 @@ export const useGitStore = create<GitStore>()(
           newDirectories.set(directory, { ...dirState, diffCache: new Map() });
           set({ directories: newDirectories });
         }
+      },
+
+      clearDiffCacheEntry: (directory, filePath) => {
+        bumpDiffFetchGeneration(directory);
+        const newDirectories = new Map(get().directories);
+        const dirState = newDirectories.get(directory);
+        if (!dirState || !dirState.diffCache.has(filePath)) {
+          return;
+        }
+
+        const newDiffCache = new Map(dirState.diffCache);
+        newDiffCache.delete(filePath);
+        newDirectories.set(directory, { ...dirState, diffCache: newDiffCache });
+        set({ directories: newDirectories });
       },
 
       fetchAllDiffs: async (directory, git) => {
