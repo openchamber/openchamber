@@ -7,6 +7,7 @@ import { getWebviewHtml } from './webviewHtml';
 import { openSseProxy } from './sseProxy';
 import { resolveWebviewDevServerUrl } from './webviewDevServer';
 import { normalizeWindowsDriveLetter } from './pathUtils';
+import { resolveWorkspaceFolders } from './workspaceResolver';
 
 export class AgentManagerPanelProvider {
   public static readonly viewType = 'openchamber.agentManager';
@@ -254,12 +255,14 @@ export class AgentManagerPanelProvider {
     const workspaceFolder = normalizeWindowsDriveLetter(
       vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || ''
     );
+    const workspaceFolders = resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []);
     const cliAvailable = this._openCodeManager?.isCliAvailable() ?? false;
 
     return getWebviewHtml({
       webview,
       extensionUri: this._extensionUri,
       workspaceFolder,
+      workspaceFolders,
       initialStatus: this._cachedStatus,
       cliAvailable,
       panelType: 'agentManager',

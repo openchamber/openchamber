@@ -7,6 +7,7 @@ import { getWebviewHtml } from './webviewHtml';
 import { openSseProxy } from './sseProxy';
 import { resolveWebviewDevServerUrl } from './webviewDevServer';
 import { normalizeWindowsDriveLetter } from './pathUtils';
+import { resolveWorkspaceFolders } from './workspaceResolver';
 
 type SessionPanelState = {
   panel: vscode.WebviewPanel;
@@ -482,6 +483,7 @@ export class SessionEditorPanelProvider {
     const workspaceFolder = normalizeWindowsDriveLetter(
       vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || ''
     );
+    const workspaceFolders = resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []);
     const initialStatus = this._cachedStatus;
     const cliAvailable = this._openCodeManager?.isCliAvailable() ?? false;
 
@@ -489,6 +491,7 @@ export class SessionEditorPanelProvider {
       webview,
       extensionUri: this._extensionUri,
       workspaceFolder,
+      workspaceFolders,
       initialStatus,
       cliAvailable,
       panelType: 'chat',

@@ -23,6 +23,7 @@ declare global {
     __VSCODE_CONFIG__?: {
       apiUrl?: string;
       workspaceFolder: string;
+      workspaceFolders?: Array<{ name: string; path: string }>;
       theme: string;
       connectionStatus: string;
       cliAvailable?: boolean;
@@ -1334,13 +1335,53 @@ onCommand('createSessionWithPrompt', (payload) => {
   });
 });
 
+const normalizeWorkspaceFoldersPayload = (value: unknown): Array<{ name: string; path: string }> => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((entry) => {
+      const candidate = entry as { name?: unknown; path?: unknown };
+      const name = typeof candidate.name === 'string' ? candidate.name.trim() : '';
+      const path = typeof candidate.path === 'string' ? candidate.path.trim() : '';
+      return path ? { name, path } : null;
+    })
+    .filter((entry): entry is { name: string; path: string } => entry !== null);
+};
+
+const syncVSCodeWorkspaceProjects = async (
+  workspaceFolders: Array<{ name: string; path: string }>,
+  activePath?: string,
+) => {
+  if (window.__VSCODE_CONFIG__) {
+    window.__VSCODE_CONFIG__.workspaceFolders = workspaceFolders;
+  }
+  const { useProjectsStore } = await import('@/stores/useProjectsStore');
+  return useProjectsStore.getState().syncVSCodeWorkspaceFolders(workspaceFolders, activePath);
+};
+
+onCommand('workspaceFoldersChanged', (payload) => {
+  const record = payload as { workspaceFolders?: unknown } | undefined;
+  const workspaceFolders = normalizeWorkspaceFoldersPayload(record?.workspaceFolders);
+  void syncVSCodeWorkspaceProjects(workspaceFolders);
+});
+
 // Listen for newSession command from extension title bar button
 onCommand('newSession', (payload) => {
-  const directory = (payload as { directory?: string } | undefined)?.directory;
-  const directoryOverride = typeof directory === 'string' && directory.length > 0 ? directory : undefined;
+  const record = payload as { directory?: unknown; workspaceFolders?: unknown } | undefined;
+  const directory = record?.directory;
+  const directoryOverride = typeof directory === 'string' && directory.trim().length > 0 ? directory.trim() : undefined;
+  const workspaceFolders = normalizeWorkspaceFoldersPayload(record?.workspaceFolders);
 
-  import('@/sync/session-ui-store').then(({ useSessionUIStore }) => {
-    useSessionUIStore.getState().openNewSessionDraft(directoryOverride ? { directoryOverride } : undefined);
+  Promise.all([
+    import('@/sync/session-ui-store'),
+    syncVSCodeWorkspaceProjects(workspaceFolders, directoryOverride),
+  ]).then(([{ useSessionUIStore }, selectedProject]) => {
+    useSessionUIStore.getState().openNewSessionDraft(
+      directoryOverride
+        ? { directoryOverride, selectedProjectId: selectedProject?.id ?? undefined }
+        : undefined
+    );
   });
 
   // Also dispatch event to navigate to chat view in VSCodeLayout

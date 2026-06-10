@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as os from 'os';
 import { getThemeKindName } from './theme';
 import type { ConnectionStatus } from './opencode';
+import type { WorkspaceFolderCandidate } from './workspaceResolver';
 
 export type PanelType = 'chat' | 'agentManager';
 
@@ -9,6 +10,7 @@ export interface WebviewHtmlOptions {
   webview: vscode.Webview;
   extensionUri: vscode.Uri;
   workspaceFolder: string;
+  workspaceFolders?: WorkspaceFolderCandidate[];
   initialStatus: ConnectionStatus;
   cliAvailable: boolean;
   panelType?: PanelType;
@@ -46,6 +48,7 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
     webview,
     extensionUri,
     workspaceFolder,
+    workspaceFolders = [],
     initialStatus,
     cliAvailable,
     panelType = 'chat',
@@ -54,6 +57,7 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
     devServerUrl,
     extensionVersion = '',
   } = options;
+  const workspaceFoldersJson = JSON.stringify(workspaceFolders).replace(/</g, '\\u003c');
 
   const scriptPath = vscode.Uri.joinPath(extensionUri, 'dist', 'webview', 'assets', 'index.js');
   const scriptUri = webview.asWebviewUri(scriptPath);
@@ -176,6 +180,7 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
 
     window.__VSCODE_CONFIG__ = {
       workspaceFolder: "${workspaceFolder.replace(/\\/g, '\\\\')}",
+      workspaceFolders: ${workspaceFoldersJson},
       theme: "${themeKind}",
       connectionStatus: "${initialStatus}",
       cliAvailable: ${cliAvailable},

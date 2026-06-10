@@ -486,7 +486,22 @@ export async function activate(context: vscode.ExtensionContext) {
           return;
         }
       }
-      chatViewProvider?.createNewSession({ directory: folderPath });
+      const workspaceFolders = candidates.some((folder) => folder.path === folderPath)
+        ? candidates
+        : [
+            ...candidates,
+            {
+              name: folderPath.split(/[\\/]/).filter(Boolean).pop() ?? folderPath,
+              path: folderPath,
+            },
+          ];
+      chatViewProvider?.createNewSession({ directory: folderPath, workspaceFolders });
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      chatViewProvider?.syncWorkspaceFolders(resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []));
     })
   );
 

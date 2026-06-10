@@ -1,3 +1,5 @@
+import { normalizeWindowsDriveLetter } from './pathUtils';
+
 export interface WorkspaceFolderInput {
   name: string;
   uri: { fsPath: string };
@@ -13,7 +15,7 @@ export function resolveWorkspaceFolders(
 ): WorkspaceFolderCandidate[] {
   const seen = new Map<string, WorkspaceFolderCandidate>();
   for (const folder of folders) {
-    const path = folder.uri.fsPath.replace(/[\\/]+$/, '');
+    const path = normalizeWindowsDriveLetter(folder.uri.fsPath).replace(/[\\/]+$/, '');
     if (!seen.has(path)) {
       seen.set(path, { name: folder.name, path });
     }
