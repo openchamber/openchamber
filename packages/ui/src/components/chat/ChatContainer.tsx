@@ -688,17 +688,19 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         setIsJumpNavigationBusy(false);
     }, []);
 
-    const clearJumpScrollGuard = React.useCallback(() => {
+    const clearJumpScrollGuard = React.useCallback((resetBusy = true) => {
         const guard = jumpScrollGuardRef.current;
         jumpScrollGuardRef.current = null;
         jumpScrollActiveRef.current = false;
         setIsJumpScrollActive(false);
         guard?.clear();
-        finishJumpNavigation();
+        if (resetBusy) {
+            finishJumpNavigation();
+        }
     }, [finishJumpNavigation]);
 
     const beginJumpScrollGuard = React.useCallback(() => {
-        clearJumpScrollGuard();
+        clearJumpScrollGuard(false);
         jumpScrollActiveRef.current = true;
         setIsJumpScrollActive(true);
 

@@ -48,7 +48,7 @@ const JumpToPreviousMessageButton: React.FC<JumpToPreviousMessageButtonProps> = 
                         <Icon name="arrow-down" className="h-4 w-4 rotate-180" />
                     </Button>
                 </TooltipTrigger>
-                <TooltipContent side="bottom" align="center" sideOffset={8}>{label}</TooltipContent>
+                <TooltipContent side="bottom" align="center" sideOffset={4}>{label}</TooltipContent>
             </Tooltip>
         </div>
     );
