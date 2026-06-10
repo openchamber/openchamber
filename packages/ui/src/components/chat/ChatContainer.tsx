@@ -51,6 +51,7 @@ import { getAllSyncSessions } from '@/sync/sync-refs';
 import { useI18n } from '@/lib/i18n';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { normalizeProjectPath, resolveProjectForDirectory } from '@/lib/projectResolution';
+import type { ProjectEntry } from '@/lib/api/types';
 
 const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = [];
 const EMPTY_PERMISSIONS: PermissionRequest[] = [];
@@ -333,7 +334,7 @@ const getProjectDisplayLabel = (project: { label?: string; path: string }): stri
     return label || formatDirectoryName(project.path);
 };
 
-const getDraftDirectoryDisplayLabel = (directory: string | null | undefined, projects: Array<{ label?: string; path: string }>): string | null => {
+const getDraftDirectoryDisplayLabel = (directory: string | null | undefined, projects: ProjectEntry[]): string | null => {
     const normalizedDirectory = normalizeProjectPath(directory);
     if (!normalizedDirectory) return null;
 
