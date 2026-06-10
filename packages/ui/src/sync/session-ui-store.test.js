@@ -193,25 +193,13 @@ describe('session-worktree-store worktree routing', () => {
 
 describe('routeMessage directory scoping', () => {
   test('runs sends in the provided session directory', async () => {
+    // The session directory travels as an explicit request param (not via
+    // client-wide directory scoping), so concurrent sends can't cross-talk.
     const calls = [];
-    let activeDirectory = '/current/project';
-    const originalWithDirectory = opencodeClient.withDirectory;
-    const originalGetDirectory = opencodeClient.getDirectory;
     const originalShellSession = opencodeClient.shellSession;
 
-    opencodeClient.withDirectory = async (directory, fn) => {
-      calls.push({ method: 'withDirectory', directory });
-      const previousDirectory = activeDirectory;
-      activeDirectory = directory ?? undefined;
-      try {
-        return await fn();
-      } finally {
-        activeDirectory = previousDirectory;
-      }
-    };
-    opencodeClient.getDirectory = () => activeDirectory;
     opencodeClient.shellSession = async (params) => {
-      calls.push({ method: 'session.shell', params });
+      calls.push(params);
       return { info: {}, parts: [] };
     };
 
@@ -225,12 +213,11 @@ describe('routeMessage directory scoping', () => {
         inputMode: 'shell',
       });
     } finally {
-      opencodeClient.withDirectory = originalWithDirectory;
-      opencodeClient.getDirectory = originalGetDirectory;
       opencodeClient.shellSession = originalShellSession;
     }
 
-    expect(calls[0]).toEqual({ method: 'withDirectory', directory: '/session/project' });
-    expect(calls[1].params.directory).toBe('/session/project');
+    expect(calls).toHaveLength(1);
+    expect(calls[0].sessionId).toBe('session-a');
+    expect(calls[0].directory).toBe('/session/project');
   });
 });

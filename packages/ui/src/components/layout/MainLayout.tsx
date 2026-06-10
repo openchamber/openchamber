@@ -2,8 +2,10 @@ import React, { useRef, useEffect } from 'react';
 import { animate, motion, useMotionValue } from 'motion/react';
 import { Header } from './Header';
 import { BottomTerminalDock } from './BottomTerminalDock';
-import { Sidebar, SIDEBAR_CONTENT_WIDTH } from './Sidebar';
-import { RightSidebar, RIGHT_SIDEBAR_CONTENT_WIDTH } from './RightSidebar';
+import { Sidebar } from './Sidebar';
+import { SidebarTopBar } from './SidebarTopBar';
+import { TitlebarLeftControls } from './TitlebarLeftControls';
+import { RightSidebar } from './RightSidebar';
 import { ProjectContextPanel, RightSidebarTabs } from './RightSidebarTabs';
 import { ContextPanel } from './ContextPanel';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
@@ -18,7 +20,7 @@ import { DrawerProvider } from '@/contexts/DrawerContext';
 
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useUpdateStore } from '@/stores/useUpdateStore';
+import { useUpdatePolling } from '@/hooks/useUpdatePolling';
 import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
@@ -31,14 +33,10 @@ import { PlanView } from '@/components/views/PlanView';
 
 // Heavy views loaded on-demand to reduce initial bundle parse time.
 const TerminalView = lazyWithChunkRecovery(() => import('@/components/views/TerminalView').then(m => ({ default: m.TerminalView })));
+const DiagramView = lazyWithChunkRecovery(() => import('@/components/views/DiagramView').then(m => ({ default: m.DiagramView })));
 const SettingsView = lazyWithChunkRecovery(() => import('@/components/views/SettingsView').then(m => ({ default: m.SettingsView })));
 const SettingsWindow = lazyWithChunkRecovery(() => import('@/components/views/SettingsWindow').then(m => ({ default: m.SettingsWindow })));
 const MultiRunWindow = lazyWithChunkRecovery(() => import('@/components/views/MultiRunWindow').then(m => ({ default: m.MultiRunWindow })));
-
-const DESKTOP_SIDEBAR_MIN_WIDTH = 280;
-const DESKTOP_SIDEBAR_MAX_WIDTH = 500;
-const DESKTOP_RIGHT_SIDEBAR_MIN_WIDTH = 360;
-const DESKTOP_RIGHT_SIDEBAR_MAX_WIDTH = 860;
 
 export const MainLayout: React.FC = () => {
     const RIGHT_SIDEBAR_AUTO_CLOSE_WIDTH = 1140;
@@ -59,8 +57,6 @@ export const MainLayout: React.FC = () => {
     const setMultiRunLauncherOpen = useUIStore((state) => state.setMultiRunLauncherOpen);
     const multiRunLauncherPrefillPrompt = useUIStore((state) => state.multiRunLauncherPrefillPrompt);
     const { isMobile, isTablet } = useDeviceInfo();
-    const sidebarWidth = useUIStore((state) => state.sidebarWidth);
-    const rightSidebarWidth = useUIStore((state) => state.rightSidebarWidth);
     const rightSidebarAutoClosedRef = React.useRef(false);
     const bottomTerminalAutoClosedRef = React.useRef(false);
     const mobilePanelsResetRef = React.useRef(false);
@@ -223,41 +219,7 @@ export const MainLayout: React.FC = () => {
         }
     }, [isMobile, isSettingsDialogOpen, isRightSidebarOpen, setMobileSessionPanelOpen, setRightSidebarOpen]);
 
-    // Trigger initial update check shortly after mount, then repeat using server-suggested cadence.
-    const checkForUpdates = useUpdateStore((state) => state.checkForUpdates);
-    React.useEffect(() => {
-        const initialDelayMs = 3000;
-        const defaultIntervalMs = 60 * 60 * 1000;
-        const minIntervalMs = 5 * 60 * 1000;
-        const maxIntervalMs = 24 * 60 * 60 * 1000;
-        let disposed = false;
-        let timer: number | null = null;
-
-        const clampIntervalMs = (seconds: number): number => {
-            const ms = Math.round(seconds * 1000);
-            return Math.max(minIntervalMs, Math.min(maxIntervalMs, ms));
-        };
-
-        const scheduleNext = (delayMs: number) => {
-            if (disposed) return;
-            timer = window.setTimeout(async () => {
-                const suggestedSec = await checkForUpdates();
-                const nextDelay = typeof suggestedSec === 'number' && Number.isFinite(suggestedSec)
-                    ? clampIntervalMs(suggestedSec)
-                    : defaultIntervalMs;
-                scheduleNext(nextDelay);
-            }, delayMs);
-        };
-
-        scheduleNext(initialDelayMs);
-
-        return () => {
-            disposed = true;
-            if (timer !== null) {
-                window.clearTimeout(timer);
-            }
-        };
-    }, [checkForUpdates]);
+    useUpdatePolling();
 
     React.useEffect(() => {
         const previous = useUIStore.getState().isMobile;
@@ -408,20 +370,14 @@ export const MainLayout: React.FC = () => {
                 return <React.Suspense fallback={null}><FilesView /></React.Suspense>;
             case 'context':
                 return <React.Suspense fallback={null}><ProjectContextPanel /></React.Suspense>;
+            case 'diagram':
+                return <React.Suspense fallback={null}><DiagramView /></React.Suspense>;
             default:
                 return null;
         }
     }, [activeMainTab]);
 
     const isChatActive = activeMainTab === 'chat';
-    const visibleSidebarWidth = React.useMemo(() => {
-        const rawWidth = sidebarWidth || SIDEBAR_CONTENT_WIDTH;
-        return Math.min(DESKTOP_SIDEBAR_MAX_WIDTH, Math.max(DESKTOP_SIDEBAR_MIN_WIDTH, rawWidth));
-    }, [sidebarWidth]);
-    const visibleRightSidebarWidth = React.useMemo(() => {
-        const rawWidth = rightSidebarWidth || RIGHT_SIDEBAR_CONTENT_WIDTH;
-        return Math.min(DESKTOP_RIGHT_SIDEBAR_MAX_WIDTH, Math.max(DESKTOP_RIGHT_SIDEBAR_MIN_WIDTH, rawWidth));
-    }, [rightSidebarWidth]);
 
     return (
         <DiffWorkerProvider>
@@ -429,7 +385,7 @@ export const MainLayout: React.FC = () => {
                 data-page-scroll-lock="true"
                 className={cn(
                     'main-content-safe-area',
-                    isMobile ? 'flex h-[100dvh] flex-col' : 'flex h-[100dvh]',
+                    isMobile ? 'flex h-[100dvh] flex-col' : 'relative flex h-[100dvh]',
                     'bg-background'
                 )}
             >
@@ -534,103 +490,55 @@ export const MainLayout: React.FC = () => {
                 </DrawerProvider>
             ) : (
                 <>
-                    {/* Desktop: full-width Header above [Sidebar | chat-frame | RightSidebar] row */}
-                    <div className="flex flex-1 flex-col overflow-hidden">
-                        <Header />
-                        <div className="relative flex flex-1 min-h-0 overflow-hidden bg-sidebar" data-page-scroll-lock="true">
-                            <div
-                                aria-hidden
-                                className="pointer-events-none absolute top-0 z-0 bg-sidebar transition-[left,opacity] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
-                                style={{
-                                    left: `${isSidebarOpen ? visibleSidebarWidth : 0}px`,
-                                    opacity: isSidebarOpen ? 1 : 0,
-                                    width: '10px',
-                                    height: '10px',
-                                    WebkitMaskImage: 'radial-gradient(circle at 100% 100%, transparent calc(10px - 1px), black 10px)',
-                                    maskImage: 'radial-gradient(circle at 100% 100%, transparent calc(10px - 1px), black 10px)',
-                                }}
-                            />
-                            <div
-                                aria-hidden
-                                className="pointer-events-none absolute bottom-0 z-0 bg-sidebar transition-[left,opacity] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
-                                style={{
-                                    left: `${isSidebarOpen ? visibleSidebarWidth : 0}px`,
-                                    opacity: isSidebarOpen ? 1 : 0,
-                                    width: '10px',
-                                    height: '10px',
-                                    WebkitMaskImage: 'radial-gradient(circle at 100% 0%, transparent calc(10px - 1px), black 10px)',
-                                    maskImage: 'radial-gradient(circle at 100% 0%, transparent calc(10px - 1px), black 10px)',
-                                }}
-                            />
-                            <div
-                                aria-hidden
-                                className="pointer-events-none absolute top-0 z-0 bg-sidebar transition-[right,opacity] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
-                                style={{
-                                    right: `${isRightSidebarOpen ? visibleRightSidebarWidth : 0}px`,
-                                    opacity: isRightSidebarOpen ? 1 : 0,
-                                    width: '10px',
-                                    height: '10px',
-                                    WebkitMaskImage: 'radial-gradient(circle at 0 100%, transparent calc(10px - 1px), black 10px)',
-                                    maskImage: 'radial-gradient(circle at 0 100%, transparent calc(10px - 1px), black 10px)',
-                                }}
-                            />
-                            <div
-                                aria-hidden
-                                className="pointer-events-none absolute bottom-0 z-0 bg-sidebar transition-[right,opacity] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
-                                style={{
-                                    right: `${isRightSidebarOpen ? visibleRightSidebarWidth : 0}px`,
-                                    opacity: isRightSidebarOpen ? 1 : 0,
-                                    width: '10px',
-                                    height: '10px',
-                                    WebkitMaskImage: 'radial-gradient(circle at 0 0, transparent calc(10px - 1px), black 10px)',
-                                    maskImage: 'radial-gradient(circle at 0 0, transparent calc(10px - 1px), black 10px)',
-                                }}
-                            />
-                            <Sidebar
-                                isOpen={isSidebarOpen}
-                                isMobile={isMobile}
-                                className="border-0"
-                            >
-                                <SessionSidebar />
-                            </Sidebar>
-                            <div className={cn(
-                                'relative flex flex-1 min-w-0 flex-col overflow-hidden',
-                                'bg-background',
-                                'border border-border/50 rounded-[10px]',
-                                !isSidebarOpen && 'border-l-transparent',
-                                !isRightSidebarOpen && 'border-r-transparent'
-                            )} data-page-scroll-lock="true">
-                                <div className="flex flex-1 min-h-0 overflow-hidden" data-page-scroll-lock="true">
-                                    <div className="relative flex flex-1 min-h-0 min-w-0 overflow-hidden" data-page-scroll-lock="true">
-                                        <main className="flex-1 overflow-hidden bg-background relative" data-page-scroll-lock="true">
-                                            <div className={cn('absolute inset-0', !isChatActive && 'invisible')}>
-                                                <ErrorBoundary><ChatView /></ErrorBoundary>
-                                            </div>
-                                            {secondaryView && (
-                                                <div className="absolute inset-0">
-                                                    <ErrorBoundary>{secondaryView}</ErrorBoundary>
+                    {/* Persistent top-left controls (toggle + project actions) that
+                        stay put while the sidebar/header animate beneath them. */}
+                    <TitlebarLeftControls />
+                    {/* Desktop: full-height Sidebar beside [Header above (chat | RightSidebar)] */}
+                    <div className="flex flex-1 overflow-hidden" data-page-scroll-lock="true">
+                        <Sidebar
+                            isOpen={isSidebarOpen}
+                            isMobile={isMobile}
+                            className="border-border/50"
+                            topBar={<SidebarTopBar />}
+                        >
+                            <SessionSidebar />
+                        </Sidebar>
+                        <div className="relative flex flex-1 min-w-0 flex-col overflow-hidden bg-background" data-page-scroll-lock="true">
+                            <Header />
+                            <div className="relative flex flex-1 min-h-0 overflow-hidden bg-background" data-page-scroll-lock="true">
+                                <div className="relative flex flex-1 min-w-0 flex-col overflow-hidden border-t border-border/50 bg-background" data-page-scroll-lock="true">
+                                    <div className="flex flex-1 min-h-0 overflow-hidden" data-page-scroll-lock="true">
+                                        <div className="relative flex flex-1 min-h-0 min-w-0 overflow-hidden" data-page-scroll-lock="true">
+                                            <main className="flex-1 overflow-hidden bg-background relative" data-page-scroll-lock="true">
+                                                <div className={cn('absolute inset-0', !isChatActive && 'invisible')}>
+                                                    <ErrorBoundary><ChatView /></ErrorBoundary>
                                                 </div>
-                                            )}
-                                        </main>
-                                        <ContextPanel />
+                                                {secondaryView && (
+                                                    <div className="absolute inset-0">
+                                                        <ErrorBoundary>{secondaryView}</ErrorBoundary>
+                                                    </div>
+                                                )}
+                                            </main>
+                                            <ContextPanel />
+                                        </div>
                                     </div>
+                                    <BottomTerminalDock isOpen={isBottomTerminalOpen} isMobile={isMobile}>
+                                        {isBottomTerminalOpen ? (
+                                            <ErrorBoundary>
+                                                <React.Suspense fallback={null}>
+                                                    <TerminalView />
+                                                </React.Suspense>
+                                            </ErrorBoundary>
+                                        ) : null}
+                                    </BottomTerminalDock>
                                 </div>
-                                <BottomTerminalDock isOpen={isBottomTerminalOpen} isMobile={isMobile}>
-                                    {isBottomTerminalOpen ? (
-                                        <ErrorBoundary>
-                                            <React.Suspense fallback={null}>
-                                                <TerminalView />
-                                            </React.Suspense>
-                                        </ErrorBoundary>
-                                    ) : null}
-                                </BottomTerminalDock>
+                                <RightSidebar
+                                    isOpen={isRightSidebarOpen}
+                                    className="bg-background border-t border-border/50"
+                                >
+                                    <ErrorBoundary><RightSidebarTabs /></ErrorBoundary>
+                                </RightSidebar>
                             </div>
-                            <RightSidebar
-                                isOpen={isRightSidebarOpen}
-                                className="border-0"
-                            >
-                                <ErrorBoundary><RightSidebarTabs /></ErrorBoundary>
-                            </RightSidebar>
                         </div>
                     </div>
 

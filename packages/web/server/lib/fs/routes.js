@@ -668,7 +668,21 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: 'Specified path is not a file' });
       }
 
-      const content = await fsPromises.readFile(canonicalPath, 'utf8');
+      let content = await fsPromises.readFile(canonicalPath, 'utf8');
+      // Retry empty reads — concurrent writer may have truncated the file
+      // between our stat and read (O_TRUNC window). If the file existed with
+      // content at stat time but we read nothing, the writer hasn't finished
+      // writing yet.
+      if (content.length === 0 && stats.size > 0) {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          await new Promise((r) => setTimeout(r, 50 * (attempt + 1)));
+          content = await fsPromises.readFile(canonicalPath, 'utf8');
+          if (content.length > 0) break;
+        }
+        if (content.length === 0) {
+          console.warn(`Read retry exhausted for ${canonicalPath}: stat reported ${stats.size} bytes but content is empty`);
+        }
+      }
       return res.type('text/plain').send(content);
     } catch (error) {
       const err = error;
@@ -779,13 +793,34 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: resolved.error });
       }
 
-      const existing = await fsPromises.readFile(resolved.resolved, 'utf8').catch(() => null);
+      const writePath = await fsPromises.realpath(resolved.resolved).catch((error) => {
+        if (error && typeof error === 'object' && error.code === 'ENOENT') {
+          return resolved.resolved;
+        }
+        throw error;
+      });
+      const canonicalBase = await fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base));
+      if (!isPathWithinRoot(writePath, canonicalBase, path, os)) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
+      const existing = await fsPromises.readFile(writePath, 'utf8').catch(() => null);
       if (existing === content) {
         return res.json({ success: true, path: resolved.resolved });
       }
 
-      await fsPromises.mkdir(path.dirname(resolved.resolved), { recursive: true });
-      await fsPromises.writeFile(resolved.resolved, content, 'utf8');
+      await fsPromises.mkdir(path.dirname(writePath), { recursive: true });
+
+      // Atomic write: write to temp then rename to avoid concurrent readers
+      // seeing an empty file during the O_TRUNC window of direct writeFile.
+      const tmp = `${writePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      try {
+        await fsPromises.writeFile(tmp, content, 'utf8');
+        await fsPromises.rename(tmp, writePath);
+      } catch (error) {
+        await fsPromises.unlink(tmp).catch(() => {});
+        throw error;
+      }
       return res.json({ success: true, path: resolved.resolved });
     } catch (error) {
       const err = error;

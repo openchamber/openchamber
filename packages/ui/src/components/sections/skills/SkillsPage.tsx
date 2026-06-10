@@ -508,7 +508,7 @@ const SkillsInstalledPage: React.FC = () => {
         </div>
 
         {/* Basic Information */}
-        <div className="mb-8">
+        <div data-settings-item="skills.basic-information" className="mb-8">
           <div className="mb-1 px-1">
             <h3 className="typography-ui-header font-medium text-foreground">
               {t('settings.skills.page.section.basicInformation')}
@@ -583,7 +583,7 @@ const SkillsInstalledPage: React.FC = () => {
         </div>
 
         {/* Instructions */}
-        <div className="mb-8">
+        <div data-settings-item="skills.instructions" className="mb-8">
           <div className="mb-1 px-1 flex items-center justify-between gap-2">
             <h3 className="typography-ui-header font-medium text-foreground">
               {t('settings.skills.page.section.instructions')}
@@ -626,7 +626,7 @@ const SkillsInstalledPage: React.FC = () => {
         </div>
 
         {/* Supporting Files */}
-        <div className="mb-2">
+        <div data-settings-item="skills.supporting-files" className="mb-2">
           <div className="mb-1 px-1 flex items-center gap-2">
             <h3 className="typography-ui-header font-medium text-foreground">
               {t('settings.skills.page.section.supportingFiles')}

@@ -133,6 +133,7 @@ const VisualSectionContent: React.FC = () => {
         ...(!isVSCode ? ['weekStart' as const] : []),
         'fontSize',
         'terminalFontSize',
+        'fileEditorKeymap',
         'spacing',
         'inputBarOffset',
         ...(!isVSCode ? ['terminalQuickKeys' as const] : []),
@@ -142,7 +143,7 @@ const VisualSectionContent: React.FC = () => {
 
 // Chat section: User message rendering, Diff layout, Mobile status bar, Show reasoning traces, Queue mode, Persist draft
 const ChatSectionContent: React.FC = () => {
-    return <OpenChamberVisualSettings visibleSettings={['chatRenderMode', 'messageTransport', 'activityRenderMode', 'userMessageRendering', 'mermaidRendering', 'reasoning', 'showToolFileIcons', 'showTurnChangedFiles', 'expandedTools', 'stickyUserHeader', 'wideChatLayout', 'splitAssistantMessageActions', 'diffLayout', 'mobileStatusBar', 'dotfiles', 'fileViewerPreview', 'queueMode', 'persistDraft', 'inputSpellcheck']} />;
+    return <OpenChamberVisualSettings visibleSettings={['chatRenderMode', 'messageTransport', 'activityRenderMode', 'userMessageRendering', 'mermaidRendering', 'reasoning', 'showToolFileIcons', 'showTurnChangedFiles', 'expandedTools', 'stickyUserHeader', 'wideChatLayout', 'splitAssistantMessageActions', 'diffLayout', 'dotfiles', 'fileViewerPreview', 'queueMode', 'persistDraft', 'inputSpellcheck']} />;
 };
 
 // Sessions section: Default model & agent, Session retention

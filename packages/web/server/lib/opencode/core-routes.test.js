@@ -84,6 +84,65 @@ describe('core-routes', () => {
     }
   });
 
+  it('should probe loopback preview URLs and return ok: true for status codes 200-599', async () => {
+    const app = express();
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock;
+
+    registerAuthAndAccessRoutes(app, {
+      express,
+      tunnelAuthController: {
+        classifyRequestScope: () => 'local',
+        requireTunnelSession: vi.fn(),
+        getTunnelSessionFromRequest: vi.fn(),
+        clearTunnelSessionCookie: vi.fn(),
+        exchangeBootstrapToken: vi.fn(),
+      },
+      uiAuthController: {
+        requireAuth: (_req, _res, next) => next(),
+        handleSessionStatus: vi.fn(),
+        handleSessionCreate: vi.fn(),
+        handlePasskeyStatus: vi.fn(),
+        handlePasskeyAuthenticationOptions: vi.fn(),
+        handlePasskeyAuthenticationVerify: vi.fn(),
+        handlePasskeyRegistrationOptions: vi.fn(),
+        handlePasskeyRegistrationVerify: vi.fn(),
+        handlePasskeyList: vi.fn(),
+        handlePasskeyRevoke: vi.fn(),
+        handleResetAuth: vi.fn(),
+      },
+      readSettingsFromDiskMigrated: vi.fn(async () => ({})),
+      normalizeTunnelSessionTtlMs: vi.fn(),
+    });
+
+    try {
+      const testCases = [
+        { status: 200, expectedOk: true },
+        { status: 302, expectedOk: true },
+        { status: 404, expectedOk: true },
+        { status: 500, expectedOk: true },
+        { status: 600, expectedOk: false },
+      ];
+
+      for (const { status, expectedOk } of testCases) {
+        fetchMock.mockResolvedValueOnce({
+          status,
+          ok: status >= 200 && status < 300,
+        });
+
+        const response = await request(app)
+          .post('/api/system/probe-url')
+          .send({ url: 'http://127.0.0.1:5173/' })
+          .expect(200);
+
+        expect(response.body).toEqual({ ok: expectedOk, status });
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('should let preview proxy credentials reach preview proxy validation', async () => {
     const app = express();
     const requireAuth = vi.fn((_req, res) => res.status(401).type('text/plain').send('Authentication required'));

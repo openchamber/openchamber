@@ -1,8 +1,8 @@
 import { formatMessage, useI18nStore } from '@/lib/i18n/store';
-
-const t = (key: Parameters<typeof formatMessage>[1]) => formatMessage(useI18nStore.getState().dictionary, key);
 import { formatDateTimeForPreference, formatTimeForPreference } from '@/lib/timeFormat';
 import type { TimeFormatPreference } from '@/stores/useUIStore';
+
+const t = (key: Parameters<typeof formatMessage>[1]) => formatMessage(useI18nStore.getState().dictionary, key);
 
 export const clampPercent = (value: number | null): number | null => {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
@@ -81,6 +81,7 @@ export const formatWindowLabel = (label: string): string => {
   if (label === 'daily') return t('quota.window.daily');
   if (label === 'monthly') return t('quota.window.monthly');
   if (label === 'credits') return t('quota.window.credits');
+  if (label === 'credits_balance') return t('quota.window.creditsBalance');
   if (label === 'session') return t('quota.window.session');
   if (label === 'premium') return t('quota.window.premium');
   if (label === 'chat') return t('quota.window.chat');

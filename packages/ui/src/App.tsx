@@ -10,6 +10,7 @@ import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 // useEventStream removed — replaced by SyncProvider + SyncBridge
 import { useMenuActions } from '@/hooks/useMenuActions';
 import { useSessionStatusBootstrap } from '@/hooks/useSessionStatusBootstrap';
+import { useTraySync } from '@/hooks/useTraySync';
 import { useRouter } from '@/hooks/useRouter';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useWebNotificationStream } from '@/hooks/useWebNotificationStream';
@@ -17,7 +18,7 @@ import { usePwaInstallPrompt } from '@/hooks/usePwaInstallPrompt';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { hasModifier } from '@/lib/utils';
-import { isDesktopLocalOriginActive, isDesktopShell, restartDesktopApp } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isDesktopShell, restartDesktopApp, invokeDesktop } from '@/lib/desktop';
 import {
   getInjectedBootOutcome,
   getBootInjectionStatus,
@@ -29,6 +30,7 @@ import {
 } from '@/lib/desktopBoot';
 import type { RecoveryVariant } from '@/components/onboarding/DesktopConnectionRecovery';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { markSessionViewed } from '@/sync/notification-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { opencodeClient } from '@/lib/opencode/client';
@@ -601,6 +603,38 @@ function App({ apis }: AppProps) {
     return () => window.removeEventListener('openchamber:open-session', handler as EventListener);
   }, []);
 
+  // Open a draft Mini Chat window from the native File menu / tray. Uses a
+  // dedicated single-fire event (not the menu-action channel) because draft
+  // mini-chat windows are NOT deduplicated — a double dispatch would open two.
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onOpenMiniChat = () => {
+      const currentDir = useDirectoryStore.getState().currentDirectory;
+      const { activeProjectId, projects } = useProjectsStore.getState();
+      const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
+      void invokeDesktop('desktop_open_draft_mini_chat_window', {
+        directory: currentDir || activeProject?.path || '',
+        projectId: activeProject?.id ?? null,
+      });
+    };
+    window.addEventListener('openchamber:open-mini-chat', onOpenMiniChat);
+    return () => window.removeEventListener('openchamber:open-mini-chat', onOpenMiniChat);
+  }, []);
+
+  // When the window regains focus, mark the currently-selected session as seen.
+  // Turn-completes that arrive while the app is backgrounded are intentionally
+  // left unseen (see isViewedInCurrentSession); coming back to the window is the
+  // signal that the user has now looked at it, so the marker clears.
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onFocus = () => {
+      const sessionId = useSessionUIStore.getState().currentSessionId;
+      if (sessionId) markSessionViewed(sessionId);
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, []);
+
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
 
@@ -671,6 +705,8 @@ function App({ apis }: AppProps) {
   }, []);
 
   useMenuActions(handleToggleMemoryDebug);
+
+  useTraySync();
 
   useSessionStatusBootstrap({ enabled: embeddedBackgroundWorkEnabled });
 

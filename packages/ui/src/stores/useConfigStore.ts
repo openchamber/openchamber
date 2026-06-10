@@ -28,6 +28,7 @@ const FALLBACK_PROVIDER_ID = "opencode";
 const FALLBACK_MODEL_ID = "big-pickle";
 const GIT_UTILITY_PROVIDER_ID = "zen";
 const GIT_UTILITY_PREFERRED_MODEL_ID = "big-pickle";
+const PROVIDER_CONFIG_REFRESH_CONCURRENCY = 4;
 
 const normalizeSttSilenceThresholdDb = (value: unknown): number | undefined => {
     if (typeof value !== 'number' || !Number.isFinite(value)) {
@@ -181,6 +182,7 @@ type ProviderModel = Provider["models"][string];
 type ProviderWithModelList = Omit<Provider, "models"> & { models: ProviderModel[] };
 
 type GitModelSelection = { providerId: string; modelId: string };
+type ProviderModelSelection = { providerId: string; modelId: string; variant?: string } | null;
 
 const normalizeOptionalString = (value: unknown): string | undefined => {
     if (typeof value !== "string") {
@@ -200,6 +202,67 @@ const hasProviderModel = (
         return false;
     }
     return provider.models.some((model) => model.id === modelId);
+};
+
+const resolveProviderModelSelection = ({
+    providers,
+    currentProviderId,
+    currentModelId,
+    currentVariant,
+    settingsDefaultModel,
+    settingsDefaultVariant,
+}: {
+    providers: ProviderWithModelList[];
+    currentProviderId?: string;
+    currentModelId?: string;
+    currentVariant?: string;
+    settingsDefaultModel?: string;
+    settingsDefaultVariant?: string;
+}): ProviderModelSelection => {
+    const resolveVariant = (providerId: string, modelId: string, variant?: string): string | undefined => {
+        if (!variant) {
+            return undefined;
+        }
+
+        const model = providers
+            .find((provider) => provider.id === providerId)
+            ?.models.find((entry) => entry.id === modelId) as { variants?: Record<string, unknown> } | undefined;
+
+        return model?.variants && Object.prototype.hasOwnProperty.call(model.variants, variant)
+            ? variant
+            : undefined;
+    };
+
+    if (currentProviderId && currentModelId && hasProviderModel(providers, currentProviderId, currentModelId)) {
+        return {
+            providerId: currentProviderId,
+            modelId: currentModelId,
+            variant: resolveVariant(currentProviderId, currentModelId, currentVariant),
+        };
+    }
+
+    if (settingsDefaultModel) {
+        const parsed = parseModelString(settingsDefaultModel);
+        if (parsed && hasProviderModel(providers, parsed.providerId, parsed.modelId)) {
+            return {
+                providerId: parsed.providerId,
+                modelId: parsed.modelId,
+                variant: resolveVariant(parsed.providerId, parsed.modelId, settingsDefaultVariant),
+            };
+        }
+    }
+
+    if (hasProviderModel(providers, FALLBACK_PROVIDER_ID, FALLBACK_MODEL_ID)) {
+        return { providerId: FALLBACK_PROVIDER_ID, modelId: FALLBACK_MODEL_ID };
+    }
+
+    const firstProvider = providers[0];
+    const firstModel = firstProvider?.models[0];
+    if (firstProvider && firstModel) {
+        return { providerId: firstProvider.id, modelId: firstModel.id };
+    }
+
+    return null;
 };
 
 const resolveGitGenerationModelSelection = ({
@@ -528,6 +591,43 @@ interface DirectoryScopedConfig {
     defaultProviders: { [key: string]: string };
 }
 
+const clearProviderDataFromDirectoryScoped = (
+    directoryScoped: Record<string, DirectoryScopedConfig>,
+): Record<string, DirectoryScopedConfig> => {
+    const next: Record<string, DirectoryScopedConfig> = {};
+
+    for (const [directoryKey, snapshot] of Object.entries(directoryScoped)) {
+        next[directoryKey] = {
+            ...snapshot,
+            providers: [],
+            defaultProviders: {},
+        };
+    }
+
+    return next;
+};
+
+const stripProviderCacheFromPersistedState = (persistedState: unknown): Partial<ConfigStore> => {
+    if (!persistedState || typeof persistedState !== 'object') {
+        return {};
+    }
+
+    const persisted = persistedState as Partial<ConfigStore>;
+    const sanitized: Partial<ConfigStore> = {
+        ...persisted,
+        providers: [],
+        defaultProviders: {},
+    };
+
+    if (persisted.directoryScoped) {
+        sanitized.directoryScoped = clearProviderDataFromDirectoryScoped(
+            persisted.directoryScoped as Record<string, DirectoryScopedConfig>,
+        );
+    }
+
+    return sanitized;
+};
+
 interface ConfigStore {
 
     activeDirectoryKey: string;
@@ -583,6 +683,7 @@ interface ConfigStore {
     sttSilenceHoldMs: number;
     sttTranscribeOnStop: boolean;
     showMessageTTSButtons: boolean;
+    ttsInputMode: 'sanitized' | 'raw';
     voiceModeEnabled: boolean;
     // Summarization settings
     summarizeMessageTTS: boolean;
@@ -610,6 +711,7 @@ interface ConfigStore {
     setSttSilenceHoldMs: (ms: number) => void;
     setSttTranscribeOnStop: (enabled: boolean) => void;
     setShowMessageTTSButtons: (show: boolean) => void;
+    setTtsInputMode: (mode: 'sanitized' | 'raw') => void;
     setVoiceModeEnabled: (enabled: boolean) => void;
     setSummarizeMessageTTS: (enabled: boolean) => void;
     setSummarizeVoiceConversation: (enabled: boolean) => void;
@@ -621,6 +723,7 @@ interface ConfigStore {
     loadProviders: (options?: { directory?: string | null; source?: string }) => Promise<void>;
     loadAgents: (options?: { directory?: string | null; source?: string }) => Promise<boolean>;
     invalidateModelMetadataCache: () => void;
+    invalidateProviderCache: (directory?: string | null) => void;
     setProvider: (providerId: string) => void;
     setModel: (modelId: string) => void;
     setCurrentVariant: (variant: string | undefined) => void;
@@ -877,6 +980,13 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                     return false;
                 })(),
+                ttsInputMode: (() => {
+                    if (typeof window !== 'undefined') {
+                        const saved = localStorage.getItem('ttsInputMode');
+                        if (saved === 'raw') return 'raw' as const;
+                    }
+                    return 'sanitized' as const;
+                })(),
                 // Voice mode enabled - load from localStorage or default to false
                 voiceModeEnabled: (() => {
                     if (typeof window !== 'undefined') {
@@ -974,6 +1084,57 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                 },
 
+                invalidateProviderCache: (directory) => {
+                    const targetDirectoryKey = directory === undefined ? null : toDirectoryKey(directory);
+
+                    set((state) => {
+                        const nextState: Partial<ConfigStore> = {};
+                        let scopedChanged = false;
+                        const nextDirectoryScoped: Record<string, DirectoryScopedConfig> = {
+                            ...state.directoryScoped,
+                        };
+
+                        const clearSnapshot = (snapshot: DirectoryScopedConfig): DirectoryScopedConfig => {
+                            if (snapshot.providers.length === 0 && Object.keys(snapshot.defaultProviders).length === 0) {
+                                return snapshot;
+                            }
+
+                            scopedChanged = true;
+                            return {
+                                ...snapshot,
+                                providers: [],
+                                defaultProviders: {},
+                            };
+                        };
+
+                        if (targetDirectoryKey) {
+                            const snapshot = state.directoryScoped[targetDirectoryKey];
+                            if (snapshot) {
+                                nextDirectoryScoped[targetDirectoryKey] = clearSnapshot(snapshot);
+                            }
+                        } else {
+                            for (const [directoryKey, snapshot] of Object.entries(state.directoryScoped)) {
+                                nextDirectoryScoped[directoryKey] = clearSnapshot(snapshot);
+                            }
+                        }
+
+                        if (scopedChanged) {
+                            nextState.directoryScoped = nextDirectoryScoped;
+                        }
+
+                        if (targetDirectoryKey === null || targetDirectoryKey === state.activeDirectoryKey) {
+                            if (state.providers.length > 0) {
+                                nextState.providers = [];
+                            }
+                            if (Object.keys(state.defaultProviders).length > 0) {
+                                nextState.defaultProviders = {};
+                            }
+                        }
+
+                        return Object.keys(nextState).length > 0 ? nextState : state;
+                    });
+                },
+
                 loadProviders: async (options) => {
                     const requestedDirectory = options?.directory ?? fromDirectoryKey(get().activeDirectoryKey);
                     const effectiveDirectory = requestedDirectory ?? opencodeClient.getDirectory() ?? null;
@@ -1034,10 +1195,38 @@ export const useConfigStore = create<ConfigStore>()(
                                     defaultProviders: {},
                                 };
 
+                                const currentProviderId = state.activeDirectoryKey === directoryKey
+                                    ? state.currentProviderId
+                                    : baseSnapshot.currentProviderId;
+                                const currentModelId = state.activeDirectoryKey === directoryKey
+                                    ? state.currentModelId
+                                    : baseSnapshot.currentModelId;
+                                const currentVariant = state.activeDirectoryKey === directoryKey
+                                    ? state.currentVariant
+                                    : baseSnapshot.currentVariant;
+                                const resolvedModel = resolveProviderModelSelection({
+                                    providers: processedProviders,
+                                    currentProviderId,
+                                    currentModelId,
+                                    currentVariant,
+                                    settingsDefaultModel: state.settingsDefaultModel,
+                                    settingsDefaultVariant: state.settingsDefaultVariant,
+                                });
+                                const currentSelectedProviderId = state.activeDirectoryKey === directoryKey
+                                    ? state.selectedProviderId
+                                    : baseSnapshot.selectedProviderId;
+                                const selectedProviderId = processedProviders.some((provider) => provider.id === currentSelectedProviderId)
+                                    ? currentSelectedProviderId
+                                    : (resolvedModel?.providerId ?? processedProviders[0]?.id ?? "");
+
                                 const nextSnapshot: DirectoryScopedConfig = {
                                     ...baseSnapshot,
                                     providers: processedProviders,
                                     defaultProviders: defaults,
+                                    currentProviderId: resolvedModel?.providerId ?? "",
+                                    currentModelId: resolvedModel?.modelId ?? "",
+                                    currentVariant: resolvedModel?.variant,
+                                    selectedProviderId,
                                 };
 
                                 const nextState: Partial<ConfigStore> = {
@@ -1050,29 +1239,10 @@ export const useConfigStore = create<ConfigStore>()(
                                 if (state.activeDirectoryKey === directoryKey) {
                                     nextState.providers = processedProviders;
                                     nextState.defaultProviders = defaults;
-
-                                    if (!state.currentProviderId && !state.currentModelId && state.settingsDefaultModel) {
-                                        const parsed = parseModelString(state.settingsDefaultModel);
-                                        if (parsed) {
-                                            const settingsProvider = processedProviders.find((p) => p.id === parsed.providerId);
-                                            if (settingsProvider?.models.some((m) => m.id === parsed.modelId)) {
-                                                const model = settingsProvider.models.find((m) => m.id === parsed.modelId);
-                                                const currentVariant = state.settingsDefaultVariant && (model as { variants?: Record<string, unknown> } | undefined)?.variants?.[state.settingsDefaultVariant]
-                                                    ? state.settingsDefaultVariant
-                                                    : undefined;
-
-                                                nextState.currentProviderId = parsed.providerId;
-                                                nextState.currentModelId = parsed.modelId;
-                                                nextState.currentVariant = currentVariant;
-                                                nextState.selectedProviderId = parsed.providerId;
-
-                                                nextSnapshot.currentProviderId = parsed.providerId;
-                                                nextSnapshot.currentModelId = parsed.modelId;
-                                                nextSnapshot.currentVariant = currentVariant;
-                                                nextSnapshot.selectedProviderId = parsed.providerId;
-                                            }
-                                        }
-                                    }
+                                    nextState.currentProviderId = nextSnapshot.currentProviderId;
+                                    nextState.currentModelId = nextSnapshot.currentModelId;
+                                    nextState.currentVariant = nextSnapshot.currentVariant;
+                                    nextState.selectedProviderId = selectedProviderId;
                                 }
 
                                 return nextState;
@@ -2125,6 +2295,13 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                 },
 
+                setTtsInputMode: (mode: 'sanitized' | 'raw') => {
+                    set({ ttsInputMode: mode });
+                    if (typeof window !== 'undefined') {
+                        localStorage.setItem('ttsInputMode', mode);
+                    }
+                },
+
                 setVoiceModeEnabled: (enabled: boolean) => {
                     set({ voiceModeEnabled: enabled });
                     if (typeof window !== 'undefined') {
@@ -2267,6 +2444,8 @@ export const useConfigStore = create<ConfigStore>()(
                             if (debug) console.log("Initializing app...");
                             markStartupTrace('initApp:skipped', { reason: 'checkConnection already verified health' });
 
+                            get().invalidateProviderCache();
+
                             if (debug) console.log("Loading providers and agents...");
                             await Promise.all([
                                 get().loadProviders({ source: 'initializeApp' }),
@@ -2349,16 +2528,20 @@ export const useConfigStore = create<ConfigStore>()(
             {
                 name: "config-store",
                 storage: createJSONStorage(() => getSafeStorage()),
+                merge: (persistedState, currentState) => ({
+                    ...currentState,
+                    ...stripProviderCacheFromPersistedState(persistedState),
+                }),
                 partialize: (state) => ({
                     activeDirectoryKey: state.activeDirectoryKey,
-                    directoryScoped: state.directoryScoped,
+                    directoryScoped: clearProviderDataFromDirectoryScoped(state.directoryScoped),
                     currentProviderId: state.currentProviderId,
                     currentModelId: state.currentModelId,
                     currentVariant: state.currentVariant,
                     currentAgentName: state.currentAgentName,
                     selectedProviderId: state.selectedProviderId,
                     agentModelSelections: state.agentModelSelections,
-                    defaultProviders: state.defaultProviders,
+                    defaultProviders: {},
                     settingsDefaultModel: state.settingsDefaultModel,
                     settingsDefaultVariant: state.settingsDefaultVariant,
                     settingsDefaultAgent: state.settingsDefaultAgent,
@@ -2380,6 +2563,31 @@ if (typeof window !== "undefined") {
     window.__zustand_config_store__ = useConfigStore;
 }
 
+const refreshKnownProviderDirectories = async (source: string): Promise<void> => {
+    const state = useConfigStore.getState();
+    const directoryKeys = Array.from(new Set([
+        state.activeDirectoryKey,
+        ...Object.keys(state.directoryScoped),
+    ])).filter((key) => key.length > 0);
+
+    state.invalidateProviderCache();
+
+    let nextIndex = 0;
+    const workerCount = Math.min(PROVIDER_CONFIG_REFRESH_CONCURRENCY, directoryKeys.length);
+    const workers = Array.from({ length: workerCount }, async () => {
+        while (nextIndex < directoryKeys.length) {
+            const directoryKey = directoryKeys[nextIndex];
+            nextIndex += 1;
+            await useConfigStore.getState().loadProviders({
+                directory: fromDirectoryKey(directoryKey),
+                source,
+            });
+        }
+    });
+
+    await Promise.all(workers);
+};
+
 let unsubscribeConfigStoreChanges: (() => void) | null = null;
 
 if (!unsubscribeConfigStoreChanges) {
@@ -2392,8 +2600,7 @@ if (!unsubscribeConfigStoreChanges) {
         }
 
         if (scopeMatches(event, "providers")) {
-            const { loadProviders } = useConfigStore.getState();
-            tasks.push(loadProviders({ source: 'configChange:providers' }));
+            tasks.push(refreshKnownProviderDirectories('configChange:providers'));
         }
 
         if (tasks.length > 0) {

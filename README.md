@@ -96,7 +96,7 @@ Download from [Releases](https://github.com/btriapitsyn/openchamber/releases).
 Install from [Marketplace](https://marketplace.visualstudio.com/items?itemName=fedaykindev.openchamber) or search "OpenChamber" in Extensions.
 
 ### **CLI (Web + PWA)**
-_requires Node.js 20+_
+_requires Node.js 22+_
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/btriapitsyn/openchamber/main/scripts/install.sh | bash
@@ -333,7 +333,7 @@ chown -R 1000:1000 data/
 <details>
 <summary><strong>Files, Diff & Terminal</strong></summary>
 
-- Workspace file browser with inline editing, syntax highlighting, and markdown preview
+- Workspace file browser with inline editing, syntax highlighting, Vim mode, and markdown preview
 - Beautiful diff viewer with stacked/inline modes, lazy loading for large changesets
 - Integrated terminal with per-directory sessions, tabbed interface, and stable heavy-output performance
 - Clickable file paths in messages - jump to exact line locations

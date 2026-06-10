@@ -7,6 +7,8 @@ import { useSkillsStore } from '@/stores/useSkillsStore';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
+import { useUIStore } from '@/stores/useUIStore';
+import { isVSCodeRuntime } from '@/lib/desktop';
 
 type CommandSource = 'openchamber' | 'opencode' | 'skill';
 
@@ -65,6 +67,8 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
   const hasSession = Boolean(currentSessionId);
   const hasNewSessionDraft = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
   const canStartSessionCommand = hasSession || hasNewSessionDraft;
+  const isMobile = useUIStore((state) => state.isMobile);
+  const canUseReviewHandoffFlow = hasSession && !isMobile && !isVSCodeRuntime();
 
   const [commands, setCommands] = React.useState<CommandInfo[]>([]);
   const [loading, setLoading] = React.useState(false);
@@ -152,6 +156,10 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
             ? [{ id: 'openchamber:workspace-review', name: 'workspace-review', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.workspaceReviewDescription'), isOpenChamber: true }]
             : []
           ),
+          ...(canUseReviewHandoffFlow
+            ? [{ id: 'openchamber:handoff-review', name: 'handoff-review', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.handoffReviewDescription'), isOpenChamber: true }]
+            : []
+          ),
           ...(canStartSessionCommand
             ? [{ id: 'openchamber:plan-feature', name: 'plan-feature', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.featurePlanDescription'), isOpenChamber: true }]
             : []
@@ -217,6 +225,10 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
             ? [{ id: 'openchamber:workspace-review', name: 'workspace-review', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.workspaceReviewDescription'), isOpenChamber: true }]
             : []
           ),
+          ...(canUseReviewHandoffFlow
+            ? [{ id: 'openchamber:handoff-review', name: 'handoff-review', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.handoffReviewDescription'), isOpenChamber: true }]
+            : []
+          ),
           ...(canStartSessionCommand
             ? [{ id: 'openchamber:plan-feature', name: 'plan-feature', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.featurePlanDescription'), isOpenChamber: true }]
             : []
@@ -253,7 +265,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
     };
 
     loadCommands();
-  }, [searchQuery, hasMessagesInCurrentSession, hasSession, canStartSessionCommand, commandsWithMetadata, skills, t]);
+  }, [searchQuery, hasMessagesInCurrentSession, hasSession, canStartSessionCommand, canUseReviewHandoffFlow, commandsWithMetadata, skills, t]);
 
   React.useEffect(() => {
     setSelectedIndex(0);

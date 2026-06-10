@@ -37,6 +37,7 @@ import { UpdateDialog } from '@/components/ui/UpdateDialog';
 import { useDeviceInfo, useTabletStandalonePwaRuntime } from '@/lib/device';
 import { cn, hasModifier } from '@/lib/utils';
 import { McpDropdownContent } from '@/components/mcp/McpDropdown';
+import { McpIcon } from '@/components/icons/McpIcon';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { formatQuotaValueLabel, formatQuotaResetLabel, formatWindowLabel, QUOTA_PROVIDERS, calculatePace, calculateExpectedUsagePercent } from '@/lib/quota';
 import { UsageProgressBar } from '@/components/sections/usage/UsageProgressBar';
@@ -706,6 +707,7 @@ export const Header: React.FC<HeaderProps> = ({
   const { t } = useI18n();
   const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
   const toggleSidebar = useUIStore((state) => state.toggleSidebar);
+  const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
   const toggleBottomTerminal = useUIStore((state) => state.toggleBottomTerminal);
   const toggleRightSidebar = useUIStore((state) => state.toggleRightSidebar);
   const openContextOverview = useUIStore((state) => state.openContextOverview);
@@ -1219,13 +1221,16 @@ export const Header: React.FC<HeaderProps> = ({
 
   const worktreeBadge = React.useMemo(() => {
     if (!worktreeAttachment) return null;
-    return formatSessionWorktreeBadge(worktreeAttachment);
-  }, [worktreeAttachment]);
+    return formatSessionWorktreeBadge(worktreeAttachment, {
+      pending: t('gitView.empty.worktreeSetupInProgress'),
+    });
+  }, [t, worktreeAttachment]);
 
   const worktreeBadgeKind = React.useMemo(() => {
     if (!worktreeAttachment) return null;
     if (worktreeAttachment.legacy) return 'legacy';
     if (worktreeAttachment.degraded) return 'degraded';
+    if (worktreeAttachment.worktreeStatus === 'pending') return 'pending';
     if (worktreeAttachment.worktreeStatus === 'missing') return 'missing';
     if (worktreeAttachment.worktreeStatus === 'invalid') return 'invalid';
     if (worktreeAttachment.attentionReason) return 'attention';
@@ -1572,12 +1577,42 @@ export const Header: React.FC<HeaderProps> = ({
     onToggleRightDrawer?.();
   }, [onToggleRightDrawer, rightDrawerOpen]);
 
-  const desktopPaddingClass = React.useMemo(() => {
-    if ((isDesktopApp && isMacPlatform && !isDesktopWindowFullscreen) || isTabletStandalonePwa) {
-      return 'pl-[5.5rem]';
+  // Left padding the header needs to clear the OS window controls (macOS
+  // traffic lights / window-controls-overlay). When the sidebar is open this
+  // space is owned by the sidebar's top strip instead, so the header drops back
+  // to its normal content padding. The full value is published as
+  // `--oc-titlebar-left-inset` so the sidebar strip can mirror it.
+  const titlebarLeftInset = React.useMemo(() => {
+    if (isDesktopApp && isMacPlatform && !isDesktopWindowFullscreen) {
+      return '5.5rem';
     }
-    return 'pl-3';
-  }, [isDesktopApp, isDesktopWindowFullscreen, isMacPlatform, isTabletStandalonePwa]);
+    if (isTabletStandalonePwa) {
+      return 'max(calc(0.75rem + var(--oc-wco-left-inset, 0px)), 5.5rem)';
+    }
+    if ((!isDesktopApp || isWindowsElectronDesktop) && !isVSCode) {
+      return 'calc(0.75rem + var(--oc-wco-left-inset, 0px))';
+    }
+    return '0.75rem';
+  }, [isDesktopApp, isDesktopWindowFullscreen, isMacPlatform, isTabletStandalonePwa, isVSCode, isWindowsElectronDesktop]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') {
+      return;
+    }
+    document.documentElement.style.setProperty('--oc-titlebar-left-inset', titlebarLeftInset);
+  }, [titlebarLeftInset]);
+
+  // Space reserved on the header's left for the persistent overlay when the
+  // sidebar is collapsed (the overlay sits over the header then). Split into two
+  // spacers so the strip stays a window drag area while the buttons stay
+  // clickable: a drag region for the window-controls inset (traffic lights) and
+  // a no-drag carve under the control cluster. Both animate so the session title
+  // slides in/out in lockstep with the sidebar. When the sidebar is open the
+  // overlay is over the sidebar, so the header only keeps normal content padding.
+  const headerInsetSpacerWidth = isSidebarOpen ? '0.75rem' : 'var(--oc-titlebar-left-inset, 0.75rem)';
+  const headerControlsSpacerWidth = isSidebarOpen
+    ? '0px'
+    : 'calc(var(--oc-titlebar-controls-width, 5.5rem) + 0.5rem)';
 
   useEffect(() => {
     if (!isDesktopApp || !isMacPlatform) {
@@ -1632,14 +1667,13 @@ export const Header: React.FC<HeaderProps> = ({
     }
 
     return {
-      paddingLeft: isTabletStandalonePwa
-        ? 'max(calc(0.75rem + var(--oc-wco-left-inset, 0px)), 5.5rem)'
-        : 'calc(0.75rem + var(--oc-wco-left-inset, 0px))',
+      // Left inset is handled by the no-drag spacer (see renderDesktop); only
+      // the right inset / titlebar height are owned by the window-controls overlay.
       paddingRight: 'calc(0.75rem + var(--oc-wco-right-inset, 0px))',
       minHeight: 'max(3rem, var(--oc-wco-titlebar-height, 0px))',
       height: 'max(3rem, var(--oc-wco-titlebar-height, 0px))',
     };
-  }, [isDesktopApp, isTabletStandalonePwa, isVSCode, isWindowsElectronDesktop]);
+  }, [isDesktopApp, isVSCode, isWindowsElectronDesktop]);
 
   const updateHeaderHeight = React.useCallback(() => {
     if (typeof document === 'undefined') {
@@ -1722,6 +1756,7 @@ export const Header: React.FC<HeaderProps> = ({
         { id: 'files', label: t('layout.mainTab.files'), icon: "folder-6" },
         { id: 'terminal', label: t('layout.mainTab.terminal'), icon: "terminal-box" },
         { id: 'context', label: t('layout.mainTab.context'), icon: "file-list-2" },
+        { id: 'diagram', label: t('layout.mainTab.diagram'), icon: 'file' },
       );
 
       return base;
@@ -1742,13 +1777,13 @@ export const Header: React.FC<HeaderProps> = ({
   }, [activeMainTab, isMobile, setActiveMainTab]);
 
   const servicesTabs = React.useMemo(() => {
-    const base: Array<{ value: 'instance' | 'usage' | 'mcp'; label: string; icon: IconName }> = [];
+    const base: Array<{ value: 'instance' | 'usage' | 'mcp'; label: string; icon: React.ReactNode }> = [];
     if (isDesktopApp) {
-      base.push({ value: 'instance', label: t('layout.services.instance'), icon: "server" });
+      base.push({ value: 'instance', label: t('layout.services.instance'), icon: <Icon name="server" className="h-3.5 w-3.5" /> });
     }
     base.push(
-      { value: 'usage', label: t('layout.services.usage'), icon: "timer" },
-      { value: 'mcp', label: 'MCP', icon: "plug-2" }
+      { value: 'usage', label: t('layout.services.usage'), icon: <Icon name="timer" className="h-3.5 w-3.5" /> },
+      { value: 'mcp', label: 'MCP', icon: <McpIcon className="h-3.5 w-3.5" /> }
     );
     return base;
   }, [isDesktopApp, t]);
@@ -1757,7 +1792,7 @@ export const Header: React.FC<HeaderProps> = ({
     return servicesTabs.map((tab) => ({
       id: tab.value,
       label: tab.label,
-      icon: <Icon name={tab.icon} className="h-3.5 w-3.5" />,
+      icon: tab.icon,
     }));
   }, [servicesTabs]);
 
@@ -1832,7 +1867,7 @@ export const Header: React.FC<HeaderProps> = ({
   const mobileServicesTabItems = React.useMemo<SortableTabsStripItem[]>(() => {
     return [
       { id: 'usage', label: t('layout.services.usage'), icon: <Icon name="timer" className="h-3.5 w-3.5" /> },
-      { id: 'mcp', label: 'MCP', icon: <Icon name="command" className="h-3.5 w-3.5" /> },
+      { id: 'mcp', label: 'MCP', icon: <McpIcon className="h-3.5 w-3.5" /> },
     ];
   }, [t]);
 
@@ -2057,13 +2092,27 @@ export const Header: React.FC<HeaderProps> = ({
       onMouseDown={handleDragStart}
       className={cn(
         'app-region-drag relative flex h-12 select-none items-center pr-3',
-        desktopPaddingClass,
         macosHeaderSizeClass
       )}
       style={webWindowControlsOverlayStyle}
       role="tablist"
       aria-label={t('header.navigation.mainAria')}
     >
+      {/* Drag region for the window-controls inset (traffic lights) to the left
+          of the overlay buttons — stays a window drag area. */}
+      <div
+        aria-hidden
+        className="shrink-0 self-stretch transition-[width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
+        style={{ width: headerInsetSpacerWidth }}
+      />
+      {/* No-drag carve under the persistent TitlebarLeftControls overlay so its
+          buttons stay clickable. Width animates with the sidebar so the session
+          title slides in lockstep instead of snapping. */}
+      <div
+        aria-hidden
+        className="app-region-no-drag shrink-0 self-stretch transition-[width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
+        style={{ width: headerControlsSpacerWidth }}
+      />
       {isWindowsElectronDesktop ? (
         <HeaderIconActionButton
           title={t('header.actions.openAppMenu')}
@@ -2073,22 +2122,10 @@ export const Header: React.FC<HeaderProps> = ({
           Icon={'menu-2'}
         />
       ) : null}
-      <HeaderIconActionButton
-        title={t('header.actions.openSessionsWithShortcut', { shortcut: shortcutLabel('toggle_sidebar') })}
-        ariaLabel={t('header.actions.openSessionsAria')}
-        onClick={handleOpenSessionSwitcher}
-        className={`${desktopHeaderIconButtonClass} shrink-0`}
-        Icon={'layout-left'}
-      />
-
-      <div className="flex min-w-0 flex-1 items-center pl-3">
-        {projectActionsContext && (
-          <ProjectActionsButton
-            projectRef={projectActionsContext.projectRef}
-            directory={projectActionsContext.directory}
-            className="mr-2"
-          />
-        )}
+      {/* Sidebar toggle + project actions live in the persistent
+          TitlebarLeftControls overlay; the header reserves matching left space
+          via padding (see headerStyle) when the sidebar is collapsed. */}
+      <div className="flex min-w-0 flex-1 items-center">
         <SessionSwitcherDropdown>
           <button
             type="button"
@@ -2591,8 +2628,11 @@ export const Header: React.FC<HeaderProps> = ({
   );
 
   const headerClassName = cn(
-    'header-safe-area relative z-10',
-    isMobile ? 'border-b border-border/50 bg-background' : 'bg-sidebar'
+    'header-safe-area relative z-10 bg-background',
+    // Mobile keeps a full-width divider. On desktop the divider lives on the chat
+    // content wrapper instead, so it doesn't run between the header and the right
+    // sidebar (they read as one continuous surface).
+    isMobile && 'border-b border-border/50'
   );
 
   return (

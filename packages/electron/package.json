@@ -50,6 +50,10 @@
       {
         "from": "resources/icons/icon.ico",
         "to": "icons/icon.ico"
+      },
+      {
+        "from": "resources/icons/tray",
+        "to": "icons/tray"
       }
     ],
     "afterPack": "scripts/after-pack.cjs",

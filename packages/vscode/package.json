@@ -238,13 +238,13 @@
     "@vitejs/plugin-react": "^5.0.0",
     "@vscode/vsce": "^3.2.1",
     "concurrently": "^9.2.1",
-    "esbuild": "^0.24.2",
-    "typescript": "~5.8.3",
+    "esbuild": "^0.28.0",
+    "typescript": "~5.9.0",
     "vite": "^7.1.2"
   },
   "dependencies": {
     "@openchamber/ui": "workspace:*",
-    "@opencode-ai/sdk": "^1.16.0",
+    "@opencode-ai/sdk": "^1.17.0",
     "adm-zip": "^0.5.16",
     "jsonc-parser": "^3.3.1",
     "react": "^19.1.1",

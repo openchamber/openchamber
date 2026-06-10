@@ -201,6 +201,8 @@ type DesktopBridgeGlobal = {
 
 type ElectronRuntimeGlobal = {
   runtime?: string;
+  macVibrancy?: boolean;
+  macVibrancySupported?: boolean;
 };
 
 const getElectronRuntime = (): ElectronRuntimeGlobal | null => {

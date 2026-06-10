@@ -152,7 +152,7 @@ export const SnippetsPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="mb-2 px-2">
+        <div data-settings-item="snippets.content" className="mb-2 px-2">
           <span className="typography-ui-label text-foreground">{t('settings.snippets.page.field.content')}</span>
           <Textarea value={content} onChange={(e) => setContent(e.target.value)} placeholder={t('settings.snippets.page.field.contentPlaceholder')} rows={12} className="mt-1.5 w-full font-mono typography-meta min-h-[160px] max-h-[60vh] bg-transparent" />
           <p className="mt-2 typography-meta text-muted-foreground">{t('settings.snippets.page.hint')}</p>

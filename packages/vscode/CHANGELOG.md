@@ -1,3 +1,12 @@
+## [1.12.4] - 2026-06-10
+
+- Agent Manager: creating isolated runs now opens sessions immediately while worktree setup continues in the background.
+- Sessions: chat folder assignments now stay in place after reloads.
+- Sessions: added an action to archive all sessions (thanks to @jjdubski).
+- Sessions: session and folder rows now have right-click menus for their available actions.
+- Settings: added search across settings pages.
+- Chat: table copy actions now include a Markdown format option (thanks to @kjhq).
+
 ## [1.12.3] - 2026-06-05
 
 - Startup: OpenCode health checks now work with OpenCode 1.15.x.

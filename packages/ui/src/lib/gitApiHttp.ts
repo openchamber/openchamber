@@ -1052,7 +1052,7 @@ export async function canonicalizeWorktreeState(
   cwd: string | null;
   branch: string | null;
   headState: 'branch' | 'detached' | 'unborn';
-  worktreeStatus: 'ready' | 'missing' | 'invalid' | 'not-a-repo';
+  worktreeStatus: 'pending' | 'ready' | 'missing' | 'invalid' | 'not-a-repo';
   legacy: boolean;
   degraded: boolean;
   attentionReason?: 'merge' | 'rebase' | 'cherry-pick' | 'revert' | 'bisect' | null;

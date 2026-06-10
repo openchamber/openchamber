@@ -17,6 +17,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { useCommandsStore, isCommandBuiltIn, type Command } from '@/stores/useCommandsStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -231,6 +232,7 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
         <div className="flex items-center justify-between gap-2">
           <span className="typography-meta text-muted-foreground">{t('settings.commands.sidebar.total', { count: commandOnlyItems.length })}</span>
           <Button size="sm"
+            data-settings-item="commands.create"
             variant="ghost"
             className="h-7 w-7 px-0 -my-1 text-muted-foreground"
             onClick={handleCreateNew}
@@ -397,17 +399,36 @@ const CommandListItem: React.FC<CommandListItemProps> = ({
 }) => {
   const { t } = useI18n();
   const isMobile = isMobileDeviceViaCSS();
-  return (
-    <div
-      className={cn(
-        'group relative flex items-center rounded-md px-1.5 py-1 transition-all duration-200 select-none',
-        isSelected ? 'bg-interactive-selection' : 'hover:bg-interactive-hover'
+  const [isContextMenuOpen, setIsContextMenuOpen] = React.useState(false);
+  const renderMenuItems = (Item: React.ElementType) => (
+    <>
+      {onRename && (
+        <Item onClick={(e: React.MouseEvent) => { e.stopPropagation(); onRename(); }}>
+          <Icon name="edit" className="h-4 w-4 mr-px" />
+          {t('settings.common.actions.rename')}
+        </Item>
       )}
-      onContextMenu={!isMobile ? (e) => {
-        e.preventDefault();
-        onMenuOpenChange(true);
-      } : undefined}
-    >
+      <Item onClick={(e: React.MouseEvent) => { e.stopPropagation(); onDuplicate(); }}>
+        <Icon name="file-copy" className="h-4 w-4 mr-px" />
+        {t('settings.common.actions.duplicate')}
+      </Item>
+      {onReset && (
+        <Item onClick={(e: React.MouseEvent) => { e.stopPropagation(); onReset(); }}>
+          <Icon name="restart" className="h-4 w-4 mr-px" />
+          {t('settings.common.actions.reset')}
+        </Item>
+      )}
+      {onDelete && (
+        <Item onClick={(e: React.MouseEvent) => { e.stopPropagation(); onDelete(); }} className="text-destructive focus:text-destructive">
+          <Icon name="delete-bin" className="h-4 w-4 mr-px" />
+          {t('settings.common.actions.delete')}
+        </Item>
+      )}
+    </>
+  );
+  return (
+    <ContextMenu open={isContextMenuOpen} onOpenChange={setIsContextMenuOpen}>
+      <ContextMenuTrigger render={<div className={cn('group relative flex items-center rounded-md px-1.5 py-1 transition-all duration-200 select-none', isSelected ? 'bg-interactive-selection' : 'hover:bg-interactive-hover')} onContextMenu={!isMobile ? (e) => { e.preventDefault(); setIsContextMenuOpen(true); } : undefined} />}>
       <div className="flex min-w-0 flex-1 items-center">
         <button
           onClick={onSelect}
@@ -432,7 +453,7 @@ const CommandListItem: React.FC<CommandListItemProps> = ({
           )}
         </button>
 
-        <DropdownMenu open={isMenuOpen} onOpenChange={onMenuOpenChange}>
+        <DropdownMenu open={isMenuOpen} onOpenChange={(open) => { if (open) setIsContextMenuOpen(false); onMenuOpenChange(open); }}>
           <DropdownMenuTrigger asChild>
             <Button size="sm"
               variant="ghost"
@@ -442,55 +463,14 @@ const CommandListItem: React.FC<CommandListItemProps> = ({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-fit min-w-20">
-            {onRename && (
-              <DropdownMenuItem
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRename();
-                }}
-              >
-                <Icon name="edit" className="h-4 w-4 mr-px" />
-                {t('settings.common.actions.rename')}
-              </DropdownMenuItem>
-            )}
-
-            <DropdownMenuItem
-              onClick={(e) => {
-                e.stopPropagation();
-                onDuplicate();
-              }}
-            >
-              <Icon name="file-copy" className="h-4 w-4 mr-px" />
-              {t('settings.common.actions.duplicate')}
-            </DropdownMenuItem>
-
-            {onReset && (
-              <DropdownMenuItem
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onReset();
-                }}
-              >
-                <Icon name="restart" className="h-4 w-4 mr-px" />
-                {t('settings.common.actions.reset')}
-              </DropdownMenuItem>
-            )}
-
-            {onDelete && (
-              <DropdownMenuItem
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDelete();
-                }}
-                className="text-destructive focus:text-destructive"
-              >
-                <Icon name="delete-bin" className="h-4 w-4 mr-px" />
-                {t('settings.common.actions.delete')}
-              </DropdownMenuItem>
-            )}
+            {renderMenuItems(DropdownMenuItem)}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-    </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-fit min-w-20">
+        {renderMenuItems(ContextMenuItem)}
+      </ContextMenuContent>
+    </ContextMenu>
   );
 };
