@@ -12,7 +12,7 @@ import MessageList, { type MessageListHandle } from './MessageList';
 import { PermissionCard } from './PermissionCard';
 import { QuestionCard } from './QuestionCard';
 import { StatusRowContainer } from './StatusRowContainer';
-import JumpToPreviousMessageButton from './components/JumpToPreviousMessageButton';
+import ScrollToTopButton from './components/ScrollToTopButton';
 import ScrollToBottomButton from './components/ScrollToBottomButton';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { useChatAutoFollow, type AnimationHandlers, type ContentChangeReason } from '@/hooks/useChatAutoFollow';
@@ -23,6 +23,7 @@ import { useChatSurfaceMode } from './useChatSurfaceMode';
 import { useDeviceInfo } from '@/lib/device';
 import { Button } from '@/components/ui/button';
 import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
+import { smoothWheelScrollElement } from '@/components/ui/smoothWheelScroll';
 import { Icon } from "@/components/icon/Icon";
 import type { PermissionRequest } from '@/types/permission';
 import type { QuestionRequest } from '@/types/question';
@@ -108,6 +109,14 @@ const shouldIgnoreChatNavigationForFocus = (activeElement: Element | null, scrol
     }
 
     return !scrollContainer?.contains(activeElement);
+};
+
+const shouldLetChatInputOwnWheel = (target: EventTarget | null): boolean => {
+    if (!isHTMLElement(target)) {
+        return false;
+    }
+
+    return Boolean(target.closest('[data-chat-input-box="true"], [data-radix-popper-content-wrapper], [role="listbox"], [role="menu"]'));
 };
 
 const hasBlockingChatOverlay = (): boolean => {
@@ -965,6 +974,28 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         void ensureSessionRenderable(currentSessionId);
     }, [currentSessionId, effectiveSessionDirectory, ensureSessionRenderable, hasRenderableSessionSnapshot, syncDirectory]);
 
+    const handleNavigationWheel = React.useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+        if (isDesktopExpandedInput) {
+            return;
+        }
+
+        if (event.defaultPrevented || shouldLetChatInputOwnWheel(event.target)) {
+            return;
+        }
+
+        const scrollContainer = scrollRef.current;
+        if (!scrollContainer) {
+            return;
+        }
+
+        if (event.deltaY === 0) {
+            return;
+        }
+
+        event.preventDefault();
+        smoothWheelScrollElement(scrollContainer, event);
+    }, [isDesktopExpandedInput, scrollRef]);
+
 	if (!currentSessionId && !draftOpen) {
 		// With auto-open, the draft welcome opens on the next tick (effect below),
 		// so the empty state is only ever transient here — render a neutral
@@ -1111,10 +1142,11 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 	return (
 		<div className="relative flex flex-col h-full bg-background">
 			{returnToParentButton}
-			<JumpToPreviousMessageButton
+			<ScrollToTopButton
 				visible={showJumpToPreviousMessage && !isDesktopExpandedInput}
 				onClick={handleJumpToPreviousMessage}
 				disabled={isJumpNavigationBusy}
+				onWheelCapture={handleNavigationWheel}
 			/>
 			<ChatViewport
 				key={currentSessionId}
@@ -1146,11 +1178,13 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                         ? 'flex-1 min-h-0 bg-background'
                         : 'bg-background'
                 )}
+                onWheelCapture={handleNavigationWheel}
             >
                 {!isDesktopExpandedInput && sessionMessages.length > 0 && (
                     <ScrollToBottomButton
                         visible={timelineController.showScrollToBottom}
                         onClick={navigation.resumeToLatest}
+                        onWheelCapture={handleNavigationWheel}
                     />
                 )}
                 {promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={resumeToLatestInstant} />}

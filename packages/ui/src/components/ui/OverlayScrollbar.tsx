@@ -2,6 +2,7 @@ import React from "react";
 import { cn } from "@/lib/utils";
 import { OVERLAY_SCROLLBAR_CANCEL_SCROLL_EVENT } from "./overlay-scrollbar-events";
 import { animateElementScrollTo } from "./scroll-animation";
+import { cancelSmoothWheelScroll, smoothWheelScrollElement } from "./smoothWheelScroll";
 
 type OverlayScrollbarProps = {
   containerRef: React.RefObject<HTMLElement | null>;
@@ -43,9 +44,6 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
 }) => {
   const scrollbarRef = React.useRef<HTMLDivElement>(null);
   const scrollAnimRef = React.useRef<number | null>(null);
-  const wheelAnimFrameRef = React.useRef<number | null>(null);
-  const isWheelAnimatingRef = React.useRef(false);
-  const wheelTargetRef = React.useRef<number | null>(null);
   const [visible, setVisible] = React.useState(false);
   const [vertical, setVertical] = React.useState<ThumbMetrics>({ length: 0, offset: 0 });
   const [horizontal, setHorizontal] = React.useState<ThumbMetrics>({ length: 0, offset: 0 });
@@ -157,13 +155,11 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
 
   const cancelScrollAnimations = React.useCallback(() => {
     cancelTrackScrollAnimation();
-    if (wheelAnimFrameRef.current !== null) {
-      cancelAnimationFrame(wheelAnimFrameRef.current);
-      wheelAnimFrameRef.current = null;
+    const container = containerRef.current;
+    if (container) {
+      cancelSmoothWheelScroll(container);
     }
-    wheelTargetRef.current = null;
-    isWheelAnimatingRef.current = false;
-  }, [cancelTrackScrollAnimation]);
+  }, [cancelTrackScrollAnimation, containerRef]);
 
   const handleScroll = React.useCallback(() => {
     if (frameRef.current) {
@@ -393,46 +389,7 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
     cancelTrackScrollAnimation();
 
     event.preventDefault();
-    const clonedEvent = new WheelEvent("wheel", {
-      deltaX: event.deltaX,
-      deltaY: event.deltaY,
-      deltaZ: event.deltaZ,
-      deltaMode: event.deltaMode,
-      bubbles: true,
-      cancelable: true,
-    });
-    container.dispatchEvent(clonedEvent);
-
-    const maxScroll = container.scrollHeight - container.clientHeight;
-    if (wheelTargetRef.current === null) {
-      wheelTargetRef.current = container.scrollTop;
-    }
-
-    wheelTargetRef.current = Math.max(0, Math.min(maxScroll, wheelTargetRef.current + event.deltaY));
-
-    const smoothScroll = () => {
-      wheelAnimFrameRef.current = null;
-      const container = containerRef.current;
-      if (!container || wheelTargetRef.current === null) {
-        isWheelAnimatingRef.current = false;
-        return;
-      }
-
-      const diff = wheelTargetRef.current - container.scrollTop;
-      if (Math.abs(diff) < 0.5) {
-        container.scrollTop = wheelTargetRef.current;
-        wheelTargetRef.current = null;
-        isWheelAnimatingRef.current = false;
-      } else {
-        container.scrollTop += diff * 0.25;
-        wheelAnimFrameRef.current = requestAnimationFrame(smoothScroll);
-      }
-    };
-
-    if (!isWheelAnimatingRef.current) {
-      isWheelAnimatingRef.current = true;
-      wheelAnimFrameRef.current = requestAnimationFrame(smoothScroll);
-    }
+    smoothWheelScrollElement(container, event);
   }, [cancelTrackScrollAnimation, containerRef, markUserIntent, scheduleHide]);
 
   const handleTrackPointerDown = (event: React.PointerEvent<HTMLDivElement>, axis: "vertical" | "horizontal") => {

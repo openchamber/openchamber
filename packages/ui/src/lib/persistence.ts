@@ -618,6 +618,12 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
       store.setDiffViewMode(settings.diffViewMode);
     }
   }
+  if (typeof settings.chatNavigationButtonAlignment === 'string'
+    && (settings.chatNavigationButtonAlignment === 'left' || settings.chatNavigationButtonAlignment === 'center' || settings.chatNavigationButtonAlignment === 'right')) {
+    if (settings.chatNavigationButtonAlignment !== store.chatNavigationButtonAlignment) {
+      store.setChatNavigationButtonAlignment(settings.chatNavigationButtonAlignment);
+    }
+  }
   if (typeof settings.gitChangesViewMode === 'string'
     && (settings.gitChangesViewMode === 'flat' || settings.gitChangesViewMode === 'tree')) {
     if (settings.gitChangesViewMode !== store.gitChangesViewMode) {
@@ -1059,6 +1065,14 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
     && (candidate.diffViewMode === 'single' || candidate.diffViewMode === 'stacked')
   ) {
     result.diffViewMode = candidate.diffViewMode;
+  }
+  if (
+    typeof candidate.chatNavigationButtonAlignment === 'string'
+    && (candidate.chatNavigationButtonAlignment === 'left'
+      || candidate.chatNavigationButtonAlignment === 'center'
+      || candidate.chatNavigationButtonAlignment === 'right')
+  ) {
+    result.chatNavigationButtonAlignment = candidate.chatNavigationButtonAlignment;
   }
   if (
     typeof candidate.gitChangesViewMode === 'string'

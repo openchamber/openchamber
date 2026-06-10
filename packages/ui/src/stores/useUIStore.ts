@@ -16,6 +16,7 @@ export type MermaidRenderingMode = 'svg' | 'ascii';
 export type UserMessageRenderingMode = 'markdown' | 'plain';
 export type ChatRenderMode = 'sorted' | 'live';
 export type ActivityRenderMode = 'collapsed' | 'summary';
+export type ChatNavigationButtonAlignment = 'left' | 'center' | 'right';
 export type SessionRetentionAction = 'archive' | 'delete';
 export type TimeFormatPreference = 'auto' | '12h' | '24h';
 export type WeekStartPreference = 'auto' | 'sunday' | 'monday';
@@ -579,6 +580,7 @@ interface UIStore {
   diffFileLayout: Record<string, 'inline' | 'side-by-side'>;
   diffWrapLines: boolean;
   diffViewMode: 'single' | 'stacked';
+  chatNavigationButtonAlignment: ChatNavigationButtonAlignment;
   gitChangesViewMode: 'flat' | 'tree';
   isTimelineDialogOpen: boolean;
   isImagePreviewOpen: boolean;
@@ -733,6 +735,7 @@ interface UIStore {
   setDiffFileLayout: (filePath: string, mode: 'inline' | 'side-by-side') => void;
   setDiffWrapLines: (wrap: boolean) => void;
   setDiffViewMode: (mode: 'single' | 'stacked') => void;
+  setChatNavigationButtonAlignment: (alignment: ChatNavigationButtonAlignment) => void;
   setGitChangesViewMode: (mode: 'flat' | 'tree') => void;
   setMultiRunLauncherOpen: (open: boolean) => void;
   setTimelineDialogOpen: (open: boolean) => void;
@@ -860,6 +863,7 @@ export const useUIStore = create<UIStore>()(
         diffFileLayout: {},
         diffWrapLines: false,
         diffViewMode: 'stacked',
+        chatNavigationButtonAlignment: 'center',
         gitChangesViewMode: 'flat',
         isTimelineDialogOpen: false,
         isImagePreviewOpen: false,
@@ -1675,6 +1679,10 @@ export const useUIStore = create<UIStore>()(
           set({ diffViewMode: mode });
         },
 
+        setChatNavigationButtonAlignment: (alignment) => {
+          set({ chatNavigationButtonAlignment: alignment });
+        },
+
         setGitChangesViewMode: (mode) => {
           set({ gitChangesViewMode: mode });
         },
@@ -2213,6 +2221,7 @@ export const useUIStore = create<UIStore>()(
           diffLayoutPreference: state.diffLayoutPreference,
           diffWrapLines: state.diffWrapLines,
           diffViewMode: state.diffViewMode,
+          chatNavigationButtonAlignment: state.chatNavigationButtonAlignment,
           gitChangesViewMode: state.gitChangesViewMode,
           nativeNotificationsEnabled: state.nativeNotificationsEnabled,
           notificationMode: state.notificationMode,

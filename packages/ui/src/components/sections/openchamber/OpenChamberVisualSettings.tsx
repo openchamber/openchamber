@@ -4,7 +4,7 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import type { ThemeMode } from '@/types/theme';
-import { useUIStore } from '@/stores/useUIStore';
+import { useUIStore, type ChatNavigationButtonAlignment } from '@/stores/useUIStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { cn, getModifierLabel } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -83,6 +83,21 @@ const DIFF_VIEW_MODE_OPTIONS: Option<'single' | 'stacked'>[] = [
         id: 'stacked',
         labelKey: 'settings.openchamber.visual.option.diffViewMode.stacked.label',
         descriptionKey: 'settings.openchamber.visual.option.diffViewMode.stacked.description',
+    },
+];
+
+const NAVIGATION_BUTTON_ALIGNMENT_OPTIONS: Option<ChatNavigationButtonAlignment>[] = [
+    {
+        id: 'left',
+        labelKey: 'settings.openchamber.visual.option.navigationButtonAlignment.left.label',
+    },
+    {
+        id: 'center',
+        labelKey: 'settings.openchamber.visual.option.navigationButtonAlignment.center.label',
+    },
+    {
+        id: 'right',
+        labelKey: 'settings.openchamber.visual.option.navigationButtonAlignment.right.label',
     },
 ];
 
@@ -247,7 +262,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-export type VisibleSetting = 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'stickyUserHeader' | 'wideChatLayout' | 'splitAssistantMessageActions' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage';
+export type VisibleSetting = 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'stickyUserHeader' | 'wideChatLayout' | 'splitAssistantMessageActions' | 'diffLayout' | 'navigationButtonAlignment' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage';
 
 interface OpenChamberVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
@@ -295,6 +310,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setDiffLayoutPreference = useUIStore(state => state.setDiffLayoutPreference);
     const diffViewMode = useUIStore(state => state.diffViewMode);
     const setDiffViewMode = useUIStore(state => state.setDiffViewMode);
+    const chatNavigationButtonAlignment = useUIStore(state => state.chatNavigationButtonAlignment);
+    const setChatNavigationButtonAlignment = useUIStore(state => state.setChatNavigationButtonAlignment);
     const showTerminalQuickKeysOnDesktop = useUIStore(state => state.showTerminalQuickKeysOnDesktop);
     const setShowTerminalQuickKeysOnDesktop = useUIStore(state => state.setShowTerminalQuickKeysOnDesktop);
     const fileEditorKeymap = useUIStore(state => state.fileEditorKeymap);
@@ -538,6 +555,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('wideChatLayout')
         || shouldShow('splitAssistantMessageActions')
         || shouldShow('diffLayout')
+        || shouldShow('navigationButtonAlignment')
         || (shouldShow('mobileStatusBar') && isMobile)
         || shouldShow('dotfiles')
         || shouldShow('fileViewerPreview')
@@ -1685,6 +1703,42 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                                 checked={selected}
                                                                 onChange={() => setDiffViewMode(option.id)}
                                                                 ariaLabel={t('settings.openchamber.visual.field.diffViewModeAria', { option: tUnsafe(option.labelKey) })}
+                                                            />
+                                                            <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
+                                                                {tUnsafe(option.labelKey)}
+                                                            </span>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </section>
+                                    )}
+
+                                    {shouldShow('navigationButtonAlignment') && (
+                                        <section className="p-2">
+                                            <h4 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.visual.section.navigationButtonAlignment')}</h4>
+                                            <div role="radiogroup" aria-label={t('settings.openchamber.visual.section.navigationButtonAlignmentAria')} className="mt-0.5 space-y-0">
+                                                {NAVIGATION_BUTTON_ALIGNMENT_OPTIONS.map((option) => {
+                                                    const selected = chatNavigationButtonAlignment === option.id;
+                                                    return (
+                                                        <div
+                                                            key={option.id}
+                                                            role="button"
+                                                            tabIndex={0}
+                                                            aria-pressed={selected}
+                                                            onClick={() => setChatNavigationButtonAlignment(option.id)}
+                                                            onKeyDown={(event) => {
+                                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                                    event.preventDefault();
+                                                                    setChatNavigationButtonAlignment(option.id);
+                                                                }
+                                                            }}
+                                                            className="flex w-full items-center gap-2 py-0 text-left"
+                                                        >
+                                                            <Radio
+                                                                checked={selected}
+                                                                onChange={() => setChatNavigationButtonAlignment(option.id)}
+                                                                ariaLabel={t('settings.openchamber.visual.field.navigationButtonAlignmentAria', { option: tUnsafe(option.labelKey) })}
                                                             />
                                                             <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
                                                                 {tUnsafe(option.labelKey)}
