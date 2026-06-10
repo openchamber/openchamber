@@ -4,6 +4,7 @@ import { AgentManagerPanelProvider } from './AgentManagerPanelProvider';
 import { SessionEditorPanelProvider } from './SessionEditorPanelProvider';
 import { createOpenCodeManager, type OpenCodeManager } from './opencode';
 import { startGlobalEventWatcher, stopGlobalEventWatcher, setChatViewProvider } from './sessionActivityWatcher';
+import { normalizeWindowsDriveLetter } from './pathUtils';
 
 let chatViewProvider: ChatViewProvider | undefined;
 let agentManagerProvider: AgentManagerPanelProvider | undefined;
@@ -20,6 +21,11 @@ const SETTINGS_KEY = 'openchamber.settings';
 const CHAT_VIEW_BOOTSTRAP_DELAY_MS = 80;
 
 const waitForChatViewBootstrap = () => new Promise<void>((resolve) => setTimeout(resolve, CHAT_VIEW_BOOTSTRAP_DELAY_MS));
+
+const getWorkspaceDirectoryForDocument = (document: vscode.TextDocument): string | undefined => {
+  const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
+  return workspaceFolder ? normalizeWindowsDriveLetter(workspaceFolder.uri.fsPath) : undefined;
+};
 
 const formatIso = (value: number | null | undefined) => {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '(none)';
@@ -246,17 +252,17 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.openNewSessionInEditor', () => {
-      sessionEditorProvider?.createOrShowNewSession();
+    vscode.commands.registerCommand('openchamber.openNewSessionInEditor', async () => {
+      await sessionEditorProvider?.createOrShowNewSession();
     })
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.openCurrentOrNewSessionInEditor', () => {
+    vscode.commands.registerCommand('openchamber.openCurrentOrNewSessionInEditor', async () => {
       if (activeSessionId) {
         sessionEditorProvider?.createOrShow(activeSessionId, activeSessionTitle ?? undefined);
       } else {
-        sessionEditorProvider?.createOrShowNewSession();
+        await sessionEditorProvider?.createOrShowNewSession();
       }
     })
   );
@@ -401,6 +407,7 @@ export async function activate(context: vscode.ExtensionContext) {
       const selectedText = editor.document.getText(selection);
       const filePath = vscode.workspace.asRelativePath(editor.document.uri);
       const languageId = editor.document.languageId;
+      const directoryOverride = getWorkspaceDirectoryForDocument(editor.document);
 
       let prompt: string;
 
@@ -415,11 +422,11 @@ export async function activate(context: vscode.ExtensionContext) {
         prompt = `${t('Explain the following Code / Text:')}\n\n${filePath}`;
       }
 
-      if (!sessionEditorProvider?.createSessionWithPromptInActivePanel(prompt)) {
+      if (!sessionEditorProvider?.createSessionWithPromptInActivePanel(prompt, directoryOverride)) {
         if (!(await revealChatViewForPayload())) {
           return;
         }
-        chatViewProvider?.createNewSessionWithPrompt(prompt);
+        chatViewProvider?.createNewSessionWithPrompt(prompt, directoryOverride);
       }
     })
   );
@@ -434,6 +441,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
       const selection = editor.selection;
       const selectedText = editor.document.getText(selection);
+      const directoryOverride = getWorkspaceDirectoryForDocument(editor.document);
 
       if (!selectedText) {
         vscode.window.showWarningMessage(t('OpenChamber [Improve Code]: No text selected'));
@@ -448,11 +456,11 @@ export async function activate(context: vscode.ExtensionContext) {
 
       const prompt = `${t('Improve the following Code:')}\n\n${filePath}:${lineRange}\n\`\`\`${languageId}\n${selectedText}\n\`\`\``;
 
-      if (!sessionEditorProvider?.createSessionWithPromptInActivePanel(prompt)) {
+      if (!sessionEditorProvider?.createSessionWithPromptInActivePanel(prompt, directoryOverride)) {
         if (!(await revealChatViewForPayload())) {
           return;
         }
-        chatViewProvider?.createNewSessionWithPrompt(prompt);
+        chatViewProvider?.createNewSessionWithPrompt(prompt, directoryOverride);
       }
     })
   );

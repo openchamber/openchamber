@@ -50,6 +50,7 @@ import { usePlanDetection } from '@/hooks/usePlanDetection';
 import { getAllSyncSessions } from '@/sync/sync-refs';
 import { useI18n } from '@/lib/i18n';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { normalizeProjectPath, resolveProjectForDirectory } from '@/lib/projectResolution';
 
 const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = [];
 const EMPTY_PERMISSIONS: PermissionRequest[] = [];
@@ -332,6 +333,14 @@ const getProjectDisplayLabel = (project: { label?: string; path: string }): stri
     return label || formatDirectoryName(project.path);
 };
 
+const getDraftDirectoryDisplayLabel = (directory: string | null | undefined, projects: Array<{ label?: string; path: string }>): string | null => {
+    const normalizedDirectory = normalizeProjectPath(directory);
+    if (!normalizedDirectory) return null;
+
+    const matchingProject = resolveProjectForDirectory(projects, normalizedDirectory);
+    return matchingProject ? getProjectDisplayLabel(matchingProject) : formatDirectoryName(normalizedDirectory);
+};
+
 const renderDraftTitle = (title: string, projectLabel: string | null): React.ReactNode => {
     if (!projectLabel) return title;
     const projectIndex = title.indexOf(projectLabel);
@@ -551,6 +560,14 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     const useCompactDraftLayout = isMobile || isVSCode || chatSurfaceMode === 'mini-chat';
     const messageListRef = React.useRef<MessageListHandle | null>(null);
     const draftProjectLabel = React.useMemo(() => {
+        const draftDirectoryLabel = draftOpen
+            ? getDraftDirectoryDisplayLabel(
+                newSessionDraft?.bootstrapPendingDirectory ?? newSessionDraft?.directoryOverride,
+                projects,
+            )
+            : null;
+        if (draftDirectoryLabel) return draftDirectoryLabel;
+
         const selectedProject = newSessionDraft?.selectedProjectId
             ? projects.find((project) => project.id === newSessionDraft.selectedProjectId) ?? null
             : null;
@@ -559,7 +576,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
             : null;
         const project = selectedProject ?? activeProject ?? projects[0] ?? null;
         return project ? getProjectDisplayLabel(project) : null;
-    }, [activeProjectId, newSessionDraft?.selectedProjectId, projects]);
+    }, [activeProjectId, draftOpen, newSessionDraft?.bootstrapPendingDirectory, newSessionDraft?.directoryOverride, newSessionDraft?.selectedProjectId, projects]);
 
     const parentSession = React.useMemo(() => {
         if (!currentSessionId) return null;

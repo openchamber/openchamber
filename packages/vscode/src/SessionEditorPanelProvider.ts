@@ -7,6 +7,7 @@ import { getWebviewHtml } from './webviewHtml';
 import { openSseProxy } from './sseProxy';
 import { resolveWebviewDevServerUrl } from './webviewDevServer';
 import { normalizeWindowsDriveLetter } from './pathUtils';
+import { selectWorkspaceFolderForNewSession } from './workspacePicker';
 
 const t = vscode.l10n.t;
 
@@ -61,10 +62,15 @@ export class SessionEditorPanelProvider {
     );
   }
 
-  public createOrShowNewSession(): void {
+  public async createOrShowNewSession(): Promise<void> {
+    const selection = await selectWorkspaceFolderForNewSession();
+    if (selection.cancelled) {
+      return;
+    }
+
     // Generate unique panel ID for new session drafts
     const panelId = `new_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    this._createPanel(panelId, t('New Session'), null);
+    this._createPanel(panelId, t('New Session'), null, selection.directory ?? undefined);
   }
 
   public createOrShow(sessionId: string, title?: string): void {
@@ -84,7 +90,7 @@ export class SessionEditorPanelProvider {
     this._createPanel(sessionId, sessionTitle, sessionId);
   }
 
-  private _createPanel(panelId: string, title: string, initialSessionId: string | null): void {
+  private _createPanel(panelId: string, title: string, initialSessionId: string | null, workspaceFolderOverride?: string): void {
     const distUri = vscode.Uri.joinPath(this._extensionUri, 'dist');
 
     const panel = vscode.window.createWebviewPanel(
@@ -111,7 +117,7 @@ export class SessionEditorPanelProvider {
     this._panels.set(panelId, state);
     this._lastActivePanelId = panelId;
 
-    panel.webview.html = this._getHtmlForWebview(panel.webview, initialSessionId);
+    panel.webview.html = this._getHtmlForWebview(panel.webview, initialSessionId, workspaceFolderOverride);
 
     void this.updateTheme(vscode.window.activeColorTheme.kind);
     this._sendCachedStateToPanel(state);
@@ -130,6 +136,12 @@ export class SessionEditorPanelProvider {
     panel.webview.onDidReceiveMessage(async (message: BridgeRequest) => {
       if (message.type === 'restartApi') {
         await this._openCodeManager?.restart();
+        return;
+      }
+
+      if (message.type === 'vscode:selectWorkspaceFolderForNewSession') {
+        const selection = await selectWorkspaceFolderForNewSession();
+        state.panel.webview.postMessage({ id: message.id, type: message.type, success: true, data: selection });
         return;
       }
 
@@ -237,7 +249,7 @@ export class SessionEditorPanelProvider {
     return true;
   }
 
-  public createSessionWithPromptInActivePanel(prompt: string): boolean {
+  public createSessionWithPromptInActivePanel(prompt: string, directoryOverride?: string): boolean {
     if (!prompt.trim()) {
       return false;
     }
@@ -251,7 +263,7 @@ export class SessionEditorPanelProvider {
     void entry.panel.webview.postMessage({
       type: 'command',
       command: 'createSessionWithPrompt',
-      payload: { prompt },
+      payload: { prompt, directoryOverride },
     });
     return true;
   }
@@ -480,10 +492,10 @@ export class SessionEditorPanelProvider {
     return { id, type, success: true, data: { stopped: true } };
   }
 
-  private _getHtmlForWebview(webview: vscode.Webview, sessionId: string | null) {
-    const workspaceFolder = normalizeWindowsDriveLetter(
-      vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || ''
-    );
+  private _getHtmlForWebview(webview: vscode.Webview, sessionId: string | null, workspaceFolderOverride?: string) {
+    const workspaceFolder = workspaceFolderOverride
+      ? normalizeWindowsDriveLetter(workspaceFolderOverride)
+      : normalizeWindowsDriveLetter(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '');
     const initialStatus = this._cachedStatus;
     const cliAvailable = this._openCodeManager?.isCliAvailable() ?? false;
 

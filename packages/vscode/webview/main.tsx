@@ -365,6 +365,49 @@ const pluginConfigErrorStatus = (message: string): number => {
 
 const isNullBodyStatus = (status: number): boolean => status === 204 || status === 205 || status === 304;
 
+type WorkspaceFolderSelection = {
+  directory: string | null;
+  cancelled: boolean;
+};
+
+type OpenNewSessionDraft = (options?: { directoryOverride?: string; preserveDirectoryOverride?: boolean }) => void;
+
+const selectWorkspaceFolderForNewSession = async (): Promise<WorkspaceFolderSelection> => {
+  try {
+    const result = await sendBridgeMessage<WorkspaceFolderSelection>('vscode:selectWorkspaceFolderForNewSession');
+    return {
+      directory: typeof result?.directory === 'string' && result.directory.trim().length > 0
+        ? result.directory.trim()
+        : null,
+      cancelled: result?.cancelled === true,
+    };
+  } catch (error) {
+    console.warn('[OpenChamber] Failed to select VS Code workspace folder:', error);
+    return { directory: null, cancelled: false };
+  }
+};
+
+const openNewSessionDraftWithWorkspaceSelection = async (
+  openNewSessionDraft: OpenNewSessionDraft,
+  directoryOverride?: string,
+): Promise<boolean> => {
+  const selectedDirectory = typeof directoryOverride === 'string' && directoryOverride.trim().length > 0
+    ? directoryOverride.trim()
+    : undefined;
+  const selection = selectedDirectory === undefined
+    ? await selectWorkspaceFolderForNewSession()
+    : { directory: selectedDirectory, cancelled: false };
+
+  if (selection.cancelled) {
+    return false;
+  }
+
+  openNewSessionDraft(selection.directory
+    ? { directoryOverride: selection.directory, preserveDirectoryOverride: true }
+    : undefined);
+  return true;
+};
+
 const buildProxiedResponse = (
   proxied: { status: number; headers: Record<string, string>; bodyBase64?: string; bodyText?: string }
 ): Response => {
@@ -1301,13 +1344,13 @@ onCommand('addFileAttachments', (payload) => {
 
 // Listen for createSessionWithPrompt command from extension (Explain, Improve Code)
 onCommand('createSessionWithPrompt', (payload) => {
-  const { prompt } = payload as { prompt: string };
+  const { prompt, directoryOverride } = payload as { prompt: string; directoryOverride?: unknown };
 
   Promise.all([
     import('@/sync/session-ui-store'),
     import('@/stores/useConfigStore'),
     import('@/sync/input-store'),
-  ]).then(([{ useSessionUIStore }, { useConfigStore }, { useInputStore }]) => {
+  ]).then(async ([{ useSessionUIStore }, { useConfigStore }, { useInputStore }]) => {
     const sessionStore = useSessionUIStore.getState();
     const configStore = useConfigStore.getState();
 
@@ -1316,7 +1359,13 @@ onCommand('createSessionWithPrompt', (payload) => {
 
     if (currentProviderId && currentModelId) {
       if (!sessionStore.currentSessionId) {
-        sessionStore.openNewSessionDraft();
+        const draftOpened = await openNewSessionDraftWithWorkspaceSelection(
+          sessionStore.openNewSessionDraft,
+          typeof directoryOverride === 'string' ? directoryOverride : undefined,
+        );
+        if (!draftOpened) {
+          return;
+        }
       }
 
       // Send the message - this will create the session from the draft and send
@@ -1339,13 +1388,20 @@ onCommand('createSessionWithPrompt', (payload) => {
 });
 
 // Listen for newSession command from extension title bar button
-onCommand('newSession', () => {
-  import('@/sync/session-ui-store').then(({ useSessionUIStore }) => {
-    useSessionUIStore.getState().openNewSessionDraft();
+onCommand('newSession', (payload) => {
+  const { directoryOverride } = (payload || {}) as { directoryOverride?: unknown };
+
+  void import('@/sync/session-ui-store').then(({ useSessionUIStore }) => {
+    void openNewSessionDraftWithWorkspaceSelection(
+      useSessionUIStore.getState().openNewSessionDraft,
+      typeof directoryOverride === 'string' ? directoryOverride : undefined,
+    ).then((draftOpened) => {
+      if (!draftOpened) {
+        return;
+      }
+      window.dispatchEvent(new CustomEvent('openchamber:navigate', { detail: { view: 'chat' } }));
+    });
   });
-  
-  // Also dispatch event to navigate to chat view in VSCodeLayout
-  window.dispatchEvent(new CustomEvent('openchamber:navigate', { detail: { view: 'chat' } }));
 });
 
 // Listen for showSettings command from extension title bar button

@@ -7,6 +7,7 @@ import { getWebviewHtml } from './webviewHtml';
 import { openSseProxy } from './sseProxy';
 import { resolveWebviewDevServerUrl } from './webviewDevServer';
 import { normalizeWindowsDriveLetter } from './pathUtils';
+import { selectWorkspaceFolderForNewSession } from './workspacePicker';
 
 type ActiveEditorFilePayload = {
   filePath: string;
@@ -141,6 +142,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         return;
       }
 
+      if (message.type === 'vscode:selectWorkspaceFolderForNewSession') {
+        const selection = await selectWorkspaceFolderForNewSession();
+        void this._sendMessageWithRetry({ id: message.id, type: message.type, success: true, data: selection });
+        return;
+      }
+
       if (message.type === 'api:sse:start') {
         const response = await this._startSseProxy(message);
         void this._sendMessageWithRetry(response);
@@ -251,15 +258,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  public createNewSessionWithPrompt(prompt: string) {
+  public createNewSessionWithPrompt(prompt: string, directoryOverride?: string) {
     if (this._view) {
       // Reveal the webview panel
       this._view.show(true);
-      
+
       this._view.webview.postMessage({
         type: 'command',
         command: 'createSessionWithPrompt',
-        payload: { prompt }
+        payload: { prompt, directoryOverride }
       });
     }
   }
@@ -268,7 +275,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     if (this._view) {
       // Reveal the webview panel
       this._view.show(true);
-      
+
       this._view.webview.postMessage({
         type: 'command',
         command: 'newSession'
