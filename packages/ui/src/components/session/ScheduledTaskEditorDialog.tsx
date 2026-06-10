@@ -20,6 +20,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import type { ScheduledTask } from '@/lib/scheduledTasksApi';
 import { useI18n } from '@/lib/i18n';
+import { isValidCronExpression, getNextRuns, CRON_EXAMPLES } from '@/lib/cron';
 
 const WEEKDAY_INDEXES = [0, 1, 2, 3, 4, 5, 6] as const;
 
@@ -451,12 +452,13 @@ type ScheduledTaskDraft = {
   name: string;
   enabled: boolean;
   schedule: {
-    kind: 'daily' | 'weekly' | 'once';
+    kind: 'daily' | 'weekly' | 'once' | 'cron';
     times: string[];
     onceDate: string;
     onceTime: string;
     weekdays: number[];
     timezone: string;
+    cronExpression: string;
   };
   execution: {
     prompt: string;
@@ -505,6 +507,7 @@ const toDraft = (
         onceTime: '09:00',
         weekdays: [1],
         timezone: timezoneFallback,
+        cronExpression: '',
       },
       execution: {
         prompt: '',
@@ -521,9 +524,11 @@ const toDraft = (
     name: task.name,
     enabled: task.enabled,
     schedule: {
-      kind: task.schedule.kind === 'once'
-        ? 'once'
-        : (task.schedule.kind === 'weekly' ? 'weekly' : 'daily'),
+      kind: task.schedule.kind === 'cron'
+        ? 'cron'
+        : (task.schedule.kind === 'once'
+          ? 'once'
+          : (task.schedule.kind === 'weekly' ? 'weekly' : 'daily')),
       times: normalizeDraftTimes(task),
       onceDate: typeof task.schedule.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(task.schedule.date)
         ? task.schedule.date
@@ -533,6 +538,9 @@ const toDraft = (
         : '09:00',
       weekdays: Array.isArray(task.schedule.weekdays) ? task.schedule.weekdays : [1],
       timezone: task.schedule.timezone || timezoneFallback,
+      cronExpression: task.schedule.kind === 'cron' && typeof task.schedule.cron === 'string'
+        ? task.schedule.cron
+        : '',
     },
     execution: {
       prompt: task.execution.prompt,
@@ -563,6 +571,14 @@ const validateDraft = (draft: ScheduledTaskDraft, t: ReturnType<typeof useI18n>[
     if (!/^([01]\d|2[0-3]):([0-5]\d)$/.test(draft.schedule.onceTime)) {
       return t('sessions.scheduledTasks.editor.validation.timeFormat');
     }
+  } else if (draft.schedule.kind === 'cron') {
+    if (!draft.schedule.cronExpression.trim()) {
+      return t('sessions.scheduledTasks.editor.validation.cronRequired');
+    }
+    const cronResult = isValidCronExpression(draft.schedule.cronExpression);
+    if (!cronResult.valid) {
+      return t('sessions.scheduledTasks.editor.validation.cronInvalid');
+    }
   } else {
     const validTimes = draft.schedule.times.filter((value) => /^([01]\d|2[0-3]):([0-5]\d)$/.test(value));
     if (validTimes.length === 0) {
@@ -584,6 +600,107 @@ const validateDraft = (draft: ScheduledTaskDraft, t: ReturnType<typeof useI18n>[
 const dedupeSortTimes = (times: string[]) => {
   const filtered = times.filter((value) => /^([01]\d|2[0-3]):([0-5]\d)$/.test(value));
   return Array.from(new Set(filtered)).sort((a, b) => a.localeCompare(b));
+};
+
+const CronScheduleSection: React.FC<{
+  draft: ScheduledTaskDraft;
+  setDraft: React.Dispatch<React.SetStateAction<ScheduledTaskDraft>>;
+  locale: string;
+  t: ReturnType<typeof useI18n>['t'];
+}> = ({ draft, setDraft, locale, t }) => {
+  const cronExpression = draft.schedule.cronExpression;
+  const cronValidation = React.useMemo(
+    () => (cronExpression.trim() ? isValidCronExpression(cronExpression) : null),
+    [cronExpression],
+  );
+  const nextRuns = React.useMemo(() => {
+    if (!cronValidation?.valid || !cronExpression.trim()) {
+      return [];
+    }
+    return getNextRuns(cronExpression, draft.schedule.timezone);
+  }, [cronExpression, cronValidation, draft.schedule.timezone]);
+
+  const formatNextRun = React.useCallback(
+    (date: Date) => new Intl.DateTimeFormat(locale, {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(date),
+    [locale],
+  );
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-1">
+        <FieldLabel htmlFor="sched-cron" required>{t('sessions.scheduledTasks.editor.cronExpression.label')}</FieldLabel>
+        <Input
+          id="sched-cron"
+          value={cronExpression}
+          onChange={(event) => setDraft((prev) => ({
+            ...prev,
+            schedule: { ...prev.schedule, cronExpression: event.target.value },
+          }))}
+          placeholder={t('sessions.scheduledTasks.editor.cronExpression.placeholder')}
+          className="w-full max-w-xs font-mono"
+        />
+        {cronValidation && !cronValidation.valid && cronExpression.trim() ? (
+          <span className="typography-micro text-destructive">
+            {t('sessions.scheduledTasks.editor.validation.cronInvalid')}
+          </span>
+        ) : null}
+      </div>
+
+      {nextRuns.length > 0 ? (
+        <div className="flex flex-col gap-1">
+          <span className="typography-meta text-muted-foreground">{t('sessions.scheduledTasks.editor.cronExpression.nextRuns')}</span>
+          <span className="typography-micro text-foreground">
+            {nextRuns.map(formatNextRun).join(', ')}
+          </span>
+        </div>
+      ) : null}
+
+      <div className="flex flex-col gap-1">
+        <span className="typography-meta text-muted-foreground">{t('sessions.scheduledTasks.editor.cronExpression.examples')}</span>
+        <div className="flex flex-wrap gap-1.5">
+          {CRON_EXAMPLES.map((example) => (
+            <button
+              key={example.expression}
+              type="button"
+              className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 typography-micro text-foreground hover:bg-interactive-hover"
+              onClick={() => setDraft((prev) => ({
+                ...prev,
+                schedule: { ...prev.schedule, cronExpression: example.expression },
+              }))}
+            >
+              <span className="font-mono">{example.expression}</span>
+              <span className="text-muted-foreground">{t(example.labelKey as Parameters<typeof t>[0])}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <FieldLabel>{t('sessions.scheduledTasks.editor.timezone.label')}</FieldLabel>
+        <Select
+          value={draft.schedule.timezone}
+          onValueChange={(timezone) => {
+            setDraft((prev) => ({
+              ...prev,
+              schedule: { ...prev.schedule, timezone },
+            }));
+          }}
+        >
+          <SelectTrigger className="w-fit max-w-full"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {TIMEZONE_OPTIONS.map((timezone) => (
+              <SelectItem key={timezone} value={timezone}>{timezone}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  );
 };
 
 export function ScheduledTaskEditorDialog(props: {
@@ -1018,15 +1135,17 @@ export function ScheduledTaskEditorDialog(props: {
       schedule: {
         kind: draft.schedule.kind,
         timezone: draft.schedule.timezone.trim(),
-        ...(draft.schedule.kind === 'once'
-          ? {
-              date: draft.schedule.onceDate,
-              time: draft.schedule.onceTime,
-            }
-          : {
-              times: normalizedTimes,
-              ...(draft.schedule.kind === 'weekly' ? { weekdays: draft.schedule.weekdays } : {}),
-            }),
+        ...(draft.schedule.kind === 'cron'
+          ? { cron: draft.schedule.cronExpression.trim() }
+          : draft.schedule.kind === 'once'
+            ? {
+                date: draft.schedule.onceDate,
+                time: draft.schedule.onceTime,
+              }
+            : {
+                times: normalizedTimes,
+                ...(draft.schedule.kind === 'weekly' ? { weekdays: draft.schedule.weekdays } : {}),
+              }),
       },
       execution: {
         prompt: draft.execution.prompt,
@@ -1081,10 +1200,16 @@ export function ScheduledTaskEditorDialog(props: {
                     <FieldLabel>{t('sessions.scheduledTasks.editor.scheduleType.label')}</FieldLabel>
                     <Select
                       value={draft.schedule.kind}
-                      onValueChange={(value: 'daily' | 'weekly' | 'once') => {
+                      onValueChange={(value: 'daily' | 'weekly' | 'once' | 'cron') => {
                         setDraft((prev) => ({
                           ...prev,
-                          schedule: { ...prev.schedule, kind: value },
+                          schedule: {
+                            ...prev.schedule,
+                            kind: value,
+                            ...(value === 'cron' && !prev.schedule.cronExpression
+                              ? { cronExpression: '0 * * * *' }
+                              : {}),
+                          },
                         }));
                       }}
                     >
@@ -1094,20 +1219,25 @@ export function ScheduledTaskEditorDialog(props: {
                             ? t('sessions.scheduledTasks.editor.scheduleType.daily')
                             : value === 'weekly'
                               ? t('sessions.scheduledTasks.editor.scheduleType.weekly')
-                              : t('sessions.scheduledTasks.editor.scheduleType.once')}
+                              : value === 'cron'
+                                ? t('sessions.scheduledTasks.editor.scheduleType.cron')
+                                : t('sessions.scheduledTasks.editor.scheduleType.once')}
                         </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="daily">{t('sessions.scheduledTasks.editor.scheduleType.daily')}</SelectItem>
                         <SelectItem value="weekly">{t('sessions.scheduledTasks.editor.scheduleType.weekly')}</SelectItem>
                         <SelectItem value="once">{t('sessions.scheduledTasks.editor.scheduleType.once')}</SelectItem>
+                        <SelectItem value="cron">{t('sessions.scheduledTasks.editor.scheduleType.cron')}</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
 
                 </div>
 
-          {draft.schedule.kind === 'once' ? (
+          {draft.schedule.kind === 'cron' ? (
+            <CronScheduleSection draft={draft} setDraft={setDraft} locale={locale} t={t} />
+          ) : draft.schedule.kind === 'once' ? (
             <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
               <div className="flex flex-col gap-1" ref={datePickerRef}>
                 <FieldLabel>{t('sessions.scheduledTasks.editor.date.label')}</FieldLabel>
