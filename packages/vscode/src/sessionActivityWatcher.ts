@@ -1,7 +1,7 @@
 import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import type { OpenCodeManager } from './opencode';
 
-// Session activity tracking (mirrors web server and desktop Tauri behavior)
+// Session activity tracking (mirrors web server and desktop behavior)
 type ActivityPhase = 'idle' | 'busy' | 'cooldown';
 
 interface SessionActivity {

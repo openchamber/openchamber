@@ -17,6 +17,10 @@ OpenChamber читає ці змінні під час запуску. Для st
 
 Пароль для browser UI. Використовуйте його для доступу не лише з localhost, тунелів або reverse proxy.
 
+### `OPENCHAMBER_API_ONLY`
+
+Запускає OpenChamber у headless mode, якщо встановлено `true` або `1`. API routes залишаються доступними для desktop і mobile clients, але browser UI не віддається.
+
 ### `OPENCHAMBER_DATA_DIR`
 
 Перевизначає директорію даних OpenChamber. Типово це `~/.config/openchamber`.

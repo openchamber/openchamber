@@ -63,8 +63,10 @@ export function SidebarHeader(props: Props): React.ReactNode {
 
   const displayMode = useSessionDisplayStore((state) => state.displayMode);
   const showRecentSection = useSessionDisplayStore((state) => state.showRecentSection);
+  const showArchivedSessions = useSessionDisplayStore((state) => state.showArchivedSessions);
   const setDisplayMode = useSessionDisplayStore((state) => state.setDisplayMode);
   const toggleRecentSection = useSessionDisplayStore((state) => state.toggleRecentSection);
+  const toggleArchivedSessions = useSessionDisplayStore((state) => state.toggleArchivedSessions);
 
   if (hideDirectoryControls) {
     return null;
@@ -209,6 +211,13 @@ export function SidebarHeader(props: Props): React.ReactNode {
                     >
                       <span>{t('sessions.sidebar.header.displayMode.showRecent')}</span>
                       {showRecentSection ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={toggleArchivedSessions}
+                      className="flex items-center justify-between"
+                    >
+                      <span>{t('sessions.sidebar.header.displayMode.showArchived')}</span>
+                      {showArchivedSessions ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
                     </DropdownMenuItem>
                   </>
                 ) : null}

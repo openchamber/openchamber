@@ -152,13 +152,11 @@ export const useSessionAutoCleanup = (enabledOrOptions?: boolean | CleanupOption
             continue;
           }
 
-          const scopedSdk = opencodeClient.getScopedSdkClient(directory);
-
           try {
             if (sessionRetentionAction === 'archive') {
-              await scopedSdk.session.update({ sessionID: id, directory, time: { archived: Date.now() } });
+              await opencodeClient.updateSession(id, { time: { archived: Date.now() } }, directory);
             } else {
-              await scopedSdk.session.delete({ sessionID: id, directory });
+              await opencodeClient.deleteSession(id, directory);
             }
             completedIds.push(id);
           } catch {

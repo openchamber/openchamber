@@ -16,14 +16,13 @@ import { getAllModelFamilies, getDisplayModelName, sortModelFamilies, groupModel
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
+import { formatTimeForPreference } from '@/lib/timeFormat';
+import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
 
-const formatTime = (timestamp: number | null) => {
+const formatTime = (timestamp: number | null, timeFormatPreference: TimeFormatPreference) => {
   if (!timestamp) return '-';
   try {
-    return new Date(timestamp).toLocaleTimeString(undefined, {
-      hour: 'numeric',
-      minute: '2-digit'
-    });
+    return formatTimeForPreference(timestamp, timeFormatPreference, { fallback: '-' });
   } catch {
     return '-';
   }
@@ -36,6 +35,7 @@ interface ModelInfo {
 
 export const UsagePage: React.FC = () => {
   const { t } = useI18n();
+  const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const results = useQuotaStore((state) => state.results);
   const selectedProviderId = useQuotaStore((state) => state.selectedProviderId);
   const setSelectedProvider = useQuotaStore((state) => state.setSelectedProvider);
@@ -163,14 +163,14 @@ export const UsagePage: React.FC = () => {
               {isLoading ? (
                 <span className="animate-pulse">{t('settings.usage.page.header.refreshing')}</span>
               ) : (
-                t('settings.usage.page.header.lastUpdated', { time: formatTime(lastUpdated) })
+                t('settings.usage.page.header.lastUpdated', { time: formatTime(lastUpdated, timeFormatPreference) })
               )}
             </p>
           </div>
         </div>
 
         {/* Options */}
-        <div className="mb-8 px-2">
+        <div data-settings-item="usage.header-menu" className="mb-8 px-2">
           <div
             className="group flex cursor-pointer items-center gap-2 py-1.5"
             role="button"
@@ -228,7 +228,7 @@ export const UsagePage: React.FC = () => {
 
         {/* Overall Usage Windows */}
         {usage?.windows && Object.keys(usage.windows).length > 0 && (
-          <div className="mb-8">
+          <div data-settings-item="usage.model-quotas" className="mb-8">
             <section className="px-2 pb-2 pt-0">
               <div className="divide-y divide-[var(--surface-subtle)]">
                 {Object.entries(usage.windows).map(([label, window]) => (

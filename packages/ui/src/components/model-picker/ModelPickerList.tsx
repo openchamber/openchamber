@@ -15,6 +15,7 @@ import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { mergeModelMetadataWithLiveModel } from '@/lib/modelMetadata';
+import { getModelDisplayName as getSharedModelDisplayName } from '@/lib/modelDisplay';
 import { cn } from '@/lib/utils';
 import type { ModelMetadata } from '@/types';
 
@@ -58,10 +59,7 @@ const CURRENCY_FORMATTER = new Intl.NumberFormat('en-US', {
 });
 
 const getModelDisplayName = (model: Record<string, unknown>) => {
-  const name = model?.name || model?.id || '';
-  const nameStr = String(name);
-  if (nameStr.length > 40) return `${nameStr.substring(0, 37)}...`;
-  return nameStr;
+  return getSharedModelDisplayName(model, undefined, { maxLength: 40 });
 };
 
 const formatModelContextTokens = (value?: number | null) => {
@@ -500,7 +498,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
   }, [disabled, flatModelList, moveSelection, onActiveKeyDown, onEscape, onSelect, onVariantKey, selectionStore]);
 
   const headerClassName = cn(
-    'typography-micro font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2 -mx-1 px-3 py-1.5 border-b border-border/30',
+    'typography-micro font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2 px-2 py-1.5',
     stickyHeaders && 'sticky top-0 z-10 [background:linear-gradient(var(--surface-elevated),var(--surface-elevated)),linear-gradient(var(--surface-background),var(--surface-background))]',
     sectionHeaderClassName,
   );
@@ -638,7 +636,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
       </div>
 
       <ScrollableOverlay ref={scrollRef} outerClassName={maxHeightClassName} className="overlay-scrollbar-target--no-gutter" style={maxHeightStyle}>
-        <div className="p-1">
+        <div className="px-1">
           {includeNotSelected ? (
             <>
               <button

@@ -1,0 +1,48 @@
+---
+title: Hosty SSH i proxy
+description: Importuj zapisane hosty SSH i dodawaj dodatkowe przekierowania portów SSH w aplikacji desktopowej.
+---
+
+# Hosty SSH i proxy
+
+Użyj **Settings → Remote Instances** w aplikacji desktopowej, aby importować zapisane hosty SSH, łączyć się ze zdalną maszyną i udostępniać dodatkowe porty przez to samo połączenie SSH.
+
+> Hosty SSH i proxy przez SSH to funkcje **tylko dla desktopu**. Używają klienta SSH na Twoim komputerze.
+
+## Importuj host SSH
+
+OpenChamber może czytać hosty z lokalnego SSH config, czyli z tego samego miejsca, którego używają polecenia takie jak `ssh work-server`.
+
+1. Otwórz **Settings → Remote Instances**.
+2. Wybierz host z **Saved SSH hosts**.
+3. Jeśli host jest wzorcem, wpisz prawdziwy cel, na przykład `deploy@app.example.com`.
+4. Zapisz i połącz.
+
+OpenChamber tworzy remote instance z tym poleceniem SSH. Gdy osiągnie stan **ready**, zdalny UI OpenChamber otworzy się w aplikacji desktopowej.
+
+## Dodaj dodatkowe przekierowania portów
+
+Każda remote instance ma sekcję **Port Forwards**. Użyj jej, gdy coś po jednej stronie połączenia SSH musi dotrzeć do portu po drugiej stronie.
+
+OpenChamber obsługuje trzy typy przekierowań:
+
+- **Local (-L)** — otwiera port na Twoim komputerze, który łączy się z czymś na zdalnej maszynie.
+- **Remote (-R)** — otwiera port na zdalnej maszynie, który łączy się z powrotem z Twoim komputerem.
+- **Dynamic (-D)** — otwiera lokalny SOCKS proxy przez połączenie SSH.
+
+Dla większości preview aplikacji i dashboardów uruchomionych na zdalnej maszynie użyj **Local (-L)**.
+
+## Użyj SOCKS proxy
+
+Wybierz **Dynamic (-D)**, gdy chcesz, aby inne narzędzia na Twoim komputerze działały przez zdalną maszynę. OpenChamber otwiera lokalny port SOCKS proxy dla tego połączenia SSH.
+
+Gdy połączenie będzie ready, skopiuj albo użyj lokalnego adresu proxy z wiersza przekierowania. Skonfiguruj przeglądarkę lub narzędzie, aby używało go jako SOCKS5 proxy.
+
+## Zachowaj prywatność
+
+Używaj `127.0.0.1` albo `localhost` jako local bind host, chyba że celowo chcesz, aby inne urządzenia w Twojej sieci miały dostęp do przekierowanego portu.
+
+## Powiązane
+
+- [Zdalne instancje](/pl/remote-instances/) — połącz aplikację desktopową z OpenChamber na innej maszynie
+- [Dostęp zdalny](/pl/troubleshooting/remote-access/) — gdy SSH lub zdalny dostęp się nie łączy

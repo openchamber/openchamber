@@ -65,6 +65,14 @@ type FitAddonWithObserveResize = FitAddon & {
   observeResize?: () => void;
 };
 
+type RendererWithScrollbar = {
+  renderScrollbar?: (...args: unknown[]) => void;
+};
+
+type TerminalWithRenderer = {
+  renderer?: RendererWithScrollbar;
+};
+
 interface TerminalViewportProps {
   sessionKey: string;
   chunks: TerminalChunk[];
@@ -787,7 +795,9 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
         container.addEventListener('pointercancel', handlePointerUp, listenerOptions);
 
         const previousTouchAction = container.style.touchAction;
-        container.style.touchAction = 'manipulation';
+        const previousOverscrollBehaviorY = container.style.overscrollBehaviorY;
+        container.style.touchAction = 'none';
+        container.style.overscrollBehaviorY = 'contain';
 
         touchScrollCleanupRef.current = () => {
           stopKinetic();
@@ -801,6 +811,7 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
           container.removeEventListener('pointerup', handlePointerUp, listenerOptions);
           container.removeEventListener('pointercancel', handlePointerUp, listenerOptions);
           container.style.touchAction = previousTouchAction;
+          container.style.overscrollBehaviorY = previousOverscrollBehaviorY;
         };
 
         return;
@@ -942,7 +953,9 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
       container.addEventListener('touchcancel', handleTouchEnd as unknown as EventListener, listenerOptions);
 
       const previousTouchAction = container.style.touchAction;
-      container.style.touchAction = 'manipulation';
+      const previousOverscrollBehaviorY = container.style.overscrollBehaviorY;
+      container.style.touchAction = 'none';
+      container.style.overscrollBehaviorY = 'contain';
 
       touchScrollCleanupRef.current = () => {
         stopKinetic();
@@ -956,6 +969,7 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
         container.removeEventListener('touchend', handleTouchEnd as unknown as EventListener, listenerOptions);
         container.removeEventListener('touchcancel', handleTouchEnd as unknown as EventListener, listenerOptions);
         container.style.touchAction = previousTouchAction;
+        container.style.overscrollBehaviorY = previousOverscrollBehaviorY;
       };
     }, [enableTouchScroll, useHiddenInputOverlay, focusHiddenInput, fontSize]);
 
@@ -966,6 +980,7 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
       let localTextareaObserver: MutationObserver | null = null;
       let localDisposables: Array<{ dispose: () => void }> = [];
       let restorePatchedScrollToBottom: (() => void) | null = null;
+      let restorePatchedScrollbar: (() => void) | null = null;
       let restoreContainerFocus: (() => void) | null = null;
 
       const container = containerRef.current;
@@ -1064,6 +1079,18 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
 
           terminal.loadAddon(fitAddon);
           terminal.open(container);
+          if (enableTouchScroll) {
+            const renderer = (terminal as unknown as TerminalWithRenderer).renderer;
+            if (renderer && typeof renderer.renderScrollbar === 'function') {
+              const originalRenderScrollbar = renderer.renderScrollbar.bind(renderer);
+              renderer.renderScrollbar = () => {};
+              restorePatchedScrollbar = () => {
+                renderer.renderScrollbar = originalRenderScrollbar;
+              };
+            } else if (process.env.NODE_ENV === 'development') {
+              console.warn('[TerminalViewport] Ghostty renderer scrollbar hook is unavailable; touch scrollbar suppression may need an update.');
+            }
+          }
           bumpTerminalReady();
           cursorBlinkStateRef.current = false;
 
@@ -1158,6 +1185,8 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
         localDisposables.forEach((disposable) => disposable.dispose());
         restorePatchedScrollToBottom?.();
         restorePatchedScrollToBottom = null;
+        restorePatchedScrollbar?.();
+        restorePatchedScrollbar = null;
         if (localTerminalTextarea) {
           localTerminalTextarea.removeEventListener('focus', handleTerminalTextareaFocus);
           localTerminalTextarea.removeEventListener('blur', handleTerminalTextareaBlur);

@@ -3,6 +3,7 @@ import { Menu as BaseMenu } from "@base-ui/react/menu"
 
 import { cn } from "@/lib/utils"
 import { Icon } from "@/components/icon/Icon";
+import { dropdownMenuItemClass, dropdownMenuPopupClass, dropdownMenuSeparatorClass, dropdownMenuSubTriggerClass } from "./dropdown-menu.styles";
 
 type AsChildProps = { asChild?: boolean };
 type AsChildRenderProps = {
@@ -124,7 +125,7 @@ function DropdownMenuContent({
         align={align}
         side={side}
         alignOffset={alignOffset}
-        className={cn("z-50", positionerClassName)}
+        className={cn("app-region-no-drag z-50", positionerClassName)}
       >
         <BaseMenu.Popup
           data-slot="dropdown-menu-content"
@@ -134,7 +135,7 @@ function DropdownMenuContent({
             ...style,
           }}
           className={cn(
-            "transition-all duration-150 ease-out data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95 z-50 max-h-[var(--available-height)] min-w-[8rem] origin-[var(--transform-origin)] overflow-visible rounded-xl p-1 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.8),inset_0_0_0_1px_rgba(0,0,0,0.04),0_0_0_1px_rgba(0,0,0,0.10),0_1px_2px_-0.5px_rgba(0,0,0,0.08),0_4px_8px_-2px_rgba(0,0,0,0.08),0_12px_20px_-4px_rgba(0,0,0,0.08)] dark:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.12),inset_0_0_0_1px_rgba(255,255,255,0.08),0_0_0_1px_rgba(0,0,0,0.36),0_1px_1px_-0.5px_rgba(0,0,0,0.22),0_3px_3px_-1.5px_rgba(0,0,0,0.20),0_6px_6px_-3px_rgba(0,0,0,0.16)]",
+            dropdownMenuPopupClass,
             className
           )}
           {...props}
@@ -177,7 +178,7 @@ function DropdownMenuItem({
       data-inset={inset}
       data-variant={variant}
       className={cn(
-        "data-[highlighted]:bg-interactive-hover hover:bg-interactive-hover data-[variant=destructive]:text-destructive data-[variant=destructive]:hover:bg-destructive/10 dark:data-[variant=destructive]:hover:bg-destructive/20 data-[variant=destructive]:hover:text-destructive data-[variant=destructive]:*:[svg]:!text-destructive [&_svg:not([class*='text-'])]:text-muted-foreground relative flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 typography-ui-label outline-hidden select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[inset]:pl-8 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
+        dropdownMenuItemClass,
         className
       )}
       {...props}
@@ -270,7 +271,7 @@ function DropdownMenuSeparator({
   return (
     <BaseMenu.Separator
       data-slot="dropdown-menu-separator"
-      className={cn("bg-border -mx-1 my-0.5 h-px", className)}
+      className={cn(dropdownMenuSeparatorClass, className)}
       {...props}
     />
   )
@@ -311,7 +312,7 @@ function DropdownMenuSubTrigger({
       data-slot="dropdown-menu-sub-trigger"
       data-inset={inset}
       className={cn(
-        "data-[highlighted]:bg-interactive-hover hover:bg-interactive-hover [&_svg:not([class*='text-'])]:text-muted-foreground relative flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 typography-ui-label outline-hidden select-none data-[inset]:pl-8 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
+        dropdownMenuSubTriggerClass,
         className
       )}
       {...props}
@@ -338,7 +339,7 @@ function DropdownMenuSubContent({
             color: 'var(--surface-elevated-foreground)',
           }}
           className={cn(
-            "transition-all duration-150 ease-out data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95 z-50 min-w-[8rem] origin-[var(--transform-origin)] overflow-visible rounded-xl p-1 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.8),inset_0_0_0_1px_rgba(0,0,0,0.04),0_0_0_1px_rgba(0,0,0,0.10),0_1px_2px_-0.5px_rgba(0,0,0,0.08),0_4px_8px_-2px_rgba(0,0,0,0.08),0_12px_20px_-4px_rgba(0,0,0,0.08)] dark:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.12),inset_0_0_0_1px_rgba(255,255,255,0.08),0_0_0_1px_rgba(0,0,0,0.36),0_1px_1px_-0.5px_rgba(0,0,0,0.22),0_3px_3px_-1.5px_rgba(0,0,0,0.20),0_6px_6px_-3px_rgba(0,0,0,0.16)]",
+            dropdownMenuPopupClass,
             className
           )}
           {...props}

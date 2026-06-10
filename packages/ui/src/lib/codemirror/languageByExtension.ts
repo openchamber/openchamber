@@ -128,6 +128,9 @@ export function languageByExtension(filePath: string): Extension | null {
       return css();
     case 'html':
     case 'htm':
+    case 'xml':
+    case 'drawio':
+    case 'dio':
       return html();
     case 'md':
     case 'mdx':

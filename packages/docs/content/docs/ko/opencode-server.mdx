@@ -60,7 +60,23 @@ UI를 보호하려면 서비스를 활성화할 때 비밀번호를 설정하세
 OPENCHAMBER_UI_PASSWORD='secret' openchamber startup enable
 ```
 
+로그인 시 시작되고 데스크톱 또는 모바일 앱에서 사용할 headless 서버라면 `--api-only`와 접근 가능한 host를 함께 지정하세요:
+
+```bash
+openchamber startup enable --port 3000 --api-only --host 0.0.0.0 --ui-password secret
+```
+
 `startup enable`은 현재 환경의 스냅샷을 서비스에 저장해, 같은 셸에서 `openchamber`를 직접 실행한 것에 더 가깝게 동작하게 합니다. provider 토큰, `PATH`, SSH agent 설정, 기타 CLI auth/config 환경 변수가 유지됩니다. 최소한의 서비스 환경을 원하면 `--no-env-snapshot`을 사용하세요.
+
+시작 서비스는 `--port`, `--host`, `--ui-password`, `--api-only`를 기억합니다. CLI 재시작과 업데이트 재시작은 이 저장된 설정을 다시 사용합니다.
+
+다른 OpenChamber 앱용 연결 링크를 만들려면 다음을 사용하세요:
+
+```bash
+openchamber connect-url --port 3000 --server http://your-host:3000 --qr
+```
+
+`openchamber connect-url --help`를 실행하면 `--name`, `--lan`, `--server`, `--api-only`, `--ui-password`, `--qr` 같은 모든 링크 옵션을 볼 수 있습니다.
 
 실행 중인 이 서비스의 터널은 별도로 관리할 수 있습니다:
 

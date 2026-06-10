@@ -220,10 +220,15 @@ export const createTunnelRoutesRuntime = (dependencies) => {
           available: result.available,
           provider: requestedProvider,
           version: result.version || null,
+          dependency: result.dependency || null,
+          installCommand: result.installCommand || null,
+          installUrl: result.installUrl || null,
+          platform: result.platform || process.platform,
+          message: result.message || null,
         });
       } catch (error) {
         console.warn('Tunnel dependency check failed:', error);
-        res.json({ available: false, provider: null, version: null });
+        res.json({ available: false, provider: null, version: null, dependency: null, installCommand: null, installUrl: null, platform: process.platform, message: null });
       }
     });
 

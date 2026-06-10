@@ -4,10 +4,12 @@ import type { SidebarSection } from '@/constants/sidebar';
 import { getSafeStorage } from './utils/safeStorage';
 import { SEMANTIC_TYPOGRAPHY, getTypographyVariable, type SemanticTypographyKey } from '@/lib/typography';
 import type { ShortcutCombo } from '@/lib/shortcuts';
+import type { DraftStarterRef } from '@/lib/draftStarters';
 import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 
-export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context';
+export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
 export type RightSidebarTab = 'git' | 'files' | 'context';
 export type ContextPanelMode = 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview' | 'browser';
 export type MermaidRenderingMode = 'svg' | 'ascii';
@@ -17,6 +19,11 @@ export type ActivityRenderMode = 'collapsed' | 'summary';
 export type SessionRetentionAction = 'archive' | 'delete';
 export type TimeFormatPreference = 'auto' | '12h' | '24h';
 export type WeekStartPreference = 'auto' | 'sunday' | 'monday';
+export type FileEditorKeymap = 'default' | 'vim';
+
+function normalizeFileEditorKeymap(value: unknown): FileEditorKeymap {
+  return value === 'vim' ? 'vim' : 'default';
+}
 
 type ContextPanelTab = {
   id: string;
@@ -105,6 +112,12 @@ const CONTEXT_PANEL_MAX_TABS = 12;
 const CONTEXT_PANEL_MAX_LABEL_LENGTH = 120;
 const LEFT_SIDEBAR_MIN_WIDTH = 280;
 const RIGHT_SIDEBAR_MIN_WIDTH = 360;
+const activeMainTabByRuntime = new Map<string, MainTab>();
+
+const runtimeMemoryKey = (value?: string | null): string => {
+  const key = (value ?? getRuntimeKey()).trim();
+  return key || 'default';
+};
 
 const normalizeDirectoryPath = (value: string): string => {
   if (!value) return '';
@@ -511,6 +524,7 @@ interface UIStore {
   sidebarOpenBeforeFullscreenTab: boolean | null;
   pendingDiffFile: string | null;
   pendingDiffStaged: boolean;
+  pendingDiagramFile: string | null;
   pendingFileNavigation: PendingFileNavigation | null;
   pendingFileFocusPath: string | null;
   isMobile: boolean;
@@ -544,6 +558,8 @@ interface UIStore {
   autoDeleteLastRunAt: number | null;
   messageLimit: number;
   fontSize: number;
+  // Global draft welcome starters; null = unset (use the default built-in set).
+  globalDraftStarters: DraftStarterRef[] | null;
   terminalFontSize: number;
   uiFont: UiFontOption;
   monoFont: MonoFontOption;
@@ -595,6 +611,7 @@ interface UIStore {
   inputSpellcheckEnabled: boolean;
   wideChatLayoutEnabled: boolean;
   showToolFileIcons: boolean;
+  showTurnChangedFiles: boolean;
   showExpandedBashTools: boolean;
   showExpandedEditTools: boolean;
   timeFormatPreference: TimeFormatPreference;
@@ -603,11 +620,13 @@ interface UIStore {
   userMessageRenderingMode: UserMessageRenderingMode;
   stickyUserHeader: boolean;
   showSplitAssistantMessageActions: boolean;
-  showMobileSessionStatusBar: boolean;
   isMobileSessionStatusBarCollapsed: boolean;
+  mobileSessionPanelOpen: boolean;
+  mobileSessionFilterProjectId: string | null;
   isExpandedInput: boolean;
   reportUsage: boolean;
   shortcutOverrides: Record<string, ShortcutCombo>;
+  fileEditorKeymap: FileEditorKeymap;
 
   setTheme: (theme: 'light' | 'dark' | 'system') => void;
   toggleSidebar: () => void;
@@ -641,12 +660,17 @@ interface UIStore {
   setSessionSwitcherOpen: (open: boolean) => void;
   setSessionDropdownOpen: (open: boolean) => void;
   setActiveMainTab: (tab: MainTab) => void;
+  prepareForRuntimeSwitch: (runtimeKey?: string | null) => void;
+  restoreForRuntimeSwitch: (runtimeKey?: string | null) => void;
   setMainTabGuard: (guard: MainTabGuard | null) => void;
   setPendingDiffFile: (filePath: string | null, staged?: boolean) => void;
+  setPendingDiagramFile: (filePath: string | null) => void;
   setPendingFileNavigation: (navigation: PendingFileNavigation | null) => void;
   setPendingFileFocusPath: (path: string | null) => void;
   navigateToDiff: (filePath: string, staged?: boolean) => void;
   consumePendingDiffFile: () => string | null;
+  navigateToDiagram: (filePath: string) => void;
+  consumePendingDiagramFile: () => string | null;
   setIsMobile: (isMobile: boolean) => void;
   toggleCommandPalette: () => void;
   setCommandPaletteOpen: (open: boolean) => void;
@@ -676,6 +700,7 @@ interface UIStore {
   setAutoDeleteLastRunAt: (timestamp: number | null) => void;
   setMessageLimit: (value: number) => void;
   setFontSize: (size: number) => void;
+  setGlobalDraftStarters: (refs: DraftStarterRef[]) => void;
   setTerminalFontSize: (size: number) => void;
   setUiFont: (font: UiFontOption) => void;
   setMonoFont: (font: MonoFontOption) => void;
@@ -728,6 +753,7 @@ interface UIStore {
   setInputSpellcheckEnabled: (value: boolean) => void;
   setWideChatLayoutEnabled: (value: boolean) => void;
   setShowToolFileIcons: (value: boolean) => void;
+  setShowTurnChangedFiles: (value: boolean) => void;
   setShowExpandedBashTools: (value: boolean) => void;
   setShowExpandedEditTools: (value: boolean) => void;
   setTimeFormatPreference: (value: TimeFormatPreference) => void;
@@ -736,8 +762,9 @@ interface UIStore {
   setUserMessageRenderingMode: (value: UserMessageRenderingMode) => void;
   setStickyUserHeader: (value: boolean) => void;
   setShowSplitAssistantMessageActions: (value: boolean) => void;
-  setShowMobileSessionStatusBar: (value: boolean) => void;
   setIsMobileSessionStatusBarCollapsed: (value: boolean) => void;
+  setMobileSessionPanelOpen: (value: boolean) => void;
+  setMobileSessionFilterProjectId: (value: string | null) => void;
   viewPagerPage: 'left' | 'center' | 'right';
   setViewPagerPage: (page: 'left' | 'center' | 'right') => void;
   toggleExpandedInput: () => void;
@@ -748,6 +775,7 @@ interface UIStore {
   setShortcutOverride: (actionId: string, combo: ShortcutCombo) => void;
   clearShortcutOverride: (actionId: string) => void;
   resetAllShortcutOverrides: () => void;
+  setFileEditorKeymap: (value: FileEditorKeymap) => void;
 }
 
 
@@ -780,6 +808,7 @@ export const useUIStore = create<UIStore>()(
         sidebarOpenBeforeFullscreenTab: null,
         pendingDiffFile: null,
         pendingDiffStaged: false,
+        pendingDiagramFile: null,
         pendingFileNavigation: null,
         pendingFileFocusPath: null,
         isMobile: false,
@@ -811,6 +840,7 @@ export const useUIStore = create<UIStore>()(
         autoDeleteLastRunAt: null,
         messageLimit: 200,
         fontSize: 100,
+        globalDraftStarters: null,
         terminalFontSize: 13,
         uiFont: DEFAULT_UI_FONT,
         monoFont: DEFAULT_MONO_FONT,
@@ -858,19 +888,22 @@ export const useUIStore = create<UIStore>()(
         inputSpellcheckEnabled: false,
         wideChatLayoutEnabled: false,
         showToolFileIcons: true,
+        showTurnChangedFiles: false,
         showExpandedBashTools: false,
         showExpandedEditTools: false,
         timeFormatPreference: 'auto',
         weekStartPreference: 'auto',
         mermaidRenderingMode: 'svg',
         userMessageRenderingMode: 'markdown',
-        stickyUserHeader: true,
+        stickyUserHeader: false,
         showSplitAssistantMessageActions: false,
-        showMobileSessionStatusBar: false,
         isMobileSessionStatusBarCollapsed: false,
+        mobileSessionPanelOpen: false,
+        mobileSessionFilterProjectId: null,
         isExpandedInput: false,
         reportUsage: true,
         shortcutOverrides: {},
+        fileEditorKeymap: 'default',
 
         setTheme: (theme) => {
           set({ theme });
@@ -1343,11 +1376,25 @@ export const useUIStore = create<UIStore>()(
           if (guard && !guard(tab)) {
             return;
           }
+          activeMainTabByRuntime.set(runtimeMemoryKey(), tab);
           set({ activeMainTab: tab });
+        },
+
+        prepareForRuntimeSwitch: (runtimeKey?: string | null) => {
+          activeMainTabByRuntime.set(runtimeMemoryKey(runtimeKey), get().activeMainTab);
+        },
+
+        restoreForRuntimeSwitch: (runtimeKey?: string | null) => {
+          const restored = activeMainTabByRuntime.get(runtimeMemoryKey(runtimeKey)) ?? 'chat';
+          set({ activeMainTab: restored });
         },
 
         setPendingDiffFile: (filePath, staged = false) => {
           set({ pendingDiffFile: filePath, pendingDiffStaged: filePath ? staged : false });
+        },
+
+        setPendingDiagramFile: (filePath) => {
+          set({ pendingDiagramFile: filePath });
         },
 
         setPendingFileNavigation: (navigation) => {
@@ -1372,6 +1419,22 @@ export const useUIStore = create<UIStore>()(
             set({ pendingDiffFile: null, pendingDiffStaged: false });
           }
           return pendingDiffFile;
+        },
+
+        navigateToDiagram: (filePath) => {
+          const guard = get().mainTabGuard;
+          if (guard && !guard('diagram')) {
+            return;
+          }
+          set({ pendingDiagramFile: filePath, activeMainTab: 'diagram' });
+        },
+
+        consumePendingDiagramFile: () => {
+          const { pendingDiagramFile } = get();
+          if (pendingDiagramFile) {
+            set({ pendingDiagramFile: null });
+          }
+          return pendingDiagramFile;
         },
 
         setIsMobile: (isMobile) => {
@@ -1500,6 +1563,10 @@ export const useUIStore = create<UIStore>()(
           const clampedSize = Math.max(50, Math.min(200, size));
           set({ fontSize: clampedSize });
           get().applyTypography();
+        },
+
+        setGlobalDraftStarters: (refs) => {
+          set({ globalDraftStarters: refs });
         },
 
         setTerminalFontSize: (size) => {
@@ -1817,10 +1884,13 @@ export const useUIStore = create<UIStore>()(
             const updates: Partial<UIStore> = {};
 
             if (state.isBottomTerminalOpen && !state.hasManuallyResizedBottomTerminal) {
-              updates.bottomTerminalHeight = Math.floor(window.innerHeight * 0.32);
+              const nextHeight = Math.floor(window.innerHeight * 0.32);
+              if (state.bottomTerminalHeight !== nextHeight) {
+                updates.bottomTerminalHeight = nextHeight;
+              }
             }
 
-            return updates;
+            return Object.keys(updates).length > 0 ? updates : state;
           });
         },
 
@@ -1908,6 +1978,9 @@ export const useUIStore = create<UIStore>()(
         setShowToolFileIcons: (value) => {
           set({ showToolFileIcons: value });
         },
+        setShowTurnChangedFiles: (value) => {
+          set({ showTurnChangedFiles: value });
+        },
         setShowExpandedBashTools: (value) => {
           set({ showExpandedBashTools: value });
         },
@@ -1934,11 +2007,14 @@ export const useUIStore = create<UIStore>()(
         setShowSplitAssistantMessageActions: (value) => {
           set({ showSplitAssistantMessageActions: value });
         },
-        setShowMobileSessionStatusBar: (value) => {
-          set({ showMobileSessionStatusBar: value });
-        },
         setIsMobileSessionStatusBarCollapsed: (value) => {
           set({ isMobileSessionStatusBarCollapsed: value });
+        },
+        setMobileSessionPanelOpen: (value) => {
+          set({ mobileSessionPanelOpen: value });
+        },
+        setMobileSessionFilterProjectId: (value) => {
+          set({ mobileSessionFilterProjectId: value });
         },
         setReportUsage: (value) => {
           set({ reportUsage: value });
@@ -1974,6 +2050,10 @@ export const useUIStore = create<UIStore>()(
 
         resetAllShortcutOverrides: () => {
           set({ shortcutOverrides: {} });
+        },
+
+        setFileEditorKeymap: (value) => {
+          set({ fileEditorKeymap: normalizeFileEditorKeymap(value) });
         },
 
         toggleExpandedInput: () => {
@@ -2075,6 +2155,8 @@ export const useUIStore = create<UIStore>()(
             }
           }
 
+          state.fileEditorKeymap = normalizeFileEditorKeymap(state.fileEditorKeymap);
+
           return state;
         },
         partialize: (state) => ({
@@ -2110,6 +2192,7 @@ export const useUIStore = create<UIStore>()(
           autoDeleteLastRunAt: state.autoDeleteLastRunAt,
           messageLimit: state.messageLimit,
           fontSize: state.fontSize,
+          globalDraftStarters: state.globalDraftStarters,
           terminalFontSize: state.terminalFontSize,
           uiFont: state.uiFont,
           monoFont: state.monoFont,
@@ -2142,6 +2225,7 @@ export const useUIStore = create<UIStore>()(
           inputSpellcheckEnabled: state.inputSpellcheckEnabled,
           wideChatLayoutEnabled: state.wideChatLayoutEnabled,
           showToolFileIcons: state.showToolFileIcons,
+          showTurnChangedFiles: state.showTurnChangedFiles,
           showExpandedBashTools: state.showExpandedBashTools,
           showExpandedEditTools: state.showExpandedEditTools,
           timeFormatPreference: state.timeFormatPreference,
@@ -2150,9 +2234,10 @@ export const useUIStore = create<UIStore>()(
           userMessageRenderingMode: state.userMessageRenderingMode,
           stickyUserHeader: state.stickyUserHeader,
           showSplitAssistantMessageActions: state.showSplitAssistantMessageActions,
-          showMobileSessionStatusBar: state.showMobileSessionStatusBar,
           isMobileSessionStatusBarCollapsed: state.isMobileSessionStatusBarCollapsed,
+          mobileSessionFilterProjectId: state.mobileSessionFilterProjectId,
           shortcutOverrides: state.shortcutOverrides,
+          fileEditorKeymap: state.fileEditorKeymap,
         })
       }
     ),

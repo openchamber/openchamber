@@ -68,6 +68,12 @@ export const PluginsSidebar: React.FC<PluginsSidebarProps> = ({
     void loadPlugins();
   }, [loadPlugins]);
 
+  React.useEffect(() => {
+    const handleOpenAdd = () => setIsAddOpen(true);
+    window.addEventListener('openchamber:settings-open-plugin-add', handleOpenAdd);
+    return () => window.removeEventListener('openchamber:settings-open-plugin-add', handleOpenAdd);
+  }, []);
+
   const updateCounts = React.useMemo(() => {
     const counts = { userEntries: 0, projectEntries: 0 };
     for (const entry of entries) {
@@ -282,6 +288,7 @@ export const PluginsSidebar: React.FC<PluginsSidebarProps> = ({
               <div className="flex items-center gap-1">
                 <Button
                   type="button"
+                  data-settings-item="plugins.create"
                   variant="ghost"
                   size="icon"
                   className="h-7 w-7 -my-1 text-muted-foreground"

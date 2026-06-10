@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "moduleDetection": "force",
+    "allowJs": true,
+    "checkJs": false,
+    "resolveJsonModule": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["node", "electron"]
+  },
+  "include": ["*.mjs", "*.cjs", "scripts/**/*.mjs", "scripts/**/*.cjs"]
+}
