@@ -1432,7 +1432,7 @@ onCommand('newSession', (payload) => {
 
   Promise.all([
     import('@/sync/session-ui-store'),
-    syncVSCodeWorkspaceProject(workspaceFolders, directoryOverride),
+    syncVSCodeWorkspaceProjects(workspaceFolders, directoryOverride),
   ]).then(([{ useSessionUIStore }]) => {
     void openNewSessionDraftWithWorkspaceSelection(
       useSessionUIStore.getState().openNewSessionDraft,
