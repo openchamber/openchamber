@@ -19,6 +19,7 @@ These provider IDs are currently dispatchable via `fetchQuotaForProvider(provide
 | --- | --- | --- | --- |
 | `claude` | Claude | `providers/claude.js` | `anthropic`, `claude` |
 | `codex` | Codex | `providers/codex.js` | `openai`, `codex`, `chatgpt` |
+| `cursor` | Cursor | `providers/cursor.js` | `CURSOR_TOKEN` / `CURSOR_ACCESS_TOKEN`, `CURSOR_REFRESH_TOKEN`, optional token files, or Cursor desktop SQLite DB |
 | `google` | Google | `providers/google/index.js` | `google`, `google.oauth`, Antigravity accounts file |
 | `github-copilot` | GitHub Copilot | `providers/copilot.js` | `github-copilot`, `copilot` |
 | `github-copilot-addon` | GitHub Copilot Add-on | `providers/copilot.js` | `github-copilot`, `copilot` |
