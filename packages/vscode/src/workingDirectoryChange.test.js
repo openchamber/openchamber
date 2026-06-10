@@ -6,7 +6,6 @@ describe('resolveWorkingDirectoryChange', () => {
     expect(resolveWorkingDirectoryChange('/work/alpha', '/work/alpha')).toEqual({
       changed: false,
       path: '/work/alpha',
-      restarted: false,
     });
   });
 
@@ -14,7 +13,6 @@ describe('resolveWorkingDirectoryChange', () => {
     expect(resolveWorkingDirectoryChange('/work/alpha', '/work/bravo')).toEqual({
       changed: true,
       path: '/work/bravo',
-      restarted: false,
     });
   });
 
@@ -22,7 +20,6 @@ describe('resolveWorkingDirectoryChange', () => {
     expect(resolveWorkingDirectoryChange('/work/alpha', '  /work/bravo  ')).toEqual({
       changed: true,
       path: '/work/bravo',
-      restarted: false,
     });
   });
 });

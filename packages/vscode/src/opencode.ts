@@ -45,7 +45,7 @@ export type OpenCodeDebugInfo = {
 };
 
 export type SetWorkingDirectoryResult =
-  | { success: true; restarted: boolean; path: string }
+  | { success: true; path: string }
   | { success: false; error: string };
 
 export interface OpenCodeManager {
@@ -1064,11 +1064,11 @@ export function createOpenCodeManager(_context: vscode.ExtensionContext): OpenCo
 
     const change = resolveWorkingDirectoryChange(workingDirectory, trimmed);
     if (!change.changed) {
-      return { success: true, restarted: change.restarted, path: change.path };
+      return { success: true, path: change.path };
     }
 
     workingDirectory = change.path;
-    return { success: true, restarted: change.restarted, path: change.path };
+    return { success: true, path: change.path };
   }
 
   return {

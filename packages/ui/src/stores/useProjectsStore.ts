@@ -448,6 +448,35 @@ const createVSCodeWorkspaceProjects = (
   return { projects, activeProjectId, activeProject: activeProject ?? projects[0] ?? null };
 };
 
+const projectIconImagesEqual = (
+  left: ProjectEntry['iconImage'],
+  right: ProjectEntry['iconImage'],
+): boolean => {
+  if (left === right) return true;
+  if (!left || !right) return left === right;
+  return left.mime === right.mime
+    && left.updatedAt === right.updatedAt
+    && left.source === right.source;
+};
+
+const vscodeWorkspaceProjectsEqual = (left: ProjectEntry[], right: ProjectEntry[]): boolean => {
+  if (left.length !== right.length) return false;
+  return left.every((leftProject, index) => {
+    const rightProject = right[index];
+    if (!rightProject) return false;
+    return leftProject.id === rightProject.id
+      && leftProject.path === rightProject.path
+      && leftProject.label === rightProject.label
+      && leftProject.icon === rightProject.icon
+      && leftProject.color === rightProject.color
+      && leftProject.iconBackground === rightProject.iconBackground
+      && leftProject.addedAt === rightProject.addedAt
+      && leftProject.lastOpenedAt === rightProject.lastOpenedAt
+      && leftProject.sidebarCollapsed === rightProject.sidebarCollapsed
+      && projectIconImagesEqual(leftProject.iconImage, rightProject.iconImage);
+  });
+};
+
 const getVSCodeWorkspaceProject = (): { projects: ProjectEntry[]; activeProjectId: string | null } | null => {
   const folders = getVSCodeWorkspaceFolders();
   if (!folders) {
@@ -877,7 +906,7 @@ export const useProjectsStore = create<ProjectsStore>()(
         return null;
       }
 
-      const projectsChanged = JSON.stringify(current.projects) !== JSON.stringify(result.projects);
+      const projectsChanged = !vscodeWorkspaceProjectsEqual(current.projects, result.projects);
       const activeChanged = current.activeProjectId !== result.activeProjectId;
 
       if (projectsChanged || activeChanged) {

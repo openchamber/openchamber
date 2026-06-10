@@ -1,8 +1,8 @@
 import { normalizeWindowsDriveLetter } from './pathUtils';
 
 export type WorkingDirectoryChange =
-  | { changed: false; path: string; restarted: false }
-  | { changed: true; path: string; restarted: false };
+  | { changed: false; path: string }
+  | { changed: true; path: string };
 
 export function resolveWorkingDirectoryChange(
   currentDirectory: string,
@@ -10,7 +10,7 @@ export function resolveWorkingDirectoryChange(
 ): WorkingDirectoryChange {
   const normalized = normalizeWindowsDriveLetter(nextDirectory.trim());
   if (currentDirectory === normalized) {
-    return { changed: false, path: normalized, restarted: false };
+    return { changed: false, path: normalized };
   }
-  return { changed: true, path: normalized, restarted: false };
+  return { changed: true, path: normalized };
 }
