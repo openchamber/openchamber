@@ -1,7 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 
 import { getToolMetadata } from '@/lib/toolHelpers';
-import { isExpandableTool, isStandaloneTool, isStaticTool, shouldShowToolParamSummary } from './toolRenderUtils';
+import {
+    formatToolParamSummaryValue,
+    getStaticGroupToolName,
+    isExpandableTool,
+    isStandaloneTool,
+    isStaticTool,
+    shouldShowToolParamSummary,
+} from './toolRenderUtils';
 
 describe('toolRenderUtils', () => {
     test('keeps custom namespaced tools expandable with parameter summaries', () => {
@@ -18,6 +25,15 @@ describe('toolRenderUtils', () => {
     test('keeps built-in custom-rendered tools from showing duplicate parameter summaries', () => {
         expect(isExpandableTool('bash')).toBe(true);
         expect(shouldShowToolParamSummary('bash')).toBe(false);
+    });
+
+    test('keeps built-in custom-rendered aliases from showing duplicate parameter summaries', () => {
+        const aliases = ['shell', 'cmd', 'terminal', 'create', 'file_write'];
+
+        for (const toolName of aliases) {
+            expect([toolName, isExpandableTool(toolName)]).toEqual([toolName, true]);
+            expect([toolName, shouldShowToolParamSummary(toolName)]).toEqual([toolName, false]);
+        }
     });
 
     test('keeps task as both an expandable tool and an activity group boundary', () => {
@@ -54,7 +70,23 @@ describe('toolRenderUtils', () => {
             expect([toolName, isStaticTool(toolName)]).toEqual([toolName, true]);
             expect([toolName, isExpandableTool(toolName)]).toEqual([toolName, false]);
             expect([toolName, isStandaloneTool(toolName)]).toEqual([toolName, false]);
+            expect([toolName, shouldShowToolParamSummary(toolName)]).toEqual([toolName, false]);
         }
+    });
+
+    test('keeps lsp expandable without duplicate parameter summaries', () => {
+        expect(isExpandableTool('lsp')).toBe(true);
+        expect(isStaticTool('lsp')).toBe(false);
+        expect(shouldShowToolParamSummary('lsp')).toBe(false);
+    });
+
+    test('keeps glob grouped with grep static search tools', () => {
+        expect(isStaticTool('glob')).toBe(true);
+        expect(getStaticGroupToolName('glob')).toBe('grep');
+    });
+
+    test('formats object parameter summary values as json snippets', () => {
+        expect(formatToolParamSummaryValue({ edits: [{ oldString: 'a', newString: 'b' }] })).toBe('{"edits":[{"oldString":"a","ne...');
     });
 
     test('keeps unknown tools expandable', () => {

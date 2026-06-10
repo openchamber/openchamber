@@ -28,3 +28,20 @@ export const isStaticTool = (toolName: unknown): boolean => {
 export const getStaticGroupToolName = (toolName: string): string => {
     return getStaticToolGroupName(toolName);
 };
+
+export const formatToolParamSummaryValue = (value: unknown): string => {
+    if (typeof value === 'string') {
+        return value.length > 30 ? `${value.substring(0, 30)}...` : value;
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') {
+        return String(value);
+    }
+    if (value === null) {
+        return 'null';
+    }
+    if (typeof value === 'object') {
+        const serialized = JSON.stringify(value);
+        return serialized.length > 30 ? `${serialized.substring(0, 30)}...` : serialized;
+    }
+    return String(value);
+};

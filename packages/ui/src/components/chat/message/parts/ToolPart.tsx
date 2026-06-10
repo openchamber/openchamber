@@ -39,7 +39,7 @@ import {
 } from '../toolRenderers';
 import { JsonTreeViewer } from '@/components/ui/JsonTreeViewer';
 import { Icon } from "@/components/icon/Icon";
-import { shouldShowToolParamSummary } from './toolRenderUtils';
+import { formatToolParamSummaryValue, shouldShowToolParamSummary } from './toolRenderUtils';
 import { DiffViewToggle, type DiffViewMode } from '../DiffViewToggle';
 import { MinDurationShineText } from './MinDurationShineText';
 import { ToolRevealOnMount } from './ToolRevealOnMount';
@@ -2008,14 +2008,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         const displayKeys = keys.slice(0, 2);
         const parts = displayKeys.map(key => {
             const value = input[key];
-            let displayValue = '';
-            if (typeof value === 'string') {
-                displayValue = value.length > 30 ? value.substring(0, 30) + '...' : value;
-            } else if (typeof value === 'number') {
-                displayValue = String(value);
-            } else {
-                displayValue = String(value);
-            }
+            const displayValue = formatToolParamSummaryValue(value);
             return `${key}: ${displayValue}`;
         });
         

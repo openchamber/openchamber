@@ -40,6 +40,28 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
       { key: 'content', label: 'Content', type: 'code' }
     ]
   },
+  create: {
+    displayName: 'Write File',
+    category: 'file',
+    outputLanguage: 'auto',
+    renderMode: 'expandable',
+    hasCustomRendering: true,
+    inputFields: [
+      { key: 'filePath', label: 'File Path', type: 'file' },
+      { key: 'content', label: 'Content', type: 'code' }
+    ]
+  },
+  file_write: {
+    displayName: 'Write File',
+    category: 'file',
+    outputLanguage: 'auto',
+    renderMode: 'expandable',
+    hasCustomRendering: true,
+    inputFields: [
+      { key: 'filePath', label: 'File Path', type: 'file' },
+      { key: 'content', label: 'Content', type: 'code' }
+    ]
+  },
   edit: {
     displayName: 'Edit File',
     category: 'file',
@@ -87,6 +109,42 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
       { key: 'timeout', label: 'Timeout (ms)', type: 'text' }
     ]
   },
+  shell: {
+    displayName: 'Shell Command',
+    category: 'system',
+    outputLanguage: 'text',
+    renderMode: 'expandable',
+    hasCustomRendering: true,
+    inputFields: [
+      { key: 'command', label: 'Command', type: 'command', language: 'bash' },
+      { key: 'description', label: 'Description', type: 'text' },
+      { key: 'timeout', label: 'Timeout (ms)', type: 'text' }
+    ]
+  },
+  cmd: {
+    displayName: 'Shell Command',
+    category: 'system',
+    outputLanguage: 'text',
+    renderMode: 'expandable',
+    hasCustomRendering: true,
+    inputFields: [
+      { key: 'command', label: 'Command', type: 'command', language: 'bash' },
+      { key: 'description', label: 'Description', type: 'text' },
+      { key: 'timeout', label: 'Timeout (ms)', type: 'text' }
+    ]
+  },
+  terminal: {
+    displayName: 'Shell Command',
+    category: 'system',
+    outputLanguage: 'text',
+    renderMode: 'expandable',
+    hasCustomRendering: true,
+    inputFields: [
+      { key: 'command', label: 'Command', type: 'command', language: 'bash' },
+      { key: 'description', label: 'Description', type: 'text' },
+      { key: 'timeout', label: 'Timeout (ms)', type: 'text' }
+    ]
+  },
 
   grep: {
     displayName: 'Search Files',
@@ -106,6 +164,7 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
     category: 'search',
     outputLanguage: 'text',
     renderMode: 'static',
+    staticGroupName: 'grep',
     hasCustomRendering: true,
     inputFields: [
       { key: 'pattern', label: 'Pattern', type: 'pattern' },
@@ -235,6 +294,8 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
       displayName: 'LSP',
       category: 'code',
       outputLanguage: 'json',
+      renderMode: 'expandable',
+      hasCustomRendering: true,
       inputFields: [
         { key: 'operation', label: 'Operation', type: 'text' },
         { key: 'filePath', label: 'File Path', type: 'file' },
@@ -299,7 +360,9 @@ export function getToolRenderMode(toolName: unknown): 'expandable' | 'static' | 
 export function shouldShowToolParamSummary(toolName: unknown): boolean {
   const canonicalName = getCanonicalToolName(toolName);
   if (!canonicalName) return false;
-  return TOOL_METADATA[canonicalName]?.hasCustomRendering !== true;
+  const metadata = TOOL_METADATA[canonicalName];
+  if (!metadata) return true;
+  return metadata.hasCustomRendering === false;
 }
 
 export function isToolActivityGroupBoundary(toolName: unknown): boolean {
