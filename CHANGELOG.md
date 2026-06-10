@@ -4,11 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-## [1.12.4] - 2026-06-10
+## [1.12.4] - 2026-06-11
 
 - Chat: added `/handoff-review` to open a linked review session for the current workspace changes, with actions to send review feedback and implementation replies between the sessions.
+- Chat/UI: added a setting to collapse long user messages.
+- Chat: `@agent` mentions in rendered messages now use the primary accent color.
 - Chat: table copy actions now include a Markdown format option (thanks to @kjhq).
 - Chat: Mermaid diagrams can now be opened in a dedicated diagram editor (thanks to @nerdosaurus).
+- Models: hidden models now stay hidden in multi-model selection controls (thanks to @kjhq).
 - Worktrees: creating a single new worktree session now opens the session immediately while worktree setup continues in the background.
 - Multi-Run: creating isolated runs now opens sessions immediately while worktree setup continues in the background.
 - Sessions: chat folder assignments now stay in place after reloads.
@@ -23,9 +26,13 @@ All notable changes to this project will be documented in this file.
 - Voice: Plan and file preview markdown now include text-to-speech buttons, with a setting for reading selected text or the full document (thanks to @yangyaofei).
 - Desktop/macOS: added a menu bar tray with live session status, Mini Chat access, and a provider usage submenu.
 - Desktop/macOS: added an optional vibrancy effect for the left sidebar.
+- Desktop/macOS: startup no longer opens unnecessary folder prompts.
 - Mobile: refreshed session controls, worktree deletion flow, MCP controls, update flow, and usage tracking for new layout.
 - Terminal/Mobile: touch scrolling in the terminal no longer conflicts with terminal input as often (thanks to @kostazol).
+- Usage: added Cursor quota tracking.
+- UI/Localization: added French interface translations and French documentation (thanks to @pascalandr).
 - VSCode: added an action to archive all sessions from the extension (thanks to @jjdubski).
+- VSCode: added multi-root workspace support, including workspace folder switching in the extension (thanks to @mmospanenko).
 
 ## [1.12.3] - 2026-06-05
 

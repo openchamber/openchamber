@@ -1,11 +1,17 @@
-## [1.12.4] - 2026-06-10
+## [1.12.4] - 2026-06-11
 
 - Agent Manager: creating isolated runs now opens sessions immediately while worktree setup continues in the background.
+- Agent Manager: hidden models now stay hidden in multi-model selection controls (thanks to @kjhq).
 - Sessions: chat folder assignments now stay in place after reloads.
 - Sessions: added an action to archive all sessions (thanks to @jjdubski).
 - Sessions: session and folder rows now have right-click menus for their available actions.
+- Workspaces: added multi-root workspace support, including workspace folder switching in the extension (thanks to @mmospanenko).
 - Settings: added search across settings pages.
+- Chat/UI: added a setting to collapse long user messages.
 - Chat: table copy actions now include a Markdown format option (thanks to @kjhq).
+- Chat: `@agent` mentions in rendered messages now use the primary accent color.
+- Usage: added Cursor quota tracking.
+- UI/Localization: added French extension translations (thanks to @pascalandr).
 
 ## [1.12.3] - 2026-06-05
 
