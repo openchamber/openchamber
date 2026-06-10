@@ -681,6 +681,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     const fullHistoryNavigationBusyRef = React.useRef(false);
     const [isFullHistoryNavigationBusy, setIsFullHistoryNavigationBusy] = React.useState(false);
     const [isFullHistoryLoading, setIsFullHistoryLoading] = React.useState(false);
+    const fullHistoryLoadingTooltipTimeoutRef = React.useRef<number | null>(null);
+    const fullHistoryLoadTimeoutRef = React.useRef<number | null>(null);
     const jumpScrollGuardRef = React.useRef<{ clear: () => void } | null>(null);
     const jumpNavigationStateRef = React.useRef({
         activeTurnId: timelineController.activeTurnId,
@@ -703,6 +705,20 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
             finishJumpNavigation();
         }
     }, [finishJumpNavigation]);
+
+    const clearFullHistoryNavigation = React.useCallback(() => {
+        if (fullHistoryLoadingTooltipTimeoutRef.current !== null) {
+            window.clearTimeout(fullHistoryLoadingTooltipTimeoutRef.current);
+            fullHistoryLoadingTooltipTimeoutRef.current = null;
+        }
+        if (fullHistoryLoadTimeoutRef.current !== null) {
+            window.clearTimeout(fullHistoryLoadTimeoutRef.current);
+            fullHistoryLoadTimeoutRef.current = null;
+        }
+        fullHistoryNavigationBusyRef.current = false;
+        setIsFullHistoryNavigationBusy(false);
+        setIsFullHistoryLoading(false);
+    }, []);
 
     const beginJumpScrollGuard = React.useCallback(() => {
         clearJumpScrollGuard(false);
@@ -751,6 +767,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     }, [clearJumpScrollGuard, finishJumpNavigation, handleHistoryScroll, scrollRef]);
 
     React.useEffect(() => clearJumpScrollGuard, [clearJumpScrollGuard, currentSessionId]);
+
+    React.useEffect(() => clearFullHistoryNavigation, [clearFullHistoryNavigation, currentSessionId]);
 
     const isTurnUserMessageAboveViewport = React.useCallback((turnId: string | null) => {
         if (!turnId) {
@@ -893,25 +911,25 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 
         fullHistoryNavigationBusyRef.current = true;
         setIsFullHistoryNavigationBusy(true);
-        window.setTimeout(() => {
+        fullHistoryLoadingTooltipTimeoutRef.current = window.setTimeout(() => {
+            fullHistoryLoadingTooltipTimeoutRef.current = null;
             if (fullHistoryNavigationBusyRef.current) {
                 setIsFullHistoryLoading(true);
             }
         }, FULL_HISTORY_LOADING_TOOLTIP_DELAY_MS);
 
         // Defer history loading by a brief timeout to let the first dots of the "Loading session history" tooltip render smoothly first
-        window.setTimeout(async () => {
+        fullHistoryLoadTimeoutRef.current = window.setTimeout(async () => {
+            fullHistoryLoadTimeoutRef.current = null;
             try {
                 await timelineController.loadAllEarlierAndScrollToTop(() => {
                     setIsFullHistoryLoading(false);
                 });
             } finally {
-                fullHistoryNavigationBusyRef.current = false;
-                setIsFullHistoryNavigationBusy(false);
-                setIsFullHistoryLoading(false);
+                clearFullHistoryNavigation();
             }
         }, 600);
-    }, [timelineController]);
+    }, [clearFullHistoryNavigation, timelineController]);
 
     React.useEffect(() => {
         if (typeof window === 'undefined' || !currentSessionId) return;
