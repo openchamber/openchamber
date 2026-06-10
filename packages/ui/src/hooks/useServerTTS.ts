@@ -18,6 +18,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 interface ServerTTSStatusCache {
   available: boolean;
@@ -45,7 +46,7 @@ async function getServerTTSStatus(): Promise<boolean> {
 
   serverTTSStatusRequest = (async () => {
     try {
-      const response = await fetch('/api/tts/status');
+      const response = await runtimeFetch('/api/tts/status');
       if (!response.ok) {
         serverTTSStatusCache = { available: false, checkedAt: Date.now() };
         return false;
@@ -262,7 +263,7 @@ export function useServerTTS(options: UseServerTTSOptions = {}): UseServerTTSRet
       console.log('[useServerTTS] Speaking with voice:', voice, 'options:', options);
 
       // Fetch audio from server
-      const response = await fetch('/api/tts/speak', {
+      const response = await runtimeFetch('/api/tts/speak', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

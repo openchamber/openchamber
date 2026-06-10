@@ -1,9 +1,10 @@
 import type { ToolsAPI } from '@openchamber/ui/lib/api/types';
+import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
 
 export const createWebToolsAPI = (): ToolsAPI => ({
   async getAvailableTools(): Promise<string[]> {
 
-    const response = await fetch('/api/experimental/tool/ids');
+    const response = await runtimeFetch('/api/experimental/tool/ids');
 
     if (!response.ok) {
       throw new Error(`Tools API returned ${response.status} ${response.statusText}`);

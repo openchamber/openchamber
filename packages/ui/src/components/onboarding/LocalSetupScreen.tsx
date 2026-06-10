@@ -1,5 +1,5 @@
 import React from 'react';
-import { isDesktopShell, isTauriShell } from '@/lib/desktop';
+import { isDesktopShell, requestFileAccess, startDesktopWindowDrag } from '@/lib/desktop';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Icon } from "@/components/icon/Icon";
@@ -7,10 +7,10 @@ import { updateDesktopSettings } from '@/lib/persistence';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { restartDesktopApp } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 const INSTALL_COMMAND = 'curl -fsSL https://opencode.ai/install | bash';
 const DOCS_URL = 'https://opencode.ai/docs';
-const WINDOWS_WSL_DOCS_URL = 'https://opencode.ai/docs/windows-wsl';
 
 type OnboardingPlatform = 'macos' | 'linux' | 'windows' | 'unknown';
 
@@ -99,7 +99,7 @@ export function LocalSetupScreen({
     let cancelled = false;
     void (async () => {
       try {
-        const response = await fetch('/api/config/settings', { method: 'GET', headers: { Accept: 'application/json' } });
+        const response = await runtimeFetch('/api/config/settings', { method: 'GET', headers: { Accept: 'application/json' } });
         if (!response.ok) return;
         const data = (await response.json().catch(() => null)) as null | { opencodeBinary?: unknown };
         if (!data || cancelled) return;
@@ -121,20 +121,14 @@ export function LocalSetupScreen({
       return;
     }
     if (e.button !== 0) return;
-    if (isDesktopApp && isTauriShell()) {
-      try {
-        const { getCurrentWindow } = await import('@tauri-apps/api/window');
-        const window = getCurrentWindow();
-        await window.startDragging();
-      } catch (error) {
-        console.error('Failed to start window dragging:', error);
-      }
+    if (isDesktopApp) {
+      await startDesktopWindowDrag();
     }
   }, [isDesktopApp]);
 
   const checkCliAvailability = React.useCallback(async (): Promise<boolean> => {
     try {
-      const response = await fetch('/health');
+      const response = await runtimeFetch('/health');
       if (!response.ok) return false;
       const data = await response.json();
       return data.openCodeRunning === true || data.isOpenCodeReady === true;
@@ -147,46 +141,37 @@ export function LocalSetupScreen({
     if (typeof window === 'undefined') {
       return;
     }
-    if (!isDesktopApp || !isTauriShell()) {
-      return;
-    }
-
-    const tauri = (window as unknown as { __TAURI__?: { dialog?: { open?: (opts: Record<string, unknown>) => Promise<unknown> } } }).__TAURI__;
-    if (!tauri?.dialog?.open) {
+    if (!isDesktopApp) {
       return;
     }
 
     try {
-      const selected = await tauri.dialog.open({
-        title: t('onboarding.localSetup.dialog.selectOpencodeBinary'),
-        multiple: false,
-        directory: false,
-      });
-      if (typeof selected === 'string' && selected.trim().length > 0) {
-        setOpencodeBinary(selected.trim());
+      const selected = await requestFileAccess();
+      if (selected.success && selected.path && selected.path.trim().length > 0) {
+        setOpencodeBinary(selected.path.trim());
       }
     } catch {
       // ignore
     }
-  }, [isDesktopApp, t]);
+  }, [isDesktopApp]);
 
   const handleApplyPath = React.useCallback(async () => {
     setIsRetrying(true);
     try {
       await updateDesktopSettings({ opencodeBinary: opencodeBinary.trim() });
 
-      // In desktop boot flow, always restart the entire Tauri app so Rust
-      // can re-evaluate the boot outcome with the updated binary path.
-      if (isTauriShell()) {
+      // In desktop boot flow, restart the app so the native host can
+      // re-evaluate the boot outcome with the updated binary path.
+      if (isDesktopApp) {
         await restartDesktopApp();
         return;
       }
 
-      await fetch('/api/config/reload', { method: 'POST' });
+      await runtimeFetch('/api/config/reload', { method: 'POST' });
     } finally {
       setTimeout(() => setIsRetrying(false), 1000);
     }
-  }, [opencodeBinary]);
+  }, [isDesktopApp, opencodeBinary]);
 
   const handleCopy = React.useCallback(async () => {
     const result = await copyTextToClipboard(INSTALL_COMMAND);
@@ -216,7 +201,7 @@ export function LocalSetupScreen({
     }
   }, [checkCliAvailability, onCliAvailable, t]);
 
-  const docsUrl = platform === 'windows' ? WINDOWS_WSL_DOCS_URL : DOCS_URL;
+  const docsUrl = DOCS_URL;
   const binaryPlaceholder =
     platform === 'windows'
       ? 'C:\\Users\\you\\AppData\\Roaming\\npm\\opencode.cmd'
@@ -253,7 +238,6 @@ export function LocalSetupScreen({
           <div className="mx-auto max-w-2xl rounded-lg border border-border bg-background/50 p-4 text-left">
             <div className="text-sm text-foreground">{t('onboarding.localSetup.windows.title')}</div>
             <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
-              <li>{t('onboarding.localSetup.windows.stepInstallWsl')} <code className="text-foreground/80">wsl --install</code> {t('onboarding.localSetup.windows.stepInstallWslSuffix')}</li>
               <li>{t('onboarding.localSetup.windows.stepRunInstallInWsl')}</li>
               <li>{t('onboarding.localSetup.windows.stepSetBinaryPath')}</li>
             </ol>
@@ -320,7 +304,7 @@ export function LocalSetupScreen({
                 type="button"
                 variant="secondary"
                 onClick={handleBrowse}
-                disabled={isRetrying || !isDesktopApp || !isTauriShell()}
+                disabled={isRetrying || !isDesktopApp}
               >
                 {t('onboarding.localSetup.actions.browse')}
               </Button>
@@ -355,9 +339,6 @@ export function LocalSetupScreen({
         <div className="absolute bottom-8 left-0 right-0 text-center space-y-1">
           {platform === 'windows' ? (
             <>
-              <p className="text-sm text-muted-foreground/70">
-                {t('onboarding.localSetup.windows.hintInstallInWsl')}
-              </p>
               <p className="text-sm text-muted-foreground/70">
                 {t('onboarding.localSetup.windows.hintDetectionFailed')}
               </p>

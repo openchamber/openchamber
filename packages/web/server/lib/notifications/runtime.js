@@ -155,6 +155,15 @@ export const createNotificationTriggerRuntime = (deps) => {
     return typeof sessionId === 'string' && sessionId.length > 0 ? sessionId : null;
   };
 
+  const extractDirectoryFromPayload = (payload) => {
+    if (!payload || typeof payload !== 'object') return undefined;
+    const props = payload.properties;
+    const directory = props?.directory ?? props?.info?.directory;
+    if (typeof directory !== 'string') return undefined;
+    const trimmed = directory.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  };
+
   const formatMode = (raw) => {
     const value = typeof raw === 'string' ? raw.trim() : '';
     const normalized = value.length > 0 ? value : 'agent';
@@ -197,6 +206,7 @@ export const createNotificationTriggerRuntime = (deps) => {
     maybeCacheSessionParentFromPayload(payload);
 
     const sessionId = extractSessionIdFromPayload(payload);
+    const notificationDirectory = extractDirectoryFromPayload(payload);
     if (payload.type === 'message.updated') {
       const info = payload.properties?.info;
       if (info?.role === 'assistant' && info?.finish === 'stop' && sessionId) {
@@ -266,6 +276,7 @@ export const createNotificationTriggerRuntime = (deps) => {
             tag: `ready-${sessionId}`,
             kind: 'ready',
             sessionId,
+            directory: notificationDirectory,
             requireHidden: settings.notificationMode !== 'always',
           };
           emitDesktopNotification(notificationPayload);
@@ -327,6 +338,7 @@ export const createNotificationTriggerRuntime = (deps) => {
             tag: `error-${sessionId}`,
             kind: 'error',
             sessionId,
+            directory: notificationDirectory,
             requireHidden: settings.notificationMode !== 'always',
           };
           emitDesktopNotification(notificationPayload);
@@ -402,6 +414,7 @@ export const createNotificationTriggerRuntime = (deps) => {
             body,
             tag: `question-${sessionId}`,
             sessionId,
+            directory: notificationDirectory,
             requireHidden: settings.notificationMode !== 'always',
           });
 
@@ -411,6 +424,7 @@ export const createNotificationTriggerRuntime = (deps) => {
             body,
             tag: `question-${sessionId}`,
             sessionId,
+            directory: notificationDirectory,
             requireHidden: settings.notificationMode !== 'always',
           });
         }
@@ -522,6 +536,7 @@ export const createNotificationTriggerRuntime = (deps) => {
             body,
             tag: requestKey ? `permission-${requestKey}` : `permission-${sessionId}`,
             sessionId,
+            directory: notificationDirectory,
             requireHidden: settings.notificationMode !== 'always',
           });
 
@@ -531,6 +546,7 @@ export const createNotificationTriggerRuntime = (deps) => {
             body,
             tag: requestKey ? `permission-${requestKey}` : `permission-${sessionId}`,
             sessionId,
+            directory: notificationDirectory,
             requireHidden: settings.notificationMode !== 'always',
           });
         }

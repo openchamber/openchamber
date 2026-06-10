@@ -5,12 +5,16 @@ import * as path from 'path';
 import {
   createAgent,
   createCommand,
+  createSnippet,
   deleteAgent,
   deleteCommand,
+  deleteSnippet,
   getAgentSources,
   getCommandSources,
+  getSnippet,
   updateAgent,
   updateCommand,
+  updateSnippet,
   type AgentScope,
   type CommandScope,
   AGENT_SCOPE,
@@ -28,10 +32,23 @@ import {
   type DiscoveredSkill,
   SKILL_SCOPE,
   listMcpConfigs,
+  listPluginDirFiles,
+  listPluginEntries,
+  getPluginEntry,
+  createPluginEntry,
+  updatePluginEntry,
+  deletePluginEntry,
+  readPluginDirFile,
+  writePluginDirFile,
+  deletePluginDirFile,
+  queryPluginRegistry,
+  listSnippets,
   getMcpConfig,
   createMcpConfig,
   updateMcpConfig,
   deleteMcpConfig,
+  expandSnippets,
+  type SnippetScope,
 } from './opencodeConfig';
 import {
   getSkillsCatalog,
@@ -66,6 +83,32 @@ const resolveWorkingDirectory = (ctx: BridgeContext | undefined, directory?: str
     ? directory.trim()
     : (ctx?.manager?.getWorkingDirectory() || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath)
 );
+
+const pluginMutationPayload = async (
+  ctx: BridgeContext | undefined,
+  deps: ConfigRuntimeDeps,
+  label: string,
+) => {
+  try {
+    await ctx?.manager?.restart();
+    return {
+      success: true,
+      requiresReload: true,
+      message: `${label}. Reloading interface…`,
+      reloadDelayMs: deps.clientReloadDelayMs,
+      reloadFailed: false,
+    };
+  } catch (error) {
+    return {
+      success: true,
+      requiresReload: false,
+      message: `${label}, but OpenCode reload failed.`,
+      reloadDelayMs: deps.clientReloadDelayMs,
+      reloadFailed: true,
+      warning: error instanceof Error ? error.message : String(error),
+    };
+  }
+};
 
 const parseSkillsCatalogSources = (settings: Record<string, unknown>): SkillsCatalogSourceConfig[] => {
   const rawCatalogs = (settings as { skillCatalogs?: unknown }).skillCatalogs;
@@ -457,6 +500,144 @@ export async function handleConfigBridgeMessage(
             reloadDelayMs: deps.clientReloadDelayMs,
           },
         };
+      }
+
+      return { id, type, success: false, error: `Unsupported method: ${normalizedMethod}` };
+    }
+
+    case 'api:config/plugins': {
+      const { method, target, pluginId, body, directory, specs, refresh } = (payload || {}) as {
+        method?: string;
+        target?: 'list' | 'registry' | 'entry' | 'file';
+        pluginId?: string;
+        body?: Record<string, unknown>;
+        directory?: string;
+        specs?: string[];
+        refresh?: boolean;
+      };
+      const normalizedMethod = typeof method === 'string' && method.trim() ? method.trim().toUpperCase() : 'GET';
+      const workingDirectory = resolveWorkingDirectory(ctx, directory);
+
+      if ((target === 'list' || !target) && normalizedMethod === 'GET') {
+        return {
+          id,
+          type,
+          success: true,
+          data: {
+            entries: listPluginEntries(workingDirectory),
+            files: listPluginDirFiles(workingDirectory),
+          },
+        };
+      }
+
+      if (target === 'registry' && normalizedMethod === 'GET') {
+        const data = await queryPluginRegistry(Array.isArray(specs) ? specs : [], {
+          refresh: refresh === true,
+          workingDirectory,
+        });
+        return { id, type, success: true, data };
+      }
+
+      if (target === 'entry') {
+        if (normalizedMethod === 'GET') {
+          if (!pluginId) return { id, type, success: false, error: 'Plugin entry id is required' };
+          const entry = getPluginEntry(pluginId, workingDirectory);
+          if (!entry) return { id, type, success: false, error: 'Plugin entry not found' };
+          return { id, type, success: true, data: entry };
+        }
+        if (normalizedMethod === 'POST') {
+          createPluginEntry(body || {}, workingDirectory);
+        } else if (normalizedMethod === 'PATCH') {
+          if (!pluginId) return { id, type, success: false, error: 'Plugin entry id is required' };
+          updatePluginEntry(pluginId, body || {}, workingDirectory);
+        } else if (normalizedMethod === 'DELETE') {
+          if (!pluginId) return { id, type, success: false, error: 'Plugin entry id is required' };
+          deletePluginEntry(pluginId, workingDirectory);
+        } else {
+          return { id, type, success: false, error: `Unsupported method: ${normalizedMethod}` };
+        }
+        return {
+          id,
+          type,
+          success: true,
+          data: await pluginMutationPayload(ctx, deps, 'Plugin entry changed'),
+        };
+      }
+
+      if (target === 'file') {
+        if (normalizedMethod === 'GET') {
+          if (!pluginId) return { id, type, success: false, error: 'Plugin file id is required' };
+          const file = readPluginDirFile(pluginId, workingDirectory);
+          if (!file) return { id, type, success: false, error: 'Plugin file not found' };
+          return { id, type, success: true, data: file };
+        }
+        if (normalizedMethod === 'POST') {
+          writePluginDirFile(body || {}, workingDirectory);
+        } else if (normalizedMethod === 'PUT') {
+          if (!pluginId) return { id, type, success: false, error: 'Plugin file id is required' };
+          const existing = readPluginDirFile(pluginId, workingDirectory);
+          if (!existing) return { id, type, success: false, error: 'Plugin file not found' };
+          writePluginDirFile({ fileName: existing.fileName, scope: existing.scope, content: body?.content }, workingDirectory, { overwrite: true });
+        } else if (normalizedMethod === 'DELETE') {
+          if (!pluginId) return { id, type, success: false, error: 'Plugin file id is required' };
+          deletePluginDirFile(pluginId, workingDirectory);
+        } else {
+          return { id, type, success: false, error: `Unsupported method: ${normalizedMethod}` };
+        }
+        return {
+          id,
+          type,
+          success: true,
+          data: await pluginMutationPayload(ctx, deps, 'Plugin file changed'),
+        };
+      }
+
+      return { id, type, success: false, error: 'Unsupported plugin config request' };
+    }
+
+    case 'api:config/snippets': {
+      const { method, name, body, directory } = (payload || {}) as {
+        method?: string;
+        name?: string;
+        body?: Record<string, unknown>;
+        directory?: string;
+      };
+      const normalizedMethod = typeof method === 'string' && method.trim() ? method.trim().toUpperCase() : 'GET';
+      const snippetName = typeof name === 'string' ? name.trim() : '';
+      const workingDirectory = resolveWorkingDirectory(ctx, directory);
+
+      if (normalizedMethod === 'GET' && !snippetName) {
+        return { id, type, success: true, data: listSnippets(workingDirectory) };
+      }
+
+      if (normalizedMethod === 'POST' && !snippetName) {
+        return { id, type, success: true, data: { text: expandSnippets(typeof body?.text === 'string' ? body.text : '', workingDirectory) } };
+      }
+
+      if (!snippetName) {
+        return { id, type, success: false, error: 'Snippet name is required' };
+      }
+
+      if (normalizedMethod === 'GET') {
+        const snippet = getSnippet(snippetName, workingDirectory);
+        if (!snippet) return { id, type, success: false, error: `Snippet "${snippetName}" not found` };
+        return { id, type, success: true, data: snippet };
+      }
+
+      if (normalizedMethod === 'POST') {
+        const scope = body?.scope === 'project' ? 'project' : 'global';
+        const snippet = createSnippet(snippetName, (body || {}) as Record<string, unknown>, workingDirectory, scope as SnippetScope);
+        return { id, type, success: true, data: { success: true, snippet } };
+      }
+
+      if (normalizedMethod === 'PATCH') {
+        const snippet = updateSnippet(snippetName, (body || {}) as Record<string, unknown>, workingDirectory);
+        return { id, type, success: true, data: { success: true, snippet } };
+      }
+
+      if (normalizedMethod === 'DELETE') {
+        deleteSnippet(snippetName, workingDirectory);
+        return { id, type, success: true, data: { success: true } };
       }
 
       return { id, type, success: false, error: `Unsupported method: ${normalizedMethod}` };

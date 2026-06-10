@@ -113,6 +113,11 @@ const requestBody = (callIndex: number): unknown => {
   return init?.body ? JSON.parse(String(init.body)) : undefined;
 };
 
+const flushPluginFollowUps = async (): Promise<void> => {
+  await Promise.resolve();
+  await Promise.resolve();
+};
+
 describe('usePluginsStore', () => {
   beforeEach(() => {
     resetStore();
@@ -125,6 +130,7 @@ describe('usePluginsStore', () => {
     queueFetchResponses([jsonResponse(pluginListPayload), jsonResponse({ results: [registryOk] })]);
 
     const result = await usePluginsStore.getState().loadPlugins();
+    await flushPluginFollowUps();
 
     expect(result).toBe(true);
     expect(fetchCalls).toHaveLength(2);
@@ -139,6 +145,7 @@ describe('usePluginsStore', () => {
 
     await usePluginsStore.getState().loadPlugins();
     await usePluginsStore.getState().loadPlugins();
+    await flushPluginFollowUps();
 
     expect(fetchCalls).toHaveLength(2);
   });
@@ -279,6 +286,7 @@ describe('usePluginsStore', () => {
     queueFetchResponses([jsonResponse(pluginListPayload), jsonResponse({ results: [registryOk] })]);
 
     const result = await usePluginsStore.getState().loadPlugins();
+    await flushPluginFollowUps();
 
     expect(result).toBe(true);
     expect(fetchCalls[0]?.input).toBe('/api/config/plugins?directory=%2Fworkspace%2Fproject');
@@ -289,6 +297,7 @@ describe('usePluginsStore', () => {
     queueFetchResponses([jsonResponse(okMutationPayload), jsonResponse(pluginListPayload), jsonResponse({ results: [] })]);
 
     const result = await usePluginsStore.getState().createEntry({ spec: 'new-plugin@1', scope: 'user' });
+    await flushPluginFollowUps();
 
     expect(result.ok).toBe(true);
     expect(registryCalls()).toHaveLength(1);
@@ -301,6 +310,7 @@ describe('usePluginsStore', () => {
     queueFetchResponses([jsonResponse(okMutationPayload), jsonResponse(pluginListPayload), jsonResponse({ results: [] })]);
 
     const result = await usePluginsStore.getState().updateEntry(entry.id, { spec: 'plugin-b@2' });
+    await flushPluginFollowUps();
 
     expect(result.ok).toBe(true);
     expect(registryCalls()).toHaveLength(1);
@@ -313,6 +323,7 @@ describe('usePluginsStore', () => {
     queueFetchResponses([jsonResponse(okMutationPayload), jsonResponse(pluginListPayload), jsonResponse({ results: [] })]);
 
     const result = await usePluginsStore.getState().updateEntry(entry.id, { options: { enabled: true } });
+    await flushPluginFollowUps();
 
     expect(result.ok).toBe(true);
     expect(String(registryCalls()[0]?.input)).toContain('specs=plugin-a');

@@ -1,5 +1,6 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
+import { ContextMenu } from '@base-ui/react/context-menu';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,6 +11,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { dropdownMenuItemClass, dropdownMenuPopupClass, dropdownMenuSeparatorClass, dropdownMenuSubTriggerClass } from '@/components/ui/dropdown-menu.styles';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { canUseElectronDesktopIPC, invokeDesktop, isVSCodeRuntime } from '@/lib/desktop';
@@ -21,7 +23,7 @@ import { buildExportFilename, downloadAsMarkdown, formatSessionAsMarkdown, getEx
 import type { ChildSessionExport } from '@/lib/exportSession';
 import { buildSessionMessageRecordsSnapshot, useDirectoryStore, useGlobalSessionStatus, useSession, useSessionPermissions } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
-import { useViewportStore } from '@/sync/viewport-store';
+import { useViewportStore, viewportSessionKey } from '@/sync/viewport-store';
 import { DraggableSessionRow } from './sessionFolderDnd';
 import type { SessionNode, SessionSummaryMeta } from './types';
 import { formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText, resolveSessionDiffStats } from './utils';
@@ -29,6 +31,8 @@ import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useSessionUnseenCount } from '@/sync/notification-store';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 import { useI18n } from '@/lib/i18n';
+import { getRuntimeBearerTokenSync } from '@/lib/runtime-auth';
+import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { parseMultiRunSessionTitle } from '@/lib/multirun/title';
 import { MultiRunFusionDialog } from '@/components/multirun/MultiRunFusionDialog';
 import { FusionIcon } from '@/components/icons/FusionIcon';
@@ -326,7 +330,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
 
   const menuInstanceKey = `${renderContext}:${archivedBucket ? 'archived' : 'active'}:${session.id}`;
   const isZombie = useViewportStore(
-    React.useCallback((state) => Boolean(state.sessionMemoryState.get(session.id)?.isZombie), [session.id]),
+    React.useCallback((state) => Boolean(state.sessionMemoryState.get(viewportSessionKey(session.id))?.isZombie), [session.id]),
   );
   const sessionStatus = useGlobalSessionStatus(session.id);
   const sessionPermissions = useSessionPermissions(session.id, sessionDirectory ?? undefined);
@@ -350,6 +354,8 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const sessionUpdatedLabel = formatSessionDateLabel(sessionTimestamp);
   const sessionCompactUpdatedLabel = formatSessionCompactDateLabel(sessionTimestamp);
   const isMenuOpen = openSidebarMenuKey === menuInstanceKey;
+  const [isContextMenuOpen, setIsContextMenuOpen] = React.useState(false);
+  const isSessionMenuOpen = isMenuOpen || isContextMenuOpen;
   const isMultiRunLikeSession = React.useMemo(() => parseMultiRunSessionTitle(resolvedSession.title) !== null, [resolvedSession.title]);
   const [fusionDialogOpen, setFusionDialogOpen] = React.useState(false);
 
@@ -447,6 +453,8 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     void invokeDesktop('desktop_open_session_mini_chat_window', {
       sessionId: session.id,
       directory: sessionDirectory,
+      apiBaseUrl: getRuntimeApiBaseUrl(),
+      clientToken: getRuntimeBearerTokenSync(),
     }).catch((error) => {
       console.warn('[session-sidebar] failed to open mini chat window', error);
     });
@@ -598,6 +606,9 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     : null;
 
   const handleMenuOpenChange = (open: boolean) => {
+    if (open) {
+      setIsContextMenuOpen(false);
+    }
     setOpenSidebarMenuKey(open ? menuInstanceKey : null);
   };
 
@@ -608,6 +619,10 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       setEditingId(id);
       setEditTitle(title);
     }
+  };
+
+  const handleContextMenuOpenChange = (open: boolean) => {
+    setIsContextMenuOpen(open);
   };
 
   const handleMenuTriggerClick = (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -702,9 +717,21 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     }
   };
 
-  const sessionMenuContent = (
-    <DropdownMenuContent align="end" className="min-w-[180px]" finalFocus={() => (renamingFolderId || editingIdRef.current) ? false : true}>
-      <DropdownMenuItem
+  const renderSessionMenuItems = ({
+    Item,
+    Separator,
+    Sub,
+    SubTrigger,
+    SubContent,
+  }: {
+    Item: React.ElementType;
+    Separator: React.ElementType;
+    Sub: React.ElementType;
+    SubTrigger: React.ElementType;
+    SubContent: React.ElementType;
+  }) => (
+    <>
+      <Item
         onClick={() => {
           // Defer rename until dropdown close transition completes.
           // onOpenChangeComplete fires after animation + focus cleanup are done,
@@ -715,38 +742,38 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       >
         <Icon name="pencil-ai" className="mr-1 h-4 w-4" />
         {t('sessions.sidebar.session.menu.rename')}
-      </DropdownMenuItem>
-      <DropdownMenuItem onClick={() => togglePinnedSession(session.id)} className="[&>svg]:mr-1">
+      </Item>
+      <Item onClick={() => togglePinnedSession(session.id)} className="[&>svg]:mr-1">
         {isPinnedSession ? <Icon name="unpin" className="mr-1 h-4 w-4" /> : <Icon name="pushpin" className="mr-1 h-4 w-4" />}
         {isPinnedSession ? t('sessions.sidebar.session.menu.unpin') : t('sessions.sidebar.session.menu.pin')}
-      </DropdownMenuItem>
+      </Item>
       {!resolvedSession.share ? (
-        <DropdownMenuItem onClick={() => handleShareSession(resolvedSession)} className="[&>svg]:mr-1">
+        <Item onClick={() => handleShareSession(resolvedSession)} className="[&>svg]:mr-1">
           <Icon name="share-2" className="mr-1 h-4 w-4" />
           {t('sessions.sidebar.session.menu.share')}
-        </DropdownMenuItem>
+        </Item>
       ) : (
         <>
-          <DropdownMenuItem onClick={() => { if (resolvedSession.share?.url) handleCopyShareUrl(resolvedSession.share.url, session.id); }} className="[&>svg]:mr-1">
+          <Item onClick={() => { if (resolvedSession.share?.url) handleCopyShareUrl(resolvedSession.share.url, session.id); }} className="[&>svg]:mr-1">
             {copiedSessionId === session.id
               ? <><Icon name="check" className="mr-1 h-4 w-4"  style={{ color: 'var(--status-success)' }}/>{t('sessions.sidebar.session.menu.copied')}</>
               : <><Icon name="file-copy" className="mr-1 h-4 w-4" />{t('sessions.sidebar.session.menu.copyLink')}</>}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => handleUnshareSession(session.id)} className="[&>svg]:mr-1">
+          </Item>
+          <Item onClick={() => handleUnshareSession(session.id)} className="[&>svg]:mr-1">
             <Icon name="link-unlink-m" className="mr-1 h-4 w-4" />
             {t('sessions.sidebar.session.menu.unshare')}
-          </DropdownMenuItem>
+          </Item>
         </>
       )}
-      <DropdownMenuItem onClick={() => { void handleExportSession(); }} className="[&>svg]:mr-1">
+      <Item onClick={() => { void handleExportSession(); }} className="[&>svg]:mr-1">
         <Icon name="download" className="mr-1 h-4 w-4" />
         {t('sessions.sidebar.session.menu.exportMarkdown')}
-      </DropdownMenuItem>
+      </Item>
       {isMultiRunLikeSession ? (
-        <DropdownMenuItem onClick={() => setFusionDialogOpen(true)} className="[&>svg]:mr-1">
+        <Item onClick={() => setFusionDialogOpen(true)} className="[&>svg]:mr-1">
           <FusionIcon className="mr-1 h-4 w-4" />
           {t('sessions.sidebar.session.menu.runFusion')}
-        </DropdownMenuItem>
+        </Item>
       ) : null}
 
       {sessionDirectory && !archivedBucket ? (() => {
@@ -754,39 +781,39 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
         const currentFolderId = getSessionFolderId(sessionDirectory, session.id);
         return (
           <>
-            <DropdownMenuSeparator />
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger className="[&>svg]:mr-1"><Icon name="folder" className="h-4 w-4" />{t('sessions.sidebar.folders.moveToFolder')}</DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="min-w-[180px]">
+            <Separator />
+            <Sub>
+              <SubTrigger className="[&>svg]:mr-1"><Icon name="folder" className="h-4 w-4" />{t('sessions.sidebar.folders.moveToFolder')}</SubTrigger>
+              <SubContent className="min-w-[180px]">
                 {scopeFolders.length === 0 ? (
-                  <DropdownMenuItem disabled className="text-muted-foreground">{t('sessions.sidebar.folders.none')}</DropdownMenuItem>
+                  <Item disabled className="text-muted-foreground">{t('sessions.sidebar.folders.none')}</Item>
                 ) : (
                   scopeFolders.map((folder) => (
-                    <DropdownMenuItem key={folder.id} onClick={() => { if (currentFolderId === folder.id) removeSessionFromFolder(sessionDirectory, session.id); else addSessionToFolder(sessionDirectory, folder.id, session.id); }}>
+                    <Item key={folder.id} onClick={() => { if (currentFolderId === folder.id) removeSessionFromFolder(sessionDirectory, session.id); else addSessionToFolder(sessionDirectory, folder.id, session.id); }}>
                       <span className="flex-1 truncate">{folder.name}</span>
                       {currentFolderId === folder.id ? <Icon name="check" className="ml-2 h-3.5 w-3.5 text-primary flex-shrink-0" /> : null}
-                    </DropdownMenuItem>
+                    </Item>
                   ))
                 )}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => { const newFolder = createFolderAndStartRename(sessionDirectory); if (!newFolder) return; addSessionToFolder(sessionDirectory, newFolder.id, session.id); }}>
+                <Separator />
+                <Item onClick={() => { const newFolder = createFolderAndStartRename(sessionDirectory); if (!newFolder) return; addSessionToFolder(sessionDirectory, newFolder.id, session.id); }}>
                   <Icon name="add" className="mr-1 h-4 w-4" />
                   {t('sessions.sidebar.folders.newFolderEllipsis')}
-                </DropdownMenuItem>
+                </Item>
                 {currentFolderId ? (
-                  <DropdownMenuItem onClick={() => { removeSessionFromFolder(sessionDirectory, session.id); }} className="text-destructive focus:text-destructive">
+                  <Item onClick={() => { removeSessionFromFolder(sessionDirectory, session.id); }} className="text-destructive focus:text-destructive">
                     <Icon name="close" className="mr-1 h-4 w-4" />
                     {t('sessions.sidebar.folders.removeFromFolder')}
-                  </DropdownMenuItem>
+                  </Item>
                 ) : null}
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
+              </SubContent>
+            </Sub>
           </>
         );
       })() : null}
 
       {!isVSCode ? (
-        <DropdownMenuItem
+        <Item
           disabled={!sessionDirectory}
           onClick={() => {
             if (!sessionDirectory) return;
@@ -801,42 +828,108 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           <Icon name="chat-4" className="mr-1 h-4 w-4" />
           <span className="truncate">{t('sessions.sidebar.session.menu.openInSidePanel')}</span>
           <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-[var(--status-warning)] bg-[var(--status-warning)]/10">{t('sessions.sidebar.session.menu.betaBadge')}</span>
-        </DropdownMenuItem>
+        </Item>
       ) : null}
 
       {isElectron ? (
-        <DropdownMenuItem
+        <Item
           disabled={!sessionDirectory}
           onClick={handleOpenMiniChatWindow}
           className="[&>svg]:mr-1"
         >
           <Icon name="window" className="mr-1 h-4 w-4" />
           <span className="truncate">{t('sessions.sidebar.session.menu.openMiniChatWindow')}</span>
-        </DropdownMenuItem>
+        </Item>
       ) : null}
 
-      <DropdownMenuSeparator />
-      <DropdownMenuItem className="text-destructive focus:text-destructive [&>svg]:mr-1" onClick={() => handleDeleteSession(session, { archivedBucket })}>
-        <Icon name="delete-bin" className="mr-1 h-4 w-4" />
+      <Separator />
+      <Item className="text-destructive focus:text-destructive [&>svg]:mr-1" onClick={() => handleDeleteSession(session, { archivedBucket })}>
+        <Icon name={archivedBucket ? "delete-bin" : "archive"} className="mr-1 h-4 w-4" />
         {archivedBucket ? t('sessions.sidebar.bulkActions.delete') : t('sessions.sidebar.bulkActions.archive')}
-      </DropdownMenuItem>
+      </Item>
+    </>
+  );
+
+  const sessionMenuContent = (
+    <DropdownMenuContent align="end" className="min-w-[180px]" finalFocus={() => (renamingFolderId || editingIdRef.current) ? false : true}>
+      {renderSessionMenuItems({
+        Item: DropdownMenuItem,
+        Separator: DropdownMenuSeparator,
+        Sub: DropdownMenuSub,
+        SubTrigger: DropdownMenuSubTrigger,
+        SubContent: DropdownMenuSubContent,
+      })}
     </DropdownMenuContent>
+  );
+
+  const contextMenuContent = (
+    <ContextMenu.Portal>
+      <ContextMenu.Positioner className="app-region-no-drag z-50">
+        <ContextMenu.Popup
+          data-slot="dropdown-menu-content"
+          finalFocus={() => (renamingFolderId || editingIdRef.current) ? false : true}
+          style={{
+            backgroundColor: 'var(--surface-elevated)',
+            color: 'var(--surface-elevated-foreground)',
+          }}
+          className={cn(dropdownMenuPopupClass, 'min-w-[180px]')}
+        >
+          {renderSessionMenuItems({
+            Item: ({ className, ...itemProps }: React.ComponentProps<typeof ContextMenu.Item>) => (
+              <ContextMenu.Item className={cn(dropdownMenuItemClass, className)} {...itemProps} />
+            ),
+            Separator: ({ className, ...separatorProps }: React.ComponentProps<typeof ContextMenu.Separator>) => (
+              <ContextMenu.Separator className={cn(dropdownMenuSeparatorClass, className)} {...separatorProps} />
+            ),
+            Sub: ContextMenu.SubmenuRoot,
+            SubTrigger: ({ className, children, ...triggerProps }: React.ComponentProps<typeof ContextMenu.SubmenuTrigger>) => (
+              <ContextMenu.SubmenuTrigger className={cn(dropdownMenuSubTriggerClass, className)} {...triggerProps}>
+                {children}
+                <Icon name="arrow-right-s" className="ml-auto size-3.5" />
+              </ContextMenu.SubmenuTrigger>
+            ),
+            SubContent: ({ className, children, ...popupProps }: React.ComponentProps<typeof ContextMenu.Popup>) => (
+              <ContextMenu.Portal>
+                <ContextMenu.Positioner className="app-region-no-drag z-50">
+                  <ContextMenu.Popup
+                    data-slot="dropdown-menu-sub-content"
+                    style={{
+                      backgroundColor: 'var(--surface-elevated)',
+                      color: 'var(--surface-elevated-foreground)',
+                    }}
+                    className={cn(dropdownMenuPopupClass, className)}
+                    {...popupProps}
+                  >
+                    {children}
+                  </ContextMenu.Popup>
+                </ContextMenu.Positioner>
+              </ContextMenu.Portal>
+            ),
+          })}
+        </ContextMenu.Popup>
+      </ContextMenu.Positioner>
+    </ContextMenu.Portal>
   );
 
   return (
     <React.Fragment key={session.id}>
       <DraggableSessionRow sessionId={session.id} sessionDirectory={sessionDirectory ?? null} sessionTitle={sessionTitle}>
-        <div
-          data-session-row={session.id}
-          data-session-scope={sessionDirectory ?? ''}
-          data-session-archived={archivedBucket ? '1' : '0'}
-          className={cn(
-            'group relative my-0.5 flex items-center rounded-sm px-1.5 py-1',
-            isMissingDirectory ? 'opacity-75' : '',
-            depth > 0 && 'pl-[20px]',
-            isRowSelected && 'bg-primary/15',
-          )}
-        >
+        <ContextMenu.Root open={isContextMenuOpen} onOpenChange={handleContextMenuOpenChange} onOpenChangeComplete={handleMenuOpenChangeComplete}>
+          <ContextMenu.Trigger
+            render={
+              <div
+                data-session-row={session.id}
+                data-session-scope={sessionDirectory ?? ''}
+                data-session-archived={archivedBucket ? '1' : '0'}
+                className={cn(
+                  'group relative my-0.5 flex items-center rounded-sm px-1.5 py-1',
+                  isMissingDirectory ? 'opacity-75' : '',
+                  depth > 0 && 'pl-[20px]',
+                  isRowSelected && 'bg-primary/15',
+                )}
+              />
+            }
+          >
           {leadingIndicators}
           {subsessionChevron}
           <div className="flex min-w-0 flex-1 items-center">
@@ -870,7 +963,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                         <div className="relative ml-1 flex h-4 min-w-4 flex-shrink-0 items-center justify-end">
                           <span className={cn(
                             'whitespace-nowrap text-right text-[0.72rem] text-muted-foreground/75 transition-opacity duration-150',
-                            isMenuOpen
+                            isSessionMenuOpen
                               ? 'opacity-0'
                               : hideOnHoverClass,
                           )}>
@@ -959,7 +1052,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
 
           <div className={cn(
             'absolute right-0 top-1/2 z-10 flex -translate-y-1/2 items-center gap-0.5 transition-opacity',
-            isMenuOpen
+            isSessionMenuOpen
               ? 'opacity-100'
               : (alwaysShowActions && !isVSCode)
                 ? 'opacity-100'
@@ -1018,7 +1111,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                   className={cn(
                     'inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
                     isMinimalMode && !alwaysShowActions
-                      ? (isMenuOpen
+                      ? (isSessionMenuOpen
                           ? 'h-4 w-4 opacity-100'
                           : cn('h-4 w-4 opacity-0', revealOnHoverClass))
                       : 'h-6 w-6 opacity-100',
@@ -1035,7 +1128,9 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
               {sessionMenuContent}
             </DropdownMenu>
           </div>
-        </div>
+          </ContextMenu.Trigger>
+          {contextMenuContent}
+        </ContextMenu.Root>
       </DraggableSessionRow>
       {hasChildren && isExpanded
         ? node.children.map((child) => renderSessionNode(child, depth + 1, sessionDirectory ?? groupDirectory, projectId, archivedBucket, undefined, renderContext))

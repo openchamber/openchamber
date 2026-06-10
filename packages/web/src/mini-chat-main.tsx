@@ -1,4 +1,4 @@
-import { createWebAPIs } from './api';
+import { createConfiguredWebAPIs } from './runtimeConfig';
 import type { RuntimeAPIs } from '@openchamber/ui/lib/api/types';
 import '@openchamber/ui/index.css';
 import '@openchamber/ui/styles/fonts';
@@ -9,9 +9,9 @@ declare global {
   }
 }
 
-window.__OPENCHAMBER_RUNTIME_APIS__ = createWebAPIs();
+window.__OPENCHAMBER_RUNTIME_APIS__ = createConfiguredWebAPIs();
 
 void import('@openchamber/ui/apps/renderElectronMiniChatApp')
   .then(({ renderElectronMiniChatApp }) => {
-    renderElectronMiniChatApp(window.__OPENCHAMBER_RUNTIME_APIS__ ?? createWebAPIs());
+    renderElectronMiniChatApp(window.__OPENCHAMBER_RUNTIME_APIS__ ?? createConfiguredWebAPIs());
   });

@@ -14,6 +14,7 @@
 
 import type { Event, OpencodeClient, SessionStatus } from "@opencode-ai/sdk/v2/client"
 import { opencodeClient } from "@/lib/opencode/client"
+import { getRuntimeUrlResolver } from "@/lib/runtime-url"
 import { syncDebug } from "./debug"
 
 export type QueuedEvent = {
@@ -41,8 +42,6 @@ const RETRY_BACKOFF_BASE_MS = 250
 const RETRY_BACKOFF_CAP_VISIBLE_MS = 5_000
 const RETRY_BACKOFF_CAP_HIDDEN_OR_OFFLINE_MS = 60_000
 const RETRY_BACKOFF_MAX_EXPONENT = 8
-const ABSOLUTE_URL_PATTERN = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//
-
 export type EventPipelineInput = {
   sdk: OpencodeClient
   onEvent: (directory: string, payload: Event) => void
@@ -168,8 +167,21 @@ function resolveEventDirectory(event: unknown, payload: Event): string {
       ? (payload.properties as Record<string, unknown>)
       : null
   const propertyDirectory = typeof properties?.directory === "string" ? properties.directory : null
+  if (propertyDirectory && propertyDirectory.length > 0) {
+    return propertyDirectory
+  }
 
-  return propertyDirectory && propertyDirectory.length > 0 ? propertyDirectory : "global"
+  // session.created / session.updated carry directory inside properties.info
+  const info =
+    typeof properties?.info === "object" && properties.info !== null
+      ? (properties.info as Record<string, unknown>)
+      : null
+  const infoDirectory = typeof info?.directory === "string" ? info.directory : null
+  if (infoDirectory && infoDirectory.length > 0) {
+    return infoDirectory
+  }
+
+  return "global"
 }
 
 function resolveEventPayload(payload: unknown): Event | null {
@@ -189,30 +201,6 @@ function resolveEventPayload(payload: unknown): Event | null {
   return null
 }
 
-function resolveAbsoluteUrl(candidate: string): string {
-  const normalized = typeof candidate === "string" && candidate.trim().length > 0 ? candidate.trim() : "/api"
-  if (ABSOLUTE_URL_PATTERN.test(normalized)) {
-    return normalized
-  }
-
-  if (typeof window === "undefined") {
-    return normalized
-  }
-
-  const baseReference = window.location?.href || window.location?.origin
-  if (!baseReference) {
-    return normalized
-  }
-
-  return new URL(normalized, baseReference).toString()
-}
-
-function toWebSocketUrl(candidate: string): string {
-  const url = new URL(resolveAbsoluteUrl(candidate))
-  url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
-  return url.toString()
-}
-
 function buildGlobalEventWsUrl(lastEventId?: string): string {
   let baseUrl = "/api"
   try {
@@ -224,11 +212,10 @@ function buildGlobalEventWsUrl(lastEventId?: string): string {
     baseUrl = "/api"
   }
   const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`
-  const httpUrl = new URL("global/event/ws", resolveAbsoluteUrl(normalizedBase))
-  if (lastEventId && lastEventId.length > 0) {
-    httpUrl.searchParams.set("lastEventId", lastEventId)
-  }
-  return toWebSocketUrl(httpUrl.toString())
+  return getRuntimeUrlResolver().websocket(
+    `${normalizedBase}global/event/ws`,
+    lastEventId && lastEventId.length > 0 ? { lastEventId } : undefined,
+  )
 }
 
 type DirectoryQueue = {
@@ -282,6 +269,10 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     if (payload.type === "session.status") {
       const props = payload.properties as { sessionID: string }
       return `session.status:${props.sessionID}`
+    }
+    if (payload.type === "session.updated") {
+      const props = payload.properties as { info?: { id?: string } }
+      return props.info?.id ? `session.updated:${props.info.id}` : undefined
     }
     if (payload.type === "lsp.updated") {
       return "lsp.updated"

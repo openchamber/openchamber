@@ -215,7 +215,7 @@ export const CommandsPage: React.FC = () => {
           <section className="px-2 pb-2 pt-0 space-y-0">
 
             {isNewCommand && (
-              <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
+              <div data-settings-item="commands.name" className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
                 <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
                   <span className="typography-ui-label text-foreground">{t('settings.commands.page.field.commandName')}</span>
                 </div>
@@ -278,7 +278,7 @@ export const CommandsPage: React.FC = () => {
 
           <section className="px-2 pb-2 pt-0 space-y-0">
 
-            <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
+            <div data-settings-item="commands.agent" className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
               <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
                 <span className="typography-ui-label text-foreground">{t('settings.commands.page.field.overrideAgent')}</span>
               </div>
@@ -290,7 +290,7 @@ export const CommandsPage: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
+            <div data-settings-item="commands.model" className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
               <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
                 <span className="typography-ui-label text-foreground">{t('settings.agents.page.field.overrideModel')}</span>
               </div>
@@ -313,7 +313,7 @@ export const CommandsPage: React.FC = () => {
         </div>
 
         {/* Command Template */}
-        <div className="mb-2">
+        <div data-settings-item="commands.template" className="mb-2">
           <div className="mb-1 px-1">
             <h3 className="typography-ui-header font-medium text-foreground">
               {t('settings.commands.page.section.template')}

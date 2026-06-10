@@ -31,13 +31,11 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import * as sessionActions from '@/sync/session-actions';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { useContextStore } from '@/stores/contextStore';
 import { validateWorktreeCreate, createWorktree } from '@/lib/worktrees/worktreeManager';
 import { withWorktreeUpstreamDefaults } from '@/lib/worktrees/worktreeCreate';
 import { getWorktreeSetupCommands } from '@/lib/openchamberConfig';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
-import { opencodeClient } from '@/lib/opencode/client';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { rankBranchesForQuery } from '@/lib/worktrees/branchSearch';
@@ -446,70 +444,24 @@ export function NewWorktreeDialog({
   const resolveDefaultVariant = React.useCallback((providerID: string, modelID: string): string | undefined => {
     const configState = useConfigStore.getState();
     const settingsDefaultVariant = configState.settingsDefaultVariant;
-    if (!settingsDefaultVariant) return undefined;
+    const currentVariant = configState.currentProviderId === providerID && configState.currentModelId === modelID
+      ? configState.currentVariant
+      : undefined;
 
     const provider = configState.providers.find((p) => p.id === providerID);
     const model = provider?.models.find((m: Record<string, unknown>) => (m as { id?: string }).id === modelID) as
       | { variants?: Record<string, unknown> }
       | undefined;
     const variants = model?.variants;
-    if (!variants) return undefined;
-    if (!Object.prototype.hasOwnProperty.call(variants, settingsDefaultVariant)) return undefined;
-    return settingsDefaultVariant;
-  }, []);
-
-  const applySessionModelAndAgentDefaults = React.useCallback((args: {
-    sessionId: string;
-    providerID: string;
-    modelID: string;
-    agentName?: string;
-    variant?: string;
-  }) => {
-    const configState = useConfigStore.getState();
-
-    try {
-      useContextStore.getState().saveSessionModelSelection(args.sessionId, args.providerID, args.modelID);
-    } catch {
-      // ignore
-    }
-
-    if (!args.agentName) {
-      return;
-    }
-
-    try {
-      configState.setAgent(args.agentName);
-    } catch {
-      // ignore
-    }
-    try {
-      useContextStore.getState().saveSessionAgentSelection(args.sessionId, args.agentName);
-    } catch {
-      // ignore
-    }
-    try {
-      useContextStore.getState().saveAgentModelForSession(args.sessionId, args.agentName, args.providerID, args.modelID);
-    } catch {
-      // ignore
-    }
-    if (args.variant !== undefined) {
-      try {
-        configState.setCurrentVariant(args.variant);
-      } catch {
-        // ignore
-      }
-      try {
-        useContextStore
-          .getState()
-          .saveAgentModelVariantForSession(args.sessionId, args.agentName, args.providerID, args.modelID, args.variant);
-      } catch {
-        // ignore
-      }
-    }
+    if (!variants) return settingsDefaultVariant || currentVariant || undefined;
+    if (settingsDefaultVariant && Object.prototype.hasOwnProperty.call(variants, settingsDefaultVariant)) return settingsDefaultVariant;
+    if (currentVariant && Object.prototype.hasOwnProperty.call(variants, currentVariant)) return currentVariant;
+    return undefined;
   }, []);
 
   const sendLinkedContextMessage = React.useCallback(async (args: {
     sessionId: string;
+    directory: string;
     issue: GitHubIssue | null;
     pr: GitHubPullRequestSummary | null;
     includeDiff: boolean;
@@ -531,14 +483,6 @@ export function NewWorktreeDialog({
     }
 
     const variant = resolveDefaultVariant(providerID, modelID);
-
-    applySessionModelAndAgentDefaults({
-      sessionId: args.sessionId,
-      providerID,
-      modelID,
-      agentName,
-      variant,
-    });
 
     if (args.issue) {
       if (!github.issueGet || !github.issueComments) {
@@ -565,18 +509,21 @@ export function NewWorktreeDialog({
         comments: commentsRes.comments ?? [],
       });
 
-      await opencodeClient.sendMessage({
-        id: args.sessionId,
+      await useSessionUIStore.getState().sendMessage(
+        visiblePromptText,
         providerID,
         modelID,
-        agent: agentName,
-        variant,
-        text: visiblePromptText,
-        additionalParts: [
+        agentName,
+        undefined,
+        undefined,
+        [
           { text: instructionsText, synthetic: true },
           { text: contextText, synthetic: true },
         ],
-      });
+        variant,
+        undefined,
+        { sessionId: args.sessionId },
+      );
 
       toast.success(t('session.newWorktree.toast.sessionFromIssue'));
       return;
@@ -601,23 +548,25 @@ export function NewWorktreeDialog({
       const instructionsText = await renderMagicPrompt('github.pr.review.instructions');
       const contextText = buildPullRequestContextText(prContext);
 
-      await opencodeClient.sendMessage({
-        id: args.sessionId,
+      await useSessionUIStore.getState().sendMessage(
+        visiblePromptText,
         providerID,
         modelID,
-        agent: agentName,
-        variant,
-        text: visiblePromptText,
-        additionalParts: [
+        agentName,
+        undefined,
+        undefined,
+        [
           { text: instructionsText, synthetic: true },
           { text: contextText, synthetic: true },
         ],
-      });
+        variant,
+        undefined,
+        { sessionId: args.sessionId },
+      );
 
       toast.success(t('session.newWorktree.toast.sessionFromPr'));
     }
   }, [
-    applySessionModelAndAgentDefaults,
     github,
     projectDirectory,
     resolveDefaultAgentName,
@@ -851,8 +800,13 @@ export function NewWorktreeDialog({
     setIsCreating(true);
     
     try {
-      const setupCommands = await getWorktreeSetupCommands(projectRef);
       const linkedPr = mode === 'new-branch' ? newBranchState.linkedPr : null;
+      const linkedIssue = mode === 'new-branch' ? newBranchState.linkedIssue : null;
+      const linkedPrState = mode === 'new-branch' ? newBranchState.linkedPr : null;
+      const includePrDiff = mode === 'new-branch' ? newBranchState.includePrDiff : false;
+      const shouldCreateSession = Boolean(linkedIssue || linkedPrState);
+
+      const setupCommands = await getWorktreeSetupCommands(projectRef);
       const sourceBranch = newBranchState.sourceBranch;
 
       let sourceLabel = '';
@@ -870,6 +824,7 @@ export function NewWorktreeDialog({
             setUpstream: prConfig.setUpstream,
             upstreamRemote: prConfig.upstreamRemote,
             upstreamBranch: prConfig.upstreamBranch,
+            returnAfterDirectoryCreated: true,
             ...(prConfig.ensureRemoteName ? { ensureRemoteName: prConfig.ensureRemoteName } : {}),
             ...(prConfig.ensureRemoteUrl ? { ensureRemoteUrl: prConfig.ensureRemoteUrl } : {}),
           };
@@ -883,20 +838,18 @@ export function NewWorktreeDialog({
           worktreeName: normalizedWorktree,
           existingBranch: mode === 'existing-branch' ? normalizedBranch : undefined,
           setupCommands,
+          returnAfterDirectoryCreated: true,
           ...(sourceBranch && mode === 'new-branch' ? { startRef: sourceBranch } : {}),
         };
       })();
       
       const resolvedArgs = await withWorktreeUpstreamDefaults(projectDirectory, args);
-      const metadata = await createWorktree(projectRef, resolvedArgs);
 
-      const linkedIssue = mode === 'new-branch' ? newBranchState.linkedIssue : null;
-      const linkedPrState = mode === 'new-branch' ? newBranchState.linkedPr : null;
-      const includePrDiff = mode === 'new-branch' ? newBranchState.includePrDiff : false;
+      const metadata = await createWorktree(projectRef, resolvedArgs);
 
       let createdSessionId: string | null = null;
 
-      if (linkedIssue || linkedPrState) {
+      if (shouldCreateSession) {
         const sessionTitle = linkedIssue
           ? `#${linkedIssue.number} ${linkedIssue.title}`.trim()
           : linkedPrState
@@ -909,6 +862,10 @@ export function NewWorktreeDialog({
         }
 
         createdSessionId = session.id;
+        onWorktreeCreated?.(metadata.path, { sessionId: createdSessionId });
+        onOpenChange(false);
+        setIsCreating(false);
+
         void sessionActions.updateSessionTitle(session.id, sessionTitle).catch(() => undefined);
 
         try {
@@ -916,6 +873,9 @@ export function NewWorktreeDialog({
         } catch {
           // ignore
         }
+      } else {
+        onOpenChange(false);
+        setIsCreating(false);
       }
       
       // Save source branch preference (only if not from PR)
@@ -929,12 +889,10 @@ export function NewWorktreeDialog({
         }),
       });
 
-      onOpenChange(false);
-
       if (createdSessionId) {
-        onWorktreeCreated?.(metadata.path, { sessionId: createdSessionId });
         void sendLinkedContextMessage({
           sessionId: createdSessionId,
+          directory: metadata.path,
           issue: linkedIssue,
           pr: linkedPrState,
           includeDiff: includePrDiff,

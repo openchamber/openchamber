@@ -1,5 +1,6 @@
 import type { FilesAPI } from '@/lib/api/types';
 import { MAX_OPEN_FILE_LINES, countLinesWithLimit } from '@/lib/fileOpenLimits';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 export type ContextFileOpenFailureReason = 'too-large' | 'missing' | 'unreadable';
 
@@ -31,7 +32,7 @@ const readFileContent = async (files: FilesAPI, path: string): Promise<string> =
   }
 
   const params = new URLSearchParams({ path, allowOutsideWorkspace: 'true', optional: 'true' });
-  const response = await fetch(`/api/fs/read?${params.toString()}`, {
+  const response = await runtimeFetch(`/api/fs/read?${params.toString()}`, {
     // Avoid conditional requests (304 + empty body).
     cache: 'no-store',
   });

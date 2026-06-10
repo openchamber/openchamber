@@ -84,9 +84,9 @@ export const fetchQuota = async () => {
       const label = unlimited
         ? 'Unlimited'
         : balance !== null
-          ? `$${formatMoney(balance)} remaining`
+          ? `$${formatMoney(balance)}`
           : null;
-      windows.credits = toUsageWindow({
+      windows.credits_balance = toUsageWindow({
         usedPercent: null,
         windowSeconds: null,
         resetAt: null,

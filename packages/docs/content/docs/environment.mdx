@@ -17,6 +17,10 @@ Bind address for the OpenChamber web server. Use `0.0.0.0` to allow access from 
 
 Password for the browser UI. Use this when binding outside localhost, using tunnels, or running behind a reverse proxy.
 
+### `OPENCHAMBER_API_ONLY`
+
+Starts OpenChamber in headless mode when set to `true` or `1`. API routes stay available for desktop and mobile clients, but the browser UI is not served.
+
 ### `OPENCHAMBER_DATA_DIR`
 
 Overrides the OpenChamber data directory. The default is `~/.config/openchamber`.

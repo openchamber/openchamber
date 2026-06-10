@@ -4,11 +4,13 @@
  * Migrates from legacy <project>/.openchamber/openchamber.json.
  */
 
-import type { FilesAPI, RuntimeAPIs } from './api/types';
+import type { FilesAPI } from './api/types';
+import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { getDesktopHomeDirectory } from './desktop';
 import { isVSCodeRuntime } from './desktop';
-import { createProjectIdFromPath } from './projectId';
 import { sanitizeStarterRefs, type DraftStarterRef } from './draftStarters';
+import { createProjectIdFromPath } from './projectId';
+import { runtimeFetch } from './runtime-fetch';
 
 type ProjectRef = { id: string; path: string };
 
@@ -21,8 +23,7 @@ const USER_PROJECTS_DIR_SEGMENTS = ['.config', 'openchamber', 'projects'];
  * Get the runtime Files API if available (Desktop/VSCode).
  */
 function getRuntimeFilesAPI(): FilesAPI | null {
-  if (typeof window === 'undefined') return null;
-  const apis = (window as typeof window & { __OPENCHAMBER_RUNTIME_APIS__?: RuntimeAPIs }).__OPENCHAMBER_RUNTIME_APIS__;
+  const apis = getRegisteredRuntimeAPIs();
   if (apis?.files) {
     return apis.files;
   }
@@ -126,7 +127,7 @@ const getBaseUrl = (): string => {
 
 const postJson = async <T>(url: string, body: unknown): Promise<{ ok: boolean; data: T | null }> => {
   try {
-    const response = await fetch(url, {
+    const response = await runtimeFetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -171,7 +172,7 @@ const readTextFile = async (path: string): Promise<string | null> => {
   }
 
   try {
-    const response = await fetch(`${getBaseUrl()}/fs/read?path=${encodeURIComponent(path)}`,
+    const response = await runtimeFetch(`${getBaseUrl()}/fs/read?path=${encodeURIComponent(path)}`,
       {
         // Avoid conditional requests (304 + empty body).
         cache: 'no-store',
@@ -208,7 +209,7 @@ const resolveHomeDirectory = async (): Promise<string | null> => {
   // In some runtimes, window.__OPENCHAMBER_HOME__ can be workspace/project-root
   // scoped, which would incorrectly route writes into the project directory.
   try {
-    const response = await fetch(`${getBaseUrl()}/fs/home`, {
+    const response = await runtimeFetch(`${getBaseUrl()}/fs/home`, {
       // Avoid conditional requests (304 + empty body).
       cache: 'no-store',
     });

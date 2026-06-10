@@ -147,7 +147,7 @@ export function InlineCommentInput({
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={t('inlineComment.input.placeholder')}
+          placeholder={isMobile ? t('inlineComment.input.placeholderShort') : t('inlineComment.input.placeholder')}
           outerClassName="rounded-[var(--radius-xl)] bg-[var(--surface-subtle)] ring-1 ring-inset ring-border/60 focus-within:ring-2 focus-within:ring-[var(--interactive-focus-ring)]"
           className="min-h-[80px] px-3 py-2.5 text-sm resize-y"
         />

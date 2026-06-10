@@ -142,6 +142,13 @@
     background-color: var(--background) !important;
   }
 
+  :root.desktop-runtime[data-oc-vibrancy],
+  :root.desktop-runtime[data-oc-vibrancy] body,
+  :root.desktop-runtime[data-oc-vibrancy] #root {
+    background: transparent !important;
+    background-color: transparent !important;
+  }
+
   .font-sans {
     font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif) !important;
   }

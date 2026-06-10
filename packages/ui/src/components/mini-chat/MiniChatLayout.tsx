@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { ChatContainer } from '@/components/chat/ChatContainer';
 import { ChatSurfaceProvider } from '@/components/chat/ChatSurfaceContext';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
+import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControls';
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
@@ -69,6 +70,9 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
   const [pinned, setPinned] = React.useState(false);
   const macosMajor = typeof window !== 'undefined' ? window.__OPENCHAMBER_MACOS_MAJOR__ ?? 0 : 0;
   const hasMacTrafficLights = Number.isFinite(macosMajor) && macosMajor > 0;
+  const isWindowsElectronDesktop = typeof window !== 'undefined'
+    && Boolean(window.__OPENCHAMBER_ELECTRON__)
+    && window.__OPENCHAMBER_PLATFORM__ === 'win32';
   const macosHeaderSizeClass = hasMacTrafficLights
     ? macosMajor >= 26
       ? 'h-12'
@@ -256,9 +260,9 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
   return (
     <header
       className={cn(
-        'flex items-center gap-3 border-b border-[var(--interactive-border)] bg-sidebar pr-3',
+        'flex items-center gap-3 bg-background pr-3',
         hasMacTrafficLights ? 'pl-[5.5rem]' : 'pl-3',
-        macosHeaderSizeClass || 'min-h-14',
+        isWindowsElectronDesktop ? 'h-12' : macosHeaderSizeClass || 'min-h-14',
       )}
       style={dragRegionStyle}
     >
@@ -327,6 +331,7 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
       >
         <Icon name="external-link" className="h-4 w-4" />
       </Button>
+      <WindowsWindowControls visible={isWindowsElectronDesktop} />
     </header>
   );
 };

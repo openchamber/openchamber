@@ -148,4 +148,137 @@ describe('OpenCode proxy SSE forwarding', () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, source: 'external-host' });
   });
+
+  it('replays parsed urlencoded bodies to generic API proxy requests', async () => {
+    const upstream = express();
+    upstream.post('/form', express.urlencoded({ extended: true }), (req, res) => {
+      res.json({ body: req.body });
+    });
+    upstreamServer = await listen(upstream);
+    const upstreamPort = upstreamServer.address().port;
+    const externalBaseUrl = `http://127.0.0.1:${upstreamPort}`;
+
+    const app = express();
+    app.use('/api', express.urlencoded({ extended: true }));
+    registerOpenCodeProxy(app, {
+      fs: {},
+      os: {},
+      path,
+      OPEN_CODE_READY_GRACE_MS: 0,
+      getRuntime: () => ({
+        openCodePort: upstreamPort,
+        openCodeBaseUrl: externalBaseUrl,
+        isOpenCodeReady: true,
+        openCodeNotReadySince: 0,
+        isRestartingOpenCode: false,
+      }),
+      getOpenCodeAuthHeaders: () => ({}),
+      buildOpenCodeUrl: (requestPath) => `${externalBaseUrl}${requestPath}`,
+      ensureOpenCodeApiPrefix: () => {},
+    });
+    proxyServer = await listen(app);
+    const proxyPort = proxyServer.address().port;
+
+    const response = await fetch(`http://127.0.0.1:${proxyPort}/api/form`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ messageID: 'msg_1' }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ body: { messageID: 'msg_1' } });
+  });
+
+  it('replays parsed JSON bodies to generic API proxy requests', async () => {
+    const upstream = express();
+    upstream.post('/session/abc/prompt_async', express.json(), (req, res) => {
+      res.json({
+        body: req.body,
+        authorization: req.headers.authorization,
+        contentLength: req.headers['content-length'],
+      });
+    });
+    upstreamServer = await listen(upstream);
+    const upstreamPort = upstreamServer.address().port;
+    const externalBaseUrl = `http://127.0.0.1:${upstreamPort}`;
+
+    const app = express();
+    app.use('/api', express.json());
+    registerOpenCodeProxy(app, {
+      fs: {},
+      os: {},
+      path,
+      OPEN_CODE_READY_GRACE_MS: 0,
+      getRuntime: () => ({
+        openCodePort: upstreamPort,
+        openCodeBaseUrl: externalBaseUrl,
+        isOpenCodeReady: true,
+        openCodeNotReadySince: 0,
+        isRestartingOpenCode: false,
+      }),
+      getOpenCodeAuthHeaders: () => ({ Authorization: 'Bearer replay-token' }),
+      buildOpenCodeUrl: (requestPath) => `${externalBaseUrl}${requestPath}`,
+      ensureOpenCodeApiPrefix: () => {},
+    });
+    proxyServer = await listen(app);
+    const proxyPort = proxyServer.address().port;
+
+    const payload = { messageID: 'msg_1', parts: [{ type: 'text', text: 'hello' }] };
+    const response = await fetch(`http://127.0.0.1:${proxyPort}/api/session/abc/prompt_async`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.body).toEqual(payload);
+    expect(data.authorization).toBe('Bearer replay-token');
+    expect(Number(data.contentLength)).toBeGreaterThan(0);
+  });
+
+  it('forwards unparsed SDK JSON bodies to generic API proxy requests', async () => {
+    const upstream = express();
+    upstream.post('/session/abc/revert', express.json(), (req, res) => {
+      res.json({
+        body: req.body,
+        contentLength: req.headers['content-length'],
+      });
+    });
+    upstreamServer = await listen(upstream);
+    const upstreamPort = upstreamServer.address().port;
+    const externalBaseUrl = `http://127.0.0.1:${upstreamPort}`;
+
+    const app = express();
+    registerOpenCodeProxy(app, {
+      fs: {},
+      os: {},
+      path,
+      OPEN_CODE_READY_GRACE_MS: 0,
+      getRuntime: () => ({
+        openCodePort: upstreamPort,
+        openCodeBaseUrl: externalBaseUrl,
+        isOpenCodeReady: true,
+        openCodeNotReadySince: 0,
+        isRestartingOpenCode: false,
+      }),
+      getOpenCodeAuthHeaders: () => ({}),
+      buildOpenCodeUrl: (requestPath) => `${externalBaseUrl}${requestPath}`,
+      ensureOpenCodeApiPrefix: () => {},
+    });
+    proxyServer = await listen(app);
+    const proxyPort = proxyServer.address().port;
+
+    const payload = { messageID: 'msg_1' };
+    const response = await fetch(`http://127.0.0.1:${proxyPort}/api/session/abc/revert`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.body).toEqual(payload);
+    expect(Number(data.contentLength)).toBeGreaterThan(0);
+  });
 });

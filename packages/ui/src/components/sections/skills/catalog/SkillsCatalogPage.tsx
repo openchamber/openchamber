@@ -1,4 +1,5 @@
 import React from 'react';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -50,7 +51,7 @@ const loadSettings = async (): Promise<DesktopSettings | null> => {
       return (result?.settings || {}) as DesktopSettings;
     }
 
-    const response = await fetch('/api/config/settings', {
+    const response = await runtimeFetch('/api/config/settings', {
       method: 'GET',
       headers: { Accept: 'application/json' },
     });
@@ -187,7 +188,7 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
         </div>
 
         {/* Source & Search */}
-        <div className="mb-8">
+        <div data-settings-item="skills.catalog.source" className="mb-8">
           <div className="mb-1 px-1">
             <h3 className="typography-ui-header font-medium text-foreground">{t('settings.skills.catalog.page.section.sourceRepository')}</h3>
           </div>
@@ -243,6 +244,7 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
               )}
 
               <Button
+                data-settings-item="skills.catalog.add-catalog"
                 size="xs"
                 className="!font-normal gap-1"
                 onClick={() => setAddCatalogOpen(true)}
@@ -251,7 +253,7 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
               </Button>
             </div>
 
-            <div className="py-1.5">
+            <div data-settings-item="skills.catalog.search" className="py-1.5">
               <div className="relative">
                 <Icon name="search" className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                 <Input

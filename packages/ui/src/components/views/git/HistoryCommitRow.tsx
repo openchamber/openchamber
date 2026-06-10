@@ -18,6 +18,8 @@ import type { LanedCommit } from './gitGraph';
 import { GitGraphSegment } from './GitGraphSegment';
 import * as git from '@/lib/gitApi';
 import { toast } from '@/components/ui/toast';
+import { formatDateTimeForPreference } from '@/lib/timeFormat';
+import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
 
 const HISTORY_DIFF_REQUEST_TIMEOUT_MS = 15000;
 const HISTORY_DIFF_LARGE_CHANGED_LINES = 500;
@@ -77,14 +79,13 @@ interface HistoryCommitRowProps {
   onActionSuccess?: () => void;
 }
 
-function formatCommitDate(date: string) {
+function formatCommitDate(date: string, timeFormatPreference: TimeFormatPreference) {
   const value = new Date(date);
   if (Number.isNaN(value.getTime())) {
     return date;
   }
 
-  return value.toLocaleString(undefined, {
-    hour12: false,
+  return formatDateTimeForPreference(value, timeFormatPreference, {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
@@ -146,6 +147,7 @@ export const HistoryCommitRow = React.memo(({
   onActionSuccess,
 }: HistoryCommitRowProps) => {
   const { t } = useI18n();
+  const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const isGraphMode = mode === 'graph';
   type PendingAction =
     | 'checkout' | 'cherryPick' | 'revert'
@@ -397,8 +399,8 @@ export const HistoryCommitRow = React.memo(({
                 {entry.author_name}
               </span>
               <span className="shrink-0">·</span>
-              <span className="truncate min-w-0" title={formatCommitDate(entry.date)}>
-                {formatCommitDate(entry.date)}
+              <span className="truncate min-w-0" title={formatCommitDate(entry.date, timeFormatPreference)}>
+                {formatCommitDate(entry.date, timeFormatPreference)}
               </span>
             </div>
             <span className="shrink-0">·</span>

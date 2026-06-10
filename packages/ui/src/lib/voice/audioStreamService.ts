@@ -18,6 +18,8 @@
  * ```
  */
 
+import { runtimeFetch } from '@/lib/runtime-fetch';
+
 export type SpeechResultCallback = (text: string, isFinal: boolean) => void;
 export type ErrorCallback = (error: string) => void;
 
@@ -352,7 +354,7 @@ class AudioStreamService {
         headers['X-Language'] = baseLang;
       }
 
-      const response = await fetch('/api/stt/transcribe', {
+      const response = await runtimeFetch('/api/stt/transcribe', {
         method: 'POST',
         headers,
         body: blob,
