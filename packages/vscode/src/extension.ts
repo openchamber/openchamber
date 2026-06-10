@@ -5,6 +5,7 @@ import { SessionEditorPanelProvider } from './SessionEditorPanelProvider';
 import { createOpenCodeManager, type OpenCodeManager } from './opencode';
 import { startGlobalEventWatcher, stopGlobalEventWatcher, setChatViewProvider } from './sessionActivityWatcher';
 import { normalizeWindowsDriveLetter } from './pathUtils';
+import { resolveWorkspaceFolders } from './workspaceResolver';
 
 let chatViewProvider: ChatViewProvider | undefined;
 let agentManagerProvider: AgentManagerPanelProvider | undefined;
@@ -466,8 +467,51 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.newSession', () => {
-      chatViewProvider?.createNewSession();
+    vscode.commands.registerCommand('openchamber.newSession', async (directory?: unknown) => {
+      const candidates = resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []);
+      let folderPath: string | undefined = typeof directory === 'string' ? directory : undefined;
+
+      if (!folderPath && candidates.length === 0) {
+        vscode.window.showInformationMessage('OpenChamber: No folder is open. Open a folder to start a new session.');
+        return;
+      }
+
+      if (!folderPath) {
+        folderPath = candidates.length === 1
+          ? candidates[0].path
+          : (await vscode.window.showQuickPick(
+              candidates.map((folder) => ({ label: folder.name, description: folder.path, path: folder.path })),
+              { placeHolder: 'Select a workspace folder for this session', matchOnDescription: true }
+            ))?.path;
+      }
+
+      if (!folderPath) {
+        return;
+      }
+
+      if (openCodeManager) {
+        const result = await openCodeManager.setWorkingDirectory(folderPath);
+        if (!result.success) {
+          vscode.window.showErrorMessage(`OpenChamber: ${result.error}`);
+          return;
+        }
+      }
+      const workspaceFolders = candidates.some((folder) => folder.path === folderPath)
+        ? candidates
+        : [
+            ...candidates,
+            {
+              name: folderPath.split(/[\\/]/).filter(Boolean).pop() ?? folderPath,
+              path: folderPath,
+            },
+          ];
+      chatViewProvider?.createNewSession({ directory: folderPath, workspaceFolders });
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      chatViewProvider?.syncWorkspaceFolders(resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []));
     })
   );
 

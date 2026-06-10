@@ -8,6 +8,7 @@ import { spawnSync } from 'child_process';
 import { spawn } from 'child_process';
 import { randomBytes } from 'crypto';
 import { normalizeWindowsDriveLetter } from './pathUtils';
+import { resolveWorkingDirectoryChange } from './workingDirectoryChange';
 
 const t = vscode.l10n.t;
 
@@ -45,11 +46,15 @@ export type OpenCodeDebugInfo = {
   authSource: 'user-env' | 'generated' | 'rotated' | null;
 };
 
+export type SetWorkingDirectoryResult =
+  | { success: true; path: string }
+  | { success: false; error: string };
+
 export interface OpenCodeManager {
   start(workdir?: string): Promise<void>;
   stop(): Promise<void>;
   restart(): Promise<void>;
-  setWorkingDirectory(path: string): Promise<{ success: boolean; restarted: boolean; path: string }>;
+  setWorkingDirectory(path: string): Promise<SetWorkingDirectoryResult>;
   getStatus(): ConnectionStatus;
   getApiUrl(): string | null;
   getOpenCodeAuthHeaders(): Record<string, string>;
@@ -728,6 +733,7 @@ export function createOpenCodeManager(_context: vscode.ExtensionContext): OpenCo
   const listeners = new Set<(status: ConnectionStatus, error?: string) => void>();
   const workspaceDirectory = (): string =>
     normalizeWindowsDriveLetter(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir());
+  const serverWorkingDirectory = (): string => normalizeWindowsDriveLetter(os.homedir());
   let workingDirectory: string = workspaceDirectory();
   let startCount = 0;
   let restartCount = 0;
@@ -886,14 +892,14 @@ export function createOpenCodeManager(_context: vscode.ExtensionContext): OpenCo
       });
       process.env.OPENCODE_SERVER_PASSWORD = password;
 
-      // SDK spawns `opencode serve` in current process cwd.
-      // Some OpenCode endpoints behave differently based on server process cwd,
-      // so ensure we start it from the workspace directory.
+      // Match the web runtime: keep the server process in a neutral cwd and pass
+      // the selected workspace through explicit `directory` API parameters.
+      const serverCwd = serverWorkingDirectory();
       const originalCwd = process.cwd();
       try {
-        process.chdir(workingDirectory);
+        process.chdir(serverCwd);
         const port = await allocateManagedOpenCodePort();
-        server = await spawnManagedOpenCodeServer(workingDirectory, port, READY_CHECK_TIMEOUT_MS);
+        server = await spawnManagedOpenCodeServer(serverCwd, port, READY_CHECK_TIMEOUT_MS);
       } finally {
         try {
           process.chdir(originalCwd);
@@ -992,9 +998,10 @@ export function createOpenCodeManager(_context: vscode.ExtensionContext): OpenCo
 
   async function restartInternal(): Promise<void> {
     restartCount += 1;
+    const restartDirectory = workingDirectory;
     await stopInternal();
     await new Promise(r => setTimeout(r, 250));
-    await startInternal(undefined, { rotateManaged: true });
+    await startInternal(restartDirectory, { rotateManaged: true });
   }
 
   async function start(workdir?: string): Promise<void> {
@@ -1042,22 +1049,29 @@ export function createOpenCodeManager(_context: vscode.ExtensionContext): OpenCo
     }
   }
 
-  async function setWorkingDirectory(newPath: string): Promise<{ success: boolean; restarted: boolean; path: string }> {
-    void newPath;
-    const workspacePath = workspaceDirectory();
-    const nextDirectory = workspacePath;
-
-    if (workingDirectory === nextDirectory) {
-      return { success: true, restarted: false, path: nextDirectory };
+  async function setWorkingDirectory(newPath: string): Promise<SetWorkingDirectoryResult> {
+    const trimmed = newPath.trim();
+    if (!trimmed) {
+      return { success: false, error: 'path not found' };
     }
 
-    workingDirectory = nextDirectory;
-
-    if (useConfiguredUrl && configuredApiUrl) {
-      return { success: true, restarted: false, path: nextDirectory };
+    let stat;
+    try {
+      stat = await fs.promises.stat(trimmed);
+    } catch {
+      return { success: false, error: 'path not found' };
+    }
+    if (!stat.isDirectory()) {
+      return { success: false, error: 'path not found' };
     }
 
-    return { success: true, restarted: false, path: nextDirectory };
+    const change = resolveWorkingDirectoryChange(workingDirectory, trimmed);
+    if (!change.changed) {
+      return { success: true, path: change.path };
+    }
+
+    workingDirectory = change.path;
+    return { success: true, path: change.path };
   }
 
   return {

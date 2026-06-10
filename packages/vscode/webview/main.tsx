@@ -24,6 +24,7 @@ declare global {
     __VSCODE_CONFIG__?: {
       apiUrl?: string;
       workspaceFolder: string;
+      workspaceFolders?: Array<{ name: string; path: string }>;
       theme: string;
       connectionStatus: string;
       cliAvailable?: boolean;
@@ -1387,18 +1388,60 @@ onCommand('createSessionWithPrompt', (payload) => {
   });
 });
 
+const normalizeWorkspaceFoldersPayload = (value: unknown): Array<{ name: string; path: string }> => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((entry) => {
+      const candidate = entry as { name?: unknown; path?: unknown };
+      const name = typeof candidate.name === 'string' ? candidate.name.trim() : '';
+      const path = typeof candidate.path === 'string' ? candidate.path.trim() : '';
+      return path ? { name, path } : null;
+    })
+    .filter((entry): entry is { name: string; path: string } => entry !== null);
+};
+
+const syncVSCodeWorkspaceProjects = async (
+  workspaceFolders: Array<{ name: string; path: string }>,
+  activePath?: string,
+) => {
+  if (window.__VSCODE_CONFIG__) {
+    window.__VSCODE_CONFIG__.workspaceFolders = workspaceFolders;
+  }
+  const { useProjectsStore } = await import('@/stores/useProjectsStore');
+  return useProjectsStore.getState().syncVSCodeWorkspaceFolders(workspaceFolders, activePath);
+};
+
+onCommand('workspaceFoldersChanged', (payload) => {
+  const record = payload as { workspaceFolders?: unknown } | undefined;
+  const workspaceFolders = normalizeWorkspaceFoldersPayload(record?.workspaceFolders);
+  void syncVSCodeWorkspaceProjects(workspaceFolders);
+});
+
 // Listen for newSession command from extension title bar button
 onCommand('newSession', (payload) => {
-  const { directoryOverride } = (payload || {}) as { directoryOverride?: unknown };
+  const record = payload as { directory?: unknown; directoryOverride?: unknown; workspaceFolders?: unknown } | undefined;
+  const rawDirectory = typeof record?.directoryOverride === 'string'
+    ? record.directoryOverride
+    : record?.directory;
+  const directoryOverride = typeof rawDirectory === 'string' && rawDirectory.trim().length > 0
+    ? rawDirectory.trim()
+    : undefined;
+  const workspaceFolders = normalizeWorkspaceFoldersPayload(record?.workspaceFolders);
 
-  void import('@/sync/session-ui-store').then(({ useSessionUIStore }) => {
+  Promise.all([
+    import('@/sync/session-ui-store'),
+    syncVSCodeWorkspaceProject(workspaceFolders, directoryOverride),
+  ]).then(([{ useSessionUIStore }]) => {
     void openNewSessionDraftWithWorkspaceSelection(
       useSessionUIStore.getState().openNewSessionDraft,
-      typeof directoryOverride === 'string' ? directoryOverride : undefined,
+      directoryOverride,
     ).then((draftOpened) => {
       if (!draftOpened) {
         return;
       }
+
       window.dispatchEvent(new CustomEvent('openchamber:navigate', { detail: { view: 'chat' } }));
     });
   });
