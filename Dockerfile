@@ -7,7 +7,7 @@ WORKDIR /app
 COPY package.json bun.lock ./
 COPY packages/ui/package.json ./packages/ui/
 COPY packages/web/package.json ./packages/web/
-COPY packages/desktop/package.json ./packages/desktop/
+COPY packages/electron/package.json ./packages/electron/
 COPY packages/vscode/package.json ./packages/vscode/
 RUN bun install --frozen-lockfile --ignore-scripts
 
