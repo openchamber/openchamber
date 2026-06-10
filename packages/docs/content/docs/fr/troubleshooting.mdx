@@ -1,0 +1,40 @@
+---
+title: Dépannage
+description: Problèmes courants d’installation et d’exécution, avec corrections rapides.
+---
+
+# Dépannage
+
+Vous êtes bloqué ? Trouvez le symptôme ci-dessous et essayez la correction.
+
+## La commande OpenChamber se ferme ou ne démarre pas
+
+- confirmez que Node.js est en version `>=22`
+- lancez `openchamber --version`
+- réinstallez la dernière CLI si nécessaire
+
+## L’UI web n’est pas joignable
+
+- consultez les logs serveur avec `openchamber logs`
+- vérifiez le port actif (par défaut `3000`)
+- ouvrez d’abord `http://localhost:3000` directement avant de tester les liens de tunnel
+
+## Le lien distant/tunnel ne fonctionne pas
+
+- lancez `openchamber tunnel status --all`
+- redémarrez le tunnel depuis la même instance/le même port
+- régénérez le lien de connexion si le token précédent a déjà été utilisé
+
+Voir [Tunnels](/tunnels/) pour la configuration complète, et [Reverse proxy](/reverse-proxy/) si vous en utilisez un.
+
+## L’extension VS Code ne se connecte pas
+
+- confirmez que le serveur OpenChamber tourne
+- vérifiez que l’extension est à jour
+- rechargez la fenêtre VS Code et réessayez la connexion
+
+## Pages liées
+
+- [Démarrage rapide](/quickstart/)
+- [Tunnels](/tunnels/)
+- [Reverse proxy](/reverse-proxy/)
