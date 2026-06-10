@@ -694,7 +694,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         jumpScrollActiveRef.current = false;
         setIsJumpScrollActive(false);
         guard?.clear();
-    }, []);
+        finishJumpNavigation();
+    }, [finishJumpNavigation]);
 
     const beginJumpScrollGuard = React.useCallback(() => {
         clearJumpScrollGuard();
@@ -736,11 +737,13 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         };
 
         container?.addEventListener('scrollend', finish, { once: true });
+        // Backup safety timeout for browsers lacking native 'scrollend' support 
+        // (e.g. older Safari/Chrome/Firefox or when scroll is interrupted by user).
         timeoutId = window.setTimeout(finish, 3000);
         jumpScrollGuardRef.current = { clear };
     }, [clearJumpScrollGuard, finishJumpNavigation, scrollRef, timelineController]);
 
-    React.useEffect(() => clearJumpScrollGuard, [clearJumpScrollGuard]);
+    React.useEffect(() => clearJumpScrollGuard, [clearJumpScrollGuard, currentSessionId]);
 
     const isTurnUserMessageAboveViewport = React.useCallback((turnId: string | null) => {
         if (!turnId) {
