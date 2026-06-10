@@ -12,6 +12,11 @@ type DeleteSessionConfirmSetter = React.Dispatch<React.SetStateAction<{
   archivedBucket: boolean;
 } | null>>;
 
+type DeleteSessionSource = {
+  archivedBucket?: boolean;
+  hardDelete?: boolean;
+};
+
 type Args = {
   activeProjectId: string | null;
   currentDirectory: string | null;
@@ -187,10 +192,10 @@ export const useSessionActions = (args: Args) => {
   const executeDeleteSession = React.useCallback(
     async (
       session: Session,
-      source?: { archivedBucket?: boolean },
+      source?: DeleteSessionSource,
       precomputed?: { descendantIds: string[] },
     ) => {
-      const shouldHardDelete = source?.archivedBucket === true;
+      const shouldHardDelete = source?.archivedBucket === true || source?.hardDelete === true;
       // Use the snapshot taken when the dialog opened (if any) so the
       // executed list matches what the user was told. Fall back to a fresh
       // collection for direct-execute (no-dialog) callers.
@@ -244,8 +249,8 @@ export const useSessionActions = (args: Args) => {
   );
 
   const handleDeleteSession = React.useCallback(
-    (session: Session, source?: { archivedBucket?: boolean }) => {
-      const shouldHardDelete = source?.archivedBucket === true;
+    (session: Session, source?: DeleteSessionSource) => {
+      const shouldHardDelete = source?.archivedBucket === true || source?.hardDelete === true;
       const effectiveDescendantIds = filterDescendantsForAction(
         collectDescendants(session.id),
         shouldHardDelete,
