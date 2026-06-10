@@ -672,6 +672,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         resumeToBottom: timelineController.resumeToBottomInstant,
     });
 
+    const handleHistoryScroll = timelineController.handleHistoryScroll;
+
     const jumpScrollActiveRef = React.useRef(false);
     const [isJumpScrollActive, setIsJumpScrollActive] = React.useState(false);
     const jumpNavigationBusyRef = React.useRef(false);
@@ -729,9 +731,9 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
             // After the jump scroll finishes, check if we are near the top boundary
             // and allow the history load handler to proceed.
             if (container) {
-                const HISTORY_SCROLL_THRESHOLD = 100;
+                const HISTORY_SCROLL_THRESHOLD = 200;
                 if (container.scrollTop < HISTORY_SCROLL_THRESHOLD) {
-                    timelineController.handleHistoryScroll();
+                    handleHistoryScroll();
                 }
             }
 
@@ -743,7 +745,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         // (e.g. older Safari/Chrome/Firefox or when scroll is interrupted by user).
         timeoutId = window.setTimeout(finish, 3000);
         jumpScrollGuardRef.current = { clear };
-    }, [clearJumpScrollGuard, finishJumpNavigation, scrollRef, timelineController]);
+    }, [clearJumpScrollGuard, finishJumpNavigation, handleHistoryScroll, scrollRef]);
 
     React.useEffect(() => clearJumpScrollGuard, [clearJumpScrollGuard, currentSessionId]);
 
@@ -772,10 +774,10 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     }, [isTurnUserMessageAboveViewport, timelineController.activeTurnId]);
     const handleChatHistoryScroll = React.useCallback(() => {
         if (!jumpScrollActiveRef.current) {
-            timelineController.handleHistoryScroll();
+            handleHistoryScroll();
         }
         updateActiveUserMessageJumpState();
-    }, [timelineController, updateActiveUserMessageJumpState]);
+    }, [handleHistoryScroll, updateActiveUserMessageJumpState]);
 
     React.useLayoutEffect(() => {
         jumpNavigationStateRef.current = {
@@ -839,13 +841,11 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
             const scrolled = await navigation.scrollToMessageId(target.targetId, { behavior: 'smooth' });
             if (!scrolled) {
                 clearJumpScrollGuard();
-                finishJumpNavigation();
             }
         } catch {
             clearJumpScrollGuard();
-            finishJumpNavigation();
         }
-    }, [beginJumpScrollGuard, clearJumpScrollGuard, finishJumpNavigation, getJumpTarget, navigation]);
+    }, [beginJumpScrollGuard, clearJumpScrollGuard, getJumpTarget, navigation]);
 
     React.useEffect(() => {
         if (typeof window === 'undefined' || !currentSessionId) return;
