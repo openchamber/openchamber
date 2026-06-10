@@ -78,6 +78,7 @@ export const formatWindowLabel = (label: string): string => {
   if (label === 'daily') return 'Daily';
   if (label === 'monthly') return 'Monthly Limit';
   if (label === 'credits') return 'Credits';
+  if (label === 'credits_balance') return 'Credits Balance';
   if (label === 'session') return 'Session';
   if (label === 'premium') return 'Premium Interactions';
   if (label === 'chat') return 'Chat Requests';

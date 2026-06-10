@@ -40,6 +40,12 @@ button,
   animation: none !important;
 }
 
+[data-settings-search-highlight="true"] {
+  border-radius: 0.25rem;
+  background: color-mix(in srgb, var(--primary-base) 7%, transparent);
+  transition: background-color 180ms ease;
+}
+
 /* ── macOS vibrancy ───────────────────────────────────────────────────────
    The window is created transparent with a native 'sidebar' NSVisualEffectView
    behind it. We keep the whole app opaque (bg-background covers the window)

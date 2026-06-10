@@ -186,6 +186,7 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
             {t('settings.mcp.sidebar.total', { count: mcpServers.length })}
           </span>
           <Button size="sm"
+            data-settings-item="mcp.create"
             variant="ghost"
             className="h-7 w-7 px-0 -my-1 text-muted-foreground"
             onClick={handleCreateNew}

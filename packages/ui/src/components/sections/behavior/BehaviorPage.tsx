@@ -243,7 +243,7 @@ export const BehaviorPage: React.FC = () => {
           </h2>
         </div>
 
-        <div>
+        <div data-settings-item="behavior.system-prompt">
           <div className="mb-1 px-1">
             <div className="flex items-center gap-1.5">
               <h3 className="typography-ui-header font-medium text-foreground">
@@ -288,7 +288,7 @@ export const BehaviorPage: React.FC = () => {
           </section>
         </div>
 
-        <div>
+        <div data-settings-item="behavior.response-style">
           <div className="mb-1 px-1">
             <div className="flex items-center gap-1.5">
               <h3 className="typography-ui-header font-medium text-foreground">

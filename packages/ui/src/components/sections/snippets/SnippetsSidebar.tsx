@@ -63,7 +63,7 @@ export const SnippetsSidebar: React.FC<SnippetsSidebarProps> = ({ onItemSelect }
         <h2 className="text-base font-semibold text-foreground mb-3">{t('settings.snippets.sidebar.title')}</h2>
         <div className="flex items-center justify-between gap-2">
           <span className="typography-meta text-muted-foreground">{t('settings.snippets.sidebar.total', { count: snippets.length })}</span>
-          <Button size="sm" variant="ghost" className="h-7 w-7 px-0 -my-1 text-muted-foreground" onClick={handleCreateNew} aria-label={t('settings.snippets.sidebar.actions.create')}>
+          <Button size="sm" data-settings-item="snippets.create" variant="ghost" className="h-7 w-7 px-0 -my-1 text-muted-foreground" onClick={handleCreateNew} aria-label={t('settings.snippets.sidebar.actions.create')}>
             <Icon name="add" className="h-3.5 w-3.5" />
           </Button>
         </div>

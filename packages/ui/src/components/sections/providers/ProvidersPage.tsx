@@ -500,7 +500,7 @@ export const ProvidersPage: React.FC = () => {
     return (
       <ScrollableOverlay outerClassName="h-full" className="w-full">
         <div className="mx-auto w-full max-w-3xl p-3 sm:p-6 sm:pt-8">
-          <div className="mb-4">
+          <div data-settings-item="providers.connect" className="mb-4">
             <h1 className="typography-ui-header font-semibold text-foreground">{t('settings.providers.page.connect.title')}</h1>
           </div>
 
@@ -599,7 +599,7 @@ export const ProvidersPage: React.FC = () => {
           </div>
 
           {candidateProviderId && (
-            <div className="mb-8">
+            <div data-settings-item="providers.auth" className="mb-8">
               <div className="mb-1 px-1">
                 <h2 className="typography-ui-header font-medium text-foreground">{t('settings.providers.page.auth.title')}</h2>
               </div>
@@ -787,7 +787,7 @@ export const ProvidersPage: React.FC = () => {
         </div>
 
         {/* Authentication */}
-        <div className="mb-8">
+        <div data-settings-item="providers.auth" className="mb-8">
           <div className="mb-1 px-1 flex items-center justify-between gap-2">
             <h3 className="typography-ui-header font-medium text-foreground">{t('settings.providers.page.auth.title')}</h3>
             <Button
@@ -934,7 +934,7 @@ export const ProvidersPage: React.FC = () => {
         </div>
 
         {/* Connection Details */}
-        <div className="mb-8">
+        <div data-settings-item="providers.connection-details" className="mb-8">
           <div className="mb-1 px-1">
             <h3 className="typography-ui-header font-medium text-foreground">{t('settings.providers.page.connectionDetails.title')}</h3>
           </div>
@@ -971,7 +971,7 @@ export const ProvidersPage: React.FC = () => {
         </div>
 
         {/* Models */}
-        <div className="mb-8">
+        <div data-settings-item="providers.models" className="mb-8">
           <div className="mb-1 px-1 flex items-center justify-between gap-2">
             <h3 className="typography-ui-header font-medium text-foreground">
               {t('settings.providers.page.models.title')}
