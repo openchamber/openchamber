@@ -2,6 +2,8 @@ import React from 'react';
 
 import { MessageFreshnessDetector } from '@/lib/messageFreshness';
 import { createScrollSpy } from '@/components/chat/lib/scroll/scrollSpy';
+import { cancelOverlayScrollbarScroll } from '@/components/ui/overlay-scrollbar-events';
+import { animateElementScrollTo } from '@/components/ui/scroll-animation';
 import { getViewportSessionMemory, useViewportStore, type SessionMemoryState } from '@/sync/viewport-store';
 
 export type AutoFollowState = 'following' | 'released';
@@ -32,6 +34,7 @@ export interface UseChatAutoFollowResult {
     isPinned: boolean;
     isOverflowing: boolean;
     isFollowingProgrammatically: boolean;
+    isScrollToBottomAnimating: boolean;
     showScrollButton: boolean;
     notifyContentChange: (reason?: ContentChangeReason) => void;
     getAnimationHandlers: (messageId: string) => AnimationHandlers;
@@ -51,6 +54,7 @@ const SETTLE_FRAMES = 4;
 const TOUCH_FINGER_DOWN_THRESHOLD = 2;
 const SETTLE_BURST_DURATION_MS = 280;
 const REPIN_GRACE_AFTER_RELEASE_MS = 1200;
+const BOTTOM_SCROLL_DURATION_MS = 220;
 
 // The bottom of the chat has an empty spacer (10vh on desktop, 40px on mobile)
 // — its height is exactly how far above scrollHeight the user can be while still
@@ -120,6 +124,7 @@ export const useChatAutoFollow = ({
     const [isOverflowing, setIsOverflowing] = React.useState(false);
     const [showScrollButton, setShowScrollButton] = React.useState(false);
     const [isFollowingProgrammatically, setIsFollowingProgrammatically] = React.useState(false);
+    const [isScrollToBottomAnimating, setIsScrollToBottomAnimating] = React.useState(false);
 
     const stateRef = React.useRef<AutoFollowState>('following');
     const sessionMessageCountRef = React.useRef(sessionMessageCount);
@@ -130,6 +135,8 @@ export const useChatAutoFollow = ({
     const lastSessionIdRef = React.useRef<string | null>(null);
     const programmaticWriteUntilRef = React.useRef(0);
     const followRafRef = React.useRef<number | null>(null);
+    const bottomScrollRafRef = React.useRef<number | null>(null);
+    const bottomScrollAnimatingRef = React.useRef(false);
     const settledFramesRef = React.useRef(0);
     const lastScrollTopRef = React.useRef(0);
     const saveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -180,6 +187,15 @@ export const useChatAutoFollow = ({
         setIsFollowingProgrammatically(false);
     }, []);
 
+    const stopBottomScrollAnimation = React.useCallback(() => {
+        if (bottomScrollRafRef.current !== null && typeof window !== 'undefined') {
+            window.cancelAnimationFrame(bottomScrollRafRef.current);
+        }
+        bottomScrollRafRef.current = null;
+        bottomScrollAnimatingRef.current = false;
+        setIsScrollToBottomAnimating(false);
+    }, []);
+
     const tickFollow = React.useCallback(() => {
         followRafRef.current = null;
         const container = scrollRef.current;
@@ -222,6 +238,7 @@ export const useChatAutoFollow = ({
     const startFollowLoop = React.useCallback(() => {
         if (typeof window === 'undefined') return;
         if (followRafRef.current !== null) return;
+        if (bottomScrollAnimatingRef.current) return;
         if (stateRef.current !== 'following') return;
         settledFramesRef.current = 0;
         setIsFollowingProgrammatically(true);
@@ -231,12 +248,14 @@ export const useChatAutoFollow = ({
     const writeScrollTopInstant = React.useCallback((target: number) => {
         const container = scrollRef.current;
         if (!container) return;
+        stopBottomScrollAnimation();
+        cancelOverlayScrollbarScroll(container);
         const max = Math.max(0, container.scrollHeight - container.clientHeight);
         const clamped = Math.max(0, Math.min(target, max));
         markProgrammaticWrite();
         container.scrollTop = clamped;
         lastScrollTopRef.current = container.scrollTop;
-    }, [markProgrammaticWrite]);
+    }, [markProgrammaticWrite, stopBottomScrollAnimation]);
 
     const stopSettleBurst = React.useCallback(() => {
         if (settleBurstRafRef.current !== null && typeof window !== 'undefined') {
@@ -270,12 +289,14 @@ export const useChatAutoFollow = ({
 
     const releaseAutoFollow = React.useCallback(() => {
         stopFollowLoop();
+        stopBottomScrollAnimation();
         stopSettleBurst();
         lastUserReleaseAtRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now();
         setStateValue('released');
-    }, [setStateValue, stopFollowLoop, stopSettleBurst]);
+    }, [setStateValue, stopBottomScrollAnimation, stopFollowLoop, stopSettleBurst]);
 
     const releaseFromUserIntent = React.useCallback(() => {
+        stopBottomScrollAnimation();
         if (stateRef.current === 'following') {
             stopFollowLoop();
             stopSettleBurst();
@@ -284,21 +305,42 @@ export const useChatAutoFollow = ({
         } else {
             lastUserReleaseAtRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now();
         }
-    }, [setStateValue, stopFollowLoop, stopSettleBurst]);
+    }, [setStateValue, stopBottomScrollAnimation, stopFollowLoop, stopSettleBurst]);
 
     const goToBottom = React.useCallback((mode: 'instant' | 'smooth' = 'instant') => {
         const container = scrollRef.current;
         setStateValue('following');
         lastUserReleaseAtRef.current = 0;
         if (!container) return;
+        cancelOverlayScrollbarScroll(container);
         if (mode === 'smooth') {
-            startFollowLoop();
+            stopFollowLoop();
+            stopSettleBurst();
+            stopBottomScrollAnimation();
+            bottomScrollAnimatingRef.current = true;
+            setIsScrollToBottomAnimating(true);
+            animateElementScrollTo(
+                container,
+                Math.max(0, container.scrollHeight - container.clientHeight),
+                'vertical',
+                BOTTOM_SCROLL_DURATION_MS,
+                bottomScrollRafRef,
+                () => {
+                    markProgrammaticWrite();
+                    lastScrollTopRef.current = container.scrollTop;
+                },
+                () => {
+                    bottomScrollAnimatingRef.current = false;
+                    setIsScrollToBottomAnimating(false);
+                    startSettleBurst();
+                },
+            );
             return;
         }
         const target = Math.max(0, container.scrollHeight - container.clientHeight);
         writeScrollTopInstant(target);
         startSettleBurst();
-    }, [setStateValue, startFollowLoop, startSettleBurst, writeScrollTopInstant]);
+    }, [markProgrammaticWrite, setStateValue, startSettleBurst, stopBottomScrollAnimation, stopFollowLoop, stopSettleBurst, writeScrollTopInstant]);
 
     const flushSave = React.useCallback(() => {
         if (saveTimerRef.current !== null) {
@@ -517,7 +559,7 @@ export const useChatAutoFollow = ({
         const handlePointerDownIntent = (event: PointerEvent) => {
             const target = event.target;
             if (!(target instanceof Element)) return;
-            if (!target.closest('[data-overlay-scrollbar-thumb]')) return;
+            if (!target.closest('[data-overlay-scrollbar-thumb]') && !target.closest('.overlay-scrollbar__track')) return;
             releaseFromUserIntent();
         };
 
@@ -606,6 +648,7 @@ export const useChatAutoFollow = ({
     React.useEffect(() => {
         return () => {
             stopFollowLoop();
+            stopBottomScrollAnimation();
             stopSettleBurst();
             flushSave();
             if (saveTimerRef.current !== null) {
@@ -613,7 +656,7 @@ export const useChatAutoFollow = ({
                 saveTimerRef.current = null;
             }
         };
-    }, [flushSave, stopFollowLoop, stopSettleBurst]);
+    }, [flushSave, stopBottomScrollAnimation, stopFollowLoop, stopSettleBurst]);
 
     React.useEffect(() => {
         if (!onActiveTurnChange) return;
@@ -691,6 +734,7 @@ export const useChatAutoFollow = ({
         isPinned: state === 'following',
         isOverflowing,
         isFollowingProgrammatically,
+        isScrollToBottomAnimating,
         showScrollButton,
         notifyContentChange,
         getAnimationHandlers,

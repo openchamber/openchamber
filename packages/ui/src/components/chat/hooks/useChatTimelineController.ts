@@ -15,6 +15,7 @@ import type { TurnHistorySignals } from '../lib/turns/historySignals';
 import { getMemoryLimits, type SessionHistoryMeta } from '@/stores/types/sessionTypes';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
+import { cancelOverlayScrollbarScroll } from '@/components/ui/overlay-scrollbar-events';
 
 type ViewportAnchor = { messageId: string; offsetTop: number };
 
@@ -624,6 +625,7 @@ export const useChatTimelineController = ({
         }
 
         releaseAutoFollow();
+        cancelOverlayScrollbarScroll(scrollRef.current);
         setPendingRevealWork(true);
 
         try {
@@ -660,7 +662,7 @@ export const useChatTimelineController = ({
         } finally {
             setPendingRevealWork(false);
         }
-    }, [attemptPendingScrollRequest, releaseAutoFollow, sessionId]);
+    }, [attemptPendingScrollRequest, releaseAutoFollow, scrollRef, sessionId]);
 
     const scrollToMessage = React.useCallback(async (
         messageId: string,
@@ -671,6 +673,7 @@ export const useChatTimelineController = ({
         }
 
         releaseAutoFollow();
+        cancelOverlayScrollbarScroll(scrollRef.current);
         setPendingRevealWork(true);
 
         try {
@@ -709,7 +712,7 @@ export const useChatTimelineController = ({
         } finally {
             setPendingRevealWork(false);
         }
-    }, [attemptPendingScrollRequest, releaseAutoFollow, sessionId]);
+    }, [attemptPendingScrollRequest, releaseAutoFollow, scrollRef, sessionId]);
 
     const resumeToBottom = React.useCallback(async () => {
         const nextStart = getInitialTurnStart(turnModelRef.current.turnCount);

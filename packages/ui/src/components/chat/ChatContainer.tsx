@@ -161,8 +161,6 @@ type ChatViewportProps = {
     scrollToBottom: () => void;
     sessionQuestions: QuestionRequest[];
     sessionPermissions: PermissionRequest[];
-    isProgrammaticFollowActive: boolean;
-    isJumpScrollActive: boolean;
 };
 
 const ChatViewport = React.memo(({
@@ -185,8 +183,6 @@ const ChatViewport = React.memo(({
     scrollToBottom,
     sessionQuestions,
     sessionPermissions,
-    isProgrammaticFollowActive,
-    isJumpScrollActive,
 }: ChatViewportProps) => {
     const focusScrollContainer = React.useCallback((event: React.MouseEvent<HTMLElement>) => {
         if (event.defaultPrevented || shouldIgnoreChatNavigationTarget(event.target)) {
@@ -257,13 +253,6 @@ const ChatViewport = React.memo(({
                         <div className="flex-shrink-0" style={{ height: isMobile ? '40px' : '10vh' }} aria-hidden="true" />
                     </div>
                 </ScrollShadow>
-                <OverlayScrollbar
-                    containerRef={scrollRef}
-                    suppressVisibility={isProgrammaticFollowActive && !isJumpScrollActive}
-                    userIntentOnly
-                    forceVisible={isJumpScrollActive}
-                    observeMutations={false}
-                />
             </div>
         </div>
     );
@@ -286,9 +275,7 @@ const ChatViewport = React.memo(({
         && prev.handleHistoryScroll === next.handleHistoryScroll
         && prev.scrollToBottom === next.scrollToBottom
         && prev.sessionQuestions === next.sessionQuestions
-        && prev.sessionPermissions === next.sessionPermissions
-        && prev.isProgrammaticFollowActive === next.isProgrammaticFollowActive
-        && prev.isJumpScrollActive === next.isJumpScrollActive;
+        && prev.sessionPermissions === next.sessionPermissions;
 });
 
 ChatViewport.displayName = 'ChatViewport';
@@ -625,6 +612,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         restoreSnapshot,
         isPinned,
         isFollowingProgrammatically,
+        isScrollToBottomAnimating,
         showScrollButton,
     } = useChatAutoFollow({
         currentSessionId,
@@ -669,7 +657,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         activeTurnId: timelineController.activeTurnId,
         scrollToTurn: timelineController.scrollToTurn,
         scrollToMessage: timelineController.scrollToMessage,
-        resumeToBottom: timelineController.resumeToBottomInstant,
+        resumeToBottom: timelineController.resumeToBottom,
     });
     const { scrollToMessageId: navScrollToMessageId } = navigation;
 
@@ -1149,8 +1137,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 scrollToBottom={resumeToLatestInstant}
                 sessionQuestions={sessionQuestions}
                 sessionPermissions={sessionPermissions}
-                isProgrammaticFollowActive={isFollowingProgrammatically}
-                isJumpScrollActive={isJumpScrollActive}
             />
 
             <div
@@ -1169,6 +1155,16 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 )}
                 {promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={resumeToLatestInstant} />}
             </div>
+
+            <OverlayScrollbar
+                containerRef={scrollRef}
+                suppressVisibility={isFollowingProgrammatically && !isJumpScrollActive && !isScrollToBottomAnimating}
+                userIntentOnly
+                forceVisible={isJumpScrollActive || isScrollToBottomAnimating}
+                observeMutations={false}
+                className="absolute inset-y-0 right-0 z-30"
+                style={{ left: 'auto', width: '16px' }}
+            />
 
             <TimelineDialog
                 open={isTimelineDialogOpen}

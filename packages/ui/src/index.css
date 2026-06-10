@@ -685,6 +685,16 @@ html:not(.dark) .chat-scroll {
   opacity: 1;
 }
 
+.overlay-scrollbar__track:hover .overlay-scrollbar__thumb {
+  background: var(--oc-scrollbar-thumb-hover) !important;
+  opacity: 1 !important;
+}
+
+.overlay-scrollbar__track:hover .overlay-scrollbar__thumb-visual,
+.overlay-scrollbar__thumb-wrapper:hover .overlay-scrollbar__thumb-visual {
+  background-color: var(--oc-scrollbar-thumb-hover) !important;
+}
+
 .overlay-scrollbar__thumb--horizontal {
   height: 6px;
   margin: 0;
