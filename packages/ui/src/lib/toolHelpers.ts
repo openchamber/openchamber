@@ -362,8 +362,8 @@ export function shouldShowToolParamSummary(toolName: unknown): boolean {
   if (!canonicalName) return false;
   const metadata = TOOL_METADATA[canonicalName];
   if (!metadata) return true;
-  // 只有显式声明没有自定义渲染的已知工具才显示参数摘要；
-  // 缺省值保留给内置工具，避免它们意外获得重复摘要。
+  // Only known tools that explicitly opt out of custom rendering show summaries.
+  // The default is reserved for built-in tools to avoid duplicate summaries.
   return metadata.hasCustomRendering === false;
 }
 
