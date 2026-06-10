@@ -1558,6 +1558,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.draftStarters.sectionSkills": "Skills",
   "chat.draftStarters.remove": "Remove",
   "chat.scrollToBottom.aria": "Ir ao final",
+  "chat.jumpToPreviousMessage.aria": "Ir para a última mensagem do usuário",
   "chat.timeline.relative.justNow": "agora mesmo",
   "chat.timeline.relative.minutesAgo": "há {count}m",
   "chat.timeline.relative.hoursAgo": "há {count}h",

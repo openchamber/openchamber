@@ -1592,6 +1592,7 @@ export const dict = {
   'chat.draftStarters.sectionSkills': 'Skills',
   'chat.draftStarters.remove': 'Remove',
   'chat.scrollToBottom.aria': 'Scroll to bottom',
+  'chat.jumpToPreviousMessage.aria': 'Jump to last user message',
   'chat.timeline.relative.justNow': 'just now',
   'chat.timeline.relative.minutesAgo': '{count}m ago',
   'chat.timeline.relative.hoursAgo': '{count}h ago',

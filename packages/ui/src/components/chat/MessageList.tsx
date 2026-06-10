@@ -25,6 +25,25 @@ const MESSAGE_LIST_OVERSCAN = 6;
 const EMPTY_STATIC_ENTRY_MESSAGES: ChatMessageEntry[] = [];
 const EMPTY_UNGROUPED_MESSAGE_IDS = new Set<string>();
 const EMPTY_VIRTUAL_ROWS: VirtualItem[] = [];
+const DEFAULT_SCROLL_SHADOW_SIZE = 48;
+
+const readPixelValue = (value: string): number | null => {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : null;
+};
+
+const getMessageScrollTopOffset = (container: HTMLElement, messageElement: HTMLElement): number => {
+    if (typeof window === 'undefined') {
+        return 0;
+    }
+
+    const containerStyle = window.getComputedStyle(container);
+    const messageStyle = window.getComputedStyle(messageElement);
+    const shadowSize = readPixelValue(containerStyle.getPropertyValue('--scroll-shadow-size')) ?? DEFAULT_SCROLL_SHADOW_SIZE;
+    const messagePaddingTop = readPixelValue(messageStyle.paddingTop) ?? 0;
+
+    return Math.max(0, shadowSize - messagePaddingTop);
+};
 
 const estimateHistoryEntryHeight = (entry: RenderEntry | undefined): number => {
     if (!entry) {
@@ -1557,7 +1576,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
 
         const containerRect = container.getBoundingClientRect();
         const messageRect = messageElement.getBoundingClientRect();
-        const offset = 50;
+        const offset = getMessageScrollTopOffset(container, messageElement);
         const top = messageRect.top - containerRect.top + container.scrollTop - offset;
         container.scrollTo({ top, behavior });
         return true;

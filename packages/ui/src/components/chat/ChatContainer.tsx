@@ -12,6 +12,7 @@ import MessageList, { type MessageListHandle } from './MessageList';
 import { PermissionCard } from './PermissionCard';
 import { QuestionCard } from './QuestionCard';
 import { StatusRowContainer } from './StatusRowContainer';
+import JumpToPreviousMessageButton from './components/JumpToPreviousMessageButton';
 import ScrollToBottomButton from './components/ScrollToBottomButton';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { useChatAutoFollow, type AnimationHandlers, type ContentChangeReason } from '@/hooks/useChatAutoFollow';
@@ -161,6 +162,7 @@ type ChatViewportProps = {
     sessionQuestions: QuestionRequest[];
     sessionPermissions: PermissionRequest[];
     isProgrammaticFollowActive: boolean;
+    isJumpScrollActive: boolean;
 };
 
 const ChatViewport = React.memo(({
@@ -184,6 +186,7 @@ const ChatViewport = React.memo(({
     sessionQuestions,
     sessionPermissions,
     isProgrammaticFollowActive,
+    isJumpScrollActive,
 }: ChatViewportProps) => {
     const focusScrollContainer = React.useCallback((event: React.MouseEvent<HTMLElement>) => {
         if (event.defaultPrevented || shouldIgnoreChatNavigationTarget(event.target)) {
@@ -254,7 +257,13 @@ const ChatViewport = React.memo(({
                         <div className="flex-shrink-0" style={{ height: isMobile ? '40px' : '10vh' }} aria-hidden="true" />
                     </div>
                 </ScrollShadow>
-                <OverlayScrollbar containerRef={scrollRef} suppressVisibility={isProgrammaticFollowActive} userIntentOnly observeMutations={false} />
+                <OverlayScrollbar
+                    containerRef={scrollRef}
+                    suppressVisibility={isProgrammaticFollowActive && !isJumpScrollActive}
+                    userIntentOnly
+                    forceVisible={isJumpScrollActive}
+                    observeMutations={false}
+                />
             </div>
         </div>
     );
@@ -278,7 +287,8 @@ const ChatViewport = React.memo(({
         && prev.scrollToBottom === next.scrollToBottom
         && prev.sessionQuestions === next.sessionQuestions
         && prev.sessionPermissions === next.sessionPermissions
-        && prev.isProgrammaticFollowActive === next.isProgrammaticFollowActive;
+        && prev.isProgrammaticFollowActive === next.isProgrammaticFollowActive
+        && prev.isJumpScrollActive === next.isJumpScrollActive;
 });
 
 ChatViewport.displayName = 'ChatViewport';
@@ -662,6 +672,176 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         resumeToBottom: timelineController.resumeToBottomInstant,
     });
 
+    const jumpScrollActiveRef = React.useRef(false);
+    const [isJumpScrollActive, setIsJumpScrollActive] = React.useState(false);
+    const jumpNavigationBusyRef = React.useRef(false);
+    const [isJumpNavigationBusy, setIsJumpNavigationBusy] = React.useState(false);
+    const jumpScrollGuardRef = React.useRef<{ clear: () => void } | null>(null);
+    const jumpNavigationStateRef = React.useRef({
+        activeTurnId: timelineController.activeTurnId,
+        turnIds: timelineController.turnIds,
+        canLoadEarlier: timelineController.historySignals.canLoadEarlier,
+    });
+
+    const finishJumpNavigation = React.useCallback(() => {
+        jumpNavigationBusyRef.current = false;
+        setIsJumpNavigationBusy(false);
+    }, []);
+
+    const clearJumpScrollGuard = React.useCallback(() => {
+        const guard = jumpScrollGuardRef.current;
+        jumpScrollGuardRef.current = null;
+        jumpScrollActiveRef.current = false;
+        setIsJumpScrollActive(false);
+        guard?.clear();
+    }, []);
+
+    const beginJumpScrollGuard = React.useCallback(() => {
+        clearJumpScrollGuard();
+        jumpScrollActiveRef.current = true;
+        setIsJumpScrollActive(true);
+
+        if (typeof window === 'undefined') {
+            return;
+        }
+
+        const container = scrollRef.current;
+        let timeoutId: number | null = null;
+        const clear = () => {
+            if (timeoutId !== null) {
+                window.clearTimeout(timeoutId);
+                timeoutId = null;
+            }
+            container?.removeEventListener('scrollend', finish);
+        };
+        const finish = () => {
+            if (jumpScrollGuardRef.current?.clear !== clear) {
+                return;
+            }
+            jumpScrollGuardRef.current = null;
+            jumpScrollActiveRef.current = false;
+            setIsJumpScrollActive(false);
+            clear();
+
+            // After the jump scroll finishes, check if we are near the top boundary
+            // and allow the history load handler to proceed.
+            if (container) {
+                const HISTORY_SCROLL_THRESHOLD = 100;
+                if (container.scrollTop < HISTORY_SCROLL_THRESHOLD) {
+                    timelineController.handleHistoryScroll();
+                }
+            }
+
+            finishJumpNavigation();
+        };
+
+        container?.addEventListener('scrollend', finish, { once: true });
+        timeoutId = window.setTimeout(finish, 3000);
+        jumpScrollGuardRef.current = { clear };
+    }, [clearJumpScrollGuard, finishJumpNavigation, scrollRef, timelineController]);
+
+    React.useEffect(() => clearJumpScrollGuard, [clearJumpScrollGuard]);
+
+    const isTurnUserMessageAboveViewport = React.useCallback((turnId: string | null) => {
+        if (!turnId) {
+            return false;
+        }
+
+        const container = scrollRef.current;
+        if (!container) {
+            return false;
+        }
+
+        const messageElement = container.querySelector<HTMLElement>(`[data-message-id="${turnId}"]`);
+        if (!messageElement) {
+            return false;
+        }
+
+        const containerTop = container.getBoundingClientRect().top;
+        const messageBottom = messageElement.getBoundingClientRect().bottom;
+        return messageBottom <= containerTop + 1;
+    }, [scrollRef]);
+    const [activeUserMessageAboveJumpTarget, setActiveUserMessageAboveJumpTarget] = React.useState(false);
+    const updateActiveUserMessageJumpState = React.useCallback(() => {
+        setActiveUserMessageAboveJumpTarget(isTurnUserMessageAboveViewport(timelineController.activeTurnId));
+    }, [isTurnUserMessageAboveViewport, timelineController.activeTurnId]);
+    const handleChatHistoryScroll = React.useCallback(() => {
+        if (!jumpScrollActiveRef.current) {
+            timelineController.handleHistoryScroll();
+        }
+        updateActiveUserMessageJumpState();
+    }, [timelineController, updateActiveUserMessageJumpState]);
+
+    React.useLayoutEffect(() => {
+        jumpNavigationStateRef.current = {
+            activeTurnId: timelineController.activeTurnId,
+            turnIds: timelineController.turnIds,
+            canLoadEarlier: timelineController.historySignals.canLoadEarlier,
+        };
+    }, [timelineController.activeTurnId, timelineController.historySignals.canLoadEarlier, timelineController.turnIds]);
+
+    React.useLayoutEffect(() => {
+        updateActiveUserMessageJumpState();
+    }, [timelineController.renderedMessages, timelineController.activeTurnId, updateActiveUserMessageJumpState]);
+
+    const activeTurnIndex = timelineController.activeTurnId
+        ? timelineController.turnIds.indexOf(timelineController.activeTurnId)
+        : -1;
+    const showJumpToPreviousMessage = timelineController.turnIds.length > 0
+        && (activeTurnIndex !== 0 || activeUserMessageAboveJumpTarget)
+        && (!timelineController.pendingRevealWork || isJumpNavigationBusy);
+
+    const getJumpTarget = React.useCallback(() => {
+        const state = jumpNavigationStateRef.current;
+        const { turnIds, activeTurnId } = state;
+
+        if (turnIds.length === 0) {
+            return { targetId: null };
+        }
+
+        if (!activeTurnId) {
+            return { targetId: turnIds[turnIds.length - 1] ?? null };
+        }
+
+        const currentIndex = turnIds.indexOf(activeTurnId);
+
+        if (currentIndex >= 0 && isTurnUserMessageAboveViewport(activeTurnId)) {
+            return { targetId: activeTurnId };
+        }
+
+        if (currentIndex > 0) {
+            return { targetId: turnIds[currentIndex - 1] ?? null };
+        }
+
+        return { targetId: null };
+    }, [isTurnUserMessageAboveViewport]);
+
+    const handleJumpToPreviousMessage = React.useCallback(async () => {
+        if (jumpNavigationBusyRef.current) {
+            return;
+        }
+
+        const target = getJumpTarget();
+        if (!target.targetId) {
+            return;
+        }
+
+        jumpNavigationBusyRef.current = true;
+        setIsJumpNavigationBusy(true);
+        beginJumpScrollGuard();
+
+        try {
+            const scrolled = await navigation.scrollToMessageId(target.targetId, { behavior: 'smooth' });
+            if (!scrolled) {
+                clearJumpScrollGuard();
+                finishJumpNavigation();
+            }
+        } catch {
+            clearJumpScrollGuard();
+            finishJumpNavigation();
+        }
+    }, [beginJumpScrollGuard, clearJumpScrollGuard, finishJumpNavigation, getJumpTarget, navigation]);
+
     React.useEffect(() => {
         if (typeof window === 'undefined' || !currentSessionId) return;
 
@@ -937,6 +1117,11 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 	return (
 		<div className="relative flex flex-col h-full bg-background">
 			{returnToParentButton}
+			<JumpToPreviousMessageButton
+				visible={showJumpToPreviousMessage && !isDesktopExpandedInput}
+				onClick={handleJumpToPreviousMessage}
+				disabled={isJumpNavigationBusy}
+			/>
 			<ChatViewport
 				key={currentSessionId}
 				currentSessionId={currentSessionId}
@@ -954,11 +1139,12 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 retryOverlay={retryOverlay}
                 handleMessageContentChange={handleMessageContentChange}
                 getAnimationHandlers={getAnimationHandlers}
-                handleHistoryScroll={timelineController.handleHistoryScroll}
+                handleHistoryScroll={handleChatHistoryScroll}
                 scrollToBottom={resumeToLatestInstant}
                 sessionQuestions={sessionQuestions}
                 sessionPermissions={sessionPermissions}
                 isProgrammaticFollowActive={isFollowingProgrammatically}
+                isJumpScrollActive={isJumpScrollActive}
             />
 
             <div

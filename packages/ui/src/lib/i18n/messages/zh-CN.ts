@@ -1558,6 +1558,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.draftStarters.sectionSkills': 'Skills',
   'chat.draftStarters.remove': 'Remove',
   'chat.scrollToBottom.aria': '滚动到底部',
+  'chat.jumpToPreviousMessage.aria': '跳转到最后一条用户消息',
   'chat.timeline.relative.justNow': '刚刚',
   'chat.timeline.relative.minutesAgo': '{count} 分钟前',
   'chat.timeline.relative.hoursAgo': '{count} 小时前',

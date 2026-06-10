@@ -10,6 +10,7 @@ type OverlayScrollbarProps = {
   observeMutations?: boolean;
   suppressVisibility?: boolean;
   userIntentOnly?: boolean;
+  forceVisible?: boolean;
 };
 
 type ThumbMetrics = {
@@ -34,6 +35,7 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
   observeMutations = true,
   suppressVisibility = false,
   userIntentOnly = false,
+  forceVisible = false,
 }) => {
   const [visible, setVisible] = React.useState(false);
   const [vertical, setVertical] = React.useState<ThumbMetrics>({ length: 0, offset: 0 });
@@ -141,6 +143,10 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
     }
     frameRef.current = requestAnimationFrame(() => {
       updateMetrics();
+      if (forceVisible) {
+        setVisible(true);
+        return;
+      }
       if (suppressVisibility && !isDraggingRef.current) {
         setVisible(false);
         return;
@@ -155,7 +161,23 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
       setVisible(true);
       scheduleHide();
     });
-  }, [scheduleHide, suppressVisibility, updateMetrics, userIntentOnly]);
+  }, [forceVisible, scheduleHide, suppressVisibility, updateMetrics, userIntentOnly]);
+
+  React.useEffect(() => {
+    if (forceVisible) {
+      updateMetrics();
+      setVisible(true);
+      if (hideTimeoutRef.current) {
+        clearTimeout(hideTimeoutRef.current);
+        hideTimeoutRef.current = null;
+      }
+      return;
+    }
+
+    if (!isDraggingRef.current && !isHoveringRef.current) {
+      scheduleHide();
+    }
+  }, [forceVisible, scheduleHide, updateMetrics]);
 
   React.useEffect(() => {
     const container = containerRef.current;
