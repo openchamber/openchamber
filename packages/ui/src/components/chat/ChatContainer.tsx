@@ -59,6 +59,7 @@ const EMPTY_QUESTIONS: QuestionRequest[] = [];
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
 const CHAT_FORCE_SCROLL_BOTTOM_EVENT = 'openchamber:chat-force-scroll-bottom';
 const DEFAULT_RETRY_MESSAGE = 'Quota limit reached. Retrying automatically.';
+const JUMP_SCROLL_GUARD_TIMEOUT_MS = 1000;
 const CHAT_SCROLL_STYLE = {
     overflowAnchor: 'none',
     overscrollBehavior: 'contain',
@@ -742,9 +743,9 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         };
 
         container?.addEventListener('scrollend', finish, { once: true });
-        // Backup safety timeout for browsers lacking native 'scrollend' support 
-        // (e.g. older Safari/Chrome/Firefox or when scroll is interrupted by user).
-        timeoutId = window.setTimeout(finish, 3000);
+        // Backup safety timeout for browsers lacking native 'scrollend' support
+        // or when scroll is interrupted by user input.
+        timeoutId = window.setTimeout(finish, JUMP_SCROLL_GUARD_TIMEOUT_MS);
         jumpScrollGuardRef.current = { clear };
     }, [clearJumpScrollGuard, finishJumpNavigation, handleHistoryScroll, scrollRef]);
 
@@ -861,14 +862,28 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     const handleJumpToNextMessage = React.useCallback(() => {
         const target = getJumpTarget('next');
         if (!target.targetId) {
-            const container = scrollRef.current;
-            if (container) {
-                container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+            if (jumpNavigationBusyRef.current) {
+                return;
             }
+
+            const container = scrollRef.current;
+            if (!container) {
+                return;
+            }
+
+            const bottomScrollTop = Math.max(container.scrollHeight - container.clientHeight, 0);
+            if (Math.abs(container.scrollTop - bottomScrollTop) < 1) {
+                return;
+            }
+
+            jumpNavigationBusyRef.current = true;
+            setIsJumpNavigationBusy(true);
+            beginJumpScrollGuard();
+            container.scrollTo({ top: bottomScrollTop, behavior: 'smooth' });
             return;
         }
         void handleJumpToUserMessage('next');
-    }, [getJumpTarget, handleJumpToUserMessage, scrollRef]);
+    }, [beginJumpScrollGuard, getJumpTarget, handleJumpToUserMessage, scrollRef]);
 
     const handleLoadAllHistoryAndScrollToTop = React.useCallback(async () => {
         if (fullHistoryNavigationBusyRef.current || jumpNavigationBusyRef.current) {

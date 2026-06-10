@@ -1623,6 +1623,12 @@ html.desktop-runtime
 html.desktop-runtime [class*="cursor-pointer"] {
   cursor: default !important;
 }
+html.desktop-runtime [data-chat-navigation-button="true"][data-interactive="true"] {
+  cursor: pointer !important;
+}
+html.desktop-runtime [data-chat-navigation-button="true"][data-interactive="false"] {
+  cursor: default !important;
+}
 html.desktop-runtime .markdown-content [data-openchamber-file-link="true"] {
   cursor: default;
 }

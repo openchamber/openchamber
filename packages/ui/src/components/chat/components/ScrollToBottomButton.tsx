@@ -127,9 +127,11 @@ const ScrollToBottomButton: React.FC<ScrollToBottomButtonProps> = ({ visible, on
                         size="sm"
                         {...pressHoldProps}
                         aria-disabled={disabled}
+                        data-chat-navigation-button="true"
+                        data-interactive={!disabled}
                         className={cn(
                             "size-8 rounded-full [corner-shape:round] p-0 shadow-none bg-background/95 hover:bg-interactive-hover",
-                            disabled && "opacity-50 cursor-not-allowed",
+                            disabled && "opacity-50",
                             isShaking && "animate-button-shake"
                         )}
                         aria-label={currentLabel}

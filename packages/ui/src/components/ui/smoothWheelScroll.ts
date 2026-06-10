@@ -35,20 +35,6 @@ export const cancelSmoothWheelScroll = (container: HTMLElement): void => {
 
 export const smoothWheelScrollElement = (container: HTMLElement, event: WheelLike): void => {
   const state = getState(container);
-  const clonedEvent = new WheelEvent('wheel', {
-    deltaX: event.deltaX,
-    deltaY: event.deltaY,
-    deltaZ: event.deltaZ,
-    deltaMode: event.deltaMode,
-    bubbles: true,
-    cancelable: true,
-    ctrlKey: event.ctrlKey,
-    shiftKey: event.shiftKey,
-    altKey: event.altKey,
-    metaKey: event.metaKey,
-  });
-  container.dispatchEvent(clonedEvent);
-
   const maxScroll = container.scrollHeight - container.clientHeight;
   if (state.target === null) {
     state.target = container.scrollTop;

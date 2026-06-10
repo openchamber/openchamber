@@ -257,6 +257,8 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
     container.addEventListener("load", onLoad, true);
 
     return () => {
+      isDraggingRef.current = false;
+      dragAxisRef.current = null;
       container.removeEventListener("scroll", onScroll);
       container.removeEventListener(OVERLAY_SCROLLBAR_CANCEL_SCROLL_EVENT, cancelScrollAnimations);
       container.removeEventListener("input", onInput, true);
