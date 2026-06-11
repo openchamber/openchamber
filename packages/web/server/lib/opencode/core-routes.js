@@ -620,7 +620,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
             redirect: 'manual',
             signal: AbortSignal.timeout(1500),
           });
-          return res.json({ ok: response.ok, status: response.status });
+          return res.json({ ok: response.status >= 200 && response.status < 600, status: response.status });
         } catch (error) {
           return res.json({ ok: false, error: error?.message || 'Probe failed' });
         }

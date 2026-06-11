@@ -43,7 +43,7 @@ import { useInputStore } from '@/sync/input-store';
 import { createWorktreeSessionForNewBranch } from '@/lib/worktreeSessionCreator';
 import { cn } from '@/lib/utils';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
-import { useI18n } from '@/lib/i18n';
+import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { TodoSendDialog, type TodoSendExecution } from './TodoSendDialog';
 
@@ -972,7 +972,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
                   >
                     <span className="min-w-0 truncate typography-ui-label text-foreground">{plan.title}</span>
                     <span className="flex-shrink-0 typography-micro text-muted-foreground">
-                      {new Date(plan.createdAt).toLocaleDateString()}
+                      {new Date(plan.createdAt).toLocaleDateString(getCurrentIntlLocale())}
                     </span>
                   </button>
                   <button

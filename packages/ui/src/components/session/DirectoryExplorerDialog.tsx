@@ -21,10 +21,6 @@ import { useDeviceInfo } from '@/lib/device';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { Icon } from "@/components/icon/Icon";
 import { opencodeClient } from '@/lib/opencode/client';
-import {
-  setDirectoryShowHidden,
-  useDirectoryShowHidden,
-} from '@/lib/directoryShowHidden';
 import { useI18n } from '@/lib/i18n';
 
 interface DirectoryExplorerDialogProps {
@@ -152,7 +148,6 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   const loadGitIdentityProfiles = useGitIdentitiesStore((s) => s.loadProfiles);
   const loadGlobalGitIdentity = useGitIdentitiesStore((s) => s.loadGlobalIdentity);
   const loadDefaultGitIdentityId = useGitIdentitiesStore((s) => s.loadDefaultGitIdentityId);
-  const showHidden = useDirectoryShowHidden();
   const { isDesktop, requestAccess, startAccessing } = useFileSystemAccess();
   const { isMobile } = useDeviceInfo();
   const inputRef = React.useRef<HTMLInputElement>(null);
@@ -170,6 +165,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   const [isCloneMode, setIsCloneMode] = React.useState(false);
   const [cloneRemoteUrl, setCloneRemoteUrl] = React.useState('');
   const [selectedGitIdentityId, setSelectedGitIdentityId] = React.useState<string | null>(null);
+  const [showHidden, setShowHidden] = React.useState(false);
 
   const explorerRootDirectory = dialogHomeDirectory || homeDirectory;
 
@@ -189,6 +185,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     setIsCloneMode(false);
     setCloneRemoteUrl('');
     setSelectedGitIdentityId(null);
+    setShowHidden(false);
     requestAnimationFrame(() => focusPathInput(inputRef.current));
 
     let cancelled = false;
@@ -524,7 +521,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   const showHiddenToggle = (
     <button
       type="button"
-      onClick={() => setDirectoryShowHidden(!showHidden)}
+      onClick={() => setShowHidden((value) => !value)}
       className="flex flex-shrink-0 items-center gap-2 rounded-lg px-2 py-1 typography-meta text-muted-foreground transition-colors hover:bg-interactive-hover/40"
     >
       {showHidden ? <Icon name="checkbox" className="h-4 w-4 text-primary" /> : <Icon name="checkbox-blank" className="h-4 w-4" />}

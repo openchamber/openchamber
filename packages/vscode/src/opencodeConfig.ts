@@ -1431,6 +1431,103 @@ const getJsonWriteTarget = (
   return { config: userConfig, path: paths.userPath };
 };
 
+const getAgentPermissionSource = (agentName: string, workingDirectory?: string) => {
+  if (workingDirectory) {
+    const projectMdPath = getProjectAgentPath(workingDirectory, agentName);
+    if (fs.existsSync(projectMdPath)) {
+      const { frontmatter } = parseMdFile(projectMdPath);
+      if (frontmatter.permission !== undefined) {
+        return { source: 'md' as const, scope: AGENT_SCOPE.PROJECT, path: projectMdPath };
+      }
+    }
+  }
+
+  const userMdPath = getUserAgentPath(agentName);
+  if (fs.existsSync(userMdPath)) {
+    const { frontmatter } = parseMdFile(userMdPath);
+    if (frontmatter.permission !== undefined) {
+      return { source: 'md' as const, scope: AGENT_SCOPE.USER, path: userMdPath };
+    }
+  }
+
+  const layers = readConfigLayers(workingDirectory);
+  const customAgent = ((layers.customConfig as Record<string, unknown>)?.agent as Record<string, unknown> | undefined)?.[agentName] as Record<string, unknown> | undefined;
+  if (customAgent?.permission !== undefined && layers.paths.customPath) {
+    return { source: 'json' as const, scope: 'custom' as const, path: layers.paths.customPath };
+  }
+
+  const projectAgent = ((layers.projectConfig as Record<string, unknown>)?.agent as Record<string, unknown> | undefined)?.[agentName] as Record<string, unknown> | undefined;
+  if (projectAgent?.permission !== undefined && layers.paths.projectPath) {
+    return { source: 'json' as const, scope: AGENT_SCOPE.PROJECT, path: layers.paths.projectPath };
+  }
+
+  const userAgent = ((layers.userConfig as Record<string, unknown>)?.agent as Record<string, unknown> | undefined)?.[agentName] as Record<string, unknown> | undefined;
+  if (userAgent?.permission !== undefined) {
+    return { source: 'json' as const, scope: AGENT_SCOPE.USER, path: layers.paths.userPath };
+  }
+
+  return { source: null, scope: null, path: null };
+};
+
+const mergePermissionWithNonWildcards = (newPermission: unknown, permissionSource: ReturnType<typeof getAgentPermissionSource>, agentName: string) => {
+  if (!permissionSource.source || !permissionSource.path) {
+    return newPermission;
+  }
+
+  let existingPermission: unknown = null;
+  if (permissionSource.source === 'md') {
+    const { frontmatter } = parseMdFile(permissionSource.path);
+    existingPermission = frontmatter.permission;
+  } else if (permissionSource.source === 'json') {
+    const config = readConfigFile(permissionSource.path) as Record<string, unknown>;
+    existingPermission = (((config.agent as Record<string, unknown> | undefined)?.[agentName] as Record<string, unknown> | undefined)?.permission);
+  }
+
+  if (!existingPermission || typeof existingPermission === 'string' || newPermission == null || typeof newPermission === 'string') {
+    return newPermission;
+  }
+
+  if (typeof existingPermission !== 'object' || Array.isArray(existingPermission) || typeof newPermission !== 'object' || Array.isArray(newPermission)) {
+    return newPermission;
+  }
+
+  const nonWildcardPatterns: Record<string, Record<string, unknown>> = {};
+  for (const [permKey, permValue] of Object.entries(existingPermission as Record<string, unknown>)) {
+    if (permKey === '*' || typeof permValue !== 'object' || permValue === null || Array.isArray(permValue)) continue;
+    const nonWildcards: Record<string, unknown> = {};
+    for (const [pattern, action] of Object.entries(permValue as Record<string, unknown>)) {
+      if (pattern !== '*') {
+        nonWildcards[pattern] = action;
+      }
+    }
+    if (Object.keys(nonWildcards).length > 0) {
+      nonWildcardPatterns[permKey] = nonWildcards;
+    }
+  }
+
+  if (Object.keys(nonWildcardPatterns).length === 0) {
+    return newPermission;
+  }
+
+  const merged: Record<string, unknown> = { ...(newPermission as Record<string, unknown>) };
+  for (const [permKey, patterns] of Object.entries(nonWildcardPatterns)) {
+    const newValue = merged[permKey];
+    if (typeof newValue === 'string') {
+      merged[permKey] = { '*': newValue, ...patterns };
+    } else if (typeof newValue === 'object' && newValue !== null && !Array.isArray(newValue)) {
+      merged[permKey] = { ...patterns, ...(newValue as Record<string, unknown>) };
+    } else {
+      const existingValue = (existingPermission as Record<string, unknown>)[permKey];
+      if (typeof existingValue === 'object' && existingValue !== null && !Array.isArray(existingValue)) {
+        const wildcard = (existingValue as Record<string, unknown>)['*'];
+        merged[permKey] = wildcard ? { '*': wildcard, ...patterns } : patterns;
+      }
+    }
+  }
+
+  return merged;
+};
+
 const parseMdFile = (filePath: string): { frontmatter: Record<string, unknown>; body: string } => {
   const content = fs.readFileSync(filePath, 'utf8');
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
@@ -1545,7 +1642,7 @@ export const updateAgent = (agentName: string, updates: Record<string, unknown>,
   const hasJsonFields = Boolean(jsonSource.exists && jsonSection && Object.keys(jsonSection).length > 0);
   const jsonTarget = jsonSource.exists
     ? { config: jsonSource.config, path: jsonSource.path }
-    : getJsonWriteTarget(layers, workingDirectory ? AGENT_SCOPE.PROJECT : AGENT_SCOPE.USER);
+    : getJsonWriteTarget(layers, AGENT_SCOPE.USER);
   const config = (jsonTarget.config || {}) as Record<string, unknown>;
   
   // Determine if we should create a new md file:
@@ -1569,6 +1666,39 @@ export const updateAgent = (agentName: string, updates: Record<string, unknown>,
 
   for (const [field, value] of Object.entries(updates || {})) {
     if (field === 'prompt') {
+      if (value === null) {
+        if (mdExists || creatingNewMd) {
+          if (mdData) {
+            mdData.body = '';
+            mdModified = true;
+          }
+          continue;
+        }
+
+        if (isPromptFileReference(jsonSection?.prompt)) {
+          const promptFilePath = resolvePromptFilePath(jsonSection.prompt);
+          if (!promptFilePath) throw new Error(`Invalid prompt file reference for agent ${agentName}`);
+          writePromptFile(promptFilePath, '');
+          continue;
+        }
+
+        if (config.agent) {
+          const agentMap = config.agent as Record<string, unknown>;
+          const current = agentMap[agentName] as Record<string, unknown> | undefined;
+          if (current) {
+            delete current.prompt;
+            if (Object.keys(current).length === 0) {
+              delete agentMap[agentName];
+            }
+            if (Object.keys(agentMap).length === 0) {
+              delete config.agent;
+            }
+            jsonModified = true;
+          }
+        }
+        continue;
+      }
+
       const normalizedValue = typeof value === 'string' ? value : value == null ? '' : String(value);
 
       if (mdExists || creatingNewMd) {
@@ -1591,6 +1721,53 @@ export const updateAgent = (agentName: string, updates: Record<string, unknown>,
       const current = ((config.agent as Record<string, unknown>)[agentName] as Record<string, unknown> | undefined) ?? {};
       (config.agent as Record<string, unknown>)[agentName] = { ...current, prompt: normalizedValue };
       jsonModified = true;
+      continue;
+    }
+
+    if (field === 'permission') {
+      const permissionSource = getAgentPermissionSource(agentName, workingDirectory);
+      const newPermission = mergePermissionWithNonWildcards(value, permissionSource, agentName);
+
+      if (permissionSource.source === 'md' && permissionSource.path) {
+        if (mdData && permissionSource.path === targetPath) {
+          mdData.frontmatter.permission = newPermission;
+          mdModified = true;
+        } else {
+          const existingMdData = parseMdFile(permissionSource.path);
+          existingMdData.frontmatter.permission = newPermission;
+          writeMdFile(permissionSource.path, existingMdData.frontmatter, existingMdData.body);
+        }
+      } else if (permissionSource.source === 'json' && permissionSource.path) {
+        if (permissionSource.path === (jsonTarget.path || CONFIG_FILE)) {
+          if (!config.agent) config.agent = {};
+          const current = ((config.agent as Record<string, unknown>)[agentName] as Record<string, unknown> | undefined) ?? {};
+          (config.agent as Record<string, unknown>)[agentName] = { ...current, permission: newPermission };
+          jsonModified = true;
+        } else {
+          const existingConfig = readConfigFile(permissionSource.path) as Record<string, unknown>;
+          const agentMap = (existingConfig.agent as Record<string, unknown> | undefined) ?? {};
+          const current = (agentMap[agentName] as Record<string, unknown> | undefined) ?? {};
+          agentMap[agentName] = { ...current, permission: newPermission };
+          existingConfig.agent = agentMap;
+          writeConfig(existingConfig, permissionSource.path);
+        }
+      } else if (mdExists && mdData) {
+        mdData.frontmatter.permission = newPermission;
+        mdModified = true;
+      } else if (hasJsonFields) {
+        if (!config.agent) config.agent = {};
+        const current = ((config.agent as Record<string, unknown>)[agentName] as Record<string, unknown> | undefined) ?? {};
+        (config.agent as Record<string, unknown>)[agentName] = { ...current, permission: newPermission };
+        jsonModified = true;
+      } else {
+        const writeTarget = getJsonWriteTarget(layers, AGENT_SCOPE.USER);
+        const targetConfig = (writeTarget.config || {}) as Record<string, unknown>;
+        const agentMap = (targetConfig.agent as Record<string, unknown> | undefined) ?? {};
+        const current = (agentMap[agentName] as Record<string, unknown> | undefined) ?? {};
+        agentMap[agentName] = { ...current, permission: newPermission };
+        targetConfig.agent = agentMap;
+        writeConfig(targetConfig, writeTarget.path || CONFIG_FILE);
+      }
       continue;
     }
 

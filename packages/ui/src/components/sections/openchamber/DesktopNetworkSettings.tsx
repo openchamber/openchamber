@@ -216,6 +216,7 @@ export const DesktopNetworkSettings: React.FC = () => {
       <section className="space-y-2 px-2 pb-2 pt-0">
         {launchAtLoginSupported ? (
           <div
+            data-settings-item="sessions.desktop-launch-at-login"
             className="group flex cursor-pointer items-start gap-2 py-1.5"
             role="button"
             tabIndex={0}
@@ -242,7 +243,7 @@ export const DesktopNetworkSettings: React.FC = () => {
           </div>
         ) : null}
 
-        <div className="space-y-1 py-1.5">
+        <div data-settings-item="sessions.desktop-ui-password" className="space-y-1 py-1.5">
           <label className="typography-ui-label text-foreground" htmlFor="desktop-ui-password">
             {t('settings.openchamber.desktopPassword.field.password')}
           </label>
@@ -261,6 +262,7 @@ export const DesktopNetworkSettings: React.FC = () => {
         </div>
 
         <div
+          data-settings-item="sessions.desktop-lan-access"
           className="group flex cursor-pointer items-start gap-2 py-1.5"
           role="button"
           tabIndex={0}

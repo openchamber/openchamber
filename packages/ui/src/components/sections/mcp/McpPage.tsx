@@ -1493,7 +1493,7 @@ export const McpPage: React.FC = () => {
         )}
 
         {/* Server Identity */}
-        <div className="mb-6">
+        <div data-settings-item="mcp.server" className="mb-6">
           <div className="mb-1 px-1">
             <h3 className="typography-ui-header font-medium text-foreground">{t('settings.mcp.page.server.title')}</h3>
           </div>
@@ -1604,7 +1604,7 @@ export const McpPage: React.FC = () => {
         </div>
 
         {/* Connection */}
-        <div className="mb-6">
+        <div data-settings-item="mcp.command" className="mb-6">
           <div className="mb-1 px-1">
             <h3 className="typography-ui-header font-medium text-foreground">
               {mcpType === 'local' ? t('settings.mcp.page.connection.command') : t('settings.mcp.page.connection.serverUrl')}
@@ -1634,7 +1634,7 @@ export const McpPage: React.FC = () => {
         </div>
 
         {mcpType === 'remote' && (
-          <div className="mb-6">
+          <div data-settings-item="mcp.advanced" className="mb-6">
             <div className="mb-1 px-1">
               <h3 className="typography-ui-header font-medium text-foreground">{t('settings.mcp.page.advanced.title')}</h3>
             </div>
@@ -1787,7 +1787,7 @@ export const McpPage: React.FC = () => {
         )}
 
         {/* Environment Variables */}
-        <div className="mb-2">
+        <div data-settings-item="mcp.environment" className="mb-2">
           <div className="mb-1 px-1">
             <h3 className="typography-ui-header font-medium text-foreground">
               {t('settings.mcp.page.env.title')}

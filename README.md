@@ -58,13 +58,16 @@
 - Background notifications plus reliable cross-tab session activity tracking
 - Built-in self-update + restart flow that keeps your server settings intact
 
-### Desktop (macOS)
+### Desktop (macOS + Windows)
 
-- Native macOS menu integration with polished app actions and deep-link handling
-- Multi-window support for parallel project/session workflows
-- "Open In" shortcuts for Finder, Terminal, and your preferred editor
-- Fast switching between local and remote instances
-- Workspace-first startup flow with directory picker and steadier window restore behavior
+- Floating Mini Chat: keep a small always-on-top assistant beside your editor, browser, or terminal
+- Multiple native windows for separate projects or sessions
+- Native notifications for task alerts while OpenChamber is hidden
+- One-click open in VS Code, Cursor, Terminal, Finder, Explorer, and more
+- Desktop host switcher for local and remote OpenChamber instances
+- Convenient tunnel management without manual setup
+- Deep-link connections for joining remote OpenChamber from a link
+- SSH remote access with host import, connection management, and port forwarding
 
 ### VS Code Extension
 
@@ -86,14 +89,14 @@
 
 > **Prerequisite:** [OpenCode CLI](https://opencode.ai) installed.
 
-### **Desktop (macOS)**
+### **Desktop (macOS + Windows)**
 Download from [Releases](https://github.com/btriapitsyn/openchamber/releases).
 
 ### **VS Code**
 Install from [Marketplace](https://marketplace.visualstudio.com/items?itemName=fedaykindev.openchamber) or search "OpenChamber" in Extensions.
 
 ### **CLI (Web + PWA)**
-_requires Node.js 20+_
+_requires Node.js 22+_
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/btriapitsyn/openchamber/main/scripts/install.sh | bash
@@ -330,7 +333,7 @@ chown -R 1000:1000 data/
 <details>
 <summary><strong>Files, Diff & Terminal</strong></summary>
 
-- Workspace file browser with inline editing, syntax highlighting, and markdown preview
+- Workspace file browser with inline editing, syntax highlighting, Vim mode, and markdown preview
 - Beautiful diff viewer with stacked/inline modes, lazy loading for large changesets
 - Integrated terminal with per-directory sessions, tabbed interface, and stable heavy-output performance
 - Clickable file paths in messages - jump to exact line locations
@@ -350,14 +353,16 @@ chown -R 1000:1000 data/
 </details>
 
 <details>
-<summary><strong>Desktop (macOS)</strong></summary>
+<summary><strong>Desktop (macOS + Windows)</strong></summary>
 
-- Connect to remote OpenChamber instances over SSH with dedicated lifecycle flows
-- Project Actions: run dev servers, SSH port forwarding, open remote URLs locally
-- Multi-window support for parallel project workflows
-- "Open In" shortcuts for Finder, Terminal, and your preferred editor
-- Fast switching between local and remote instances
-- Native macOS menu, deep-link handling, and polished startup
+- Floating Mini Chat: keep a small always-on-top assistant beside your editor, browser, or terminal
+- Multiple native windows for separate projects or sessions
+- Native notifications for task alerts while OpenChamber is hidden
+- One-click open in VS Code, Cursor, Terminal, Finder, Explorer, and more
+- Desktop host switcher for local and remote OpenChamber instances
+- Convenient tunnel management without manual setup
+- Deep-link connections for joining remote OpenChamber from a link
+- SSH remote access with host import, connection management, and port forwarding
 
 </details>
 
@@ -402,7 +407,7 @@ chown -R 1000:1000 data/
 
 Active development. Here's what's being worked on or planned:
 
-- Windows and Linux desktop apps
+- Linux desktop app
 - Mobile app with remote instance and laptop connectivity
 - More built-in tunneling options
 - Kanban board for multi-agent management - keeping the human in the loop and in control

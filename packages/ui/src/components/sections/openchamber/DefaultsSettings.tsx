@@ -32,8 +32,6 @@ export const DefaultsSettings: React.FC = () => {
   const setSettingsDefaultModel = useConfigStore((state) => state.setSettingsDefaultModel);
   const setSettingsDefaultVariant = useConfigStore((state) => state.setSettingsDefaultVariant);
   const setSettingsDefaultAgent = useConfigStore((state) => state.setSettingsDefaultAgent);
-  const setSettingsDefaultFileViewerPreview = useConfigStore((state) => state.setSettingsDefaultFileViewerPreview);
-  const settingsDefaultFileViewerPreview = useConfigStore((state) => state.settingsDefaultFileViewerPreview);
   const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
   const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
   const providers = useConfigStore((state) => state.providers);
@@ -191,12 +189,6 @@ export const DefaultsSettings: React.FC = () => {
     [setAgent, setSettingsDefaultAgent]
   );
 
-  const handleToggleFileViewerPreview = React.useCallback(() => {
-    const next = !settingsDefaultFileViewerPreview;
-    setSettingsDefaultFileViewerPreview(next);
-    updateDesktopSettings({ defaultFileViewerPreview: next }).catch(console.warn);
-  }, [settingsDefaultFileViewerPreview, setSettingsDefaultFileViewerPreview]);
-
   const availableVariants = React.useMemo(() => {
     if (!parsedModel.providerId || !parsedModel.modelId) return [];
     const provider = providers.find((p) => p.id === parsedModel.providerId);
@@ -253,7 +245,7 @@ export const DefaultsSettings: React.FC = () => {
           )}
         </div>
 
-        <div className={cn('flex flex-col gap-2 py-1 sm:flex-row sm:items-center sm:gap-8')}>
+        <div data-settings-item="sessions.default-model" className={cn('flex flex-col gap-2 py-1 sm:flex-row sm:items-center sm:gap-8')}>
           <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
             <span className="typography-ui-label text-foreground">{t('settings.openchamber.defaults.field.defaultModel')}</span>
           </div>
@@ -262,7 +254,7 @@ export const DefaultsSettings: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex flex-col gap-2 py-1 sm:flex-row sm:items-center sm:gap-8">
+        <div data-settings-item="sessions.default-thinking" className="flex flex-col gap-2 py-1 sm:flex-row sm:items-center sm:gap-8">
           <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
             <span className="typography-ui-label text-foreground">{t('settings.openchamber.defaults.field.defaultThinking')}</span>
           </div>
@@ -285,7 +277,7 @@ export const DefaultsSettings: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex flex-col gap-2 py-1 sm:flex-row sm:items-center sm:gap-8">
+        <div data-settings-item="sessions.default-agent" className="flex flex-col gap-2 py-1 sm:flex-row sm:items-center sm:gap-8">
           <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
             <span className="typography-ui-label text-foreground">{t('settings.openchamber.defaults.field.defaultAgent')}</span>
           </div>
@@ -295,6 +287,7 @@ export const DefaultsSettings: React.FC = () => {
         </div>
 
         <div
+          data-settings-item="sessions.deletion-dialog"
           className="group flex cursor-pointer items-center gap-2 py-1"
           role="button"
           tabIndex={0}
@@ -309,23 +302,6 @@ export const DefaultsSettings: React.FC = () => {
         >
           <Checkbox checked={showDeletionDialog} onChange={setShowDeletionDialog} ariaLabel={t('settings.openchamber.defaults.field.showDeletionDialogAria')} />
           <span className="typography-ui-label text-foreground">{t('settings.openchamber.defaults.field.showDeletionDialog')}</span>
-        </div>
-
-        <div
-          className="group flex cursor-pointer items-center gap-2 py-1"
-          role="button"
-          tabIndex={0}
-          aria-pressed={settingsDefaultFileViewerPreview}
-          onClick={handleToggleFileViewerPreview}
-          onKeyDown={(event) => {
-            if (event.key === ' ' || event.key === 'Enter') {
-              event.preventDefault();
-              handleToggleFileViewerPreview();
-            }
-          }}
-        >
-          <Checkbox checked={settingsDefaultFileViewerPreview} onChange={setSettingsDefaultFileViewerPreview} ariaLabel={t('settings.openchamber.defaults.field.openFilesPreviewAria')} />
-          <span className="typography-ui-label text-foreground">{t('settings.openchamber.defaults.field.openFilesPreview')}</span>
         </div>
 
       </section>

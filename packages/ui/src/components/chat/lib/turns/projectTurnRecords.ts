@@ -1,6 +1,6 @@
 import { projectTurnActivity } from './projectTurnActivity';
 import { projectTurnIndexes } from './projectTurnIndexes';
-import { projectTurnDiffStats, projectTurnSummary } from './projectTurnSummary';
+import { projectTurnChangedFiles, projectTurnDiffStats, projectTurnSummary } from './projectTurnSummary';
 import type {
     ChatMessageEntry,
     TurnMessageRecord,
@@ -83,11 +83,13 @@ const buildTurnStreamState = (userMessage: ChatMessageEntry, assistantMessages: 
 interface ProjectTurnRecordsOptions {
     previousProjection?: TurnProjectionResult | null;
     showTextJustificationActivity: boolean;
+    showTurnChangedFiles: boolean;
 }
 
 const DEFAULT_OPTIONS: ProjectTurnRecordsOptions = {
     previousProjection: null,
     showTextJustificationActivity: false,
+    showTurnChangedFiles: false,
 };
 
 const areSameMessageRefs = (left: ChatMessageEntry[], right: ChatMessageEntry[]): boolean => {
@@ -180,6 +182,7 @@ export const projectTurnRecords = (
             hasTools: false,
             hasReasoning: false,
             diffStats: undefined,
+            changedFiles: undefined,
             stream: {
                 isStreaming: false,
                 isRetrying: false,
@@ -215,6 +218,9 @@ export const projectTurnRecords = (
         turn.summary = projectTurnSummary(turn.assistantMessages);
         turn.summaryText = turn.summary.text ?? getUserSummaryBody(turn.userMessage);
         turn.diffStats = projectTurnDiffStats(turn.userMessage);
+        turn.changedFiles = effectiveOptions.showTurnChangedFiles
+            ? projectTurnChangedFiles(turn.userMessage)
+            : undefined;
 
         const activity = projectTurnActivity({
             turnId: turn.turnId,

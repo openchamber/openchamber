@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  applyPreviewPassthroughRequestHeaders,
+  applyPreviewPassthroughResponseHeaders,
   classifyPreviewNavigation,
   classifyPreviewResourceError,
   normalizeProxyTargetUrl,
@@ -14,6 +16,47 @@ const rewrite = (bodyText, kind) => rewritePreviewBody({
   kind,
   proxyBasePath: '/api/preview/proxy/abc123',
   targetOrigin: 'http://127.0.0.1:3000',
+});
+
+describe('preview Inertia header passthrough', () => {
+  it('forwards Inertia request headers to the preview target', () => {
+    const forwarded = new Map();
+    const proxyReq = {
+      setHeader: (name, value) => forwarded.set(name, value),
+    };
+
+    applyPreviewPassthroughRequestHeaders({
+      headers: {
+        'x-inertia': 'true',
+        'x-inertia-version': 'asset-hash',
+        'x-unrelated': 'ignored',
+      },
+    }, proxyReq);
+
+    expect(forwarded.get('x-inertia')).toBe('true');
+    expect(forwarded.get('x-inertia-version')).toBe('asset-hash');
+    expect(forwarded.has('x-unrelated')).toBe(false);
+  });
+
+  it('forwards Inertia response headers back to the preview client', () => {
+    const forwarded = new Map();
+    const res = {
+      headersSent: false,
+      setHeader: (name, value) => forwarded.set(name, value),
+    };
+
+    applyPreviewPassthroughResponseHeaders({
+      headers: {
+        'x-inertia': 'true',
+        'x-inertia-location': 'http://127.0.0.1:8000/login',
+        'x-unrelated': 'ignored',
+      },
+    }, res);
+
+    expect(forwarded.get('x-inertia')).toBe('true');
+    expect(forwarded.get('x-inertia-location')).toBe('http://127.0.0.1:8000/login');
+    expect(forwarded.has('x-unrelated')).toBe(false);
+  });
 });
 
 describe('preview resource error classification', () => {
@@ -97,6 +140,37 @@ describe('preview body URL rewriting', () => {
     expect(output).toContain('const url = "/api/data";');
   });
 
+  it('rewrites inline module imports in HTML responses', () => {
+    const input = [
+      '<script type="module">',
+      'import RefreshRuntime from "/@react-refresh";',
+      'window.__vite_plugin_react_preamble_installed__ = true;',
+      '</script>',
+      '<script type=module>',
+      'import { injectIntoGlobalHook } from "/@react-refresh";',
+      'import value from "/module.js";',
+      'const url = "/api/data";',
+      '</script>',
+      '<script type=\'module\'>',
+      'import "/entry.js";',
+      '</script>',
+      '<script type="text/javascript">',
+      'import "/not-rewritten.js";',
+      '</script>',
+      '<script>const refreshUrl = "/@react-refresh";</script>',
+    ].join('');
+    const output = rewrite(input, 'html');
+
+    expect(output).toContain('from "/api/preview/proxy/abc123/@react-refresh"');
+    expect(output).toContain('import { injectIntoGlobalHook } from "/api/preview/proxy/abc123/@react-refresh";');
+    expect(output).toContain('import value from "/api/preview/proxy/abc123/module.js";');
+    expect(output).toContain('const url = "/api/data";');
+    expect(output).toContain('import "/api/preview/proxy/abc123/entry.js";');
+    expect(output).toContain('import "/not-rewritten.js";');
+    expect(output).toContain('window.__vite_plugin_react_preamble_installed__ = true;');
+    expect(output).toContain('const refreshUrl = "/@react-refresh";');
+  });
+
   it('removes CSP meta tags that block the preview bridge', () => {
     const input = '<meta http-equiv="Content-Security-Policy" content="script-src \'self\'"><div>Preview</div>';
     const output = rewrite(input, 'html');
@@ -107,7 +181,7 @@ describe('preview body URL rewriting', () => {
 
   it('adds preview and URL auth tokens to rewritten proxy resources when provided', () => {
     const output = rewritePreviewBody({
-      bodyText: '<script src="/entry.js"></script><a href="http://localhost:3000/docs?x=1&oc_client_token=legacy">Docs</a>',
+      bodyText: '<script src="/entry.js"></script><script type="module">import RefreshRuntime from "/@react-refresh";</script><a href="http://localhost:3000/docs?x=1&oc_client_token=legacy">Docs</a>',
       kind: 'html',
       proxyBasePath: '/api/preview/proxy/abc123',
       targetOrigin: 'http://127.0.0.1:3000',
@@ -116,6 +190,7 @@ describe('preview body URL rewriting', () => {
     });
 
     expect(output).toContain('src="/api/preview/proxy/abc123/entry.js?oc_preview_token=preview-secret&oc_url_token=url-secret"');
+    expect(output).toContain('from "/api/preview/proxy/abc123/@react-refresh?oc_preview_token=preview-secret&oc_url_token=url-secret"');
     expect(output).toContain('href="/api/preview/proxy/abc123/docs?x=1&oc_preview_token=preview-secret&oc_url_token=url-secret"');
     expect(output).not.toContain('oc_client_token');
   });

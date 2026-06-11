@@ -33,6 +33,7 @@ import { useConfigStore } from "@/stores/useConfigStore"
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { toast } from "@/components/ui"
 import { appendNotification } from "./notification-store"
+import { applyGlobalSessionStatusEvent } from "./global-session-status"
 import type { State } from "./types"
 import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
 import type { PermissionRequest } from "@/types/permission"
@@ -44,6 +45,8 @@ import { getRuntimeLiveStatusSeed, LIVE_STATUS_TTL_MS } from "./runtime-live-mem
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry"
 import { setSessionPrefetch } from "./session-prefetch-cache"
+import { listGlobalSessionPages } from "@/stores/globalSessions"
+import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 
 // ---------------------------------------------------------------------------
 // Context
@@ -194,6 +197,7 @@ const ACTIVE_SESSION_WATCHDOG_INTERVAL_MS = 5_000
 const ACTIVE_SESSION_STATUS_POLL_INTERVAL_MS = 5_000
 const ACTIVE_SESSION_STALE_EVENT_MS = 20_000
 const ACTIVE_SESSION_FULL_RESYNC_COOLDOWN_MS = 15_000
+const CHILD_SESSION_DISCOVERY_INTERVAL_MS = 15_000
 const requestSignature = (items: Array<{ id: string }> | undefined): string => {
   if (!items || items.length === 0) return ""
   return items
@@ -384,9 +388,21 @@ export function setExternallyViewedSession(directory: string, sessionId: string,
   externallyViewedSessions.set(key, Date.now() + EXTERNAL_VIEW_TTL_MS)
 }
 
+// The window must actually be focused for the active session to count as
+// "seen": if the app is minimized or in the background, a turn finishing in the
+// currently-selected session should still raise an unseen marker (in the tray
+// and in-app), since the user isn't looking at it.
+function isWindowFocused(): boolean {
+  return typeof document !== "undefined" && document.hasFocus()
+}
+
 function isViewedInCurrentSession(directory: string, sessionId?: string): boolean {
   if (!sessionId) return false
-  if (_activeDirectory && _activeSession && directory === _activeDirectory && sessionId === _activeSession) return true
+  if (
+    _activeDirectory && _activeSession
+    && directory === _activeDirectory && sessionId === _activeSession
+    && isWindowFocused()
+  ) return true
   pruneExternallyViewedSessions()
   return externallyViewedSessions.has(viewedSessionKey(directory, sessionId))
 }
@@ -569,11 +585,21 @@ const getSessionIdFromPayload = (event: Event): string | null => {
   }
 
   if (event.type === "message.part.updated") {
+    const sessionID = props.sessionID
+    if (typeof sessionID === "string" && sessionID.length > 0) {
+      return sessionID
+    }
+
     const part = props.part
     if (!part || typeof part !== "object") {
       return null
     }
-    const sessionID = (part as { sessionID?: unknown }).sessionID
+    const partSessionID = (part as { sessionID?: unknown }).sessionID
+    return typeof partSessionID === "string" && partSessionID.length > 0 ? partSessionID : null
+  }
+
+  if (event.type === "message.part.delta" || event.type === "message.part.removed") {
+    const sessionID = props.sessionID
     return typeof sessionID === "string" && sessionID.length > 0 ? sessionID : null
   }
 
@@ -587,6 +613,46 @@ const getSessionIdFromPayload = (event: Event): string | null => {
   }
 
   return null
+}
+
+const getSessionInfoFromPayload = (event: Event): Session | null => {
+  if (event.type !== "session.created" && event.type !== "session.updated" && event.type !== "session.deleted") {
+    return null
+  }
+
+  const properties = (event as { properties?: unknown }).properties
+  if (!properties || typeof properties !== "object") {
+    return null
+  }
+
+  const info = (properties as { info?: unknown }).info
+  if (!info || typeof info !== "object") {
+    return null
+  }
+
+  const session = info as Partial<Session>
+  if (typeof session.id !== "string" || !session.time) {
+    return null
+  }
+
+  return stripSessionDiffSnapshots(session as Session)
+}
+
+const applySessionEventToGlobalSessions = (payload: Event) => {
+  if (payload.type === "session.created" || payload.type === "session.updated") {
+    const session = getSessionInfoFromPayload(payload)
+    if (session) {
+      useGlobalSessionsStore.getState().upsertSession(session)
+    }
+    return
+  }
+
+  if (payload.type === "session.deleted") {
+    const sessionID = getSessionIdFromPayload(payload) ?? getSessionInfoFromPayload(payload)?.id
+    if (sessionID) {
+      useGlobalSessionsStore.getState().removeSessions([sessionID])
+    }
+  }
 }
 
 const getMessageIdFromPayload = (event: Event): string | null => {
@@ -616,8 +682,8 @@ const getMessageIdFromPayload = (event: Event): string | null => {
     if (!part || typeof part !== "object") {
       return null
     }
-    const messageID = (part as { messageID?: unknown }).messageID
-    return typeof messageID === "string" && messageID.length > 0 ? messageID : null
+    const partMessageID = (part as { messageID?: unknown }).messageID
+    return typeof partMessageID === "string" && partMessageID.length > 0 ? partMessageID : null
   }
 
   return null
@@ -915,9 +981,12 @@ const updateRoutingIndexFromEvent = (
     }
 
     case "message.part.updated": {
-      const part = (payload.properties as { part?: Part }).part as (Part & { sessionID?: string; messageID?: string }) | undefined
-      if (part?.messageID && part.sessionID) {
-        setIndexedMessage(routingIndex, part.sessionID, part.messageID, directory)
+      const props = payload.properties as { sessionID?: string; part?: Part }
+      const part = props.part as (Part & { sessionID?: string; messageID?: string }) | undefined
+      const sessionID = part?.sessionID ?? props.sessionID
+      const messageID = part?.messageID
+      if (messageID && sessionID) {
+        setIndexedMessage(routingIndex, sessionID, messageID, directory)
       }
       return
     }
@@ -1205,6 +1274,13 @@ function handleEvent(
     return
   }
 
+  applySessionEventToGlobalSessions(payload)
+  // Keep the cross-project status map current for ALL directories (mirrors the
+  // global-session handling above). Child stores remain the primary source for
+  // synced directories; this map covers sessions a child store doesn't list
+  // (unopened directories, or list/status races for just-created sessions).
+  applyGlobalSessionStatusEvent(directory, payload)
+
   // Global events
   if (directory === "global" || !directory) {
     const recent = isRecentBoot()
@@ -1278,6 +1354,7 @@ function handleEvent(
     if (permissionStore.isSessionAutoAccepting(permission.sessionID)) {
       updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload)
       void sessionActions.respondToPermission(permission.sessionID, permission.id, "once").catch(() => undefined)
+      return
     }
 
     const toastKey = getPermissionToastKey(permission.sessionID, permission.id)
@@ -1501,6 +1578,7 @@ export function SyncProvider(props: {
   const lastActiveEventAtByDirectoryRef = useRef(new Map<string, number>())
   const lastStatusPollAtByDirectoryRef = useRef(new Map<string, number>())
   const lastFullResyncAtByDirectoryRef = useRef(new Map<string, number>())
+  const lastChildDiscoveryAtByDirectoryRef = useRef(new Map<string, number>())
   const resyncingDirectoriesRef = useRef(new Set<string>())
   const statusPollingDirectoriesRef = useRef(new Set<string>())
   const pipelineReconnectRef = useRef<((reason?: string) => void) | null>(null)
@@ -1561,29 +1639,38 @@ export function SyncProvider(props: {
               providers: globalState.providers,
             },
             loadSessions: (dir) => retry(async () => {
-              const result = await props.sdk.session.list({
+              const rootSessions = (await listGlobalSessionPages(props.sdk, {
                 directory: dir,
+                archived: false,
                 roots: true,
-                limit: 50,
-              })
-              // SDK returns { error } instead of { data } on non-ok responses (503).
-              // Preserve HTTP status so retry()'s transient detection works.
-              const rawError = (result as { error?: unknown }).error
-              if (rawError) {
-                const response = (result as { response?: { status?: number } }).response
-                const status = response?.status
-                const message = typeof rawError === "object" && rawError !== null && "message" in rawError
-                  ? String((rawError as { message?: unknown }).message)
-                  : String(rawError)
-                const wrapped = new Error(`session.list failed${status ? ` (${status})` : ""}: ${message}`)
-                if (status !== undefined) {
-                  ;(wrapped as Error & { status?: number }).status = status
-                }
-                throw wrapped
-              }
-              const sessions = (result.data ?? [])
+                pageSize: 500,
+              }))
                 .filter((s) => !!s?.id)
                 .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+
+              // Also load child sessions (sub-agent delegations) so they
+              // appear in the sidebar immediately instead of relying on
+              // the async global session store.
+              let allSessions: typeof rootSessions = []
+              try {
+                const allResult = await props.sdk.session.list({
+                  directory: dir,
+                  limit: 200,
+                })
+                const allError = (allResult as { error?: unknown }).error
+                if (!allError) {
+                  allSessions = ((allResult as { data?: unknown }).data ?? []) as typeof rootSessions
+                }
+              } catch {
+                // Child load is best-effort; fall back to roots only
+              }
+
+              // Merge: keep root sessions from the first query (for accurate
+              // sessionTotal), plus any child sessions from the broader query.
+              const rootIds = new Set(rootSessions.map((s: { id: string }) => s.id))
+              const childSessions = allSessions.filter((s: { id: string; parentID?: string | null }) => s?.id && !rootIds.has(s.id) && s.parentID)
+
+              const sessions = rootSessions.concat(childSessions)
               // Race guard: if the list came back empty but event pipeline
               // already populated the store, don't clobber. OpenCode can
               // answer HTTP with empty sessions while WS delivers session
@@ -1591,11 +1678,11 @@ export function SyncProvider(props: {
               const currentSessions = store.getState().session
               if (sessions.length === 0 && currentSessions.length > 0) {
                 console.warn(
-                  `[bootstrap] session.list returned empty for ${dir}; preserving ${currentSessions.length} existing sessions`,
+                  `[bootstrap] experimental.session.list returned empty for ${dir}; preserving ${currentSessions.length} existing sessions`,
                 )
                 return
               }
-              store.setState({ session: sessions, sessionTotal: sessions.length, limit: Math.max(sessions.length, 50) })
+              store.setState({ session: sessions, sessionTotal: rootSessions.length, limit: Math.max(sessions.length, 50) })
               ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
             }),
           })
@@ -1724,6 +1811,53 @@ export function SyncProvider(props: {
     let stopped = false
     let running = false
 
+    const discoverChildSessions = async (
+      directory: string,
+      store: StoreApi<DirectoryStore>,
+      parentSessionIds: string[],
+    ) => {
+      if (parentSessionIds.length === 0) return
+      try {
+        const scopedClient = opencodeClient.getScopedSdkClient(directory)
+        const result = await scopedClient.session.list({ directory, limit: 200 })
+        const allSessions = ((result as { data?: unknown }).data ?? []) as Session[]
+        const state = store.getState()
+        const existingIds = new Set(state.session.map((s) => s.id))
+        const parentIdSet = new Set(parentSessionIds)
+        const newChildSessions: Session[] = []
+        for (const session of allSessions) {
+          if (
+            session?.id
+            && !existingIds.has(session.id)
+            && (session as { parentID?: string | null }).parentID
+            && parentIdSet.has((session as { parentID: string }).parentID)
+          ) {
+            newChildSessions.push(session)
+          }
+        }
+        if (newChildSessions.length === 0) return
+        // Collect unique parent IDs for materialization
+        const parentIdsForMaterialization = new Set<string>()
+        for (const session of newChildSessions) {
+          const pid = (session as { parentID?: string | null }).parentID
+          if (pid) parentIdsForMaterialization.add(pid)
+        }
+        store.setState((state: DirectoryStore) => {
+          const sessions = [...state.session, ...newChildSessions].sort((a, b) =>
+            a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+          )
+          return { session: sessions, limit: Math.max(sessions.length, 50) }
+        })
+        // Trigger parent session materialization so the task tool part
+        // state (metadata, sessionId, output) is refreshed.
+        for (const pid of parentIdsForMaterialization) {
+          enqueueSessionMaterialization(directory, pid, childStores)
+        }
+      } catch {
+        // Best-effort — next tick will retry.
+      }
+    }
+
     const pollDirectoryStatuses = async (
       directory: string,
       store: StoreApi<DirectoryStore>,
@@ -1782,6 +1916,14 @@ export function SyncProvider(props: {
             ) {
               pipelineReconnectRef.current?.("active_stream_stale")
               triggerDirectoryResync(directory)
+            }
+
+            // Discover child sessions created by other OpenCode instances
+            // that didn't broadcast a session.created event on this stream.
+            const lastChildDiscoveryAt = lastChildDiscoveryAtByDirectoryRef.current.get(directory) ?? 0
+            if (now - lastChildDiscoveryAt >= CHILD_SESSION_DISCOVERY_INTERVAL_MS) {
+              lastChildDiscoveryAtByDirectoryRef.current.set(directory, now)
+              void discoverChildSessions(directory, store, candidateSessionIds)
             }
           }
         })

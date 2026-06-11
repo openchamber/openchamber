@@ -143,7 +143,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ isOpen, children, cl
       )}
       <div
         className={cn(
-          'relative z-10 flex h-full min-h-0 shrink-0 flex-col transition-opacity duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
+          'relative z-10 flex h-full min-h-0 shrink-0 flex-col pt-2 transition-opacity duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
           isResizing && 'pointer-events-none',
           !isOpen && 'pointer-events-none select-none opacity-0'
         )}

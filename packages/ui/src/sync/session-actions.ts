@@ -9,13 +9,20 @@ import { useSessionUIStore } from "./session-ui-store"
 import { useInputStore } from "./input-store"
 import type { ChildStoreManager } from "./child-store"
 import { opencodeClient } from "@/lib/opencode/client"
-import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
+import { mergeSessionDirectoryMetadata, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { registerSessionDirectory } from "./sync-refs"
 import { isSyntheticPart } from "@/lib/messages/synthetic"
 import { materializeSessionSnapshots } from "./materialization"
-import { stripMessageDiffSnapshots } from "./sanitize"
+import { stripMessageDiffSnapshots, stripSessionDiffSnapshots } from "./sanitize"
 import { sessionEvents } from "@/lib/sessionEvents"
+import {
+  getOriginalSessionID,
+  getSessionMetadata,
+  isReviewSession,
+  withoutReviewSessionLink,
+  type SessionMetadataRecord,
+} from "@/lib/sessionReviewMetadata"
 
 const MESSAGE_REFETCH_LIMIT = 200
 const MESSAGE_REFETCH_SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
@@ -26,8 +33,11 @@ const UNREVERT_REFETCH_RETRY_MS = 150
 let _sdk: OpencodeClient | null = null
 let _childStores: ChildStoreManager | null = null
 let _getDirectory: () => string = () => ""
-let _optimisticAdd: ((input: { sessionID: string; message: Message; parts: Part[] }) => void) | null = null
-let _optimisticRemove: ((input: { sessionID: string; messageID: string }) => void) | null = null
+type OptimisticAddInput = { sessionID: string; directory?: string | null; message: Message; parts: Part[] }
+type OptimisticRemoveInput = { sessionID: string; directory?: string | null; messageID: string }
+
+let _optimisticAdd: ((input: OptimisticAddInput) => void) | null = null
+let _optimisticRemove: ((input: OptimisticRemoveInput) => void) | null = null
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -60,7 +70,9 @@ function formatSdkError(error: unknown): string {
 function assertSdkSuccess<T>(result: SdkResult<T>, operation: string): T | undefined {
   if (!result.error) return result.data
   const status = result.response?.status
-  throw new Error(`${operation} failed${status ? ` (${status})` : ""}: ${formatSdkError(result.error)}`)
+  const error = new Error(`${operation} failed${status ? ` (${status})` : ""}: ${formatSdkError(result.error)}`) as Error & { status?: number }
+  if (status !== undefined) error.status = status
+  throw error
 }
 
 function assertSdkData<T>(result: SdkResult<T>, operation: string): T {
@@ -82,8 +94,8 @@ export function setActionRefs(
 }
 
 export function setOptimisticRefs(
-  add: (input: { sessionID: string; message: Message; parts: Part[] }) => void,
-  remove: (input: { sessionID: string; messageID: string }) => void,
+  add: (input: OptimisticAddInput) => void,
+  remove: (input: OptimisticRemoveInput) => void,
 ) {
   _optimisticAdd = add
   _optimisticRemove = remove
@@ -113,6 +125,27 @@ function dirStoreForSession(sessionId: string): { store: DirectoryStoreApi; dire
     return { store: dirStoreForDirectory(directory), directory }
   }
   return { store: dirStore(), directory: dir() }
+}
+
+function updateLiveSession(session: Session, directory?: string): void {
+  const stores = _childStores
+  if (!stores) return
+
+  const candidates = directory
+    ? [[directory, stores.getChild(directory)] as const]
+    : stores.children
+
+  for (const [, store] of candidates) {
+    if (!store) continue
+    const current = store.getState().session
+    const index = current.findIndex((item) => item.id === session.id)
+    if (index === -1) continue
+
+    const next = [...current]
+    next[index] = mergeSessionDirectoryMetadata(session, current[index])
+    store.setState({ session: next })
+    return
+  }
 }
 
 function dir() {
@@ -256,6 +289,56 @@ function resolveDirectoryForBlockingRequest(
   return null
 }
 
+export function isQuestionRequestNotFoundError(error: unknown): boolean {
+  if (error && typeof error === "object") {
+    const status = (error as { status?: unknown }).status
+    if (status === 404) return true
+  }
+
+  let message = ""
+  if (error instanceof Error) {
+    message = error.message
+  } else if (typeof error === "string") {
+    message = error
+  }
+
+  return /Question(?:\.)?NotFoundError|Question request not found/i.test(message)
+}
+
+function removeQuestionRequestFromChildStores(sessionId: string, requestId: string): boolean {
+  const stores = _childStores
+  if (!stores || !requestId) return false
+
+  let removed = false
+  for (const [, store] of stores.children) {
+    const current = store.getState().question ?? {}
+    let nextQuestion: typeof current | null = null
+    const sessionIds = new Set([sessionId, ...Object.keys(current)].filter(Boolean))
+
+    for (const candidateSessionId of sessionIds) {
+      const requests = current[candidateSessionId]
+      if (!requests?.length) continue
+
+      const nextRequests = requests.filter((request) => request.id !== requestId)
+      if (nextRequests.length === requests.length) continue
+
+      nextQuestion ??= { ...current }
+      if (nextRequests.length > 0) {
+        nextQuestion[candidateSessionId] = nextRequests
+      } else {
+        delete nextQuestion[candidateSessionId]
+      }
+      removed = true
+    }
+
+    if (nextQuestion) {
+      store.setState({ question: nextQuestion })
+    }
+  }
+
+  return removed
+}
+
 function getRequestReplyClient(
   type: "permission" | "question",
   sessionId: string,
@@ -276,26 +359,64 @@ export async function createSession(
   title?: string,
   directoryOverride?: string | null,
   parentID?: string | null,
+  metadata?: Record<string, unknown>,
 ): Promise<Session | null> {
   try {
     const session = await opencodeClient.createSession({
       title,
       parentID: parentID ?? undefined,
+      metadata,
     }, directoryOverride ?? dir())
 
-      const sessionDirectory = (session as { directory?: string }).directory ?? directoryOverride ?? null
-      // Pre-populate routing index so SSE events arriving before session.created
-      // can be routed to the correct child store
-      if (sessionDirectory) {
-        registerSessionDirectory(session.id, sessionDirectory)
-      }
-      useSessionUIStore.getState().setCurrentSession(session.id, sessionDirectory)
-      useSessionUIStore.getState().markSessionAsOpenChamberCreated(session.id)
-      useGlobalSessionsStore.getState().upsertSession(session)
-      return session
+    const sessionDirectory = (session as { directory?: string | null }).directory ?? null
+    // Pre-populate routing index so SSE events arriving before session.created
+    // can be routed to the correct child store
+    if (sessionDirectory) {
+      registerSessionDirectory(session.id, sessionDirectory)
+    }
+    useSessionUIStore.getState().setCurrentSession(session.id, sessionDirectory)
+    useSessionUIStore.getState().markSessionAsOpenChamberCreated(session.id)
+    useGlobalSessionsStore.getState().upsertSession(session)
+    return session
   } catch (error) {
     console.error("[session-actions] createSession failed", error)
     return null
+  }
+}
+
+export async function patchSessionMetadata(
+  sessionId: string,
+  directory: string | null | undefined,
+  updater: (metadata: SessionMetadataRecord) => SessionMetadataRecord,
+): Promise<Session> {
+  const targetDirectory = directory ?? getSessionDirectory(sessionId)
+  const current = await opencodeClient.getSession(sessionId, targetDirectory)
+  const nextMetadata = updater(getSessionMetadata(current))
+  const updated = await opencodeClient.updateSession(sessionId, { metadata: nextMetadata }, targetDirectory)
+  useGlobalSessionsStore.getState().upsertSession(updated)
+  const sessionDirectory = (updated as { directory?: string | null }).directory ?? targetDirectory
+  if (sessionDirectory) registerSessionDirectory(updated.id, sessionDirectory)
+  return updated
+}
+
+async function cleanupReviewMetadataBeforeDelete(sessionId: string, directory?: string | null): Promise<void> {
+  let session: Session
+  try {
+    session = await opencodeClient.getSession(sessionId, directory ?? getSessionDirectory(sessionId))
+  } catch {
+    return
+  }
+  if (!isReviewSession(session)) return
+  const originalSessionID = getOriginalSessionID(session)
+  if (!originalSessionID) return
+  try {
+    await patchSessionMetadata(originalSessionID, directory ?? getSessionDirectory(originalSessionID), (metadata) =>
+      withoutReviewSessionLink(metadata, sessionId),
+    )
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (/not found/i.test(message)) return
+    console.warn("[session-actions] review metadata cleanup failed before delete", error)
   }
 }
 
@@ -353,6 +474,7 @@ export async function deleteSession(sessionId: string, _options?: Record<string,
     ui.setCurrentSession(null)
   }
   try {
+    await cleanupReviewMetadataBeforeDelete(sessionId, sessionDirectory)
     const deleted = await opencodeClient.deleteSession(sessionId, sessionDirectory)
     if (deleted !== true) {
       throw new Error("session.delete failed: server did not confirm deletion")
@@ -376,6 +498,7 @@ export async function deleteSessionInDirectory(sessionId: string, directory: str
   const ui = useSessionUIStore.getState()
   if (ui.currentSessionId === sessionId) ui.setCurrentSession(null)
   try {
+    await cleanupReviewMetadataBeforeDelete(sessionId, directory)
     const deleted = await opencodeClient.deleteSession(sessionId, directory)
     if (deleted !== true) {
       throw new Error("session.delete failed: server did not confirm deletion")
@@ -401,6 +524,7 @@ export async function archiveSession(sessionId: string): Promise<boolean> {
     ui.setCurrentSession(null)
   }
   try {
+    await cleanupReviewMetadataBeforeDelete(sessionId, sessionDirectory)
     const archived = await opencodeClient.updateSession(sessionId, { time: { archived: archivedAt } }, sessionDirectory)
     if (!archived) {
       throw new Error("session.update failed: server did not return the archived session")
@@ -424,16 +548,18 @@ export async function updateSessionTitle(sessionId: string, title: string): Prom
 export async function shareSession(sessionId: string): Promise<Session | null> {
   const sessionDirectory = getSessionDirectory(sessionId)
   const result = await sdk().session.share({ sessionID: sessionId, directory: sessionDirectory })
-  const session = assertSdkData(result, "session.share")
+  const session = stripSessionDiffSnapshots(assertSdkData(result, "session.share"))
   useGlobalSessionsStore.getState().upsertSession(session)
+  updateLiveSession(session, sessionDirectory)
   return session
 }
 
 export async function unshareSession(sessionId: string): Promise<Session | null> {
   const sessionDirectory = getSessionDirectory(sessionId)
   const result = await sdk().session.unshare({ sessionID: sessionId, directory: sessionDirectory })
-  const session = assertSdkData(result, "session.unshare")
+  const session = stripSessionDiffSnapshots(assertSdkData(result, "session.unshare"))
   useGlobalSessionsStore.getState().upsertSession(session)
+  updateLiveSession(session, sessionDirectory)
   return session
 }
 
@@ -487,7 +613,9 @@ export async function optimisticSend(input: {
   providerID: string
   modelID: string
   agent?: string
+  directory?: string | null
   files?: Array<{ type: "file"; mime: string; url: string; filename: string }>
+  onOptimisticInsert?: () => void
   /** The actual API call — receives the optimistic messageID so the server can use the same ID */
   send: (messageID: string) => Promise<void>
 }): Promise<void> {
@@ -497,7 +625,8 @@ export async function optimisticSend(input: {
 
   await waitForConnectionOrThrow()
 
-  const store = dirStore()
+  const targetDirectory = input.directory ?? dir()
+  const store = targetDirectory ? dirStoreForDirectory(targetDirectory) : dirStore()
   const messageID = ascendingId("msg")
   const textPartId = ascendingId("prt")
 
@@ -527,9 +656,11 @@ export async function optimisticSend(input: {
   // Insert into store + register in shadow Map (for mergeOptimisticPage cleanup)
   _optimisticAdd({
     sessionID: input.sessionId,
+    directory: targetDirectory,
     message: optimisticMessage,
     parts: optimisticParts,
   })
+  input.onOptimisticInsert?.()
 
   // Set busy status
   const current = store.getState()
@@ -546,6 +677,7 @@ export async function optimisticSend(input: {
     // Rollback via optimistic infrastructure
     _optimisticRemove({
       sessionID: input.sessionId,
+      directory: targetDirectory,
       messageID,
     })
     const s = store.getState()
@@ -584,7 +716,12 @@ export async function respondToPermission(
   const directory = resolveDirectoryForBlockingRequest("permission", sessionId, requestId)
     || getSessionDirectory(sessionId)
     || dir()
-  if (await opencodeClient.replyToPermission(requestId, response, { directory }) !== true) {
+  const result = await getRequestReplyClient("permission", sessionId, requestId).permission.reply({
+    requestID: requestId,
+    reply: response,
+    ...(directory ? { directory } : {}),
+  })
+  if (assertSdkData(result, "permission.reply") !== true) {
     throw new Error("Permission reply failed")
   }
 }
@@ -597,7 +734,12 @@ export async function dismissPermission(
   const directory = resolveDirectoryForBlockingRequest("permission", sessionId, requestId)
     || getSessionDirectory(sessionId)
     || dir()
-  if (await opencodeClient.replyToPermission(requestId, "reject", { directory }) !== true) {
+  const result = await getRequestReplyClient("permission", sessionId, requestId).permission.reply({
+    requestID: requestId,
+    reply: "reject",
+    ...(directory ? { directory } : {}),
+  })
+  if (assertSdkData(result, "permission.reply") !== true) {
     throw new Error("Permission dismissal failed")
   }
 }
@@ -615,8 +757,25 @@ export async function respondToQuestion(
   const directory = resolveDirectoryForBlockingRequest("question", sessionId, requestId)
     || getSessionDirectory(sessionId)
     || dir()
-  if (await opencodeClient.replyToQuestion(requestId, answers, directory) !== true) {
-    throw new Error("Question reply failed")
+  try {
+    const normalizedAnswers = answers.length === 0
+      ? []
+      : Array.isArray(answers[0])
+        ? answers as string[][]
+        : [answers as string[]]
+    const result = await getRequestReplyClient("question", sessionId, requestId).question.reply({
+      requestID: requestId,
+      answers: normalizedAnswers,
+      ...(directory ? { directory } : {}),
+    })
+    if (assertSdkData(result, "question.reply") !== true) {
+      throw new Error("Question reply failed")
+    }
+  } catch (error) {
+    if (isQuestionRequestNotFoundError(error)) {
+      removeQuestionRequestFromChildStores(sessionId, requestId)
+    }
+    throw error
   }
 }
 
@@ -628,12 +787,19 @@ export async function rejectQuestion(
   const directory = resolveDirectoryForBlockingRequest("question", sessionId, requestId)
     || getSessionDirectory(sessionId)
     || dir()
-  const result = await getRequestReplyClient("question", sessionId, requestId).question.reject({
-    requestID: requestId,
-    ...(directory ? { directory } : {}),
-  })
-  if (assertSdkData(result, "question.reject") !== true) {
-    throw new Error("Question rejection failed")
+  try {
+    const result = await getRequestReplyClient("question", sessionId, requestId).question.reject({
+      requestID: requestId,
+      ...(directory ? { directory } : {}),
+    })
+    if (assertSdkData(result, "question.reject") !== true) {
+      throw new Error("Question rejection failed")
+    }
+  } catch (error) {
+    if (isQuestionRequestNotFoundError(error)) {
+      removeQuestionRequestFromChildStores(sessionId, requestId)
+    }
+    throw error
   }
 }
 

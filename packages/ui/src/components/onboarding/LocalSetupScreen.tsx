@@ -11,7 +11,6 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 
 const INSTALL_COMMAND = 'curl -fsSL https://opencode.ai/install | bash';
 const DOCS_URL = 'https://opencode.ai/docs';
-const WINDOWS_WSL_DOCS_URL = 'https://opencode.ai/docs/windows-wsl';
 
 type OnboardingPlatform = 'macos' | 'linux' | 'windows' | 'unknown';
 
@@ -202,7 +201,7 @@ export function LocalSetupScreen({
     }
   }, [checkCliAvailability, onCliAvailable, t]);
 
-  const docsUrl = platform === 'windows' ? WINDOWS_WSL_DOCS_URL : DOCS_URL;
+  const docsUrl = DOCS_URL;
   const binaryPlaceholder =
     platform === 'windows'
       ? 'C:\\Users\\you\\AppData\\Roaming\\npm\\opencode.cmd'
@@ -239,7 +238,6 @@ export function LocalSetupScreen({
           <div className="mx-auto max-w-2xl rounded-lg border border-border bg-background/50 p-4 text-left">
             <div className="text-sm text-foreground">{t('onboarding.localSetup.windows.title')}</div>
             <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
-              <li>{t('onboarding.localSetup.windows.stepInstallWsl')} <code className="text-foreground/80">wsl --install</code> {t('onboarding.localSetup.windows.stepInstallWslSuffix')}</li>
               <li>{t('onboarding.localSetup.windows.stepRunInstallInWsl')}</li>
               <li>{t('onboarding.localSetup.windows.stepSetBinaryPath')}</li>
             </ol>
@@ -341,9 +339,6 @@ export function LocalSetupScreen({
         <div className="absolute bottom-8 left-0 right-0 text-center space-y-1">
           {platform === 'windows' ? (
             <>
-              <p className="text-sm text-muted-foreground/70">
-                {t('onboarding.localSetup.windows.hintInstallInWsl')}
-              </p>
               <p className="text-sm text-muted-foreground/70">
                 {t('onboarding.localSetup.windows.hintDetectionFailed')}
               </p>

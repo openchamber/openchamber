@@ -3,6 +3,8 @@ const TOKEN_COOKIE_NAME = 'oc_preview_token';
 const TOKEN_QUERY_PARAM = 'oc_preview_token';
 const CLIENT_TOKEN_QUERY_PARAM = 'oc_client_token';
 const URL_AUTH_TOKEN_QUERY_PARAM = 'oc_url_token';
+const PREVIEW_PASSTHROUGH_REQUEST_HEADERS = ['x-inertia', 'x-inertia-version'];
+const PREVIEW_PASSTHROUGH_RESPONSE_HEADERS = ['x-inertia', 'x-inertia-location'];
 
 const LOOPBACK_HOSTS = new Set([
   'localhost',
@@ -22,6 +24,34 @@ const parsePreviewResourcePath = (url) => {
     return path + parsed.search;
   } catch {
     return String(url || '');
+  }
+};
+
+const readHeader = (headers, name) => {
+  if (!headers || typeof headers !== 'object') return undefined;
+  const direct = headers[name];
+  if (direct !== undefined) return direct;
+  const lowerName = name.toLowerCase();
+  const key = Object.keys(headers).find((entry) => entry.toLowerCase() === lowerName);
+  return key ? headers[key] : undefined;
+};
+
+export const applyPreviewPassthroughRequestHeaders = (req, proxyReq) => {
+  for (const headerName of PREVIEW_PASSTHROUGH_REQUEST_HEADERS) {
+    const value = readHeader(req?.headers, headerName);
+    if (value !== undefined) {
+      proxyReq.setHeader(headerName, value);
+    }
+  }
+};
+
+export const applyPreviewPassthroughResponseHeaders = (proxyRes, res) => {
+  if (!res || res.headersSent || typeof res.setHeader !== 'function') return;
+  for (const headerName of PREVIEW_PASSTHROUGH_RESPONSE_HEADERS) {
+    const value = readHeader(proxyRes?.headers, headerName);
+    if (value !== undefined) {
+      res.setHeader(headerName, value);
+    }
   }
 };
 
@@ -164,7 +194,7 @@ export const classifyPreviewNavigation = ({ url, currentUrl, targetOrigin }) => 
   return { action: 'external', url: parsed.toString() };
 };
 
-  const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
+const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
   if (window.__openchamberPreviewBridgeInstalled) return;
   window.__openchamberPreviewBridgeInstalled = true;
 
@@ -1041,21 +1071,6 @@ export const rewritePreviewBody = ({ bodyText, proxyBasePath, targetOrigin, kind
     }
     return value;
   };
-  const rewriteHtml = (text) => text
-    .replace(/\b(src|href|action)=(['"])([^'"]*)\2/gi, (_match, attr, quote, value) => {
-      return `${attr}=${quote}${rewriteResourceUrl(value)}${quote}`;
-    })
-    .replace(/\bsrcset=(['"])([^'"]*)\1/gi, (_match, quote, value) => {
-      const rewritten = String(value).split(',').map((part) => {
-        const trimmed = part.trim();
-        if (!trimmed) return trimmed;
-        const segments = trimmed.split(/\s+/);
-        const url = segments[0] || '';
-        segments[0] = rewriteResourceUrl(url);
-        return segments.join(' ');
-      }).join(', ');
-      return `srcset=${quote}${rewritten}${quote}`;
-    });
   const stripPreviewCspMeta = (text) => text
     .replace(/<meta\b(?=[^>]*\bhttp-equiv\s*=\s*(['"])content-security-policy\1)[^>]*>/gi, '')
     .replace(/<meta\b(?=[^>]*\bhttp-equiv\s*=\s*content-security-policy\b)[^>]*>/gi, '');
@@ -1077,6 +1092,35 @@ export const rewritePreviewBody = ({ bodyText, proxyBasePath, targetOrigin, kind
     .replace(/\bimport\(\s*(['"])\/(?!\/)([^'"]*)\1\s*\)/gi, (_match, quote, path) => {
       return `import(${quote}${rewriteResourceUrl(`/${path}`)}${quote})`;
     });
+  const rewriteInlineModuleScripts = (text) => text.replace(
+    /<script\b([^>]*)>([\s\S]*?)<\/script>/gi,
+    (match, attrs, scriptBody) => {
+      if (/\bsrc\s*=/i.test(attrs)) return match;
+
+      const typeMatch = String(attrs || '').match(/\btype\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
+      const type = String(typeMatch?.[1] ?? typeMatch?.[2] ?? typeMatch?.[3] ?? '').trim().toLowerCase();
+      if (type !== 'module') return match;
+
+      const rewrittenScriptBody = rewriteJavaScript(scriptBody);
+      if (rewrittenScriptBody === scriptBody) return match;
+      return `<script${attrs}>${rewrittenScriptBody}</script>`;
+    },
+  );
+  const rewriteHtml = (text) => rewriteInlineModuleScripts(text
+    .replace(/\b(src|href|action)=(['"])([^'"]*)\2/gi, (_match, attr, quote, value) => {
+      return `${attr}=${quote}${rewriteResourceUrl(value)}${quote}`;
+    })
+    .replace(/\bsrcset=(['"])([^'"]*)\1/gi, (_match, quote, value) => {
+      const rewritten = String(value).split(',').map((part) => {
+        const trimmed = part.trim();
+        if (!trimmed) return trimmed;
+        const segments = trimmed.split(/\s+/);
+        const url = segments[0] || '';
+        segments[0] = rewriteResourceUrl(url);
+        return segments.join(' ');
+      }).join(', ');
+      return `srcset=${quote}${rewritten}${quote}`;
+    }));
 
   if (kind === 'html') return stripPreviewCspMeta(rewriteHtml(bodyText));
   if (kind === 'css') return rewriteCss(bodyText);
@@ -1398,14 +1442,16 @@ export const createPreviewProxyRuntime = ({
         return `${strippedPath}${withoutUrlAuthToken}`;
       },
       on: {
-        proxyReq: (proxyReq) => {
+        proxyReq: (proxyReq, req) => {
+          applyPreviewPassthroughRequestHeaders(req, proxyReq);
           // Keep local dev servers from receiving OpenChamber credentials.
           proxyReq.removeHeader('cookie');
           proxyReq.removeHeader('authorization');
           proxyReq.removeHeader('x-openchamber-ui-session');
           proxyReq.setHeader('accept-encoding', 'identity');
         },
-        proxyRes: responseInterceptor(async (responseBuffer, proxyRes, req) => {
+        proxyRes: responseInterceptor(async (responseBuffer, proxyRes, req, res) => {
+          applyPreviewPassthroughResponseHeaders(proxyRes, res);
           // Per-response nonce lets the injected bridge run under the dev
           // server's CSP without dropping its script restrictions wholesale.
           const bridgeNonce = crypto.randomBytes(16).toString('base64');

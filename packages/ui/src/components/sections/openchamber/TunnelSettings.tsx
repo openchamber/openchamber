@@ -14,6 +14,8 @@ import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { openExternalUrl } from '@/lib/url';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { formatTimeForPreference } from '@/lib/timeFormat';
+import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
 
 type TunnelState =
   | 'checking'
@@ -147,6 +149,84 @@ interface TunnelProviderCapability {
   modes?: TunnelProviderModeDescriptor[];
 }
 
+interface TunnelCheckResponse {
+  available?: boolean;
+  provider?: string | null;
+  version?: string | null;
+  dependency?: string | null;
+  installCommand?: string | null;
+  platform?: string | null;
+}
+
+interface TunnelDependencyInstallInfo {
+  provider: string;
+  dependency: string;
+  installCommand: string;
+}
+
+const getProviderDependencyName = (provider: string): string => (provider === 'ngrok' ? 'ngrok' : 'cloudflared');
+
+const getClientInstallPlatform = (): string => {
+  if (typeof window !== 'undefined' && typeof window.__OPENCHAMBER_PLATFORM__ === 'string') {
+    const platform = window.__OPENCHAMBER_PLATFORM__;
+    if (platform === 'win32' || platform === 'darwin' || platform === 'linux') {
+      return platform;
+    }
+  }
+
+  const browserPlatform = typeof navigator !== 'undefined'
+    ? `${navigator.platform || ''} ${navigator.userAgent || ''}`.toLowerCase()
+    : '';
+  if (browserPlatform.includes('win')) {
+    return 'win32';
+  }
+  if (browserPlatform.includes('mac')) {
+    return 'darwin';
+  }
+  return 'linux';
+};
+
+const getFallbackInstallCommand = (provider: string, platform = getClientInstallPlatform()): string => {
+  if (provider === 'ngrok') {
+    if (platform === 'win32') {
+      return 'winget install ngrok -s msstore';
+    }
+    if (platform === 'darwin') {
+      return 'brew install ngrok';
+    }
+    return 'https://ngrok.com/download';
+  }
+
+  if (platform === 'win32') {
+    return 'winget install --id Cloudflare.cloudflared';
+  }
+  if (platform === 'darwin') {
+    return 'brew install cloudflared';
+  }
+  return 'https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflared/downloads/';
+};
+
+const createTunnelDependencyInstallInfo = (provider: string, checkData?: TunnelCheckResponse): TunnelDependencyInstallInfo => {
+  const responseProvider = typeof checkData?.provider === 'string' && checkData.provider.trim().length > 0
+    ? checkData.provider.trim().toLowerCase()
+    : provider;
+  const dependency = typeof checkData?.dependency === 'string' && checkData.dependency.trim().length > 0
+    ? checkData.dependency.trim()
+    : getProviderDependencyName(responseProvider);
+  const platform = typeof checkData?.platform === 'string' && checkData.platform.trim().length > 0
+    ? checkData.platform.trim()
+    : getClientInstallPlatform();
+  const installCommand = typeof checkData?.installCommand === 'string' && checkData.installCommand.trim().length > 0
+    ? checkData.installCommand.trim()
+    : getFallbackInstallCommand(responseProvider, platform);
+
+  return {
+    provider: responseProvider,
+    dependency,
+    installCommand,
+  };
+};
+
 const getProviderLabel = (provider: string): string => {
   if (provider === 'cloudflare') {
     return 'Cloudflare';
@@ -209,8 +289,8 @@ const formatRemaining = (remainingMs: number): string => {
   return `${seconds}s`;
 };
 
-const formatAbsoluteTime = (timestamp: number): string => {
-  return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+const formatAbsoluteTime = (timestamp: number, timeFormatPreference: TimeFormatPreference): string => {
+  return formatTimeForPreference(timestamp, timeFormatPreference, { hour: '2-digit', precision: 'second' });
 };
 
 const normalizePresetHostname = (value: string): string => {
@@ -267,6 +347,7 @@ const createPresetId = (): string => {
 
 export const TunnelSettings: React.FC = () => {
   const { t } = useI18n();
+  const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const tUnsafe = React.useCallback((key: string) => t(key as Parameters<typeof t>[0]), [t]);
   const [state, setState] = React.useState<TunnelState>('checking');
   const [tunnelInfo, setTunnelInfo] = React.useState<TunnelInfo | null>(null);
@@ -278,6 +359,7 @@ export const TunnelSettings: React.FC = () => {
   const [isSavingTtl, setIsSavingTtl] = React.useState(false);
   const [isSavingMode, setIsSavingMode] = React.useState(false);
   const [tunnelProvider, setTunnelProvider] = React.useState<string>('cloudflare');
+  const [dependencyInstallInfo, setDependencyInstallInfo] = React.useState<TunnelDependencyInstallInfo>(() => createTunnelDependencyInstallInfo('cloudflare'));
   const [providerCapabilities, setProviderCapabilities] = React.useState<TunnelProviderCapability[]>([]);
   const [tunnelMode, setTunnelMode] = React.useState<TunnelMode>('quick');
   const [managedLocalConfigPath, setManagedLocalConfigPath] = React.useState<string | null>(null);
@@ -397,12 +479,46 @@ export const TunnelSettings: React.FC = () => {
     () => tunnelModeOptions.some((option) => option.value === 'managed-remote' || option.value === 'managed-local'),
     [tunnelModeOptions],
   );
-  const installCommand = tunnelProvider === 'ngrok'
-    ? 'brew install ngrok'
-    : 'brew install cloudflared';
+  const displayedDependencyInstallInfo = React.useMemo(() => {
+    if (dependencyInstallInfo.provider === tunnelProvider) {
+      return dependencyInstallInfo;
+    }
+    return createTunnelDependencyInstallInfo(tunnelProvider);
+  }, [dependencyInstallInfo, tunnelProvider]);
   const openExternal = React.useCallback(async (url: string) => {
     await openExternalUrl(url);
   }, []);
+
+  const applyDependencyCheck = React.useCallback((checkData: TunnelCheckResponse, fallbackProvider: string): boolean => {
+    setDependencyInstallInfo(createTunnelDependencyInstallInfo(fallbackProvider, checkData));
+    return checkData.available === true;
+  }, []);
+
+  const refreshTunnelDependencyCheck = React.useCallback(async (provider: string, signal?: AbortSignal): Promise<boolean | null> => {
+    try {
+      const checkRes = await runtimeFetch('/api/openchamber/tunnel/check', {
+        query: { provider },
+        ...(signal ? { signal } : {}),
+      });
+      if (!checkRes.ok) {
+        return null;
+      }
+      const checkData = (await checkRes.json()) as TunnelCheckResponse;
+      if (signal?.aborted) {
+        return null;
+      }
+      const available = applyDependencyCheck(checkData, provider);
+      setState((current) => {
+        if (current === 'checking' || current === 'starting' || current === 'active' || current === 'stopping') {
+          return current;
+        }
+        return available ? 'idle' : 'not-available';
+      });
+      return available;
+    } catch {
+      return null;
+    }
+  }, [applyDependencyCheck]);
 
   const checkAvailabilityAndStatus = React.useCallback(async (signal: AbortSignal) => {
     try {
@@ -413,7 +529,7 @@ export const TunnelSettings: React.FC = () => {
         runtimeFetch('/api/openchamber/tunnel/providers', { signal }),
       ]);
 
-      const checkData = await checkRes.json();
+      const checkData = (await checkRes.json()) as TunnelCheckResponse;
       const statusData = (await statusRes.json()) as TunnelStatusResponse;
       const settingsData = settingsRes.ok ? await settingsRes.json() : {};
       const providersData = providersRes.ok ? await providersRes.json() : {};
@@ -437,6 +553,7 @@ export const TunnelSettings: React.FC = () => {
       const loadedManagedLocalConfigPath = typeof settingsData?.managedLocalTunnelConfigPath === 'string'
         ? settingsData.managedLocalTunnelConfigPath.trim() || null
         : null;
+      const dependencyAvailable = applyDependencyCheck(checkData, loadedProvider);
 
       const loadedPresetsFromStatus = sanitizePresets(statusData?.managedRemoteTunnelPresets);
       const loadedHostname = typeof statusData.managedRemoteTunnelHostname === 'string'
@@ -481,14 +598,14 @@ export const TunnelSettings: React.FC = () => {
         return;
       }
 
-      setState(checkData.available ? 'idle' : 'not-available');
+      setState(dependencyAvailable ? 'idle' : 'not-available');
     } catch {
       if (!signal.aborted) {
         setState('error');
         setErrorMessage(t('settings.openchamber.tunnel.toast.checkAvailabilityFailed'));
       }
     }
-  }, [t]);
+  }, [applyDependencyCheck, t]);
 
   React.useEffect(() => {
     const controller = new AbortController();
@@ -735,7 +852,8 @@ export const TunnelSettings: React.FC = () => {
       ? tunnelMode
       : toUiTunnelMode(capability?.modes?.[0]?.key);
     await saveTunnelSettings({ tunnelProvider: provider, tunnelMode: defaultMode });
-  }, [providerCapabilities, saveTunnelSettings, tunnelMode]);
+    void refreshTunnelDependencyCheck(provider);
+  }, [providerCapabilities, refreshTunnelDependencyCheck, saveTunnelSettings, tunnelMode]);
 
   const handleBrowseManagedLocalConfig = React.useCallback(async () => {
     const result = await requestFileAccess({
@@ -1167,7 +1285,7 @@ export const TunnelSettings: React.FC = () => {
                       {modeLabel}
                     </span>
                     <span className="typography-meta text-muted-foreground/80">
-                      {t('settings.openchamber.tunnel.session.redeemedAt', { time: formatAbsoluteTime(record.createdAt) })}
+                      {t('settings.openchamber.tunnel.session.redeemedAt', { time: formatAbsoluteTime(record.createdAt, timeFormatPreference) })}
                     </span>
                     <span className="typography-meta text-foreground">
                       {record.isActive
@@ -1189,10 +1307,12 @@ export const TunnelSettings: React.FC = () => {
           <div className="flex items-start gap-2 rounded-lg border border-[var(--status-warning)]/30 bg-[var(--status-warning)]/5 p-3">
             <Icon name="error-warning" className="mt-0.5 size-4 shrink-0 text-[var(--status-warning)]" />
             <div className="space-y-1">
-              <p className="typography-meta font-medium text-foreground">{getProviderLabel(tunnelProvider)} tunnel dependency was not found.</p>
+              <p className="typography-meta font-medium text-foreground">
+                {t('settings.openchamber.tunnel.notAvailable.dependencyNotFound', { dependency: displayedDependencyInstallInfo.dependency })}
+              </p>
               <p className="typography-meta text-muted-foreground/70">{t('settings.openchamber.tunnel.notAvailable.installHint')}</p>
               <code className="typography-code block rounded bg-muted/50 px-2 py-1 text-xs text-foreground">
-                {installCommand}
+                {displayedDependencyInstallInfo.installCommand}
               </code>
             </div>
           </div>
@@ -1202,7 +1322,7 @@ export const TunnelSettings: React.FC = () => {
       {(
         <section className="space-y-4 px-2 pb-2 pt-0">
           <div className="space-y-3">
-            <div className="space-y-1.5">
+            <div data-settings-item="tunnel.provider" className="space-y-1.5">
               <p className="typography-ui-label text-foreground">{t('settings.openchamber.tunnel.field.provider')}</p>
               <Select
                 value={tunnelProvider}
@@ -1233,7 +1353,7 @@ export const TunnelSettings: React.FC = () => {
               </Select>
             </div>
 
-            <div className="space-y-1.5">
+            <div data-settings-item="tunnel.type" className="space-y-1.5">
               <p className="typography-ui-label text-foreground">{t('settings.openchamber.tunnel.field.tunnelType')}</p>
               <div className="flex flex-wrap items-center gap-1">
                 {tunnelModeOptions.map((option) => (
@@ -1261,7 +1381,7 @@ export const TunnelSettings: React.FC = () => {
             </div>
           </div>
 
-          <div className="mt-2 grid grid-cols-1 gap-2 py-1.5 md:grid-cols-[14rem_auto] md:gap-x-8 md:gap-y-2">
+          <div data-settings-item="tunnel.ttl" className="mt-2 grid grid-cols-1 gap-2 py-1.5 md:grid-cols-[14rem_auto] md:gap-x-8 md:gap-y-2">
             <div className="flex min-w-0 items-center gap-2">
               <span className="typography-ui-label shrink-0 text-foreground">{t('settings.openchamber.tunnel.field.connectLinkTtl')}</span>
               <Select
@@ -1326,7 +1446,7 @@ export const TunnelSettings: React.FC = () => {
           )}
 
           {tunnelMode === 'managed-remote' && (
-            <div className="space-y-2 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-3">
+            <div data-settings-item="tunnel.managed-remote" className="space-y-2 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-3">
               {typeof suggestedConnectorPort === 'number' && (
                 <div className="rounded-md border border-[var(--status-info-border)] bg-[var(--status-info-background)]/35 px-2 py-1.5">
                   <p className="typography-meta text-[var(--status-info)]">
@@ -1537,7 +1657,7 @@ export const TunnelSettings: React.FC = () => {
           )}
 
           {tunnelMode === 'managed-local' && (
-            <div className="space-y-2 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-3">
+            <div data-settings-item="tunnel.managed-local-config" className="space-y-2 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-3">
               <div className="space-y-1.5">
                 <p className="typography-ui-label text-foreground">{t('settings.openchamber.tunnel.field.configurationFile')}</p>
                 <input
@@ -1602,7 +1722,7 @@ export const TunnelSettings: React.FC = () => {
           )}
 
           {!isSelectedModeTunnelReady && (
-            <div className="space-y-6">
+            <div data-settings-item="tunnel.start" className="space-y-6">
               <div className="rounded-lg border border-[var(--status-info-border)] bg-[var(--status-info-background)] p-3">
                 <div className="flex items-start gap-2">
                   <Icon name="information" className="mt-0.5 size-4 shrink-0 text-[var(--status-info)]" />
@@ -1712,7 +1832,7 @@ export const TunnelSettings: React.FC = () => {
       )}
 
       {isSelectedModeTunnelReady && tunnelInfo && (
-        <section className="space-y-4 px-2 pb-2 pt-0">
+        <section data-settings-item="tunnel.start" className="space-y-4 px-2 pb-2 pt-0">
           <div className="space-y-3">
             <div className="flex items-center gap-2">
               <div className="size-2 shrink-0 rounded-full bg-[var(--status-success)]" />

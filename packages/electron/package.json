@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/electron",
-  "version": "1.12.0",
+  "version": "1.12.4",
   "private": true,
   "description": "Electron desktop runtime for OpenChamber",
   "author": "OpenChamber",
@@ -50,6 +50,10 @@
       {
         "from": "resources/icons/icon.ico",
         "to": "icons/icon.ico"
+      },
+      {
+        "from": "resources/icons/tray",
+        "to": "icons/tray"
       }
     ],
     "afterPack": "scripts/after-pack.cjs",

@@ -51,6 +51,12 @@ const createGitReadCacheTtlMs = () => {
   return 30 * 1000;
 };
 
+const createGitCheckIgnoreTimeoutMs = () => {
+  const raw = Number(process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS);
+  if (Number.isFinite(raw) && raw >= 0) return raw;
+  return 2500;
+};
+
 const normalizeCommand = (command: unknown): string =>
   typeof command === 'string' ? command.trim().replace(/\s+/g, ' ') : '';
 
@@ -60,6 +66,7 @@ const isCacheableGitReadCommand = (command: string): boolean => {
 };
 
 const GIT_READ_CACHE_TTL_MS = createGitReadCacheTtlMs();
+const GIT_CHECK_IGNORE_TIMEOUT_MS = createGitCheckIgnoreTimeoutMs();
 const GIT_READ_CACHE_MAX_ENTRIES = 500;
 const GIT_READ_CACHE_MAX_BYTES = 1024 * 1024;
 const gitReadCache = new Map<string, { result: FsExecCommandResult; at: number }>();
@@ -113,6 +120,30 @@ type FsDeps = {
   >;
   parseDroppedFileReference: (rawReference: string) => DroppedReferenceParse;
   readUriAsAttachment: (uri: vscode.Uri, name: string) => Promise<ReadUriAsAttachmentResult>;
+};
+
+const runGitCheckIgnore = async (
+  execGit: FsDeps['execGit'],
+  args: string[],
+  cwd: string,
+): Promise<{ stdout: string; stderr: string; exitCode: number } | null> => {
+  if (GIT_CHECK_IGNORE_TIMEOUT_MS <= 0) {
+    return execGit(args, cwd);
+  }
+
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      execGit(args, cwd),
+      new Promise<null>((resolve) => {
+        timeout = setTimeout(() => resolve(null), GIT_CHECK_IGNORE_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
 };
 
 export async function handleFsBridgeMessage(
@@ -177,7 +208,10 @@ export async function handleFsBridgeMessage(
       }
 
       try {
-        const result = await deps.execGit(['check-ignore', '--', ...pathsToCheck], normalized);
+        const result = await runGitCheckIgnore(deps.execGit, ['check-ignore', '--', ...pathsToCheck], normalized);
+        if (!result) {
+          return { id, type, success: true, data: { entries, directory: normalized, path: normalized } };
+        }
         const ignoredNames = new Set(
           result.stdout
             .split('\n')

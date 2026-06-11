@@ -66,5 +66,6 @@ export function useSessionActivity(sessionId: string | null | undefined, directo
 
 export function useCurrentSessionActivity(): SessionActivityResult {
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  return useSessionActivity(currentSessionId);
+  const currentSessionDirectory = useSessionUIStore((state) => state.currentSessionDirectory);
+  return useSessionActivity(currentSessionId, currentSessionDirectory ?? undefined);
 }

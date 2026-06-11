@@ -167,8 +167,21 @@ function resolveEventDirectory(event: unknown, payload: Event): string {
       ? (payload.properties as Record<string, unknown>)
       : null
   const propertyDirectory = typeof properties?.directory === "string" ? properties.directory : null
+  if (propertyDirectory && propertyDirectory.length > 0) {
+    return propertyDirectory
+  }
 
-  return propertyDirectory && propertyDirectory.length > 0 ? propertyDirectory : "global"
+  // session.created / session.updated carry directory inside properties.info
+  const info =
+    typeof properties?.info === "object" && properties.info !== null
+      ? (properties.info as Record<string, unknown>)
+      : null
+  const infoDirectory = typeof info?.directory === "string" ? info.directory : null
+  if (infoDirectory && infoDirectory.length > 0) {
+    return infoDirectory
+  }
+
+  return "global"
 }
 
 function resolveEventPayload(payload: unknown): Event | null {
@@ -256,6 +269,10 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     if (payload.type === "session.status") {
       const props = payload.properties as { sessionID: string }
       return `session.status:${props.sessionID}`
+    }
+    if (payload.type === "session.updated") {
+      const props = payload.properties as { info?: { id?: string } }
+      return props.info?.id ? `session.updated:${props.info.id}` : undefined
     }
     if (payload.type === "lsp.updated") {
       return "lsp.updated"

@@ -385,6 +385,7 @@
 @media (display-mode: standalone) and (max-width: 768px) {
   .pwa-dialog-content {
     --pwa-dialog-padding: clamp(0.75rem, 3vw, 1.25rem);
+    top: auto;
     /* Browsers that don't understand dvh ignore the second declaration and
        keep the vh-based fallback. Newer browsers use 100dvh so Android
        Chrome's collapsible URL bar doesn't push the dialog footer off-screen. */

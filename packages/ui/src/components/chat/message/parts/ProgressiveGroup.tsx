@@ -23,6 +23,7 @@ import ReasoningPart from './ReasoningPart';
 import JustificationBlock from './JustificationBlock';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
 import { getExternalFaviconUrl } from '@/lib/url';
+import { getDirectoryForFilePath, getRelativeFilePath, normalizeFilePath, toAbsoluteFilePath } from '@/lib/path-utils';
 
 const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-4 sm:!leading-6 tracking-normal';
 const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
@@ -240,45 +241,6 @@ const getToolReadOffset = (activity: TurnActivityPart): number | undefined => {
     return Math.floor(rawOffset);
 };
 
-const normalizePathValue = (value: string): string => {
-    const trimmed = value.trim();
-    if (!trimmed) {
-        return '';
-    }
-    return trimmed.replace(/\\/g, '/').replace(/\/{2,}/g, '/');
-};
-
-const trimTrailingSlashes = (value: string): string => {
-    if (value === '/') {
-        return value;
-    }
-    return value.replace(/\/+$/, '');
-};
-
-const getRelativePathFromDirectory = (filePath: string, currentDirectory: string): string => {
-    const normalizedPath = trimTrailingSlashes(normalizePathValue(filePath));
-    const normalizedDirectory = trimTrailingSlashes(normalizePathValue(currentDirectory));
-
-    if (!normalizedPath) {
-        return '';
-    }
-
-    if (!normalizedDirectory) {
-        return normalizedPath;
-    }
-
-    if (normalizedPath === normalizedDirectory) {
-        return '.';
-    }
-
-    const prefix = `${normalizedDirectory}/`;
-    if (normalizedPath.startsWith(prefix)) {
-        return normalizedPath.slice(prefix.length);
-    }
-
-    return normalizedPath;
-};
-
 const renderReadFilePath = (displayPath: string, animate = true) => {
     const lastSlash = displayPath.lastIndexOf('/');
 
@@ -326,42 +288,13 @@ const renderReadFilePath = (displayPath: string, animate = true) => {
     );
 };
 
-const resolveAbsolutePath = (currentDirectory: string, filePath: string): string => {
-    const normalizedPath = normalizePathValue(filePath);
-    if (!normalizedPath) {
-        return '';
-    }
-    if (normalizedPath.startsWith('/')) {
-        return normalizedPath;
-    }
-    const normalizedDirectory = normalizePathValue(currentDirectory);
-    if (!normalizedDirectory) {
-        return normalizedPath;
-    }
-    return normalizedDirectory.endsWith('/') ? `${normalizedDirectory}${normalizedPath}` : `${normalizedDirectory}/${normalizedPath}`;
-};
-
 const resolveSkillFilePath = (skillPathOrDir: string): string => {
-    const normalizedPath = trimTrailingSlashes(normalizePathValue(skillPathOrDir));
+    const normalizedPath = normalizeFilePath(skillPathOrDir);
     if (!normalizedPath) {
         return '';
     }
 
     return normalizedPath.toLowerCase().endsWith('/skill.md') ? normalizedPath : `${normalizedPath}/SKILL.md`;
-};
-
-const getContextDirectoryForPath = (currentDirectory: string, absolutePath: string): string => {
-    const normalizedDirectory = normalizePathValue(currentDirectory);
-    if (normalizedDirectory) {
-        return normalizedDirectory;
-    }
-
-    const normalizedPath = normalizePathValue(absolutePath);
-    if (!normalizedPath) {
-        return '';
-    }
-    const parent = normalizedPath.replace(/\/[^/]*$/, '');
-    return parent || normalizedPath;
 };
 
 /**
@@ -687,7 +620,7 @@ const StaticToolRowInner: React.FC<{
             const offset = getToolReadOffset(activity);
             if (!filePath) continue;
             if (entries.some((entry) => entry.path === filePath)) continue;
-            const displayPath = getRelativePathFromDirectory(filePath, currentDirectory);
+            const displayPath = getRelativeFilePath(filePath, currentDirectory);
             if (!displayPath) continue;
             entries.push({ path: filePath, displayPath, offset });
         }
@@ -695,7 +628,7 @@ const StaticToolRowInner: React.FC<{
     }, [activities, currentDirectory, isReadGroup]);
 
     const handleReadFileClick = React.useCallback((filePath: string, offset?: number) => {
-        const absolutePath = resolveAbsolutePath(currentDirectory, filePath);
+        const absolutePath = toAbsoluteFilePath(currentDirectory, filePath);
         if (!absolutePath) {
             return;
         }
@@ -706,7 +639,7 @@ const StaticToolRowInner: React.FC<{
         }
 
         const uiStore = useUIStore.getState();
-        const contextDirectory = getContextDirectoryForPath(currentDirectory, absolutePath);
+        const contextDirectory = getDirectoryForFilePath(currentDirectory, absolutePath);
         if (offset && Number.isFinite(offset)) {
             uiStore.openContextFileAtLine(contextDirectory, absolutePath, Math.max(1, Math.trunc(offset)), 1);
             return;
@@ -719,7 +652,7 @@ const StaticToolRowInner: React.FC<{
             return;
         }
         const uiStore = useUIStore.getState();
-        uiStore.openContextFile(currentDirectory || getContextDirectoryForPath('', skillPath), skillPath);
+        uiStore.openContextFile(currentDirectory || getDirectoryForFilePath('', skillPath), skillPath);
     }, [currentDirectory]);
 
     const normalizedToolName = toolName.toLowerCase();

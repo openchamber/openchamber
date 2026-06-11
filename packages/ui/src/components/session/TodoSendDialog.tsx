@@ -66,7 +66,7 @@ export function TodoSendDialog(props: TodoSendDialogProps) {
 
   React.useEffect(() => {
     if (!open) return;
-    void loadProviders({ directory: projectDirectory });
+    void loadProviders({ directory: projectDirectory, source: 'todoSendDialog' });
     void loadConfigAgents({ directory: projectDirectory });
     void loadAgentsStoreAgents();
   }, [open, loadProviders, loadConfigAgents, loadAgentsStoreAgents, projectDirectory]);

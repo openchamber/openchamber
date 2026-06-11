@@ -257,16 +257,16 @@ export function useSync() {
 
   // Optimistic operations
   const getOptimistic = useCallback(
-    (sessionID: string): OptimisticItem[] => {
-      const key = `${directory}\n${sessionID}`
+    (sessionID: string, directoryOverride?: string | null): OptimisticItem[] => {
+      const key = `${directoryOverride || directory}\n${sessionID}`
       return [...(optimistic.current.get(key)?.values() ?? [])]
     },
     [directory],
   )
 
   const setOptimistic = useCallback(
-    (sessionID: string, item: OptimisticItem) => {
-      const key = `${directory}\n${sessionID}`
+    (sessionID: string, item: OptimisticItem, directoryOverride?: string | null) => {
+      const key = `${directoryOverride || directory}\n${sessionID}`
       const list = optimistic.current.get(key)
       const sorted: OptimisticItem = { message: item.message, parts: sortParts(item.parts) }
       if (list) {
@@ -279,8 +279,8 @@ export function useSync() {
   )
 
   const clearOptimistic = useCallback(
-    (sessionID: string, messageID?: string) => {
-      const key = `${directory}\n${sessionID}`
+    (sessionID: string, messageID?: string, directoryOverride?: string | null) => {
+      const key = `${directoryOverride || directory}\n${sessionID}`
       if (!messageID) {
         optimistic.current.delete(key)
         return
@@ -291,6 +291,14 @@ export function useSync() {
       if (list.size === 0) optimistic.current.delete(key)
     },
     [directory],
+  )
+
+  const getOptimisticStore = useCallback(
+    (directoryOverride?: string | null) => {
+      if (!directoryOverride || directoryOverride === directory) return store
+      return childStores.ensureChild(directoryOverride, { bootstrap: false })
+    },
+    [childStores, directory, store],
   )
 
   // Fetch messages from API
@@ -490,9 +498,10 @@ export function useSync() {
 
   // Optimistic add (for prompt submission)
   const optimisticAdd = useCallback(
-    (input: { sessionID: string; message: Message; parts: Part[] }) => {
-      setOptimistic(input.sessionID, { message: input.message, parts: input.parts })
-      const current = store.getState()
+    (input: { sessionID: string; directory?: string | null; message: Message; parts: Part[] }) => {
+      setOptimistic(input.sessionID, { message: input.message, parts: input.parts }, input.directory)
+      const targetStore = getOptimisticStore(input.directory)
+      const current = targetStore.getState()
       const message = { ...current.message }
       const part = { ...current.part }
 
@@ -505,16 +514,17 @@ export function useSync() {
       // Insert parts
       part[input.message.id] = sortParts(input.parts)
 
-      store.setState({ message, part })
+      targetStore.setState({ message, part })
     },
-    [store, setOptimistic],
+    [getOptimisticStore, setOptimistic],
   )
 
   // Optimistic remove (for rollback on error)
   const optimisticRemove = useCallback(
-    (input: { sessionID: string; messageID: string }) => {
-      clearOptimistic(input.sessionID, input.messageID)
-      const current = store.getState()
+    (input: { sessionID: string; directory?: string | null; messageID: string }) => {
+      clearOptimistic(input.sessionID, input.messageID, input.directory)
+      const targetStore = getOptimisticStore(input.directory)
+      const current = targetStore.getState()
       const message = { ...current.message }
       const part = { ...current.part }
 
@@ -529,9 +539,9 @@ export function useSync() {
       }
       delete part[input.messageID]
 
-      store.setState({ message, part })
+      targetStore.setState({ message, part })
     },
-    [store, clearOptimistic],
+    [clearOptimistic, getOptimisticStore],
   )
 
   return useMemo(
