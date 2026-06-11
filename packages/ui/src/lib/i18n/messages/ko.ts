@@ -1964,6 +1964,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.shellCommand.showOutput': '표시 출력',
   'chat.messageBody.shellCommand.copied': '복사됨',
   'chat.messageBody.shellCommand.copyOutput': '출력 복사',
+  'chat.userText.previous': '이전 메시지',
+  'chat.userText.next': '다음 메시지',
   'commandPalette.title': '명령 팔레트',
   'commandPalette.description': '파일, 세션, 명령을 검색합니다.',
   'commandPalette.input.placeholder': '파일, 세션, 명령 검색…',

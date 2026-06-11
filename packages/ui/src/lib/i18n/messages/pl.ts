@@ -1214,6 +1214,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.toolPart.copyOutput': 'Kopiuj wyjście',
   'chat.toolPart.copiedOutput': 'Skopiowano wyjście',
   'chat.toolPart.copyOutputFailed': 'Nie udało się skopiować wyjścia',
+  'chat.userText.previous': 'Poprzednia wiadomość',
+  'chat.userText.next': 'Następna wiadomość',
   'commandPalette.description': 'Szukaj plików, sesji i poleceń.',
   'commandPalette.empty.noResults': 'Nie znaleziono wyników.',
   'commandPalette.empty.searchingFiles': 'Wyszukiwanie plików...',

@@ -1930,6 +1930,8 @@ export const dict: Record<I18nKey, string> = {
   "chat.messageBody.shellCommand.showOutput": "Mostrar saída",
   "chat.messageBody.shellCommand.copied": "Copiado",
   "chat.messageBody.shellCommand.copyOutput": "Copiar saída",
+  "chat.userText.previous": "Mensagem anterior",
+  "chat.userText.next": "Próxima mensagem",
   "commandPalette.title": "Paleta de comandos",
   "commandPalette.description": "Buscar arquivos, sessões e comandos.",
   "commandPalette.input.placeholder": "Buscar arquivos, sessões, comandos...",

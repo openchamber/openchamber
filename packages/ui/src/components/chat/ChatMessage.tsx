@@ -33,6 +33,7 @@ import { FadeInOnReveal } from './message/FadeInOnReveal';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
 import { areOptionalRenderRelevantMessagesEqual, areRenderRelevantMessagesEqual, areRelevantTurnGroupingContextsEqual } from './message/renderCompare';
 import type { ReviewTransferDirection } from '@/lib/reviewFlow';
+import type { UserMessageNavInfo } from './MessageList';
 
 const ToolOutputDialog = lazyWithChunkRecovery(() => import('./message/ToolOutputDialog'));
 
@@ -136,6 +137,7 @@ interface ChatMessageProps {
     animateUserOnMount?: boolean;
     onUserAnimationConsumed?: (messageId: string) => void;
     reviewTransferDirection?: ReviewTransferDirection | null;
+    userMessageNavInfo?: UserMessageNavInfo;
 }
 
 const ChatMessage: React.FC<ChatMessageProps> = ({
@@ -151,6 +153,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     animateUserOnMount = false,
     onUserAnimationConsumed,
     reviewTransferDirection = null,
+    userMessageNavInfo,
 }) => {
     const { isMobile, isTablet, hasTouchInput } = useDeviceInfo();
     const alwaysShowMessageActions = isMobile || isTablet;
@@ -771,6 +774,16 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         forkFromMessage(sessionId, message.info.id);
     }, [sessionId, message.info.id, forkFromMessage]);
 
+    const handleScrollToMessage = React.useCallback((target: 'prev' | 'next' | 'self-top') => {
+        if (target === 'self-top') {
+            messageContainerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            return;
+        }
+        const targetId = target === 'prev' ? userMessageNavInfo?.previousUserMessageId : userMessageNavInfo?.nextUserMessageId;
+        if (!targetId) return;
+        userMessageNavInfo?.scrollToUserMessage(targetId);
+    }, [userMessageNavInfo]);
+
     const handleToggleTool = React.useCallback((toolId: string) => {
         const isDefaultOpen = defaultOpenToolIds.has(toolId);
         const isCurrentlyExpanded = effectiveExpandedTools.has(toolId);
@@ -1051,6 +1064,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                                 errorVariant={assistantErrorVariant}
                                                 userActionsMode={useExternalUserActionsRow ? 'external-content' : 'inline'}
                                                 stickyUserHeaderEnabled={stickyUserHeader}
+                                                onScrollToMessage={isUser ? handleScrollToMessage : undefined}
+                                                userMessageNavInfo={isUser ? userMessageNavInfo : undefined}
                                             />
                                         </div>
                                         {useExternalUserActionsRow ? (
@@ -1085,6 +1100,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                                 errorVariant={assistantErrorVariant}
                                                 userActionsMode="external-actions"
                                                 stickyUserHeaderEnabled={stickyUserHeader}
+                                                onScrollToMessage={isUser ? handleScrollToMessage : undefined}
+                                                userMessageNavInfo={isUser ? userMessageNavInfo : undefined}
                                             />
                                         ) : null}
                                     </div>

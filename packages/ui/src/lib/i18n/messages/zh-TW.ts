@@ -1934,6 +1934,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.shellCommand.showOutput': '顯示輸出',
   'chat.messageBody.shellCommand.copied': '已複製',
   'chat.messageBody.shellCommand.copyOutput': '複製輸出',
+  'chat.userText.previous': '上一條訊息',
+  'chat.userText.next': '下一條訊息',
   'commandPalette.title': '命令面板',
   'commandPalette.description': '搜尋檔案、會話和命令。',
   'commandPalette.input.placeholder': '搜尋檔案、會話、命令...',
