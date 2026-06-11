@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Chat: the `/` command menu no longer lists a skill twice when a command shares its name (e.g. after installing a plugin that ships skills).
+
 ## [1.13.1] - 2026-06-17
 
 - Chat: inline math delimiters no longer incorrectly treat currency amounts like `$50` as LaTeX math expressions — only `$$...$$` display math and `\(...\)` inline math are recognized.
