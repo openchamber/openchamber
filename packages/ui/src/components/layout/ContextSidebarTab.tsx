@@ -8,9 +8,10 @@ import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { generateSyntaxTheme } from '@/lib/theme/syntaxThemeGenerator';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { computeCacheHitRate } from '@/stores/utils/tokenUtils';
 import { useSessions, useSessionMessageRecords } from '@/sync/sync-context';
 import { copyTextToClipboard } from '@/lib/clipboard';
-import { useI18n } from '@/lib/i18n';
+import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
 
@@ -223,12 +224,16 @@ const computeContextBreakdown = (
   };
 };
 
-const formatNumber = (value: number): string => value.toLocaleString();
+const formatNumber = (value: number): string => value.toLocaleString(getCurrentIntlLocale());
 
 const formatMoney = (value: number): string => {
-  if (!Number.isFinite(value) || value <= 0) return '$0.00';
-  if (value < 0.01) return `$${value.toFixed(4)}`;
-  return `$${value.toFixed(2)}`;
+  if (!Number.isFinite(value) || value <= 0) return new Intl.NumberFormat(getCurrentIntlLocale(), { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(0);
+  return new Intl.NumberFormat(getCurrentIntlLocale(), {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: value < 0.01 ? 4 : 2,
+    maximumFractionDigits: value < 0.01 ? 4 : 2,
+  }).format(value);
 };
 
 const formatDateTime = (timestamp: number | null, timeFormatPreference: TimeFormatPreference): string => {
@@ -336,6 +341,14 @@ export const ContextPanelContent: React.FC = () => {
 
     const tokenBreakdown = contextMessage ? extractTokenBreakdown(contextMessage) : EMPTY_BREAKDOWN;
 
+    // Cache hit rate for the last assistant message. `input` is the non-cached portion
+    // (total input - cache.read - cache.write per SDK's session.ts:getUsage),
+    // so hit rate = cache.read / (input + cache.read + cache.write).
+    const cacheHitRate = computeCacheHitRate({
+      input: tokenBreakdown.input,
+      cache: { read: tokenBreakdown.cacheRead, write: tokenBreakdown.cacheWrite },
+    });
+
     const totalAssistantCost = assistantMessages.reduce((sum, message) => {
       const cost = toNonNegativeNumber((message.info as { cost?: unknown }).cost);
       return sum + cost;
@@ -380,6 +393,7 @@ export const ContextPanelContent: React.FC = () => {
       providerModel,
       tokenBreakdown,
       usagePercent,
+      cacheHitRate,
       totalAssistantCost,
       contextLimit,
       breakdown: {
@@ -467,18 +481,29 @@ export const ContextPanelContent: React.FC = () => {
 
         {/* ── Last turn tokens ── */}
         <div className="mb-5 rounded-lg bg-[var(--surface-elevated)]/70 px-4 py-3.5">
-          <div className="typography-micro text-muted-foreground">{t('contextSidebar.section.lastAssistantMessage')}</div>
-          <div className="mt-2.5 grid grid-cols-3 gap-x-4 gap-y-2.5">
+          <div className="typography-micro text-muted-foreground mb-2.5">{t('contextSidebar.section.lastAssistantMessage')}</div>
+          <div className="grid grid-cols-3 gap-x-4 gap-y-2.5">
             {([
-              { label: t('contextSidebar.tokens.input'), value: viewModel.tokenBreakdown.input },
-              { label: t('contextSidebar.tokens.output'), value: viewModel.tokenBreakdown.output },
-              { label: t('contextSidebar.tokens.reasoning'), value: viewModel.tokenBreakdown.reasoning },
-              { label: t('contextSidebar.tokens.cacheRead'), value: viewModel.tokenBreakdown.cacheRead },
-              { label: t('contextSidebar.tokens.cacheWrite'), value: viewModel.tokenBreakdown.cacheWrite },
+              { label: t('contextSidebar.tokens.input'), value: viewModel.tokenBreakdown.input, format: 'count' },
+              { label: t('contextSidebar.tokens.output'), value: viewModel.tokenBreakdown.output, format: 'count' },
+              { label: t('contextSidebar.tokens.reasoning'), value: viewModel.tokenBreakdown.reasoning, format: 'count' },
+              { label: t('contextSidebar.tokens.cacheRead'), value: viewModel.tokenBreakdown.cacheRead, format: 'count' },
+              { label: t('contextSidebar.tokens.cacheWrite'), value: viewModel.tokenBreakdown.cacheWrite, format: 'count' },
+              {
+                label: t('contextSidebar.tokens.cacheHit'),
+                value: viewModel.cacheHitRate.hasInput ? viewModel.cacheHitRate.percent : null,
+                format: 'percent',
+              },
             ] as const).map((item) => (
               <div key={item.label}>
                 <div className="typography-micro text-muted-foreground/70">{item.label}</div>
-                <div className="mt-0.5 typography-ui-label tabular-nums text-foreground">{formatNumber(item.value)}</div>
+                <div className="mt-0.5 typography-ui-label tabular-nums text-foreground">
+                  {item.value !== null && item.value !== undefined
+                    ? item.format === 'percent'
+                      ? `${item.value.toFixed(1)}%`
+                      : formatNumber(item.value)
+                    : '—'}
+                </div>
               </div>
             ))}
           </div>

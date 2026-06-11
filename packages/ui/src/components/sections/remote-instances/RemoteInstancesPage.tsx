@@ -956,7 +956,7 @@ export const RemoteInstancesPage: React.FC = () => {
     return (
       <SettingsPageLayout>
         {clientAuth ? (
-          <div className="mb-8">
+          <div data-settings-item="remote-instances.client-auth" className="mb-8">
             <div className="mb-1 px-1 space-y-0.5">
               <h3 className="typography-ui-header font-medium text-foreground">{t('settings.remoteInstances.clientAuth.title')}</h3>
               <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.clientAuth.description')}</p>
@@ -1029,7 +1029,7 @@ export const RemoteInstancesPage: React.FC = () => {
           </div>
         ) : null}
 
-        {showInstanceManagement ? <div className="mb-8 border-t border-[var(--surface-subtle)] pt-8">
+        {showInstanceManagement ? <div data-settings-item="remote-instances.direct-hosts" className="mb-8 border-t border-[var(--surface-subtle)] pt-8">
           <div className="mb-1 px-1 space-y-0.5">
             <h3 className="typography-ui-header font-medium text-foreground">{t('settings.remoteInstances.direct.title')}</h3>
             <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.direct.description')}</p>

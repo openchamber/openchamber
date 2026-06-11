@@ -56,7 +56,9 @@ export function parseSseEventEnvelope(block) {
         ? parsed.directory
         : typeof parsed?.properties?.directory === 'string' && parsed.properties.directory.length > 0
           ? parsed.properties.directory
-          : null;
+          : typeof parsed?.properties?.info?.directory === 'string' && parsed.properties.info.directory.length > 0
+            ? parsed.properties.info.directory
+            : null;
 
     return {
       eventId,

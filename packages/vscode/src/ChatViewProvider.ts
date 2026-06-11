@@ -7,6 +7,7 @@ import { getWebviewHtml } from './webviewHtml';
 import { openSseProxy } from './sseProxy';
 import { resolveWebviewDevServerUrl } from './webviewDevServer';
 import { normalizeWindowsDriveLetter } from './pathUtils';
+import { resolveWorkspaceFolders, type WorkspaceFolderCandidate } from './workspaceResolver';
 
 type ActiveEditorFilePayload = {
   filePath: string;
@@ -264,16 +265,27 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  public createNewSession() {
+  public createNewSession(options?: { directory?: string; workspaceFolders?: WorkspaceFolderCandidate[] }) {
     if (this._view) {
       // Reveal the webview panel
       this._view.show(true);
-      
+
       this._view.webview.postMessage({
         type: 'command',
-        command: 'newSession'
+        command: 'newSession',
+        ...((options?.directory || options?.workspaceFolders?.length) && {
+          payload: { directory: options?.directory, workspaceFolders: options?.workspaceFolders ?? [] },
+        }),
       });
     }
+  }
+
+  public syncWorkspaceFolders(workspaceFolders: WorkspaceFolderCandidate[]) {
+    this._view?.webview.postMessage({
+      type: 'command',
+      command: 'workspaceFoldersChanged',
+      payload: { workspaceFolders },
+    });
   }
 
   public showSettings() {
@@ -596,6 +608,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const workspaceFolder = normalizeWindowsDriveLetter(
       vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || ''
     );
+    const workspaceFolders = resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []);
     // Use cached values which are updated by onStatusChange callback
     const initialStatus = this._cachedStatus;
     const cliAvailable = this._openCodeManager?.isCliAvailable() ?? false;
@@ -604,6 +617,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       webview,
       extensionUri: this._extensionUri,
       workspaceFolder,
+      workspaceFolders,
       initialStatus,
       cliAvailable,
       extensionVersion: String(this._context.extension?.packageJSON?.version || ''),

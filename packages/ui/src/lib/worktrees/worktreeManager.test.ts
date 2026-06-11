@@ -14,6 +14,8 @@ const createdWorktree = {
   name: 'feature',
   branch: 'feature',
   path: '/repo-feature',
+  directoryCreated: true as const,
+  bootstrapStatus: { status: 'pending' as const, error: null, updatedAt: 1 },
 };
 
 const sessionState = {
@@ -28,6 +30,8 @@ mock.module('@/lib/openchamberConfig', () => ({
 mock.module('@/lib/worktrees/worktreeBootstrap', () => ({
   clearWorktreeBootstrapState: mock(),
   markWorktreeBootstrapPending: mock(),
+  setWorktreeBootstrapState: mock(),
+  startWorktreeBootstrapWatcher: mock(),
 }));
 
 mock.module('@/lib/worktrees/worktreeStatus', () => ({
@@ -102,5 +106,18 @@ describe('worktreeManager list invalidation', () => {
 
     expect(listCalls).toEqual(['/repo', '/repo']);
     expect(result.map((entry) => entry.path)).toEqual(['/repo-feature']);
+  });
+
+  test('marks fast-created worktrees pending until bootstrap settles', async () => {
+    const metadata = await createWorktree({ id: 'project-1', path: '/repo' }, {
+      preferredName: 'feature',
+      mode: 'new',
+      branchName: 'feature',
+      worktreeName: 'feature',
+      returnAfterDirectoryCreated: true,
+    });
+
+    expect(metadata.worktreeStatus).toBe('pending');
+    expect(sessionState.availableWorktrees[0]?.worktreeStatus).toBe('pending');
   });
 });

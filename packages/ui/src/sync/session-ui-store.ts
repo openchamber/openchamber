@@ -28,7 +28,6 @@ import { getSafeStorage } from "@/stores/utils/safeStorage"
 import { markPendingUserSendAnimation } from "@/lib/userSendAnimation"
 import { flattenAssistantTextParts } from "@/lib/messages/messageText"
 import { composeForkSessionMessage } from "@/lib/messages/executionMeta"
-import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap"
 import { waitForPendingDraftWorktreeRequest } from "@/lib/worktrees/pendingDraftWorktree"
 import { resolveProjectForSessionDirectory } from "@/lib/projectResolution"
 import {
@@ -158,6 +157,15 @@ type SendMessageOptions = {
   sessionId?: string
 }
 
+type AssistantMessageSessionExecution = {
+  providerID: string
+  modelID: string
+  variant: string
+  agent: string
+  instructions: string
+  createWorktree?: boolean
+}
+
 function notifyMessageSent(sessionId: string): void {
   runtimeFetch(`/api/sessions/${sessionId}/message-sent`, { method: "POST" })
     .catch(() => { /* ignore */ })
@@ -260,7 +268,7 @@ export type SessionUIState = {
     options?: SendMessageOptions,
   ) => Promise<void>
 
-  createSession: (title?: string, directoryOverride?: string | null, parentID?: string | null) => Promise<Session | null>
+  createSession: (title?: string, directoryOverride?: string | null, parentID?: string | null, metadata?: Record<string, unknown>) => Promise<Session | null>
   deleteSession: (id: string, options?: Record<string, unknown>) => Promise<boolean>
   deleteSessions: (ids: string[], options?: Record<string, unknown>) => Promise<{ deletedIds: string[]; failedIds: string[] }>
   archiveSession: (id: string) => Promise<boolean>
@@ -272,7 +280,7 @@ export type SessionUIState = {
   forkFromMessage: (sessionId: string, messageId: string) => Promise<void>
   handleSlashUndo: (sessionId: string) => Promise<void>
   handleSlashRedo: (sessionId: string, options?: { fullUnrevert?: boolean }) => Promise<void>
-  createSessionFromAssistantMessage: (sourceMessageId: string, execution: { providerID: string; modelID: string; variant: string; agent: string; instructions: string }) => Promise<void>
+  createSessionFromAssistantMessage: (sourceMessageId: string, execution: AssistantMessageSessionExecution) => Promise<void>
 
   // Data access helpers (read from sync)
   getSessionsByDirectory: (directory: string) => Session[]
@@ -434,6 +442,14 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     )
     const fallbackDir = opencodeClient.getDirectory() ?? directoryState.currentDirectory ?? null
     const resolvedDir = (directoryHint ? normalizePath(directoryHint) : null) ?? sessionDir ?? fallbackDir
+    const projectsState = useProjectsStore.getState()
+    const sessionProject = resolvedDir
+      ? resolveProjectForSessionDirectory(
+        projectsState.projects,
+        get().availableWorktreesByProject,
+        resolvedDir,
+      )
+      : null
 
     // Set the directory together with the session id so chat hooks read the
     // same child store that send/SSE events will update during startup races.
@@ -443,6 +459,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     try {
       if (resolvedDir && directoryState.currentDirectory !== resolvedDir) {
         directoryState.setDirectory(resolvedDir, { showOverlay: false })
+      }
+      if (sessionProject && projectsState.activeProjectId !== sessionProject.id) {
+        projectsState.setActiveProjectIdOnly(sessionProject.id)
       }
       opencodeClient.setDirectory(resolvedDir ?? undefined)
     } catch (e) {
@@ -874,10 +893,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         ? [...(additionalParts || []), ...draftSyntheticParts]
         : additionalParts
 
-      if (createdDirectory) {
-        await waitForWorktreeBootstrap(createdDirectory)
-      }
-
       notifyMessageSent(created.id)
 
       markPendingUserSendAnimation(created.id)
@@ -922,8 +937,13 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const configAgentName = useConfigStore.getState().currentAgentName
     const effectiveAgent = trimmedAgent || sessionAgentSelection || configAgentName || undefined
 
+    if (targetSessionId) {
+      useSelectionStore.getState().saveSessionModelSelection(targetSessionId, providerID, modelID)
+    }
+
     if (targetSessionId && effectiveAgent) {
       useSelectionStore.getState().saveSessionAgentSelection(targetSessionId, effectiveAgent)
+      useSelectionStore.getState().saveAgentModelForSession(targetSessionId, effectiveAgent, providerID, modelID)
       useSelectionStore.getState().saveAgentModelVariantForSession(targetSessionId, effectiveAgent, providerID, modelID, variant)
     }
 
@@ -947,10 +967,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const currentSessionDirectory = targetSessionId
       ? normalizePath(get().getDirectoryForSession(targetSessionId))
       : null
-    if (currentSessionDirectory) {
-      await waitForWorktreeBootstrap(currentSessionDirectory)
-    }
-
     if (targetSessionId) {
       notifyMessageSent(targetSessionId)
     }
@@ -993,14 +1009,14 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // ---------------------------------------------------------------------------
   // createSession
   // ---------------------------------------------------------------------------
-  createSession: async (title, directoryOverride, parentID) => {
+  createSession: async (title, directoryOverride, parentID, metadata) => {
     const draft = get().newSessionDraft
     const targetFolderId = draft.targetFolderId
     get().closeNewSessionDraft()
 
     try {
       const dir = directoryOverride ?? opencodeClient.getDirectory()
-      const session = await createSessionAction(title, dir, parentID ?? null)
+      const session = await createSessionAction(title, dir, parentID ?? null, metadata)
       if (!session) return null
 
       if (targetFolderId) {
@@ -1203,25 +1219,81 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       sourceSessionId ?? null,
       (sid) => get().worktreeMetadata.get(sid),
     )
-
-    const session = await get().createSession(undefined, directory ?? null, null)
-    if (!session) return
+    const sourceWorktreeMetadata = sourceSessionId ? get().worktreeMetadata.get(sourceSessionId) : undefined
 
     const pID = execution.providerID || useSelectionStore.getState().lastUsedProvider?.providerID
     const mID = execution.modelID || useSelectionStore.getState().lastUsedProvider?.modelID
 
     if (!pID || !mID) return
 
-    const sessionDirectory = normalizePath(directory ?? session.directory ?? null)
-    await opencodeClient.sendMessage({
-      id: session.id,
-      providerID: pID,
-      modelID: mID,
-      variant: execution.variant || undefined,
-      text: composeForkSessionMessage(execution.instructions, assistantPlanText),
-      agent: execution.agent || undefined,
-      directory: sessionDirectory,
-    })
+    const sourceDirectory = normalizePath(directory ?? opencodeClient.getDirectory() ?? null)
+    let sessionDirectory = sourceDirectory
+    let createdWorktree: WorktreeMetadata | null = null
+    let createdWorktreeProject: { id: string; path: string } | null = null
+
+    if (execution.createWorktree) {
+      const projects = useProjectsStore.getState().projects
+      const project = resolveProjectForSessionDirectory(
+        projects,
+        get().availableWorktreesByProject,
+        sourceDirectory,
+      ) ?? resolveProjectForSessionDirectory(
+        projects,
+        get().availableWorktreesByProject,
+        sourceWorktreeMetadata?.projectDirectory ?? null,
+      )
+      if (!project?.path) {
+        throw new Error("Project is not registered in OpenChamber")
+      }
+
+      const [branchNameModule, configModule, createModule] = await Promise.all([
+        import("@/lib/git/branchNameGenerator"),
+        import("@/lib/openchamberConfig"),
+        import("@/lib/worktrees/worktreeCreate"),
+      ])
+      const branchName = branchNameModule.generateBranchName()
+      createdWorktreeProject = { id: project.id, path: project.path }
+      const setupCommands = await configModule.getWorktreeSetupCommands(createdWorktreeProject)
+      createdWorktree = await createModule.createWorktreeWithDefaults(createdWorktreeProject, {
+        preferredName: branchName,
+        mode: "new",
+        branchName,
+        worktreeName: branchName,
+        setupCommands,
+        returnAfterDirectoryCreated: true,
+      })
+      sessionDirectory = normalizePath(createdWorktree.path)
+    }
+
+    const session = await get().createSession(undefined, sessionDirectory || null, null)
+    if (!session) {
+      if (createdWorktree && createdWorktreeProject) {
+        const { removeProjectWorktree } = await import("@/lib/worktrees/worktreeManager")
+        await removeProjectWorktree(createdWorktreeProject, createdWorktree, { deleteLocalBranch: true }).catch(() => undefined)
+      }
+      return
+    }
+
+    if (createdWorktree) {
+      get().setWorktreeMetadata(session.id, {
+        ...createdWorktree,
+        kind: "standard",
+      })
+      useDirectoryStore.getState().setDirectory(createdWorktree.path, { showOverlay: false })
+    }
+
+    await get().sendMessage(
+      composeForkSessionMessage(execution.instructions, assistantPlanText),
+      pID,
+      mID,
+      execution.agent || undefined,
+      undefined,
+      undefined,
+      undefined,
+      execution.variant || undefined,
+      undefined,
+      { sessionId: session.id },
+    )
   },
 
   // ---------------------------------------------------------------------------

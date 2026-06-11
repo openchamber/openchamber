@@ -3,6 +3,8 @@ const TOKEN_COOKIE_NAME = 'oc_preview_token';
 const TOKEN_QUERY_PARAM = 'oc_preview_token';
 const CLIENT_TOKEN_QUERY_PARAM = 'oc_client_token';
 const URL_AUTH_TOKEN_QUERY_PARAM = 'oc_url_token';
+const PREVIEW_PASSTHROUGH_REQUEST_HEADERS = ['x-inertia', 'x-inertia-version'];
+const PREVIEW_PASSTHROUGH_RESPONSE_HEADERS = ['x-inertia', 'x-inertia-location'];
 
 const LOOPBACK_HOSTS = new Set([
   'localhost',
@@ -22,6 +24,34 @@ const parsePreviewResourcePath = (url) => {
     return path + parsed.search;
   } catch {
     return String(url || '');
+  }
+};
+
+const readHeader = (headers, name) => {
+  if (!headers || typeof headers !== 'object') return undefined;
+  const direct = headers[name];
+  if (direct !== undefined) return direct;
+  const lowerName = name.toLowerCase();
+  const key = Object.keys(headers).find((entry) => entry.toLowerCase() === lowerName);
+  return key ? headers[key] : undefined;
+};
+
+export const applyPreviewPassthroughRequestHeaders = (req, proxyReq) => {
+  for (const headerName of PREVIEW_PASSTHROUGH_REQUEST_HEADERS) {
+    const value = readHeader(req?.headers, headerName);
+    if (value !== undefined) {
+      proxyReq.setHeader(headerName, value);
+    }
+  }
+};
+
+export const applyPreviewPassthroughResponseHeaders = (proxyRes, res) => {
+  if (!res || res.headersSent || typeof res.setHeader !== 'function') return;
+  for (const headerName of PREVIEW_PASSTHROUGH_RESPONSE_HEADERS) {
+    const value = readHeader(proxyRes?.headers, headerName);
+    if (value !== undefined) {
+      res.setHeader(headerName, value);
+    }
   }
 };
 
@@ -164,7 +194,7 @@ export const classifyPreviewNavigation = ({ url, currentUrl, targetOrigin }) => 
   return { action: 'external', url: parsed.toString() };
 };
 
-  const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
+const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
   if (window.__openchamberPreviewBridgeInstalled) return;
   window.__openchamberPreviewBridgeInstalled = true;
 
@@ -1412,14 +1442,16 @@ export const createPreviewProxyRuntime = ({
         return `${strippedPath}${withoutUrlAuthToken}`;
       },
       on: {
-        proxyReq: (proxyReq) => {
+        proxyReq: (proxyReq, req) => {
+          applyPreviewPassthroughRequestHeaders(req, proxyReq);
           // Keep local dev servers from receiving OpenChamber credentials.
           proxyReq.removeHeader('cookie');
           proxyReq.removeHeader('authorization');
           proxyReq.removeHeader('x-openchamber-ui-session');
           proxyReq.setHeader('accept-encoding', 'identity');
         },
-        proxyRes: responseInterceptor(async (responseBuffer, proxyRes, req) => {
+        proxyRes: responseInterceptor(async (responseBuffer, proxyRes, req, res) => {
+          applyPreviewPassthroughResponseHeaders(proxyRes, res);
           // Per-response nonce lets the injected bridge run under the dev
           // server's CSP without dropping its script restrictions wholesale.
           const bridgeNonce = crypto.randomBytes(16).toString('base64');

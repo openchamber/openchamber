@@ -22,6 +22,7 @@ import { isDesktopShell } from '@/lib/desktop';
 import { getAgentColor } from '@/lib/agentColors';
 import { useDeviceInfo } from '@/lib/device';
 import { mergeModelMetadataWithLiveModel } from '@/lib/modelMetadata';
+import { getModelDisplayName as getSharedModelDisplayName } from '@/lib/modelDisplay';
 import { getEditModeColors } from '@/lib/permissions/editModeColors';
 import { cn, fuzzyMatch } from '@/lib/utils';
 import { useContextStore } from '@/stores/contextStore';
@@ -35,9 +36,10 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useModelLists } from '@/hooks/useModelLists';
 import { useIsTextTruncated } from '@/hooks/useIsTextTruncated';
 import { formatEffortLabel, getCycledPrimaryAgentName, type MobileControlsPanel } from './mobileControlsUtils';
-import { useI18n } from '@/lib/i18n';
+import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { useOpenCodeReadiness } from '@/hooks/useOpenCodeReadiness';
 import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
+import { markStartupTrace } from '@/lib/startupTrace';
 
 type IconComponent = IconName;
 
@@ -162,27 +164,27 @@ const getModalityIcons = (metadata: ModelMetadata | undefined, direction: 'input
     return result;
 };
 
-const COMPACT_NUMBER_FORMATTER = new Intl.NumberFormat('en-US', {
+const formatCompactNumber = (value: number) => new Intl.NumberFormat(getCurrentIntlLocale(), {
     notation: 'compact',
     compactDisplay: 'short',
     maximumFractionDigits: 1,
     minimumFractionDigits: 0,
-});
+}).format(value);
 
-const CURRENCY_FORMATTER = new Intl.NumberFormat('en-US', {
+const formatUsdCurrency = (value: number) => new Intl.NumberFormat(getCurrentIntlLocale(), {
     style: 'currency',
     currency: 'USD',
     maximumFractionDigits: 4,
     minimumFractionDigits: 2,
-});
+}).format(value);
 
-const KNOWLEDGE_DATE_FORMATTER = new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric' });
+const formatKnowledgeDate = (value: Date) => new Intl.DateTimeFormat(getCurrentIntlLocale(), { month: 'short', year: 'numeric' }).format(value);
 
-const DATE_FORMATTER = new Intl.DateTimeFormat('en-US', {
+const formatReleaseDate = (value: Date) => new Intl.DateTimeFormat(getCurrentIntlLocale(), {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
-});
+}).format(value);
 
 const ADD_PROVIDER_ID = '__add_provider__';
 
@@ -224,7 +226,7 @@ const formatTokens = (value?: number | null) => {
         return '0';
     }
 
-    const formatted = COMPACT_NUMBER_FORMATTER.format(value);
+    const formatted = formatCompactNumber(value);
     return formatted.endsWith('.0') ? formatted.slice(0, -2) : formatted;
 };
 
@@ -233,7 +235,7 @@ const formatCost = (value?: number | null) => {
         return '—';
     }
 
-    return CURRENCY_FORMATTER.format(value);
+    return formatUsdCurrency(value);
 };
 
 const getCapabilityIcons = (metadata?: ModelMetadata) => {
@@ -257,7 +259,7 @@ const formatKnowledge = (knowledge?: string) => {
         const monthIndex = Number.parseInt(match[2], 10) - 1;
         const knowledgeDate = new Date(Date.UTC(year, monthIndex, 1));
         if (!Number.isNaN(knowledgeDate.getTime())) {
-            return KNOWLEDGE_DATE_FORMATTER.format(knowledgeDate);
+            return formatKnowledgeDate(knowledgeDate);
         }
     }
 
@@ -274,7 +276,7 @@ const formatDate = (value?: string) => {
         return value;
     }
 
-    return DATE_FORMATTER.format(parsedDate);
+    return formatReleaseDate(parsedDate);
 };
 
 interface ModelControlsProps {
@@ -312,6 +314,19 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     // Use visible agents (excludes hidden internal agents)
     const agents = getVisibleAgents();
     const primaryAgents = React.useMemo(() => agents.filter((agent) => agent.mode === 'primary'), [agents]);
+    const tracedReadyRef = React.useRef(false);
+
+    React.useEffect(() => {
+        if (tracedReadyRef.current || !isReady) return;
+        tracedReadyRef.current = true;
+        markStartupTrace('ModelControls:ready', {
+            providers: providers.length,
+            agents: agents.length,
+            currentProviderId,
+            currentModelId,
+            currentAgentName,
+        });
+    }, [agents.length, currentAgentName, currentModelId, currentProviderId, isReady, providers.length]);
 
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
     const getDirectoryForSession = useSessionUIStore((s) => s.getDirectoryForSession);
@@ -1244,12 +1259,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         }
     };
 
-    const getModelDisplayName = (model: ProviderModel | undefined) => {
-        const name = (typeof model?.name === 'string' ? model.name : (typeof model?.id === 'string' ? model.id : ''));
-        if (name.length > 40) {
-            return name.substring(0, 37) + '...';
-        }
-        return name;
+    const getModelDisplayName = (model: ProviderModel | undefined, fallbackModelId?: string) => {
+        return getSharedModelDisplayName(model, fallbackModelId, { maxLength: 40 });
     };
 
     const getProviderDisplayName = () => {
@@ -1258,10 +1269,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     };
 
     const getCurrentModelDisplayName = () => {
-        if (!currentProviderId || !currentModelId) return 'Not selected';
-        if (models.length === 0) return 'Not selected';
+        if (!currentModelId) return t('chat.modelControls.selectModel');
         const currentModel = models.find((m: ProviderModel) => m.id === currentModelId);
-        return getModelDisplayName(currentModel);
+        return getModelDisplayName(currentModel, currentModelId) || t('chat.modelControls.selectModel');
     };
 
     const currentModelDisplayName = getCurrentModelDisplayName();

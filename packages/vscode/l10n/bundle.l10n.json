@@ -1,0 +1,23 @@
+{
+  "OpenChamber: Failed to open sidebar - {0}": "OpenChamber: Failed to open sidebar - {0}",
+  "OpenChamber: Chat sidebar is not ready": "OpenChamber: Chat sidebar is not ready",
+  "OpenChamber: No active session": "OpenChamber: No active session",
+  "OpenChamber: API connection restarted": "OpenChamber: API connection restarted",
+  "OpenChamber: Failed to restart API - {0}": "OpenChamber: Failed to restart API - {0}",
+  "OpenChamber [Add to Context]: No active editor": "OpenChamber [Add to Context]: No active editor",
+  "OpenChamber [Add to Context]: No text selected": "OpenChamber [Add to Context]: No text selected",
+  "OpenChamber: No file selected to mention": "OpenChamber: No file selected to mention",
+  "OpenChamber: Some selected entries were skipped (folders or unsupported resources)": "OpenChamber: Some selected entries were skipped (folders or unsupported resources)",
+  "OpenChamber [Explain]: No active editor": "OpenChamber [Explain]: No active editor",
+  "Explain the following Code / Text:": "Explain the following Code / Text:",
+  "OpenChamber [Improve Code]: No active editor": "OpenChamber [Improve Code]: No active editor",
+  "OpenChamber [Improve Code]: No text selected": "OpenChamber [Improve Code]: No text selected",
+  "Improve the following Code:": "Improve the following Code:",
+  "OpenCode CLI not found. Install it and ensure it's in PATH.": "OpenCode CLI not found. Install it and ensure it's in PATH.",
+  "OpenCode CLI not found. Please install it and ensure it's in PATH.": "OpenCode CLI not found. Please install it and ensure it's in PATH.",
+  "More Info": "More Info",
+  "Failed to start OpenCode: {0}": "Failed to start OpenCode: {0}",
+  "New Session": "New Session",
+  "Session": "Session",
+  "Agent Manager": "Agent Manager"
+}

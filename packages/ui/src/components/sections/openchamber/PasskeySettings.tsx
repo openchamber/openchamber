@@ -14,7 +14,7 @@ import {
   type PasskeyStatus,
   type StoredPasskey,
 } from '@/lib/passkeys';
-import { useI18n } from '@/lib/i18n';
+import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
 
 const formatTimestamp = (timestamp: number | null, neverUsedText: string, timeFormatPreference: TimeFormatPreference) => {
@@ -22,7 +22,7 @@ const formatTimestamp = (timestamp: number | null, neverUsedText: string, timeFo
     return neverUsedText;
   }
 
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(getCurrentIntlLocale(), {
     dateStyle: 'medium',
     timeStyle: 'short',
     hour12: timeFormatPreference === 'auto' ? undefined : timeFormatPreference === '12h',

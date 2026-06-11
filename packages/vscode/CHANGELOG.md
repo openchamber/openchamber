@@ -1,3 +1,28 @@
+## [1.12.4] - 2026-06-11
+
+- Agent Manager: creating isolated runs now opens sessions immediately while worktree setup continues in the background.
+- Agent Manager: hidden models now stay hidden in multi-model selection controls (thanks to @kjhq).
+- Sessions: chat folder assignments now stay in place after reloads.
+- Sessions: added an action to archive all sessions (thanks to @jjdubski).
+- Sessions: session and folder rows now have right-click menus for their available actions.
+- Workspaces: added multi-root workspace support, including workspace folder switching in the extension (thanks to @mmospanenko).
+- Settings: added search across settings pages.
+- Chat/UI: added a setting to collapse long user messages.
+- Chat: table copy actions now include a Markdown format option (thanks to @kjhq).
+- Chat: `@agent` mentions in rendered messages now use the primary accent color.
+- Usage: added Cursor quota tracking.
+- UI/Localization: added French extension translations (thanks to @pascalandr).
+
+## [1.12.3] - 2026-06-05
+
+- Startup: OpenCode health checks now work with OpenCode 1.15.x.
+
+## [1.12.2] - 2026-06-05
+
+- Startup/Windows: the extension now detects more OpenCode installs from PATH, npm, Scoop, and Chocolatey.
+- Chat: prompts sent while creating or switching target sessions now stay attached to the intended workspace directory.
+- Files: chat and tool links now handle Windows drive-letter and backslash paths.
+
 ## [1.12.1] - 2026-06-03
 
 - Chat: completed turns can now show changed-file chips with per-file additions and deletions, controlled by a new Chat setting.

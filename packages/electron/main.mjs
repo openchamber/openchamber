@@ -11,6 +11,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import updaterPkg from 'electron-updater';
 import { ElectronSshManager } from './ssh-manager.mjs';
+import { createTrayController } from './tray.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -182,9 +183,12 @@ const state = {
   windowCounter: 1,
   focusedWindowIds: new Set(),
   windowGeometryRevisions: new Map(),
+  windowGeometryTimers: new Map(),
   miniChatWindowsBySession: new Map(),
   sshStatuses: new Map(),
   sshLogs: new Map(),
+  trayController: null,
+  lastFocusedWindowId: null,
 };
 
 const quitRisk = {
@@ -247,6 +251,14 @@ const prepareForQuit = ({ installingUpdate = false } = {}) => {
   state.quitConfirmed = true;
   state.installingUpdate = installingUpdate;
   state.quitConfirmationPending = false;
+
+  if (state.trayController) {
+    try {
+      state.trayController.destroy();
+    } catch {
+    }
+    state.trayController = null;
+  }
 
   if (state.mainWindow && !state.mainWindow.isDestroyed()) {
     try {
@@ -581,8 +593,15 @@ const debounceWindowStatePersist = (browserWindow, immediate = false) => {
   const revision = (state.windowGeometryRevisions.get(key) || 0) + 1;
   state.windowGeometryRevisions.set(key, revision);
 
+  const existingTimer = state.windowGeometryTimers.get(key);
+  if (existingTimer) {
+    clearTimeout(existingTimer);
+    state.windowGeometryTimers.delete(key);
+  }
+
   const persist = async () => {
     if (state.windowGeometryRevisions.get(key) !== revision) return;
+    state.windowGeometryTimers.delete(key);
     await writeWindowState(browserWindow);
   };
 
@@ -591,9 +610,10 @@ const debounceWindowStatePersist = (browserWindow, immediate = false) => {
     return;
   }
 
-  setTimeout(() => {
+  const timer = setTimeout(() => {
     void persist();
   }, 300);
+  state.windowGeometryTimers.set(key, timer);
 };
 
 const buildHealthUrl = (url) => {
@@ -1069,7 +1089,12 @@ const spawnLocalServer = async () => {
   process.env.OPENCHAMBER_HOST = bindHost;
   process.env.OPENCHAMBER_DIST_DIR = resolveWebDistDir();
   process.env.OPENCHAMBER_RUNTIME = 'desktop';
+  process.env.OPENCHAMBER_OPENCODE_CWD = app.getPath('userData');
   process.env.OPENCHAMBER_DESKTOP_NOTIFY = 'true';
+  try {
+    fs.mkdirSync(process.env.OPENCHAMBER_OPENCODE_CWD, { recursive: true });
+  } catch {
+  }
   if (desktopUiPassword) {
     process.env.OPENCHAMBER_UI_PASSWORD = desktopUiPassword;
   } else {
@@ -1471,6 +1496,36 @@ const emitToAllWindows = (event, detail) => {
   }
 };
 
+// macOS vibrancy: the native NSVisualEffectView needs a moment to settle after
+// the window is shown/restored. Until then the renderer keeps the sidebar solid
+// to avoid a flash of raw transparency; once ready it switches to the
+// translucent overlay. We toggle this readiness over the same IPC bridge.
+// Apply vibrancy to a live, on-screen window. Done after show (not in the
+// BrowserWindow constructor) because macOS otherwise leaves the material
+// uncomposited on a cold launch until the window gets a state change.
+const applyMacVibrancy = (browserWindow) => {
+  if (process.platform !== 'darwin' || !browserWindow || browserWindow.isDestroyed()) return;
+  try {
+    browserWindow.setVibrancy('sidebar');
+  } catch {}
+};
+
+const setMacVibrancyReady = (browserWindow, ready) => {
+  if (process.platform !== 'darwin' || !browserWindow || browserWindow.isDestroyed()) return;
+  emitToWindow(browserWindow, 'openchamber:vibrancy-ready', { ready });
+};
+
+const scheduleMacVibrancyReady = (browserWindow, delayMs = 160) => {
+  if (process.platform !== 'darwin' || !browserWindow || browserWindow.isDestroyed()) return;
+  setMacVibrancyReady(browserWindow, false);
+  const timer = setTimeout(() => {
+    if (browserWindow.isDestroyed() || browserWindow.isMinimized() || !browserWindow.isVisible()) return;
+    setMacVibrancyReady(browserWindow, true);
+  }, delayMs);
+  if (typeof timer?.unref === 'function') timer.unref();
+};
+
+
 const setTaskbarProgress = (value) => {
   if (process.platform !== 'win32') return;
   for (const browserWindow of BrowserWindow.getAllWindows()) {
@@ -1699,6 +1754,14 @@ const dispatchMenuAction = (action) => {
   dispatchDomEventToWindow(target, 'openchamber:menu-action', action);
 };
 
+// Mini-chat draft windows are not deduplicated, so this must reach the renderer
+// exactly once — emitToWindow alone (no DOM-event double dispatch). The renderer
+// resolves the active directory/project and opens the window.
+const dispatchOpenMiniChat = (browserWindow) => {
+  const target = browserWindow && !browserWindow.isDestroyed() ? browserWindow : getMenuTargetWindow();
+  if (target) emitToWindow(target, 'openchamber:open-mini-chat');
+};
+
 const dispatchCheckForUpdates = () => {
   emitToAllWindows('openchamber:check-for-updates');
   for (const browserWindow of BrowserWindow.getAllWindows()) {
@@ -1763,6 +1826,8 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
   const desktopHome = os.homedir() || '';
   const desktopMacosMajor = String(macosMajorVersion());
   const usesCustomTitleBar = process.platform === 'darwin' || process.platform === 'win32';
+  // macOS vibrancy, on by default; users can disable it (Appearance settings).
+  const useVibrancy = process.platform === 'darwin' && readSettingsRoot().desktopVibrancy !== false;
   const titleBarOverlayEnabled = false;
   const autoHidesNativeMenuBar = process.platform !== 'darwin';
   const windowIconPath = getWindowIconPath();
@@ -1777,7 +1842,11 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
     minHeight: MIN_WINDOW_HEIGHT,
     icon: windowIconPath,
     show: false,
-    backgroundColor: '#151313',
+    backgroundColor: useVibrancy ? '#00000000' : '#151313',
+    // Vibrancy is applied after the window is shown (see applyMacVibrancy), not
+    // here: setting it in the constructor leaves the material uncomposited on a
+    // cold launch until a window event. No `transparent: true` either — vibrancy
+    // alone is enough and composites reliably once applied to a live window.
     frame: process.platform === 'win32' ? false : undefined,
     autoHideMenuBar: autoHidesNativeMenuBar,
     // Electron's hiddenInset adds its own extra inset, which leaves the controls
@@ -1792,6 +1861,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
         `--openchamber-client-token=${desktopClientToken}`,
         `--openchamber-home=${desktopHome}`,
         `--openchamber-macos-major=${desktopMacosMajor}`,
+        `--openchamber-mac-vibrancy=${useVibrancy ? '1' : '0'}`,
         `--openchamber-boot-outcome=${JSON.stringify(state.bootOutcome || null)}`,
       ],
       preload: isDev ? path.join(__dirname, 'preload.mjs') : path.join(app.getAppPath(), 'preload.mjs'),
@@ -1838,17 +1908,28 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
         browserWindow.setTrafficLightPosition({ x: 16, y: 17 });
       } catch {}
     };
-    browserWindow.on('minimize', refreshTrafficLights);
+    browserWindow.on('minimize', () => {
+      refreshTrafficLights();
+      setMacVibrancyReady(browserWindow, false);
+    });
     browserWindow.on('restore', () => {
       refreshTrafficLights();
       setTimeout(refreshTrafficLights, 250);
+      scheduleMacVibrancyReady(browserWindow, 180);
     });
+    // Only suppress vibrancy around the minimize/restore cycle (it flashes raw
+    // transparency during the genie animation). A plain show — cold launch from
+    // the dock, un-hide — must NOT suppress, or the sidebar gets stuck solid
+    // when the post-show `ready` re-enable is skipped while the window is still
+    // animating in.
     browserWindow.on('show', refreshTrafficLights);
     browserWindow.on('focus', refreshTrafficLights);
   }
 
   browserWindow.on('resize', () => {
-    emitToWindow(browserWindow, 'openchamber:window-resized');
+    if (process.platform === 'darwin') {
+      emitToWindow(browserWindow, 'openchamber:window-resized');
+    }
     debounceWindowStatePersist(browserWindow, false);
   });
   browserWindow.on('maximize', () => {
@@ -1965,6 +2046,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
   browserWindow.once('ready-to-show', () => {
     browserWindow.show();
     browserWindow.focus();
+    if (useVibrancy) applyMacVibrancy(browserWindow);
   });
 
   if (url) {
@@ -2092,6 +2174,8 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
   const desktopClientToken = effectiveRuntimeConfig.clientToken || '';
   const desktopHome = os.homedir() || '';
   const desktopMacosMajor = String(macosMajorVersion());
+  // macOS vibrancy, on by default; users can disable it (Appearance settings).
+  const useVibrancy = process.platform === 'darwin' && readSettingsRoot().desktopVibrancy !== false;
   const browserWindow = new BrowserWindow({
     title: 'OpenChamber Mini Chat',
     width: MINI_CHAT_WINDOW_WIDTH,
@@ -2100,7 +2184,11 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
     minHeight: MINI_CHAT_MIN_WINDOW_HEIGHT,
     icon: getWindowIconPath(),
     show: false,
-    backgroundColor: '#151313',
+    backgroundColor: useVibrancy ? '#00000000' : '#151313',
+    // Vibrancy is applied after the window is shown (see applyMacVibrancy), not
+    // here: setting it in the constructor leaves the material uncomposited on a
+    // cold launch until a window event. No `transparent: true` either — vibrancy
+    // alone is enough and composites reliably once applied to a live window.
     frame: process.platform === 'win32' ? false : undefined,
     autoHideMenuBar: process.platform !== 'darwin',
     titleBarStyle: process.platform === 'darwin' || process.platform === 'win32' ? 'hidden' : 'default',
@@ -2150,13 +2238,17 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
         browserWindow.setTrafficLightPosition({ x: 16, y: 17 });
       } catch {}
     };
+    // Suppress vibrancy only around minimize/restore, never on a plain show.
     browserWindow.on('show', refreshTrafficLights);
     browserWindow.on('focus', refreshTrafficLights);
+    browserWindow.on('minimize', () => setMacVibrancyReady(browserWindow, false));
+    browserWindow.on('restore', () => scheduleMacVibrancyReady(browserWindow, 180));
   }
 
   browserWindow.once('ready-to-show', () => {
     browserWindow.show();
     browserWindow.focus();
+    if (useVibrancy) applyMacVibrancy(browserWindow);
   });
 
   browserWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -3066,6 +3158,16 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       maybeShowNativeNotification(args);
       return null;
 
+    case 'desktop_tray_update':
+      if (state.trayController) {
+        try {
+          state.trayController.update(args || {});
+        } catch (error) {
+          log.warn('[electron] tray update failed', error);
+        }
+      }
+      return null;
+
     case 'desktop_clear_cache':
       await session.defaultSession.clearStorageData();
       for (const browserWindow of BrowserWindow.getAllWindows()) {
@@ -3298,13 +3400,23 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     }
 
     case 'desktop_set_vibrancy': {
-      // Vibrancy (macOS blur) is not supported in the Electron shell for our
-      // titleBarStyle:'hidden' setup. Persist the
-      // disabled state so settings UI reflects it; args.enabled is ignored.
+      // Vibrancy + transparent backing are window-creation options, so the
+      // change only takes effect on a fresh launch. Persist the preference,
+      // then relaunch the app.
+      const enabled = args.enabled === true;
       await mutateSettingsRoot((root) => {
-        root.desktopVibrancy = false;
+        root.desktopVibrancy = enabled;
       });
-      return { enabled: false, requiresRestart: false };
+      setImmediate(() => {
+        try {
+          prepareForQuit();
+          app.relaunch();
+          app.exit(0);
+        } catch (err) {
+          log.error('[electron] desktop_set_vibrancy relaunch failed', err);
+        }
+      });
+      return { enabled, requiresRestart: true };
     }
 
     case 'desktop_check_for_updates': {
@@ -3490,23 +3602,33 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     case 'desktop_get_window_pinned':
       return { pinned: Boolean(browserWindow?.__ocPinned) };
 
-    case 'desktop_focus_main_window':
-      if (state.mainWindow && !state.mainWindow.isDestroyed()) {
-        if (state.mainWindow.isMinimized()) state.mainWindow.restore();
-        state.mainWindow.show();
-        state.mainWindow.focus();
-        const sessionId = typeof args.sessionId === 'string' ? args.sessionId.trim() : '';
-        const directory = typeof args.directory === 'string' ? args.directory.trim() : '';
-        const mode = typeof args.mode === 'string' ? args.mode.trim() : '';
-        if (sessionId) {
-          emitToWindow(state.mainWindow, 'openchamber:open-session', { sessionId, directory });
-        } else if (mode === 'draft') {
-          const projectId = typeof args.projectId === 'string' ? args.projectId.trim() : '';
-          emitToWindow(state.mainWindow, 'openchamber:open-draft-session', { directory, projectId });
-        }
+    case 'desktop_focus_main_window': {
+      const sessionId = typeof args.sessionId === 'string' ? args.sessionId.trim() : '';
+      const directory = typeof args.directory === 'string' ? args.directory.trim() : '';
+      const mode = typeof args.mode === 'string' ? args.mode.trim() : '';
+      const projectId = typeof args.projectId === 'string' ? args.projectId.trim() : '';
+      const hasMainWindow = state.mainWindow && !state.mainWindow.isDestroyed();
+
+      // No live main window (e.g. "Open in main window" from a mini-chat after
+      // the main window was closed): create one and open the session in it. A
+      // fresh window can't take an immediate emit, so queue the session as a
+      // pending deep-link and let did-finish-load flush it once ready.
+      if (!hasMainWindow) {
+        if (sessionId) pendingDeepLinks.push({ type: 'session', value: sessionId });
+        await openMainWindow();
         return { focused: true };
       }
-      return { focused: false };
+
+      if (state.mainWindow.isMinimized()) state.mainWindow.restore();
+      state.mainWindow.show();
+      state.mainWindow.focus();
+      if (sessionId) {
+        emitToWindow(state.mainWindow, 'openchamber:open-session', { sessionId, directory });
+      } else if (mode === 'draft') {
+        emitToWindow(state.mainWindow, 'openchamber:open-draft-session', { directory, projectId });
+      }
+      return { focused: true };
+    }
 
     case 'desktop_close_current_window':
       if (browserWindow && !browserWindow.isDestroyed()) {
@@ -3622,6 +3744,9 @@ const buildMacMenu = () => {
         { type: 'separator' },
         { label: 'New Session', accelerator: 'Cmd+N', click: () => dispatchAction('new-session') },
         { label: 'New Worktree', accelerator: 'Cmd+Shift+N', click: () => dispatchAction('new-worktree-session') },
+        // registerAccelerator:false → show the shortcut hint but let the
+        // renderer own the (customizable) key binding, avoiding a double open.
+        { label: 'New Mini Chat', accelerator: 'Cmd+Alt+N', registerAccelerator: false, click: () => dispatchOpenMiniChat() },
         { type: 'separator' },
         { label: 'Add Workspace', click: () => dispatchAction('change-workspace') },
         { type: 'separator' },
@@ -3884,6 +4009,7 @@ const COMMANDS_SAFE_FOR_REMOTE = new Set([
   'desktop_get_app_version',
   'desktop_get_lan_address',
   'desktop_capture_page_rect',
+  'desktop_tray_update',
 ]);
 
 ipcMain.handle('openchamber:invoke', async (event, command, args) => {
@@ -3927,6 +4053,167 @@ ipcMain.handle('openchamber:dialog:open', async (event, options) => {
   if (options?.multiple) return result.filePaths;
   return result.filePaths[0] || null;
 });
+
+// --- macOS menu bar (status bar) ---------------------------------------------
+// Tray lives only on macOS; the renderer streams a compact state snapshot via
+// the `desktop_tray_update` IPC command (see the command switch). Tray clicks
+// flow back through dispatchTrayAction → renderer (focus/respond) or native
+// handlers (show window / quit).
+
+// Icon assets: a calm outline (idle), a statically filled cube (a finished
+// session left unread), and an eased sequence the busy state breathes through.
+const TRAY_BREATH_FRAME_COUNT = 16;
+// Track the most recently focused window (main or mini-chat) so tray actions
+// can target the surface the user was last using, even when the tray menu is
+// open and nothing is focused right now.
+app.on('browser-window-focus', (_event, browserWindow) => {
+  if (browserWindow && !browserWindow.isDestroyed()) {
+    state.lastFocusedWindowId = browserWindow.id;
+  }
+});
+
+// The window the user is "on" for tray routing: the focused one, else the last
+// focused that is still alive.
+const resolveTraySurface = () => {
+  const focused = BrowserWindow.getFocusedWindow();
+  if (focused && !focused.isDestroyed()) return focused;
+  if (state.lastFocusedWindowId != null) {
+    const remembered = BrowserWindow.fromId(state.lastFocusedWindowId);
+    if (remembered && !remembered.isDestroyed()) return remembered;
+  }
+  return null;
+};
+
+const trayIconAssets = () => {
+  const dir = path.join(resourceRoot(), 'icons', 'tray');
+  const statusDir = path.join(dir, 'status');
+  return {
+    idleIconPath: path.join(dir, 'trayTemplate-idle.png'),
+    unseenIconPath: path.join(dir, 'trayTemplate-unseen.png'),
+    breathIconPaths: Array.from({ length: TRAY_BREATH_FRAME_COUNT }, (_, i) =>
+      path.join(dir, `trayTemplate-breath-${String(i).padStart(2, '0')}.png`)),
+    // Per-session status icons shown in the menu rows (left, vertically centred
+    // across the title + sublabel). 'blank' reserves the gutter for idle rows.
+    statusIconPaths: {
+      busy: path.join(statusDir, 'busy.png'),
+      retry: path.join(statusDir, 'retry.png'),
+      error: path.join(statusDir, 'error.png'),
+      unseen: path.join(statusDir, 'unseen.png'),
+      blank: path.join(statusDir, 'blank.png'),
+    },
+  };
+};
+
+const setupTray = () => {
+  if (process.platform !== 'darwin' || state.trayController) return;
+  const assets = trayIconAssets();
+  if (!fs.existsSync(assets.idleIconPath)) {
+    log.warn('[electron] tray icon missing, skipping tray setup', { iconPath: assets.idleIconPath });
+    return;
+  }
+  try {
+    state.trayController = createTrayController({
+      ...assets,
+      onAction: (action) => { void dispatchTrayAction(action); },
+    });
+    // Seed an empty snapshot so the icon appears immediately; the renderer
+    // pushes the real state once the sync stores are mounted.
+    state.trayController.update({ sessions: [], approvals: [] });
+  } catch (error) {
+    log.warn('[electron] failed to set up tray', error);
+    state.trayController = null;
+  }
+};
+
+// Bring the existing main window forward WITHOUT re-navigating it. Only when
+// no live window exists (truly closed) do we recreate one — recreation reloads,
+// but showing an existing window must not. This mirrors desktop_focus_main_window
+// and the notification "open session" path; calling openMainWindow on a live
+// window navigates it (full reload), which is the bug we're avoiding here.
+const revealMainWindow = async () => {
+  let target = state.mainWindow;
+  if (!target || target.isDestroyed()) {
+    target = await openMainWindow().catch(() => null) || state.mainWindow;
+  }
+  if (target && !target.isDestroyed()) {
+    if (target.isMinimized()) target.restore();
+    target.show();
+    target.focus();
+  }
+  return target;
+};
+
+// Open a session in the main window, creating one first if none is alive. A
+// freshly created window can't receive an immediate emit (its renderer hasn't
+// mounted its listeners yet), so we queue the session as a pending deep-link —
+// the did-finish-load handler flushes it once the window is ready.
+const focusMainWindowWithSession = async (sessionId, directory) => {
+  if (state.mainWindow && !state.mainWindow.isDestroyed()) {
+    if (state.mainWindow.isMinimized()) state.mainWindow.restore();
+    state.mainWindow.show();
+    state.mainWindow.focus();
+    if (sessionId) {
+      emitToWindow(state.mainWindow, 'openchamber:open-session', { sessionId, directory: directory || '' });
+    }
+    return;
+  }
+  if (sessionId) pendingDeepLinks.push({ type: 'session', value: sessionId });
+  await openMainWindow();
+};
+
+const dispatchTrayAction = async (action) => {
+  if (!action || typeof action !== 'object') return;
+
+  if (action.type === 'quit') {
+    app.quit();
+    return;
+  }
+
+  // Responding to a permission doesn't need to steal focus — just deliver it.
+  if (action.type === 'respond-permission') {
+    const target = (state.mainWindow && !state.mainWindow.isDestroyed())
+      ? state.mainWindow
+      : await revealMainWindow();
+    emitToWindow(target, 'openchamber:tray-action', action);
+    return;
+  }
+
+  // Mini chat opens its own small window; we only need a renderer with context,
+  // not to surface the main window.
+  if (action.type === 'new-mini-chat') {
+    let target = getMenuTargetWindow();
+    if (!target) target = await revealMainWindow();
+    dispatchOpenMiniChat(target);
+    return;
+  }
+
+  // Open a session on the surface the user was last on: if that's a mini-chat,
+  // switch THAT window to the session in place (no new window); otherwise use
+  // the main window.
+  if (action.type === 'focus-session') {
+    const surface = resolveTraySurface();
+    if (surface && surface.__ocMiniChat === true && action.sessionId) {
+      if (surface.isMinimized()) surface.restore();
+      surface.show();
+      surface.focus();
+      emitToWindow(surface, 'openchamber:open-session', {
+        sessionId: action.sessionId,
+        directory: action.directory || '',
+      });
+      return;
+    }
+    await focusMainWindowWithSession(action.sessionId, action.directory || '');
+    return;
+  }
+
+  const target = await revealMainWindow();
+  if (!target || target.isDestroyed()) return;
+
+  if (action.type === 'new-session') {
+    emitToWindow(target, 'openchamber:open-draft-session', { directory: '', projectId: '' });
+  }
+  // show-main-window: revealing the window above is the whole action.
+};
 
 app.on('window-all-closed', () => {
   if (process.platform === 'darwin' && !state.quitRequested) {
@@ -3983,16 +4270,23 @@ app.on('open-url', (event, url) => {
 
 app.on('activate', async () => {
   const windows = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed());
-  if (windows.length > 0) {
-    const visibleWindow = windows.find((window) => window.isVisible());
-    const targetWindow = visibleWindow || state.mainWindow || windows[0];
-    if (targetWindow.isMinimized()) targetWindow.restore();
-    targetWindow.show();
-    targetWindow.focus();
+  // Only spawn a main window when there is genuinely nothing to come back to.
+  if (windows.length === 0) {
+    await openMainWindow();
     return;
   }
 
-  await openMainWindow();
+  // Otherwise bring back the surface the user was last on — restoring it if
+  // minimized — instead of surfacing a hidden window or creating a new one.
+  // This covers e.g. "only a minimized mini-chat remains": it should un-minimize
+  // rather than open the main window.
+  const remembered = resolveTraySurface();
+  const targetWindow = (remembered && !remembered.isDestroyed())
+    ? remembered
+    : (windows.find((window) => window.isVisible() && !window.isMinimized()) || windows[0]);
+  if (targetWindow.isMinimized()) targetWindow.restore();
+  targetWindow.show();
+  targetWindow.focus();
 });
 
 app.whenReady().then(async () => {
@@ -4013,6 +4307,7 @@ app.whenReady().then(async () => {
 
   if (process.platform === 'darwin') {
     Menu.setApplicationMenu(buildMacMenu());
+    setupTray();
   } else {
     Menu.setApplicationMenu(buildAutoHiddenMenu());
   }

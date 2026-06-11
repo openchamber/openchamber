@@ -500,6 +500,9 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
       store.setUserMessageRenderingMode(settings.userMessageRenderingMode);
     }
   }
+  if (typeof settings.collapsibleUserMessages === 'boolean' && settings.collapsibleUserMessages !== store.collapsibleUserMessages) {
+    store.setCollapsibleUserMessages(settings.collapsibleUserMessages);
+  }
   if (typeof settings.messageStreamTransport === 'string'
     && (settings.messageStreamTransport === 'auto' || settings.messageStreamTransport === 'ws' || settings.messageStreamTransport === 'sse')) {
     if (configStore && settings.messageStreamTransport !== configStore.settingsMessageStreamTransport) {
@@ -996,6 +999,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.userMessageRenderingMode === 'string'
     && (candidate.userMessageRenderingMode === 'markdown' || candidate.userMessageRenderingMode === 'plain')) {
     result.userMessageRenderingMode = candidate.userMessageRenderingMode;
+  }
+  if (typeof candidate.collapsibleUserMessages === 'boolean') {
+    result.collapsibleUserMessages = candidate.collapsibleUserMessages;
   }
   if (typeof candidate.stickyUserHeader === 'boolean') {
     result.stickyUserHeader = candidate.stickyUserHeader;

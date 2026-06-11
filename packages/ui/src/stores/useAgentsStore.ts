@@ -11,10 +11,10 @@ import {
 } from "@/lib/configUpdate";
 import { getSafeStorage } from "./utils/safeStorage";
 import { useConfigStore } from "@/stores/useConfigStore";
-import { useCommandsStore } from "@/stores/useCommandsStore";
+import { invalidateCommandsLoadCache, useCommandsStore } from "@/stores/useCommandsStore";
 import { useProjectsStore } from "@/stores/useProjectsStore";
 import { useSkillsCatalogStore } from "@/stores/useSkillsCatalogStore";
-import { useSkillsStore } from "@/stores/useSkillsStore";
+import { invalidateSkillsLoadCache, useSkillsStore } from "@/stores/useSkillsStore";
 import { runtimeFetch } from "@/lib/runtime-fetch";
 
 // Note: useDirectoryStore cannot be imported at top level to avoid circular dependency
@@ -70,12 +70,24 @@ const getAgentsCacheKey = (directory: string | null): string => {
   return directory?.trim() || DEFAULT_AGENTS_CACHE_KEY;
 };
 
+const invalidateAgentsLoadCache = (directory: string | null = getConfigDirectory()) => {
+  agentsLastLoadedAt.delete(getAgentsCacheKey(directory));
+};
+
 const buildAgentsSignature = (agents: Agent[]): string => {
   return agents
     .map((agent) => {
       const extended = agent as AgentWithExtras;
       return [
         agent.name,
+        extended.mode ?? '',
+        typeof extended.model === 'object' && extended.model
+          ? `${extended.model.providerID ?? ''}/${extended.model.modelID ?? ''}`
+          : String(extended.model ?? ''),
+        String(extended.temperature ?? ''),
+        String((extended as { topP?: unknown; top_p?: unknown }).topP ?? (extended as { topP?: unknown; top_p?: unknown }).top_p ?? ''),
+        extended.prompt ?? '',
+        JSON.stringify(extended.permission ?? null),
         extended.scope ?? '',
         extended.group ?? '',
         extended.description ?? '',
@@ -94,7 +106,7 @@ export interface AgentConfig {
   model?: string | null;
   temperature?: number;
   top_p?: number;
-  prompt?: string;
+  prompt?: string | null;
   mode?: "primary" | "subagent" | "all";
   permission?: PermissionConfig | null;
 
@@ -345,13 +357,14 @@ export const useAgentsStore = create<AgentsStore>()(
             }
 
             const needsReload = payload?.requiresReload ?? true;
+            invalidateAgentsLoadCache(configDirectory);
             if (needsReload) {
               requiresReload = true;
               await refreshAfterOpenCodeRestart({
                 message: payload?.message,
                 delayMs: payload?.reloadDelayMs,
                 scopes: ["agents"],
-                mode: "active",
+                mode: "projects",
               });
               return true;
             }
@@ -406,13 +419,14 @@ export const useAgentsStore = create<AgentsStore>()(
             }
 
             const needsReload = payload?.requiresReload ?? true;
+            invalidateAgentsLoadCache(configDirectory);
             if (needsReload) {
               requiresReload = true;
               await refreshAfterOpenCodeRestart({
                 message: payload?.message,
                 delayMs: payload?.reloadDelayMs,
                 scopes: ["agents"],
-                mode: "active",
+                mode: "projects",
               });
               return true;
             }
@@ -452,13 +466,14 @@ export const useAgentsStore = create<AgentsStore>()(
             }
 
             const needsReload = payload?.requiresReload ?? true;
+            invalidateAgentsLoadCache(configDirectory);
             if (needsReload) {
               requiresReload = true;
               await refreshAfterOpenCodeRestart({
                 message: payload?.message,
                 delayMs: payload?.reloadDelayMs,
                 scopes: ["agents"],
-                mode: "active",
+                mode: "projects",
               });
               return true;
             }
@@ -615,35 +630,40 @@ async function performConfigRefresh(options: {
 
     if (refreshProviders) {
       useConfigStore.getState().invalidateModelMetadataCache();
+      useConfigStore.getState().invalidateProviderCache(mode === "active" ? currentDirectory : undefined);
     }
 
     const sdkRefreshTasks: Promise<void>[] = [];
     for (const directory of directoriesToRefresh) {
       if (refreshProviders) {
-        sdkRefreshTasks.push(configStore.loadProviders({ directory }).then(() => undefined));
+        sdkRefreshTasks.push(configStore.loadProviders({ directory, source: 'agentsStore:refreshConfig' }).then(() => undefined));
       }
       if (refreshSdkAgents) {
-        sdkRefreshTasks.push(configStore.loadAgents({ directory }).then(() => undefined));
+        sdkRefreshTasks.push(configStore.loadAgents({ directory, source: 'agentsStore:refreshConfig' }).then(() => undefined));
       }
     }
 
     const uiRefreshTasks: Promise<void>[] = [];
     if (refreshAgentConfigs) {
+      invalidateAgentsLoadCache(currentDirectory);
       uiRefreshTasks.push(agentConfigStore.loadAgents().then(() => undefined));
     }
     if (refreshCommands) {
+      invalidateCommandsLoadCache(currentDirectory);
       uiRefreshTasks.push(commandsStore.loadCommands().then(() => undefined));
     }
     if (refreshSkills) {
+      invalidateSkillsLoadCache(currentDirectory);
       uiRefreshTasks.push(skillsStore.loadSkills().then(() => undefined));
-      uiRefreshTasks.push(skillsCatalogStore.loadCatalog().then(() => undefined));
+      uiRefreshTasks.push(skillsCatalogStore.loadCatalog({ refresh: true }).then(() => undefined));
     }
 
     updateConfigUpdateMessage("Refreshing configuration…");
     await Promise.all([...sdkRefreshTasks, ...uiRefreshTasks]);
-  } catch {
+  } catch (error) {
     updateConfigUpdateMessage("OpenCode refresh failed. Please retry.");
     await sleep(1500);
+    throw error;
   } finally {
     finishConfigUpdate();
   }

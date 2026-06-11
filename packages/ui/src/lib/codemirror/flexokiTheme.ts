@@ -143,6 +143,20 @@ export function createFlexokiCodeMirrorTheme(theme: Theme): Extension {
       left: 'auto',
       width: 'auto',
     },
+    '.cm-panels-bottom': {
+      position: 'static' as const,
+      width: '100%',
+      pointerEvents: 'auto',
+    },
+    '.cm-panels-bottom .cm-vim-panel': {
+      borderTop: `1px solid ${theme.colors.interactive.border}`,
+      backgroundColor: theme.colors.surface.elevated,
+      color: theme.colors.surface.mutedForeground,
+      fontFamily: 'var(--font-mono)',
+      fontSize: '12px',
+      minHeight: '22px',
+      padding: '2px 8px',
+    },
 
     /* ── Floating search panel ── */
     '.cm-panel.cm-search': {
