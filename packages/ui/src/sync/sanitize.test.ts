@@ -63,7 +63,12 @@ describe('stripSessionListDetails', () => {
       directory: '/repo/app',
       title: 'Session',
       time: { created: 1, updated: 2 },
-      metadata: { huge: true },
+      metadata: {
+        openchamber: {
+          kind: 'review',
+          originalSessionID: 'ses_original',
+        },
+      },
       permission: [{ permission: 'todowrite' }],
       revert: {
         messageID: 'msg_2',
@@ -87,10 +92,51 @@ describe('stripSessionListDetails', () => {
     }
 
     expect(next).not.toBe(session)
-    expect(next.metadata).toBe(undefined)
+    expect(next.metadata).toEqual({
+      openchamber: {
+        kind: 'review',
+        originalSessionID: 'ses_original',
+      },
+    })
     expect(next.permission).toBe(undefined)
     expect(next.revert).toEqual({ messageID: 'msg_2', partID: 'part_3' })
     expect(next.summary).toEqual({ additions: 2, deletions: 1, files: 1 })
+  })
+
+  test('preserves metadata extension fields in session list records', () => {
+    const session = {
+      id: 'ses_1',
+      directory: '/repo/app',
+      title: 'Session',
+      time: { created: 1, updated: 2 },
+      metadata: { custom: { value: 'kept' } },
+      summary: { additions: 2, deletions: 1, files: 1, diffs: [{ patch: '@@ -1 +1 @@' }] },
+    } as unknown as Session
+
+    const next = stripSessionListDetails(session) as Session & {
+      metadata?: unknown
+      summary?: { diffs?: unknown[] }
+    }
+
+    expect(next).not.toBe(session)
+    expect(next.metadata).toEqual({ custom: { value: 'kept' } })
+    expect(next.summary?.diffs).toBe(undefined)
+  })
+
+  test('keeps summary fields other than list-only diffs', () => {
+    const session = {
+      id: 'ses_1',
+      directory: '/repo/app',
+      title: 'Session',
+      time: { created: 1, updated: 2 },
+      summary: { custom: 'kept', diffs: [{ patch: '@@ -1 +1 @@' }] },
+    } as unknown as Session
+
+    const next = stripSessionListDetails(session) as Session & {
+      summary?: { custom?: string; diffs?: unknown[] }
+    }
+
+    expect(next.summary).toEqual({ custom: 'kept' })
   })
 
   test('preserves object identity for already lightweight records with revert markers', () => {

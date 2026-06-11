@@ -270,7 +270,7 @@ describe('OpenCode proxy SSE forwarding', () => {
             files: 2,
             diffs: [{ patch: '@@ -1 +1 @@', additions: 5, deletions: 3 }],
           },
-          metadata: { huge: true },
+          metadata: { openchamber: { kind: 'review', originalSessionID: 'ses_original' } },
           permission: [{ permission: 'todowrite', action: 'deny', pattern: '*' }],
           revert: { messageID: 'msg_1', partID: 'part_1', snapshot: 'abc123', diff: 'diff --git a/x b/x' },
         },
@@ -334,6 +334,7 @@ describe('OpenCode proxy SSE forwarding', () => {
         cost: 7,
         tokens: { input: 10, output: 20 },
         share: { url: 'https://share.example/ses_1' },
+        metadata: { openchamber: { kind: 'review', originalSessionID: 'ses_original' } },
         project: { id: 'proj_1', worktree: '/repo/app' },
         summary: { additions: 5, deletions: 3, files: 2 },
         revert: { messageID: 'msg_1', partID: 'part_1' },
@@ -359,7 +360,7 @@ describe('OpenCode proxy SSE forwarding', () => {
             files: 2,
             diffs: [{ patch: '@@ -1 +1 @@', additions: 5, deletions: 3 }],
           },
-          metadata: { huge: true },
+          metadata: { custom: { value: 'kept' } },
           revert: { messageID: 'msg_1', partID: 'part_1', snapshot: 'abc123', diff: 'diff --git a/x b/x' },
         },
       ]);
@@ -412,6 +413,7 @@ describe('OpenCode proxy SSE forwarding', () => {
         title: 'Alpha',
         time: { created: 1, updated: 2 },
         summary: { additions: 5, deletions: 3, files: 2 },
+        metadata: { custom: { value: 'kept' } },
         revert: { messageID: 'msg_1', partID: 'part_1' },
       },
     ]);

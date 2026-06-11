@@ -15,7 +15,12 @@ describe('listGlobalSessionPages', () => {
                 directory: '/repo/app',
                 title: 'Alpha',
                 time: { created: 1, updated: 2 },
-                metadata: { huge: true },
+                metadata: {
+                  openchamber: {
+                    kind: 'review',
+                    originalSessionID: 'ses_original',
+                  },
+                },
                 permission: [{ permission: 'todowrite' }],
                 revert: { messageID: 'msg_1', snapshot: 'abc123', diff: 'diff --git a/x b/x' },
                 summary: {
@@ -40,7 +45,12 @@ describe('listGlobalSessionPages', () => {
       summary?: { additions?: number; deletions?: number; files?: number; diffs?: unknown[] }
     }
 
-    expect(session.metadata).toBe(undefined)
+    expect(session.metadata).toEqual({
+      openchamber: {
+        kind: 'review',
+        originalSessionID: 'ses_original',
+      },
+    })
     expect(session.permission).toBe(undefined)
     expect(session.revert).toEqual({ messageID: 'msg_1' })
     expect(session.summary).toEqual({ additions: 5, deletions: 3, files: 2 })

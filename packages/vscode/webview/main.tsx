@@ -372,7 +372,9 @@ const buildProxiedResponse = (
   }
 
   const body = proxied.bodyBase64 ? decodeBase64(proxied.bodyBase64) : new Uint8Array();
-  return new Response(body, { status: proxied.status, headers: proxied.headers });
+  const buffer = new ArrayBuffer(body.byteLength);
+  new Uint8Array(buffer).set(body);
+  return new Response(buffer, { status: proxied.status, headers: proxied.headers });
 };
 
 const isSseApiPath = (pathname: string) => pathname === '/api/event' || pathname === '/api/global/event';

@@ -109,6 +109,7 @@ const SESSION_LIST_ALLOWED_FIELDS = [
   'cost',
   'tokens',
   'share',
+  'metadata',
   'project',
 ];
 
@@ -126,19 +127,9 @@ export const sanitizeSessionListItem = (session) => {
 
   const summary = session.summary;
   if (summary && typeof summary === 'object' && !Array.isArray(summary)) {
-    const summaryCounts = {};
-    if ('additions' in summary) {
-      summaryCounts.additions = summary.additions;
-    }
-    if ('deletions' in summary) {
-      summaryCounts.deletions = summary.deletions;
-    }
-    if ('files' in summary) {
-      summaryCounts.files = summary.files;
-    }
-    if (Object.keys(summaryCounts).length > 0) {
-      sanitized.summary = summaryCounts;
-    }
+    const summaryWithoutDiffs = { ...summary };
+    delete summaryWithoutDiffs.diffs;
+    sanitized.summary = summaryWithoutDiffs;
   }
 
   const revert = session.revert;

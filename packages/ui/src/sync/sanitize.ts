@@ -2,9 +2,10 @@
 // Payload sanitization — strip oversized diff snapshot fields client-side.
 //
 // OpenCode session/message snapshots may carry large full-content diff fields
-// (legacy before/after or from/to). The UI never uses these fields but they
-// waste browser memory and
-// can crash tabs for large sessions.
+// (legacy before/after or from/to). Revert snapshots and diff text can also
+// carry large file snapshots. The UI derives reverted-state behavior from the
+// lightweight messageID/partID markers, so these blob fields are intentionally
+// kept out of client stores.
 //
 // Applied at two points:
 // 1. Event reducer — session.created/session.updated events
@@ -129,13 +130,11 @@ export function stripSessionListDetails(session: Session): Session {
   const record = session as Session & {
     summary?: SessionSummary
     revert?: unknown
-    metadata?: unknown
     permission?: unknown
   }
 
   const shouldStrip = hasSessionListRevertDetails(record.revert)
     || Array.isArray(record.summary?.diffs)
-    || "metadata" in record
     || "permission" in record
 
   if (!shouldStrip) {
@@ -144,7 +143,6 @@ export function stripSessionListDetails(session: Session): Session {
 
   const stripped = stripSessionDiffSnapshots(session) as typeof record
   const next: Record<string, unknown> = { ...stripped }
-  delete next.metadata
   delete next.permission
 
   const revertMarker = getSessionListRevertMarker(stripped.revert)
@@ -156,15 +154,9 @@ export function stripSessionListDetails(session: Session): Session {
 
   const summary = stripped.summary
   if (summary && typeof summary === "object" && !Array.isArray(summary)) {
-    const summaryCounts: SessionSummary = {}
-    if ("additions" in summary) summaryCounts.additions = summary.additions
-    if ("deletions" in summary) summaryCounts.deletions = summary.deletions
-    if ("files" in summary) summaryCounts.files = summary.files
-    if (Object.keys(summaryCounts).length > 0) {
-      next.summary = summaryCounts
-    } else {
-      delete next.summary
-    }
+    const summaryWithoutDiffs = { ...summary }
+    delete summaryWithoutDiffs.diffs
+    next.summary = summaryWithoutDiffs
   }
 
   return next as unknown as Session
