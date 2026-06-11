@@ -333,13 +333,14 @@ const getRequestDirectoryHint = (url: URL, input?: RequestInfo | URL, init?: Req
   return undefined;
 };
 
-const decodeBase64 = (value: string): Uint8Array => {
+const decodeBase64 = (value: string): ArrayBuffer => {
   const binary = atob(value);
-  const bytes = new Uint8Array(binary.length);
+  const buffer = new ArrayBuffer(binary.length);
+  const bytes = new Uint8Array(buffer);
   for (let i = 0; i < binary.length; i += 1) {
     bytes[i] = binary.charCodeAt(i);
   }
-  return bytes;
+  return buffer;
 };
 
 const jsonResponse = (body: unknown, status = 200): Response => {

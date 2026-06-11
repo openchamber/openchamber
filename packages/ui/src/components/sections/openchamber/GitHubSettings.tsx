@@ -177,12 +177,17 @@ export const GitHubSettings: React.FC = () => {
   const toggleGhCli = React.useCallback(async (disabled: boolean) => {
     setIsBusy(true);
     try {
-      const response = await fetch('/api/github/auth/gh-cli', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ disabled }),
-      });
-      if (!response.ok) throw new Error(response.statusText);
+      if (runtimeGitHub) {
+        await runtimeGitHub.authSetGhCliDisabled(disabled);
+      } else {
+        const response = await runtimeFetch('/api/github/auth/gh-cli', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ disabled }),
+        });
+        const body = (await response.json().catch(() => null)) as { error?: string } | null;
+        if (!response.ok) throw new Error(body?.error || response.statusText);
+      }
       toast.success(disabled ? t('settings.github.page.toast.ghCliDisabled') : t('settings.github.page.toast.ghCliEnabled'));
       await refreshStatus(runtimeGitHub, { force: true });
     } catch (error) {

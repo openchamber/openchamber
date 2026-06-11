@@ -127,8 +127,10 @@ export function registerGitHubRoutes(app) {
   app.post('/api/github/auth/gh-cli', async (req, res) => {
     try {
       const { setGhCliDisabled, isGhCliDisabled } = await getGitHubLibraries();
+      const { clearGhCliTokenCache } = await import('./gh-cli-credential.js');
       const disabled = Boolean(req.body?.disabled);
       setGhCliDisabled(disabled);
+      clearGhCliTokenCache();
       return res.json({ disabled: isGhCliDisabled() });
     } catch (error) {
       console.error('Failed to update gh CLI setting:', error);

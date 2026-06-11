@@ -30,6 +30,9 @@ export const createVSCodeGitHubAPI = (): GitHubAPI => ({
   authDisconnect: async () => sendBridgeMessage<{ removed: boolean }>('api:github/auth:disconnect'),
   authActivate: async (accountId: string) =>
     sendBridgeMessage<GitHubAuthStatus>('api:github/auth:activate', { accountId }),
+  authSetGhCliDisabled: async () => {
+    throw new Error('gh CLI fallback is not supported in VS Code');
+  },
   me: async () => sendBridgeMessage<GitHubUserSummary>('api:github/me'),
 
   prStatus: async (directory: string, branch: string) =>

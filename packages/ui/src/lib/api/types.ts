@@ -1070,6 +1070,7 @@ export interface GitHubAPI {
   authComplete(deviceCode: string): Promise<GitHubDeviceFlowComplete>;
   authDisconnect(): Promise<{ removed: boolean }>;
   authActivate(accountId: string): Promise<GitHubAuthStatus>;
+  authSetGhCliDisabled(disabled: boolean): Promise<{ disabled: boolean }>;
   me?(): Promise<GitHubUserSummary>;
 
   prStatus(directory: string, branch: string, remote?: string, options?: { force?: boolean }): Promise<GitHubPullRequestStatus>;
